@@ -1,0 +1,148 @@
+{% extends "admin_console/config_base.html" %}
+
+{% block config_content %}
+<section class="admin-card-grid">
+  {% for card in summary_cards %}
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">{{ card.label }}</div>
+    <div class="admin-card-value">{{ card.value }}</div>
+    <p class="admin-card-copy">{{ card.description }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="admin-card">
+  <div class="admin-state admin-state--inline">
+    <strong>班期标签准备状态</strong>
+    <span>标签组：{{ bootstrap_group_name }}</span>
+  </div>
+</section>
+
+<section class="admin-card">
+  <form class="admin-filter-bar admin-form-grid admin-form-grid--filters" method="get">
+    <label>
+      <span>筛选</span>
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="班期 / 标签 / 标签组">
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" name="active_only" value="1" {% if filters.active_only %}checked{% endif %}>
+      <span>仅看启用项</span>
+    </label>
+    <div class="admin-form-actions">
+      <button class="admin-button admin-button--primary" type="submit">应用筛选</button>
+      <a class="admin-button admin-button--ghost" href="/admin/config/class-term-tags">重置</a>
+    </div>
+  </form>
+</section>
+
+<section class="admin-card">
+  <div class="config-editor-layout">
+    <div class="config-list-stack">
+      <div class="admin-card-head">
+        <div>
+          <h2>班期标签规则</h2>
+          <p>这里维护班期和标签之间的对应关系。</p>
+        </div>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>班期</th>
+              <th>标签组 / 标签</th>
+              <th>标签编号</th>
+              <th>标签组编号</th>
+              <th>是否启用</th>
+              <th>最近修改人</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>{{ row.id }}</td>
+              <td>{{ row.class_term_no }} / {{ row.class_term_label }}</td>
+              <td>{{ row.tag_group_name }} / {{ row.tag_name }}</td>
+              <td><code>{{ row.tag_id or "-" }}</code></td>
+              <td><code>{{ row.group_id or "-" }}</code></td>
+              <td>{{ "是" if row.is_active else "否" }}</td>
+              <td>{{ row.last_modified_by or "-" }}</td>
+              <td><a class="admin-inline-link" href="/admin/config/class-term-tags?edit_mapping={{ row.id }}">编辑</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <aside class="config-editor-aside">
+      <div class="admin-card-head">
+        <div>
+          <h2>编辑班期标签规则</h2>
+          <p>在这里维护班期、标签组和标签编号。</p>
+        </div>
+      </div>
+      <form class="admin-form-grid admin-form-grid--stacked" method="post" action="/admin/config/class-term-tags/save">
+        <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
+        <input type="hidden" name="mapping_id" value="{{ form_row.id or '' }}">
+        <label>
+          <span>班期编号</span>
+          <input type="number" name="class_term_no" value="{{ form_row.class_term_no or '' }}" min="1" required>
+        </label>
+        <label>
+          <span>班期名称</span>
+          <input type="text" name="class_term_label" value="{{ form_row.class_term_label or '' }}">
+        </label>
+        <label>
+          <span>标签组名称</span>
+          <input type="text" name="tag_group_name" value="{{ form_row.tag_group_name or '' }}" required>
+        </label>
+        <label>
+          <span>标签名称</span>
+          <input type="text" name="tag_name" value="{{ form_row.tag_name or '' }}" required>
+        </label>
+        <label>
+          <span>标签编号</span>
+          <input type="text" name="tag_id" value="{{ form_row.tag_id or '' }}">
+        </label>
+        <label>
+          <span>标签组编号</span>
+          <input type="text" name="group_id" value="{{ form_row.group_id or '' }}">
+        </label>
+        <label>
+          <span>策略编号</span>
+          <input type="text" name="strategy_id" value="{{ form_row.strategy_id or '' }}">
+        </label>
+        <label class="admin-checkbox">
+          <input type="checkbox" name="is_active" value="1" {% if form_row.is_active %}checked{% endif %}>
+          <span>启用</span>
+        </label>
+        <label>
+          <span>操作人</span>
+          <input type="text" name="operator" placeholder="填写本次修改人">
+        </label>
+        <div class="admin-form-actions">
+          <button class="admin-button admin-button--primary" type="submit">保存班期标签规则</button>
+        </div>
+      </form>
+    </aside>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>最近审计</h2>
+      <p>这里展示班期标签规则最近的修改记录。</p>
+    </div>
+  </div>
+  <div class="admin-audit-list">
+    {% for item in audit_entries %}
+    <div class="admin-audit-item">
+      <strong>{{ item.target_id }}</strong>
+      <span>{{ item.action_type }} · {{ item.operator }} · {{ item.created_at }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

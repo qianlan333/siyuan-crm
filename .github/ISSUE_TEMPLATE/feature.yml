@@ -1,0 +1,101 @@
+name: 功能工单
+description: 新增能力或增强需求，适用于 AI-CRM 常规开发工单。
+title: "[Feature] "
+labels:
+  - feature
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: 目标
+      description: 说明本次要完成什么，优先写结果，不写泛泛背景。
+      placeholder: 例如：为 /api/ops/status 增加 request_id 与延迟任务摘要。
+    validations:
+      required: true
+  - type: textarea
+    id: authorized_files
+    attributes:
+      label: 授权修改文件
+      description: 逐行列出本工单允许修改的文件路径。
+      placeholder: |
+        wecom_ability_service/routes.py
+        tests/test_api.py
+    validations:
+      required: true
+  - type: textarea
+    id: forbidden_scope
+    attributes:
+      label: 禁止修改范围
+      description: 逐行列出本工单明确不能碰的模块、目录或行为。
+      placeholder: |
+        不改 API 路径
+        不改 schema
+        不加第三方依赖
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: API 与实现约束
+      description: 只写会影响实现决策的硬约束。
+      placeholder: |
+        响应字段只加不删
+        不改业务语义
+        不做无关重构
+    validations:
+      required: true
+  - type: textarea
+    id: targeted_tests
+    attributes:
+      label: 定向测试
+      description: 写清楚必须先跑的测试命令。
+      placeholder: |
+        python3 -m pytest -q tests/test_api.py::test_ops_status
+    validations:
+      required: true
+  - type: textarea
+    id: full_regression
+    attributes:
+      label: 全量回归
+      description: 若本工单要求跑全量，请明确写出命令。
+      placeholder: python3 -m pytest -q
+    validations:
+      required: true
+  - type: textarea
+    id: risks
+    attributes:
+      label: 风险说明
+      description: 写实现后最需要 review 的风险点。
+      placeholder: 例如：新增诊断字段依赖请求上下文，需确认无请求场景兼容。
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: 回滚说明
+      description: 用一句到几句说明最小回滚路径。
+      placeholder: 回滚本工单改动的文件，并恢复相关测试断言。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 验收标准
+      description: 列出 reviewer 能直接核对的结果。
+      placeholder: |
+        1. 定向测试通过
+        2. 全量 pytest -q 通过
+        3. 返回包信息完整
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已明确授权修改文件范围
+          required: true
+        - label: 我已明确是否允许新增依赖
+          required: true
+        - label: 我已提供定向测试与全量回归要求
+          required: true

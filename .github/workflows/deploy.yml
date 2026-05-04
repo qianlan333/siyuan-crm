@@ -1,0 +1,31 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd '/home/ubuntu/极简 crm'
+            git pull origin main
+            set -a
+            source /home/ubuntu/.openclaw-wecom-pg.env
+            set +a
+            test -n "${DATABASE_URL:-}"
+            source /home/ubuntu/venvs/openclaw/bin/activate
+            pip install -r requirements.txt
+            python3 app.py init-db
+            sudo systemctl restart openclaw-wecom-postgres.service
+            sleep 3
+            curl -sSf http://127.0.0.1:5001/health

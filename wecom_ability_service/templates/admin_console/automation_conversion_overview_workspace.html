@@ -1,0 +1,350 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/automation_conversion_workspace.css') }}">
+<style>
+  .ac-overview-shell,
+  .ac-overview-top,
+  .ac-overview-summary-grid,
+  .ac-overview-status-row,
+  .ac-overview-section {
+    display: grid;
+    gap: 18px;
+  }
+
+  .ac-overview-top {
+    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 360px);
+    align-items: start;
+  }
+
+  .ac-overview-summary-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .ac-overview-additional-stats {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    align-items: start;
+  }
+
+  .ac-overview-card,
+  .ac-overview-section,
+  .ac-overview-stat {
+    padding: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.88);
+  }
+
+  .ac-overview-card,
+  .ac-overview-section {
+    display: grid;
+    gap: 14px;
+  }
+
+  .ac-overview-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ac-overview-muted {
+    margin: 0;
+    color: #64748b;
+    line-height: 1.6;
+  }
+
+  .ac-overview-status-row {
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    justify-content: start;
+    gap: 10px;
+    overflow: auto;
+  }
+
+  .ac-overview-stat {
+    display: grid;
+    gap: 8px;
+  }
+
+  .ac-overview-stat strong {
+    font-size: 28px;
+    line-height: 1;
+    color: #1f2937;
+  }
+
+  .ac-overview-stat span {
+    font-size: 12px;
+    color: #64748b;
+  }
+
+  .ac-overview-table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 18px;
+    background: #fff;
+  }
+
+  .ac-overview-group-grid {
+    display: grid;
+    gap: 16px;
+  }
+
+  .ac-overview-segmentation-stats {
+    display: grid;
+    gap: 16px;
+    grid-column: 1 / -1;
+  }
+
+  .ac-overview-segmentation-panel {
+    display: grid;
+    gap: 10px;
+    padding: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 18px;
+    background: rgba(248, 250, 252, 0.92);
+  }
+
+  .ac-overview-segmentation-panel strong {
+    font-size: 14px;
+    color: #0f172a;
+  }
+
+  .ac-overview-segmentation-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ac-overview-segmentation-item {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.96);
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    color: #334155;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .ac-overview-group-card {
+    display: grid;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 18px;
+    background: rgba(255, 255, 255, 0.92);
+  }
+
+  .ac-overview-group-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ac-overview-subtle {
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .ac-overview-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .ac-overview-table th,
+  .ac-overview-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .ac-overview-table th {
+    background: rgba(248, 250, 252, 0.94);
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  .ac-overview-feedback[hidden],
+  .ac-overview-loading[hidden] {
+    display: none;
+  }
+
+  .ac-overview-feedback {
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
+  }
+
+  .ac-overview-feedback.is-error {
+    background: rgba(254, 242, 242, 0.96);
+    color: #991b1b;
+  }
+
+  .ac-overview-feedback.is-success {
+    background: rgba(240, 253, 244, 0.96);
+    color: #166534;
+  }
+
+  .ac-overview-loading {
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
+  }
+
+  .ac-overview-shell,
+  .ac-overview-top,
+  .ac-overview-summary-grid,
+  .ac-overview-status-row,
+  .ac-overview-section {
+    gap: 14px;
+  }
+
+  .ac-overview-card,
+  .ac-overview-section,
+  .ac-overview-stat {
+    padding: 16px;
+    border-radius: 12px;
+    background: #fff;
+  }
+
+  .ac-overview-stat strong {
+    font-size: 22px;
+  }
+
+  .ac-overview-table-wrap,
+  .ac-overview-group-card,
+  .ac-overview-segmentation-panel {
+    border-radius: 12px;
+  }
+
+  .ac-overview-table th,
+  .ac-overview-table td {
+    padding: 10px 12px;
+  }
+
+  @media (max-width: 980px) {
+    .ac-overview-top {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set workspace = overview_workspace or {} %}
+{% set snapshot = workspace.snapshot or {} %}
+{% set message_sync = snapshot.message_activity_sync or {} %}
+{% set reply_monitor = snapshot.reply_monitor or {} %}
+{% set sync_last_run = message_sync.last_run or {} %}
+
+{% include "admin_console/_automation_program_context.html" %}
+{% include "admin_console/_automation_conversion_workspace_tabs.html" %}
+
+<div
+  id="automation-overview-root"
+  class="ac-overview-shell"
+  data-api-urls='{{ (workspace.api_urls or {})|tojson }}'
+  data-admin-action-token="{{ admin_action_token }}"
+>
+  <section class="ac-overview-top">
+    <article class="ac-overview-card">
+      <div class="ac-overview-head">
+        <div>
+          <h2>运行概况</h2>
+          <p class="ac-overview-muted">人群规模、运营进度与任务流执行一览。</p>
+        </div>
+        <div class="ac-overview-status-row">
+          <span class="admin-chip admin-chip--neutral" id="overview-last-updated">最近刷新：加载中</span>
+        </div>
+      </div>
+      <div class="ac-overview-feedback" id="overview-feedback" hidden></div>
+      <div class="ac-overview-loading" id="overview-loading">正在加载自动化转化概览数据...</div>
+      <div class="ac-overview-summary-grid" id="overview-summary-grid" hidden>
+        <article class="ac-overview-stat">
+          <span>未填问卷人群</span>
+          <strong id="overview-pending-questionnaire">0</strong>
+        </article>
+        <article class="ac-overview-stat">
+          <span>运营中人群</span>
+          <strong id="overview-operating">0</strong>
+        </article>
+        <article class="ac-overview-stat">
+          <span>已转化人群</span>
+          <strong id="overview-converted">0</strong>
+        </article>
+        <article class="ac-overview-stat">
+          <span>问卷提交人数</span>
+          <strong id="overview-questionnaire-submitted">0</strong>
+        </article>
+        <article class="ac-overview-stat">
+          <span>启用中的任务流</span>
+          <strong id="overview-active-workflow-count">0</strong>
+        </article>
+      </div>
+      <div class="ac-overview-summary-grid ac-overview-additional-stats" id="overview-additional-stats" hidden>
+        <div class="ac-overview-segmentation-stats" id="overview-segmentation-stats" hidden></div>
+      </div>
+    </article>
+
+    <article class="ac-overview-card">
+      <div class="ac-overview-head">
+        <div>
+          <h3>快速动作</h3>
+          <p class="ac-overview-muted">同步消息活跃数据并放行自动应答。</p>
+        </div>
+      </div>
+      <button class="admin-button admin-button--primary" type="button" id="overview-refresh-button">刷新模块状态</button>
+      <div class="ac-overview-muted" id="overview-refresh-status"></div>
+    </article>
+  </section>
+
+  <section class="ac-overview-section">
+    <div class="ac-overview-head">
+      <div>
+        <h3>池子用户</h3>
+        <p class="ac-overview-muted">按池子查看在池用户的画像与对话状态。</p>
+      </div>
+      <div class="ac-overview-subtle" id="overview-profile-template-note">自然画像模板：加载中</div>
+    </div>
+    <div class="ac-overview-group-grid" id="overview-member-groups"></div>
+  </section>
+
+  <section class="ac-overview-section">
+    <div class="ac-overview-head">
+      <div>
+        <h3>任务流执行</h3>
+        <p class="ac-overview-muted">最近执行次数与时间。</p>
+      </div>
+    </div>
+    <div class="ac-overview-table-wrap">
+      <table class="ac-overview-table">
+        <thead>
+          <tr>
+            <th>任务流</th>
+            <th>执行次数</th>
+            <th>最近执行时间</th>
+          </tr>
+        </thead>
+        <tbody id="overview-execution-body"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+{{ super() }}
+<script defer src="{{ url_for('static', filename='admin_console/automation_overview_core.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_overview_renderers.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_overview_actions.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_overview.js') }}"></script>
+{% endblock %}

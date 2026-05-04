@@ -1,0 +1,159 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<section
+  class="admin-card admin-orchestrator-shell"
+  data-followup-orchestrator-root
+  data-api-url="{{ url_for('api.api_admin_followup_orchestrator') }}"
+  data-mission-api-base="{{ url_for('api.api_admin_followup_orchestrator') }}/missions"
+  data-customer-detail-base="{{ url_for('api.admin_console_customers') }}"
+  data-customer-pulse-inbox-url="{{ url_for('api.admin_customer_pulse_inbox') }}"
+  data-admin-action-token="{{ admin_action_token }}"
+  data-customer-pulse-mode="{{ orchestrator_access.mode }}"
+  data-customer-pulse-tenant-key="{{ orchestrator_access.tenant_key }}"
+  data-customer-pulse-actor-userid="{{ orchestrator_access.actor_userid }}"
+  data-customer-pulse-actor-role="{{ orchestrator_access.actor_role }}"
+>
+  <script type="application/json" data-followup-orchestrator-json>{{ orchestrator_payload | tojson }}</script>
+  <div class="admin-card-head">
+    <div>
+      <h2>AI 团队跟进编排器</h2>
+      <p>把个人 action card 升级成团队任务包、波次、接力和审批。所有外发消息继续只生成草稿，必须逐个预览并人工确认。</p>
+    </div>
+    <div class="admin-toolbar">
+      <a class="admin-button admin-button--ghost" href="{{ url_for('api.admin_customer_pulse_inbox') }}">查看 AI推进</a>
+      <a class="admin-button admin-button--secondary" href="{{ url_for('api.admin_console_home') }}">返回工作台</a>
+    </div>
+  </div>
+
+  <div class="admin-toolbar admin-orchestrator-tabs" role="tablist" aria-label="团队编排视图">
+    <button
+      type="button"
+      class="admin-subnav-link"
+      data-orchestrator-view-tab
+      data-view="mine"
+      role="tab"
+      aria-selected="false"
+    >
+      我的任务包
+    </button>
+    <button
+      type="button"
+      class="admin-subnav-link"
+      data-orchestrator-view-tab
+      data-view="team"
+      role="tab"
+      aria-selected="false"
+    >
+      团队指挥台
+    </button>
+    <button type="button" class="admin-button admin-button--ghost" data-orchestrator-refresh>刷新编排</button>
+  </div>
+
+  <div class="admin-state admin-state--inline">
+    <strong>执行原则</strong>
+    <span>编排层只做建议和执行编排，不会静默修改 owner，也不会一键静默群发。批量草稿仍然逐客户预览和编辑。</span>
+  </div>
+  <div class="admin-state admin-state--inline">
+    <strong>复用链路</strong>
+    <span>任务包来源于客户推进卡片，草稿/任务/阶段/标签/提醒执行继续复用既有租户、角色权限、审计和回写链路。</span>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2 data-orchestrator-section-title>我的任务包</h2>
+      <p data-orchestrator-section-summary>默认展示今天优先处理的 mission，可再切到团队指挥台看堆积、超 SLA 和审批队列。</p>
+    </div>
+  </div>
+
+  <div class="admin-card-grid" data-orchestrator-summary-cards></div>
+  <div class="admin-card-grid admin-orchestrator-board-metrics" data-orchestrator-board-metrics hidden></div>
+
+  <form class="admin-filter-bar admin-form-grid admin-form-grid--wide-filters admin-orchestrator-filter-bar" data-orchestrator-filter-form>
+    <label>
+      <span>搜索</span>
+      <input type="search" name="search" data-orchestrator-filter="search" placeholder="任务包 / 客户 / owner / why / 风险">
+    </label>
+    <label>
+      <span>团队</span>
+      <select name="team" data-orchestrator-filter="team">
+        <option value="">全部团队</option>
+      </select>
+    </label>
+    <label>
+      <span>负责人</span>
+      <select name="owner" data-orchestrator-filter="owner">
+        <option value="">全部负责人</option>
+      </select>
+    </label>
+    <label>
+      <span>阶段</span>
+      <select name="stage" data-orchestrator-filter="stage">
+        <option value="">全部阶段</option>
+      </select>
+    </label>
+    <label>
+      <span>风险</span>
+      <select name="risk" data-orchestrator-filter="risk">
+        <option value="">全部风险</option>
+      </select>
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" data-orchestrator-filter="dueTodayOnly">
+      <span>仅到期 / 超 SLA</span>
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" data-orchestrator-filter="approvalOnly">
+      <span>仅待审批</span>
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" data-orchestrator-filter="overloadedOnly">
+      <span>仅 owner 过载</span>
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" data-orchestrator-filter="unownedOnly">
+      <span>仅无 owner</span>
+    </label>
+    <div class="admin-toolbar">
+      <button type="button" class="admin-button admin-button--primary" data-orchestrator-apply-filters>应用筛选</button>
+      <button type="button" class="admin-button admin-button--ghost" data-orchestrator-reset-filters>重置</button>
+    </div>
+  </form>
+</section>
+
+<section class="admin-split-grid admin-orchestrator-layout">
+  <article class="admin-card admin-orchestrator-list-panel">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2 data-orchestrator-list-title>今日任务包</h2>
+        <p data-orchestrator-list-summary>按优先级、SLA、转派、升级和批量草稿规则排序。</p>
+      </div>
+    </div>
+    <div class="admin-state admin-state--loading" data-orchestrator-list-state>
+      <strong>正在加载任务包</strong>
+      <span>系统正在汇总团队编排结果。</span>
+    </div>
+    <div class="admin-orchestrator-list" data-orchestrator-list hidden></div>
+  </article>
+
+  <article class="admin-card admin-orchestrator-detail-panel">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>任务包详情</h2>
+        <p>可直接接受、认领、审批转派、标记阻塞、完成或跳过；涉及草稿的动作仍复用现有客户推进安全预览链路。</p>
+      </div>
+    </div>
+    <div class="admin-state admin-state--empty" data-orchestrator-detail-state>
+      <strong>请选择一个任务包</strong>
+      <span>左侧会优先展示今日 mission；选中后可查看客户项、证据、审批状态和批量草稿入口。</span>
+    </div>
+    <div class="admin-orchestrator-detail" data-orchestrator-detail-body hidden></div>
+  </article>
+</section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="{{ url_for('static', filename='admin_console/followup_orchestrator.js') }}"></script>
+{% endblock %}

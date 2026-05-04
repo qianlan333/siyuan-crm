@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>班期用户管理</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f3f1ea;
+      --panel: rgba(255,255,255,0.95);
+      --line: rgba(78, 62, 36, 0.12);
+      --text: #2f2416;
+      --muted: #776852;
+      --primary: #8b6338;
+      --primary-strong: #6e4c28;
+      --soft: #f4eadb;
+      --ok: #2f7d57;
+      --danger: #a14e37;
+      --shadow: 0 20px 48px rgba(65, 48, 24, 0.08);
+      --radius: 22px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "PingFang SC", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(197, 149, 92, 0.15), transparent 24%),
+        linear-gradient(180deg, #f8f4ed 0%, var(--bg) 100%);
+    }
+    button, a { font: inherit; }
+    .shell { max-width: 1320px; margin: 0 auto; padding: 24px 16px 36px; }
+    .hero, .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .hero { padding: 22px; margin-bottom: 16px; }
+    .hero-head, .toolbar { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; }
+    .hero h1 { margin: 0 0 8px; font-size: 28px; }
+    .hero p { margin: 0; color: var(--muted); line-height: 1.7; }
+    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+    .stat {
+      padding: 16px;
+      border-radius: 18px;
+      background: #fffdf8;
+      border: 1px solid rgba(78, 62, 36, 0.1);
+    }
+    .stat-label { color: var(--muted); font-size: 13px; margin-bottom: 6px; }
+    .stat-value { font-size: 28px; font-weight: 700; }
+    .toolbar.card { padding: 16px 18px; margin-bottom: 16px; }
+    .toolbar-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .filters { display: flex; flex-wrap: wrap; gap: 10px; }
+    .chip {
+      border: 1px solid rgba(78, 62, 36, 0.12);
+      background: #fffdf8;
+      color: var(--text);
+      border-radius: 999px;
+      padding: 10px 14px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .chip.active {
+      background: linear-gradient(135deg, var(--primary), var(--primary-strong));
+      color: #fff;
+      border-color: transparent;
+    }
+    .btn {
+      border: 0;
+      border-radius: 999px;
+      padding: 11px 16px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .btn.primary { color: #fff; background: linear-gradient(135deg, var(--primary), var(--primary-strong)); }
+    .btn.ghost { color: var(--primary-strong); background: var(--soft); }
+    .table-card { padding: 10px 0 0; overflow: hidden; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 14px 18px; text-align: left; border-bottom: 1px solid rgba(78, 62, 36, 0.08); font-size: 14px; }
+    th { color: var(--muted); font-weight: 600; background: rgba(244, 234, 219, 0.35); }
+    .tag-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--primary-strong);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .empty, .status { padding: 18px; color: var(--muted); }
+    .status.error { color: var(--danger); }
+    .data-timestamp { color: var(--muted); font-size: 13px; }
+    .ext-note {
+      margin-top: 16px;
+      padding: 16px 18px;
+      border-radius: 18px;
+      background: #fffaf2;
+      border: 1px dashed rgba(78, 62, 36, 0.18);
+      color: var(--muted);
+      line-height: 1.7;
+      font-size: 14px;
+    }
+    @media (max-width: 900px) {
+      .stats { grid-template-columns: 1fr; }
+      .hero-head, .toolbar { flex-direction: column; align-items: stretch; }
+      .table-scroll { overflow-x: auto; }
+      table { min-width: 900px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <section class="hero">
+      <div class="hero-head">
+        <div>
+          <h1>班期用户管理</h1>
+          <p>聚焦 AI 产品报名情况这一个标签组，做筛选、统计、查看与导出。页面结构已为后续用户运营动作字段预留扩展位。</p>
+        </div>
+        <div class="hero-head">
+          <button id="init-button" class="btn ghost" type="button">检查并补齐标签</button>
+          <button id="refresh-button" class="btn ghost" type="button">重新加载页面数据</button>
+        </div>
+      </div>
+      <div id="stats" class="stats"></div>
+    </section>
+
+    <section class="toolbar card">
+      <div class="toolbar-head">
+        <div id="data-timestamp" class="data-timestamp">数据更新时间：加载中...</div>
+        <div>
+          <button id="export-button" class="btn primary" type="button">导出当前筛选结果</button>
+        </div>
+      </div>
+      <div id="filters" class="filters"></div>
+    </section>
+
+    <section class="card table-card">
+      <div id="table-status" class="status">加载中...</div>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>客户昵称</th>
+              <th>手机号</th>
+              <th>跟进人</th>
+              <th>当前标签</th>
+              <th>external_userid</th>
+              <th>更新时间</th>
+            </tr>
+          </thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="ext-note">
+      已预留 `status_fields.operation_flags`、`reserved_filters` 和表格扩展位，后续可以继续接“是否执行动作”“是否已加微”“是否已绑定手机号”“手机号批量比对结果”等运营字段。
+    </section>
+  </div>
+
+  <script>
+    const state = {
+      filter: '',
+      definitions: [],
+      stats: [],
+      items: [],
+    };
+    const statsEl = document.getElementById('stats');
+    const filtersEl = document.getElementById('filters');
+    const tableBodyEl = document.getElementById('table-body');
+    const tableStatusEl = document.getElementById('table-status');
+    const dataTimestampEl = document.getElementById('data-timestamp');
+    const refreshButton = document.getElementById('refresh-button');
+    const initButton = document.getElementById('init-button');
+    const exportButton = document.getElementById('export-button');
+
+    async function fetchJson(url, options) {
+      const response = await fetch(url, options);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || ('请求失败(' + response.status + ')'));
+      }
+      return payload;
+    }
+
+    function renderStats() {
+      statsEl.innerHTML = state.stats.map((item) => (
+        '<article class="stat"><div class="stat-label">' + item.label + '</div><div class="stat-value">' + item.count + '</div></article>'
+      )).join('');
+    }
+
+    function renderFilters() {
+      const chips = [
+        '<button type="button" class="chip' + (state.filter ? '' : ' active') + '" data-filter="">全部</button>'
+      ].concat(state.definitions.map((item) => (
+        '<button type="button" class="chip' + (state.filter === item.signup_status ? ' active' : '') + '" data-filter="' + item.signup_status + '">' + item.label + '</button>'
+      )));
+      filtersEl.innerHTML = chips.join('');
+      Array.from(filtersEl.querySelectorAll('.chip')).forEach((button) => {
+        button.addEventListener('click', () => {
+          state.filter = button.getAttribute('data-filter') || '';
+          loadList();
+        });
+      });
+    }
+
+    function renderTable() {
+      if (!state.items.length) {
+        tableBodyEl.innerHTML = '<tr><td class="empty" colspan="6">当前筛选下暂无用户</td></tr>';
+        tableStatusEl.textContent = '已加载 0 条';
+        tableStatusEl.className = 'status';
+        return;
+      }
+      tableBodyEl.innerHTML = state.items.map((item) => {
+        const tagName = (((item || {}).status_fields || {}).current_tag_name) || '-';
+        return '<tr>'
+          + '<td>' + (item.customer_name || '-') + '</td>'
+          + '<td>' + (item.mobile || '-') + '</td>'
+          + '<td>' + (item.follow_user_display_name || item.follow_user_userid || '-') + '</td>'
+          + '<td><span class="tag-pill">' + tagName + '</span></td>'
+          + '<td>' + (item.external_userid || '-') + '</td>'
+          + '<td>' + (item.updated_at || '-') + '</td>'
+          + '</tr>';
+      }).join('');
+      tableStatusEl.textContent = '已加载 ' + state.items.length + ' 条';
+      tableStatusEl.className = 'status';
+    }
+
+    async function loadList() {
+      tableStatusEl.textContent = '加载中...';
+      tableStatusEl.className = 'status';
+      const params = new URLSearchParams();
+      if (state.filter) params.set('signup_status', state.filter);
+      try {
+        const result = await fetchJson('/api/admin/class-user-management?' + params.toString());
+        state.definitions = Array.isArray(result.status_definitions) ? result.status_definitions : [];
+        state.stats = Array.isArray(result.stats) ? result.stats : [];
+        state.items = Array.isArray(result.items) ? result.items : [];
+        renderStats();
+        renderFilters();
+        renderTable();
+        const generatedAt = ((((result || {}).meta || {}).data_generated_at) || '');
+        dataTimestampEl.textContent = '数据更新时间：' + (generatedAt || '-');
+        const initState = (result.tag_initialization || {});
+        initButton.textContent = initState.initialized ? '重新检查标签' : '检查并补齐标签';
+      } catch (error) {
+        tableStatusEl.textContent = error.message || '加载失败';
+        tableStatusEl.className = 'status error';
+        tableBodyEl.innerHTML = '';
+        dataTimestampEl.textContent = '数据更新时间：加载失败';
+      }
+    }
+
+    exportButton.addEventListener('click', () => {
+      const params = new URLSearchParams();
+      if (state.filter) params.set('signup_status', state.filter);
+      window.location.href = '/api/admin/class-user-management/export?' + params.toString();
+    });
+
+    refreshButton.addEventListener('click', async () => {
+      refreshButton.disabled = true;
+      try {
+        await loadList();
+      } finally {
+        refreshButton.disabled = false;
+      }
+    });
+
+    initButton.addEventListener('click', async () => {
+      initButton.disabled = true;
+      try {
+        await fetchJson('/api/admin/class-user-management/bootstrap', { method: 'POST' });
+        await loadList();
+      } finally {
+        initButton.disabled = false;
+      }
+    });
+
+    loadList().catch((error) => {
+      tableStatusEl.textContent = error.message || '初始化失败';
+      tableStatusEl.className = 'status error';
+    });
+  </script>
+</body>
+</html>

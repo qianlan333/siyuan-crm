@@ -1,0 +1,341 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<section class="admin-card-grid">
+  {% for card in summary_cards %}
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">{{ card.label }}</div>
+    <div class="admin-card-value admin-card-value--compact">{{ card.value }}</div>
+    <p class="admin-card-copy">{{ card.description }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>AI 工具连接状态</h2>
+      <p>这里可以查看 AI 工具是否可用，以及最近一次环境检查结果。</p>
+    </div>
+    <div class="admin-toolbar">
+      <form method="post" action="/admin/mcp/preflight">
+        <input type="hidden" name="operator" value="crm_console">
+        <button class="admin-button admin-button--primary" type="submit">开始检查</button>
+      </form>
+      <a class="admin-button admin-button--secondary" href="/admin/config/mcp-tools">进入 AI 工具设置</a>
+    </div>
+  </div>
+
+  <div class="admin-card-grid admin-card-grid--triple">
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">工具入口地址</div>
+      <div class="admin-card-value admin-card-value--compact"><code>{{ runtime.mcp_endpoint }}</code></div>
+      <p class="admin-card-copy">当前后台工具服务入口。</p>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">访问令牌</div>
+      <div class="admin-card-value admin-card-value--compact">{{ "已配置" if runtime.auth_configured else "未配置" }}</div>
+      <p class="admin-card-copy">当前用于访问 AI 工具的令牌状态。</p>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">最近检查</div>
+      <div class="admin-card-value admin-card-value--compact">
+        {% if latest_preflight_log %}
+        {{ "正常" if latest_preflight_log.after_json.ok else "失败" }}
+        {% else %}
+        暂无记录
+        {% endif %}
+      </div>
+      <p class="admin-card-copy">
+        {% if latest_preflight_log %}
+        {{ latest_preflight_log.created_at }} · {{ latest_preflight_log.operator }}
+        {% else %}
+        还没有执行过环境检查
+        {% endif %}
+      </p>
+    </article>
+  </div>
+
+  {% if preflight_result %}
+  <div class="admin-state admin-state--inline">
+    <strong>本次检查：{{ "通过" if preflight_result.ok else "失败" }}</strong>
+    <span>工具清单数量：{{ preflight_result.tools_list_count }} · 访问令牌{{ "已配置" if preflight_result.auth_configured else "未配置" }}</span>
+  </div>
+  {% endif %}
+
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>检查项目</th>
+          <th>状态</th>
+          <th>当前值</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in dependency_checks %}
+        <tr>
+          <td>{{ item.label }}</td>
+          <td><span class="admin-inline-chip admin-inline-chip--{{ item.status }}">{{ "正常" if item.status == "ok" else ("需关注" if item.status == "warn" else "失败") }}</span></td>
+          <td>{{ item.value }}</td>
+          <td>{{ item.detail }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="admin-card">
+  <form class="admin-filter-bar admin-form-grid admin-form-grid--wide-filters" method="get">
+    <label>
+      <span>筛选</span>
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="工具名称 / 分组 / 说明">
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" name="enabled_only" value="1" {% if filters.enabled_only %}checked{% endif %}>
+      <span>仅看已启用</span>
+    </label>
+    <label class="admin-checkbox">
+      <input type="checkbox" name="visible_only" value="1" {% if filters.visible_only %}checked{% endif %}>
+      <span>仅看后台显示</span>
+    </label>
+    <div class="admin-form-actions">
+      <button class="admin-button admin-button--primary" type="submit">应用筛选</button>
+      <a class="admin-button admin-button--ghost" href="/admin/mcp">重置</a>
+    </div>
+  </form>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>工具清单</h2>
+      <p>这里展示当前可用的 AI 工具、用途和使用状态。</p>
+    </div>
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table admin-table--registry">
+      <thead>
+        <tr>
+          <th>工具</th>
+          <th>分组</th>
+          <th>风险等级</th>
+          <th>说明</th>
+          <th>处理说明</th>
+          <th>配置</th>
+          <th>演示内容</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in registry_rows %}
+        <tr>
+          <td>
+            <strong><code>{{ row.tool_name }}</code></strong>
+            <div class="admin-card-copy">显示名称：{{ row.display_name }}</div>
+          </td>
+          <td>{{ row.category }}</td>
+          <td>
+            <span class="admin-inline-chip admin-inline-chip--{{ "danger" if row.risk_level == "high" else "ok" }}">
+              {{ row.risk_label }}
+            </span>
+          </td>
+          <td>
+            <div>{{ row.description }}</div>
+          </td>
+          <td>
+            <div><strong>{{ row.application_service }}</strong></div>
+            <details class="admin-details-block">
+              <summary>高级信息</summary>
+              <pre class="admin-code-block">{{ row.service_paths|tojson(indent=2) }}</pre>
+              {% if row.service_note %}
+              <div class="admin-card-copy">{{ row.service_note }}</div>
+              {% endif %}
+            </details>
+          </td>
+          <td>
+            <div>已启用：{{ "是" if row.enabled else "否" }}</div>
+            <div>后台显示：{{ "是" if row.visible_in_console else "否" }}</div>
+            <div>分组：{{ row.tool_group }}</div>
+            <div><a class="admin-inline-link admin-inline-link--compact" href="/admin/config/mcp-tools?edit_tool={{ row.tool_name }}">编辑配置</a></div>
+          </td>
+          <td>
+            <div>示例参数：{{ "显示" if row.show_sample_args else "隐藏" }}</div>
+            <div>示例结果：{{ "显示" if row.show_sample_output else "隐藏" }}</div>
+            <div><a class="admin-inline-link admin-inline-link--compact" href="/admin/mcp?tool={{ row.tool_name }}">试运行</a></div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="admin-split-grid">
+  <article class="admin-card">
+    <div class="admin-card-head">
+      <div>
+        <h2>试运行</h2>
+        <p>默认只做预览；高风险工具需要额外确认后才会真正执行。</p>
+      </div>
+    </div>
+    <form class="admin-form-grid admin-form-grid--stacked" method="post" action="/admin/mcp/sample-call">
+      <label>
+        <span>当前工具</span>
+        <select name="tool_name">
+          {% for row in registry_rows %}
+          <option value="{{ row.tool_name }}" {% if sample_form.tool_name == row.tool_name %}selected{% endif %}>{{ row.tool_name }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>输入内容</span>
+        <textarea name="arguments_json" rows="14">{{ sample_form.arguments_json }}</textarea>
+      </label>
+      <label class="admin-checkbox">
+        <input type="checkbox" name="live_run" value="1" {% if sample_form.live_run %}checked{% endif %}>
+        <span>确认真正执行（默认不勾选）</span>
+      </label>
+      <label class="admin-checkbox">
+        <input type="checkbox" name="confirm_high_risk" value="1" {% if sample_form.confirm_high_risk %}checked{% endif %}>
+        <span>高风险工具二次确认</span>
+      </label>
+      <label>
+        <span>操作人</span>
+        <input type="text" name="operator" value="{{ sample_form.operator }}" placeholder="填写本次执行人">
+      </label>
+      <div class="admin-form-actions">
+        <button class="admin-button admin-button--primary" type="submit">开始试运行</button>
+      </div>
+    </form>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-card-head">
+      <div>
+        <h2>当前工具</h2>
+        <p>这里展示当前工具的说明和示例内容。</p>
+      </div>
+    </div>
+    {% if selected_tool %}
+    <div class="admin-state admin-state--inline">
+      <strong><code>{{ selected_tool.tool_name }}</code></strong>
+      <span>{{ selected_tool.description }}</span>
+      <span>风险等级：{{ selected_tool.risk_label }} · 已启用{{ "是" if selected_tool.enabled else "否" }} · 后台显示{{ "是" if selected_tool.visible_in_console else "否" }}</span>
+    </div>
+    <div class="admin-code-panel">
+      <h3>示例参数</h3>
+      {% if selected_tool.show_sample_args %}
+      <pre class="admin-code-block">{{ selected_tool.sample_args_pretty }}</pre>
+      {% else %}
+      <div class="admin-state admin-state--inline">
+        <strong>示例参数已隐藏</strong>
+        <span>可在 AI 工具设置页开启显示。</span>
+      </div>
+      {% endif %}
+    </div>
+    <div class="admin-code-panel">
+      <h3>示例结果</h3>
+      {% if selected_tool.show_sample_output %}
+      <pre class="admin-code-block">{{ selected_tool.sample_output_pretty }}</pre>
+      {% else %}
+      <div class="admin-state admin-state--inline">
+        <strong>示例结果已隐藏</strong>
+        <span>可在 AI 工具设置页开启显示。</span>
+      </div>
+      {% endif %}
+    </div>
+    <details class="admin-details-block">
+      <summary>高级信息</summary>
+      <div class="admin-code-panel">
+        <h3>输入说明</h3>
+        <pre class="admin-code-block">{{ selected_tool.input_schema_pretty }}</pre>
+      </div>
+    </details>
+    {% endif %}
+  </article>
+</section>
+
+{% if sample_result %}
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>试运行结果</h2>
+      <p>这里展示本次试运行的结果；高风险工具默认不会直接执行。</p>
+    </div>
+  </div>
+  <div class="admin-state admin-state--inline">
+    <strong>{{ sample_result.tool_name }} · {{ sample_result.mode_label }}</strong>
+    <span>风险等级：{{ sample_result.risk_label }} · 实际执行{{ "是" if sample_result.requested_live else "否" }}</span>
+    {% if sample_result.warnings %}
+    <span>{{ sample_result.warnings|join("；") }}</span>
+    {% endif %}
+    {% if sample_result.error %}
+    <span>{{ sample_result.error }}</span>
+    {% endif %}
+  </div>
+  <div class="admin-code-panel">
+    <h3>提交内容</h3>
+    <pre class="admin-code-block">{{ sample_result.submitted_arguments_pretty }}</pre>
+  </div>
+  {% if sample_result.runtime_result %}
+  <div class="admin-code-panel">
+    <h3>返回结果</h3>
+    <pre class="admin-code-block">{{ sample_result.runtime_result.result_pretty }}</pre>
+  </div>
+  {% elif sample_result.preview_payload %}
+  <div class="admin-code-panel">
+    <h3>预览结果</h3>
+    <pre class="admin-code-block">{{ sample_result.preview_payload_pretty }}</pre>
+  </div>
+  {% endif %}
+</section>
+{% endif %}
+
+<section class="admin-split-grid">
+  <article class="admin-card">
+    <div class="admin-card-head">
+      <div>
+        <h2>最近检查</h2>
+        <p>这里展示最近几次环境检查记录。</p>
+      </div>
+    </div>
+    <div class="admin-audit-list">
+      {% for item in recent_preflight_logs %}
+      <div class="admin-audit-item">
+        <strong>{{ item.action_label }}</strong>
+        <span>{{ item.operator }} · {{ item.created_at }}</span>
+      </div>
+      {% else %}
+      <div class="admin-state admin-state--inline">
+        <strong>暂无检查记录</strong>
+        <span>点击上方按钮开始第一次检查。</span>
+      </div>
+      {% endfor %}
+    </div>
+  </article>
+
+  <article class="admin-card">
+    <div class="admin-card-head">
+      <div>
+        <h2>最近试运行</h2>
+        <p>这里展示最近试运行的操作记录。</p>
+      </div>
+    </div>
+    <div class="admin-audit-list">
+      {% for item in recent_sample_logs %}
+      <div class="admin-audit-item">
+        <strong>{{ item.target_id }}</strong>
+        <span>{{ item.action_label }} · {{ item.operator }} · {{ item.created_at }}</span>
+      </div>
+      {% else %}
+      <div class="admin-state admin-state--inline">
+        <strong>暂无试运行记录</strong>
+        <span>从上面的试运行区域开始第一次试运行。</span>
+      </div>
+      {% endfor %}
+    </div>
+  </article>
+</section>
+{% endblock %}

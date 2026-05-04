@@ -1,0 +1,11 @@
+{
+  "days_observed": 0,
+  "last_daily_report_path": "/Users/qianlan/Downloads/aicrm-new-codex-1/docs/ai-customer-pulse/observation-daily/2026-04-11.md",
+  "last_daily_run_at": "2026-04-11 20:19:19",
+  "last_verdict_generated_at": "",
+  "observation_started_at": "",
+  "observed_tenants": [],
+  "rollback_incident_detected": false,
+  "rollback_incident_notes": [],
+  "status": "awaiting_real_whitelist_tenants"
+}

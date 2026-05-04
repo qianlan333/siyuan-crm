@@ -1,0 +1,101 @@
+name: 事故工单
+description: 线上事故、紧急止血、回滚与复盘入口。
+title: "[Incident] "
+labels:
+  - incident
+body:
+  - type: textarea
+    id: incident_summary
+    attributes:
+      label: 事故摘要
+      description: 用最短文字说明发生了什么、影响了谁。
+      placeholder: 例如：生产环境接口返回 500，影响顾问后台查看状态页。
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: 影响范围
+      description: 写清用户影响、接口影响或数据影响。
+      placeholder: |
+        影响接口：
+        影响用户：
+        是否有数据风险：
+    validations:
+      required: true
+  - type: textarea
+    id: authorized_files
+    attributes:
+      label: 授权修改文件
+      description: 事故处置允许修改的文件。
+      placeholder: |
+        wecom_ability_service/routes.py
+        tests/test_api.py
+    validations:
+      required: true
+  - type: textarea
+    id: forbidden_scope
+    attributes:
+      label: 禁止修改范围
+      description: 紧急修复中仍然不能碰的内容。
+      placeholder: |
+        不做无关重构
+        不改未授权模块
+        不做额外流程改造
+    validations:
+      required: true
+  - type: textarea
+    id: immediate_action
+    attributes:
+      label: 止血策略
+      description: 写清本次先修什么、先不修什么。
+      placeholder: 例如：先恢复接口可用性，不处理文案和低优先级清理。
+    validations:
+      required: true
+  - type: textarea
+    id: targeted_tests
+    attributes:
+      label: 定向测试
+      description: 事故修复后必须立即验证的命令。
+      placeholder: |
+        python3 -m pytest -q tests/test_api.py::test_xxx
+    validations:
+      required: true
+  - type: textarea
+    id: full_regression
+    attributes:
+      label: 全量回归
+      description: 若事故允许，再写全量命令。
+      placeholder: python3 -m pytest -q
+    validations:
+      required: true
+  - type: textarea
+    id: rollback
+    attributes:
+      label: 回滚方案
+      description: 如果修复失败，如何最小回退。
+      placeholder: 回退本次事故处置涉及文件或切回上一个稳定版本。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 关闭条件
+      description: 明确什么情况下事故才算关闭。
+      placeholder: |
+        1. 核心接口恢复
+        2. 指定测试通过
+        3. 风险已记录
+    validations:
+      required: true
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已明确止血范围与禁止修改范围
+          required: true
+        - label: 我已提供最小验证命令
+          required: true
+        - label: 我已提供回滚方案
+          required: true

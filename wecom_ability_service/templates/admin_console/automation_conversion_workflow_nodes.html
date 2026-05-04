@@ -1,0 +1,649 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+{% include "admin_console/_automation_conversion_operations_styles.html" %}
+{% endblock %}
+
+{% block content %}
+{% set workspace = operations_workspace or {} %}
+
+{% include "admin_console/_automation_program_context.html" %}
+{% include "admin_console/_automation_conversion_workspace_tabs.html" %}
+
+<div
+  id="automation-workflow-nodes-root"
+  class="ac-ops-shell"
+  data-page-mode="{{ workspace.page_mode or 'nodes' }}"
+  data-selected-workflow-id="{{ workspace.selected_workflow_id or '' }}"
+  data-api-urls='{{ (workspace.api_urls or {})|tojson }}'
+  data-entry-urls='{{ (workspace.entry_urls or {})|tojson }}'
+  data-action-urls='{{ (workspace.action_urls or {})|tojson }}'
+>
+  <section class="admin-page-hero admin-page-hero--workspace">
+    <div class="admin-page-hero__head">
+      <div>
+        <h1>节点配置</h1>
+        <p>维护任务流的节点：目标人群、触发方式和节点内容。</p>
+      </div>
+      <div class="ac-ops-page-links">
+        {% if (workspace.action_urls or {}).workflow_edit %}
+        <a class="ac-ops-page-link" href="{{ (workspace.action_urls or {}).workflow_edit }}">返回任务流</a>
+        {% endif %}
+        <button class="admin-button admin-button--primary" id="node-create-button" type="button">新增节点</button>
+      </div>
+    </div>
+    <div class="ac-ops-feedback" id="nodes-page-feedback" hidden></div>
+    <div class="ac-ops-loading" id="nodes-page-loading">正在加载任务流与节点信息...</div>
+  </section>
+
+  <section class="ac-ops-panel" id="workflow-summary-panel" hidden>
+    <div class="ac-ops-head">
+      <div>
+        <div class="ac-eyebrow">当前任务流</div>
+        <h3 id="workflow-summary-title">任务流信息</h3>
+        <p class="ac-ops-code" id="workflow-summary-code"></p>
+      </div>
+    </div>
+    <dl class="ac-ops-summary-meta" id="workflow-summary-meta"></dl>
+  </section>
+
+  <section class="ac-ops-panel">
+    <div class="ac-ops-head">
+      <div>
+        <h3>节点列表</h3>
+        <p class="ac-ops-muted">节点页只维护节点本身：目标人群、触发方式和节点内容。</p>
+      </div>
+    </div>
+    <div class="ac-ops-table-wrap">
+      <table class="ac-ops-table">
+        <thead>
+          <tr>
+            <th>节点名称</th>
+            <th>目标人群</th>
+            <th>触发方式</th>
+            <th>第几天</th>
+            <th>时间</th>
+            <th>内容摘要</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="node-table-body"></tbody>
+      </table>
+    </div>
+    <div class="ac-ops-empty" id="node-empty" hidden>当前任务流还没有节点，可以先新增第一个节点。</div>
+  </section>
+
+  <section class="ac-ops-form-card" id="node-form-card" hidden>
+    <div class="ac-ops-head">
+      <div>
+        <h3 id="node-form-title">新增节点</h3>
+        <p class="ac-ops-muted">节点内容方式继承当前任务流。这个页面不会出现任务流基础表单和执行记录区。</p>
+      </div>
+      <button class="admin-button admin-button--ghost" id="node-form-cancel" type="button">收起</button>
+    </div>
+
+    <form id="node-form" class="admin-form-grid admin-form-grid--stacked">
+      <input type="hidden" name="node_id" value="">
+
+      <div class="ac-ops-field-grid">
+        <label class="admin-field">
+          <span>节点名称</span>
+          <input type="text" name="node_name" placeholder="例如：进入运营中第 3 天">
+        </label>
+        <label class="admin-field">
+          <span>目标人群</span>
+          <select name="target_audience_code"></select>
+        </label>
+      </div>
+
+      <div class="ac-ops-field-grid">
+        <label class="admin-field">
+          <span>触发方式</span>
+          <select name="trigger_mode">
+            <option value="scheduled">进入人群后第 N 天指定时间运行</option>
+            <option value="daily_recurring">进入人群后第 N 天每日轮巡运行</option>
+            <option value="audience_entered">进入目标人群后立即运行</option>
+          </select>
+        </label>
+        <label class="admin-field" id="node-day-offset-field">
+          <span>第几天</span>
+          <input type="number" name="day_offset" min="1" value="1">
+        </label>
+        <label class="admin-field" id="node-send-time-field">
+          <span>时间</span>
+          <input type="time" name="send_time" value="09:00">
+        </label>
+      </div>
+
+      <p class="ac-ops-muted" id="node-trigger-help">按时间点运行时，会在进入目标人群后的第 N 天指定时间执行。</p>
+      <p class="ac-ops-muted" id="node-content-help"></p>
+
+      <label class="admin-field" id="node-standard-content-field" hidden>
+        <span id="node-standard-content-label">标准内容</span>
+        <textarea name="standard_content_text" rows="7" placeholder="输入统一标准内容"></textarea>
+      </label>
+
+      <section class="ac-ops-panel" id="node-variant-section" hidden>
+        <div class="ac-ops-head">
+          <div>
+            <h4>分层内容明细</h4>
+            <p class="ac-ops-muted" id="node-variant-help"></p>
+          </div>
+        </div>
+        <div class="ac-ops-variant-grid" id="node-variant-grid"></div>
+      </section>
+
+      <label class="admin-checkbox">
+        <input type="checkbox" name="enabled" value="1" checked>
+        <span>启用当前节点</span>
+      </label>
+
+      <div class="ac-ops-feedback" id="node-form-feedback" hidden></div>
+      <div class="ac-ops-inline-actions">
+        <button class="admin-button admin-button--primary" type="submit">保存节点</button>
+      </div>
+    </form>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+{{ super() }}
+<script>
+  (() => {
+    const root = document.getElementById('automation-workflow-nodes-root');
+    if (!root) return;
+
+    const selectedWorkflowId = Number(root.dataset.selectedWorkflowId || 0) || null;
+    const apiUrls = JSON.parse(root.dataset.apiUrls || '{}');
+    if (!selectedWorkflowId) return;
+
+    const elements = {
+      pageFeedback: document.getElementById('nodes-page-feedback'),
+      pageLoading: document.getElementById('nodes-page-loading'),
+      workflowSummaryPanel: document.getElementById('workflow-summary-panel'),
+      workflowSummaryTitle: document.getElementById('workflow-summary-title'),
+      workflowSummaryCode: document.getElementById('workflow-summary-code'),
+      workflowSummaryMeta: document.getElementById('workflow-summary-meta'),
+      nodeCreateButton: document.getElementById('node-create-button'),
+      nodeTableBody: document.getElementById('node-table-body'),
+      nodeEmpty: document.getElementById('node-empty'),
+      nodeFormCard: document.getElementById('node-form-card'),
+      nodeFormTitle: document.getElementById('node-form-title'),
+      nodeFormCancel: document.getElementById('node-form-cancel'),
+      nodeForm: document.getElementById('node-form'),
+      nodeDayOffsetField: document.getElementById('node-day-offset-field'),
+      nodeSendTimeField: document.getElementById('node-send-time-field'),
+      nodeTriggerHelp: document.getElementById('node-trigger-help'),
+      nodeContentHelp: document.getElementById('node-content-help'),
+      nodeStandardContentField: document.getElementById('node-standard-content-field'),
+      nodeStandardContentLabel: document.getElementById('node-standard-content-label'),
+      nodeVariantSection: document.getElementById('node-variant-section'),
+      nodeVariantHelp: document.getElementById('node-variant-help'),
+      nodeVariantGrid: document.getElementById('node-variant-grid'),
+      nodeFormFeedback: document.getElementById('node-form-feedback'),
+    };
+
+    const state = {
+      registry: {},
+      workflowBundle: null,
+    };
+
+    function withId(base, id) {
+      return String(base || '').replace(/\/0(?=\/|$|\?)/, '/' + encodeURIComponent(String(id)));
+    }
+
+    function escapeHtml(value) {
+      return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function requestJson(url, options) {
+      return fetch(url, options).then(async (response) => {
+        const rawText = await response.text();
+        let payload = {};
+        if (rawText) {
+          try {
+            payload = JSON.parse(rawText);
+          } catch (error) {
+            payload = {};
+          }
+        }
+        if (!response.ok || payload.ok === false) {
+          throw new Error(String(payload.error || payload.message || rawText || `HTTP ${response.status}`).trim());
+        }
+        return payload;
+      });
+    }
+
+    function showFeedback(target, message, tone) {
+      if (!target) return;
+      if (!message) {
+        target.hidden = true;
+        target.textContent = '';
+        target.className = 'ac-ops-feedback';
+        return;
+      }
+      target.hidden = false;
+      target.textContent = message;
+      target.className = 'ac-ops-feedback' + (tone === 'error' ? ' is-error' : tone === 'success' ? ' is-success' : '');
+    }
+
+    function labelFromRegistry(groupKey, code, fallback) {
+      const items = Array.isArray(state.registry[groupKey]) ? state.registry[groupKey] : [];
+      const keyName = groupKey === 'audiences'
+        ? 'audience_code'
+        : groupKey === 'recipient_filter_bases'
+        ? 'basis_code'
+        : groupKey === 'segmentation_bases'
+        ? 'basis_code'
+        : groupKey === 'generation_modes'
+        ? 'mode_code'
+        : groupKey === 'node_trigger_modes'
+        ? 'trigger_mode'
+        : groupKey === 'workflow_statuses'
+        ? 'status_code'
+        : 'tier_code';
+      const match = items.find((item) => String(item[keyName] || '') === String(code || ''));
+      return match ? (match.label || fallback || code) : (fallback || code || '-');
+    }
+
+    function audienceLabel(code) {
+      return labelFromRegistry('audiences', code, code);
+    }
+
+    function recipientFilterLabel(code) {
+      return labelFromRegistry('recipient_filter_bases', code, code);
+    }
+
+    function segmentationLabel(code) {
+      return labelFromRegistry('segmentation_bases', code, code);
+    }
+
+    function generationLabel(code) {
+      return labelFromRegistry('generation_modes', code, code);
+    }
+
+    function nodeTriggerModeLabel(code) {
+      return labelFromRegistry('node_trigger_modes', code, code);
+    }
+
+    function statusLabel(code) {
+      return labelFromRegistry('workflow_statuses', code, code);
+    }
+
+    function behaviorTierLabel(code, fallback) {
+      const normalized = String(code || '').trim();
+      if (normalized === 'lt_2') return '消息少于 2';
+      if (normalized === 'between_2_9') return '消息 2 ~ 9';
+      if (normalized === 'gte_10') return '消息大于等于 10';
+      return labelFromRegistry('behavior_tiers', normalized, fallback || normalized);
+    }
+
+    function workflowRecipientSummary(workflow) {
+      const basis = String((workflow || {}).recipient_filter_basis || '').trim();
+      if (basis !== 'behavior') {
+        return recipientFilterLabel(basis || 'none');
+      }
+      const tierKeys = Array.isArray((workflow || {}).recipient_behavior_tier_keys) ? workflow.recipient_behavior_tier_keys : [];
+      const tierLabels = tierKeys.map((item) => behaviorTierLabel(item, item)).filter(Boolean);
+      return tierLabels.length ? `按消息条数发：${tierLabels.join(' / ')}` : '按消息条数发';
+    }
+
+    function workflowContentSummary(workflow, bundle) {
+      const basis = String((workflow || {}).content_segmentation_basis || (workflow || {}).segmentation_basis || '').trim() || 'none';
+      if (basis !== 'profile') {
+        return segmentationLabel(basis);
+      }
+      const templateName = ((((bundle || {}).profile_segment_template || {}).template) || {}).template_name || '';
+      return templateName ? `按基础画像分层 · ${templateName}` : segmentationLabel(basis);
+    }
+
+    function defaultNodeContentMode(bundle) {
+      const workflowMode = String((((bundle || {}).workflow) || {}).generation_mode || '').trim();
+      if (workflowMode === 'manual_layered') return 'manual_layered';
+      if (workflowMode === 'auto_layered_rewrite') return 'standard_layered_rewrite';
+      if (workflowMode === 'personalized_single') return 'personalized_single';
+      return 'standard_direct';
+    }
+
+    function defaultNodeSegmentationBasis(bundle, contentMode) {
+      if (!['manual_layered', 'standard_layered_rewrite'].includes(String(contentMode || '').trim())) {
+        return '';
+      }
+      const workflowBasis = String((((bundle || {}).workflow) || {}).content_segmentation_basis || (((bundle || {}).workflow) || {}).segmentation_basis || '').trim();
+      if (workflowBasis === 'profile' || workflowBasis === 'behavior') {
+        return workflowBasis;
+      }
+      return ((((bundle || {}).profile_segment_template || {}).template) || {}).id ? 'profile' : 'behavior';
+    }
+
+    function manualVariantTargets(bundle, segmentationBasis) {
+      if (!bundle) return [];
+      if (String(segmentationBasis || '') === 'behavior') {
+        return (state.registry.behavior_tiers || []).map((item) => ({
+          variant_scope: 'behavior_tier',
+          segment_key: item.tier_code,
+          label: behaviorTierLabel(item.tier_code, item.label),
+        }));
+      }
+      if (String(segmentationBasis || '') === 'profile') {
+        return (((bundle.profile_segment_template || {}).categories) || [])
+          .filter((item) => item.enabled)
+          .map((item) => ({
+            variant_scope: 'profile_category',
+            segment_key: item.category_key,
+            label: item.category_name || item.category_key,
+          }));
+      }
+      return [];
+    }
+
+    function renderWorkflowSummary() {
+      const bundle = state.workflowBundle;
+      if (!bundle) return;
+      const workflow = bundle.workflow || {};
+      elements.workflowSummaryPanel.hidden = false;
+      elements.workflowSummaryTitle.textContent = workflow.workflow_name || workflow.workflow_code || '任务流';
+      elements.workflowSummaryCode.textContent = `workflow_code=${workflow.workflow_code || '-'}`;
+      elements.workflowSummaryMeta.innerHTML = `
+        <div><dt>任务流名称</dt><dd>${escapeHtml(workflow.workflow_name || workflow.workflow_code || '-')}</dd></div>
+        <div><dt>状态</dt><dd>${escapeHtml(statusLabel(workflow.status))}</dd></div>
+        <div><dt>适用人群</dt><dd>${escapeHtml((bundle.audiences || []).map((item) => audienceLabel(item.audience_code)).join(' / ') || '-')}</dd></div>
+        <div><dt>发给谁</dt><dd>${escapeHtml(workflowRecipientSummary(workflow))}</dd></div>
+        <div><dt>怎么发</dt><dd>${escapeHtml(workflowContentSummary(workflow, bundle))}</dd></div>
+        <div><dt>生成方式</dt><dd>${escapeHtml(generationLabel(workflow.generation_mode))}</dd></div>
+      `;
+    }
+
+    function renderNodeTargetOptions() {
+      const bundle = state.workflowBundle;
+      const select = elements.nodeForm.elements.target_audience_code;
+      select.innerHTML = (bundle.audiences || []).map((item) => `<option value="${escapeHtml(item.audience_code)}">${escapeHtml(audienceLabel(item.audience_code))}</option>`).join('');
+    }
+
+    function renderNodeList() {
+      const nodes = Array.isArray((state.workflowBundle || {}).nodes) ? state.workflowBundle.nodes : [];
+      elements.nodeTableBody.innerHTML = nodes.map((node) => {
+        const contentMode = defaultNodeContentMode(state.workflowBundle);
+        const contentSummary = contentMode === 'manual_layered'
+          ? `分层内容 ${((node.content_variants || []).length || 0)} 条`
+          : contentMode === 'personalized_single'
+          ? '继承任务流智能体配置'
+          : (node.standard_content_text || '-').slice(0, 40);
+        return `
+          <tr>
+            <td><strong>${escapeHtml(node.node_name || node.node_code || '-')}</strong><div class="ac-ops-code">${escapeHtml(node.node_code || '')}</div></td>
+            <td>${escapeHtml(audienceLabel(node.target_audience_code))}</td>
+            <td>${escapeHtml(nodeTriggerModeLabel(node.trigger_mode || 'scheduled'))}</td>
+            <td>${node.trigger_mode === 'audience_entered' ? '-' : `第 ${escapeHtml(node.day_offset || 1)} 天`}</td>
+            <td>${escapeHtml(node.trigger_mode === 'audience_entered' ? '立即运行' : (node.trigger_mode === 'daily_recurring' ? `每日 ${node.send_time || '-'}` : (node.send_time || '-')))}</td>
+            <td>${escapeHtml(contentSummary)}</td>
+            <td>${node.enabled ? '启用' : '停用'}</td>
+            <td>
+              <div class="ac-ops-inline-actions">
+                <button class="admin-button admin-button--secondary" type="button" data-node-action="edit" data-node-id="${escapeHtml(node.id)}">编辑</button>
+                <button class="admin-button admin-button--ghost" type="button" data-node-action="delete" data-node-id="${escapeHtml(node.id)}">删除</button>
+              </div>
+            </td>
+          </tr>
+        `;
+      }).join('');
+      elements.nodeEmpty.hidden = nodes.length > 0;
+    }
+
+    function syncNodeTriggerModeFields() {
+      const triggerMode = String(elements.nodeForm.elements.trigger_mode.value || 'scheduled');
+      const usesScheduleFields = triggerMode !== 'audience_entered';
+      elements.nodeDayOffsetField.hidden = !usesScheduleFields;
+      elements.nodeSendTimeField.hidden = !usesScheduleFields;
+      if (triggerMode === 'scheduled') {
+        elements.nodeTriggerHelp.textContent = '按时间点运行时，会在进入目标人群后的第 N 天指定时间执行一次。';
+      } else if (triggerMode === 'daily_recurring') {
+        elements.nodeTriggerHelp.textContent = '每日轮巡时，只会在进入目标人群后的第 N 天指定时间，对当前仍在该人群内的成员执行一次。';
+      } else {
+        elements.nodeTriggerHelp.textContent = '进入目标人群后立即运行时，不再要求配置第几天和时间。';
+      }
+    }
+
+    function renderNodeVariantControls(node, segmentationBasis, forceShow) {
+      const targets = forceShow ? manualVariantTargets(state.workflowBundle, segmentationBasis) : [];
+      if (!targets.length) {
+        elements.nodeVariantSection.hidden = true;
+        elements.nodeVariantGrid.innerHTML = '';
+        return;
+      }
+      const variantByKey = {};
+      (node && Array.isArray(node.content_variants) ? node.content_variants : []).forEach((item) => {
+        variantByKey[item.segment_key] = item.content_text || '';
+      });
+      elements.nodeVariantSection.hidden = false;
+      elements.nodeVariantHelp.textContent =
+        segmentationBasis === 'profile'
+          ? '填写当前有效画像分类对应的节点内容，输入区会随画像分类配置动态变化。'
+          : '填写当前有效消息条数层级对应的节点内容，输入区会随消息条数层级配置动态变化。';
+      elements.nodeVariantGrid.innerHTML = targets.map((target) => `
+        <label class="ac-ops-variant-item">
+          <span>${escapeHtml(target.label)}</span>
+          <textarea rows="6" data-segment-key="${escapeHtml(target.segment_key)}" placeholder="输入该分层下的节点内容">${escapeHtml(variantByKey[target.segment_key] || '')}</textarea>
+        </label>
+      `).join('');
+    }
+
+    function syncNodeContentFields(node) {
+      const contentMode = defaultNodeContentMode(state.workflowBundle);
+      const segmentationBasis = defaultNodeSegmentationBasis(state.workflowBundle, contentMode);
+      const showStandard = ['standard_direct', 'standard_layered_rewrite'].includes(contentMode);
+      const showVariants = contentMode === 'manual_layered';
+      elements.nodeStandardContentField.hidden = !showStandard;
+      elements.nodeStandardContentLabel.textContent = '标准内容';
+      if (!showStandard) {
+        elements.nodeForm.elements.standard_content_text.value = '';
+      }
+
+      if (contentMode === 'standard_direct') {
+        elements.nodeContentHelp.textContent = '当前任务流是统一内容录入，节点层只填写一份统一标准内容。';
+      } else if (contentMode === 'manual_layered') {
+        elements.nodeContentHelp.textContent = '当前任务流是手动分层录入，节点层只填写当前有效分层的内容明细。填写当前有效行为层级对应的节点内容，输入区会随行为层级配置动态变化。';
+      } else if (contentMode === 'standard_layered_rewrite') {
+        elements.nodeContentHelp.textContent = '当前任务流是自动生成配置，节点层填写统一标准内容，执行时按当前分层和智能体配置改写。';
+      } else {
+        elements.nodeContentHelp.textContent = '当前任务流是单人定制化生成，节点层只继承任务流智能体配置，不填写人工内容。';
+      }
+
+      renderNodeVariantControls(node || null, segmentationBasis, showVariants);
+    }
+
+    function openNodeForm(node) {
+      elements.nodeFormCard.hidden = false;
+      showFeedback(elements.nodeFormFeedback, '', '');
+      elements.nodeForm.reset();
+      renderNodeTargetOptions();
+      if (node) {
+        elements.nodeFormTitle.textContent = '编辑节点';
+        elements.nodeForm.elements.node_id.value = String(node.id || '');
+        elements.nodeForm.elements.node_name.value = node.node_name || '';
+        elements.nodeForm.elements.target_audience_code.value = node.target_audience_code || '';
+        elements.nodeForm.elements.trigger_mode.value = node.trigger_mode || 'scheduled';
+        elements.nodeForm.elements.day_offset.value = node.day_offset || 1;
+        elements.nodeForm.elements.send_time.value = node.send_time || '09:00';
+        elements.nodeForm.elements.standard_content_text.value = node.standard_content_text || '';
+        elements.nodeForm.elements.enabled.checked = !!node.enabled;
+      } else {
+        elements.nodeFormTitle.textContent = '新增节点';
+        elements.nodeForm.elements.node_id.value = '';
+        elements.nodeForm.elements.trigger_mode.value = 'scheduled';
+        elements.nodeForm.elements.day_offset.value = 1;
+        elements.nodeForm.elements.send_time.value = '09:00';
+        elements.nodeForm.elements.enabled.checked = true;
+      }
+      syncNodeTriggerModeFields();
+      syncNodeContentFields(node || null);
+      elements.nodeForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    function closeNodeForm() {
+      elements.nodeFormCard.hidden = true;
+      showFeedback(elements.nodeFormFeedback, '', '');
+    }
+
+    function collectNodeContentVariants() {
+      return Array.from(elements.nodeVariantGrid.querySelectorAll('textarea[data-segment-key]'))
+        .map((input) => ({
+          segment_key: String(input.dataset.segmentKey || '').trim(),
+          content_text: String(input.value || '').trim(),
+        }))
+        .filter((item) => item.segment_key);
+    }
+
+    function validateNodePayload(payload, triggerMode, contentMode) {
+      const bundle = state.workflowBundle;
+      const allowedAudiences = new Set((bundle.audiences || []).map((item) => item.audience_code));
+      if (!payload.node_name) throw new Error('节点名称不能为空');
+      if (!payload.target_audience_code) throw new Error('目标人群不能为空');
+      if (!allowedAudiences.has(payload.target_audience_code)) {
+        throw new Error('当前目标人群不属于任务流适用人群');
+      }
+      if (triggerMode === 'audience_entered') {
+        if ('day_offset' in payload || 'send_time' in payload) {
+          throw new Error('当前触发方式为“立即运行”，不能同时填写“第几天”和“时间”');
+        }
+      } else {
+        if (!Number.isInteger(payload.day_offset) || payload.day_offset < 1) {
+          throw new Error('当前触发方式必须填写有效的第几天');
+        }
+        if (!/^\d{2}:\d{2}$/.test(String(payload.send_time || ''))) {
+          throw new Error('时间格式不正确');
+        }
+      }
+      if (contentMode === 'standard_direct' && !payload.standard_content_text) {
+        throw new Error('当前任务流内容方式需要标准内容');
+      }
+      if (contentMode === 'manual_layered') {
+        const segmentationBasis = defaultNodeSegmentationBasis(bundle, contentMode);
+        const targets = manualVariantTargets(bundle, segmentationBasis);
+        if (!targets.length) {
+          throw new Error('当前任务流还没有可用的分层项，暂时无法录入分层内容');
+        }
+        const variantMap = new Map((payload.content_variants || []).map((item) => [item.segment_key, item.content_text]));
+        const missingTargets = targets.filter((target) => !String(variantMap.get(target.segment_key) || '').trim());
+        if (missingTargets.length) {
+          throw new Error(`请补全所有有效分层的内容：${missingTargets.map((item) => item.label).join('、')}`);
+        }
+      }
+      if (contentMode === 'standard_layered_rewrite' && !payload.standard_content_text) {
+        throw new Error('当前任务流内容方式需要标准内容');
+      }
+    }
+
+    function buildNodePayload() {
+      const triggerMode = String(elements.nodeForm.elements.trigger_mode.value || 'scheduled').trim();
+      const contentMode = defaultNodeContentMode(state.workflowBundle);
+      const standardContentText = String(elements.nodeForm.elements.standard_content_text.value || '').trim();
+      const payload = {
+        node_name: String(elements.nodeForm.elements.node_name.value || '').trim(),
+        target_audience_code: String(elements.nodeForm.elements.target_audience_code.value || '').trim(),
+        trigger_mode: triggerMode,
+        enabled: !!elements.nodeForm.elements.enabled.checked,
+      };
+
+      if (triggerMode !== 'audience_entered') {
+        payload.day_offset = Number(elements.nodeForm.elements.day_offset.value || 1);
+        payload.send_time = String(elements.nodeForm.elements.send_time.value || '09:00');
+      }
+
+      if (contentMode === 'standard_direct') {
+        payload.standard_content_text = standardContentText;
+      } else if (contentMode === 'manual_layered') {
+        payload.content_variants = collectNodeContentVariants();
+      } else if (contentMode === 'standard_layered_rewrite') {
+        payload.standard_content_text = standardContentText;
+      }
+
+      validateNodePayload(payload, triggerMode, contentMode);
+      return payload;
+    }
+
+    async function reloadWorkflowBundle() {
+      const [registryPayload, workflowPayload] = await Promise.all([
+        requestJson(apiUrls.registry, { credentials: 'same-origin' }),
+        requestJson(withId(apiUrls.workflow_detail_base, selectedWorkflowId), { credentials: 'same-origin' }),
+      ]);
+      state.registry = registryPayload;
+      state.workflowBundle = workflowPayload.workflow_bundle;
+      renderWorkflowSummary();
+      renderNodeList();
+      renderNodeTargetOptions();
+    }
+
+    async function saveNode(event) {
+      event.preventDefault();
+      try {
+        const payload = buildNodePayload();
+        const nodeId = Number(elements.nodeForm.elements.node_id.value || 0);
+        await requestJson(nodeId ? withId(apiUrls.workflow_node_base, nodeId) : withId(apiUrls.workflow_nodes_base, selectedWorkflowId), {
+          method: nodeId ? 'PUT' : 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        await reloadWorkflowBundle();
+        showFeedback(elements.pageFeedback, nodeId ? '节点已更新' : '节点已创建', 'success');
+        closeNodeForm();
+      } catch (error) {
+        showFeedback(elements.nodeFormFeedback, error.message || '保存节点失败', 'error');
+      }
+    }
+
+    async function deleteNode(nodeId) {
+      if (!window.confirm('确认删除这个节点吗？')) return;
+      await requestJson(withId(apiUrls.workflow_node_base, nodeId), {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      await reloadWorkflowBundle();
+      showFeedback(elements.pageFeedback, '节点已删除', 'success');
+    }
+
+    function findNodeById(nodeId) {
+      return ((state.workflowBundle || {}).nodes || []).find((item) => Number(item.id || 0) === Number(nodeId || 0)) || null;
+    }
+
+    async function initialize() {
+      try {
+        await reloadWorkflowBundle();
+      } catch (error) {
+        showFeedback(elements.pageFeedback, error.message || '加载节点配置失败', 'error');
+      } finally {
+        elements.pageLoading.hidden = true;
+      }
+    }
+
+    elements.nodeCreateButton.addEventListener('click', () => openNodeForm(null));
+    elements.nodeFormCancel.addEventListener('click', closeNodeForm);
+    elements.nodeForm.addEventListener('submit', saveNode);
+    elements.nodeForm.elements.trigger_mode.addEventListener('change', syncNodeTriggerModeFields);
+    elements.nodeTableBody.addEventListener('click', async (event) => {
+      const button = event.target.closest('button[data-node-action]');
+      if (!button) return;
+      const nodeId = Number(button.dataset.nodeId || 0);
+      try {
+        if (button.dataset.nodeAction === 'edit') {
+          openNodeForm(findNodeById(nodeId));
+        } else if (button.dataset.nodeAction === 'delete') {
+          await deleteNode(nodeId);
+        }
+      } catch (error) {
+        showFeedback(elements.pageFeedback, error.message || '节点操作失败', 'error');
+      }
+    });
+
+    initialize();
+  })();
+</script>
+{% endblock %}

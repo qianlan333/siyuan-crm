@@ -1,0 +1,417 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/automation_conversion_workspace.css') }}">
+<style>
+  [hidden] {
+    display: none !important;
+  }
+
+  .ac-flow-shell { display: grid; gap: 14px; }
+  .ac-flow-nav,
+  .ac-flow-tabs,
+  .ac-flow-hero-meta { display: flex; flex-wrap: wrap; gap: 10px; }
+  .ac-flow-card {
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(20, 86, 240, 0.10);
+    background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,251,255,0.98));
+    box-shadow: none;
+    display: grid;
+    gap: 16px;
+  }
+  .ac-flow-grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .ac-flow-muted { color: #4e5969; line-height: 1.7; margin: 0; }
+  .ac-flow-card h3 { margin: 0; }
+  .ac-flow-card strong { color: #1f2329; }
+  .ac-section-link {
+    display: inline-flex;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid rgba(20, 86, 240, 0.10);
+    background: #fff;
+    color: #1456f0;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .ac-section-link.is-active { background: #ebf2ff; color: #1456f0; }
+  .ac-flow-day { padding: 8px 12px; border-radius: 999px; background: #f5f6f7; color: #4e5969; }
+  .ac-flow-day.is-selected { background: #ebf2ff; color: #1456f0; }
+  .ac-flow-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    background: #ebf2ff;
+    color: #1456f0;
+    font-size: 12px;
+    font-weight: 700;
+  }
+  textarea { min-height: 120px; width: 100%; }
+  input[type="text"], input[type="time"] { width: 100%; padding: 10px 12px; }
+  .ac-config-shell,
+  .ac-config-main,
+  .ac-config-panel,
+  .ac-config-summary-meta,
+  .ac-config-form-grid,
+  .ac-config-category-list,
+  .ac-config-option-grid,
+  .ac-config-stack,
+  .ac-config-field-status-list { display: grid; gap: 14px; }
+  .ac-config-main { grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr); align-items: start; }
+  .ac-config-panel,
+  .ac-config-category-card {
+    padding: 16px;
+    border-radius: 12px;
+    border: 1px solid rgba(20, 86, 240, 0.10);
+    background: rgba(255,255,255,0.96);
+  }
+  .ac-config-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+  .ac-config-muted { margin: 0; color: #4e5969; line-height: 1.7; }
+  .ac-config-row-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .ac-config-table-wrap { overflow: auto; border: 1px solid rgba(20, 86, 240, 0.10); border-radius: 12px; background: #fff; }
+  .ac-config-table { width: 100%; border-collapse: collapse; }
+  .ac-config-table th,
+  .ac-config-table td { padding: 12px 14px; border-bottom: 1px solid rgba(20, 86, 240, 0.08); text-align: left; vertical-align: top; }
+  .ac-config-table th { background: #f8fbff; color: #4e5969; font-size: 12px; }
+  .ac-config-table tbody tr.is-clickable { cursor: pointer; }
+  .ac-config-table tbody tr.is-clickable:hover,
+  .ac-config-table tbody tr.is-active { background: #f2f6ff; }
+  .ac-config-code { margin: 0; color: #64748b; font-size: 12px; }
+  .ac-config-empty,
+  .ac-config-feedback { padding: 12px 14px; border-radius: 10px; background: #f5f7fb; color: #334155; }
+  .ac-config-feedback.is-error { background: #fef2f2; color: #991b1b; }
+  .ac-config-feedback.is-success { background: #f0fdf4; color: #166534; }
+  .ac-config-form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ac-config-summary-meta { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .ac-config-summary-meta > div { padding: 10px 12px; border-radius: 10px; background: #f8fbff; border: 1px solid rgba(20, 86, 240, 0.08); }
+  .ac-config-summary-meta dt { margin-bottom: 4px; color: #4e5969; font-size: 12px; }
+  .ac-config-summary-meta dd { margin: 0; font-weight: 700; }
+  .ac-config-option-grid { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .ac-config-option-item { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(20, 86, 240, 0.10); background: #fff; }
+  .ac-config-qr-card { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: start; padding: 14px; border-radius: 12px; border: 1px solid rgba(20, 86, 240, 0.10); background: #f8fbff; }
+  .ac-config-qr-preview { width: 120px; height: 120px; border-radius: 10px; background: #fff; border: 1px solid rgba(20, 86, 240, 0.10); object-fit: contain; padding: 8px; }
+  .ac-config-field-status-item { padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(20, 86, 240, 0.08); background: #fff; }
+  .ac-config-field-status-item p { margin: 6px 0 0; color: #4e5969; line-height: 1.5; }
+  .ac-config-status-badge { display: inline-flex; min-width: 68px; justify-content: center; padding: 5px 8px; border-radius: 999px; background: #eef2ff; color: #1456f0; font-size: 12px; font-weight: 700; }
+  .ac-config-status-badge.is-published { background: #dcfce7; color: #166534; }
+  .ac-config-status-badge.is-disabled { background: #f1f5f9; color: #475569; }
+  .ac-config-tag-picker { display: grid; gap: 10px; padding: 12px; border-radius: 10px; border: 1px solid rgba(20, 86, 240, 0.10); background: #f8fbff; }
+  .ac-config-tag-picker-display { min-height: 44px; padding: 10px 12px; border-radius: 10px; border: 1px dashed rgba(20, 86, 240, 0.18); background: #fff; }
+  .ac-config-tag-picker-note { color: #4e5969; font-size: 13px; line-height: 1.6; }
+  .ac-config-tag-badge { display: inline-flex; padding: 7px 10px; border-radius: 999px; border: 1px solid rgba(20, 86, 240, 0.10); background: #ebf2ff; color: #1456f0; font-size: 13px; }
+  .ac-config-tag-badge.is-unknown { background: #fef2f2; color: #991b1b; }
+  .ac-config-tag-modal-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, 0.28); backdrop-filter: blur(6px); }
+  .ac-config-tag-modal { width: min(1040px, 100%); max-height: calc(100vh - 48px); overflow: auto; display: grid; gap: 14px; padding: 20px; border-radius: 14px; background: #fff; box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18); }
+  .ac-config-tag-modal-grid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.7fr); gap: 14px; }
+  .ac-config-tag-modal-panel { display: grid; gap: 12px; padding: 14px; border-radius: 12px; border: 1px solid rgba(20, 86, 240, 0.10); background: #f8fbff; align-content: start; }
+  .ac-config-tag-group-list,
+  .ac-config-tag-selected-panel { display: grid; gap: 14px; align-content: start; }
+  .ac-config-tag-chip-grid,
+  .ac-config-tag-selected-display { display: flex; flex-wrap: wrap; gap: 8px; }
+  .ac-config-tag-chip { border: 1px solid rgba(20, 86, 240, 0.10); border-radius: 999px; padding: 9px 12px; background: #fff; color: #334155; cursor: pointer; }
+  .ac-config-tag-chip.is-active { border-color: rgba(20, 86, 240, 0.26); background: #ebf2ff; color: #1456f0; }
+  .ac-config-tag-search { width: 100%; }
+  .ac-config-tag-fallback input { width: 100%; margin-top: 8px; }
+  .ac-config-tag-modal-actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+  .ac-config-editor-shell { border-top: 1px solid rgba(20, 86, 240, 0.10); padding-top: 14px; }
+  @media (max-width: 1080px) { .ac-config-main { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .ac-config-form-grid, .ac-config-tag-modal-grid, .ac-config-qr-card { grid-template-columns: 1fr; } }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set workspace = flow_design_workspace or {} %}
+{% set default_channel = workspace.default_channel or {} %}
+{% set profile_workspace = workspace.profile_segment_workspace or {} %}
+{% set initial_templates = profile_workspace.initial_templates or [] %}
+{% set initial_catalog = profile_workspace.initial_template_catalog or [] %}
+{% include "admin_console/_automation_program_context.html" %}
+{% include "admin_console/_automation_conversion_workspace_tabs.html" %}
+<div class="ac-flow-shell">
+  <section class="admin-page-hero admin-page-hero--workspace">
+    <div class="admin-page-hero__head">
+      <div>
+        <h1>方案基础配置</h1>
+        <p>问卷分层、欢迎语、扫码标签与入口二维码。</p>
+      </div>
+    </div>
+    <div class="admin-page-hero__footer">
+      <div class="ac-flow-nav">
+      {% for item in workspace.sections or [] %}
+      <a class="ac-section-link{% if item.key == workspace.section %} is-active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
+      {% endfor %}
+      </div>
+    </div>
+    {% if workspace.saved %}
+    <div class="admin-banner admin-banner--success">已保存</div>
+    {% endif %}
+    {% if page_error %}
+    <div class="admin-banner admin-banner--error">{{ page_error }}</div>
+    {% endif %}
+  </section>
+
+  <section id="flow-profile-segments" class="ac-flow-card">
+    <div class="ac-config-head">
+      <div>
+        <h3>问卷分层与方案入口</h3>
+        <p class="ac-flow-muted">画像分层模板按当前方案独立维护；每个模板绑定自己的问卷和分层题目。欢迎语、自动通过、二维码和扫码标签也只作用于当前方案入口。</p>
+      </div>
+      <span class="ac-flow-chip">当前方案独有</span>
+    </div>
+
+    <div
+      id="automation-agent-config-root"
+      class="ac-config-shell"
+      data-api-urls='{{ (profile_workspace.api_urls or {})|tojson }}'
+      data-selected-template-id="{{ profile_workspace.selected_template_id or '' }}"
+      data-admin-action-token="{{ admin_action_token }}"
+    >
+      <script type="application/json" id="automation-agent-config-initial-templates">{{ initial_templates|tojson }}</script>
+      <script type="application/json" id="automation-agent-config-initial-catalog">{{ initial_catalog|tojson }}</script>
+
+      <div class="ac-config-feedback" id="agent-config-feedback" hidden></div>
+
+      <div class="ac-config-main">
+        <section class="ac-config-panel">
+          <div class="ac-config-head">
+            <div>
+              <h3>基础画像分层模板</h3>
+              <p class="ac-config-muted">选择当前方案问卷中的一道题作为分层依据，并为分类绑定选项。未命中时后续直接回落到标准版原文。</p>
+            </div>
+            <div class="ac-config-row-actions">
+              <button class="admin-button admin-button--primary" id="template-create-button" type="button">新建分层模板</button>
+            </div>
+          </div>
+
+          <div class="ac-config-table-wrap">
+            <table class="ac-config-table">
+              <thead>
+                <tr>
+                  <th>模板名</th>
+                  <th>问卷 / 题目</th>
+                  <th>分类数</th>
+                  <th>状态</th>
+                  <th>更新时间</th>
+                </tr>
+              </thead>
+              <tbody id="template-table-body">
+                {% for item in initial_templates %}
+                {% set template = item.template or {} %}
+                {% set questionnaire = item.questionnaire or {} %}
+                {% set question = item.segmentation_question or {} %}
+                {% set template_status = '启用' if template.enabled else '停用' %}
+                <tr class="is-clickable" data-template-id="{{ template.id or '' }}">
+                  <td>
+                    <strong>{{ template.template_name or template.template_code or '-' }}</strong>
+                    <div class="ac-config-code">{{ template.template_code or '' }}</div>
+                  </td>
+                  <td>{{ questionnaire.name or '-' }} / {{ question.title or '-' }}</td>
+                  <td>{{ (item.categories or [])|length }}</td>
+                  <td>{{ template_status }}</td>
+                  <td>{{ template.updated_at or '-' }}</td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="ac-config-empty" id="template-empty" {% if initial_templates %}hidden{% endif %}>当前方案还没有基础画像分层模板。</div>
+
+          <section class="ac-config-panel ac-config-editor-shell" id="template-detail-panel" hidden>
+            <div class="ac-config-head">
+              <div>
+                <h4 id="template-detail-title">模板详情</h4>
+                <p class="ac-config-code" id="template-detail-code"></p>
+              </div>
+              <button class="admin-button admin-button--secondary" id="template-edit-button" type="button">编辑模板</button>
+            </div>
+            <dl class="ac-config-summary-meta" id="template-detail-summary"></dl>
+            <div id="template-detail-categories"></div>
+          </section>
+
+          <section class="ac-config-panel ac-config-editor-shell" id="template-form-panel" hidden>
+            <div class="ac-config-head">
+              <div>
+                <h4 id="template-form-title">新建分层模板</h4>
+                <p class="ac-config-muted">保存后该模板只归属于当前方案，不进入共享资源。</p>
+              </div>
+              <button class="admin-button admin-button--ghost" id="template-form-cancel" type="button">收起</button>
+            </div>
+
+            <div class="ac-config-feedback" id="template-form-feedback" hidden></div>
+
+            <form id="template-form" class="admin-form-grid admin-form-grid--stacked">
+              <input type="hidden" name="template_id" value="">
+
+              <div class="ac-config-form-grid">
+                <label class="admin-field">
+                  <span>模板名称</span>
+                  <input type="text" name="template_name" placeholder="例如：当前方案首轮分层">
+                </label>
+                <label class="admin-field">
+                  <span>template_code</span>
+                  <input type="text" name="template_code" placeholder="可选，不填则后端自动生成">
+                </label>
+              </div>
+
+              <label class="admin-field">
+                <span>说明</span>
+                <textarea name="description" rows="3" placeholder="补充模板用途"></textarea>
+              </label>
+
+              <div class="ac-config-form-grid">
+                <label class="admin-field">
+                  <span>问卷</span>
+                  <select name="questionnaire_id"></select>
+                </label>
+                <label class="admin-field">
+                  <span>分层题目</span>
+                  <select name="segmentation_question_id"></select>
+                </label>
+              </div>
+
+              <label class="admin-checkbox">
+                <input type="checkbox" name="enabled" value="1" checked>
+                <span>启用当前模板</span>
+              </label>
+
+              <div class="ac-config-head">
+                <div>
+                  <strong>分类与选项映射</strong>
+                  <p class="ac-config-muted">未命中的用户不进入默认分类，后续直接回落到标准版原文。</p>
+                </div>
+                <button class="admin-button admin-button--secondary" id="category-add-button" type="button">新增分类</button>
+              </div>
+
+              <div class="ac-config-category-list" id="template-category-list"></div>
+
+              <div class="admin-form-actions">
+                <button class="admin-button admin-button--primary" id="template-form-submit" type="submit">保存模板</button>
+              </div>
+            </form>
+          </section>
+        </section>
+
+        <section id="flow-channel" class="ac-config-panel">
+          <div class="ac-config-head">
+            <div>
+              <h3>方案入口二维码</h3>
+              <p class="ac-config-muted">维护当前方案的欢迎语、自动通过、扫码自动打标签和二维码。不同方案之间互不复用。</p>
+            </div>
+            <div class="ac-config-row-actions">
+              <button class="admin-button admin-button--secondary" id="default-channel-generate-button" type="button">重新生成二维码</button>
+            </div>
+          </div>
+
+          <div class="ac-config-feedback" id="default-channel-feedback" hidden></div>
+
+          <div class="ac-config-qr-card">
+            <img class="ac-config-qr-preview" id="default-channel-qr-image" src="{{ default_channel.qr_url or '' }}" alt="方案入口二维码" {% if not default_channel.qr_url %}hidden{% endif %}>
+            <div class="ac-config-stack">
+              <div class="ac-config-empty" id="default-channel-qr-empty" {% if default_channel.qr_url %}hidden{% endif %}>当前还没有可用二维码，保存配置后可重新生成。</div>
+              <dl class="ac-config-summary-meta">
+                <div><dt>渠道名称</dt><dd id="default-channel-name">{{ default_channel.channel_name or '-' }}</dd></div>
+                <div><dt>当前状态</dt><dd id="default-channel-status">{{ default_channel.status or '-' }}</dd></div>
+                <div><dt>Provider</dt><dd id="default-channel-provider">-</dd></div>
+                <div><dt>默认负责人</dt><dd id="default-channel-owner">{{ default_channel.owner_staff_id or '-' }}</dd></div>
+              </dl>
+              <p class="ac-config-code" id="default-channel-qr-link">{% if default_channel.qr_url %}<a href="{{ default_channel.qr_url }}" target="_blank" rel="noreferrer">打开当前二维码链接</a>{% endif %}</p>
+            </div>
+          </div>
+
+          <div class="ac-config-field-status-list" id="default-channel-field-statuses"></div>
+
+          <form id="default-channel-form" class="admin-form-grid admin-form-grid--stacked">
+            <div class="ac-config-form-grid">
+              <label class="admin-field">
+                <span>渠道名称</span>
+                <input type="text" name="channel_name" value="{{ default_channel.channel_name or '' }}" placeholder="当前方案入口二维码">
+              </label>
+              <label class="admin-field">
+                <span>自动通过</span>
+                <select name="auto_accept_friend">
+                  <option value="0"{% if not default_channel.auto_accept_friend %} selected{% endif %}>关闭，走好友验证</option>
+                  <option value="1"{% if default_channel.auto_accept_friend %} selected{% endif %}>开启，免验证直接添加好友</option>
+                </select>
+              </label>
+            </div>
+            <div class="admin-field ac-config-tag-picker-field">
+              <span>扫码自动打标签</span>
+              <input type="hidden" name="entry_tag_id" value="{{ default_channel.entry_tag_id or '' }}">
+              <div class="ac-config-tag-picker">
+                <div class="ac-config-tag-picker-display" id="default-channel-entry-tag-display">
+                  {% if default_channel.entry_tag_name %}
+                  <span class="ac-config-tag-badge">{{ default_channel.entry_tag_group_name or '标签' }} / {{ default_channel.entry_tag_name }}</span>
+                  {% else %}
+                  <span class="ac-config-tag-picker-note">未配置扫码自动打标签</span>
+                  {% endif %}
+                </div>
+                <div class="ac-config-row-actions">
+                  <button class="admin-button admin-button--secondary" id="default-channel-entry-tag-pick-button" type="button">选择已有标签</button>
+                  <button class="admin-button admin-button--ghost" id="default-channel-entry-tag-clear-button" type="button">清空</button>
+                </div>
+              </div>
+              <p class="ac-config-code" id="default-channel-entry-tag-help">从已有企微标签和标签组中选择；只有在标签列表加载失败时，才需要手工填写 tag_id。</p>
+              <details class="ac-config-tag-fallback">
+                <summary>手工填写 tag_id 兜底</summary>
+                <input type="text" name="entry_tag_id_manual" placeholder="仅当标签列表加载失败时，再手工填写企微 tag_id">
+              </details>
+            </div>
+            <label class="admin-field">
+              <span>欢迎语</span>
+              <textarea name="welcome_message" rows="5" placeholder="扫码加好友后的当前方案欢迎语">{{ workspace.page_input.welcome_message or default_channel.welcome_message or '' }}</textarea>
+            </label>
+            <div class="admin-form-actions">
+              <button class="admin-button admin-button--primary" type="submit">保存方案入口配置</button>
+            </div>
+          </form>
+        </section>
+      </div>
+
+      <div class="ac-config-tag-modal-overlay" id="default-channel-tag-modal-overlay" hidden>
+        <div class="ac-config-tag-modal" role="dialog" aria-modal="true" aria-labelledby="default-channel-tag-modal-title">
+          <div class="ac-config-head">
+            <div>
+              <h3 id="default-channel-tag-modal-title">选择标签</h3>
+              <p class="ac-config-muted">按标签组选择，确认后仅保存 tag_id，不再手工填写标签名称和标签分组。</p>
+            </div>
+            <button class="admin-button admin-button--ghost" id="default-channel-tag-modal-close" type="button">关闭</button>
+          </div>
+          <input class="ac-config-tag-search" id="default-channel-tag-search" type="text" placeholder="搜索标签名称、标签组或 tag_id">
+          <div class="ac-config-tag-modal-grid">
+            <div class="ac-config-tag-modal-panel">
+              <div class="ac-config-tag-group-list" id="default-channel-tag-groups"></div>
+            </div>
+            <div class="ac-config-tag-modal-panel ac-config-tag-selected-panel">
+              <div>
+                <h4>已选标签</h4>
+                <div class="ac-config-tag-selected-display" id="default-channel-tag-selected"></div>
+              </div>
+              <details class="ac-config-tag-fallback">
+                <summary>手工填写 tag_id 兜底</summary>
+                <input id="default-channel-tag-manual-input" type="text" placeholder="仅在标签列表异常时手工填写 tag_id">
+              </details>
+            </div>
+          </div>
+          <div class="ac-config-tag-modal-actions">
+            <button class="admin-button admin-button--ghost" id="default-channel-tag-modal-cancel" type="button">取消</button>
+            <button class="admin-button admin-button--primary" id="default-channel-tag-modal-confirm" type="button">确认选择</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+{{ super() }}
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_core.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_templates.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_tag_picker.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_channel_model.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_boot.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config.js') }}"></script>
+{% endblock %}

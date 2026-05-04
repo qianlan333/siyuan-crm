@@ -1,0 +1,2570 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ editor_page_title or "问卷编辑" }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f2f3f5;
+      --panel: rgba(255, 255, 255, 0.98);
+      --line: rgba(20, 86, 240, 0.10);
+      --line-strong: rgba(20, 86, 240, 0.18);
+      --text: #1f2329;
+      --muted: #4e5969;
+      --soft: #ebf2ff;
+      --primary: #3370ff;
+      --primary-strong: #1456f0;
+      --danger: #f54a45;
+      --warning-bg: #fff3e0;
+      --warning-text: #ff8800;
+      --shadow: 0 16px 36px rgba(15, 23, 42, 0.06);
+      --shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.04);
+      --radius-xl: 24px;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "PingFang SC", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(51, 112, 255, 0.10), transparent 24%),
+        radial-gradient(circle at bottom right, rgba(51, 112, 255, 0.06), transparent 22%),
+        var(--bg);
+    }
+    button, input, textarea, select { font: inherit; }
+    button {
+      cursor: pointer;
+      border: 0;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, opacity 0.18s ease;
+    }
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.52; cursor: not-allowed; transform: none; box-shadow: none; }
+    .hidden { display: none !important; }
+    .shell { min-height: 100vh; padding: 18px; }
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .back-link::before {
+      content: "←";
+      font-size: 14px;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 auto 14px;
+      max-width: 1600px;
+      min-height: 68px;
+      padding: 12px 16px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255, 253, 248, 0.92);
+      backdrop-filter: blur(14px);
+      box-shadow: var(--shadow-soft);
+    }
+    .topbar-meta-wrap {
+      min-width: 0;
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .topbar-copy {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+    }
+    .topbar-title-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar h1 {
+      margin: 0;
+      font-size: clamp(20px, 2.2vw, 28px);
+      line-height: 1.12;
+      letter-spacing: -0.03em;
+    }
+    .draft-indicator {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(157, 99, 48, 0.12);
+      color: var(--primary-strong);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .topbar-actions,
+    .field-grid,
+    .header-actions,
+    .row-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 40px;
+      padding: 10px 15px;
+      border-radius: 999px;
+      font-weight: 700;
+    }
+    .btn.primary {
+      color: #fff;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
+      box-shadow: 0 12px 24px rgba(115, 67, 26, 0.18);
+    }
+    .btn.secondary {
+      color: var(--primary);
+      background: var(--soft);
+    }
+    .btn.ghost {
+      color: var(--text);
+      background: #fffdf8;
+      border: 1px solid var(--line);
+    }
+    .btn.danger {
+      color: #fff;
+      background: linear-gradient(135deg, #b45a41 0%, #98432e 100%);
+    }
+    .btn.emphasis {
+      min-height: 46px;
+      padding: 12px 18px;
+      font-size: 15px;
+    }
+    .management-card {
+      max-width: 1600px;
+      margin: 0 auto 16px;
+      padding: 18px;
+    }
+    .management-toolbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 14px;
+    }
+    .management-toolbar h2 {
+      margin: 8px 0 0;
+      font-size: 24px;
+      line-height: 1.12;
+      letter-spacing: -0.03em;
+    }
+    .management-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .management-filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .management-filter {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .management-filter.search { flex: 1 1 360px; }
+    .management-filter.status { flex: 0 0 180px; }
+    .management-filter input,
+    .management-filter select {
+      width: 100%;
+      padding: 12px 13px;
+      border-radius: 14px;
+      border: 1px solid rgba(45, 107, 74, 0.14);
+      background: #ffffff;
+      color: var(--text);
+      outline: none;
+    }
+    .management-table-wrap {
+      overflow: auto;
+      border: 1px solid rgba(45, 107, 74, 0.10);
+      border-radius: 20px;
+      background: #ffffff;
+    }
+    .management-table {
+      width: 100%;
+      min-width: 860px;
+      border-collapse: separate;
+      border-spacing: 0;
+    }
+    .management-table th {
+      padding: 14px 16px;
+      text-align: left;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      background: #f7faf7;
+      border-bottom: 1px solid rgba(45, 107, 74, 0.10);
+      white-space: nowrap;
+    }
+    .management-table td {
+      padding: 16px;
+      border-bottom: 1px solid rgba(45, 107, 74, 0.08);
+      vertical-align: middle;
+    }
+    .management-table tbody tr:last-child td { border-bottom: 0; }
+    .management-row.active { background: rgba(47, 109, 76, 0.04); }
+    .management-row.disabled { background: rgba(108, 119, 112, 0.07); }
+    .management-row.disabled .name-main,
+    .management-row.disabled .name-sub,
+    .management-row.disabled .table-text,
+    .management-row.disabled .table-number {
+      color: #98a39b;
+    }
+    .name-line {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+    .name-main {
+      font-size: 15px;
+      line-height: 1.5;
+      font-weight: 800;
+      color: var(--text);
+    }
+    .name-sub {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #e8f1e7;
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .status-badge.disabled {
+      background: #ecefed;
+      color: #78847b;
+    }
+    .table-text {
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .table-number {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+    }
+    .row-actions {
+      justify-content: flex-end;
+      min-width: 320px;
+    }
+    .row-actions .mini-btn {
+      padding: 7px 10px;
+      border-radius: 10px;
+      background: #ffffff;
+      border: 1px solid rgba(45, 107, 74, 0.10);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .workspace {
+      max-width: 1600px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr) 380px;
+      gap: 16px;
+      align-items: start;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(16px);
+    }
+    .sidebar,
+    .inspector-column {
+      position: sticky;
+      top: 86px;
+      display: grid;
+      gap: 14px;
+      max-height: calc(100vh - 104px);
+      min-height: 0;
+      align-content: start;
+    }
+    .tag-status,
+    .inline-alert {
+      padding: 10px 12px;
+      border-radius: var(--radius-md);
+      font-size: 13px;
+      line-height: 1.6;
+      background: #eef6ee;
+      color: var(--primary);
+      white-space: pre-wrap;
+    }
+    .inline-alert.warning {
+      background: var(--warning-bg);
+      color: var(--warning-text);
+    }
+    .inline-alert.error {
+      background: #fbebea;
+      color: #8c4130;
+    }
+    .section-card { padding: 16px; }
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .section-head h3,
+    .section-head h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .section-subtitle {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .tool-grid {
+      display: grid;
+      gap: 8px;
+    }
+    .tool-card {
+      display: flex;
+      gap: 12px;
+      width: 100%;
+      padding: 14px;
+      text-align: left;
+      border-radius: 16px;
+      background: #fffaf3;
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+    .tool-card .tool-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--soft);
+      color: var(--primary);
+      font-weight: 800;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+    .tool-card strong {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 14px;
+    }
+    .tool-card span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .preview-column { min-width: 0; }
+    .phone-stage {
+      min-height: calc(100vh - 104px);
+      padding: 18px;
+      display: grid;
+      place-items: center;
+    }
+    .phone-frame {
+      width: min(100%, 480px);
+      padding: 12px;
+      border-radius: 30px;
+      background: linear-gradient(180deg, #f7efe3 0%, #ecdfcd 100%);
+      border: 1px solid rgba(115, 67, 26, 0.12);
+      box-shadow: 0 24px 48px rgba(60, 45, 24, 0.10);
+    }
+    .phone-topbar {
+      display: flex;
+      justify-content: center;
+      margin-bottom: 12px;
+    }
+    .phone-notch {
+      width: 34%;
+      height: 24px;
+      border-radius: 999px;
+      background: rgba(39, 29, 16, 0.88);
+    }
+    .phone-screen {
+      min-height: 720px;
+      padding: 16px 14px 18px;
+      border-radius: 22px;
+      background:
+        radial-gradient(circle at top left, rgba(181, 128, 69, 0.10), transparent 26%),
+        #fffdfa;
+      border: 1px solid rgba(255,255,255,0.65);
+    }
+    .preview-head {
+      padding: 16px;
+      border-radius: 18px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+      cursor: pointer;
+    }
+    .preview-head.active,
+    .preview-question.active,
+    .preview-rule.active {
+      border-color: rgba(157, 99, 48, 0.32);
+      box-shadow: 0 0 0 3px rgba(157, 99, 48, 0.10);
+    }
+    .preview-head h2 {
+      margin: 8px 0 6px;
+      font-size: 24px;
+      line-height: 1.12;
+      letter-spacing: -0.03em;
+    }
+    .preview-head p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+    }
+    .preview-stack {
+      display: grid;
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .preview-question,
+    .preview-rule {
+      padding: 14px;
+      border-radius: 16px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      cursor: pointer;
+    }
+    .preview-question h4,
+    .preview-rule h4 {
+      margin: 8px 0 6px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    .preview-question .muted,
+    .preview-rule .muted {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .question-type {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: var(--soft);
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .preview-options {
+      display: grid;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .option-pill {
+      padding: 9px 11px;
+      border-radius: 12px;
+      background: #fff8ef;
+      border: 1px solid rgba(157, 99, 48, 0.10);
+      font-size: 13px;
+      color: var(--text);
+    }
+    .preview-footer-note {
+      margin-top: 14px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, rgba(157, 99, 48, 0.10), rgba(157, 99, 48, 0.04));
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    .inspector-card {
+      padding: 16px;
+      min-height: 0;
+      height: calc(100vh - 104px);
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+    .config-group {
+      padding: 14px;
+      border-radius: 16px;
+      background: #fffaf3;
+      border: 1px solid var(--line);
+      margin-bottom: 12px;
+    }
+    .config-group.danger-zone {
+      background: transparent;
+      border: 1px dashed rgba(165, 79, 56, 0.24);
+      padding: 12px 14px;
+    }
+    .config-group.danger-zone h3 { color: #8c4130; font-size: 13px; }
+    .config-group.danger-zone p { font-size: 12px; }
+    details.config-advanced {
+      padding: 0;
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    details.config-advanced[open] {
+      background: #fffaf3;
+    }
+    details.config-advanced > summary {
+      list-style: none;
+      cursor: pointer;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    details.config-advanced > summary::-webkit-details-marker { display: none; }
+    details.config-advanced > summary::after {
+      content: "▾";
+      color: var(--muted);
+      transition: transform 0.15s ease;
+    }
+    details.config-advanced[open] > summary::after { transform: rotate(180deg); }
+    details.config-advanced > *:not(summary) {
+      margin-left: 14px;
+      margin-right: 14px;
+    }
+    details.config-advanced > *:last-child {
+      margin-bottom: 14px;
+    }
+    .config-advanced-label {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+    .config-advanced-hint {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .config-group h3 {
+      margin: 0;
+      font-size: 16px;
+    }
+    .config-group p {
+      margin: 6px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .config-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .field {
+      display: block;
+      margin-bottom: 12px;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .field-grid.compact { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .field-grid.triple { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .field input[type="text"],
+    .field textarea,
+    .field select {
+      width: 100%;
+      margin-top: 7px;
+      padding: 12px 13px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--text);
+      outline: none;
+    }
+    .field textarea { min-height: 96px; resize: vertical; }
+    .field input[type="checkbox"] { margin-right: 8px; }
+    .option-editor {
+      padding: 12px;
+      border-radius: 14px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      margin-bottom: 12px;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+    }
+    .option-editor[draggable="true"] {
+      cursor: grab;
+    }
+    .option-editor.is-dragging {
+      opacity: 0.4;
+    }
+    .option-editor.is-drop-target {
+      border-color: rgba(157, 99, 48, 0.5);
+      box-shadow: 0 0 0 3px rgba(157, 99, 48, 0.12);
+    }
+    .rule-nav-list {
+      display: grid;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    .rule-nav-item {
+      width: 100%;
+      padding: 12px 14px;
+      text-align: left;
+      border-radius: 14px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      color: var(--text);
+    }
+    .rule-nav-item.active {
+      border-color: rgba(157, 99, 48, 0.28);
+      box-shadow: 0 0 0 3px rgba(157, 99, 48, 0.10);
+    }
+    .rule-nav-item strong {
+      display: block;
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    .rule-nav-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .option-editor-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .mini-label {
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .link-btn {
+      padding: 0;
+      background: transparent;
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .link-btn.danger { color: #93452f; }
+    .tag-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      min-height: 30px;
+    }
+    .tag-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      background: #f4e7d7;
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .tag-badge.unknown {
+      background: #f0f1ed;
+      color: #6d746d;
+    }
+    .tag-inline { margin-top: 10px; }
+    .tag-fallback {
+      margin-top: 10px;
+      border-top: 1px dashed rgba(157, 99, 48, 0.18);
+      padding-top: 10px;
+    }
+    .tag-fallback summary {
+      cursor: pointer;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .helper-note {
+      margin-top: 10px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: #fbf8f2;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .empty-state {
+      padding: 24px 18px;
+      border-radius: 18px;
+      border: 1px dashed rgba(157, 99, 48, 0.18);
+      color: var(--muted);
+      text-align: center;
+      font-size: 14px;
+      line-height: 1.7;
+      background: rgba(255,255,255,0.7);
+    }
+    .tag-modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      background: rgba(14, 25, 18, 0.38);
+      backdrop-filter: blur(8px);
+    }
+    .tag-modal {
+      width: min(960px, 100%);
+      max-height: calc(100vh - 40px);
+      overflow: auto;
+      padding: 18px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      box-shadow: 0 28px 72px rgba(14, 25, 18, 0.22);
+    }
+    .tag-modal-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .tag-modal-head h3 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.15;
+    }
+    .tag-modal-search {
+      width: 100%;
+      margin: 12px 0 16px;
+      padding: 12px 13px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fffdfa;
+    }
+    .tag-modal-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.9fr);
+      gap: 14px;
+    }
+    .tag-group-list,
+    .tag-selected-panel {
+      padding: 14px;
+      border-radius: 18px;
+      background: #fffaf3;
+      border: 1px solid var(--line);
+    }
+    .tag-group {
+      margin-bottom: 16px;
+    }
+    .tag-group:last-child { margin-bottom: 0; }
+    .tag-group-title {
+      margin: 0 0 10px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 700;
+    }
+    .tag-chip-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .tag-chip {
+      padding: 8px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .tag-chip.active {
+      background: #f4e7d7;
+      color: var(--primary);
+      border-color: rgba(157, 99, 48, 0.24);
+    }
+    .tag-selected-panel h4 {
+      margin: 0 0 10px;
+      font-size: 14px;
+    }
+    .tag-modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .drawer-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 60;
+      display: flex;
+      justify-content: flex-end;
+      background: rgba(12, 23, 17, 0.34);
+      backdrop-filter: blur(8px);
+      padding: 16px;
+    }
+    .drawer-panel {
+      width: min(460px, 100%);
+      height: calc(100vh - 32px);
+      border-radius: 28px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      box-shadow: 0 30px 70px rgba(12, 23, 17, 0.20);
+      padding: 20px;
+      overflow: auto;
+    }
+    .drawer-panel h3 {
+      margin: 6px 0 16px;
+      font-size: 22px;
+      line-height: 1.15;
+    }
+    .drawer-row {
+      display: grid;
+      gap: 4px;
+      padding: 12px 0;
+      border-bottom: 1px solid rgba(157, 99, 48, 0.10);
+    }
+    .drawer-row span {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .drawer-row strong {
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .toast {
+      position: fixed;
+      top: 24px;
+      right: 24px;
+      z-index: 80;
+      min-width: 220px;
+      max-width: 320px;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(39, 29, 16, 0.92);
+      color: #fff;
+      box-shadow: 0 20px 40px rgba(12, 23, 17, 0.18);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .toast.error { background: rgba(148, 60, 42, 0.96); }
+    @media (max-width: 1260px) {
+      .workspace { grid-template-columns: 300px minmax(0, 1fr); }
+      .inspector-column {
+        position: static;
+        max-height: none;
+        grid-column: 1 / -1;
+      }
+      .inspector-card {
+        min-height: auto;
+        height: auto;
+        overflow: visible;
+      }
+      .tag-modal-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 980px) {
+      .shell { padding: 14px; }
+      .page-head {
+        padding-top: 0;
+        flex-direction: column;
+      }
+      .topbar {
+        position: static;
+        padding: 12px 14px;
+        border-radius: 16px;
+      }
+      .workspace { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        max-height: none;
+      }
+      .phone-stage { min-height: auto; padding: 16px; }
+      .phone-screen { min-height: 0; }
+      .field-grid.compact,
+      .field-grid.triple { grid-template-columns: 1fr; }
+      .topbar-actions { width: 100%; }
+      .topbar-actions .btn { flex: 1 1 160px; }
+    }
+
+    /* 2026-04 zip-aligned questionnaire-admin overrides */
+    .topbar,
+    .sidebar-card,
+    .editor-card,
+    .inspector-card,
+    .management-card,
+    .phone-stage,
+    .phone-screen,
+    .preview-panel,
+    .question-card,
+    .config-card {
+      border-color: rgba(20, 86, 240, 0.10);
+      background: rgba(255,255,255,0.98);
+      box-shadow: var(--shadow-soft);
+    }
+    .btn.primary,
+    .action-primary {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
+      box-shadow: 0 10px 24px rgba(20, 86, 240, 0.18);
+    }
+    .btn.secondary,
+    .btn.ghost,
+    .tab-button,
+    .chip,
+    .draft-indicator {
+      border-color: rgba(20, 86, 240, 0.10);
+    }
+    .btn.secondary,
+    .tab-button.active,
+    .chip,
+    .draft-indicator {
+      background: var(--soft);
+      color: var(--primary-strong);
+    }
+    .btn.ghost {
+      background: #fff;
+      color: var(--text);
+    }
+    .management-table-wrap,
+    .option-list,
+    .json-panel,
+    .question-card,
+    .preview-card,
+    .inspector-block,
+    .editor-block,
+    .choice-row,
+    .score-row {
+      border-color: rgba(20, 86, 240, 0.08);
+    }
+    .management-table th,
+    .list-table th,
+    .option-list-head {
+      background: #f7f9fc;
+      color: #8f959e;
+    }
+    .management-row.active,
+    .preview-answer.active,
+    .tab-content.is-active {
+      background: rgba(235, 242, 255, 0.56);
+    }
+    .status-badge.enabled,
+    .pill.enabled,
+    .tag.enabled {
+      background: rgba(230, 250, 245, 0.96);
+      color: #00b884;
+    }
+    .status-badge.disabled,
+    .pill.disabled,
+    .tag.disabled {
+      background: rgba(240, 241, 242, 0.96);
+      color: #8f959e;
+    }
+    .toast {
+      background: rgba(31, 35, 41, 0.92);
+      box-shadow: 0 14px 28px rgba(15, 23, 42, 0.18);
+    }
+    .toast.error { background: rgba(245, 74, 69, 0.96); }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="topbar-meta-wrap">
+        <div class="topbar-copy">
+          <a id="back-link" class="back-link" href="{{ editor_back_href or '/admin/questionnaires' }}">返回问卷管理</a>
+          <div class="topbar-title-row">
+            <h1 id="topbar-title">{{ editor_heading or "新建问卷" }}</h1>
+            <span id="draft-indicator" class="draft-indicator hidden">未保存修改</span>
+          </div>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div id="editor-secondary-actions" class="header-actions"></div>
+        <button id="reset-btn" type="button" class="btn ghost">重置当前</button>
+        <button id="save-btn" type="button" class="btn primary">保存问卷</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="sidebar">
+        <section class="card section-card">
+          <div class="section-head">
+            <div>
+              <h3>添加题目</h3>
+              <p class="section-subtitle">点击添加到当前问卷。</p>
+            </div>
+          </div>
+          <div id="tag-catalog-message" class="inline-alert hidden" style="margin-bottom:12px;">企微标签加载失败，可稍后重试或手工填写 tag_id</div>
+          <div class="tool-grid">
+            <button id="add-single" type="button" class="tool-card">
+              <span class="tool-mark">单</span>
+              <span><strong>单选题</strong><span>只能选一个。</span></span>
+            </button>
+            <button id="add-multi" type="button" class="tool-card">
+              <span class="tool-mark">多</span>
+              <span><strong>多选题</strong><span>可以选多个。</span></span>
+            </button>
+            <button id="add-textarea" type="button" class="tool-card">
+              <span class="tool-mark">文</span>
+              <span><strong>文本题</strong><span>开放回答。</span></span>
+            </button>
+            <button id="add-mobile" type="button" class="tool-card">
+              <span class="tool-mark">号</span>
+              <span><strong>手机号题</strong><span>收集联系方式。</span></span>
+            </button>
+            <button id="add-rule" type="button" class="tool-card">
+              <span class="tool-mark">规</span>
+              <span><strong>分数规则</strong><span>按总分区间打标签。</span></span>
+            </button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="preview-column">
+        <section class="card phone-stage">
+          <div class="phone-frame">
+            <div class="phone-topbar"><div class="phone-notch"></div></div>
+            <div class="phone-screen">
+              <div id="preview-head" class="preview-head"></div>
+              <div id="preview-questions" class="preview-stack"></div>
+              <div id="preview-rules-wrap" class="preview-stack"></div>
+              <div class="preview-footer-note">点击预览中的题目或分数规则即可在右侧编辑。</div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <aside class="inspector-column">
+        <section class="card inspector-card">
+          <div class="section-head">
+            <div>
+              <div class="eyebrow">配置区</div>
+              <h2 id="inspector-title" style="margin:8px 0 0;font-size:18px;font-weight:700;">问卷设置</h2>
+              <p id="inspector-subtitle" class="section-subtitle">编辑当前选中项的属性。</p>
+            </div>
+          </div>
+          <div id="inspector-body"></div>
+        </section>
+      </aside>
+    </div>
+
+    <div id="tag-modal-overlay" class="tag-modal-overlay hidden">
+      <div class="tag-modal">
+        <div class="tag-modal-head">
+          <div>
+            <h3>选择标签</h3>
+            <p class="section-subtitle">按标签组选择，确认后仅保存 tag_id。</p>
+          </div>
+          <button id="tag-modal-close" type="button" class="btn ghost">关闭</button>
+        </div>
+        <input id="tag-modal-search" class="tag-modal-search" type="text" placeholder="搜索标签名称或标签组">
+        <div class="tag-modal-grid">
+          <div id="tag-modal-groups" class="tag-group-list"></div>
+          <div class="tag-selected-panel">
+            <h4>已选标签</h4>
+            <div id="tag-modal-selected" class="tag-badges"></div>
+            <details class="tag-fallback">
+              <summary>手工填写 tag_id 兜底</summary>
+              <input id="tag-modal-manual" type="text" placeholder='例如 ["etxxx1","etxxx2"]' style="width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid rgba(73,55,29,0.12);">
+            </details>
+          </div>
+        </div>
+        <div class="tag-modal-actions">
+          <button id="tag-modal-cancel" type="button" class="btn ghost">取消</button>
+          <button id="tag-modal-confirm" type="button" class="btn primary">确认选择</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="drawer-overlay" class="drawer-overlay hidden">
+      <div class="drawer-panel">
+        <div class="section-head">
+          <div>
+            <h3 id="drawer-title">面板</h3>
+          </div>
+          <button id="drawer-close" type="button" class="btn ghost">关闭</button>
+        </div>
+        <div id="drawer-body"></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast hidden"></div>
+  </div>
+  <script>
+    const editorConfig = {
+      mode: {{ (editor_mode or 'new')|tojson }},
+      heading: {{ (editor_heading or '问卷编辑')|tojson }},
+      subtitle: "",
+      backHref: {{ (editor_back_href or '/admin/questionnaires')|tojson }},
+      initialQuestionnaire: {{ initial_questionnaire|tojson }},
+      initialQuestionnaireId: {{ initial_questionnaire_id|tojson }},
+    };
+    const listEl = document.getElementById('questionnaire-list');
+    const listSearchEl = document.getElementById('list-search');
+    const statusFilterEl = document.getElementById('status-filter');
+    const previewHeadEl = document.getElementById('preview-head');
+    const previewQuestionsEl = document.getElementById('preview-questions');
+    const previewRulesWrapEl = document.getElementById('preview-rules-wrap');
+    const inspectorBodyEl = document.getElementById('inspector-body');
+    const inspectorTitleEl = document.getElementById('inspector-title');
+    const inspectorSubtitleEl = document.getElementById('inspector-subtitle');
+    const backLinkEl = document.getElementById('back-link');
+    const editorPageTitleEl = document.getElementById('editor-page-title');
+    const editorPageSubtitleEl = document.getElementById('editor-page-subtitle');
+    const editorSecondaryActionsEl = document.getElementById('editor-secondary-actions');
+    const topbarTitleEl = document.getElementById('topbar-title');
+    const draftIndicatorEl = document.getElementById('draft-indicator');
+    const tagCatalogMessageEl = document.getElementById('tag-catalog-message');
+    const drawerOverlayEl = document.getElementById('drawer-overlay');
+    const drawerTitleEl = document.getElementById('drawer-title');
+    const drawerBodyEl = document.getElementById('drawer-body');
+    const toastEl = document.getElementById('toast');
+    const tagModalOverlayEl = document.getElementById('tag-modal-overlay');
+    const tagModalGroupsEl = document.getElementById('tag-modal-groups');
+    const tagModalSelectedEl = document.getElementById('tag-modal-selected');
+    const tagModalSearchEl = document.getElementById('tag-modal-search');
+    const tagModalManualEl = document.getElementById('tag-modal-manual');
+
+    const state = {
+      list: [],
+      availableTags: [],
+      availableTagMap: new Map(),
+      questionnaire: null,
+      currentId: null,
+      editorMode: editorConfig.mode || 'new',
+      selection: { kind: 'questionnaire' },
+      ruleMode: false,
+      lastRuleKey: '',
+      initialSnapshot: '',
+      persistedIsDisabled: false,
+      listSearch: '',
+      statusFilter: 'all',
+      loadingList: false,
+      tagModal: {
+        open: false,
+        search: '',
+        selected: [],
+        target: null,
+      },
+    };
+    let localSeq = 0;
+    let toastTimer = null;
+
+    function nextLocalKey(prefix) {
+      localSeq += 1;
+      return `${prefix}_${Date.now()}_${localSeq}`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function normalizeTagIds(value) {
+      if (Array.isArray(value)) {
+        return [...new Set(value.map((item) => String(item || '').trim()).filter(Boolean))];
+      }
+      if (typeof value === 'string' && value.trim()) {
+        try {
+          const parsed = JSON.parse(value);
+          if (Array.isArray(parsed)) return normalizeTagIds(parsed);
+        } catch (error) {
+          return [...new Set(value.split(',').map((item) => item.trim()).filter(Boolean))];
+        }
+      }
+      return [];
+    }
+
+    function parseManualTagInput(value) {
+      if (!String(value || '').trim()) return [];
+      try {
+        const parsed = JSON.parse(value);
+        return Array.isArray(parsed) ? normalizeTagIds(parsed) : [];
+      } catch (error) {
+        return normalizeTagIds(value);
+      }
+    }
+
+    function formatQuestionType(type) {
+      if (type === 'single_choice') return '单选题';
+      if (type === 'multi_choice') return '多选题';
+      if (type === 'textarea') return '文本题';
+      if (type === 'mobile') return '手机号题';
+      return type || '题目';
+    }
+
+    function buildUnknownTag(tagId) {
+      return { tag_id: tagId, tag_name: `未知标签（${tagId}）`, group_name: '未知标签' };
+    }
+
+    function ensureTagKnown(tagId) {
+      return state.availableTagMap.get(tagId) || buildUnknownTag(tagId);
+    }
+
+    function formatTagLabel(tag) {
+      return `${tag.group_name || '未分组'} / ${tag.tag_name}`;
+    }
+
+    function formatTagGroupName(tag) {
+      return tag.group_name || '未分组';
+    }
+
+    function buildTagBadges(tagIds) {
+      const ids = normalizeTagIds(tagIds);
+      if (!ids.length) return '<span class="tag-picker-note">未选择标签</span>';
+      return ids.map((tagId) => {
+        const tag = ensureTagKnown(tagId);
+        const isUnknown = !state.availableTagMap.has(tagId);
+        return `<span class="tag-badge${isUnknown ? ' unknown' : ''}">${escapeHtml(formatTagLabel(tag))}</span>`;
+      }).join('');
+    }
+
+    function buildPublicUrl(questionnaire = state.questionnaire) {
+      if (!questionnaire) return '';
+      if (questionnaire.public_url) return questionnaire.public_url;
+      const slug = String(questionnaire.slug || '').trim();
+      return slug ? `${window.location.origin}/s/${slug}` : '';
+    }
+
+    function questionnaireDisplayName(item, fallback = '未命名问卷') {
+      const title = String(item?.title || '').trim();
+      const name = String(item?.name || '').trim();
+      return title || name || fallback;
+    }
+
+    function fieldLabel(fieldName) {
+      const labels = {
+        name: '问卷名称',
+        title: '问卷标题',
+        description: '问卷说明',
+        redirect_url: '提交后跳转地址',
+        slug: '分享标识',
+        min_score: '最低分',
+        max_score: '最高分',
+        sort_order: '排序',
+        required: '必填',
+        option_text: '选项文案',
+        score: '分值',
+        tag_codes: '标签',
+      };
+      return labels[fieldName] || fieldName;
+    }
+
+    function questionLabel(rawTitle) {
+      const title = String(rawTitle || '').trim();
+      return title ? `题目“${title}”` : '该题目';
+    }
+
+    function humanizeErrorMessage(rawMessage, fallback = '操作失败，请稍后重试') {
+      const message = String(rawMessage || '').trim();
+      if (!message) return fallback;
+      if (/[一-龥]/.test(message) && !/ is required|must be|unknown_|already_submitted|wechat_oauth_not_configured/i.test(message)) {
+        return message;
+      }
+
+      if (message === 'name is required') return '请输入问卷名称';
+      if (message === 'title is required') return '请输入问卷标题';
+      if (message === 'questions must be an array') return '题目数据格式不正确，请重新添加题目';
+      if (message === 'score must be an integer') return '分值必须填写数字';
+      if (message === 'tag_codes must be an array') return '标签数据格式不正确，请重新选择标签';
+      if (message === 'answers is required') return '请先填写问卷内容再提交';
+      if (message === 'unknown question_id') return '检测到异常题目数据，请刷新页面后重试';
+      if (message === 'already_submitted') return '你已经提交过这份问卷';
+      if (message === 'wechat_oauth_not_configured') return '当前未完成微信授权配置，暂时无法使用该功能';
+      if (message === 'question type must be single_choice, multi_choice, textarea or mobile') return '题型不正确，请重新选择题型';
+      if (message === 'min_score must be an integer') return '最低分必须填写数字';
+      if (message === 'max_score must be an integer') return '最高分必须填写数字';
+      if (message === 'option_text is required') return '请输入选项文案';
+      if (message === 'score rule min_score cannot be greater than max_score') return '请检查分数规则：最低分不能大于最高分';
+      if (message === 'score rule tag_codes must be an array') return '分数规则标签格式不正确，请重新选择标签';
+      if (message === 'slug already exists') return '分享标识已存在，请修改右侧分享标识后再保存';
+
+      let matched = message.match(/^([a-z_]+) is required$/i);
+      if (matched) return `请输入${fieldLabel(matched[1])}`;
+
+      matched = message.match(/^([a-z_]+) must be an integer$/i);
+      if (matched) return `${fieldLabel(matched[1])}必须填写数字`;
+
+      matched = message.match(/^question ['"]?(.*?)['"]? is required$/i);
+      if (matched) return `${questionLabel(matched[1])}还未填写，请补充后再保存`;
+
+      matched = message.match(/^question ['"]?(.*?)['"]? must have options$/i);
+      if (matched) return `${questionLabel(matched[1])}至少需要一个选项，请补充后再保存`;
+
+      matched = message.match(/^question ['"]?(.*?)['"]? has an invalid option$/i);
+      if (matched) return `${questionLabel(matched[1])}存在无效选项，请检查选项内容`;
+
+      matched = message.match(/^question ['"]?(.*?)['"]? only allows one option$/i);
+      if (matched) return `${questionLabel(matched[1])}只能选择一个选项，请检查当前配置`;
+
+      matched = message.match(/^unknown question_id:?/i);
+      if (matched) return '检测到异常题目数据，请刷新页面后重试';
+
+      if (/Failed to fetch|NetworkError|Load failed/i.test(message)) return '网络连接异常，请稍后重试';
+      if (/Unexpected token|JSON/i.test(message)) return fallback;
+
+      return fallback;
+    }
+
+    function showToast(message, isError = false) {
+      if (!message) return;
+      toastEl.textContent = message;
+      toastEl.className = `toast${isError ? ' error' : ''}`;
+      clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => {
+        toastEl.className = 'toast hidden';
+      }, isError ? 7800 : 4200);
+    }
+
+    function openDrawer(title, rows = []) {
+      drawerTitleEl.textContent = title;
+      drawerBodyEl.innerHTML = rows.map((row) => `
+        <div class="drawer-row">
+          <span>${escapeHtml(row.label || '')}</span>
+          <strong>${escapeHtml(row.value || '-')}</strong>
+        </div>
+      `).join('');
+      drawerOverlayEl.classList.remove('hidden');
+    }
+
+    function closeDrawer() {
+      drawerOverlayEl.classList.add('hidden');
+    }
+
+    function openTagModal(target, selectedTagIds = []) {
+      state.tagModal = {
+        open: true,
+        search: '',
+        selected: normalizeTagIds(selectedTagIds),
+        target,
+      };
+      tagModalSearchEl.value = '';
+      tagModalManualEl.value = '';
+      renderTagModal();
+      tagModalOverlayEl.classList.remove('hidden');
+    }
+
+    function closeTagModal() {
+      state.tagModal.open = false;
+      state.tagModal.target = null;
+      tagModalOverlayEl.classList.add('hidden');
+    }
+
+    function toggleModalTag(tagId) {
+      const selected = new Set(state.tagModal.selected);
+      if (selected.has(tagId)) {
+        selected.delete(tagId);
+      } else {
+        selected.add(tagId);
+      }
+      state.tagModal.selected = [...selected];
+      renderTagModal();
+    }
+
+    function groupedTagsForModal() {
+      const keyword = state.tagModal.search.trim().toLowerCase();
+      const tags = state.availableTags.filter((tag) => {
+        if (!keyword) return true;
+        const haystack = `${tag.group_name || ''} ${tag.tag_name || ''} ${tag.tag_id || ''}`.toLowerCase();
+        return haystack.includes(keyword);
+      });
+      const groups = new Map();
+      tags.forEach((tag) => {
+        const groupName = formatTagGroupName(tag);
+        if (!groups.has(groupName)) groups.set(groupName, []);
+        groups.get(groupName).push(tag);
+      });
+      return [...groups.entries()];
+    }
+
+    function renderTagModal() {
+      const groups = groupedTagsForModal();
+      tagModalGroupsEl.innerHTML = groups.length
+        ? groups.map(([groupName, tags]) => `
+            <section class="tag-group">
+              <h4 class="tag-group-title">${escapeHtml(groupName)}</h4>
+              <div class="tag-chip-grid">
+                ${tags.map((tag) => `
+                  <button type="button" class="tag-chip${state.tagModal.selected.includes(tag.tag_id) ? ' active' : ''}" data-tag-id="${escapeHtml(tag.tag_id)}">
+                    ${escapeHtml(tag.tag_name)}
+                  </button>
+                `).join('')}
+              </div>
+            </section>
+          `).join('')
+        : '<div class="empty-state">没有匹配到标签</div>';
+      tagModalSelectedEl.innerHTML = buildTagBadges(state.tagModal.selected);
+      tagModalGroupsEl.querySelectorAll('[data-tag-id]').forEach((button) => {
+        button.addEventListener('click', () => toggleModalTag(button.dataset.tagId));
+      });
+    }
+
+    function createOption(option = {}, index = 0) {
+      return {
+        id: option.id ?? null,
+        local_key: option.local_key || nextLocalKey('option'),
+        option_text: option.option_text || '',
+        score: option.score ?? 0,
+        tag_codes: normalizeTagIds(option.tag_codes || []),
+        sort_order: option.sort_order ?? (index + 1),
+      };
+    }
+
+    function createQuestion(type = 'single_choice', question = {}, index = 0) {
+      const normalizedType = question.type || type;
+      return {
+        id: question.id ?? null,
+        local_key: question.local_key || nextLocalKey('question'),
+        type: normalizedType,
+        title: question.title || '',
+        placeholder_text: question.placeholder_text || '',
+        required: Boolean(question.required),
+        sort_order: question.sort_order ?? (index + 1),
+        options: ['textarea', 'mobile'].includes(normalizedType)
+          ? []
+          : (question.options || []).map((option, optionIndex) => createOption(option, optionIndex)).length
+            ? (question.options || []).map((option, optionIndex) => createOption(option, optionIndex))
+            : [createOption({}, 0)],
+      };
+    }
+
+    function createRule(rule = {}, index = 0) {
+      return {
+        id: rule.id ?? null,
+        local_key: rule.local_key || nextLocalKey('rule'),
+        min_score: rule.min_score ?? '',
+        max_score: rule.max_score ?? '',
+        tag_codes: normalizeTagIds(rule.tag_codes || []),
+        sort_order: rule.sort_order ?? (index + 1),
+      };
+    }
+
+    function createExternalPushCustomParam(param = {}, index = 0) {
+      return {
+        local_key: param.local_key || nextLocalKey('external-push-param'),
+        name: param.name || param.key || '',
+        value: param.value || param.detail || '',
+        sort_order: param.sort_order ?? (index + 1),
+      };
+    }
+
+    function blankQuestionnaire() {
+      return {
+        id: null,
+        public_url: '',
+        name: '',
+        title: '',
+        description: '',
+        redirect_url: '',
+        external_push_enabled: false,
+        external_push_url: '',
+        external_push_day: '',
+        external_push_frequency: '',
+        external_push_remark: '',
+        external_push_custom_params: [],
+        slug: '',
+        is_disabled: false,
+        questions: [],
+        score_rules: [],
+      };
+    }
+
+    function hydrateQuestionnaire(source = null) {
+      const draft = blankQuestionnaire();
+      const questionnaire = source || {};
+      return {
+        ...draft,
+        id: questionnaire.id ?? null,
+        public_url: questionnaire.public_url || '',
+        name: questionnaire.name || '',
+        title: questionnaire.title || '',
+        description: questionnaire.description || '',
+        redirect_url: questionnaire.redirect_url || '',
+        external_push_enabled: Boolean(questionnaire.external_push_enabled),
+        external_push_url: questionnaire.external_push_url || '',
+        external_push_day: questionnaire.external_push_day ?? '',
+        external_push_frequency: questionnaire.external_push_frequency ?? '',
+        external_push_remark: questionnaire.external_push_remark || '',
+        external_push_custom_params: (questionnaire.external_push_custom_params || []).map(
+          (param, index) => createExternalPushCustomParam(param, index),
+        ),
+        slug: questionnaire.slug || '',
+        is_disabled: Boolean(questionnaire.is_disabled),
+        questions: (questionnaire.questions || []).map((question, index) => createQuestion(question.type || 'single_choice', question, index)),
+        score_rules: (questionnaire.score_rules || []).map((rule, index) => createRule(rule, index)),
+      };
+    }
+
+    function currentQuestion() {
+      if (state.selection.kind !== 'question') return null;
+      return state.questionnaire.questions.find((item) => item.local_key === state.selection.key) || null;
+    }
+
+    function currentRule() {
+      if (state.selection.kind !== 'rule') return null;
+      return state.questionnaire.score_rules.find((item) => item.local_key === state.selection.key) || null;
+    }
+
+    function selectQuestionnaire() {
+      state.ruleMode = false;
+      state.selection = { kind: 'questionnaire' };
+      renderWorkspace();
+    }
+
+    function selectQuestion(key) {
+      state.ruleMode = false;
+      state.selection = { kind: 'question', key };
+      renderWorkspace();
+    }
+
+    function selectRule(key) {
+      state.ruleMode = true;
+      state.lastRuleKey = key;
+      state.selection = { kind: 'rule', key };
+      renderWorkspace();
+    }
+
+    function enterRuleMode() {
+      state.ruleMode = true;
+      if (state.questionnaire.score_rules.length) {
+        const remembered = state.questionnaire.score_rules.find((item) => item.local_key === state.lastRuleKey);
+        const target = remembered || state.questionnaire.score_rules[0];
+        state.lastRuleKey = target.local_key;
+        state.selection = { kind: 'rule', key: target.local_key };
+      } else {
+        state.lastRuleKey = '';
+        state.selection = { kind: 'questionnaire' };
+      }
+      renderWorkspace();
+    }
+
+    function resetDraft(data = null) {
+      state.questionnaire = hydrateQuestionnaire(data);
+      state.currentId = state.questionnaire.id;
+      state.ruleMode = false;
+      state.lastRuleKey = state.questionnaire.score_rules[0]?.local_key || '';
+      state.selection = { kind: 'questionnaire' };
+      rememberDraftSnapshot();
+      renderWorkspace();
+    }
+
+    function serializePayload() {
+      return {
+        name: state.questionnaire.name,
+        title: state.questionnaire.title,
+        description: state.questionnaire.description,
+        redirect_url: state.questionnaire.redirect_url,
+        external_push_enabled: Boolean(state.questionnaire.external_push_enabled),
+        external_push_url: state.questionnaire.external_push_url,
+        external_push_day: state.questionnaire.external_push_day === '' ? '' : Number(state.questionnaire.external_push_day),
+        external_push_frequency: state.questionnaire.external_push_frequency === '' ? '' : Number(state.questionnaire.external_push_frequency),
+        external_push_remark: state.questionnaire.external_push_remark,
+        external_push_custom_params: (state.questionnaire.external_push_custom_params || []).map((param, index) => ({
+          name: param.name,
+          value: param.value,
+          sort_order: Number(param.sort_order || (index + 1)),
+        })),
+        slug: state.questionnaire.slug,
+        is_disabled: state.questionnaire.is_disabled,
+        questions: state.questionnaire.questions.map((question, index) => {
+          const payload = {
+            type: question.type,
+            title: question.title,
+            required: Boolean(question.required),
+            sort_order: Number(question.sort_order || (index + 1)),
+          };
+          if (['textarea', 'mobile'].includes(question.type)) {
+            payload.placeholder_text = question.placeholder_text || '';
+          }
+          if (!['textarea', 'mobile'].includes(question.type)) {
+            payload.options = question.options.map((option, optionIndex) => ({
+              option_text: option.option_text,
+              score: Number(option.score || 0),
+              tag_codes: normalizeTagIds(option.tag_codes),
+              sort_order: Number(option.sort_order || (optionIndex + 1)),
+            }));
+          }
+          return payload;
+        }),
+        score_rules: state.questionnaire.score_rules.map((rule, index) => ({
+          min_score: rule.min_score,
+          max_score: rule.max_score,
+          tag_codes: normalizeTagIds(rule.tag_codes),
+          sort_order: Number(rule.sort_order || (index + 1)),
+        })),
+      };
+    }
+
+    function serializeDraftSnapshot() {
+      return JSON.stringify(serializePayload());
+    }
+
+    function isDraftDirty() {
+      return Boolean(state.questionnaire) && state.initialSnapshot !== serializeDraftSnapshot();
+    }
+
+    function updateDraftIndicator() {
+      draftIndicatorEl.classList.toggle('hidden', !isDraftDirty());
+    }
+
+    function rememberDraftSnapshot() {
+      state.initialSnapshot = state.questionnaire ? serializeDraftSnapshot() : '';
+      state.persistedIsDisabled = Boolean(state.currentId && state.questionnaire && state.questionnaire.is_disabled);
+      updateDraftIndicator();
+    }
+
+    function confirmDiscardChanges() {
+      if (!isDraftDirty()) return true;
+      return window.confirm('当前有未保存修改，确认放弃并继续吗？');
+    }
+
+    function normalizeDateValue(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return 0;
+      const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+      const timestamp = new Date(normalized).getTime();
+      return Number.isNaN(timestamp) ? 0 : timestamp;
+    }
+
+    function formatDateTime(value) {
+      const raw = String(value || '').trim();
+      if (!raw) return '-';
+      const normalized = raw.includes('T') ? raw : raw.replace(' ', 'T');
+      const date = new Date(normalized);
+      if (Number.isNaN(date.getTime())) return raw;
+      const pad = (number) => String(number).padStart(2, '0');
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    function filteredQuestionnaires() {
+      const keyword = state.listSearch.trim().toLowerCase();
+      return [...state.list]
+        .filter((item) => {
+          if (state.statusFilter === 'enabled' && item.is_disabled) return false;
+          if (state.statusFilter === 'disabled' && !item.is_disabled) return false;
+          if (!keyword) return true;
+          return String(item.name || '').toLowerCase().includes(keyword);
+        })
+        .sort((left, right) => {
+          const statusDiff = Number(Boolean(left.is_disabled)) - Number(Boolean(right.is_disabled));
+          if (statusDiff !== 0) return statusDiff;
+          return normalizeDateValue(right.created_at) - normalizeDateValue(left.created_at);
+        });
+    }
+
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) {
+        throw new Error(humanizeErrorMessage(data.message || data.error || '', '请求失败，请稍后重试'));
+      }
+      return data;
+    }
+
+    async function loadAvailableTags() {
+      try {
+        const data = await fetchJson('/api/admin/wecom/tags');
+        state.availableTags = data.items || [];
+        state.availableTagMap = new Map(state.availableTags.map((item) => [item.tag_id, item]));
+        if (!state.availableTags.length) {
+          tagCatalogMessageEl.textContent = '当前未获取到企微标签，可手工填写 tag_id';
+          tagCatalogMessageEl.className = 'inline-alert warning';
+        } else {
+          tagCatalogMessageEl.textContent = '';
+          tagCatalogMessageEl.className = 'inline-alert hidden';
+        }
+      } catch (error) {
+        state.availableTags = [];
+        state.availableTagMap = new Map();
+        tagCatalogMessageEl.textContent = '企微标签加载失败，可稍后重试或手工填写 tag_id';
+        tagCatalogMessageEl.className = 'inline-alert error';
+      }
+      renderInspector();
+    }
+
+    async function loadList() {
+      if (!listEl) return;
+      state.loadingList = true;
+      listEl.innerHTML = '<div class="empty-state">问卷列表加载中...</div>';
+      try {
+        const data = await fetchJson('/api/admin/questionnaires');
+        state.list = data.questionnaires || [];
+        renderList();
+      } catch (error) {
+        state.list = [];
+        listEl.innerHTML = `<div class="empty-state">${escapeHtml(error.message || '问卷列表加载失败，请稍后重试')}</div>`;
+      } finally {
+        state.loadingList = false;
+      }
+    }
+
+    async function loadQuestionnaire(questionnaireId, options = {}) {
+      if (!options.skipConfirm && !confirmDiscardChanges()) return;
+      const data = await fetchJson(`/api/admin/questionnaires/${questionnaireId}`);
+      resetDraft(data.questionnaire);
+      renderList();
+    }
+
+    function startNewQuestionnaire(options = {}) {
+      if (!options.skipConfirm && !confirmDiscardChanges()) return;
+      resetDraft();
+    }
+
+    async function toggleQuestionnaire(item) {
+      await fetchJson(`/api/admin/questionnaires/${item.id}/disable`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_disabled: !item.is_disabled }),
+      });
+      showToast(item.is_disabled ? '问卷已启用' : '问卷已停用');
+      await loadList();
+      if (state.currentId === item.id) {
+        await loadQuestionnaire(item.id, { skipConfirm: true });
+      }
+    }
+
+    async function deleteQuestionnaireItem(item) {
+      if (!window.confirm('删除后不可恢复，确认删除该问卷吗？')) return;
+      await fetchJson(`/api/admin/questionnaires/${item.id}`, { method: 'DELETE' });
+      if (state.currentId === item.id) {
+        window.location.assign(editorConfig.backHref);
+        return;
+      }
+      showToast('问卷已删除');
+      await loadList();
+    }
+
+    async function copyText(text, successMessage = '链接已复制') {
+      if (!text) {
+        showToast('当前还没有可复制的链接', true);
+        return;
+      }
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          window.prompt('请复制以下链接', text);
+        }
+        showToast(successMessage);
+      } catch (error) {
+        window.prompt('请手动复制以下链接', text);
+      }
+    }
+
+    function renderManagementTable() {
+      if (!listEl) return;
+      if (!state.list.length) {
+        listEl.innerHTML = '<div class="empty-state">还没有问卷，点击「创建新问卷」开始搭建。</div>';
+        return;
+      }
+      const items = filteredQuestionnaires();
+      if (!items.length) {
+        listEl.innerHTML = '<div class="empty-state">没有符合当前筛选条件的问卷。</div>';
+        return;
+      }
+      listEl.innerHTML = `
+        <table class="management-table">
+          <thead>
+            <tr>
+              <th>问卷名称</th>
+              <th>问卷创建时间</th>
+              <th>提交数</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((item) => `
+              <tr class="management-row${state.currentId === item.id ? ' active' : ''}${item.is_disabled ? ' disabled' : ''}" data-id="${escapeHtml(String(item.id))}">
+                <td>
+                  <div class="name-line">
+                    <span class="name-main">${escapeHtml(item.name || '未命名问卷')}</span>
+                    <span class="status-badge${item.is_disabled ? ' disabled' : ''}">${item.is_disabled ? '已停用' : '启用中'}</span>
+                  </div>
+                  ${item.title ? `<div class="name-sub">${escapeHtml(item.title)}</div>` : ''}
+                </td>
+                <td><span class="table-text">${escapeHtml(formatDateTime(item.created_at))}</span></td>
+                <td><span class="table-number">${escapeHtml(String(item.submission_count || 0))}</span></td>
+                <td>
+                  <div class="row-actions">
+                    <button type="button" class="mini-btn edit" data-action="edit">编辑</button>
+                    <button type="button" class="mini-btn toggle" data-action="toggle">${item.is_disabled ? '启用' : '停用'}</button>
+                    <button type="button" class="mini-btn share" data-action="share">分享</button>
+                    <button type="button" class="mini-btn export" data-action="export">下载数据</button>
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      listEl.querySelectorAll('.management-row').forEach((row) => {
+        const item = state.list.find((entry) => String(entry.id) === row.dataset.id);
+        if (!item) return;
+        row.querySelector('[data-action="edit"]').addEventListener('click', () => {
+          loadQuestionnaire(item.id).catch((error) => showToast(error.message || '问卷加载失败，请稍后重试', true));
+        });
+        row.querySelector('[data-action="toggle"]').addEventListener('click', () => {
+          toggleQuestionnaire(item).catch((error) => showToast(error.message || '问卷状态更新失败，请稍后重试', true));
+        });
+        row.querySelector('[data-action="share"]').addEventListener('click', () => {
+          copyText(item.public_url, '分享链接已复制');
+        });
+        row.querySelector('[data-action="export"]').addEventListener('click', () => {
+          window.open(`/api/admin/questionnaires/${item.id}/export`, '_blank');
+        });
+      });
+    }
+
+    function renderList() {
+      if (!listEl) return;
+      renderManagementTable();
+    }
+
+    function renderEditorSecondaryActions() {
+      if (!editorSecondaryActionsEl) return;
+      editorSecondaryActionsEl.innerHTML = `
+        <button id="editor-global-external-push-logs-btn" type="button" class="btn ghost">外推总览</button>
+        ${state.currentId ? `
+          <button id="editor-share-btn" type="button" class="btn ghost">分享</button>
+          <button id="editor-export-btn" type="button" class="btn ghost">下载数据</button>
+          <button id="editor-external-push-logs-btn" type="button" class="btn ghost">外推记录</button>
+        ` : ''}
+      `;
+      const globalExternalPushLogsBtn = document.getElementById('editor-global-external-push-logs-btn');
+      const shareBtn = document.getElementById('editor-share-btn');
+      const exportBtn = document.getElementById('editor-export-btn');
+      const externalPushLogsBtn = document.getElementById('editor-external-push-logs-btn');
+      globalExternalPushLogsBtn?.addEventListener('click', () => {
+        window.location.assign('/admin/questionnaires/external-push-logs');
+      });
+      shareBtn?.addEventListener('click', () => {
+        copyText(buildPublicUrl(), '分享链接已复制');
+      });
+      exportBtn?.addEventListener('click', () => {
+        window.open(`/api/admin/questionnaires/${state.currentId}/export`, '_blank');
+      });
+      externalPushLogsBtn?.addEventListener('click', () => {
+        window.location.assign(`/admin/questionnaires/${state.currentId}/external-push-logs`);
+      });
+    }
+
+    function renderTopbar() {
+      const title = questionnaireDisplayName(state.questionnaire, state.currentId ? '编辑问卷' : '新建问卷');
+      topbarTitleEl.textContent = title;
+      if (editorPageTitleEl) {
+        editorPageTitleEl.textContent = state.currentId ? '编辑问卷' : '新建问卷';
+      }
+      document.title = `${state.currentId ? '编辑问卷' : '新建问卷'} · ${title || '问卷编辑'}`;
+      renderEditorSecondaryActions();
+      updateDraftIndicator();
+    }
+
+    function renderPreview() {
+      const questionnaire = state.questionnaire;
+      const isQuestionnaireSelected = state.selection.kind === 'questionnaire';
+      previewHeadEl.className = `preview-head${isQuestionnaireSelected ? ' active' : ''}`;
+      previewHeadEl.innerHTML = `
+        <div class="question-type">问卷设置</div>
+        <h2>${escapeHtml(questionnaire.title || '问卷标题')}</h2>
+        <p>${escapeHtml(questionnaire.description || '在右侧编辑问卷信息')}</p>
+      `;
+      previewHeadEl.onclick = () => selectQuestionnaire();
+
+      previewQuestionsEl.innerHTML = '';
+      if (!questionnaire.questions.length) {
+        previewQuestionsEl.innerHTML = '<div class="empty-state">从左侧添加题目</div>';
+      } else {
+        questionnaire.questions.forEach((question) => {
+          const card = document.createElement('article');
+          card.className = `preview-question${state.selection.kind === 'question' && state.selection.key === question.local_key ? ' active' : ''}`;
+          const optionPreview = question.type === 'textarea'
+            ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '多行文本输入')}</div>`
+            : question.type === 'mobile'
+              ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '请输入手机号')}</div>`
+              : (question.options || []).map((option) => `<div class="option-pill">${escapeHtml(option.option_text || '选项')}</div>`).join('');
+          card.innerHTML = `
+            <span class="question-type">${escapeHtml(formatQuestionType(question.type))}${question.required ? ' · 必填' : ''}</span>
+            <h4>${escapeHtml(question.title || '题目标题')}</h4>
+            <div class="preview-options">${optionPreview}</div>
+          `;
+          card.addEventListener('click', () => selectQuestion(question.local_key));
+          previewQuestionsEl.appendChild(card);
+        });
+      }
+
+      previewRulesWrapEl.classList.add('hidden');
+      previewRulesWrapEl.innerHTML = '';
+      updateDraftIndicator();
+    }
+
+    function mountTagPicker(host, selectedTagIds, onChange, target) {
+      const normalizedSelected = normalizeTagIds(selectedTagIds);
+      host.innerHTML = `
+        <div class="tag-inline">
+          <button type="button" class="btn ghost open-tag-modal">选择标签</button>
+          <div class="tag-badges">${buildTagBadges(normalizedSelected)}</div>
+          <details class="tag-fallback">
+            <summary>手工填写 tag_id 兜底</summary>
+            <input class="manual-tag-input" type="text" placeholder='例如 ["etxxx1","etxxx2"]' style="width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid rgba(73,55,29,0.12);">
+          </details>
+        </div>
+      `;
+      const manualInput = host.querySelector('.manual-tag-input');
+      const openButton = host.querySelector('.open-tag-modal');
+      manualInput.value = '';
+      manualInput.addEventListener('input', () => {
+        const merged = normalizeTagIds([...normalizedSelected, ...parseManualTagInput(manualInput.value || '')]);
+        host.querySelector('.tag-badges').innerHTML = buildTagBadges(merged);
+        onChange(merged);
+        updateDraftIndicator();
+      });
+      openButton.addEventListener('click', () => openTagModal(target, onChange.currentValue ? onChange.currentValue() : normalizedSelected));
+    }
+
+    function renderQuestionnaireInspector() {
+      inspectorTitleEl.textContent = '问卷设置';
+      inspectorSubtitleEl.textContent = '编辑当前问卷的基础信息。';
+      const deleteDisabled = !state.persistedIsDisabled;
+      const customParamsHtml = (state.questionnaire.external_push_custom_params || []).length
+        ? state.questionnaire.external_push_custom_params.map((param) => `
+            <div class="option-editor" data-custom-param-key="${escapeHtml(param.local_key)}">
+              <div class="field-grid compact">
+                <label class="field">参数名
+                  <input
+                    type="text"
+                    data-custom-param-name="${escapeHtml(param.local_key)}"
+                    value="${escapeHtml(param.name)}"
+                    placeholder="例如：source_name"
+                  >
+                </label>
+                <label class="field">参数值
+                  <input
+                    type="text"
+                    data-custom-param-value="${escapeHtml(param.local_key)}"
+                    value="${escapeHtml(param.value)}"
+                    placeholder="例如：黄小璨激活"
+                  >
+                </label>
+              </div>
+              <div class="option-editor-head" style="justify-content:flex-end;">
+                <button type="button" class="link-btn danger" data-custom-param-remove="${escapeHtml(param.local_key)}">删除参数</button>
+              </div>
+            </div>
+          `).join('')
+        : '<div class="empty-state">暂未配置自定义顶层参数</div>';
+      const deleteSection = state.currentId ? `
+        <section class="config-group danger-zone">
+          <button
+            id="delete-questionnaire-btn"
+            type="button"
+            class="link-btn danger"
+            ${deleteDisabled ? 'disabled title="请先停用后删除"' : ''}
+          >
+            删除此问卷
+          </button>
+          ${deleteDisabled ? '<p>请先停用问卷后再删除。</p>' : ''}
+        </section>
+      ` : '';
+      inspectorBodyEl.innerHTML = `
+        <section class="config-group">
+          <label class="field">问卷名称
+            <input id="field-name" type="text" value="${escapeHtml(state.questionnaire.name)}">
+          </label>
+          <label class="field">问卷标题
+            <input id="field-title" type="text" value="${escapeHtml(state.questionnaire.title)}">
+          </label>
+          <label class="field">问卷说明
+            <textarea id="field-description">${escapeHtml(state.questionnaire.description)}</textarea>
+          </label>
+          <label class="field">提交后跳转地址
+            <input id="field-redirect-url" type="text" value="${escapeHtml(state.questionnaire.redirect_url)}" placeholder="可选，提交后跳转的地址">
+          </label>
+          <div class="field-grid compact">
+            <label class="field">分享标识
+              <input id="field-slug" type="text" value="${escapeHtml(state.questionnaire.slug)}">
+            </label>
+            <label class="field"><span style="display:block;margin-bottom:7px;">问卷状态</span>
+              <label class="field" style="margin-bottom:0;font-weight:600;">
+                <input id="field-is-disabled" type="checkbox" ${state.questionnaire.is_disabled ? 'checked' : ''}> 停用问卷
+              </label>
+            </label>
+          </div>
+        </section>
+        <details class="config-group config-advanced" ${state.questionnaire.external_push_enabled ? 'open' : ''}>
+          <summary>
+            <span class="config-advanced-label">外部推送</span>
+            <span class="config-advanced-hint">提交后向指定 webhook 发送 POST</span>
+          </summary>
+          <label class="field" style="margin:12px 0;font-weight:600;">
+            <input id="field-external-push-enabled" type="checkbox" ${state.questionnaire.external_push_enabled ? 'checked' : ''}> 开启外部推送
+          </label>
+          <label class="field">推送地址
+            <input id="field-external-push-url" type="text" value="${escapeHtml(state.questionnaire.external_push_url)}" placeholder="https://hooks.example.com/...">
+          </label>
+          <div class="field-grid compact">
+            <label class="field">day
+              <input id="field-external-push-day" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_day ?? ''))}" placeholder="20">
+            </label>
+            <label class="field">frequency
+              <input id="field-external-push-frequency" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_frequency ?? ''))}" placeholder="20">
+            </label>
+          </div>
+          <label class="field">remark
+            <input id="field-external-push-remark" type="text" value="${escapeHtml(state.questionnaire.external_push_remark || '')}" placeholder="备注文本">
+          </label>
+          <div class="config-head" style="margin-top:8px;">
+            <div><h4 style="margin:0;font-size:13px;">自定义参数</h4></div>
+            <button id="add-external-push-custom-param-btn" type="button" class="btn secondary">新增</button>
+          </div>
+          ${customParamsHtml}
+        </details>
+        ${deleteSection}
+      `;
+      inspectorBodyEl.querySelector('#field-name').addEventListener('input', (event) => {
+        state.questionnaire.name = event.target.value;
+        renderTopbar();
+      });
+      inspectorBodyEl.querySelector('#field-title').addEventListener('input', (event) => {
+        state.questionnaire.title = event.target.value;
+        renderTopbar();
+        renderPreview();
+      });
+      inspectorBodyEl.querySelector('#field-description').addEventListener('input', (event) => {
+        state.questionnaire.description = event.target.value;
+        renderPreview();
+      });
+      inspectorBodyEl.querySelector('#field-redirect-url').addEventListener('input', (event) => {
+        state.questionnaire.redirect_url = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-enabled').addEventListener('change', (event) => {
+        state.questionnaire.external_push_enabled = event.target.checked;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-url').addEventListener('input', (event) => {
+        state.questionnaire.external_push_url = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-day').addEventListener('input', (event) => {
+        state.questionnaire.external_push_day = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-frequency').addEventListener('input', (event) => {
+        state.questionnaire.external_push_frequency = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-remark').addEventListener('input', (event) => {
+        state.questionnaire.external_push_remark = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#add-external-push-custom-param-btn').addEventListener('click', () => {
+        state.questionnaire.external_push_custom_params = [
+          ...(state.questionnaire.external_push_custom_params || []),
+          createExternalPushCustomParam({}, (state.questionnaire.external_push_custom_params || []).length),
+        ];
+        renderQuestionnaireInspector();
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelectorAll('[data-custom-param-name]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const target = (state.questionnaire.external_push_custom_params || []).find((item) => item.local_key === input.dataset.customParamName);
+          if (target) target.name = event.target.value;
+          updateDraftIndicator();
+        });
+      });
+      inspectorBodyEl.querySelectorAll('[data-custom-param-value]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const target = (state.questionnaire.external_push_custom_params || []).find((item) => item.local_key === input.dataset.customParamValue);
+          if (target) target.value = event.target.value;
+          updateDraftIndicator();
+        });
+      });
+      inspectorBodyEl.querySelectorAll('[data-custom-param-remove]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.questionnaire.external_push_custom_params = (state.questionnaire.external_push_custom_params || [])
+            .filter((item) => item.local_key !== button.dataset.customParamRemove)
+            .map((item, index) => ({ ...item, sort_order: index + 1 }));
+          renderQuestionnaireInspector();
+          updateDraftIndicator();
+        });
+      });
+      inspectorBodyEl.querySelector('#field-slug').addEventListener('input', (event) => {
+        state.questionnaire.slug = event.target.value;
+        renderTopbar();
+      });
+      inspectorBodyEl.querySelector('#field-is-disabled').addEventListener('change', (event) => {
+        state.questionnaire.is_disabled = event.target.checked;
+        updateDraftIndicator();
+      });
+      const deleteBtn = inspectorBodyEl.querySelector('#delete-questionnaire-btn');
+      if (deleteBtn) {
+        deleteBtn.addEventListener('click', () => {
+          deleteQuestionnaireItem({
+            id: state.currentId,
+            name: questionnaireDisplayName(state.questionnaire),
+          }).catch((error) => showToast(error.message || '删除失败，请稍后重试', true));
+        });
+      }
+    }
+
+    function renderQuestionInspector(question) {
+      inspectorTitleEl.textContent = formatQuestionType(question.type);
+      inspectorSubtitleEl.textContent = '编辑题目内容、选项与分值。';
+      const optionsHtml = ['textarea', 'mobile'].includes(question.type)
+        ? ''
+        : (question.options || []).map((option, index) => `
+            <div class="option-editor" data-option-key="${escapeHtml(option.local_key)}" draggable="true">
+              <div class="option-editor-head">
+                <span class="mini-label" title="拖拽调整顺序">⋮⋮ 选项 ${index + 1}</span>
+                <button type="button" class="link-btn danger remove-option-btn" data-option-key="${escapeHtml(option.local_key)}">删除</button>
+              </div>
+              <div class="field-grid compact">
+                <label class="field">选项文案
+                  <input data-option-field="option_text" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(option.option_text)}">
+                </label>
+                <label class="field">分值
+                  <input data-option-field="score" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(String(option.score ?? 0))}">
+                </label>
+              </div>
+              <div class="tag-picker-host" data-option-tag-host="${escapeHtml(option.local_key)}"></div>
+            </div>
+          `).join('');
+      inspectorBodyEl.innerHTML = `
+        <section class="config-group">
+          <div class="config-head">
+            <div><h3>题目</h3></div>
+            <button id="remove-question-btn" type="button" class="link-btn danger">删除</button>
+          </div>
+          <label class="field">题型
+            <select id="question-type">
+              <option value="single_choice">单选题</option>
+              <option value="multi_choice">多选题</option>
+              <option value="textarea">文本题</option>
+              <option value="mobile">手机号题</option>
+            </select>
+          </label>
+          <label class="field">题目标题
+            <input id="question-title" type="text" value="${escapeHtml(question.title)}">
+          </label>
+          <label class="field${['textarea', 'mobile'].includes(question.type) ? '' : ' hidden'}" id="question-placeholder-field">提示文字
+            <input
+              id="question-placeholder-text"
+              type="text"
+              value="${escapeHtml(question.placeholder_text || '')}"
+              placeholder="${escapeHtml(question.type === 'mobile' ? '例如：请输入手机号' : '例如：写下你的目标')}"
+            >
+          </label>
+          <label class="field" style="margin-bottom:0;">
+            <input id="question-required" type="checkbox" ${question.required ? 'checked' : ''}> 必填
+          </label>
+        </section>
+        <section class="config-group${['textarea', 'mobile'].includes(question.type) ? ' hidden' : ''}" id="question-options-group">
+          <div class="config-head">
+            <div><h3>选项</h3></div>
+            <button id="add-option-btn" type="button" class="btn secondary">添加选项</button>
+          </div>
+          ${optionsHtml || '<div class="empty-state">点击"添加选项"开始配置</div>'}
+        </section>
+      `;
+      inspectorBodyEl.querySelector('#question-type').value = question.type;
+
+      inspectorBodyEl.querySelector('#question-title').addEventListener('input', (event) => {
+        question.title = event.target.value;
+        renderPreview();
+      });
+      const questionPlaceholderInput = inspectorBodyEl.querySelector('#question-placeholder-text');
+      if (questionPlaceholderInput) {
+        questionPlaceholderInput.addEventListener('input', (event) => {
+          question.placeholder_text = event.target.value;
+          renderPreview();
+        });
+      }
+      inspectorBodyEl.querySelector('#question-required').addEventListener('change', (event) => {
+        question.required = event.target.checked;
+        renderPreview();
+      });
+      inspectorBodyEl.querySelector('#question-type').addEventListener('change', (event) => {
+        question.type = event.target.value;
+        if (['textarea', 'mobile'].includes(question.type)) {
+          question.options = [];
+        } else if (!question.options.length) {
+          question.options = [createOption({}, 0)];
+        }
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelector('#remove-question-btn').addEventListener('click', () => {
+        state.questionnaire.questions = state.questionnaire.questions.filter((item) => item.local_key !== question.local_key);
+        state.selection = { kind: 'questionnaire' };
+        renderWorkspace();
+      });
+
+      const addOptionBtn = inspectorBodyEl.querySelector('#add-option-btn');
+      if (addOptionBtn) {
+        addOptionBtn.addEventListener('click', () => {
+          question.options.push(createOption({}, question.options.length));
+          renderWorkspace();
+        });
+      }
+
+      inspectorBodyEl.querySelectorAll('[data-option-field]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const option = question.options.find((item) => item.local_key === event.target.dataset.optionKey);
+          if (!option) return;
+          option[event.target.dataset.optionField] = event.target.value;
+          renderPreview();
+        });
+      });
+      inspectorBodyEl.querySelectorAll('.remove-option-btn').forEach((button) => {
+        button.addEventListener('click', () => {
+          question.options = question.options.filter((item) => item.local_key !== button.dataset.optionKey);
+          if (!question.options.length && !['textarea', 'mobile'].includes(question.type)) {
+            question.options = [createOption({}, 0)];
+          }
+          renderWorkspace();
+        });
+      });
+      question.options.forEach((option) => {
+        const host = inspectorBodyEl.querySelector(`[data-option-tag-host="${option.local_key}"]`);
+        if (!host) return;
+        const apply = (tagIds) => {
+          option.tag_codes = tagIds;
+        };
+        apply.currentValue = () => option.tag_codes;
+        mountTagPicker(host, option.tag_codes, apply, {
+          type: 'option',
+          questionKey: question.local_key,
+          optionKey: option.local_key,
+        });
+      });
+
+      let dragKey = null;
+      inspectorBodyEl.querySelectorAll('.option-editor[draggable="true"]').forEach((node) => {
+        node.addEventListener('dragstart', (event) => {
+          dragKey = node.dataset.optionKey;
+          node.classList.add('is-dragging');
+          if (event.dataTransfer) {
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', dragKey || '');
+          }
+        });
+        node.addEventListener('dragend', () => {
+          dragKey = null;
+          node.classList.remove('is-dragging');
+        });
+        node.addEventListener('dragover', (event) => {
+          event.preventDefault();
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+          node.classList.add('is-drop-target');
+        });
+        node.addEventListener('dragleave', () => {
+          node.classList.remove('is-drop-target');
+        });
+        node.addEventListener('drop', (event) => {
+          event.preventDefault();
+          node.classList.remove('is-drop-target');
+          const sourceKey = dragKey || (event.dataTransfer && event.dataTransfer.getData('text/plain'));
+          const targetKey = node.dataset.optionKey;
+          if (!sourceKey || !targetKey || sourceKey === targetKey) return;
+          const items = [...question.options];
+          const fromIdx = items.findIndex((item) => item.local_key === sourceKey);
+          const toIdx = items.findIndex((item) => item.local_key === targetKey);
+          if (fromIdx < 0 || toIdx < 0) return;
+          const [moved] = items.splice(fromIdx, 1);
+          items.splice(toIdx, 0, moved);
+          question.options = items;
+          renderWorkspace();
+          updateDraftIndicator();
+        });
+      });
+    }
+
+    function renderRuleInspector(rule) {
+      inspectorTitleEl.textContent = '分数规则';
+      inspectorSubtitleEl.textContent = '按总分区间给提交者打标签。';
+      const ruleListHtml = state.questionnaire.score_rules.length
+        ? `
+          <div class="rule-nav-list">
+            ${state.questionnaire.score_rules.map((item, index) => `
+              <button type="button" class="rule-nav-item${rule && item.local_key === rule.local_key ? ' active' : ''}" data-rule-key="${escapeHtml(item.local_key)}">
+                <strong>规则 ${index + 1}</strong>
+                <span>${escapeHtml(String(item.min_score ?? ''))} - ${escapeHtml(String(item.max_score ?? ''))}</span>
+                <span>${normalizeTagIds(item.tag_codes).length ? normalizeTagIds(item.tag_codes).map((tagId) => formatTagLabel(ensureTagKnown(tagId))).join(' / ') : '未选择标签'}</span>
+              </button>
+            `).join('')}
+          </div>
+        `
+        : `
+          <div class="empty-state">
+            <strong style="display:block;font-size:18px;margin-bottom:6px;">当前还没有分数规则</strong>
+            <div class="muted" style="margin-bottom:14px;">点击下方按钮新增规则</div>
+            <button id="empty-add-rule-btn" type="button" class="btn secondary">新增规则</button>
+          </div>
+        `;
+      const editorHtml = rule ? `
+        <section class="config-group">
+          <div class="config-head">
+            <div><h3>规则设置</h3></div>
+            <button id="remove-rule-btn" type="button" class="link-btn danger">删除</button>
+          </div>
+          <div class="field-grid compact">
+            <label class="field">最低分
+              <input id="rule-min-score" type="text" value="${escapeHtml(String(rule.min_score ?? ''))}">
+            </label>
+            <label class="field">最高分
+              <input id="rule-max-score" type="text" value="${escapeHtml(String(rule.max_score ?? ''))}">
+            </label>
+          </div>
+          <div id="rule-tag-host"></div>
+        </section>
+      ` : `
+        <section class="config-group">
+          <div class="config-head"><div><h3>规则设置</h3></div></div>
+          <div class="helper-note">从上方选择一条规则，或新增规则。</div>
+        </section>
+      `;
+      inspectorBodyEl.innerHTML = `
+        <section class="config-group">
+          <div class="config-head">
+            <div><h3>规则列表</h3></div>
+            <button id="rule-list-add-btn" type="button" class="btn secondary">新增</button>
+          </div>
+          ${ruleListHtml}
+        </section>
+        ${editorHtml}
+      `;
+      inspectorBodyEl.querySelector('#rule-list-add-btn').addEventListener('click', () => addRule());
+      inspectorBodyEl.querySelectorAll('[data-rule-key]').forEach((button) => {
+        button.addEventListener('click', () => selectRule(button.dataset.ruleKey));
+      });
+      const emptyAddRuleBtn = inspectorBodyEl.querySelector('#empty-add-rule-btn');
+      if (emptyAddRuleBtn) {
+        emptyAddRuleBtn.addEventListener('click', () => addRule());
+      }
+      if (!rule) {
+        return;
+      }
+      inspectorBodyEl.querySelector('#rule-min-score').addEventListener('input', (event) => {
+        rule.min_score = event.target.value;
+        renderPreview();
+      });
+      inspectorBodyEl.querySelector('#rule-max-score').addEventListener('input', (event) => {
+        rule.max_score = event.target.value;
+        renderPreview();
+      });
+      inspectorBodyEl.querySelector('#remove-rule-btn').addEventListener('click', () => {
+        const currentIndex = state.questionnaire.score_rules.findIndex((item) => item.local_key === rule.local_key);
+        state.questionnaire.score_rules = state.questionnaire.score_rules.filter((item) => item.local_key !== rule.local_key);
+        state.ruleMode = true;
+        if (state.questionnaire.score_rules.length) {
+          const nextIndex = Math.min(currentIndex, state.questionnaire.score_rules.length - 1);
+          state.lastRuleKey = state.questionnaire.score_rules[nextIndex].local_key;
+          state.selection = { kind: 'rule', key: state.questionnaire.score_rules[nextIndex].local_key };
+        } else {
+          state.lastRuleKey = '';
+          state.selection = { kind: 'questionnaire' };
+        }
+        renderWorkspace();
+      });
+      const apply = (tagIds) => {
+        rule.tag_codes = tagIds;
+        renderPreview();
+      };
+      apply.currentValue = () => rule.tag_codes;
+      mountTagPicker(inspectorBodyEl.querySelector('#rule-tag-host'), rule.tag_codes, apply, {
+        type: 'rule',
+        ruleKey: rule.local_key,
+      });
+    }
+
+    function renderInspector() {
+      if (state.ruleMode) {
+        const rule = currentRule();
+        renderRuleInspector(rule);
+        return;
+      }
+      if (state.selection.kind === 'questionnaire') {
+        renderQuestionnaireInspector();
+        return;
+      }
+      if (state.selection.kind === 'question') {
+        const question = currentQuestion();
+        if (!question) {
+          state.selection = { kind: 'questionnaire' };
+          renderInspector();
+          return;
+        }
+        renderQuestionInspector(question);
+        return;
+      }
+      renderQuestionnaireInspector();
+    }
+
+    function renderWorkspace() {
+      renderTopbar();
+      renderPreview();
+      renderInspector();
+      renderList();
+    }
+
+    function addQuestion(type) {
+      const question = createQuestion(type, {}, state.questionnaire.questions.length);
+      state.questionnaire.questions.push(question);
+      state.ruleMode = false;
+      state.selection = { kind: 'question', key: question.local_key };
+      renderWorkspace();
+    }
+
+    function addRule() {
+      const rule = createRule({}, state.questionnaire.score_rules.length);
+      state.questionnaire.score_rules.push(rule);
+      state.ruleMode = true;
+      state.lastRuleKey = rule.local_key;
+      state.selection = { kind: 'rule', key: rule.local_key };
+      renderWorkspace();
+    }
+
+    async function saveQuestionnaire() {
+      const wasEditing = Boolean(state.currentId);
+      const payload = serializePayload();
+      const url = state.currentId ? `/api/admin/questionnaires/${state.currentId}` : '/api/admin/questionnaires';
+      const method = state.currentId ? 'PUT' : 'POST';
+      const data = await fetchJson(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      resetDraft(data.questionnaire);
+      state.editorMode = state.currentId ? 'edit' : 'new';
+      if (!wasEditing && state.currentId) {
+        window.history.replaceState({}, '', `/admin/questionnaires/${state.currentId}`);
+      }
+      await loadList();
+      showToast(wasEditing ? '问卷已更新' : '问卷已创建');
+    }
+
+    if (backLinkEl) {
+      backLinkEl.addEventListener('click', (event) => {
+        if (confirmDiscardChanges()) return;
+        event.preventDefault();
+      });
+    }
+    document.getElementById('reset-btn').addEventListener('click', () => {
+      if (!confirmDiscardChanges()) return;
+      if (state.currentId) {
+        loadQuestionnaire(state.currentId, { skipConfirm: true }).catch((error) => showToast(error.message || '重置失败，请稍后重试', true));
+        return;
+      }
+      resetDraft();
+    });
+    document.getElementById('save-btn').addEventListener('click', () => saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true)));
+    if (document.getElementById('reload-list-btn')) {
+      document.getElementById('reload-list-btn').addEventListener('click', () => loadList());
+    }
+    if (listSearchEl) {
+      listSearchEl.addEventListener('input', (event) => {
+        state.listSearch = event.target.value || '';
+        renderList();
+      });
+    }
+    if (statusFilterEl) {
+      statusFilterEl.addEventListener('change', (event) => {
+        state.statusFilter = event.target.value || 'all';
+        renderList();
+      });
+    }
+    document.getElementById('add-single').addEventListener('click', () => addQuestion('single_choice'));
+    document.getElementById('add-multi').addEventListener('click', () => addQuestion('multi_choice'));
+    document.getElementById('add-textarea').addEventListener('click', () => addQuestion('textarea'));
+    document.getElementById('add-mobile').addEventListener('click', () => addQuestion('mobile'));
+    document.getElementById('add-rule').addEventListener('click', () => enterRuleMode());
+    document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+    document.getElementById('tag-modal-close').addEventListener('click', closeTagModal);
+    document.getElementById('tag-modal-cancel').addEventListener('click', closeTagModal);
+    document.getElementById('tag-modal-confirm').addEventListener('click', () => {
+      const merged = normalizeTagIds([...state.tagModal.selected, ...parseManualTagInput(tagModalManualEl.value || '')]);
+      if (state.tagModal.target?.type === 'option') {
+        const question = state.questionnaire.questions.find((item) => item.local_key === state.tagModal.target.questionKey);
+        const option = question?.options.find((item) => item.local_key === state.tagModal.target.optionKey);
+        if (option) option.tag_codes = merged;
+      }
+      if (state.tagModal.target?.type === 'rule') {
+        const rule = state.questionnaire.score_rules.find((item) => item.local_key === state.tagModal.target.ruleKey);
+        if (rule) rule.tag_codes = merged;
+      }
+      closeTagModal();
+      renderWorkspace();
+    });
+    tagModalSearchEl.addEventListener('input', (event) => {
+      state.tagModal.search = event.target.value;
+      renderTagModal();
+    });
+    tagModalOverlayEl.addEventListener('click', (event) => {
+      if (event.target === tagModalOverlayEl) closeTagModal();
+    });
+    drawerOverlayEl.addEventListener('click', (event) => {
+      if (event.target === drawerOverlayEl) closeDrawer();
+    });
+
+    if (editorConfig.initialQuestionnaire) {
+      resetDraft(editorConfig.initialQuestionnaire);
+    } else {
+      resetDraft();
+    }
+    const bootTasks = [loadAvailableTags()];
+    if (listEl) bootTasks.push(loadList());
+    Promise.all(bootTasks).then(() => {
+      renderWorkspace();
+    }).catch((error) => {
+      showToast(error.message || '页面初始化失败，请刷新后重试', true);
+      renderWorkspace();
+    });
+  </script>
+</body>
+</html>

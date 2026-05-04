@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw Automation Conversion due jobs every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00,15,30,45:00
+Persistent=true
+Unit=openclaw-automation-conversion-due-runner.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,815 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/automation_conversion_workspace.css') }}">
+<style>
+  [hidden] {
+    display: none !important;
+  }
+
+  .ac-config-shell,
+  .ac-config-top,
+  .ac-config-main,
+  .ac-config-panel,
+  .ac-config-summary-grid,
+  .ac-config-form-grid,
+  .ac-config-category-list,
+  .ac-config-option-grid,
+  .ac-config-action-stack {
+    display: grid;
+    gap: 18px;
+  }
+
+  .ac-config-top {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+
+  .ac-config-main {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    align-items: start;
+  }
+
+  .ac-config-panel,
+  .ac-config-summary-card,
+  .ac-config-category-card {
+    padding: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.88);
+  }
+
+  .ac-config-panel,
+  .ac-config-category-card {
+    display: grid;
+    gap: 16px;
+  }
+
+  .ac-config-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 14px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ac-config-muted {
+    margin: 0;
+    color: #64748b;
+    line-height: 1.6;
+  }
+
+  .ac-config-summary-card strong {
+    display: block;
+    font-size: 26px;
+    line-height: 1;
+    color: #1f2937;
+  }
+
+  .ac-config-summary-card span {
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  .ac-config-table-wrap {
+    overflow: auto;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 18px;
+    background: #fff;
+  }
+
+  .ac-config-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .ac-config-table th,
+  .ac-config-table td {
+    padding: 14px 16px;
+    border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    text-align: left;
+    vertical-align: top;
+  }
+
+  .ac-config-table th {
+    background: rgba(248, 250, 252, 0.94);
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  .ac-config-table tbody tr.is-active {
+    background: rgba(255, 247, 237, 0.9);
+  }
+
+  .ac-config-table tbody tr.is-clickable {
+    cursor: pointer;
+  }
+
+  .ac-config-table tbody tr.is-clickable:hover {
+    background: rgba(248, 242, 233, 0.62);
+  }
+
+  .ac-config-form-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ac-config-form-grid--single {
+    grid-template-columns: 1fr;
+  }
+
+  .ac-config-editor-grid {
+    display: grid;
+    gap: 16px;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+    align-items: start;
+  }
+
+  .ac-config-editor-card {
+    display: grid;
+    gap: 14px;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(248, 250, 252, 0.9);
+  }
+
+  .ac-config-placeholder-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ac-config-placeholder-button {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: #fff;
+    color: #334155;
+  }
+
+  .ac-config-placeholder-help {
+    margin: 0;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  .ac-config-json-editor {
+    width: 100%;
+    min-height: 220px;
+    padding: 12px 14px;
+    border: 1px solid rgba(15, 23, 42, 0.12);
+    border-radius: 14px;
+    background: #fff;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    resize: vertical;
+  }
+
+  .ac-config-code-block {
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    color: #334155;
+    white-space: pre-wrap;
+    word-break: break-word;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+
+  .ac-config-diff-list {
+    margin: 0;
+    padding-left: 18px;
+    color: #475569;
+  }
+
+  .ac-config-diff-list li + li {
+    margin-top: 6px;
+  }
+
+  .ac-config-feedback,
+  .ac-config-loading,
+  .ac-config-empty {
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.04);
+    color: #334155;
+  }
+
+  .ac-config-feedback.is-error {
+    background: rgba(254, 242, 242, 0.96);
+    color: #991b1b;
+  }
+
+  .ac-config-feedback.is-success {
+    background: rgba(240, 253, 244, 0.96);
+    color: #166534;
+  }
+
+  .ac-config-code {
+    margin: 0;
+    color: #64748b;
+    font-size: 12px;
+  }
+
+  .ac-config-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 76px;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(248, 250, 252, 0.96);
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .ac-config-status-badge.is-published {
+    background: rgba(220, 252, 231, 0.96);
+    color: #166534;
+  }
+
+  .ac-config-status-badge.is-draft {
+    background: rgba(254, 249, 195, 0.96);
+    color: #854d0e;
+  }
+
+  .ac-config-status-badge.is-disabled {
+    background: rgba(241, 245, 249, 0.96);
+    color: #475569;
+  }
+
+  .ac-config-summary-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 12px;
+  }
+
+  .ac-config-summary-meta > div {
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: rgba(248, 250, 252, 0.92);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+  }
+
+  .ac-config-summary-meta dt {
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: #64748b;
+  }
+
+  .ac-config-summary-meta dd {
+    margin: 0;
+    line-height: 1.6;
+    color: #1f2937;
+  }
+
+  .ac-config-option-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+  }
+
+  .ac-config-option-item {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(248, 250, 252, 0.82);
+  }
+
+  .ac-config-row-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .ac-config-tag-picker-field {
+    display: grid;
+    gap: 10px;
+    grid-column: 1 / -1;
+  }
+
+  .ac-config-tag-picker {
+    display: grid;
+    gap: 12px;
+    padding: 14px;
+    border-radius: 16px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(248, 250, 252, 0.78);
+  }
+
+  .ac-config-tag-picker-display {
+    min-height: 48px;
+    padding: 12px 14px;
+    border-radius: 14px;
+    border: 1px dashed rgba(15, 23, 42, 0.12);
+    background: #fff;
+  }
+
+  .ac-config-tag-picker-note {
+    color: #64748b;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  .ac-config-tag-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 247, 237, 0.92);
+    color: #9a3412;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .ac-config-tag-badge.is-unknown {
+    background: rgba(254, 242, 242, 0.9);
+    color: #991b1b;
+  }
+
+  .ac-config-tag-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 80;
+    display: grid;
+    place-items: center;
+    padding: 24px;
+    background: rgba(15, 23, 42, 0.28);
+    backdrop-filter: blur(6px);
+  }
+
+  .ac-config-tag-modal {
+    width: min(1040px, 100%);
+    max-height: calc(100vh - 48px);
+    overflow: auto;
+    display: grid;
+    gap: 16px;
+    padding: 24px;
+    border-radius: 24px;
+    background: rgba(255, 255, 255, 0.98);
+    box-shadow: 0 28px 72px rgba(15, 23, 42, 0.18);
+  }
+
+  .ac-config-tag-modal-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.7fr);
+    gap: 16px;
+  }
+
+  .ac-config-tag-modal-panel {
+    display: grid;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 20px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(255, 250, 245, 0.74);
+    align-content: start;
+  }
+
+  .ac-config-tag-search {
+    width: 100%;
+  }
+
+  .ac-config-tag-group-list,
+  .ac-config-tag-selected-panel {
+    display: grid;
+    gap: 16px;
+    align-content: start;
+  }
+
+  .ac-config-tag-group {
+    display: grid;
+    gap: 10px;
+  }
+
+  .ac-config-tag-group-title {
+    margin: 0;
+    color: #1f2937;
+    font-size: 15px;
+  }
+
+  .ac-config-tag-chip-grid,
+  .ac-config-tag-selected-display {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ac-config-tag-chip {
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    border-radius: 999px;
+    padding: 10px 14px;
+    background: #fff;
+    color: #334155;
+    cursor: pointer;
+    transition: all 0.18s ease;
+  }
+
+  .ac-config-tag-chip:hover {
+    border-color: rgba(180, 83, 9, 0.42);
+    color: #9a3412;
+  }
+
+  .ac-config-tag-chip.is-active {
+    border-color: rgba(180, 83, 9, 0.28);
+    background: rgba(255, 247, 237, 0.96);
+    color: #9a3412;
+    box-shadow: inset 0 0 0 1px rgba(180, 83, 9, 0.1);
+  }
+
+  .ac-config-tag-fallback {
+    padding-top: 4px;
+    border-top: 1px dashed rgba(15, 23, 42, 0.08);
+  }
+
+  .ac-config-tag-fallback summary {
+    cursor: pointer;
+    color: #64748b;
+    font-weight: 600;
+  }
+
+  .ac-config-tag-fallback input {
+    width: 100%;
+    margin-top: 10px;
+  }
+
+  .ac-config-tag-modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .ac-config-editor-shell {
+    border-top: 1px solid rgba(15, 23, 42, 0.08);
+    padding-top: 16px;
+  }
+
+  .ac-config-editor-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .ac-config-stack {
+    display: grid;
+    gap: 12px;
+  }
+
+  .ac-config-qr-card {
+    display: grid;
+    grid-template-columns: 132px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+    padding: 16px;
+    border-radius: 18px;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    background: rgba(248, 250, 252, 0.82);
+  }
+
+  .ac-config-qr-preview {
+    width: 132px;
+    height: 132px;
+    border-radius: 16px;
+    background: #fff;
+    border: 1px solid rgba(15, 23, 42, 0.08);
+    object-fit: contain;
+    padding: 8px;
+  }
+
+  .ac-config-field-status-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .ac-config-field-status-item {
+    padding: 12px 14px;
+    border-radius: 14px;
+    background: rgba(248, 250, 252, 0.92);
+    border: 1px solid rgba(15, 23, 42, 0.06);
+  }
+
+  .ac-config-field-status-item strong {
+    display: inline-block;
+    margin-right: 8px;
+  }
+
+  .ac-config-field-status-item p {
+    margin: 6px 0 0;
+    color: #64748b;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 1180px) {
+    .ac-config-main {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  @media (max-width: 760px) {
+    .ac-config-form-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .ac-config-editor-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .ac-config-tag-modal-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set workspace = agent_config_workspace or {} %}
+{% set initial_agents = workspace.available_agents or [] %}
+
+{% include "admin_console/_automation_conversion_workspace_tabs.html" %}
+
+<div
+  id="automation-agent-config-root"
+  class="ac-config-shell"
+  data-api-urls='{{ (workspace.api_urls or {})|tojson }}'
+  data-selected-template-id="{{ workspace.selected_template_id or '' }}"
+  data-admin-action-token="{{ admin_action_token }}"
+>
+  <script type="application/json" id="automation-agent-config-initial-agents">{{ initial_agents|tojson }}</script>
+
+  <section class="ac-config-panel">
+    <div class="ac-config-head">
+      <div>
+        <h2>智能体与大模型</h2>
+        <p class="ac-config-muted">维护可跨方案复用的智能体和大模型接口。</p>
+      </div>
+      <div class="ac-config-row-actions">
+        <a class="admin-button admin-button--secondary" href="{{ (workspace.entry_urls or {}).operations }}">查看任务流绑定</a>
+      </div>
+    </div>
+
+    <div class="ac-config-feedback" id="agent-config-feedback" hidden></div>
+    <div class="ac-config-loading" id="agent-config-loading" hidden>正在加载智能体与模型配置...</div>
+
+    <div class="ac-config-top" id="agent-config-summary-grid">
+      <article class="ac-config-summary-card">
+        <span>可用智能体</span>
+        <strong id="agent-total">{{ initial_agents|length }}</strong>
+      </article>
+      <article class="ac-config-summary-card">
+        <span>已发布智能体</span>
+        <strong id="agent-published-total">{{ initial_agents|selectattr('status', 'equalto', 'published')|list|length }}</strong>
+      </article>
+    </div>
+  </section>
+
+  <div class="ac-config-main">
+    <section class="ac-config-panel">
+      <div class="ac-config-head">
+        <div>
+          <h3>可用智能体列表</h3>
+          <p class="ac-config-muted">表头只保留新增入口，每个智能体单独编辑。说明和更新时间不再占表格位置，状态统一显示中文。</p>
+        </div>
+        <div class="ac-config-row-actions">
+          <button class="admin-button admin-button--primary" id="agent-create-button" type="button">新增智能体</button>
+        </div>
+      </div>
+
+      <div class="ac-config-table-wrap">
+        <table class="ac-config-table">
+          <thead>
+            <tr>
+              <th>智能体</th>
+              <th>状态</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="agent-table-body">
+            {% for item in initial_agents %}
+            {% set raw_status = item.status or 'draft' %}
+            {% set status_label = '已发布' if raw_status == 'published' else '草稿' if raw_status == 'draft' else '停用' if raw_status == 'disabled' else raw_status %}
+            <tr data-agent-code="{{ item.agent_code or '' }}">
+              <td>
+                <strong>{{ item.agent_name or item.agent_code or '-' }}</strong>
+                <div class="ac-config-code">{{ item.agent_code or '' }}</div>
+              </td>
+              <td>
+                <span class="ac-config-status-badge {% if raw_status == 'published' %}is-published{% elif raw_status == 'disabled' %}is-disabled{% else %}is-draft{% endif %}">{{ status_label }}</span>
+              </td>
+              <td>
+                <div class="ac-config-row-actions">
+                  <button class="admin-button admin-button--secondary" type="button" data-agent-edit="{{ item.agent_code or '' }}">编辑</button>
+                  <button class="admin-button admin-button--ghost" type="button" data-agent-delete="{{ item.agent_code or '' }}">删除</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="ac-config-empty" id="agent-empty" {% if initial_agents %}hidden{% endif %}>当前没有可用智能体。</div>
+
+      <section class="ac-config-panel ac-config-editor-shell" id="agent-form-panel" hidden>
+        <div class="ac-config-head">
+          <div>
+            <h4 id="agent-form-title">智能体编排工作台</h4>
+            <p class="ac-config-muted">这里直接维护智能体的草稿态：显示名、启用状态、角色提示词和任务提示词。信息来源不再单独勾选，系统会根据你在提示词里实际写到的占位符自动注入，而且每类信息只整理一次。</p>
+          </div>
+          <button class="admin-button admin-button--ghost" id="agent-form-cancel" type="button">收起</button>
+        </div>
+
+        <div class="ac-config-feedback" id="agent-form-feedback" hidden></div>
+
+        <form id="agent-form" class="admin-form-grid admin-form-grid--stacked">
+          <input type="hidden" name="form_mode" value="edit">
+          <input type="hidden" name="expected_draft_version" value="">
+
+          <div class="ac-config-form-grid">
+            <label class="admin-field">
+              <span>智能体内部编码</span>
+              <input type="text" name="agent_code" placeholder="例如：conversion_followup_agent">
+            </label>
+            <label class="admin-field">
+              <span>显示名称</span>
+              <input type="text" name="display_name" placeholder="例如：成交推进智能体">
+            </label>
+          </div>
+
+          <label class="admin-checkbox">
+            <input type="checkbox" name="enabled" value="1">
+            <span>启用当前智能体</span>
+          </label>
+
+          <dl class="ac-config-summary-meta" id="agent-form-meta">
+            <div><dt>当前状态</dt><dd id="agent-meta-status">-</dd></div>
+            <div><dt>草稿版本</dt><dd id="agent-meta-draft-version">-</dd></div>
+            <div><dt>已发布版本</dt><dd id="agent-meta-published-version">-</dd></div>
+            <div><dt>最近变更</dt><dd id="agent-meta-change-summary">-</dd></div>
+          </dl>
+
+          <label class="admin-field">
+            <span>变更摘要</span>
+            <input type="text" name="change_summary" placeholder="例如：调整提示词与占位符引用">
+          </label>
+
+          <label class="admin-field">
+            <span>角色提示词</span>
+            <textarea name="role_prompt" rows="6" placeholder="填写角色提示词"></textarea>
+          </label>
+
+          <label class="admin-field">
+            <span>任务提示词</span>
+            <textarea name="task_prompt" rows="10" placeholder="填写任务提示词"></textarea>
+          </label>
+
+          <div class="ac-config-editor-grid">
+            <section class="ac-config-editor-card">
+              <div>
+                <strong>上下文注入规则</strong>
+                <p class="ac-config-muted">这里不再单独勾选 4 类信息来源。你只需要在角色提示词或任务提示词里写下对应占位符；运行时系统会自动识别被引用的项，并且每类信息只整理一次放进上下文，不会因为重复写占位符而重复膨胀。</p>
+              </div>
+              <ul class="ac-config-diff-list">
+                <li>写了 {% raw %}{{问卷信息}}{% endraw %}，才会注入问卷题目与答案摘要。</li>
+                <li>写了 {% raw %}{{最近20条聊天信息}}{% endraw %}，才会注入最近 20 条聊天信息。</li>
+                <li>写了 {% raw %}{{用户标签}}{% endraw %}，才会注入当前用户标签。</li>
+                <li>写了 {% raw %}{{阶段信息}}{% endraw %}，才会注入当前池子、当前阶段、当前大人群和跟进类型。</li>
+              </ul>
+            </section>
+
+            <section class="ac-config-editor-card">
+              <div>
+                <strong>变量插入区</strong>
+                <p class="ac-config-muted">点一下就能把占位符插入到当前聚焦的提示词编辑框。没有聚焦时默认插入到任务提示词。占位符在提示词里重复出现也不会重复展开原始内容，只会引用同一份上下文块。</p>
+              </div>
+              <div class="ac-config-placeholder-group">
+                <button class="admin-button admin-button--secondary ac-config-placeholder-button" type="button" data-agent-placeholder="{% raw %}{{问卷信息}}{% endraw %}">{% raw %}{{问卷信息}}{% endraw %}</button>
+                <button class="admin-button admin-button--secondary ac-config-placeholder-button" type="button" data-agent-placeholder="{% raw %}{{最近20条聊天信息}}{% endraw %}">{% raw %}{{最近20条聊天信息}}{% endraw %}</button>
+                <button class="admin-button admin-button--secondary ac-config-placeholder-button" type="button" data-agent-placeholder="{% raw %}{{用户标签}}{% endraw %}">{% raw %}{{用户标签}}{% endraw %}</button>
+                <button class="admin-button admin-button--secondary ac-config-placeholder-button" type="button" data-agent-placeholder="{% raw %}{{阶段信息}}{% endraw %}">{% raw %}{{阶段信息}}{% endraw %}</button>
+              </div>
+              <p class="ac-config-placeholder-help">系统内部固定只生成一条话术，保存和发布时会自动按 `draft_reply` 收口，不再让你配置输出协议 JSON。</p>
+            </section>
+          </div>
+
+          <div class="ac-config-editor-grid">
+            <section class="ac-config-editor-card">
+              <div class="ac-config-head">
+                <div>
+                  <strong>已发布版本预览</strong>
+                  <p class="ac-config-muted">对照当前草稿和已发布版本。需要回退时，可以先用已发布内容覆盖草稿，再保存。</p>
+                </div>
+                <button class="admin-button admin-button--ghost" id="agent-load-published-button" type="button">用已发布版本覆盖草稿</button>
+              </div>
+              <div class="ac-config-stack">
+                <div>
+                  <div class="ac-config-code">角色提示词（已发布）</div>
+                  <pre class="ac-config-code-block" id="agent-published-role-prompt">-</pre>
+                </div>
+                <div>
+                  <div class="ac-config-code">任务提示词（已发布）</div>
+                  <pre class="ac-config-code-block" id="agent-published-task-prompt">-</pre>
+                </div>
+                <div>
+                  <div class="ac-config-code">已发布占位符引用</div>
+                  <pre class="ac-config-code-block" id="agent-published-context-sources">当前未引用任何上下文占位符</pre>
+                </div>
+              </div>
+            </section>
+
+            <section class="ac-config-editor-card">
+              <div>
+                <strong>草稿差异摘要</strong>
+                <p class="ac-config-muted">这里直接显示当前草稿与已发布版本的差异，便于发布前自检。</p>
+              </div>
+              <ul class="ac-config-diff-list" id="agent-diff-summary">
+                <li>当前没有差异。</li>
+              </ul>
+            </section>
+          </div>
+
+          <div class="admin-form-actions">
+            <button class="admin-button admin-button--primary" id="agent-form-submit" type="submit">保存</button>
+            <button class="admin-button admin-button--secondary" id="agent-publish-button" type="button">发布</button>
+          </div>
+        </form>
+      </section>
+    </section>
+
+    <section class="ac-config-panel">
+      <div class="ac-config-head">
+        <div>
+          <h3>大模型 / API 配置</h3>
+          <p class="ac-config-muted">这里承接原来模型基础设施页的核心能力：模型开关、接口密钥、接口地址、模型名与连通性测试。</p>
+        </div>
+        <div class="ac-config-row-actions">
+          <button class="admin-button admin-button--secondary" id="model-settings-test-button" type="button">测试连接</button>
+        </div>
+      </div>
+
+      <div class="ac-config-feedback" id="model-settings-feedback" hidden></div>
+
+      <dl class="ac-config-summary-meta">
+        <div><dt>当前状态</dt><dd id="model-settings-enabled-label">-</dd></div>
+        <div><dt>接口密钥</dt><dd id="model-settings-api-key-mask">-</dd></div>
+        <div><dt>最近更新</dt><dd id="model-settings-updated-at">-</dd></div>
+        <div><dt>最近测试</dt><dd id="model-settings-test-result">未测试</dd></div>
+      </dl>
+
+      <form id="model-settings-form" class="admin-form-grid admin-form-grid--stacked">
+        <div class="ac-config-form-grid">
+          <label class="admin-field">
+            <span>模型开关</span>
+            <select name="enabled">
+              <option value="true">开启</option>
+              <option value="false">关闭</option>
+            </select>
+          </label>
+          <label class="admin-field">
+            <span>DeepSeek 接口密钥</span>
+            <input type="password" name="api_key" placeholder="留空表示保持当前值">
+          </label>
+        </div>
+        <div class="ac-config-form-grid">
+          <label class="admin-field">
+            <span>接口地址</span>
+            <input type="url" name="base_url" placeholder="https://api.deepseek.com">
+          </label>
+          <label class="admin-field">
+            <span>超时时间（秒）</span>
+            <input type="number" name="timeout_seconds" min="1" step="1" placeholder="60">
+          </label>
+        </div>
+        <div class="ac-config-form-grid">
+          <label class="admin-field">
+            <span>路由模型</span>
+            <input type="text" name="router_model" placeholder="deepseek-chat">
+          </label>
+          <label class="admin-field">
+            <span>执行模型</span>
+            <input type="text" name="execution_model" placeholder="deepseek-chat">
+          </label>
+        </div>
+        <label class="admin-field">
+          <span>Reasoner Model</span>
+          <input type="text" name="reasoner_model" placeholder="deepseek-reasoner">
+        </label>
+        <div class="admin-form-actions">
+          <button class="admin-button admin-button--primary" type="submit">保存模型配置</button>
+        </div>
+      </form>
+    </section>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+{{ super() }}
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_core.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_agents.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_channel_model.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config_boot.js') }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/automation_agent_config.js') }}"></script>
+{% endblock %}

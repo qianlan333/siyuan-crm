@@ -1,0 +1,334 @@
+{% extends "admin_console/config_base.html" %}
+
+{% block config_content %}
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>企微成员授权页</h2>
+      <p>企业微信只作为身份来源；CRM 本地决定谁能登录、谁是超级管理员、谁拥有业务角色。</p>
+    </div>
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <tbody>
+        <tr>
+          <th>认证模式</th>
+          <td><code>{{ auth_mode }}</code></td>
+        </tr>
+        <tr>
+          <th>当前企业 ID</th>
+          <td><code>{{ corp_id or "-" }}</code></td>
+        </tr>
+        <tr>
+          <th>本地应急入口</th>
+          <td>{{ "已开启" if break_glass_enabled else "默认关闭" }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>企微通讯录成员</h2>
+      <p>从企微通讯录读取成员后，本页可直接按成员授权后台角色；新增成员进入企微后点刷新即可同步。</p>
+    </div>
+    {% if can_manage_accounts %}
+    <form method="post" action="/admin/config/login-access/directory/refresh">
+      <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
+      <button class="admin-button admin-button--secondary" type="submit">刷新企微通讯录</button>
+    </form>
+    {% endif %}
+  </div>
+  <div class="admin-state admin-state--inline">
+    <span>
+      已缓存 {{ directory_summary.count }} 位成员；
+      已授权 {{ directory_summary.authorized_count }} 位；
+      最近刷新 {{ directory_summary.last_synced_at or "尚未刷新" }}。
+    </span>
+  </div>
+  {% if directory_members %}
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>成员</th>
+          <th>企微 UserId</th>
+          <th>部门 ID</th>
+          <th>职位</th>
+          <th>企微状态</th>
+          <th>后台授权</th>
+          <th>管理层级</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for member in directory_members %}
+        <tr>
+          <td>{{ member.display_name }}</td>
+          <td><code>{{ member.wecom_userid }}</code></td>
+          <td>{{ member.department_ids_display or "-" }}</td>
+          <td>{{ member.position or "-" }}</td>
+          <td>{{ member.status_label }}</td>
+          <td>
+            {% if member.is_authorized %}
+            {{ "允许登录" if member.admin_login_enabled else "禁止登录" }}
+            {% else %}
+            未授权
+            {% endif %}
+          </td>
+          <td>{{ member.admin_level_label or "-" }}</td>
+          <td>
+            {% if can_manage_accounts %}
+              {% if member.is_authorized %}
+                {% if member.admin_level == "super_admin" and not can_manage_super_admin %}
+                <span>-</span>
+                {% else %}
+              <a class="admin-inline-link" href="/admin/config/login-access?edit_id={{ member.admin_user_id }}">编辑授权</a>
+                {% endif %}
+              {% else %}
+              <a class="admin-inline-link" href="/admin/config/login-access?wecom_userid={{ member.wecom_userid }}">授权</a>
+              {% endif %}
+            {% else %}
+            <span>-</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="admin-state admin-state--empty">
+    <strong>尚未缓存通讯录</strong>
+    <span>请先刷新企微通讯录；如果刷新失败，需要确认企微应用具备通讯录读取权限并在可见范围内。</span>
+  </div>
+  {% endif %}
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>超级管理员</h2>
+      <p>每个企业只保留一个超级管理员；普通管理员不能修改超级管理员。</p>
+    </div>
+  </div>
+  {% if super_admin_rows %}
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>企微 UserId</th>
+          <th>显示名称</th>
+          <th>登录状态</th>
+          <th>最近登录</th>
+          <th>更新人</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in super_admin_rows %}
+        <tr>
+          <td><code>{{ row.wecom_userid }}</code></td>
+          <td>{{ row.display_name }}</td>
+          <td>{{ "允许登录" if row.login_enabled else "禁止登录" }}</td>
+          <td>{{ row.last_login_at or "-" }}</td>
+          <td>{{ row.updated_by or "-" }}</td>
+          <td>
+            {% if can_manage_super_admin %}
+            <a class="admin-inline-link" href="/admin/config/login-access?edit_id={{ row.id }}">编辑</a>
+            {% else %}
+            <span>-</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="admin-state admin-state--empty">
+    <strong>尚未设置超级管理员</strong>
+    <span>请用应急入口或初始化流程设置第一个超级管理员。</span>
+  </div>
+  {% endif %}
+</section>
+
+<section class="admin-card">
+  <div class="config-editor-layout">
+    <div class="config-list-stack">
+      <div class="admin-card-head">
+        <div>
+          <h2>后台授权成员</h2>
+          <p>这里是允许登录后台的普通管理员和只读成员；通讯录成员不会自动获得登录权限。</p>
+        </div>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>企微 UserId</th>
+              <th>显示名称</th>
+              <th>层级</th>
+              <th>角色</th>
+              <th>登录状态</th>
+              <th>最近登录</th>
+              <th>授权来源</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in admin_rows %}
+            <tr>
+              <td>{{ row.id }}</td>
+              <td><code>{{ row.wecom_userid }}</code></td>
+              <td>{{ row.display_name }}</td>
+              <td>{{ row.admin_level_label }}</td>
+              <td>{{ row.roles_display }}</td>
+              <td>{{ "允许登录" if row.login_enabled else "禁止登录" }}</td>
+              <td>{{ row.last_login_at or "-" }}</td>
+              <td>{{ row.auth_source }}</td>
+              <td>
+                {% if can_manage_accounts %}
+                <a class="admin-inline-link" href="/admin/config/login-access?edit_id={{ row.id }}">编辑</a>
+                {% else %}
+                <span>-</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <aside class="config-editor-aside">
+      <div class="admin-card-head">
+        <div>
+          <h2>{{ "编辑后台成员" if form_row.id else "授权后台成员" }}</h2>
+          <p>这里管理后台登录准入、管理员层级和业务角色，不维护本地密码。</p>
+        </div>
+      </div>
+
+      {% if can_manage_form %}
+      <form class="admin-form-grid admin-form-grid--stacked" method="post" action="/admin/config/login-access/save">
+        <input type="hidden" name="id" value="{{ form_row.id or '' }}">
+        <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
+        <input type="hidden" name="auth_source" value="{{ form_row.auth_source or 'wecom_sso' }}">
+        <input type="hidden" name="is_active" value="1">
+        {% if directory_members %}
+        <label>
+          <span>企微成员</span>
+          <select name="wecom_userid" required>
+            <option value="">从通讯录选择成员</option>
+            {% if form_row.wecom_userid %}
+            <option value="{{ form_row.wecom_userid }}" selected>{{ form_row.display_name or form_row.wecom_userid }}（{{ form_row.wecom_userid }}）</option>
+            {% endif %}
+            {% for member in directory_members if member.wecom_userid != form_row.wecom_userid %}
+            <option value="{{ member.wecom_userid }}">
+              {{ member.display_name }}（{{ member.wecom_userid }}{% if member.is_authorized %} · 已授权{% endif %}）
+            </option>
+            {% endfor %}
+          </select>
+          <small>没有看到新成员时，先点击上方“刷新企微通讯录”。</small>
+        </label>
+        {% else %}
+        <label>
+          <span>企微 UserId</span>
+          <input type="text" name="wecom_userid" value="{{ form_row.wecom_userid or '' }}" placeholder="如 qianlan333" required>
+          <small>未缓存通讯录时保留手工输入兜底。</small>
+        </label>
+        {% endif %}
+        <label>
+          <span>显示名称</span>
+          <input type="text" name="display_name" value="{{ form_row.display_name or '' }}" placeholder="默认取通讯录姓名">
+        </label>
+        <label>
+          <span>企业 ID</span>
+          <input type="text" name="wecom_corpid" value="{{ form_row.wecom_corpid or corp_id or '' }}" placeholder="默认使用当前企业 ID">
+        </label>
+        <label>
+          <span>管理员层级</span>
+          <select name="admin_level" required>
+            <option value="admin" {% if (form_row.admin_level or 'admin') == 'admin' %}selected{% endif %}>管理员</option>
+            {% if can_manage_super_admin %}
+            <option value="super_admin" {% if form_row.admin_level == 'super_admin' %}selected{% endif %}>超级管理员</option>
+            {% endif %}
+          </select>
+          <small>超级管理员全公司唯一；转让会把原超级管理员降为普通管理员。</small>
+        </label>
+        <label class="admin-checkbox">
+          <input type="checkbox" name="login_enabled" value="1" {% if form_row.login_enabled is not defined or form_row.login_enabled %}checked{% endif %}>
+          <span>允许登录后台</span>
+        </label>
+        <div>
+          <span style="display:block; margin-bottom: 8px; font-weight: 600;">角色分配</span>
+          <div style="display:grid; gap:8px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+            {% for option in role_options %}
+            <label class="admin-checkbox">
+              <input type="checkbox" name="role_codes" value="{{ option.value }}" {% if option.value in (form_row.roles or []) %}checked{% endif %}>
+              <span>{{ option.label }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        {% if can_manage_super_admin %}
+        <label class="admin-checkbox">
+          <input type="checkbox" name="confirm_super_admin_transfer" value="1">
+          <span>确认转让超级管理员</span>
+        </label>
+        {% endif %}
+        <label>
+          <span>操作人</span>
+          <input type="text" name="operator" placeholder="默认取当前登录账号">
+        </label>
+        <div class="admin-form-actions">
+          <button class="admin-button admin-button--primary" type="submit">{{ "保存授权成员" if form_row.id else "创建授权成员" }}</button>
+        </div>
+      </form>
+      {% else %}
+      <div class="admin-state admin-state--empty">
+        <strong>只读访问</strong>
+        <span>当前账号没有修改该成员的权限；普通管理员不能创建、转让或编辑超级管理员。</span>
+      </div>
+      {% endif %}
+    </aside>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>最近登录审计</h2>
+      <p>记录企业微信登录和本地应急登录结果，用于排障和 7 天观察期核对。</p>
+    </div>
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>时间</th>
+          <th>成员</th>
+          <th>登录方式</th>
+          <th>结果</th>
+          <th>IP</th>
+          <th>客户端信息</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in login_audit_rows %}
+        <tr>
+          <td>{{ row.created_at }}</td>
+          <td>{{ row.display_name or row.wecom_userid or "-" }}</td>
+          <td><code>{{ row.login_type }}</code></td>
+          <td><code>{{ row.login_result }}</code></td>
+          <td>{{ row.ip or "-" }}</td>
+          <td>{{ row.user_agent or "-" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

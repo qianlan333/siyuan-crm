@@ -42,8 +42,8 @@ from ..domains.marketing_automation.presenter import business_marketing_display,
 from ..infra.wecom_runtime import build_jsapi_payload
 from ..application.class_user.dto import GetClassUserStatusCurrentQueryDTO
 from ..application.class_user.queries import GetClassUserStatusCurrentQuery
-from ..application.identity_contact._legacy_delegate import (
-    _get_contact_by_external_userid as get_contact_by_external_userid,
+from ..application.identity_contact._runtime import (
+    get_contact_by_external_userid,
 )
 from ..domains.identity import ContactBindingConflictError
 from ..application.user_ops import ThirdPartyUserSyncError

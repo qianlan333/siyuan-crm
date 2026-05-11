@@ -8,16 +8,6 @@
   data-initial-section="{{ customer_payload.initial_section }}"
   data-admin-action-token="{{ admin_action_token }}"
   data-tags-url="{{ customer_profile_urls.tags }}"
-  data-pulse-url="{{ customer_profile_urls.pulse }}"
-  data-customer-pulse-card-api-base="{{ customer_profile_urls.pulse_card_api_base }}"
-  data-customer-pulse-inbox-url="{{ customer_profile_urls.pulse_inbox }}"
-  data-followup-orchestrator-url="{{ customer_profile_urls.followup_orchestrator }}"
-  data-followup-orchestrator-api-url="{{ customer_profile_urls.followup_orchestrator_api }}"
-  data-followup-orchestrator-enabled="{{ 1 if followup_orchestrator_enabled else 0 }}"
-  data-customer-pulse-mode="{{ customer_pulse_access.mode }}"
-  data-customer-pulse-tenant-key="{{ customer_pulse_access.tenant_key }}"
-  data-customer-pulse-actor-userid="{{ customer_pulse_access.actor_userid }}"
-  data-customer-pulse-actor-role="{{ customer_pulse_access.actor_role }}"
   data-questionnaire-url="{{ customer_profile_urls.questionnaire_answers }}"
   data-messages-url="{{ customer_profile_urls.messages }}"
   data-automation-member-url="{{ customer_profile_urls.automation_member }}"
@@ -120,61 +110,6 @@
   </div>
 
   <aside class="admin-customer-detail-sidebar">
-    {% if customer_payload.customer_pulse_feature_enabled and customer_pulse_access.permissions.widget_view %}
-    <section class="admin-card admin-customer-pulse-sidebar" id="customer-ai-next-step">
-      <div class="admin-card-head admin-card-head--tight">
-        <div>
-          <h2>AI 下一步</h2>
-          <p>聚焦当前客户的下一步行动卡。所有外发消息只生成草稿，必须人工确认。</p>
-        </div>
-        {% if customer_pulse_access.permissions.page_visible %}
-        <div class="admin-toolbar">
-        <a class="admin-button admin-button--ghost" href="{{ customer_profile_urls.pulse_inbox }}">查看 AI推进</a>
-        {% if followup_orchestrator_enabled %}
-        <a class="admin-button admin-button--ghost" href="{{ customer_profile_urls.followup_orchestrator }}">查看团队编排</a>
-        {% endif %}
-        </div>
-        {% endif %}
-      </div>
-      <div class="admin-state admin-state--inline admin-state--loading" data-customer-pulse-state>
-        <strong>正在加载 AI 下一步</strong>
-        <span>优先展示带证据的判断；低置信度时降级为规则建议或不展示草稿。</span>
-      </div>
-      <div class="admin-customer-pulse-widget" data-customer-pulse-widget hidden>
-        <div class="admin-toolbar admin-customer-pulse-widget__chips" data-customer-pulse-chips hidden></div>
-        <div class="admin-state admin-state--inline" data-customer-pulse-summary hidden></div>
-        <dl class="admin-definition-list" data-customer-pulse-detail hidden></dl>
-        <div class="admin-profile-message-list" data-customer-pulse-evidence hidden></div>
-        <div class="admin-toolbar admin-customer-pulse-card__actions" data-customer-pulse-actions hidden></div>
-        <section class="admin-drawer admin-customer-pulse-widget-editor" data-customer-pulse-editor hidden></section>
-        <div class="admin-state admin-state--inline" data-customer-pulse-feedback hidden></div>
-      </div>
-    </section>
-    {% endif %}
-
-    {% if followup_orchestrator_enabled and customer_pulse_access.permissions.page_visible %}
-    <section class="admin-card admin-followup-orchestrator-widget" id="customer-followup-orchestrator">
-      <div class="admin-card-head admin-card-head--tight">
-        <div>
-          <h2>团队编排</h2>
-          <p>查看当前客户是否已进入 mission、当前建议归属，以及是否待审批或待接力。</p>
-        </div>
-        <div class="admin-toolbar">
-          <a class="admin-button admin-button--ghost" href="{{ customer_profile_urls.followup_orchestrator }}">查看团队编排</a>
-        </div>
-      </div>
-      <div class="admin-state admin-state--inline admin-state--loading" data-followup-orchestrator-widget-state>
-        <strong>正在加载团队编排状态</strong>
-        <span>这里会展示当前客户的 mission 归属、转派建议和批量草稿状态。</span>
-      </div>
-      <div class="admin-customer-pulse-widget" data-followup-orchestrator-widget hidden>
-        <div class="admin-toolbar admin-customer-pulse-widget__chips" data-followup-orchestrator-widget-chips hidden></div>
-        <dl class="admin-definition-list" data-followup-orchestrator-widget-detail hidden></dl>
-        <div class="admin-profile-message-list" data-followup-orchestrator-widget-items hidden></div>
-      </div>
-    </section>
-    {% endif %}
-
     <section class="admin-card admin-automation-sidebar" id="customer-automation-sidebar">
     <div class="admin-card-head admin-card-head--tight">
       <div>
@@ -261,8 +196,6 @@
 {% block scripts_extra %}
 <script defer src="{{ url_for('static', filename='admin_console/customer_profile_core.js') }}"></script>
 <script defer src="{{ url_for('static', filename='admin_console/customer_profile_sections.js') }}"></script>
-<script defer src="{{ url_for('static', filename='admin_console/customer_profile_pulse.js') }}"></script>
-<script defer src="{{ url_for('static', filename='admin_console/customer_profile_followup.js') }}"></script>
 <script defer src="{{ url_for('static', filename='admin_console/customer_profile_automation.js') }}"></script>
 <script defer src="{{ url_for('static', filename='admin_console/customer_profile.js') }}"></script>
 {% endblock %}

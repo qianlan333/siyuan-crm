@@ -11,31 +11,10 @@ from wecom_ability_service.services import evaluate_customer_value_segment, save
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "value-segment.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 def _seed_bound_person(
@@ -75,7 +54,7 @@ def _seed_signup_conversion_questionnaire(app, *, questionnaire_id: int = 31) ->
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (questionnaire_id, f"value-segment-{questionnaire_id}", "价值分层问卷", "价值分层问卷"),
         )
@@ -90,7 +69,7 @@ def _seed_signup_conversion_questionnaire(app, *, questionnaire_id: int = 31) ->
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, questionnaire_id, f"关键题{index}", index),
             )
@@ -274,7 +253,7 @@ def test_value_segment_service_covers_unknown_normal_core_top(app):
         ).fetchone()
         assert top_current["segment"] == "top"
         assert top_current["submission_id"] == 1004
-        assert json.loads(top_current["matched_question_ids_json"]) == questionnaire_seed["question_ids"][:4]
+        assert top_current["matched_question_ids_json"] if isinstance(top_current["matched_question_ids_json"], list) else json.loads(top_current["matched_question_ids_json"]) == questionnaire_seed["question_ids"][:4]
         assert top_current["evaluated_at"] != ""
 
 
@@ -396,4 +375,4 @@ def test_value_segment_service_recomputes_on_threshold_and_latest_submission_cha
         assert current_row["segment"] == "top"
         assert current_row["score"] == 1
         assert current_row["submission_id"] == 2002
-        assert json.loads(current_row["matched_question_ids_json"]) == [questionnaire_seed["question_ids"][0]]
+        assert current_row["matched_question_ids_json"] if isinstance(current_row["matched_question_ids_json"], list) else json.loads(current_row["matched_question_ids_json"]) == [questionnaire_seed["question_ids"][0]]

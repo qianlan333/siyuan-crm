@@ -1030,7 +1030,7 @@ def migrate_legacy_user_ops_pool_to_lead_pool(
            OR (
                 COALESCE(mobile, '') <> ''
                 AND COALESCE(source_type, '') = 'experience_import'
-                AND COALESCE(is_wecom_bound, 0) = ?
+                AND COALESCE(is_wecom_bound, false) = ?
            )
         ORDER BY id ASC
         """,

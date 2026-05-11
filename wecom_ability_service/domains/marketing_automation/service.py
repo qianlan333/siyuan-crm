@@ -185,6 +185,7 @@ def _clear_class_user_status_current(
 _FOCUS_POOL_KEYS = set(SHARED_FOCUS_POOL_KEYS)
 
 automation_webhook_logger = logging.getLogger("automation_webhook")
+logger = logging.getLogger(__name__)
 
 
 def _normalized_text(value: Any) -> str:
@@ -282,10 +283,14 @@ def _validate_timezone(value: Any) -> str:
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
     text = _normalized_text(value)
     if not text:
         return None
-    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+    import re as _re
+    text = _re.sub(r"[+-]\d{2}(:\d{2})?$", "", text).rstrip()
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
         try:
             return datetime.strptime(text, pattern)
         except ValueError:
@@ -891,7 +896,14 @@ def _validate_send_owner_userid(owner_userid: str) -> tuple[str, dict[str, Any]]
     return normalized_owner_userid, owner_role
 
 
-def _build_pool_send_plan(*, owner_userid: str, pool_key: str) -> dict[str, Any]:
+def _build_pool_send_plan(
+    *,
+    owner_userid: str,
+    pool_key: str,
+    apply_frequency_budget: bool = True,
+    budget_channels: tuple[str, ...] = ("wecom_private",),
+    budget_program_codes: tuple[str, ...] = (DEFAULT_SCENARIO_KEY,),
+) -> dict[str, Any]:
     matched_items = _pool_send_selection(owner_userid=owner_userid, pool_key=pool_key)
     skipped_by_reason: dict[str, int] = {}
     eligible_items: list[dict[str, Any]] = []
@@ -907,6 +919,22 @@ def _build_pool_send_plan(*, owner_userid: str, pool_key: str) -> dict[str, Any]
             skipped_by_reason[skip_reason] = skipped_by_reason.get(skip_reason, 0) + 1
             continue
         eligible_items.append(item)
+    budget_skip_details: list[dict[str, Any]] = []
+    if apply_frequency_budget and eligible_items:
+        try:
+            from .frequency_budget_service import annotate_eligible_items_with_budget
+
+            eligible_items, skipped_by_reason, budget_skip_details = (
+                annotate_eligible_items_with_budget(
+                    eligible_items=eligible_items,
+                    pool_keys=(pool_key,) if pool_key else (),
+                    program_codes=budget_program_codes,
+                    channels=budget_channels,
+                    skipped_by_reason=skipped_by_reason,
+                )
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning("frequency budget filter failed, fail-open: %s", exc)
     owner_buckets = []
     if eligible_items:
         owner_buckets.append(
@@ -923,6 +951,7 @@ def _build_pool_send_plan(*, owner_userid: str, pool_key: str) -> dict[str, Any]
         "eligible_count": len(eligible_items),
         "skipped_count": len(matched_items) - len(eligible_items),
         "skipped_by_reason": skipped_by_reason,
+        "budget_skip_details": budget_skip_details,
         "owner_buckets": owner_buckets,
     }
 
@@ -1076,6 +1105,9 @@ def send_pool_private_message(
     images: list[dict[str, Any]] | None = None,
     image_media_ids: list[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    trace_id: str = "",
+    source_kind: str = "manual_pool_send",
+    source_id: str = "",
 ) -> dict[str, Any]:
     from . import message_dispatch_service
 
@@ -1088,6 +1120,9 @@ def send_pool_private_message(
         images=images,
         image_media_ids=image_media_ids,
         attachments=attachments,
+        trace_id=trace_id,
+        source_kind=source_kind,
+        source_id=source_id,
     )
 
 

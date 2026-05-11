@@ -255,6 +255,23 @@ def create_focus_send_batch(
         )
     )
     get_db().commit()
+    if items:
+        from ..broadcast_jobs import service as queue_service
+        queue_service.enqueue_job(
+            source_type="focus_send",
+            source_id=str(batch.get("id") or ""),
+            source_table="automation_focus_send_batch",
+            scheduled_for=now_text,
+            target_external_userids=[
+                _normalized_text(it.get("external_contact_id"))
+                for it in items if _normalized_text(it.get("external_contact_id"))
+            ],
+            target_summary=f"{pool_key} 池 {len(items)} 人",
+            content_type="openclaw_push",
+            content_payload={"handler": "focus_send", "batch_id": int(batch.get("id") or 0)},
+            content_summary=f"focus_send/{_normalized_text(route_key)}",
+            created_by=_normalized_text(operator_id) or "crm_console",
+        )
     return {
         "ok": True,
         "status": "created",
@@ -384,4 +401,65 @@ def get_focus_send_batch_detail(*, batch_id: int, item_limit: int = 12) -> dict[
     if not batch_row:
         raise LookupError("focus send batch not found")
     return _focus_batch_detail_payload(batch_row, item_limit=item_limit)
+
+
+def run_focus_send_job(*, batch_id: int) -> dict[str, Any]:
+    """broadcast_jobs handler 调这个：一次性执行整个 focus_send batch（逐 item push_openclaw）。"""
+    batch_row = repo.get_focus_send_batch(int(batch_id))
+    if not batch_row:
+        return {"ok": False, "error": "batch not found", "sent_count": 0, "failed_count": 0}
+    batch = _serialize_focus_send_batch(batch_row)
+    now_text = _iso_now()
+    sent_count = 0
+    failed_count = 0
+    while True:
+        item = repo.claim_next_focus_send_batch_item(batch_id=int(batch_id), started_at=now_text)
+        if not item:
+            break
+        serialized_item = _serialize_focus_send_batch_item(item)
+        external_contact_id = _normalized_text(serialized_item.get("external_contact_id"))
+        push_result = push_openclaw(
+            external_contact_id=external_contact_id,
+            operator_id="broadcast_worker",
+        )
+        accepted = bool(push_result.get("accepted"))
+        item_status = "sent" if accepted else "failed"
+        repo.update_focus_send_batch_item(
+            int(serialized_item.get("id") or 0),
+            {
+                **serialized_item,
+                "status": item_status,
+                "detail": "" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status"))),
+                "result_payload": dict(push_result or {}),
+                "updated_at": now_text,
+                "started_at": _normalized_text(serialized_item.get("started_at")) or now_text,
+                "finished_at": now_text,
+            },
+        )
+        repo.update_touch_delivery_log_status_by_source(
+            touch_surface=TOUCH_SURFACE_FOCUS_SEND,
+            source_batch_id=int(batch_id),
+            source_item_id=int(serialized_item.get("id") or 0),
+            external_contact_id=external_contact_id,
+            status=item_status,
+            detail="" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status"))),
+            metadata=dict(push_result or {}),
+            sent_at=now_text if accepted else "",
+            updated_at=now_text,
+        )
+        if accepted:
+            sent_count += 1
+        else:
+            failed_count += 1
+    _update_focus_batch_counters(
+        batch,
+        sent_delta=sent_count,
+        failed_delta=failed_count,
+        status="finished",
+        next_run_at="",
+        finished_at=now_text,
+        last_run_at=now_text,
+    )
+    get_db().commit()
+    return {"ok": True, "sent_count": sent_count, "failed_count": failed_count}
 

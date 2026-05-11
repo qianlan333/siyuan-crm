@@ -236,6 +236,84 @@
       grid-template-columns: 1fr;
     }
   }
+
+  .ac-overview-segment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .ac-overview-segment-card {
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+    padding: 12px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ac-overview-segment-card .seg-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: #1d1d1f;
+  }
+  .ac-overview-segment-card .seg-count {
+    font-size: 22px;
+    font-weight: 600;
+    color: #2c5cdb;
+  }
+  .ac-overview-segment-card .seg-meta {
+    font-size: 11px;
+    color: #888;
+    display: flex;
+    gap: 8px;
+  }
+  .ac-overview-segment-card .seg-source-system {
+    background: #eef0f4;
+    color: #5b626f;
+    padding: 1px 6px;
+    border-radius: 8px;
+  }
+  .ac-overview-segment-card .seg-source-ai {
+    background: #e6f4ff;
+    color: #1f5fb6;
+    padding: 1px 6px;
+    border-radius: 8px;
+  }
+  .ac-overview-arrow { display: inline-block; transition: transform 160ms ease; }
+  .ac-overview-arrow.is-open { transform: rotate(180deg); }
+  .ac-overview-segment-drawer {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px dashed #e5e7eb;
+  }
+  .ac-overview-segment-section {
+    margin-top: 16px;
+  }
+  .ac-overview-segment-section-title {
+    font-size: 13px;
+    color: #5b626f;
+    margin: 0 0 8px;
+    font-weight: 600;
+  }
+  .ac-overview-segment-card {
+    cursor: help;
+    position: relative;
+  }
+  .ac-overview-segment-card .seg-desc {
+    font-size: 11px;
+    color: #6b7280;
+    margin-top: 4px;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .ac-overview-segment-card[title]:hover .seg-desc {
+    -webkit-line-clamp: unset;
+    overflow: visible;
+  }
 </style>
 {% endblock %}
 
@@ -307,15 +385,49 @@
     </article>
   </section>
 
-  <section class="ac-overview-section">
+  <section class="ac-overview-section ac-overview-segments">
     <div class="ac-overview-head">
       <div>
-        <h3>池子用户</h3>
-        <p class="ac-overview-muted">按池子查看在池用户的画像与对话状态。</p>
+        <h3>画像分层</h3>
+        <p class="ac-overview-muted">运营池子 + AI 创建的子分层。鼠标悬停在卡片上看人群特征描述。</p>
       </div>
-      <div class="ac-overview-subtle" id="overview-profile-template-note">自然画像模板：加载中</div>
+      <button class="admin-button admin-button--ghost" type="button" id="overview-toggle-more-segments">
+        更多画像 <span class="ac-overview-arrow" id="overview-more-segments-arrow">▾</span>
+      </button>
     </div>
-    <div class="ac-overview-group-grid" id="overview-member-groups"></div>
+
+    <div class="ac-overview-segment-section">
+      <h4 class="ac-overview-segment-section-title">运营池子分层</h4>
+      <div class="ac-overview-segment-grid" id="overview-pool-segments"></div>
+    </div>
+
+    <div class="ac-overview-segment-section">
+      <h4 class="ac-overview-segment-section-title">AI 创建的子分层</h4>
+      <div class="ac-overview-segment-grid" id="overview-ai-segments"></div>
+    </div>
+
+    <div class="ac-overview-segment-section">
+      <h4 class="ac-overview-segment-section-title">特殊分层</h4>
+      <div class="ac-overview-segment-grid" id="overview-special-segments"></div>
+    </div>
+
+    <div class="ac-overview-segment-drawer" id="overview-more-segments" hidden>
+      <div class="ac-overview-muted" style="margin-bottom:12px;">
+        以下分层在上方"运行概况"中已经按 chip 形式展示过，此处仅作完整对照。
+      </div>
+      <div class="ac-overview-segment-section">
+        <h4 class="ac-overview-segment-section-title">生命周期分层（与"运行概况"一致）</h4>
+        <div class="ac-overview-segment-grid" id="overview-audience-segments"></div>
+      </div>
+      <div class="ac-overview-segment-section">
+        <h4 class="ac-overview-segment-section-title">自然画像分层（与上方 chip 一致）</h4>
+        <div class="ac-overview-segment-grid" id="overview-profile-segments"></div>
+      </div>
+      <div class="ac-overview-segment-section">
+        <h4 class="ac-overview-segment-section-title">行为画像分层（与上方 chip 一致）</h4>
+        <div class="ac-overview-segment-grid" id="overview-behavior-segments"></div>
+      </div>
+    </div>
   </section>
 
   <section class="ac-overview-section">
@@ -347,4 +459,89 @@
 <script defer src="{{ url_for('static', filename='admin_console/automation_overview_renderers.js') }}"></script>
 <script defer src="{{ url_for('static', filename='admin_console/automation_overview_actions.js') }}"></script>
 <script defer src="{{ url_for('static', filename='admin_console/automation_overview.js') }}"></script>
+<script>
+(function () {
+  function fmt(s) { return s == null ? '' : String(s); }
+  function escape(s) { return fmt(s).replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+  // 根据 segment_code 前缀 / tags 判定一级类目
+  function classifyCategory(seg) {
+    const code = fmt(seg.segment_code);
+    const tags = (seg.tags || []).map(String);
+    if (seg.source_type !== 'system_default') return 'ai';
+    if (code.startsWith('audience_') || tags.includes('audience')) return 'audience';
+    if (code.startsWith('pool_') || tags.includes('pool')) return 'pool';
+    if (code.startsWith('profile_') || tags.includes('profile')) return 'profile';
+    if (code.startsWith('behavior_') || tags.includes('behavior')) return 'behavior';
+    if (code.startsWith('silent_') || tags.includes('silent')) return 'special';
+    return 'special';
+  }
+  function renderCard(seg) {
+    const sourceClass = seg.source_type === 'system_default' ? 'seg-source-system' : 'seg-source-ai';
+    const sourceLabel = seg.source_type === 'system_default' ? '系统' : 'AI';
+    const desc = fmt(seg.description);
+    return `<article class="ac-overview-segment-card" title="${escape(desc)}">
+      <span class="seg-name">${escape(seg.display_name || seg.segment_code)}</span>
+      <span class="seg-count">${seg.cached_headcount || 0}</span>
+      ${desc ? `<span class="seg-desc">${escape(desc)}</span>` : ''}
+      <span class="seg-meta">
+        <span class="${sourceClass}">${sourceLabel}</span>
+        <span>引用 ${seg.usage_count || 0} 次</span>
+      </span>
+    </article>`;
+  }
+  function fillSlot(id, items, emptyHint) {
+    const host = document.getElementById(id);
+    if (!host) return;
+    host.innerHTML = items.length
+      ? items.map(renderCard).join('')
+      : `<div class="ac-overview-muted">${emptyHint}</div>`;
+  }
+  async function loadSegments() {
+    const poolHost = document.getElementById('overview-pool-segments');
+    if (!poolHost) return;
+    try {
+      const resp = await fetch('/api/admin/cloud-orchestrator/segments?status=active&limit=300');
+      const data = await resp.json();
+      if (!data.ok) return;
+      const buckets = { audience: [], pool: [], profile: [], behavior: [], special: [], ai: [] };
+      for (const seg of (data.segments || [])) {
+        const cat = classifyCategory(seg);
+        buckets[cat].push(seg);
+      }
+      // 默认显示：池子 + AI + 特殊（不重复"上面已经有的"）
+      fillSlot('overview-pool-segments', buckets.pool, '暂无池子分层');
+      fillSlot('overview-ai-segments', buckets.ai, '暂无 AI 创建的子分层（在 Claude Code 里调 propose_segment 创建）');
+      fillSlot('overview-special-segments', buckets.special, '暂无特殊分层');
+      // 折叠态：生命周期 / 自然画像 / 行为画像（上面已经有 chip 展示）
+      fillSlot('overview-audience-segments', buckets.audience, '无');
+      fillSlot('overview-profile-segments', buckets.profile, '无');
+      fillSlot('overview-behavior-segments', buckets.behavior, '无');
+    } catch (e) { /* 容错：不影响概览主流程 */ }
+  }
+  document.addEventListener('DOMContentLoaded', () => {
+    loadSegments();
+    const btn = document.getElementById('overview-toggle-more-segments');
+    const arrow = document.getElementById('overview-more-segments-arrow');
+    const drawer = document.getElementById('overview-more-segments');
+    if (btn && drawer) {
+      btn.addEventListener('click', () => {
+        const opening = drawer.hasAttribute('hidden');
+        if (opening) drawer.removeAttribute('hidden'); else drawer.setAttribute('hidden', '');
+        if (arrow) arrow.classList.toggle('is-open', opening);
+      });
+    }
+    // 让"刷新模块状态"按钮也覆盖到画像分层模块 — 旧 dashboard 刷完会触发
+    // automation_member 字段 backfill，再刷一次 segments 就能拿到新数据
+    const refreshBtn = document.getElementById('overview-refresh-button');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        // 给旧 loadDashboard 让出主线程 + backfill 完成的时间
+        setTimeout(loadSegments, 1500);
+        // 兜底再刷一次（某些慢链路）
+        setTimeout(loadSegments, 5000);
+      });
+    }
+  });
+})();
+</script>
 {% endblock %}

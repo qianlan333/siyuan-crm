@@ -179,10 +179,14 @@ def _claim_due_events(limit: int) -> list[OutboxEvent]:
         )
         if getattr(update_cursor, "rowcount", 1) == 0:
             continue
-        try:
-            payload = json.loads(row.get("payload_json") or "{}")
-        except (TypeError, json.JSONDecodeError):
-            payload = {}
+        raw_payload = row.get("payload_json")
+        if isinstance(raw_payload, (dict, list)):
+            payload = raw_payload
+        else:
+            try:
+                payload = json.loads(raw_payload or "{}")
+            except (TypeError, json.JSONDecodeError):
+                payload = {}
         claimed.append(
             OutboxEvent(
                 id=int(row["id"]),

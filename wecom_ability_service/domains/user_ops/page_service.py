@@ -6,6 +6,7 @@ from typing import Any
 
 from ...db import get_db
 from ...infra.helpers import db_bool, stringify_db_timestamp
+from .. import miniprogram_library
 from ..tasks.private_message import (
     count_private_message_images,
     extract_private_message_text,
@@ -219,7 +220,7 @@ def _query_base_rows(
         sql += f" AND current.id IN ({_build_placeholders(len(pool_ids))})"
         params.extend(pool_ids)
     if normalized_filters["class_term_no"]:
-        sql += " AND CAST(COALESCE(current.class_term_no, '') AS TEXT) = ?"
+        sql += " AND COALESCE(CAST(current.class_term_no AS TEXT), '') = ?"
         params.append(normalized_filters["class_term_no"])
     if normalized_filters["owner_userid"]:
         sql += " AND current.owner_userid = ?"
@@ -730,6 +731,11 @@ def _summarize_skipped_by_reason(skipped_by_reason: dict[str, int]) -> str:
 
 
 def _build_private_message_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str, int]:
+    raw_attachments = payload.get("attachments")
+    if isinstance(raw_attachments, list) and raw_attachments:
+        expanded = miniprogram_library.expand_attachments_with_library(raw_attachments)
+        payload = dict(payload)
+        payload["attachments"] = expanded
     content_preview = extract_private_message_text(payload)
     image_count = count_private_message_images(payload)
     if not has_private_message_body(payload):

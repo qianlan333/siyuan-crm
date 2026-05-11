@@ -89,7 +89,7 @@ def save_local_private_message_draft(
         "draft_only": True,
         "status": "draft",
         "image_count": image_count,
-        "source": _normalized_text(source) or "customer_pulse",
+        "source": _normalized_text(source) or "manual",
     }
     task_id = repo.save_outbound_task_record(
         "private_message",

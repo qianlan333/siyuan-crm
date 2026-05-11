@@ -263,15 +263,15 @@ def test_class_user_application_skeleton_delegates_to_legacy_module(monkeypatch)
         return _inner
 
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.get_class_user_status_definition_legacy",
+        "wecom_ability_service.domains.class_user.service.get_class_user_status_definition",
         _record("get_class_user_status_definition", {"signup_status": "lead"}),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.get_class_user_status_current_legacy",
+        "wecom_ability_service.domains.class_user.service.get_class_user_status_current",
         _record("get_class_user_status_current", {"external_userid": "wm_ext_001"}),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.get_class_user_snapshot_legacy",
+        "wecom_ability_service.domains.class_user.service.get_class_user_snapshot",
         _record(
             "get_class_user_snapshot",
             {
@@ -283,50 +283,50 @@ def test_class_user_application_skeleton_delegates_to_legacy_module(monkeypatch)
         ),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.list_class_user_status_history_legacy",
+        "wecom_ability_service.domains.class_user.service.list_class_user_status_history",
         _record("list_class_user_status_history", {"items": [], "total": 0, "limit": 100}),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.list_class_user_management_records_legacy",
+        "wecom_ability_service.domains.class_user.service.list_class_user_management_records",
         _record(
             "list_class_user_management_records",
             {"items": [], "total": 0, "stats": [], "meta": {}, "filter": "", "status_definitions": []},
         ),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.export_class_user_management_records_legacy",
+        "wecom_ability_service.domains.class_user.service.export_class_user_management_records",
         _record("export_class_user_management_records", {"headers": [], "rows": [], "filename": "class-user.xls"}),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.apply_class_user_status_change_legacy",
+        "wecom_ability_service.domains.class_user.service.apply_class_user_status_change",
         _record("apply_class_user_status_change", {"external_userid": "wm_ext_001", "signup_status": "lead"}),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.update_class_user_status_sync_result_legacy",
+        "wecom_ability_service.domains.class_user.service.update_class_user_status_sync_result",
         _record("update_class_user_status_sync_result", None),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.clear_class_user_status_current_legacy",
+        "wecom_ability_service.domains.class_user.service.clear_class_user_status_current",
         _record("clear_class_user_status_current", None),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.migrate_class_user_status_from_contact_tags_legacy",
+        "wecom_ability_service.domains.class_user.service.migrate_class_user_status_from_contact_tags",
         _record("migrate_class_user_status_from_contact_tags", {"migrated_count": 2}),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.list_signup_scope_external_userids_legacy",
+        "wecom_ability_service.domains.class_user.service.list_signup_scope_external_userids",
         _record("list_signup_scope_external_userids", ["wm_ext_001"]),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.list_class_user_live_base_rows_legacy",
+        "wecom_ability_service.domains.class_user.service.list_class_user_live_base_rows",
         _record("list_class_user_live_base_rows", [{"external_userid": "wm_ext_001"}]),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.upsert_class_user_status_current_legacy",
+        "wecom_ability_service.domains.class_user.service.upsert_class_user_status_current",
         _record("upsert_class_user_status_current", None),
     )
     monkeypatch.setattr(
-        "wecom_ability_service.application.class_user._legacy_delegate.append_class_user_status_history_legacy",
+        "wecom_ability_service.domains.class_user.service.append_class_user_status_history",
         _record("append_class_user_status_history", None),
     )
 

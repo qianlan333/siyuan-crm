@@ -5,39 +5,15 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "admin-customer-profile.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path, MCP_BEARER_TOKEN="mcp-token") as app:
+        yield app
 
 
 @pytest.fixture()
@@ -104,7 +80,7 @@ def _seed_customer_profile_fixture(app) -> None:
         db.execute(
             """
             INSERT INTO owner_role_map (userid, display_name, role, active)
-            VALUES ('owner-a', '顾问甲', 'sales', 1)
+            VALUES ('owner-a', '顾问甲', 'sales', true)
             """
         )
         db.execute(
@@ -142,7 +118,7 @@ def _seed_customer_profile_fixture(app) -> None:
             INSERT INTO wecom_external_contact_follow_users (
                 corp_id, external_userid, user_id, relation_status, is_primary, remark, description, raw_follow_user
             )
-            VALUES ('ww-test', 'ext-1', 'owner-a', 'active', 1, '主跟进', '一线顾问', '{}')
+            VALUES ('ww-test', 'ext-1', 'owner-a', 'active', true, '主跟进', '一线顾问', '{}')
             """
         )
         db.execute(
@@ -163,7 +139,7 @@ def _seed_customer_profile_fixture(app) -> None:
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (1, 'q-1', '客户问卷', '客户问卷', '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (1, 'q-1', '客户问卷', '客户问卷', '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """
         )
         db.execute(
@@ -199,9 +175,9 @@ def _seed_customer_profile_fixture(app) -> None:
                 last_trigger_message_at, entered_at, exited_at, exit_reason, state_payload_json, created_at, updated_at
             )
             VALUES (
-                1, 'ext-1', 'signup_conversion_v1', 'pool', 'active_focus', 1, 0, 1, 'pool',
+                1, 'ext-1', 'signup_conversion_v1', 'pool', 'active_focus', true, false, true, 'pool',
                 ?, '', ?, NULL, '', '', '',
-                ?, ?, '', '',
+                ?, ?, NULL, '',
                 ?,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
@@ -272,96 +248,6 @@ def _seed_customer_profile_fixture(app) -> None:
                     send_time.strftime("%Y-%m-%d %H:%M:%S"),
                 ),
             )
-        db.commit()
-
-
-def _seed_customer_pulse_output(
-    app,
-    *,
-    confidence: float,
-    reason: str,
-    draft_reply: str = "",
-    output_type: str = "next_action_suggestion",
-) -> None:
-    created_at = datetime.now().replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_agent_run (
-                run_id, request_id, userid, external_contact_id, agent_code, agent_type, provider,
-                input_snapshot_json, variables_snapshot_json, final_prompt_preview,
-                role_prompt_version, task_prompt_version, status, source, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "arun-customer-pulse-001",
-                "req-customer-pulse-001",
-                "owner-a",
-                "ext-1",
-                "pricing_agent",
-                "child_agent",
-                "deepseek",
-                json.dumps(
-                    {
-                        "messages": [
-                            {
-                                "content": "我想先了解一下课程价格和安排。",
-                                "send_time": created_at,
-                            }
-                        ]
-                    },
-                    ensure_ascii=False,
-                ),
-                json.dumps({"current_pool": "active_focus"}, ensure_ascii=False),
-                "system+user prompt",
-                "published-v1",
-                "draft-v1",
-                "success",
-                "test",
-                created_at,
-                created_at,
-            ),
-        )
-        db.execute(
-            """
-            INSERT INTO automation_agent_output (
-                output_id, run_id, request_id, userid, external_contact_id, agent_code, output_type,
-                raw_output_text, normalized_output_json, rendered_output_text, target_agent_code, target_pool,
-                confidence, reason, need_human_review, applied_status, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                "aout-customer-pulse-001",
-                "arun-customer-pulse-001",
-                "req-customer-pulse-001",
-                "owner-a",
-                "ext-1",
-                "pricing_agent",
-                output_type,
-                draft_reply or reason,
-                json.dumps(
-                    {
-                        "confidence": confidence,
-                        "reason": reason,
-                        "next_action": "quote_explain",
-                        "draft_reply": draft_reply,
-                        "need_human_review": True,
-                    },
-                    ensure_ascii=False,
-                ),
-                draft_reply or reason,
-                "pricing_agent",
-                "active_focus",
-                confidence,
-                reason,
-                1,
-                "generated",
-                created_at,
-            ),
-        )
         db.commit()
 
 
@@ -544,36 +430,3 @@ def test_customer_profile_api_supports_external_userid_mobile_and_reserved_user_
     assert user_id_payload["lookup"]["resolved_by"] == "user_id_fallback_external_userid"
 
 
-def test_admin_customer_profile_page_and_pulse_api_render_ai_customer_pulse(app, client, fake_contact_client):
-    _seed_customer_profile_fixture(app)
-    _seed_customer_pulse_output(
-        app,
-        confidence=0.91,
-        reason="客户正在询价，适合先解释价格和方案。",
-        draft_reply="可以，我先把课程价格、交付方式和适合你的方案拆开说明一下。",
-    )
-    app.config["ai_customer_pulse"] = True
-    app.config["ai_followup_orchestrator"] = True
-
-    page_response = client.get("/admin/customers/ext-1")
-    pulse_response = client.get("/api/admin/customers/profile/pulse", query_string={"external_userid": "ext-1"})
-
-    assert page_response.status_code == 200
-    html = page_response.get_data(as_text=True)
-    assert "AI 下一步" in html
-    assert "团队编排" in html
-    assert "查看 AI推进" in html
-    assert "data-followup-orchestrator-api-url" in html
-    assert "data-customer-pulse-editor" in html
-
-    assert pulse_response.status_code == 200
-    payload = pulse_response.get_json()
-    assert payload["ok"] is True
-    assert payload["pulse"]["enabled"] is True
-    assert payload["pulse"]["source"] == "ai_output"
-    assert payload["pulse"]["draft_message"] == "可以，我先把课程价格、交付方式和适合你的方案拆开说明一下。"
-    assert payload["pulse"]["need_human_confirmation"] is True
-    assert len(payload["pulse"]["evidence"]) >= 1
-    assert payload["customer_pulse"]["enabled"] is True
-    assert payload["customer_pulse"]["card"]["suggested_action_label"]
-    assert payload["customer_pulse"]["card"]["current_judgement"]

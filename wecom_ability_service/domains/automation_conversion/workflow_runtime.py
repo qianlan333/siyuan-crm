@@ -935,10 +935,17 @@ def _send_private_message_to_member(
     content_text: str,
     operator_id: str,
     filter_snapshot: dict[str, Any],
+    miniprogram_library_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     owner_staff_id = _normalized_text(member.get("owner_staff_id"))
     sender_userid = owner_staff_id or DEFAULT_AUTOMATION_SENDER
-    task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload({"content": _normalized_text(content_text)})
+    payload_for_build: dict[str, Any] = {"content": _normalized_text(content_text)}
+    library_ids = [int(i) for i in (miniprogram_library_ids or []) if i]
+    if library_ids:
+        payload_for_build["attachments"] = [
+            {"msgtype": "miniprogram", "miniprogram": {"library_id": lid}} for lid in library_ids
+        ]
+    task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(payload_for_build)
     request_payload = {
         "sender": sender_userid,
         "external_userid": [_normalized_text(member.get("external_contact_id"))],
@@ -1137,6 +1144,19 @@ def _process_execution_item(
                 "sent_at": "",
             },
         )
+    raw_node_miniprograms = node.get("miniprogram_library_ids") or []
+    if not raw_node_miniprograms:
+        scp = node.get("standard_content_payload")
+        if isinstance(scp, dict):
+            raw_node_miniprograms = scp.get("miniprogram_library_ids") or []
+    if not raw_node_miniprograms:
+        raw_node_miniprograms = workflow_bundle.get("miniprogram_library_ids") or []
+    miniprogram_library_ids: list[int] = []
+    for value in raw_node_miniprograms:
+        try:
+            miniprogram_library_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
     send_result = _send_private_message_to_member(
         member=member,
         content_text=final_content,
@@ -1147,7 +1167,9 @@ def _process_execution_item(
             "node_id": int(execution.get("node_id") or 0),
             "execution_id": _normalized_text(execution.get("execution_id")),
             "audience_entry_id": int(audience_entry.get("id") or 0),
+            "miniprogram_library_ids": miniprogram_library_ids,
         },
+        miniprogram_library_ids=miniprogram_library_ids,
     )
     return workflow_repo.update_workflow_execution_item_row(
         int(execution_item["id"]),
@@ -1559,6 +1581,16 @@ def _run_due_node(
         }
         _log_runtime_event("node_already_processed", result)
         return result
+    if _normalized_text(execution.get("status")) == "running":
+        result = {
+            "ok": True,
+            "status": "already_enqueued",
+            "execution_id": _normalized_text(execution.get("execution_id")),
+            "node_id": int(node.get("id") or 0),
+            "execution": execution,
+        }
+        _log_runtime_event("node_already_enqueued", result)
+        return result
 
     execution = workflow_repo.update_workflow_execution_row(
         int(execution["id"]),
@@ -1582,48 +1614,101 @@ def _run_due_node(
         },
     )
     execution_items = workflow_repo.list_workflow_execution_item_rows(int(execution["id"]))
-    for item in execution_items:
-        if _normalized_text(item.get("status")) != "pending":
-            continue
-        audience_entry = audience_map.get(int(item.get("audience_entry_id") or 0)) or {}
-        _process_execution_item(
-            execution=execution,
-            execution_item=item,
-            workflow_bundle=workflow_bundle,
-            node=node,
-            audience_entry=audience_entry,
-            operator_id=operator_id,
+    pending_externals = [
+        _normalized_text(item.get("external_contact_id"))
+        for item in execution_items
+        if _normalized_text(item.get("status")) == "pending" and _normalized_text(item.get("external_contact_id"))
+    ]
+    if not pending_externals:
+        # 无候选人 — 立刻标 finished，避免永远卡在 running
+        counters = {"total_count": 0, "success_count": 0, "skipped_count": 0, "failed_count": 0,
+                    "pending_count": 0, "missing_external_contact_id_count": 0,
+                    "owner_staff_id_missing_count": 0, "send_api_failed_count": 0,
+                    "segment_or_content_miss_count": 0, "content_missing_count": 0}
+        summary_json = _execution_summary_json(
+            workflow_bundle=workflow_bundle, node=node, diagnostics=diagnostics, counters=counters,
         )
-    refreshed_items = workflow_repo.list_workflow_execution_item_rows(int(execution["id"]))
-    final_status, counters = _execution_summary_from_items(refreshed_items)
-    summary_json = _execution_summary_json(
+        workflow_repo.update_workflow_execution_row(
+            int(execution["id"]),
+            {
+                **execution,
+                "status": "finished",
+                "total_count": 0,
+                "success_count": 0,
+                "skipped_count": 0,
+                "failed_count": 0,
+                "finished_at": _iso_now(),
+                "summary_json": summary_json,
+            },
+        )
+        result = {
+            "ok": True,
+            "status": "finished_no_candidates",
+            "execution_id": _normalized_text(execution.get("execution_id")),
+            "node_id": int(node.get("id") or 0),
+            "pending_count": 0,
+            "execution": execution,
+        }
+        _log_runtime_event("scheduled_node_no_candidates", result)
+        return result
+
+    # 入队前把完整 summary（含 diagnostics / result / zero_hit_reasons）快照到
+    # execution，方便监控页和测试立即读到；worker 执行后会用最终结果覆盖。
+    _enqueue_counters = _execution_summary_from_items(execution_items)[1]
+    _enqueue_summary = _execution_summary_json(
         workflow_bundle=workflow_bundle,
         node=node,
         diagnostics=diagnostics,
-        counters=counters,
+        counters=_enqueue_counters,
     )
-    final_execution = workflow_repo.update_workflow_execution_row(
+    workflow_repo.update_workflow_execution_row(
         int(execution["id"]),
         {
             **execution,
-            "status": final_status,
-            "scheduled_for": scheduled_for,
-            "total_count": counters["total_count"],
-            "success_count": counters["success_count"],
-            "skipped_count": counters["skipped_count"],
-            "failed_count": counters["failed_count"],
-            "summary_json": summary_json,
-            "finished_at": _iso_now() if final_status in _FINAL_EXECUTION_STATUSES else "",
+            "status": "running",
+            "total_count": _enqueue_counters["total_count"],
+            "summary_json": _enqueue_summary,
         },
     )
+
+    from ..broadcast_jobs import service as queue_service
+    from ..broadcast_jobs import repo as queue_repo
+
+    # 去重：如果预排期的 job 已存在（queued/claimed），不重复入队
+    exec_id_str = str(execution.get("execution_id") or "")
+    existing = queue_repo.fetch_jobs_filtered(
+        statuses=["queued", "claimed"],
+        source_types=["workflow"],
+        limit=50,
+    )
+    already_scheduled = any(
+        str(j.get("source_id") or "") == exec_id_str for j in existing
+    )
+    if not already_scheduled:
+        queue_service.enqueue_job(
+            source_type="workflow",
+            source_id=exec_id_str,
+            source_table="automation_workflow_executions",
+            scheduled_for=datetime.now(),
+            target_external_userids=pending_externals,
+            target_summary=f"workflow node={int(node.get('id') or 0)} — {len(pending_externals)} 人",
+            content_type="private_message",
+            content_payload={
+                "execution_id": _normalized_text(execution.get("execution_id")),
+                "workflow_id": int(execution.get("workflow_id") or 0),
+                "node_id": int(node.get("id") or 0),
+                "operator_id": operator_id,
+            },
+            content_summary=_normalized_text(node.get("standard_content_text"))[:200],
+        )
     result = {
         "ok": True,
-        "status": final_status,
-        "execution": final_execution,
-        "items": workflow_repo.list_workflow_execution_item_rows(int(final_execution["id"])),
-        "summary": summary_json,
+        "status": "enqueued",
+        "execution_id": _normalized_text(execution.get("execution_id")),
+        "node_id": int(node.get("id") or 0),
+        "pending_count": len(pending_externals),
     }
-    _log_runtime_event("scheduled_node_finished", result["summary"])
+    _log_runtime_event("scheduled_node_enqueued", result)
     return result
 
 
@@ -1694,6 +1779,10 @@ def _run_immediate_node(
             diagnostics["already_sent_count"] += 1
             processed_executions.append(execution)
             continue
+        if _normalized_text(execution.get("status")) == "running":
+            diagnostics["already_sent_count"] += 1
+            processed_executions.append(execution)
+            continue
 
         execution = workflow_repo.update_workflow_execution_row(
             int(execution["id"]),
@@ -1709,7 +1798,7 @@ def _run_immediate_node(
                 },
             },
         )
-        workflow_repo.insert_workflow_execution_item_row(
+        new_item = workflow_repo.insert_workflow_execution_item_row(
             {
                 "execution_id": int(execution.get("id") or 0),
                 "workflow_id": int(execution.get("workflow_id") or 0),
@@ -1729,43 +1818,109 @@ def _run_immediate_node(
             }
         )
         diagnostics["inserted_pending_count"] += 1
-        execution_items = workflow_repo.list_workflow_execution_item_rows(int(execution["id"]))
-        for item in execution_items:
-            if _normalized_text(item.get("status")) != "pending":
-                continue
-            _process_execution_item(
-                execution=execution,
-                execution_item=item,
-                workflow_bundle=workflow_bundle,
-                node=node,
-                audience_entry=audience_entry,
-                operator_id=operator_id,
-            )
-        refreshed_items = workflow_repo.list_workflow_execution_item_rows(int(execution["id"]))
-        final_status, counters = _execution_summary_from_items(refreshed_items)
-        final_execution = workflow_repo.update_workflow_execution_row(
-            int(execution["id"]),
-            {
-                **execution,
-                "status": final_status,
-                "scheduled_for": _normalized_text(audience_entry.get("entered_at")) or _iso_now(),
-                "total_count": counters["total_count"],
-                "success_count": counters["success_count"],
-                "skipped_count": counters["skipped_count"],
-                "failed_count": counters["failed_count"],
-                "summary_json": {
-                    **_execution_summary_json(
-                        workflow_bundle=workflow_bundle,
-                        node=node,
-                        diagnostics={**diagnostics, "scheduled_for": _normalized_text(audience_entry.get("entered_at")) or _iso_now()},
-                        counters=counters,
-                    ),
-                    "audience_entry_id": audience_entry_id,
+
+        # ── 立即渲染内容 ──
+        # 内容决策是确定性的（不依赖外部 API），在入队前完成：
+        #   - 渲染成功 → 更新 item 保持 pending，入队给 broadcast worker 真发
+        #   - 渲染为空 → 标 failed，跳过入队
+        _imm_member = dict(audience_entry.get("member") or {})
+        _imm_rendered = _render_node_content(
+            member=_imm_member,
+            workflow_bundle=workflow_bundle,
+            node=node,
+            execution_request_id=f"workflow-node-{int(node['id'])}-item-{int(new_item.get('id') or 0)}",
+        )
+        _imm_content = _normalized_text(_imm_rendered.get("content_text"))
+        _imm_snapshot = {
+            "workflow_code": _normalized_text((workflow_bundle.get("workflow") or {}).get("workflow_code")),
+            "workflow_name": _normalized_text((workflow_bundle.get("workflow") or {}).get("workflow_name")),
+            "node_code": _normalized_text(node.get("node_code")),
+            "node_name": _normalized_text(node.get("node_name")),
+            "node_content_mode": _node_content_mode(node, workflow_bundle),
+            "node_generation_mode": _node_generation_mode(node, workflow_bundle),
+            "node_segmentation_basis": _node_segmentation_basis(node, workflow_bundle),
+            "workflow_generation_mode": _normalized_text((workflow_bundle.get("workflow") or {}).get("generation_mode")),
+            "workflow_segmentation_basis": _normalized_text((workflow_bundle.get("workflow") or {}).get("segmentation_basis")),
+            "standard_content_text": _normalized_text(node.get("standard_content_text")),
+            "rendered_content_text": _imm_content,
+            "content_source": _normalized_text(_imm_rendered.get("content_source")),
+            "fallback_reason": _normalized_text(_imm_rendered.get("fallback_reason")),
+            "agent_code": _normalized_text(_imm_rendered.get("agent_code")),
+            "segment_match": dict(_imm_rendered.get("segment_match") or {}),
+            "behavior_match": dict(_imm_rendered.get("behavior_match") or {}),
+        }
+
+        external_userid = _normalized_text((audience_entry.get("member") or {}).get("external_contact_id"))
+
+        if not external_userid:
+            workflow_repo.update_workflow_execution_item_row(
+                int(new_item["id"]),
+                {
+                    **new_item,
+                    "status": "skipped",
+                    "error_message": "missing_external_contact_id",
+                    "content_snapshot_json": _imm_snapshot,
+                    "rendered_content_text": _imm_content,
                 },
-                "finished_at": _iso_now() if final_status in _FINAL_EXECUTION_STATUSES else "",
+            )
+            workflow_repo.update_workflow_execution_row(
+                int(execution["id"]),
+                {**execution, "status": "finished", "finished_at": _iso_now(),
+                 "summary_json": {"note": "no_external_userid"}},
+            )
+            processed_executions.append(execution)
+            continue
+
+        if not _imm_content:
+            # 内容为空 — 标 failed，不入队
+            workflow_repo.update_workflow_execution_item_row(
+                int(new_item["id"]),
+                {
+                    **new_item,
+                    "status": "failed",
+                    "error_message": "rendered_content_empty",
+                    "content_snapshot_json": _imm_snapshot,
+                    "rendered_content_text": "",
+                    "agent_code": _imm_rendered.get("agent_code"),
+                    "agent_run_id": _imm_rendered.get("agent_run_id"),
+                    "agent_output_id": _imm_rendered.get("agent_output_id"),
+                },
+            )
+            processed_executions.append(execution)
+            continue
+
+        # 内容已渲染 — 更新 item 并入队给 broadcast worker 真发
+        workflow_repo.update_workflow_execution_item_row(
+            int(new_item["id"]),
+            {
+                **new_item,
+                "rendered_content_text": _imm_content,
+                "content_snapshot_json": _imm_snapshot,
+                "agent_code": _imm_rendered.get("agent_code"),
+                "agent_run_id": _imm_rendered.get("agent_run_id"),
+                "agent_output_id": _imm_rendered.get("agent_output_id"),
             },
         )
-        processed_executions.append(final_execution)
+
+        from ..broadcast_jobs import service as queue_service
+
+        queue_service.enqueue_job(
+            source_type="workflow",
+            source_id=execution_key,
+            source_table="automation_workflow_executions",
+            scheduled_for=datetime.now(),
+            target_external_userids=[external_userid],
+            target_summary=f"workflow immediate node={int(node.get('id') or 0)}",
+            content_type="private_message",
+            content_payload={
+                "execution_id": execution_key,
+                "workflow_id": int(execution.get("workflow_id") or 0),
+                "node_id": int(node.get("id") or 0),
+                "operator_id": operator_id,
+            },
+            content_summary=_imm_content[:200],
+        )
+        processed_executions.append(execution)
     result = {
         "ok": True,
         "status": "finished" if processed_executions else "no_candidates",
@@ -1786,6 +1941,122 @@ def _run_immediate_node(
     }
     _log_runtime_event("immediate_node_finished", result["summary"])
     return result
+
+
+def run_pre_scheduled_workflow_node(*, workflow_id: int, node_id: int) -> dict[str, Any]:
+    """预排期 workflow job 到期后由 worker 调用 — 走完整 node 执行流程。
+
+    与 _run_due_node 相同逻辑，但跳过"时间未到"检查（worker 已确保到期才 claim）。
+    创建 execution → 找候选人 → 入队真发 job（或直接返回 no-candidates）。
+    """
+    workflow_bundle = get_conversion_workflow_model_bundle(workflow_id)
+    node = None
+    for n in (workflow_bundle.get("nodes") or []):
+        if int(n.get("id") or 0) == node_id:
+            node = dict(n)
+            break
+    if not node:
+        return {"ok": False, "error": f"node {node_id} not found in workflow {workflow_id}"}
+    if not bool(node.get("enabled")):
+        return {"ok": True, "sent_count": 0, "failed_count": 0, "status": "node_disabled"}
+
+    # 调用 _run_due_node，它内部会判断时间 — 预排期 job 到期执行时 now >= scheduled 必然成立
+    result = _run_due_node(
+        workflow_bundle=workflow_bundle,
+        node=node,
+        operator_id="automation_conversion_workflow_runner",
+    )
+    # 如果 _run_due_node 返回 enqueued，说明它创建了新的 broadcast_job 来真发
+    # 此处 pre-scheduled job 本身视为成功（真发由新 job 接管）
+    status = _normalized_text(result.get("status")) if isinstance(result, dict) else ""
+    if status in ("enqueued", "already_processed", "already_enqueued"):
+        return {"ok": True, "sent_count": 0, "failed_count": 0, "status": status}
+    if status == "not_due_yet":
+        # 理论上不该发生（worker 到期才 claim），但防御性处理
+        return {"ok": True, "sent_count": 0, "failed_count": 0, "status": "not_due_yet"}
+    return result
+
+
+def run_workflow_execution(*, execution_data: dict[str, Any]) -> dict[str, Any]:
+    """broadcast_jobs handler 调用 — 执行一个 workflow execution 的 pending items。"""
+    execution_id_str = _normalized_text(execution_data.get("execution_id"))
+    workflow_id = int(execution_data.get("workflow_id") or 0)
+    node_id = int(execution_data.get("node_id") or 0)
+    operator_id = _normalized_text(execution_data.get("operator_id")) or "automation_conversion_workflow_runner"
+
+    if not execution_id_str or not workflow_id or not node_id:
+        return {"ok": False, "error": "missing execution_id, workflow_id, or node_id"}
+
+    execution = workflow_repo.get_workflow_execution_row_by_execution_id(execution_id_str)
+    if not execution:
+        return {"ok": False, "error": f"execution not found: {execution_id_str}"}
+    if _normalized_text(execution.get("status")) in _FINAL_EXECUTION_STATUSES:
+        return {"ok": True, "sent_count": 0, "failed_count": 0, "status": "already_finished"}
+
+    workflow_bundle = get_conversion_workflow_model_bundle(workflow_id)
+    node = None
+    for n in (workflow_bundle.get("nodes") or []):
+        if int(n.get("id") or 0) == node_id:
+            node = dict(n)
+            break
+    if not node:
+        return {"ok": False, "error": f"node {node_id} not found in workflow {workflow_id}"}
+
+    audience_map: dict[int, dict[str, Any]] = {}
+    execution_items = workflow_repo.list_workflow_execution_item_rows(int(execution["id"]))
+    sent_count = 0
+    failed_count = 0
+    for item in execution_items:
+        if _normalized_text(item.get("status")) != "pending":
+            continue
+        audience_entry = audience_map.get(int(item.get("audience_entry_id") or 0)) or {}
+        result_item = _process_execution_item(
+            execution=execution,
+            execution_item=item,
+            workflow_bundle=workflow_bundle,
+            node=node,
+            audience_entry=audience_entry,
+            operator_id=operator_id,
+        )
+        if _normalized_text((result_item or {}).get("status")) == "sent":
+            sent_count += 1
+        else:
+            failed_count += 1
+
+    refreshed_items = workflow_repo.list_workflow_execution_item_rows(int(execution["id"]))
+    final_status, counters = _execution_summary_from_items(refreshed_items)
+    # 合并 cron 阶段存的 diagnostics（如 day_offset_miss_count 等）
+    prior_summary = execution.get("summary_json") or {}
+    diagnostics = {
+        **(prior_summary.get("diagnostics") or {}),
+        "workflow_id": workflow_id,
+        "node_id": node_id,
+    }
+    summary_json = _execution_summary_json(
+        workflow_bundle=workflow_bundle,
+        node=node,
+        diagnostics=diagnostics,
+        counters=counters,
+    )
+    workflow_repo.update_workflow_execution_row(
+        int(execution["id"]),
+        {
+            **execution,
+            "status": final_status,
+            "total_count": counters["total_count"],
+            "success_count": counters["success_count"],
+            "skipped_count": counters["skipped_count"],
+            "failed_count": counters["failed_count"],
+            "summary_json": summary_json,
+            "finished_at": _iso_now() if final_status in _FINAL_EXECUTION_STATUSES else "",
+        },
+    )
+    get_db().commit()
+    return {
+        "ok": True,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+    }
 
 
 def run_due_conversion_workflows(*, operator_id: str = "", operator_type: str = "system") -> dict[str, Any]:
@@ -1816,6 +2087,10 @@ def run_due_conversion_workflows(*, operator_id: str = "", operator_type: str = 
     total_skipped_count = sum(int(item.get("skipped_count") or 0) for item in execution_rows)
     total_failed_count = sum(int(item.get("failed_count") or 0) for item in execution_rows)
     get_db().commit()
+
+    # 阶段 2：为明天要跑的 workflow node 预排期到 broadcast_jobs（让队列页展示排期）
+    future_enqueued = _pre_enqueue_future_workflow_nodes()
+
     result = {
         "ok": True,
         "operator_type": _normalized_text(operator_type) or "system",
@@ -1824,6 +2099,7 @@ def run_due_conversion_workflows(*, operator_id: str = "", operator_type: str = 
         "scanned_workflow_count": scanned_workflow_count,
         "processed_node_count": processed_node_count,
         "execution_count": len(execution_rows),
+        "future_enqueued": future_enqueued,
         "total_success_count": total_success_count,
         "total_skipped_count": total_skipped_count,
         "total_failed_count": total_failed_count,
@@ -1838,9 +2114,92 @@ def run_due_conversion_workflows(*, operator_id: str = "", operator_type: str = 
             "scanned_workflow_count": scanned_workflow_count,
             "processed_node_count": processed_node_count,
             "execution_count": len(execution_rows),
+            "future_enqueued": future_enqueued,
             "total_success_count": total_success_count,
             "total_skipped_count": total_skipped_count,
             "total_failed_count": total_failed_count,
         },
     )
     return result
+
+
+def _pre_enqueue_future_workflow_nodes() -> int:
+    """为明天（下一个自然日）将触发的 workflow node 预排期到 broadcast_jobs。
+
+    让队列页提前展示"明天 14:00 将执行 xxx 工作流"。到时间后 worker 领取
+    预排期 job，handler 走正常 _run_due_node 流程（现场决策候选人）。
+
+    滚动机制：每次 cron 跑完今天的 node 后调用此函数，为下一天排期。
+    明天 cron 跑后又为后天排期，依此类推。
+    """
+    from ..broadcast_jobs import service as queue_service
+    from ..broadcast_jobs import repo as queue_repo
+
+    tomorrow = _now_dt() + timedelta(days=1)
+    enqueued = 0
+
+    # 已有的 queued workflow jobs → 用于去重
+    existing_jobs = queue_repo.fetch_jobs_filtered(
+        statuses=["queued", "claimed"],
+        source_types=["workflow"],
+        limit=200,
+    )
+    existing_source_ids = {str(j.get("source_id") or "") for j in existing_jobs}
+
+    for workflow_row in workflow_repo.list_workflow_rows(include_archived=False, status=WORKFLOW_STATUS_ACTIVE):
+        workflow_bundle = get_conversion_workflow_model_bundle(int(workflow_row["id"]))
+        workflow = workflow_bundle.get("workflow") or {}
+        for node in workflow_bundle.get("nodes") or []:
+            if not bool(node.get("enabled")):
+                continue
+            trigger_mode = _node_trigger_mode(node)
+            # audience_entered 不走定时，跳过
+            if trigger_mode == NODE_TRIGGER_MODE_AUDIENCE_ENTERED:
+                continue
+            # 计算明天该 node 的 scheduled_for
+            h, m = _parse_send_time(node.get("send_time"))
+            scheduled_for_dt = tomorrow.replace(hour=h, minute=m, second=0, microsecond=0)
+            # 构造 execution_id（与 _run_due_node 一致）
+            execution_key = (
+                f"acwf-{int(workflow.get('id') or 0)}-"
+                f"{int(node.get('id') or 0)}-"
+                f"{scheduled_for_dt.strftime('%Y%m%d%H%M')}"
+            )
+            if execution_key in existing_source_ids:
+                continue
+            # 估算候选人数（当前 audience pool 大小，实际到时才确定）
+            audience_code = _normalized_text(node.get("target_audience_code"))
+            audience_rows = workflow_repo.list_current_member_audience_rows(audience_code)
+            estimated_count = len(audience_rows)
+            if estimated_count == 0:
+                continue
+            # 取一个 placeholder external_userid 用于满足 enqueue_job 的非空要求
+            # 实际发送时 handler 会重新决策候选人
+            placeholder_externals = [
+                _normalized_text((r.get("member") or {}).get("external_contact_id"))
+                for r in audience_rows
+                if _normalized_text((r.get("member") or {}).get("external_contact_id"))
+            ][:5]  # 只取前 5 个做占位，避免 payload 过大
+            if not placeholder_externals:
+                continue
+            node_name = _normalized_text(node.get("node_name")) or f"node-{node.get('id')}"
+            workflow_name = _normalized_text(workflow.get("workflow_name")) or f"workflow-{workflow.get('id')}"
+            queue_service.enqueue_job(
+                source_type="workflow",
+                source_id=execution_key,
+                source_table="automation_workflow_executions",
+                scheduled_for=scheduled_for_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                target_external_userids=placeholder_externals,
+                target_summary=f"workflow node={int(node.get('id') or 0)} — ~{estimated_count} 人",
+                content_type="private_message",
+                content_payload={
+                    "workflow_id": int(workflow.get("id") or 0),
+                    "node_id": int(node.get("id") or 0),
+                    "pre_scheduled": True,
+                },
+                content_summary=f"[{workflow_name}] {node_name}",
+            )
+            existing_source_ids.add(execution_key)
+            enqueued += 1
+
+    return enqueued

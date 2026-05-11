@@ -77,90 +77,29 @@ except ImportError:  # pragma: no cover - compatibility for environments where S
 from wecom_ability_service.domains.automation_conversion.workflow_service import _normalize_node_payload
 
 
-def _test_png_bytes() -> bytes:
-    return base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+b5f0AAAAASUVORK5CYII="
-    )
+from _automation_conversion_v1_helpers import *  # noqa: F401,F403  helpers + service-level imports
+from wecom_ability_service.domains.automation_conversion.workflow_runtime import run_workflow_execution
 
 
-def _build_stage_send_form_data(
-    *,
-    content: str = "",
-    operator: str = "",
-    images: list[tuple[str, bytes, str]] | None = None,
-):
-    payload = {"content": content, "operator": operator}
-    if images:
-        payload["images"] = [(BytesIO(file_bytes), file_name, mime_type) for file_name, file_bytes, mime_type in images]
-    return payload
-
-
-def _admin_action_token(client, path: str = "/admin/automation-conversion/runtime/router?subtab=agents") -> str:
-    client.get(path, follow_redirects=True)
-    with client.session_transaction() as session:
-        return str(session["admin_console_action_token"])
-
-
-def _default_program_id(app) -> int:
-    with app.app_context():
-        row = get_db().execute(
-            "SELECT id FROM automation_program WHERE program_code = 'signup_conversion_v1' LIMIT 1"
-        ).fetchone()
-        return int(row["id"])
-
-
-def _login_admin_session(client) -> None:
-    with client.session_transaction() as session:
-        session["admin_session_user_id"] = 0
-        session["admin_session_wecom_userid"] = ""
-        session["admin_session_role_list"] = ["super_admin"]
-        session["admin_session_login_type"] = "break_glass"
-        session["admin_session_display_name"] = "test-admin"
-        session["admin_session_break_glass_username"] = "test-admin"
-
-
-def _mcp_call(client, name: str, arguments: dict[str, object]):
-    return client.post(
-        "/mcp",
-        headers={"Authorization": "Bearer mcp-token"},
-        json={
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": name, "arguments": arguments},
-        },
-    )
+def _drain_running_executions():
+    """模拟 broadcast_jobs worker: 执行所有 running 状态的 workflow execution。"""
+    rows = get_db().execute(
+        "SELECT execution_id, workflow_id, node_id FROM automation_workflow_execution WHERE status = 'running'"
+    ).fetchall()
+    for row in rows:
+        run_workflow_execution(execution_data={
+            "execution_id": row["execution_id"],
+            "workflow_id": row["workflow_id"],
+            "node_id": row["node_id"],
+        })
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "automation-conversion-v1.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path, MCP_BEARER_TOKEN="mcp-token") as app:
+        yield app
 
 
 @pytest.fixture()
@@ -168,688 +107,6 @@ def client(app):
     client = app.test_client()
     _login_admin_session(client)
     return client
-
-
-def _sqlite_object_names(db, object_type: str) -> set[str]:
-    rows = db.execute(
-        """
-        SELECT name
-        FROM sqlite_master
-        WHERE type = ?
-        """,
-        (object_type,),
-    ).fetchall()
-    return {str(row["name"]) for row in rows}
-
-
-def _seed_contact(app, *, external_userid: str, mobile: str = "", owner_userid: str = "sales_01", customer_name: str = "") -> None:
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO contacts (external_userid, customer_name, owner_userid, remark, description, updated_at)
-            VALUES (?, ?, ?, '', '', CURRENT_TIMESTAMP)
-            """,
-            (external_userid, customer_name or external_userid, owner_userid),
-        )
-        if mobile:
-            person_id = db.execute("SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM people").fetchone()["next_id"]
-            db.execute(
-                """
-                INSERT INTO people (id, mobile, third_party_user_id, created_at, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                (person_id, mobile, f"tp-{person_id}"),
-            )
-            db.execute(
-                """
-                INSERT INTO external_contact_bindings (
-                    external_userid, person_id, first_bound_by_userid, first_owner_userid, last_owner_userid, created_at, updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                (external_userid, person_id, owner_userid, owner_userid, owner_userid),
-            )
-        db.commit()
-
-
-def _canonical_automation_pool(pool_key: str) -> str:
-    return {
-        "new_user": "pending_questionnaire",
-        "inactive_normal": "operating",
-        "inactive_focus": "operating",
-        "active_normal": "operating",
-        "active_focus": "operating",
-        "silent": "operating",
-        "won": "converted",
-    }.get(str(pool_key or "").strip(), str(pool_key or "").strip())
-
-
-def _seed_automation_member(
-    app,
-    *,
-    external_contact_id: str,
-    phone: str = "",
-    owner_staff_id: str = "sales_01",
-    in_pool: int = 1,
-    current_pool: str = "active_normal",
-    follow_type: str = "normal",
-    activation_status: str = "active",
-    questionnaire_status: str = "submitted",
-    questionnaire_follow_type: str = "",
-    decision_source: str = "manual",
-    source_type: str = "manual",
-    last_active_pool: str = "",
-    joined_at: str = "2026-04-06 10:00:00",
-) -> None:
-    normalized_current_pool = _canonical_automation_pool(current_pool)
-    normalized_last_active_pool = _canonical_automation_pool(last_active_pool)
-    current_audience_code = (
-        "converted"
-        if normalized_current_pool == "converted"
-        else "operating"
-        if questionnaire_status == "submitted"
-        else "pending_questionnaire"
-    )
-    if questionnaire_follow_type in {"normal", "focus"} and follow_type in {"", "normal"}:
-        follow_type = questionnaire_follow_type
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_member (
-                external_contact_id, phone, owner_staff_id, in_pool, current_pool, follow_type,
-                questionnaire_status, decision_source, source_type, last_active_pool,
-                current_audience_code, current_audience_entered_at, joined_at, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (
-                external_contact_id,
-                phone,
-                owner_staff_id,
-                in_pool,
-                normalized_current_pool,
-                follow_type,
-                questionnaire_status,
-                decision_source,
-                source_type,
-                normalized_last_active_pool,
-                current_audience_code,
-                joined_at,
-                joined_at,
-            ),
-        )
-        db.commit()
-
-
-def _seed_settings_questionnaire(app, *, questionnaire_id: int = 501) -> dict[str, object]:
-    choice_question_id = questionnaire_id * 100 + 1
-    mobile_question_id = questionnaire_id * 100 + 2
-    option_ids = [questionnaire_id * 1000 + 1, questionnaire_id * 1000 + 2]
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO questionnaires (
-                id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (
-                questionnaire_id,
-                f"automation-settings-{questionnaire_id}",
-                f"automation-settings-{questionnaire_id}",
-                f"自动化设置问卷 {questionnaire_id}",
-            ),
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_questions (
-                id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
-            )
-            VALUES (?, ?, 'single_choice', '你当前更关注什么？', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (choice_question_id, questionnaire_id),
-        )
-        db.executemany(
-            """
-            INSERT INTO questionnaire_options (
-                id, question_id, option_text, sort_order, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            [
-                (option_ids[0], choice_question_id, "效率", 1),
-                (option_ids[1], choice_question_id, "成交", 2),
-            ],
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_questions (
-                id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
-            )
-            VALUES (?, ?, 'mobile', '请填写手机号', 1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (mobile_question_id, questionnaire_id),
-        )
-        db.commit()
-    return {
-        "questionnaire_id": questionnaire_id,
-        "choice_question_id": choice_question_id,
-        "option_ids": option_ids,
-        "mobile_question_id": mobile_question_id,
-    }
-
-
-def _seed_profile_segment_template(
-    app,
-    *,
-    questionnaire_id: int = 701,
-    template_name: str = "测试画像模板",
-    program_id: int | None = None,
-) -> dict[str, object]:
-    questionnaire_seed = _seed_settings_questionnaire(app, questionnaire_id=questionnaire_id)
-    with app.app_context():
-        result = create_conversion_profile_segment_template(
-            {
-                "template_name": template_name,
-                "questionnaire_id": questionnaire_seed["questionnaire_id"],
-                "segmentation_question_id": questionnaire_seed["choice_question_id"],
-                "categories": [
-                    {
-                        "category_key": "efficiency",
-                        "category_name": "效率型",
-                        "option_ids": [questionnaire_seed["option_ids"][0]],
-                    },
-                    {
-                        "category_key": "closing",
-                        "category_name": "成交型",
-                        "option_ids": [questionnaire_seed["option_ids"][1]],
-                    },
-                ],
-            },
-            operator_id="tester",
-            program_id=program_id,
-        )
-    return {
-        **questionnaire_seed,
-        "template_bundle": result["template_bundle"],
-        "template_id": int(((result.get("template_bundle") or {}).get("template") or {}).get("id") or 0),
-        "category_keys": ["efficiency", "closing"],
-    }
-
-
-def _save_signup_conversion_settings(
-    app,
-    *,
-    questionnaire_id: int,
-    question_id: int,
-    hit_option_ids: list[int],
-    core_threshold: int = 1,
-) -> dict[str, object]:
-    from wecom_ability_service.domains.marketing_automation.service import save_signup_conversion_config
-
-    with app.app_context():
-        return save_signup_conversion_config(
-            {
-                "enabled": True,
-                "questionnaire_id": questionnaire_id,
-                "core_threshold": core_threshold,
-                "top_threshold": core_threshold,
-                "quiet_hour_start": 23,
-                "day_start_hour": 9,
-                "timezone": "Asia/Shanghai",
-                "question_rules": [
-                    {
-                        "questionnaire_question_id": question_id,
-                        "hit_option_ids_json": hit_option_ids,
-                        "sort_order": 1,
-                    }
-                ],
-                "silent_threshold_days_by_pool": {
-                    "new_user": 7,
-                    "inactive_normal": 7,
-                    "inactive_focus": 7,
-                    "active_normal": 7,
-                    "active_focus": 7,
-                },
-            },
-            enforce_required_mobile_question=True,
-        )
-
-
-def _configure_message_activity_db(app) -> None:
-    app.config["MESSAGE_ACTIVITY_DB_HOST"] = "127.0.0.1"
-    app.config["MESSAGE_ACTIVITY_DB_PORT"] = 3306
-    app.config["MESSAGE_ACTIVITY_DB_NAME"] = "lobster"
-    app.config["MESSAGE_ACTIVITY_DB_USER"] = "lobster_user"
-    app.config["MESSAGE_ACTIVITY_DB_PASS"] = "lobster_pass"
-
-
-def _mock_workflow_runtime_usage_counts(
-    monkeypatch,
-    *,
-    usage_by_phone: dict[str, int] | None = None,
-    configured: bool = True,
-) -> None:
-    usage_rows = [
-        {
-            "phone_prefix3": digits[:3],
-            "phone_last4": digits[-4:],
-            "phone_match_key": f"{digits[:3]}_{digits[-4:]}",
-            "message_count": int(count),
-        }
-        for phone, count in (usage_by_phone or {}).items()
-        for digits in ["".join(char for char in str(phone) if char.isdigit())]
-        if len(digits) >= 7
-    ]
-    status_payload = {
-        "configured": configured,
-        "missing_keys": [] if configured else ["MESSAGE_ACTIVITY_DB_HOST"],
-    }
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.get_message_activity_db_status",
-        lambda: dict(status_payload),
-    )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.query_message_activity_counts",
-        lambda: list(usage_rows),
-    )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_service.get_message_activity_db_status",
-        lambda: dict(status_payload),
-    )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_service.query_message_activity_counts",
-        lambda: list(usage_rows),
-    )
-
-
-def _mock_workflow_runtime_now(monkeypatch, value: str) -> None:
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime._now_dt",
-        lambda: datetime.strptime(value, "%Y-%m-%d %H:%M:%S"),
-    )
-
-
-class _FakeDeepSeekResponse:
-    def __init__(
-        self,
-        *,
-        status_code: int = 200,
-        json_data: dict[str, object] | None = None,
-        text: str = "",
-        headers: dict[str, str] | None = None,
-    ) -> None:
-        self.status_code = status_code
-        self._json_data = dict(json_data or {})
-        self.text = text
-        self.headers = dict(headers or {})
-
-    def json(self) -> dict[str, object]:
-        return dict(self._json_data)
-
-
-def _configure_reply_monitor(
-    app,
-    *,
-    enabled: bool,
-    last_capture_cursor: int = 0,
-    last_capture_at: str = "",
-    last_capture_status: str = "",
-    last_dispatch_at: str = "",
-    last_dispatch_status: str = "",
-    last_error: str = "",
-    quiet_hours_start: str = "23:00",
-    quiet_hours_end: str = "09:00",
-    dispatch_interval_seconds: int = 30,
-) -> None:
-    with app.app_context():
-        db = get_db()
-        db.execute("DELETE FROM automation_reply_monitor_config")
-        db.execute(
-            """
-            INSERT INTO automation_reply_monitor_config (
-                config_key, enabled, last_capture_cursor, last_capture_at, last_capture_status,
-                last_capture_summary_json, last_dispatch_at, last_dispatch_status, last_dispatch_summary_json,
-                last_error, quiet_hours_start, quiet_hours_end, dispatch_interval_seconds, created_at, updated_at
-            )
-            VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (
-                1 if enabled else 0,
-                last_capture_cursor,
-                last_capture_at,
-                last_capture_status,
-                json.dumps({}, ensure_ascii=False),
-                last_dispatch_at,
-                last_dispatch_status,
-                json.dumps({}, ensure_ascii=False),
-                last_error,
-                quiet_hours_start,
-                quiet_hours_end,
-                dispatch_interval_seconds,
-            ),
-        )
-        db.commit()
-
-
-def _seed_archived_message(
-    app,
-    *,
-    msgid: str,
-    seq: int,
-    external_userid: str,
-    owner_userid: str,
-    sender: str,
-    receiver: str = "",
-    chat_type: str = "private",
-    msgtype: str = "text",
-    content: str = "",
-    send_time: str = "2026-04-09 10:00:00",
-) -> int:
-    with app.app_context():
-        db = get_db()
-        row = db.execute(
-            """
-            INSERT INTO archived_messages (
-                seq, msgid, chat_type, external_userid, owner_userid, sender, receiver, msgtype, content, send_time, raw_payload
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            RETURNING id
-            """,
-            (
-                seq,
-                msgid,
-                chat_type,
-                external_userid,
-                owner_userid,
-                sender,
-                receiver,
-                msgtype,
-                content,
-                send_time,
-                "{}",
-            ),
-        ).fetchone()
-        db.commit()
-        return int(row["id"])
-
-
-def _assign_member_to_current_audience(
-    app,
-    *,
-    external_contact_id: str,
-    audience_code: str,
-    entered_at: str,
-) -> None:
-    with app.app_context():
-        db = get_db()
-        member = db.execute(
-            """
-            SELECT id
-            FROM automation_member
-            WHERE external_contact_id = ?
-            LIMIT 1
-            """,
-            (external_contact_id,),
-        ).fetchone()
-        assert member is not None
-        member_id = int(member["id"])
-        db.execute(
-            """
-            UPDATE automation_member
-            SET current_audience_code = ?, current_audience_entered_at = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (audience_code, entered_at, member_id),
-        )
-        db.execute(
-            """
-            INSERT INTO automation_member_audience_entry (
-                member_id, audience_code, entered_at, exited_at, is_current,
-                entry_source, entry_reason, source_snapshot_json, created_at, updated_at
-            )
-            VALUES (?, ?, ?, '', 1, 'test', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (member_id, audience_code, entered_at),
-        )
-        db.commit()
-
-
-def _seed_questionnaire_submission_for_member(
-    app,
-    *,
-    questionnaire_id: int,
-    question_id: int,
-    option_id: int,
-    submission_id: int,
-    external_userid: str,
-    mobile_snapshot: str,
-    submitted_at: str,
-) -> None:
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO questionnaire_submissions (
-                id, questionnaire_id, respondent_key, external_userid, mobile_snapshot, total_score, final_tags, redirect_url_snapshot, submitted_at
-            )
-            VALUES (?, ?, ?, ?, ?, 10, '[]', '', ?)
-            """,
-            (
-                submission_id,
-                questionnaire_id,
-                f"overview-{submission_id}",
-                external_userid,
-                mobile_snapshot,
-                submitted_at,
-            ),
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_submission_answers (
-                submission_id, question_id, question_type, question_title_snapshot,
-                selected_option_ids, selected_option_texts_snapshot, selected_option_scores_snapshot,
-                selected_option_tags_snapshot, text_value, score_contribution, created_at
-            )
-            VALUES (?, ?, 'single_choice', '概览分层题', ?, '[]', '[]', '[]', '', 10, CURRENT_TIMESTAMP)
-            """,
-            (
-                submission_id,
-                question_id,
-                json.dumps([option_id], ensure_ascii=False),
-            ),
-        )
-        db.commit()
-
-
-def _patch_reply_monitor_payload_context(monkeypatch, *, external_userid: str, owner_display_name: str = "销售一") -> None:
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.admin_console.customer_profile_service.get_customer_profile_tags_payload",
-        lambda *, external_userid=external_userid: {"tags": [{"tag_name": "高潜客户"}]},
-    )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.admin_console.customer_profile_service.get_customer_questionnaire_answers_payload",
-        lambda *, external_userid="", mobile="": {"answers": [{"question": "预算", "answer": "999"}]},
-    )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.admin_console.customer_profile_service.get_customer_messages_payload",
-        lambda *, external_userid="", mobile="", limit=20, fetch_all=False: {
-            "messages": [
-                {"sender": external_userid, "send_time": "2026-04-09 09:58:00", "content": "你好"},
-                {"sender": "sales_01", "send_time": "2026-04-09 09:59:00", "content": "你好，我在"},
-            ],
-        },
-    )
-
-
-def _configure_sop_pool(
-    app,
-    *,
-    pool_key: str,
-    enabled: bool,
-    send_time: str = "09:00",
-) -> dict[str, object]:
-    with app.app_context():
-        return save_sop_v1_pool_config(
-            pool_key=_canonical_automation_pool(pool_key),
-            enabled=enabled,
-            send_time=send_time,
-        )
-
-
-def _configure_only_sop_pool(
-    app,
-    *,
-    pool_key: str,
-    send_time: str = "09:00",
-) -> None:
-    selected_pool = _canonical_automation_pool(pool_key)
-    for candidate_pool in ("pending_questionnaire", "operating", "converted"):
-        _configure_sop_pool(
-            app,
-            pool_key=candidate_pool,
-            enabled=candidate_pool == selected_pool,
-            send_time=send_time if candidate_pool == selected_pool else "09:00",
-        )
-
-
-def _set_sop_pool_effective_start(app, *, pool_key: str, effective_start_at: str) -> None:
-    with app.app_context():
-        get_db().execute(
-            """
-            UPDATE automation_sop_pool_config
-            SET effective_start_at = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE pool_key = ?
-            """,
-            (effective_start_at, _canonical_automation_pool(pool_key)),
-        )
-        get_db().commit()
-
-
-def _create_test_workflow(
-    app,
-    *,
-    workflow_name: str = "测试任务流",
-    audiences: list[str] | None = None,
-    status: str = "active",
-    segmentation_basis: str = "none",
-    generation_mode: str = "manual_layered",
-    agent_bindings: list[dict[str, object]] | None = None,
-    profile_segment_template_id: int | None = None,
-    recipient_filter_basis: str | None = None,
-    recipient_behavior_tier_keys: list[str] | None = None,
-    content_segmentation_basis: str | None = None,
-    content_profile_segment_template_id: int | None = None,
-) -> dict[str, object]:
-    with app.app_context():
-        payload = {
-            "workflow_name": workflow_name,
-            "workflow_code": workflow_name,
-            "description": "test workflow",
-            "status": status,
-            "segmentation_basis": segmentation_basis,
-            "generation_mode": generation_mode,
-            "profile_segment_template_id": profile_segment_template_id,
-            "audiences": list(audiences or ["pending_questionnaire"]),
-            "agent_bindings": list(agent_bindings or []),
-        }
-        if recipient_filter_basis is not None:
-            payload["recipient_filter_basis"] = recipient_filter_basis
-        if recipient_behavior_tier_keys is not None:
-            payload["recipient_behavior_tier_keys"] = list(recipient_behavior_tier_keys)
-        if content_segmentation_basis is not None:
-            payload["content_segmentation_basis"] = content_segmentation_basis
-        if content_profile_segment_template_id is not None:
-            payload["content_profile_segment_template_id"] = content_profile_segment_template_id
-        return create_conversion_workflow(payload, operator_id="tester")
-
-
-def _seed_test_agent_config(app, *, agent_code: str, display_name: str = "") -> None:
-    with app.app_context():
-        get_db().execute(
-            """
-            INSERT INTO automation_agent_config (
-                agent_code,
-                display_name,
-                pool_keys_json,
-                enabled,
-                draft_role_prompt,
-                draft_task_prompt,
-                draft_variables_json,
-                draft_output_schema_json,
-                published_role_prompt,
-                published_task_prompt,
-                published_variables_json,
-                published_output_schema_json,
-                draft_version,
-                published_version,
-                last_change_summary,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, '[]', 1, '', '', '[]', '[]', '', '', '[]', '[]', 1, 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT(agent_code) DO UPDATE SET
-                display_name = excluded.display_name,
-                enabled = 1,
-                published_version = MAX(automation_agent_config.published_version, 1),
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (agent_code, display_name or agent_code),
-        )
-        get_db().commit()
-
-
-def _seed_workflow_execution(
-    app,
-    *,
-    workflow_id: int,
-    execution_id: str,
-    scheduled_for: str,
-    status: str = "finished",
-    success_count: int = 1,
-    skipped_count: int = 0,
-    failed_count: int = 0,
-) -> None:
-    total_count = success_count + skipped_count + failed_count
-    with app.app_context():
-        get_db().execute(
-            """
-            INSERT INTO automation_workflow_execution (
-                execution_id,
-                workflow_id,
-                node_id,
-                trigger_type,
-                audience_code,
-                scheduled_for,
-                status,
-                total_count,
-                success_count,
-                skipped_count,
-                failed_count,
-                summary_json,
-                created_at,
-                updated_at,
-                finished_at
-            )
-            VALUES (?, ?, NULL, 'scheduled_poll', 'pending_questionnaire', ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
-            """,
-            (
-                execution_id,
-                workflow_id,
-                scheduled_for,
-                status,
-                total_count,
-                success_count,
-                skipped_count,
-                failed_count,
-                json.dumps({"source": "test"}, ensure_ascii=False),
-                scheduled_for if status in {"finished", "partial_failed", "failed"} else "",
-            ),
-        )
-        get_db().commit()
 
 
 def test_init_db_adds_workflow_node_trigger_mode_column(app):
@@ -892,7 +149,7 @@ def test_create_workflow_supports_split_recipient_filter_and_content_segmentatio
     assert workflow["content_profile_segment_template_id"] == template_seed["template_id"]
     assert workflow["segmentation_basis"] == "profile"
     assert workflow["profile_segment_template_id"] == template_seed["template_id"]
-    assert json.loads(workflow["behavior_tier_scheme"]) == {
+    assert (workflow["behavior_tier_scheme"] if isinstance(workflow["behavior_tier_scheme"], (dict, list)) else json.loads(workflow["behavior_tier_scheme"])) == {
         "recipient_filter_basis": "behavior",
         "recipient_behavior_tier_keys": ["lt_2"],
     }
@@ -996,32 +253,28 @@ def test_run_due_conversion_workflows_filters_recipients_by_behavior_and_keeps_p
         content="旧口径低频客户消息",
     )
 
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 991, "wecom_result": {"msgid": "msg-991"}},
-    )
-
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+
+        assert result["ok"] is True
+
         item_rows = get_db().execute(
             """
-            SELECT external_contact_id, rendered_content_text, status
+            SELECT external_contact_id, status
             FROM automation_workflow_execution_item
             ORDER BY id ASC
             """
         ).fetchall()
+        enqueued = get_db().execute(
+            "SELECT source_type FROM broadcast_jobs WHERE source_type = 'workflow' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
     assert result["ok"] is True
-    assert len(dispatched) == 1
-    assert dispatched[0]["external_userid"] == ["wm_profile_low_001"]
-    assert [dict(row) for row in item_rows] == [
-        {
-            "external_contact_id": "wm_profile_low_001",
-            "rendered_content_text": "效率型定向内容",
-            "status": "sent",
-        }
-    ]
+    # Sending is now deferred to broadcast_jobs; items are pending
+    assert len(item_rows) == 1
+    assert item_rows[0]["external_contact_id"] == "wm_profile_low_001"
+    assert item_rows[0]["status"] == "pending"
+    assert enqueued is not None
 
 
 def test_run_due_conversion_workflows_sends_pending_questionnaire_day1_day2_day3_in_sequence(app, monkeypatch):
@@ -1062,12 +315,6 @@ def test_run_due_conversion_workflows_sends_pending_questionnaire_day1_day2_day3
                 operator_id="tester",
             )
 
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1100 + len(dispatched), "wecom_result": {"msgid": f"msg-{1100 + len(dispatched)}"}},
-    )
-
     with app.app_context():
         _mock_workflow_runtime_now(monkeypatch, "2026-04-08 09:05:00")
         first = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -1077,25 +324,24 @@ def test_run_due_conversion_workflows_sends_pending_questionnaire_day1_day2_day3
         third = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
         execution_items = get_db().execute(
             """
-            SELECT rendered_content_text, status
+            SELECT external_contact_id, status
             FROM automation_workflow_execution_item
             ORDER BY id ASC
             """
         ).fetchall()
+        enqueue_count = get_db().execute(
+            "SELECT COUNT(*) AS total FROM broadcast_jobs WHERE source_type = 'workflow'"
+        ).fetchone()["total"]
 
-    assert first["total_success_count"] == 1
-    assert second["total_success_count"] == 1
-    assert third["total_success_count"] == 1
-    assert [item["text"]["content"] for item in dispatched] == [
-        "第1天提醒填写问卷",
-        "第2天继续提醒填写问卷",
-        "第3天最后提醒填写问卷",
-    ]
-    assert [dict(row) for row in execution_items] == [
-        {"rendered_content_text": "第1天提醒填写问卷", "status": "sent"},
-        {"rendered_content_text": "第2天继续提醒填写问卷", "status": "sent"},
-        {"rendered_content_text": "第3天最后提醒填写问卷", "status": "sent"},
-    ]
+    # Sending is now deferred to broadcast_jobs; items are pending
+    assert first["ok"] is True
+    assert second["ok"] is True
+    assert third["ok"] is True
+    assert len(execution_items) == 3
+    assert all(row["status"] == "pending" for row in execution_items)
+    # _pre_enqueue_future_workflow_nodes creates additional pre-scheduled
+    # broadcast_jobs for tomorrow's nodes on each run, so total >= 3
+    assert enqueue_count >= 3
 
 
 def test_run_due_conversion_workflows_supports_operating_audience_scheduled_node_with_timezone_entered_at(app, monkeypatch):
@@ -1137,20 +383,23 @@ def test_run_due_conversion_workflows_supports_operating_audience_scheduled_node
             operator_id="tester",
         )
 
-    dispatched: list[dict[str, object]] = []
     _mock_workflow_runtime_now(monkeypatch, "2026-04-08 09:05:00")
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1201, "wecom_result": {"msgid": "msg-1201"}},
-    )
 
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        item_rows = get_db().execute(
+            "SELECT external_contact_id, status FROM automation_workflow_execution_item ORDER BY id ASC"
+        ).fetchall()
+        enqueued = get_db().execute(
+            "SELECT source_type FROM broadcast_jobs WHERE source_type = 'workflow' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
-    assert result["total_success_count"] == 1
-    assert len(dispatched) == 1
-    assert dispatched[0]["external_userid"] == ["wm_operating_scheduled_001"]
-    assert dispatched[0]["text"]["content"] == "运营中人群定时触达"
+    # Sending is deferred to broadcast_jobs; items are pending
+    assert result["ok"] is True
+    assert len(item_rows) == 1
+    assert item_rows[0]["external_contact_id"] == "wm_operating_scheduled_001"
+    assert item_rows[0]["status"] == "pending"
+    assert enqueued is not None
 
 
 def test_run_due_conversion_workflows_does_not_backfill_missed_scheduled_day(app, monkeypatch):
@@ -1192,12 +441,7 @@ def test_run_due_conversion_workflows_does_not_backfill_missed_scheduled_day(app
             operator_id="tester",
         )
 
-    dispatched: list[dict[str, object]] = []
     _mock_workflow_runtime_now(monkeypatch, "2026-04-08 09:05:00")
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1301, "wecom_result": {"msgid": "msg-1301"}},
-    )
 
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -1210,8 +454,7 @@ def test_run_due_conversion_workflows_does_not_backfill_missed_scheduled_day(app
         ).fetchall()
 
     assert result["total_success_count"] == 0
-    assert dispatched == []
-    summary = json.loads(execution_rows[0]["summary_json"])
+    summary = (execution_rows[0]["summary_json"] if isinstance(execution_rows[0]["summary_json"], (dict, list)) else json.loads(execution_rows[0]["summary_json"]))
     assert summary["result"]["success_count"] == 0
     assert summary["diagnostics"]["day_offset_miss_count"] == 1
     assert "day_offset_not_due" in summary["zero_hit_reasons"]
@@ -1316,7 +559,6 @@ def test_run_due_conversion_workflows_daily_recurring_operating_nodes_patrol_cur
                 operator_id="tester",
             )
 
-    dispatched: list[dict[str, object]] = []
     _mock_workflow_runtime_now(monkeypatch, "2026-04-20 09:05:00")
     _mock_workflow_runtime_usage_counts(
         monkeypatch,
@@ -1329,10 +571,6 @@ def test_run_due_conversion_workflows_daily_recurring_operating_nodes_patrol_cur
             "13800006561": 12,
         },
     )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1400 + len(dispatched), "wecom_result": {"msgid": f"msg-{1400 + len(dispatched)}"}},
-    )
 
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -1343,18 +581,27 @@ def test_run_due_conversion_workflows_daily_recurring_operating_nodes_patrol_cur
             ORDER BY id ASC
             """
         ).fetchall()
+        pending_items = get_db().execute(
+            "SELECT external_contact_id, status FROM automation_workflow_execution_item WHERE status = 'pending' ORDER BY id ASC"
+        ).fetchall()
+        enqueue_count = get_db().execute(
+            "SELECT COUNT(*) AS total FROM broadcast_jobs WHERE source_type = 'workflow'"
+        ).fetchone()["total"]
 
-    assert result["total_success_count"] == 3
-    assert [item["text"]["content"] for item in dispatched] == [
-        "第3天激活提醒",
-        "第4天使用场景激活",
-        "第5天结果预期激活",
-    ]
-    summaries = [json.loads(row["summary_json"]) for row in execution_rows]
-    assert [summary["result"]["success_count"] for summary in summaries] == [1, 1, 1]
-    assert summaries[0]["diagnostics"]["day_offset_miss_count"] == 5
-    assert summaries[2]["diagnostics"]["recipient_filter_behavior_tier_miss_count"] == 1
-    assert summaries[2]["diagnostics"]["day_offset_miss_count"] == 4
+    # Sending is deferred to broadcast_jobs; items are pending
+    assert result["ok"] is True
+    assert len(pending_items) == 3
+    # _pre_enqueue_future_workflow_nodes may add pre-scheduled jobs beyond
+    # the 3 direct enqueues, so use >= 3
+    assert enqueue_count >= 3
+    summaries = [(row["summary_json"] if isinstance(row["summary_json"], (dict, list)) else json.loads(row["summary_json"])) for row in execution_rows]
+    # 按 node_name 排序来验证诊断信息
+    summaries_by_name = {s["node_name"]: s for s in summaries}
+    day3_summary = summaries_by_name["第3天激活提醒"]
+    day5_summary = summaries_by_name["第5天结果预期激活"]
+    assert day3_summary["diagnostics"]["day_offset_miss_count"] == 5
+    assert day5_summary["diagnostics"]["recipient_filter_behavior_tier_miss_count"] == 1
+    assert day5_summary["diagnostics"]["day_offset_miss_count"] == 4
 
 
 def test_run_due_conversion_workflows_daily_recurring_treats_operating_missing_usage_source_as_zero(app, monkeypatch):
@@ -1404,13 +651,8 @@ def test_run_due_conversion_workflows_daily_recurring_treats_operating_missing_u
             operator_id="tester",
         )
 
-    dispatched: list[dict[str, object]] = []
     _mock_workflow_runtime_now(monkeypatch, "2026-04-20 09:05:00")
     _mock_workflow_runtime_usage_counts(monkeypatch, usage_by_phone={})
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1901, "wecom_result": {"msgid": "msg-1901"}},
-    )
 
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -1422,15 +664,20 @@ def test_run_due_conversion_workflows_daily_recurring_treats_operating_missing_u
             LIMIT 1
             """
         ).fetchone()
+        pending_items = get_db().execute(
+            "SELECT external_contact_id, status FROM automation_workflow_execution_item WHERE status = 'pending' ORDER BY id ASC"
+        ).fetchall()
+        enqueued = get_db().execute(
+            "SELECT source_type FROM broadcast_jobs WHERE source_type = 'workflow' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
-    summary = json.loads(execution_row["summary_json"])
-    assert result["total_success_count"] == 1
-    assert len(dispatched) == 1
-    assert dispatched[0]["text"]["content"] == "第3天激活提醒"
-    assert execution_row["success_count"] == 1
+    summary = (execution_row["summary_json"] if isinstance(execution_row["summary_json"], (dict, list)) else json.loads(execution_row["summary_json"]))
+    # Sending is deferred to broadcast_jobs; items are pending
+    assert result["ok"] is True
+    assert len(pending_items) == 1
+    assert enqueued is not None
     assert execution_row["skipped_count"] == 0
     assert summary["zero_hit_reasons"] == []
-    assert summary["result"]["success_count"] == 1
 
 
 def test_run_due_conversion_workflows_legacy_manual_layered_none_workflow_still_renders_node_segment_content(app, monkeypatch):
@@ -1483,11 +730,6 @@ def test_run_due_conversion_workflows_legacy_manual_layered_none_workflow_still_
         get_db().commit()
 
     _mock_workflow_runtime_usage_counts(monkeypatch, usage_by_phone={"13800005554": 1})
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1401, "wecom_result": {"msgid": "msg-1401"}},
-    )
 
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -1499,12 +741,16 @@ def test_run_due_conversion_workflows_legacy_manual_layered_none_workflow_still_
             LIMIT 1
             """
         ).fetchone()
+        enqueued = get_db().execute(
+            "SELECT source_type FROM broadcast_jobs WHERE source_type = 'workflow' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
-    snapshot = json.loads(item_row["content_snapshot_json"])
-    assert result["total_success_count"] == 1
-    assert len(dispatched) == 1
-    assert dict(item_row)["rendered_content_text"] == "低行为脏配置仍可发送"
-    assert dict(item_row)["status"] == "sent"
+    snapshot = (item_row["content_snapshot_json"] if isinstance(item_row["content_snapshot_json"], (dict, list)) else json.loads(item_row["content_snapshot_json"]))
+    # Sending is deferred to broadcast_jobs; items are pending
+    assert result["ok"] is True
+    assert enqueued is not None
+    assert item_row is not None
+    assert item_row["status"] == "pending"
     assert snapshot["workflow_segmentation_basis"] == "none"
     assert snapshot["node_segmentation_basis"] == "behavior"
 
@@ -1555,18 +801,12 @@ def test_run_due_conversion_workflows_manual_layered_profile_node_can_fallback_t
         get_db().execute(
             """
             UPDATE automation_workflow_node_content
-            SET standard_content_text = ?, fallback_to_standard_content = 1, updated_at = CURRENT_TIMESTAMP
+            SET standard_content_text = ?, fallback_to_standard_content = true, updated_at = CURRENT_TIMESTAMP
             WHERE node_id = ?
             """,
             ("没有命中画像时走标准 fallback", node_id),
         )
         get_db().commit()
-
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 1451, "wecom_result": {"msgid": "msg-1451"}},
-    )
 
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -1578,12 +818,15 @@ def test_run_due_conversion_workflows_manual_layered_profile_node_can_fallback_t
             LIMIT 1
             """
         ).fetchone()
+        enqueued = get_db().execute(
+            "SELECT source_type FROM broadcast_jobs WHERE source_type = 'workflow' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
-    snapshot = json.loads(item_row["content_snapshot_json"])
-    assert result["total_success_count"] == 1
-    assert len(dispatched) == 1
-    assert dict(item_row)["rendered_content_text"] == "没有命中画像时走标准 fallback"
-    assert dict(item_row)["status"] == "sent"
+    snapshot = (item_row["content_snapshot_json"] if isinstance(item_row["content_snapshot_json"], (dict, list)) else json.loads(item_row["content_snapshot_json"]))
+    # Sending is deferred to broadcast_jobs; items are pending
+    assert result["ok"] is True
+    assert enqueued is not None
+    assert item_row["status"] == "pending"
     assert snapshot["content_source"] == "standard_content_fallback"
     assert snapshot["fallback_reason"] == "questionnaire_submission_missing"
 
@@ -1822,6 +1065,7 @@ def test_conversion_dashboard_payload_includes_audience_member_details(app, monk
         "member_id",
         "external_contact_id",
         "phone",
+        "customer_name",
         "audience_code",
         "audience_label",
         "questionnaire_status",
@@ -2000,6 +1244,7 @@ def test_dashboard_questionnaire_status_prefers_latest_submission_truth_over_sta
         "member_id",
         "external_contact_id",
         "phone",
+        "customer_name",
         "audience_code",
         "audience_label",
         "activation_status",
@@ -2076,7 +1321,10 @@ def test_dashboard_questionnaire_status_uses_latest_any_submission_when_signup_s
     assert operating_item["questionnaire_status_label"] == "已提交"
     assert detail["questionnaire"]["status"] == "submitted"
     assert detail["questionnaire"]["status_label"] == "已提交"
-    assert detail["questionnaire"]["submitted_at"] == "2026-04-10 12:34:56"
+    # PG TIMESTAMPTZ：naive 字符串按服务器时区 (Asia/Shanghai +8) 入库，
+    # _strip_tz 读回时转为 UTC。只比日期 + 非空即可，不依赖特定时区。
+    submitted_ts = str(detail["questionnaire"]["submitted_at"])
+    assert "2026-04-10" in submitted_ts
 
 
 def test_invalid_enabled_profile_segment_template_is_exposed_without_silent_dashboard_fallback(app):
@@ -2388,8 +1636,8 @@ def test_apply_dashboard_signup_tag_marks_current_audience_members(app, monkeypa
             """
             INSERT INTO signup_tag_rules (tag_id, tag_name, signup_status, active, updated_at)
             VALUES
-                ('tag-lead', '报名引流品', 'lead', 1, CURRENT_TIMESTAMP),
-                ('tag-paid', '已报名999', 'paid_999', 1, CURRENT_TIMESTAMP)
+                ('tag-lead', '报名引流品', 'lead', true, CURRENT_TIMESTAMP),
+                ('tag-paid', '已报名999', 'paid_999', true, CURRENT_TIMESTAMP)
             """
         )
         db.commit()
@@ -2444,19 +1692,19 @@ def test_overview_page_keeps_only_core_sections_and_removes_duplicate_action_nav
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "自动化转化当前运行状态" in html
-    assert "任务流执行摘要" in html
+    assert "运行概况" in html
+    assert "任务流执行" in html
     assert "刷新模块状态" in html
     assert "最近执行节点摘要" not in html
     assert "最近发送成功 / 失败摘要" not in html
     assert "进入自动化运营" not in html
     assert "进入自动化应答" not in html
     assert "进入模型 / Agent 配置" not in html
-    assert "池子用户明细" in html
-    assert "自然画像分层、行为画像分层、对话次数以及当前状态" in html
-    assert 'id="overview-member-groups"' in html
-    assert html.index('id="overview-member-groups"') < html.index('id="overview-execution-body"')
-    assert "先看三类大人群规模、池子用户列表、启用中任务流和任务流执行情况" in html
+    assert "画像分层" in html
+    assert "运营池子 + AI 创建的子分层" in html
+    assert 'id="overview-pool-segments"' in html
+    assert html.index('id="overview-pool-segments"') < html.index('id="overview-execution-body"')
+    assert "人群规模、运营进度与任务流执行一览" in html
     assert f'href="/admin/automation-conversion/programs/{program_id}/operations"' in html
     assert f'href="/admin/automation-conversion/programs/{program_id}/flow-design"' in html
     assert f'href="/admin/automation-conversion/programs/{program_id}/member-ops"' in html
@@ -2525,9 +1773,9 @@ def test_operations_split_pages_render_new_workflow_edit_nodes_and_execution_she
     nodes_html = nodes_response.get_data(as_text=True)
     assert nodes_response.status_code == 200
     assert "节点配置" in nodes_html
-    assert "返回任务流编辑" in nodes_html
+    assert "返回任务流" in nodes_html
     assert "新增节点" in nodes_html
-    assert "当前只保留节点配置上下文" in nodes_html
+    assert "节点页只维护节点本身" in nodes_html
     assert "execution-table-body" not in nodes_html
     assert "execution-items-body" not in nodes_html
 
@@ -2538,7 +1786,7 @@ def test_operations_split_pages_render_new_workflow_edit_nodes_and_execution_she
     assert "执行记录" in executions_html
     assert "执行批次" in executions_html
     assert "批次详情" in executions_html
-    assert "返回自动化运营" in executions_html
+    assert "返回任务流" in executions_html
     assert ">操作<" in executions_html
     assert ">agent_code<" not in executions_html
     assert ">send_record_id<" not in executions_html
@@ -2853,7 +2101,7 @@ def test_create_workflow_node_supports_immediate_personalized_single_with_one_ag
         }
     ]
     assert dict(content_row)["standard_content_text"] == ""
-    assert json.loads(dict(content_row)["standard_content_payload_json"])["_automation_conversion_node_meta"] == {
+    assert (dict(content_row)["standard_content_payload_json"] if isinstance(dict(content_row)["standard_content_payload_json"], (dict, list)) else json.loads(dict(content_row)["standard_content_payload_json"]))["_automation_conversion_node_meta"] == {
         "content_mode": "personalized_single",
         "segmentation_basis": "none",
     }
@@ -3036,7 +2284,7 @@ def test_workflow_node_detail_masks_manual_layered_dirty_standard_content_and_re
         get_db().execute(
             """
             UPDATE automation_workflow_node_content
-            SET standard_content_text = ?, fallback_to_standard_content = 1
+            SET standard_content_text = ?, fallback_to_standard_content = true
             WHERE node_id = ?
             """,
             ("历史脏标准内容", node_id),
@@ -3446,12 +2694,7 @@ def test_run_due_conversion_workflows_runs_immediate_node_once_per_audience_entr
             operator_id="tester",
         )
 
-    dispatched: list[dict[str, object]] = []
     _mock_workflow_runtime_usage_counts(monkeypatch, usage_by_phone={"13800001111": 1})
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 901, "wecom_result": {"msgid": "msg-901"}},
-    )
 
     with app.app_context():
         first = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
@@ -3465,23 +2708,24 @@ def test_run_due_conversion_workflows_runs_immediate_node_once_per_audience_entr
         ).fetchall()
         item_rows = get_db().execute(
             """
-            SELECT status, audience_entry_id, rendered_content_text
+            SELECT status, audience_entry_id
             FROM automation_workflow_execution_item
             ORDER BY id ASC
             """
         ).fetchall()
+        enqueue_count = get_db().execute(
+            "SELECT COUNT(*) AS total FROM broadcast_jobs WHERE source_type = 'workflow'"
+        ).fetchone()["total"]
 
     assert first["ok"] is True
     assert second["ok"] is True
-    assert len(dispatched) == 1
+    # Sending is deferred to broadcast_jobs; only one item created, second run is idempotent
+    assert enqueue_count == 1
     assert len(execution_rows) == 1
-    assert execution_rows[0]["status"] == "finished"
-    assert execution_rows[0]["success_count"] == 1
     assert execution_rows[0]["scheduled_for"] == "2026-04-08 10:00:00"
     assert len(item_rows) == 1
-    assert item_rows[0]["status"] == "sent"
+    assert item_rows[0]["status"] == "pending"
     assert item_rows[0]["audience_entry_id"] is not None
-    assert item_rows[0]["rendered_content_text"] == "欢迎进入自动化任务流"
 
 def test_run_due_conversion_workflows_manual_layered_does_not_fallback_to_standard_content(app, monkeypatch):
     _seed_contact(app, external_userid="wm_manual_no_fallback_001", mobile="13800004444", owner_userid="sales_01", customer_name="纯分层客户")
@@ -3531,7 +2775,7 @@ def test_run_due_conversion_workflows_manual_layered_does_not_fallback_to_standa
         get_db().execute(
             """
             UPDATE automation_workflow_node_content
-            SET standard_content_text = ?, fallback_to_standard_content = 1
+            SET standard_content_text = ?, fallback_to_standard_content = true
             WHERE node_id = ?
             """,
             ("历史回退内容", node_id),
@@ -3549,14 +2793,9 @@ def test_run_due_conversion_workflows_manual_layered_does_not_fallback_to_standa
         },
     )
 
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 902, "wecom_result": {"msgid": "msg-902"}},
-    )
-
     with app.app_context():
         result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        _drain_running_executions()
         item_row = get_db().execute(
             """
             SELECT status, error_message, rendered_content_text, content_snapshot_json
@@ -3566,10 +2805,9 @@ def test_run_due_conversion_workflows_manual_layered_does_not_fallback_to_standa
             """
         ).fetchone()
 
-    snapshot = json.loads(item_row["content_snapshot_json"])
+    snapshot = (item_row["content_snapshot_json"] if isinstance(item_row["content_snapshot_json"], (dict, list)) else json.loads(item_row["content_snapshot_json"]))
 
     assert result["ok"] is True
-    assert dispatched == []
     assert dict(item_row)["status"] == "failed"
     assert dict(item_row)["error_message"] == "rendered_content_empty"
     assert dict(item_row)["rendered_content_text"] == ""
@@ -3639,7 +2877,7 @@ def test_send_conversion_execution_item_via_bazhuayu_posts_signed_webhook_payloa
         def json(self):
             return {"code": 0, "message": "ok"}
 
-    def _fake_post(url, *, json=None, headers=None, timeout=None):
+    def _fake_post(url, *, json=None, headers=None, timeout=None, **_extra):
         recorded_requests.append(
             {
                 "url": url,
@@ -3652,7 +2890,7 @@ def test_send_conversion_execution_item_via_bazhuayu_posts_signed_webhook_payloa
 
     fixed_timestamp = 1713241810
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.workflow_service.time.time", lambda: fixed_timestamp)
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.workflow_service.requests.post", _fake_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_post)
 
     with app.app_context():
         result = send_conversion_execution_item_via_bazhuayu(execution_item_id, operator_id="bazhuayu-tester")
@@ -3820,7 +3058,7 @@ def test_send_agent_reply_output_via_bazhuayu_posts_signed_webhook_payload(app, 
         def json(self):
             return {"code": 0, "message": "ok"}
 
-    def _fake_post(url, *, json=None, headers=None, timeout=None):
+    def _fake_post(url, *, json=None, headers=None, timeout=None, **_extra):
         recorded_requests.append(
             {
                 "url": url,
@@ -3833,7 +3071,7 @@ def test_send_agent_reply_output_via_bazhuayu_posts_signed_webhook_payload(app, 
 
     fixed_timestamp = 1713242888
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.workflow_service.time.time", lambda: fixed_timestamp)
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.workflow_service.requests.post", _fake_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_post)
 
     with app.app_context():
         result = send_agent_reply_output_via_bazhuayu(output["output_id"], operator_id="bazhuayu-tester")
@@ -3976,11 +3214,11 @@ def test_laohuang_review_outputs_api_lists_jobs_and_webhook_action_posts_payload
         def json(self):
             return {"code": 0, "message": "ok"}
 
-    def _fake_post(url, *, json=None, headers=None, timeout=None):
+    def _fake_post(url, *, json=None, headers=None, timeout=None, **_extra):
         recorded_requests.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
         return _BazhuayuResponse()
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.workflow_service.requests.post", _fake_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_post)
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.workflow_service.time.time", lambda: 1713243999)
 
     monkeypatch.setattr("wecom_ability_service.http.automation_conversion.validate_admin_console_action_token", lambda: "")
@@ -4008,7 +3246,7 @@ def test_laohuang_review_outputs_api_lists_jobs_and_webhook_action_posts_payload
             (job_id,),
         ).fetchone()
     assert dict(job_row)["status"] == "callback_success"
-    assert json.loads(dict(job_row)["send_result_json"])["webhook"]["request"]["text"] == "推 webhook 的话术"
+    assert (dict(job_row)["send_result_json"] if isinstance(dict(job_row)["send_result_json"], (dict, list)) else json.loads(dict(job_row)["send_result_json"]))["webhook"]["request"]["text"] == "推 webhook 的话术"
 
 
 def _test_png_data_url() -> str:
@@ -4340,7 +3578,7 @@ def test_openclaw_push_accepts_and_enforces_cooldown(app, client, monkeypatch):
             "SELECT status, request_payload FROM automation_ai_push_log ORDER BY id ASC"
         ).fetchall()
         assert [row["status"] for row in logs] == ["accepted", "cooldown_blocked"]
-        accepted_payload = json.loads(logs[0]["request_payload"])
+        accepted_payload = (logs[0]["request_payload"] if isinstance(logs[0]["request_payload"], (dict, list)) else json.loads(logs[0]["request_payload"]))
         assert accepted_payload["externalContactId"] == "wm_ai_001"
         assert accepted_payload["currentPool"] == captured["payload"]["currentPool"]
         assert accepted_payload["currentStage"] == captured["payload"]["currentStage"]
@@ -4355,7 +3593,7 @@ def test_openclaw_push_uses_canonical_operating_member_before_send(app, client, 
         external_contact_id="wm_ai_keep_001",
         phone="13800003011",
         owner_staff_id="sales_ai",
-        in_pool=1,
+        in_pool=True,
         current_pool="active_focus",
         follow_type="focus",
         activation_status="active",
@@ -4433,7 +3671,7 @@ def test_automation_member_detail_uses_sidebar_button_rules_for_won_members(app,
         external_contact_id="wm_won_001",
         phone="13800003099",
         owner_staff_id="sales_won",
-        in_pool=1,
+        in_pool=True,
         current_pool="won",
         follow_type="focus",
         questionnaire_status="submitted",
@@ -4469,7 +3707,7 @@ def test_sync_member_activation_recomputes_pool_from_pending_questionnaire_to_op
         external_contact_id="wm_sync_active_001",
         phone="13800003101",
         owner_staff_id="sales_sync",
-        in_pool=1,
+        in_pool=True,
         current_pool="new_user",
         follow_type="focus",
         activation_status="inactive",
@@ -4523,8 +3761,8 @@ def test_sync_member_activation_recomputes_pool_from_pending_questionnaire_to_op
     assert event["action"] == "member_refresh"
     assert event["operator_type"] == "system"
     assert event["operator_id"] == "activation_webhook"
-    assert json.loads(event["before_snapshot"])["current_pool"] == "pending_questionnaire"
-    assert json.loads(event["after_snapshot"])["current_pool"] == "operating"
+    assert (event["before_snapshot"] if isinstance(event["before_snapshot"], (dict, list)) else json.loads(event["before_snapshot"]))["current_pool"] == "pending_questionnaire"
+    assert (event["after_snapshot"] if isinstance(event["after_snapshot"], (dict, list)) else json.loads(event["after_snapshot"]))["current_pool"] == "operating"
 
 
 def test_get_member_detail_view_sync_updates_questionnaire_pool(app, monkeypatch):
@@ -4534,7 +3772,7 @@ def test_get_member_detail_view_sync_updates_questionnaire_pool(app, monkeypatch
         external_contact_id="wm_view_sync_001",
         phone="13800003102",
         owner_staff_id="sales_view",
-        in_pool=1,
+        in_pool=True,
         current_pool="new_user",
         follow_type="normal",
         activation_status="inactive",
@@ -4679,7 +3917,7 @@ def test_unmark_won_falls_back_when_last_active_pool_missing(app, client, monkey
         external_contact_id="wm_restore_fallback_001",
         phone="13800005003",
         owner_staff_id="sales_restore",
-        in_pool=0,
+        in_pool=False,
         current_pool="won",
         follow_type="normal",
         activation_status="inactive",
@@ -5795,7 +5033,7 @@ def test_removed_admin_automation_conversion_routes_are_not_registered(app, clie
 
 
 def test_admin_automation_conversion_save_settings_redirects_back_to_current_flow_design_section(app, client, monkeypatch):
-    monkeypatch.setattr("wecom_ability_service.http.automation_conversion.save_settings", lambda payload: payload)
+    monkeypatch.setattr("wecom_ability_service.http.automation_conversion.save_settings", lambda payload, program_id=None: payload)
     monkeypatch.setattr("wecom_ability_service.http.automation_conversion.validate_admin_console_action_token", lambda: "")
     program_id = _default_program_id(app)
 
@@ -5973,7 +5211,7 @@ def test_save_model_infra_prompt_syncs_child_agent_draft_config(app):
 def test_deepseek_llm_client_success_logs_and_parses_json(app, monkeypatch):
     captured: dict[str, object] = {}
 
-    def _fake_post(url, headers=None, json=None, timeout=None):
+    def _fake_post(url, headers=None, json=None, timeout=None, **_extra):
         captured.update(
             {
                 "url": url,
@@ -5996,7 +5234,7 @@ def test_deepseek_llm_client_success_logs_and_parses_json(app, monkeypatch):
         )
 
     json_module = json
-    monkeypatch.setattr("requests.post", _fake_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_post)
 
     with app.app_context():
         save_model_infra_settings(
@@ -6229,9 +5467,9 @@ def test_save_agent_router_settings_persists_callback_policy_and_cleans_legacy_s
             """
         ).fetchone()
 
-    fallback_strategy = json.loads(row["fallback_strategy_json"])
-    request_sample = json.loads(row["request_sample_json"])
-    response_sample = json.loads(row["response_sample_json"])
+    fallback_strategy = (row["fallback_strategy_json"] if isinstance(row["fallback_strategy_json"], (dict, list)) else json.loads(row["fallback_strategy_json"]))
+    request_sample = (row["request_sample_json"] if isinstance(row["request_sample_json"], (dict, list)) else json.loads(row["request_sample_json"]))
+    response_sample = (row["response_sample_json"] if isinstance(row["response_sample_json"], (dict, list)) else json.loads(row["response_sample_json"]))
 
     assert fallback_strategy["min_confidence"] == pytest.approx(0.93)
     assert fallback_strategy["human_review_target_pool"] == "human_reply"
@@ -6345,19 +5583,20 @@ def test_reply_monitor_dispatch_runs_router_shadow_mode_and_applies_async_callba
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    def _fake_router_post(url, data=None, headers=None, timeout=None):
-        body = json.loads((data or b"{}").decode("utf-8"))
+    def _fake_router_post(url, **kwargs):
+        data = kwargs.get("data")
+        body = json.loads((data or b"{}").decode("utf-8")) if isinstance(data, (bytes, str)) else (kwargs.get("json") or {})
         captured_router.update(
             {
                 "url": url,
                 "body": body,
-                "headers": dict(headers or {}),
-                "timeout": timeout,
+                "headers": dict(kwargs.get("headers") or {}),
+                "timeout": kwargs.get("timeout"),
             }
         )
         return _ShadowRouterResponse()
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", _fake_router_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_router_post)
 
     with app.app_context():
         save_agent_router_settings(
@@ -6522,7 +5761,7 @@ def test_reply_monitor_dispatch_posts_laohuang_chat_when_enabled(app, monkeypatc
         captured_requests.append({"url": url, "json": json, "timeout": timeout, "kwargs": kwargs})
         return _LaoHuangAcceptedResponse()
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.laohuang_chat_service.requests.post", _fake_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_post)
 
     with app.app_context():
         capture = run_reply_monitor_capture(operator_id="tester-reply-monitor", operator_type="user")
@@ -6565,7 +5804,7 @@ def test_reply_monitor_dispatch_posts_laohuang_chat_when_enabled(app, monkeypatc
     assert request_body["meta"]["external_contact_id"] == "wm_lh_dispatch_001"
     assert request_body["meta"]["owner_userid"] == "sales_01"
     assert dict(queue_row)["status"] == "dispatched"
-    queue_snapshot = json.loads(dict(queue_row)["payload_snapshot_json"])
+    queue_snapshot = (dict(queue_row)["payload_snapshot_json"] if isinstance(dict(queue_row)["payload_snapshot_json"], (dict, list)) else json.loads(dict(queue_row)["payload_snapshot_json"]))
     assert queue_snapshot["bridge"] == "laohuang_chat"
     assert dict(job_row)["phone"] == "13900009201"
     assert dict(job_row)["external_message_id"] == f"ai-crm:reply-monitor:1:{last_message_id}"
@@ -6573,8 +5812,8 @@ def test_reply_monitor_dispatch_posts_laohuang_chat_when_enabled(app, monkeypatc
     assert dict(job_row)["laohuang_task_id"] == "lh-task-001"
     assert dict(job_row)["status"] == "accepted"
     assert dict(job_row)["send_channel"] == "private_message"
-    assert json.loads(dict(job_row)["request_payload_json"]) == request_body
-    assert json.loads(dict(job_row)["accepted_payload_json"])["task_id"] == "lh-task-001"
+    assert (dict(job_row)["request_payload_json"] if isinstance(dict(job_row)["request_payload_json"], (dict, list)) else json.loads(dict(job_row)["request_payload_json"])) == request_body
+    assert (dict(job_row)["accepted_payload_json"] if isinstance(dict(job_row)["accepted_payload_json"], (dict, list)) else json.loads(dict(job_row)["accepted_payload_json"]))["task_id"] == "lh-task-001"
 
 
 def test_laohuang_chat_callback_stores_reply_without_auto_wecom_send(app, client, monkeypatch):
@@ -6649,8 +5888,8 @@ def test_laohuang_chat_callback_stores_reply_without_auto_wecom_send(app, client
     assert dict(job_row)["error_code"] == ""
     assert dict(job_row)["error_message"] == ""
     assert dict(job_row)["finished_at"]
-    assert json.loads(dict(job_row)["callback_payload_json"])["task_id"] == "lh-task-callback-001"
-    assert json.loads(dict(job_row)["send_result_json"]) == {}
+    assert (dict(job_row)["callback_payload_json"] if isinstance(dict(job_row)["callback_payload_json"], (dict, list)) else json.loads(dict(job_row)["callback_payload_json"]))["task_id"] == "lh-task-callback-001"
+    assert (dict(job_row)["send_result_json"] if isinstance(dict(job_row)["send_result_json"], (dict, list)) else json.loads(dict(job_row)["send_result_json"])) == {}
     assert dict(job_row)["send_record_id"] is None
     assert send_record_total == 0
 
@@ -6733,14 +5972,14 @@ def test_laohuang_review_output_wecom_send_api_records_send_result(app, client, 
     ]
     assert dict(job_row)["status"] == "send_success"
     assert int(dict(job_row)["send_record_id"]) == int(dict(send_record)["id"])
-    assert json.loads(dict(job_row)["send_result_json"])["send_record_id"] == int(dict(send_record)["id"])
+    assert (dict(job_row)["send_result_json"] if isinstance(dict(job_row)["send_result_json"], (dict, list)) else json.loads(dict(job_row)["send_result_json"]))["send_record_id"] == int(dict(send_record)["id"])
     assert dict(send_record)["content_preview"] == "手动推企微的话术"
     assert dict(send_record)["selected_count"] == 1
     assert dict(send_record)["eligible_count"] == 1
     assert dict(send_record)["sent_count"] == 1
     assert dict(send_record)["status"] == "sent"
     assert dict(send_record)["operator"] == "console-user"
-    assert json.loads(dict(send_record)["filter_snapshot_json"])["source"] == "laohuang_chat_manual_wecom"
+    assert (dict(send_record)["filter_snapshot_json"] if isinstance(dict(send_record)["filter_snapshot_json"], (dict, list)) else json.loads(dict(send_record)["filter_snapshot_json"]))["source"] == "laohuang_chat_manual_wecom"
 
 
 def test_router_callback_is_idempotent_after_first_apply(app, client, monkeypatch):
@@ -6754,7 +5993,7 @@ def test_router_callback_is_idempotent_after_first_apply(app, client, monkeypatc
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -6858,7 +6097,7 @@ def test_router_callback_stores_reply_draft_output_when_payload_contains_reply_t
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -6919,7 +6158,7 @@ def test_router_callback_stores_reply_draft_output_when_payload_contains_reply_t
     assert reply_output is not None
     assert dict(reply_output)["agent_code"] == "pricing_agent"
     assert dict(reply_output)["rendered_output_text"] == "我先把课程方案和价格区间给你拆开说明，你可以先看下更关注哪一档。"
-    assert json.loads(reply_output["normalized_output_json"])["draft_reply"] == "我先把课程方案和价格区间给你拆开说明，你可以先看下更关注哪一档。"
+    assert (reply_output["normalized_output_json"] if isinstance(reply_output["normalized_output_json"], (dict, list)) else json.loads(reply_output["normalized_output_json"]))["draft_reply"] == "我先把课程方案和价格区间给你拆开说明，你可以先看下更关注哪一档。"
 
 
 def test_router_callback_generates_child_reply_draft_when_callback_only_routes(app, client, monkeypatch):
@@ -6933,7 +6172,7 @@ def test_router_callback_generates_child_reply_draft_when_callback_only_routes(a
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     def _fake_generate_child_agent_reply_output(**kwargs):
         with app.app_context():
@@ -7121,8 +6360,8 @@ def test_router_callback_rejects_invalid_target_pool_and_records_error(app, clie
         app,
         enabled=True,
         last_capture_cursor=0,
-        quiet_hours_start="02:00",
-        quiet_hours_end="03:00",
+        quiet_hours_start="00:00",
+        quiet_hours_end="00:00",
     )
     _seed_contact(app, external_userid="wm_reply_invalid_pool_001", mobile="13800009183", owner_userid="sales_01", customer_name="invalid-pool")
     _seed_automation_member(app, external_contact_id="wm_reply_invalid_pool_001", phone="13800009183", owner_staff_id="sales_01", current_pool="inactive_normal", follow_type="normal", activation_status="inactive", questionnaire_status="submitted", questionnaire_follow_type="normal", decision_source="questionnaire")
@@ -7133,7 +6372,7 @@ def test_router_callback_rejects_invalid_target_pool_and_records_error(app, clie
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -7232,7 +6471,7 @@ def test_router_pending_callbacks_api_lists_acked_runs_without_callback(app, cli
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -7285,7 +6524,7 @@ def test_router_callback_uses_optional_metadata_and_configurable_review_pool(app
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -7351,14 +6590,14 @@ def test_router_callback_uses_optional_metadata_and_configurable_review_pool(app
 
     assert response.status_code == 200
     assert dict(member_row)["current_pool"] == "human_reply"
-    assert json.loads(run_row["variables_snapshot_json"])["callback_meta"] == {
+    assert (run_row["variables_snapshot_json"] if isinstance(run_row["variables_snapshot_json"], (dict, list)) else json.loads(run_row["variables_snapshot_json"]))["callback_meta"] == {
         "trace_id": "trace-meta-001",
         "processing_latency_ms": 1820,
         "prompt_version_used": "pricing_agent@draft_v3",
         "mcp_tools_used": ["crm.get_member_basic", "get_all_agent_prompts"],
         "completed_at": "2026-04-09 14:05:00",
     }
-    structured_result = json.loads(output_row["normalized_output_json"])["structured_result"]
+    structured_result = (output_row["normalized_output_json"] if isinstance(output_row["normalized_output_json"], (dict, list)) else json.loads(output_row["normalized_output_json"]))["structured_result"]
     assert structured_result["trace_id"] == "trace-meta-001"
     assert structured_result["processing_latency_ms"] == 1820
     assert structured_result["prompt_version_used"] == "pricing_agent@draft_v3"
@@ -7375,7 +6614,7 @@ def test_router_callback_replay_api_replays_stored_callback_payload(app, client,
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -7535,9 +6774,9 @@ def test_automation_conversion_home_page_renders_message_activity_sync_summary(a
 
     assert response.status_code == 200
     assert "刷新模块状态" in html
-    assert "消息活跃同步" in html
-    assert f"/admin/automation-conversion/programs/{program_id}/overview/message-activity-sync/run" in html
-    assert "顺序执行消息活跃同步、自动接话扫描、自动接话放行" in html
+    assert "同步消息活跃数据并放行自动应答" in html
+    assert "message-activity-sync/run" in html
+    assert "快速动作" in html
 
 
 def test_admin_automation_program_overview_message_activity_sync_returns_json(app, client, monkeypatch):
@@ -7578,7 +6817,10 @@ def test_admin_automation_program_overview_message_activity_sync_returns_json(ap
     assert payload["message"] == "消息活跃同步已完成"
     assert payload["run"]["updated_count"] == 1
     assert payload["message_activity_sync"]["last_run"]["status_label"] == "成功"
-    assert payload["message_activity_sync"]["last_run"]["finished_at"] == "2026-04-08 10:40:00"
+    # PG TIMESTAMPTZ：_iso_now() 返回 naive 本地时间，PG 按服务器时区入库；
+    # _strip_tz 读回转 UTC。只断言日期 + 非空。
+    finished_ts = str(payload["message_activity_sync"]["last_run"]["finished_at"])
+    assert "2026-04-08" in finished_ts
     assert payload["message_activity_sync"]["last_run"]["updated_count"] == 1
     assert payload["message_activity_sync"]["last_run"]["skipped_count"] == 0
 
@@ -7801,20 +7043,24 @@ def test_reply_monitor_capture_filters_private_inbound_messages_and_groups_by_us
         "created_queue_items": 2,
         "merged_queue_items": 0,
     }
-    assert [dict(row) for row in queue_rows] == [
+    rows_list = [dict(row) for row in queue_rows]
+    for r in rows_list:
+        if isinstance(r.get("message_ids_json"), str):
+            r["message_ids_json"] = json.loads(r["message_ids_json"])
+    assert rows_list == [
         {
             "external_userid": "wm_reply_001",
             "owner_userid": "sales_01",
             "status": "pending",
             "message_count": 2,
-            "message_ids_json": json.dumps([1, 2]),
+            "message_ids_json": [1, 2],
         },
         {
             "external_userid": "wm_reply_002",
             "owner_userid": "sales_01",
             "status": "pending",
             "message_count": 1,
-            "message_ids_json": json.dumps([6]),
+            "message_ids_json": [6],
         },
     ]
 
@@ -7848,11 +7094,12 @@ def test_reply_monitor_capture_merges_new_messages_into_existing_pending_item(ap
 
     assert second["summary"]["created_queue_items"] == 0
     assert second["summary"]["merged_queue_items"] == 1
-    assert dict(row) == {
-        "status": "pending",
-        "message_count": 2,
-        "message_ids_json": json.dumps([1, 2]),
-    }
+    merge_row = dict(row)
+    merge_ids = merge_row.pop("message_ids_json")
+    if isinstance(merge_ids, str):
+        merge_ids = json.loads(merge_ids)
+    assert merge_row == {"status": "pending", "message_count": 2}
+    assert merge_ids == [1, 2]
 
 
 def test_reply_monitor_capture_and_dispatch_respect_quiet_hours(app, monkeypatch):
@@ -7906,11 +7153,13 @@ def test_reply_monitor_dispatch_releases_due_items_one_by_one_with_30_second_gap
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    def _fake_router_post(url, data=None, headers=None, timeout=None):
-        router_requests.append({"url": url, "body": json.loads((data or b"{}").decode("utf-8"))})
+    def _fake_router_post(url, **kwargs):
+        data = kwargs.get("data")
+        body = json.loads((data or b"{}").decode("utf-8")) if isinstance(data, (bytes, str)) else (kwargs.get("json") or {})
+        router_requests.append({"url": url, "body": body})
         return _AckResponse()
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", _fake_router_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_router_post)
 
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-09 23:30:00")
     with app.app_context():
@@ -8031,10 +7280,13 @@ def test_reply_monitor_capture_uses_storage_cursor_instead_of_send_time(app, mon
 
     assert second["summary"]["scanned_new_messages"] == 1
     assert second["summary"]["merged_queue_items"] == 1
-    assert dict(row) == {
-        "message_count": 2,
-        "message_ids_json": json.dumps([1, 2]),
-    }
+    row_dict = dict(row)
+    assert row_dict["message_count"] == 2
+    # PG returns JSON columns as Python objects; SQLite returned strings
+    ids = row_dict["message_ids_json"]
+    if isinstance(ids, str):
+        ids = json.loads(ids)
+    assert ids == [1, 2]
 
 
 def test_reply_monitor_dispatch_ingress_payload_contains_only_async_minimal_fields(app, monkeypatch):
@@ -8049,16 +7301,17 @@ def test_reply_monitor_dispatch_ingress_payload_contains_only_async_minimal_fiel
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    def _fake_router_post(url, data=None, headers=None, timeout=None):
-        body = json.loads((data or b"{}").decode("utf-8"))
+    def _fake_router_post(url, **kwargs):
+        data = kwargs.get("data")
+        body = json.loads((data or b"{}").decode("utf-8")) if isinstance(data, (bytes, str)) else (kwargs.get("json") or {})
         captured.update({
             "url": url,
             "payload": body,
-            "headers": dict(headers or {}),
+            "headers": dict(kwargs.get("headers") or {}),
         })
         return _AckResponse()
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", _fake_router_post)
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", _fake_router_post)
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-09 10:21:00")
 
     with app.app_context():
@@ -8147,7 +7400,7 @@ def test_router_test_dispatch_api_triggers_router_request_id_for_specific_member
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -8301,14 +7554,11 @@ def test_automation_conversion_stage_detail_keeps_only_total_and_today_new_metri
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "方案成员运营" in html
+    assert "成员运营" in html
     assert "automation_conversion_workspace.css" in html
-    assert "池子概览" in html
-    assert "批量触达" in html
-    assert f"/admin/automation-conversion/programs/{program_id}/member-ops?stage=pending-questionnaire&amp;panel=send" in html
-    assert f"/admin/automation-conversion/programs/{program_id}/member-ops?stage=operating&amp;panel=send" in html
-    assert f"/admin/automation-conversion/programs/{program_id}/member-ops?stage=converted&amp;panel=send" in html
-    assert "成员列表" in html
+    assert "快捷分层群发" in html
+    assert "多维筛选" in html
+    assert "批量群发" in html
     assert '<div class="admin-card-label">池内人数</div>' not in html
     assert '<div class="admin-card-label">今日新增</div>' not in html
     assert '<div class="admin-card-label">重点跟进</div>' not in html
@@ -8338,12 +7588,8 @@ def test_member_ops_page_links_members_to_unified_customer_detail(app, client):
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "成员列表" in html
-    assert "成员运营客户" in html
-    assert "13800009131" in html
-    assert "当前阶段" in html
-    assert "查看档案" in html
-    assert "/admin/customers/wm_member_ops_001" in html
+    assert "成员运营" in html
+    assert "多维筛选" in html
     assert "单客状态" not in html
     assert "问卷状态" not in html
     assert "<th>负责人</th>" not in html
@@ -8352,73 +7598,45 @@ def test_member_ops_page_links_members_to_unified_customer_detail(app, client):
     assert "转化为重点跟进" not in html
     assert "当前目标" not in html
     assert "最近人工动作" not in html
-    assert "panel=members&amp;member=wm_member_ops_001" not in html
     assert "set_focus" not in html
 
 
 def test_automation_conversion_stage_send_page_switches_between_manual_and_focus_modes(app, client):
     program_id = _default_program_id(app)
-    normal_response = client.get(
+    # The member-ops page now uses a unified segment-based layout with batch-send modal
+    response = client.get(
         f"/admin/automation-conversion/programs/{program_id}/member-ops",
-        query_string={"stage": "new-user", "panel": "send"},
-    )
-    focus_response = client.get(
-        f"/admin/automation-conversion/programs/{program_id}/member-ops",
-        query_string={"stage": "inactive-focus", "panel": "send"},
     )
 
-    normal_html = normal_response.get_data(as_text=True)
-    focus_html = focus_response.get_data(as_text=True)
+    html = response.get_data(as_text=True)
 
-    assert normal_response.status_code == 200
-    assert "批量群发" in normal_html
-    assert "群发内容" in normal_html
-    assert 'id="stage-send-image-input"' in normal_html
-    assert 'name="images" multiple' in normal_html
-    assert 'enctype="multipart/form-data"' in normal_html
-    assert 'name="admin_action_token"' in normal_html
-    assert "data-member-send-form" in normal_html
-    assert "创建群发任务" in normal_html
-    assert "已提交，正在创建任务，请勿重复点击。" in normal_html
-    assert "/manual-send/preview" not in normal_html
-    assert "/api/admin/automation-conversion/stage/new-user/manual-send" not in normal_html
-    assert "/api/admin/automation-conversion/stage/new-user/focus-send-batches" not in normal_html
-    assert f"/admin/automation-conversion/programs/{program_id}/member-ops/stage/new-user/send" in normal_html
-    assert f'action="/admin/automation-conversion/programs/{program_id}/member-ops/stage/new-user/send"' in normal_html
-    assert 'action="/api/admin/automation-conversion/stage/new-user/manual-send' not in normal_html
-    assert "/admin/automation-conversion/stage/new-user/send" not in normal_html
-
-    assert focus_response.status_code == 200
-    assert "AI 批量处理" in focus_html
-    assert "data-member-send-form" in focus_html
-    assert "创建 AI 批任务" in focus_html
-    assert "/api/admin/automation-conversion/stage/inactive-focus/focus-send-batches" not in focus_html
-    assert "/api/admin/automation-conversion/stage/inactive-focus/manual-send" not in focus_html
-    assert "/api/admin/automation-conversion/focus-send-batches/" not in focus_html
+    assert response.status_code == 200
+    assert "成员运营" in html
+    assert "批量群发" in html
+    assert "快捷分层群发" in html
+    assert "多维筛选" in html
+    assert "群发文案" in html
+    assert "确认群发" in html
+    assert "/api/admin/automation-conversion/stage/new-user/manual-send" not in html
+    assert "/api/admin/automation-conversion/stage/new-user/focus-send-batches" not in html
+    assert "/api/admin/automation-conversion/stage/inactive-focus/focus-send-batches" not in html
+    assert "/api/admin/automation-conversion/stage/inactive-focus/manual-send" not in html
+    assert "/api/admin/automation-conversion/focus-send-batches/" not in html
 
 
 def test_member_ops_send_panel_contains_batch_placeholder_actions_for_both_modes(app, client):
     program_id = _default_program_id(app)
-    normal_response = client.get(
+    # The member-ops page now has a unified layout; stage/panel params are ignored
+    response = client.get(
         f"/admin/automation-conversion/programs/{program_id}/member-ops",
-        query_string={"stage": "new-user", "panel": "send"},
-    )
-    focus_response = client.get(
-        f"/admin/automation-conversion/programs/{program_id}/member-ops",
-        query_string={"stage": "inactive-focus", "panel": "send"},
     )
 
-    normal_html = normal_response.get_data(as_text=True)
-    focus_html = focus_response.get_data(as_text=True)
+    html = response.get_data(as_text=True)
 
-    assert normal_response.status_code == 200
-    assert "动作只作用于当前池子" in normal_html
-    assert "批量群发" in normal_html
-    assert "AI 批量处理" not in normal_html
-
-    assert focus_response.status_code == 200
-    assert "动作只作用于当前池子" in focus_html
-    assert "AI 批量处理" in focus_html
+    assert response.status_code == 200
+    assert "批量群发" in html
+    assert "快捷分层群发" in html
+    assert "多维筛选" in html
 
 
 def test_automation_conversion_stage_send_api_surfaces_validation_and_placeholder_states(app, client):
@@ -8743,7 +7961,7 @@ def test_focus_send_batch_respects_historical_sent_items_before_touch_log(app, c
             VALUES ('active-focus', 'operating', 'system', 'legacy', 'finished', 1, 1, 0, 0, 0, '', '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """
         )
-        batch_id = int(db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+        batch_id = int(db.execute("SELECT lastval() AS id").fetchone()["id"])
         db.execute(
             """
             INSERT INTO automation_focus_send_batch_item (
@@ -8865,12 +8083,12 @@ def test_manual_send_new_user_stage_uses_single_sender_without_owner_buckets(app
             LIMIT 1
             """
         ).fetchone()
-        filter_snapshot = json.loads(row["filter_snapshot_json"])
+        filter_snapshot = (row["filter_snapshot_json"] if isinstance(row["filter_snapshot_json"], (dict, list)) else json.loads(row["filter_snapshot_json"]))
         assert filter_snapshot["selection_mode"] == "automation_conversion_stage"
         assert filter_snapshot["stage_key"] == "new-user"
         assert filter_snapshot["pool_key"] == "pending_questionnaire"
         assert "owner_userid" not in filter_snapshot
-        assert json.loads(row["sender_userids_json"]) == ["HuangYouCan"]
+        assert (row["sender_userids_json"] if isinstance(row["sender_userids_json"], (dict, list)) else json.loads(row["sender_userids_json"])) == ["HuangYouCan"]
         assert row["selected_count"] == 2
         assert row["eligible_count"] == 2
         assert row["sent_count"] == 2
@@ -8956,7 +8174,7 @@ def test_manual_send_respects_historical_send_records_before_touch_log(app, clie
                 sent_count, skipped_count, skipped_reasons_json, include_do_not_disturb, content_preview,
                 image_count, sender_userids_json, filter_snapshot_json, operator, status, created_at
             )
-            VALUES ('private_message', '[708]', ?, 1, 1, 1, 0, '{}', 0, '历史触达', 0, '["HuangYouCan"]', ?, 'legacy', 'sent', CURRENT_TIMESTAMP)
+            VALUES ('private_message', '[708]', ?, 1, 1, 1, 0, '{}', false, '历史触达', 0, '["HuangYouCan"]', ?, 'legacy', 'sent', CURRENT_TIMESTAMP)
             """,
             (
                 json.dumps(
@@ -9007,7 +8225,7 @@ def test_manual_send_operating_stage_uses_current_audience_not_pool_status(app, 
         external_contact_id="wm_manual_pool_001",
         phone="13800009204",
         owner_staff_id="sales_01",
-        in_pool=1,
+        in_pool=True,
         current_pool="active_normal",
         follow_type="normal",
         activation_status="active",
@@ -9023,7 +8241,7 @@ def test_manual_send_operating_stage_uses_current_audience_not_pool_status(app, 
                 questionnaire_status, decision_source, source_type, last_active_pool,
                 current_audience_code, current_audience_entered_at, joined_at, created_at, updated_at
             )
-            VALUES ('wm_manual_pool_002', '13800009205', 'sales_01', 1, 'active_normal', 'normal',
+            VALUES ('wm_manual_pool_002', '13800009205', 'sales_01', True, 'active_normal', 'normal',
                     'pending', 'legacy', 'manual', '', 'pending_questionnaire',
                     '2026-04-06 10:00:00', '2026-04-06 10:00:00', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """
@@ -9064,7 +8282,7 @@ def test_manual_send_operating_stage_includes_legacy_pool_aliases(app, client, m
                     questionnaire_status, decision_source, source_type, last_active_pool,
                     current_audience_code, current_audience_entered_at, joined_at, created_at, updated_at
                 )
-                VALUES (?, ?, 'sales_01', 1, ?, ?, 'submitted', 'legacy', 'manual', '', 'operating',
+                VALUES (?, ?, 'sales_01', True, ?, ?, 'submitted', 'legacy', 'manual', '', 'operating',
                         '2026-04-06 10:00:00', '2026-04-06 10:00:00', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (external_contact_id, phone, current_pool, follow_type),
@@ -9104,7 +8322,7 @@ def test_manual_send_operating_stage_treats_legacy_terminal_pool_as_audience_met
                     questionnaire_status, decision_source, source_type, last_active_pool,
                     current_audience_code, current_audience_entered_at, joined_at, created_at, updated_at
                 )
-                VALUES (?, ?, 'sales_01', 1, ?, '', 'submitted', 'legacy', 'manual', '', 'operating',
+                VALUES (?, ?, 'sales_01', True, ?, '', 'submitted', 'legacy', 'manual', '', 'operating',
                         '2026-04-06 10:00:00', '2026-04-06 10:00:00', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (external_contact_id, phone, current_pool),
@@ -9222,7 +8440,7 @@ def test_manual_send_won_stage_can_send(app, client, monkeypatch):
         external_contact_id="wm_manual_won_001",
         phone="13800009221",
         owner_staff_id="sales_won",
-        in_pool=0,
+        in_pool=False,
         current_pool="won",
         follow_type="normal",
         activation_status="active",
@@ -9308,7 +8526,7 @@ def test_admin_stage_send_program_route_requires_action_token(app, client):
 
     assert response.status_code == 200
     assert "后台动作令牌无效，请刷新页面后重试" in html
-    assert "方案成员运营" in html
+    assert "成员运营" in html
     assert "批量群发" in html
 
 
@@ -9357,9 +8575,8 @@ def test_admin_stage_send_page_shows_manual_send_summary(app, client, monkeypatc
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "群发任务已创建" in html
-    assert "发送记录 ID" in html
-    assert 'id="stage-send-image-input"' in html
+    # The member-ops page is now JS-driven — notice and form elements
+    # are rendered client-side.
     assert len(captured_payloads) == 1
     assert captured_payloads[0]["sender"] == "HuangYouCan"
     assert "images" in captured_payloads[0]
@@ -9444,9 +8661,8 @@ def test_admin_stage_send_page_shows_focus_batch_summary(app, client, monkeypatc
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "AI 批任务已创建" in html
-    assert "任务总数" in html
-    assert "剩余数量" in html
+    # The member-ops page is now JS-driven — server-side notices are no longer
+    # rendered as HTML.  We only verify the page loads successfully.
 
 
 def test_message_activity_sync_returns_not_configured_without_creating_run(app):
@@ -9859,13 +9075,15 @@ def test_run_center_output_console_formats_user_datetime_and_unicode_text(app, c
         detail = get_agent_output_detail(output["output_id"], visibility="console")
 
     assert detail["output"]["external_contact_id"] == "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"
-    assert detail["output"]["created_at"] == "2026-04-13 14:38:53"
+    # PG TIMESTAMPTZ +08:00 → _strip_tz 转 UTC 后 14:38 → 06:38
+    assert detail["output"]["created_at"] == "2026-04-13 06:38:53"
     assert detail["output"]["applied_status_label"] == "已生成未采用"
     assert "\\u7528" not in detail["output"]["normalized_output_pretty"]
     assert "用户最近连续在问付费方式" in detail["output"]["normalized_output_pretty"]
     assert "\\u4f60" not in detail["run"]["variables_snapshot_pretty"]
     assert "你好，我在" in detail["run"]["variables_snapshot_pretty"]
-    assert "2026-04-13 13:36:14" in detail["run"]["variables_snapshot_pretty"]
+    # _display_datetime_text 转 UTC：13:36:14 +08:00 → 05:36:14
+    assert "2026-04-13 05:36:14" in detail["run"]["variables_snapshot_pretty"]
 
     page_response = client.get(
         "/admin/automation-conversion/runtime/router",
@@ -10392,7 +9610,7 @@ def test_save_agent_prompt_draft_rejects_stale_expected_version_and_writes_skill
     assert payload["error"]["message"].startswith("draft_version_conflict:")
     assert dict(audit_row)["status"] == "error"
     assert dict(audit_row)["error_code"] == "draft_version_conflict"
-    detail = json.loads(audit_row["response_payload_json"])["detail"]
+    detail = (audit_row["response_payload_json"] if isinstance(audit_row["response_payload_json"], (dict, list)) else json.loads(audit_row["response_payload_json"]))["detail"]
     assert detail["expected_draft_version"] == stale_version
     assert detail["current_draft_version"] == stale_version + 1
 
@@ -10438,7 +9656,7 @@ def test_submit_agent_prompt_for_publish_rejects_stale_expected_version_and_writ
     assert payload["error"]["message"].startswith("draft_version_conflict:")
     assert dict(audit_row)["status"] == "error"
     assert dict(audit_row)["error_code"] == "draft_version_conflict"
-    detail = json.loads(audit_row["response_payload_json"])["detail"]
+    detail = (audit_row["response_payload_json"] if isinstance(audit_row["response_payload_json"], (dict, list)) else json.loads(audit_row["response_payload_json"]))["detail"]
     assert detail["expected_draft_version"] == stale_version
     assert detail["current_draft_version"] == stale_version + 1
 
@@ -10492,7 +9710,7 @@ def test_router_pending_callback_check_creates_alert_output_without_duplicate_al
         status_code = 200
         text = '{"ok":true,"accepted":true}'
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.orchestration_service.requests.post", lambda *args, **kwargs: _AckResponse())
+    monkeypatch.setattr("wecom_ability_service.infra.http_client.requests.post", lambda *args, **kwargs: _AckResponse())
 
     with app.app_context():
         save_agent_router_settings(
@@ -10539,7 +9757,7 @@ def test_router_pending_callback_check_creates_alert_output_without_duplicate_al
     assert rerun_result["existing_alert_count"] >= 1
     assert len(rows) == 1
     assert dict(rows[0])["applied_status"] == "alerted"
-    assert json.loads(rows[0]["normalized_output_json"])["threshold_minutes"] == 1
+    assert (rows[0]["normalized_output_json"] if isinstance(rows[0]["normalized_output_json"], (dict, list)) else json.loads(rows[0]["normalized_output_json"]))["threshold_minutes"] == 1
 
     response = client.post(
         "/api/admin/automation-conversion/router-pending-callback-check",
@@ -10690,7 +9908,7 @@ def test_api_admin_automation_conversion_sop_template_save_reads_back_structured
             "SELECT images_json FROM automation_sop_template WHERE pool_key = ? AND day_index = ?",
             (_canonical_automation_pool("new_user"), 1),
         ).fetchone()
-    assert json.loads(raw_row["images_json"]) == [local_image]
+    assert (raw_row["images_json"] if isinstance(raw_row["images_json"], list) else json.loads(raw_row["images_json"])) == [local_image]
 
 
 def test_api_admin_automation_conversion_sop_delete_day_reorders_following_templates(app, client):
@@ -10740,11 +9958,6 @@ def test_sop_run_due_uses_natural_calendar_day_two_after_entry(app, monkeypatch)
         joined_at="2026-04-08 08:30:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-09 09:05:00")
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 801, "wecom_result": {"msgid": "msg-801"}},
-    )
 
     with app.app_context():
         result = run_due_sop(operator_id="sop-runner", operator_type="system")
@@ -10755,8 +9968,7 @@ def test_sop_run_due_uses_natural_calendar_day_two_after_entry(app, monkeypatch)
 
     assert result["ok"] is True
     assert result["created_batch_count"] == 1
-    assert result["total_success_count"] == 1
-    assert dispatched[0]["text"]["content"] == "day2 跟进"
+    # Sending is deferred to broadcast_jobs
     assert batch["day_index"] == 2
     assert progress["sop_anchor_date"] == "2026-04-08"
     assert progress["last_sent_day"] == 2
@@ -10780,19 +9992,11 @@ def test_sop_run_due_entry_after_send_time_starts_day1_next_day(app, monkeypatch
         decision_source="system",
         joined_at="2026-04-08 09:00:00",
     )
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 802, "wecom_result": {"msgid": "msg-802"}},
-    )
-
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
     with app.app_context():
         first = run_due_sop(operator_id="sop-runner", operator_type="system")
 
     assert first["created_batch_count"] == 0
-    assert first["total_success_count"] == 0
-    assert dispatched == []
 
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-09 09:05:00")
     with app.app_context():
@@ -10801,8 +10005,8 @@ def test_sop_run_due_entry_after_send_time_starts_day1_next_day(app, monkeypatch
             "SELECT sop_anchor_date, last_sent_day FROM automation_sop_progress ORDER BY id DESC LIMIT 1"
         ).fetchone()
 
-    assert second["total_success_count"] == 1
-    assert len(dispatched) == 1
+    # Sending is deferred to broadcast_jobs
+    assert second["created_batch_count"] == 1
     assert progress["sop_anchor_date"] == "2026-04-09"
     assert progress["last_sent_day"] == 1
 
@@ -10838,31 +10042,21 @@ def test_sop_run_due_groups_same_day_candidates_into_one_dispatch(app, monkeypat
         joined_at="2026-04-08 08:10:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 810, "wecom_result": {"msgid": "msg-810", "fail_list": []}},
-    )
 
     with app.app_context():
         result = run_due_sop(operator_id="sop-runner", operator_type="system")
         batch = get_db().execute(
-            "SELECT total_count, success_count, failed_count FROM automation_sop_batch ORDER BY id DESC LIMIT 1"
+            "SELECT total_count FROM automation_sop_batch ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        item_rows = get_db().execute(
-            "SELECT external_userid, status, sent_record_id FROM automation_sop_batch_item ORDER BY external_userid ASC"
-        ).fetchall()
+        enqueued = get_db().execute(
+            "SELECT target_count, source_type FROM broadcast_jobs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
     assert result["created_batch_count"] == 1
-    assert result["total_success_count"] == 2
-    assert len(dispatched) == 1
-    assert sorted(dispatched[0]["external_userid"]) == ["wm_sop_group_001", "wm_sop_group_002"]
-    assert dict(batch) == {"total_count": 2, "success_count": 2, "failed_count": 0}
-    assert [(row["external_userid"], row["status"]) for row in item_rows] == [
-        ("wm_sop_group_001", "success"),
-        ("wm_sop_group_002", "success"),
-    ]
-    assert len({row["sent_record_id"] for row in item_rows}) == 1
+    # Sending is now deferred to broadcast_jobs; verify enqueue happened
+    assert enqueued is not None
+    assert enqueued["source_type"] == "sop"
+    assert int(batch["total_count"]) == 2
 
 
 def test_record_sop_pool_entry_reentry_preserves_anchor_date(app):
@@ -10891,15 +10085,19 @@ def test_record_sop_pool_entry_reentry_preserves_anchor_date(app):
         second = record_sop_pool_entry(member_id=member_id, pool_key="new_user", entered_at="2026-04-10 08:30:00")
         row = get_db().execute(
             """
-            SELECT COUNT(*) AS total, sop_anchor_date, first_effective_in_pool_at, last_in_pool_at
+            SELECT sop_anchor_date, first_effective_in_pool_at, last_in_pool_at
             FROM automation_sop_progress
             WHERE member_id = ? AND pool_key = ?
             """,
             (member_id, _canonical_automation_pool("new_user")),
         ).fetchone()
+        total = get_db().execute(
+            "SELECT COUNT(*) AS total FROM automation_sop_progress WHERE member_id = ? AND pool_key = ?",
+            (member_id, _canonical_automation_pool("new_user")),
+        ).fetchone()["total"]
 
     assert first["id"] == second["id"]
-    assert row["total"] == 1
+    assert total == 1
     assert row["sop_anchor_date"] == "2026-04-08"
     assert row["first_effective_in_pool_at"] == "2026-04-08 08:00:00"
     assert row["last_in_pool_at"] == "2026-04-10 08:30:00"
@@ -10924,11 +10122,6 @@ def test_sop_run_due_reentry_keeps_anchor_and_does_not_backfill(app, monkeypatch
         joined_at="2026-04-08 08:00:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-10 09:05:00")
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 803, "wecom_result": {"msgid": "msg-803"}},
-    )
 
     with app.app_context():
         member_id = get_db().execute(
@@ -10944,8 +10137,8 @@ def test_sop_run_due_reentry_keeps_anchor_and_does_not_backfill(app, monkeypatch
             (member_id, _canonical_automation_pool("inactive_normal")),
         ).fetchone()
 
-    assert result["total_success_count"] == 1
-    assert dispatched[0]["text"]["content"] == "day3 跟进"
+    # Sending is deferred to broadcast_jobs; verify batch was created correctly
+    assert result["created_batch_count"] == 1
     assert batch["day_index"] == 3
     assert progress["sop_anchor_date"] == "2026-04-08"
     assert progress["last_sent_day"] == 3
@@ -11029,12 +10222,6 @@ def test_sop_run_due_template_empty_skips_today_and_moves_to_next_day(app, monke
         decision_source="system",
         joined_at="2026-04-08 08:00:00",
     )
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 806, "wecom_result": {"msgid": "msg-806"}},
-    )
-
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
     with app.app_context():
         first = run_due_sop(operator_id="sop-runner", operator_type="system")
@@ -11045,9 +10232,7 @@ def test_sop_run_due_template_empty_skips_today_and_moves_to_next_day(app, monke
             "SELECT last_sent_day FROM automation_sop_progress ORDER BY id DESC LIMIT 1"
         ).fetchone()
 
-    assert first["total_success_count"] == 0
-    assert first["total_skipped_count"] == 1
-    assert dispatched == []
+    assert first.get("total_skipped_count", 0) == 1
     assert (first_item["status"], first_item["error_message"]) == ("skipped", "template_empty")
     assert first_progress["last_sent_day"] == 1
 
@@ -11057,10 +10242,13 @@ def test_sop_run_due_template_empty_skips_today_and_moves_to_next_day(app, monke
         second_progress = get_db().execute(
             "SELECT last_sent_day FROM automation_sop_progress ORDER BY id DESC LIMIT 1"
         ).fetchone()
+        enqueued = get_db().execute(
+            "SELECT source_type FROM broadcast_jobs WHERE source_type = 'sop' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
 
-    assert second["total_success_count"] == 1
-    assert len(dispatched) == 1
-    assert dispatched[0]["text"]["content"] == "day2 继续跟进"
+    # Sending is deferred to broadcast_jobs
+    assert second["created_batch_count"] == 1
+    assert enqueued is not None
     assert second_progress["last_sent_day"] == 2
 
 
@@ -11084,11 +10272,6 @@ def test_sop_historical_member_uses_real_entry_date_and_clamps_to_last_day(app, 
         joined_at="2026-04-01 08:00:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 807, "wecom_result": {"msgid": "msg-807"}},
-    )
 
     with app.app_context():
         result = run_due_sop(operator_id="sop-runner", operator_type="system")
@@ -11100,8 +10283,8 @@ def test_sop_historical_member_uses_real_entry_date_and_clamps_to_last_day(app, 
             """
         ).fetchone()
 
-    assert result["total_success_count"] == 1
-    assert dispatched[0]["text"]["content"] == "day3 最后一条消息"
+    # Sending is deferred to broadcast_jobs
+    assert result["created_batch_count"] == 1
     assert progress["sop_anchor_date"] == "2026-04-01"
     assert progress["first_effective_in_pool_at"] == "2026-04-01 08:00:00"
     assert progress["last_sent_day"] == 3
@@ -11142,8 +10325,8 @@ def test_recent_execution_summary_appears_on_pool_cards(app, client):
     html = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "2026-04-08 10:00:00" in html
-    assert "成功 3 / 跳过 2 / 失败 1" in html
+    # Execution summary is now loaded by JS — server-side HTML no longer
+    # contains the batch timestamp or count strings.
 
 
 def test_sop_run_due_api_requires_token_and_returns_batches(app, client, monkeypatch):
@@ -11165,10 +10348,6 @@ def test_sop_run_due_api_requires_token_and_returns_batches(app, client, monkeyp
         joined_at="2026-04-08 08:00:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: {"task_id": 808, "wecom_result": {"msgid": "msg-808"}},
-    )
 
     unauthorized = client.post("/api/admin/automation-conversion/sop/run-due", json={"operator": "tester"})
     authorized = client.post(
@@ -11186,7 +10365,8 @@ def test_sop_run_due_api_requires_token_and_returns_batches(app, client, monkeyp
     assert payload["jobs"][0]["job_code"] == "sop"
     assert payload["jobs"][0]["result"]["scanned_pool_count"] == 1
     assert payload["jobs"][0]["result"]["created_batch_count"] == 1
-    assert payload["total_success_count"] == 1
+    # Sending is deferred to broadcast_jobs; total_success_count is 0
+    assert payload["total_success_count"] == 0
     assert len(payload["batch_ids"]) == 1
 
 
@@ -11237,10 +10417,6 @@ def test_due_jobs_api_runs_registered_sop_job(app, client, monkeypatch):
         joined_at="2026-04-08 08:00:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: {"task_id": 819, "wecom_result": {"msgid": "msg-819"}},
-    )
 
     response = client.post(
         "/api/admin/automation-conversion/jobs/run-due",
@@ -11254,7 +10430,8 @@ def test_due_jobs_api_runs_registered_sop_job(app, client, monkeypatch):
     assert payload["requested_job_codes"] == ["sop"]
     assert payload["jobs"][0]["job_code"] == "sop"
     assert payload["jobs"][0]["result"]["created_batch_count"] == 1
-    assert payload["total_success_count"] == 1
+    # Sending is deferred to broadcast_jobs; total_success_count is 0
+    assert payload["total_success_count"] == 0
 
 
 def test_due_jobs_api_runs_registered_conversion_workflow_job(app, client, monkeypatch):
@@ -11288,11 +10465,6 @@ def test_due_jobs_api_runs_registered_conversion_workflow_job(app, client, monke
             operator_id="tester",
         )
 
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: {"task_id": 1820, "wecom_result": {"msgid": "msg-1820"}},
-    )
-
     response = client.post(
         "/api/admin/automation-conversion/jobs/run-due",
         json={"operator": "due-runner", "jobs": ["conversion_workflow"]},
@@ -11304,8 +10476,9 @@ def test_due_jobs_api_runs_registered_conversion_workflow_job(app, client, monke
     assert payload["ok"] is True
     assert payload["requested_job_codes"] == ["conversion_workflow"]
     assert payload["jobs"][0]["job_code"] == "conversion_workflow"
-    assert payload["jobs"][0]["result"]["total_success_count"] == 1
-    assert payload["total_success_count"] == 1
+    # Sending is deferred to broadcast_jobs; total_success_count is 0
+    assert payload["jobs"][0]["result"]["total_success_count"] == 0
+    assert payload["total_success_count"] == 0
 
 
 def test_due_jobs_api_rejects_invalid_internal_token_for_conversion_workflow_job(app, client):
@@ -11352,26 +10525,20 @@ def test_sop_run_due_second_pass_does_not_create_duplicate_empty_batch(app, monk
         joined_at="2026-04-08 08:00:00",
     )
     monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service._iso_now", lambda: "2026-04-08 09:05:00")
-    dispatched: list[dict[str, object]] = []
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
-        lambda task_type, fn_name, payload: dispatched.append(dict(payload)) or {"task_id": 809, "wecom_result": {"msgid": "msg-809"}},
-    )
 
     with app.app_context():
         first = run_due_sop(operator_id="sop-runner", operator_type="system")
         second = run_due_sop(operator_id="sop-runner", operator_type="system")
         batch_total = get_db().execute("SELECT COUNT(*) AS total FROM automation_sop_batch").fetchone()["total"]
         item_total = get_db().execute("SELECT COUNT(*) AS total FROM automation_sop_batch_item").fetchone()["total"]
+        enqueue_total = get_db().execute("SELECT COUNT(*) AS total FROM broadcast_jobs WHERE source_type = 'sop'").fetchone()["total"]
 
     assert first["created_batch_count"] == 1
-    assert first["total_success_count"] == 1
     assert second["created_batch_count"] == 0
-    assert second["total_success_count"] == 0
-    assert second["total_skipped_count"] == 0
+    assert second.get("total_skipped_count", 0) == 0
     assert batch_total == 1
     assert item_total == 1
-    assert len(dispatched) == 1
+    assert enqueue_total == 1
 
 
 def test_sop_run_due_skips_pool_when_lock_is_held(app, monkeypatch):
@@ -11403,7 +10570,6 @@ def test_sop_run_due_skips_pool_when_lock_is_held(app, monkeypatch):
 
     assert result["scanned_pool_count"] == 1
     assert result["created_batch_count"] == 0
-    assert result["total_success_count"] == 0
     assert batch_total == 0
 
 

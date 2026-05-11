@@ -134,6 +134,9 @@ def _batch_send_payload_from_request() -> dict:
     images = _normalize_one_time_batch_send_images()
     if images:
         payload["images"] = images
+    attachments = _parse_json_form_field("attachments_json", [])
+    if attachments:
+        payload["attachments"] = attachments
     return payload
 
 

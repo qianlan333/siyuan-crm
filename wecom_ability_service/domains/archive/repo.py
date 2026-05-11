@@ -236,10 +236,13 @@ def materialize_message_batches(window_minutes: int = 3) -> dict[str, int]:
                 batch_id = int(inserted["id"])
                 created_batches += 1
             batch_cache[batch_key] = batch_id
-        payload = {}
-        if row.get("raw_payload"):
+        payload: dict[str, Any] = {}
+        raw_payload = row.get("raw_payload")
+        if isinstance(raw_payload, dict):
+            payload = raw_payload
+        elif raw_payload:
             try:
-                payload = json.loads(row["raw_payload"])
+                payload = json.loads(raw_payload)
             except (TypeError, json.JSONDecodeError):
                 payload = {}
         chat_id = ((payload.get("decrypted_message") or {}).get("roomid")) or ""

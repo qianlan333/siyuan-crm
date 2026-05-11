@@ -758,6 +758,21 @@
               <div class="table-empty">暂未添加图片</div>
             </div>
           </div>
+          <div class="image-picker">
+            <div class="image-picker-head">
+              <div>
+                <strong>附加小程序卡片</strong>
+                <div class="preview-hint">从小程序素材库选择，发送前自动刷新缩略图 media_id。</div>
+              </div>
+              <div class="hero-actions">
+                <span id="batch-miniprogram-count" class="subtle">已选 0 个</span>
+                <button id="pick-batch-miniprograms-btn" class="btn soft" type="button">选择小程序</button>
+              </div>
+            </div>
+            <div id="batch-miniprogram-list" class="image-thumb-list">
+              <div class="table-empty">暂未添加小程序</div>
+            </div>
+          </div>
           <label class="checkbox-line">
             <input id="include-dnd-toggle" type="checkbox">
             <span>包含免打扰用户</span>
@@ -880,7 +895,80 @@
       previewSkippedSummary: document.getElementById('preview-skipped-summary'),
       previewMessageSummary: document.getElementById('preview-message-summary'),
       previewTargetBody: document.getElementById('preview-target-body'),
+      pickBatchMiniprogramsBtn: document.getElementById('pick-batch-miniprograms-btn'),
+      batchMiniprogramCount: document.getElementById('batch-miniprogram-count'),
+      batchMiniprogramList: document.getElementById('batch-miniprogram-list'),
     };
+
+    let _selectedMiniprograms = [];
+
+    function renderBatchMiniprograms() {
+      if (!els.batchMiniprogramList) return;
+      els.batchMiniprogramCount.textContent = '已选 ' + _selectedMiniprograms.length + ' 个';
+      if (!_selectedMiniprograms.length) {
+        els.batchMiniprogramList.innerHTML = '<div class="table-empty">暂未添加小程序</div>';
+        return;
+      }
+      els.batchMiniprogramList.innerHTML = _selectedMiniprograms.map(function (item, idx) {
+        return '<div class="image-thumb-item">'
+          + '<div><strong>' + escapeHtml(item.title || item.name) + '</strong>'
+          + '<div class="subtle">' + escapeHtml(item.appid) + ' · ' + escapeHtml(item.pagepath) + '</div></div>'
+          + '<button class="btn soft" type="button" data-mp-remove="' + idx + '">移除</button>'
+          + '</div>';
+      }).join('');
+      els.batchMiniprogramList.querySelectorAll('[data-mp-remove]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const i = Number(btn.getAttribute('data-mp-remove'));
+          _selectedMiniprograms.splice(i, 1);
+          renderBatchMiniprograms();
+        });
+      });
+    }
+
+    async function openMiniprogramPicker() {
+      try {
+        const resp = await fetch('/api/admin/miniprogram-library', { credentials: 'same-origin' });
+        const data = await resp.json();
+        if (!data.ok) throw new Error(data.error || '加载失败');
+        const items = data.items || [];
+        if (!items.length) {
+          alert('小程序素材库还是空的，先去 /admin/miniprogram-library 配置一条吧。');
+          return;
+        }
+        const existing = new Set(_selectedMiniprograms.map(function (i) { return i.id; }));
+        const choices = items.map(function (it) {
+          const checked = existing.has(it.id) ? 'checked' : '';
+          return '<label style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:6px;">'
+            + '<input type="checkbox" data-mp-pick="' + it.id + '" ' + checked + '>'
+            + '<span><strong>' + escapeHtml(it.title || it.name) + '</strong>'
+            + '<br><small>' + escapeHtml(it.appid) + ' · ' + escapeHtml(it.pagepath) + '</small></span>'
+            + '</label>';
+        }).join('');
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
+        wrap.innerHTML = '<div style="background:#fff;padding:16px;border-radius:8px;max-width:480px;width:90%;max-height:80vh;overflow:auto;">'
+          + '<h3>选择小程序卡片</h3>' + choices
+          + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">'
+          + '<button class="btn soft" type="button" data-mp-cancel>取消</button>'
+          + '<button class="btn primary" type="button" data-mp-confirm>确定</button>'
+          + '</div></div>';
+        document.body.appendChild(wrap);
+        wrap.querySelector('[data-mp-cancel]').addEventListener('click', function () { wrap.remove(); });
+        wrap.querySelector('[data-mp-confirm]').addEventListener('click', function () {
+          const picked = [];
+          wrap.querySelectorAll('[data-mp-pick]:checked').forEach(function (cb) {
+            const id = Number(cb.getAttribute('data-mp-pick'));
+            const found = items.find(function (it) { return it.id === id; });
+            if (found) picked.push(found);
+          });
+          _selectedMiniprograms = picked;
+          renderBatchMiniprograms();
+          wrap.remove();
+        });
+      } catch (err) {
+        alert('加载小程序素材失败：' + (err && err.message || err));
+      }
+    }
 
     function buildTag(label, tone) {
       return '<span class="tag' + (tone ? ' ' + tone : '') + '">' + label + '</span>';
@@ -1242,6 +1330,12 @@
       currentBatchImageFiles().forEach((file) => {
         formData.append('images', file);
       });
+      if (_selectedMiniprograms && _selectedMiniprograms.length) {
+        const attachments = _selectedMiniprograms.map(function (item) {
+          return { msgtype: 'miniprogram', miniprogram: { library_id: item.id } };
+        });
+        formData.append('attachments_json', JSON.stringify(attachments));
+      }
       return formData;
     }
 
@@ -1515,6 +1609,11 @@
       els.pickBatchImagesBtn.addEventListener('click', () => {
         els.batchImageInput.click();
       });
+      if (els.pickBatchMiniprogramsBtn) {
+        els.pickBatchMiniprogramsBtn.addEventListener('click', () => {
+          openMiniprogramPicker();
+        });
+      }
       els.batchImageInput.addEventListener('change', async (event) => {
         const files = Array.from(event.target.files || []);
         els.batchImageInput.value = '';

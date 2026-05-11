@@ -131,28 +131,6 @@ def insert_archived_messages(messages: list[dict[str, Any]], *, commit: bool = T
                 process_inbound_messages_for_openclaw(inserted_rows)
             except Exception:
                 archive_domain_logger.exception("post-insert inbound message automation failed")
-        try:
-            from ..customer_pulse.access import build_customer_pulse_legacy_tenant_context
-            from ..customer_pulse.service import enqueue_customer_pulse_recompute
-
-            for external_userid in {
-                str(row.get("external_userid") or "").strip()
-                for row in inserted_rows
-                if str(row.get("external_userid") or "").strip()
-            }:
-                enqueue_customer_pulse_recompute(
-                    external_userid=external_userid,
-                    owner_userid=str((next((row for row in inserted_rows if str(row.get("external_userid") or "").strip() == external_userid), {}) or {}).get("owner_userid") or "").strip(),
-                    delay_seconds=0,
-                    operator="archive_sync",
-                    trigger_source="archived_messages",
-                    tenant_context=build_customer_pulse_legacy_tenant_context(
-                        operator="archive_sync",
-                        source="legacy_internal_archive_sync",
-                    ),
-                )
-        except Exception:
-            archive_domain_logger.exception("customer pulse enqueue failed after archived message insert")
     return len(inserted_rows)
 
 
@@ -198,7 +176,10 @@ def list_archived_messages_by_window(start_time: str, end_time: str, owner_useri
     has_more = len(rows) > limit
     page_rows = rows[:limit]
     next_cursor = str(offset + limit) if has_more else ""
-    messages = [json.loads(row["raw_payload"]) for row in page_rows]
+    messages = [
+        row["raw_payload"] if isinstance(row["raw_payload"], (dict, list)) else json.loads(row["raw_payload"])
+        for row in page_rows
+    ]
     return {"messages": messages, "has_more": has_more, "next_cursor": next_cursor}
 
 

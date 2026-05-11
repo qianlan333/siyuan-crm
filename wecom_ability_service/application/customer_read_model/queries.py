@@ -102,7 +102,6 @@ class GetCustomerTimelineQuery:
             _get_customer_timeline_impl(
                 _require_external_userid(dto.external_userid),
                 filters,
-                customer_pulse_tenant_context=dto.customer_pulse_tenant_context,
             ),
         )
 

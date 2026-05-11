@@ -7,8 +7,7 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.services import save_signup_conversion_config
 
 
@@ -24,7 +23,7 @@ def _seed_questionnaire(app, *, questionnaire_id: int = 61) -> dict[str, object]
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -42,7 +41,7 @@ def _seed_questionnaire(app, *, questionnaire_id: int = 61) -> dict[str, object]
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, questionnaire_id, f"关键问题{index}", index),
             )
@@ -170,38 +169,19 @@ def _seed_bound_customer(app, questionnaire_seed: dict[str, object]) -> None:
 
 
 def test_marketing_backfill_script_recomputes_all_targets(tmp_path):
-    db_path = tmp_path / "marketing-backfill.sqlite3"
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(tmp_path) as app:
+        questionnaire_seed = _seed_questionnaire(app, questionnaire_id=61)
+        _save_config(app, questionnaire_seed)
+        _seed_bound_customer(app, questionnaire_seed)
+
     private_key_path = tmp_path / "wecom_private_key.pem"
     sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
-
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        init_db()
-    questionnaire_seed = _seed_questionnaire(app, questionnaire_id=61)
-    _save_config(app, questionnaire_seed)
-    _seed_bound_customer(app, questionnaire_seed)
-
     env = os.environ.copy()
     env.update(
         {
-            "DATABASE_PATH": str(db_path),
+            "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
             "WECOM_CORP_ID": "ww-test",
             "WECOM_CONTACT_SECRET": "contact-secret-test",
             "WECOM_SECRET": "secret-test",
@@ -288,38 +268,19 @@ def test_marketing_backfill_script_recomputes_all_targets(tmp_path):
 
 
 def test_marketing_backfill_script_dry_run_does_not_write_current_tables(tmp_path):
-    db_path = tmp_path / "marketing-backfill-dry-run.sqlite3"
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(tmp_path) as app:
+        questionnaire_seed = _seed_questionnaire(app, questionnaire_id=62)
+        _save_config(app, questionnaire_seed)
+        _seed_bound_customer(app, questionnaire_seed)
+
     private_key_path = tmp_path / "wecom_private_key.pem"
     sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
-
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        init_db()
-    questionnaire_seed = _seed_questionnaire(app, questionnaire_id=62)
-    _save_config(app, questionnaire_seed)
-    _seed_bound_customer(app, questionnaire_seed)
-
     env = os.environ.copy()
     env.update(
         {
-            "DATABASE_PATH": str(db_path),
+            "DATABASE_URL": os.environ.get("DATABASE_URL", ""),
             "WECOM_CORP_ID": "ww-test",
             "WECOM_CONTACT_SECRET": "contact-secret-test",
             "WECOM_SECRET": "secret-test",

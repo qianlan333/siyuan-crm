@@ -7,8 +7,7 @@ from datetime import datetime as real_datetime
 import pytest
 import requests
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.services import (
     evaluate_customer_marketing_state,
     insert_archived_messages,
@@ -29,33 +28,15 @@ def _test_image_data_url(label: str = "img") -> str:
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "marketing-automation.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    """PG-only：用顶层 build_pg_test_app helper 起 app（2026-05 砍 SQLite 后改造）。"""
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-            "AUTOMATION_INTERNAL_API_TOKEN": "internal-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(
+        tmp_path,
+        MCP_BEARER_TOKEN="mcp-token",
+        AUTOMATION_INTERNAL_API_TOKEN="internal-token",
+    ) as app:
+        yield app
 
 
 @pytest.fixture()
@@ -79,10 +60,11 @@ def _seed_customer(
         db = get_db()
         db.execute(
             """
-            INSERT OR IGNORE INTO owner_role_map (userid, display_name, role, active)
+            INSERT INTO owner_role_map (userid, display_name, role, active)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
             """,
-            (owner_userid, owner_userid, "sales", 1),
+            (owner_userid, owner_userid, "sales", True),
         )
         db.execute(
             """
@@ -121,8 +103,9 @@ def _seed_customer(
         if add_questionnaire:
             db.execute(
                 """
-                INSERT OR IGNORE INTO questionnaires (id, slug, name, title, description, is_disabled, redirect_url)
-                VALUES (1, 'marketing-auto', '自动化问卷', '自动化问卷', '', 0, '')
+                INSERT INTO questionnaires (id, slug, name, title, description, is_disabled, redirect_url)
+                VALUES (1, 'marketing-auto', '自动化问卷', '自动化问卷', '', false, '')
+                ON CONFLICT DO NOTHING
                 """
             )
             db.execute(
@@ -277,7 +260,7 @@ def _seed_signup_conversion_questionnaire(
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -296,7 +279,7 @@ def _seed_signup_conversion_questionnaire(
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, questionnaire_id, f"关键问题{index}", index),
             )
@@ -327,7 +310,7 @@ def _seed_signup_conversion_questionnaire(
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'mobile', '手机号', 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'mobile', '手机号', true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (mobile_question_id, questionnaire_id, question_count + 1),
         )
@@ -348,7 +331,7 @@ def _seed_signup_conversion_questionnaire_without_required_mobile(app, *, questi
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -365,7 +348,7 @@ def _seed_signup_conversion_questionnaire_without_required_mobile(app, *, questi
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'single_choice', '关键问题1', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'single_choice', '关键问题1', true, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (question_id, questionnaire_id),
         )
@@ -474,7 +457,7 @@ def _seed_activation_source(app, *, mobile: str, updated_at: str):
             INSERT INTO user_ops_huangxiaocan_activation_source (
                 mobile, activation_state, import_batch_id, created_by, is_active, created_at, updated_at
             )
-            VALUES (?, 'activated', 'batch-seed', 'seed', 1, ?, ?)
+            VALUES (?, 'activated', 'batch-seed', 'seed', true, ?, ?)
             """,
             (mobile, updated_at, updated_at),
         )
@@ -768,10 +751,11 @@ def test_send_pool_private_message_mcp_tool_supports_multiple_owners_and_writes_
     with app.app_context():
         get_db().execute(
             """
-            INSERT OR IGNORE INTO owner_role_map (userid, display_name, role, active, updated_at)
+            INSERT INTO owner_role_map (userid, display_name, role, active, updated_at)
             VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT DO NOTHING
             """,
-            ("sales_empty", "sales_empty", "sales", 1),
+            ("sales_empty", "sales_empty", "sales", True),
         )
         get_db().commit()
 
@@ -899,15 +883,15 @@ def test_send_pool_private_message_mcp_tool_supports_multiple_owners_and_writes_
             """
         ).fetchall()
         assert len(rows) == 5
-        assert json.loads(rows[0]["filter_snapshot_json"])["pool_key"] == "new_user"
-        assert json.loads(rows[0]["filter_snapshot_json"])["owner_userid"] == "QianLan"
-        assert json.loads(rows[1]["filter_snapshot_json"])["pool_key"] == "new_user"
-        assert json.loads(rows[1]["filter_snapshot_json"])["owner_userid"] == "sales_02"
-        assert json.loads(rows[2]["filter_snapshot_json"])["pool_key"] == "inactive_normal"
-        assert json.loads(rows[3]["filter_snapshot_json"])["pool_key"] == "active_focus"
-        assert json.loads(rows[3]["filter_snapshot_json"])["owner_userid"] == "QianLan"
-        assert json.loads(rows[4]["filter_snapshot_json"])["pool_key"] == "active_focus"
-        assert json.loads(rows[4]["filter_snapshot_json"])["owner_userid"] == "sales_02"
+        assert (rows[0]["filter_snapshot_json"] if isinstance(rows[0]["filter_snapshot_json"], (dict, list)) else json.loads(rows[0]["filter_snapshot_json"]))["pool_key"] == "new_user"
+        assert (rows[0]["filter_snapshot_json"] if isinstance(rows[0]["filter_snapshot_json"], (dict, list)) else json.loads(rows[0]["filter_snapshot_json"]))["owner_userid"] == "QianLan"
+        assert (rows[1]["filter_snapshot_json"] if isinstance(rows[1]["filter_snapshot_json"], (dict, list)) else json.loads(rows[1]["filter_snapshot_json"]))["pool_key"] == "new_user"
+        assert (rows[1]["filter_snapshot_json"] if isinstance(rows[1]["filter_snapshot_json"], (dict, list)) else json.loads(rows[1]["filter_snapshot_json"]))["owner_userid"] == "sales_02"
+        assert (rows[2]["filter_snapshot_json"] if isinstance(rows[2]["filter_snapshot_json"], (dict, list)) else json.loads(rows[2]["filter_snapshot_json"]))["pool_key"] == "inactive_normal"
+        assert (rows[3]["filter_snapshot_json"] if isinstance(rows[3]["filter_snapshot_json"], (dict, list)) else json.loads(rows[3]["filter_snapshot_json"]))["pool_key"] == "active_focus"
+        assert (rows[3]["filter_snapshot_json"] if isinstance(rows[3]["filter_snapshot_json"], (dict, list)) else json.loads(rows[3]["filter_snapshot_json"]))["owner_userid"] == "QianLan"
+        assert (rows[4]["filter_snapshot_json"] if isinstance(rows[4]["filter_snapshot_json"], (dict, list)) else json.loads(rows[4]["filter_snapshot_json"]))["pool_key"] == "active_focus"
+        assert (rows[4]["filter_snapshot_json"] if isinstance(rows[4]["filter_snapshot_json"], (dict, list)) else json.loads(rows[4]["filter_snapshot_json"]))["owner_userid"] == "sales_02"
         assert [(row["selected_count"], row["eligible_count"], row["sent_count"]) for row in rows] == [
             (1, 1, 1),
             (1, 1, 1),
@@ -1006,18 +990,18 @@ def test_send_pool_private_message_mcp_tool_supports_images_and_keeps_records(ap
             """
             SELECT filter_snapshot_json, content_preview, image_count, selected_count, eligible_count, sent_count
             FROM user_ops_send_records
-            WHERE filter_snapshot_json LIKE '%marketing_pool%'
+            WHERE CAST(filter_snapshot_json AS TEXT) LIKE '%%marketing_pool%%'
             ORDER BY id DESC
             LIMIT 2
             """
         ).fetchall()
         latest_rows = list(reversed(rows))
         assert len(latest_rows) == 2
-        assert json.loads(latest_rows[0]["filter_snapshot_json"])["owner_userid"] == "QianLan"
+        assert (latest_rows[0]["filter_snapshot_json"] if isinstance(latest_rows[0]["filter_snapshot_json"], (dict, list)) else json.loads(latest_rows[0]["filter_snapshot_json"]))["owner_userid"] == "QianLan"
         assert latest_rows[0]["content_preview"] == ""
         assert int(latest_rows[0]["image_count"]) == 1
         assert (latest_rows[0]["selected_count"], latest_rows[0]["eligible_count"], latest_rows[0]["sent_count"]) == (1, 1, 1)
-        assert json.loads(latest_rows[1]["filter_snapshot_json"])["owner_userid"] == "sales_02"
+        assert (latest_rows[1]["filter_snapshot_json"] if isinstance(latest_rows[1]["filter_snapshot_json"], (dict, list)) else json.loads(latest_rows[1]["filter_snapshot_json"]))["owner_userid"] == "sales_02"
         assert latest_rows[1]["content_preview"] == "图片和文本一起发"
         assert int(latest_rows[1]["image_count"]) == 1
         assert (latest_rows[1]["selected_count"], latest_rows[1]["eligible_count"], latest_rows[1]["sent_count"]) == (1, 1, 1)
@@ -1114,18 +1098,18 @@ def test_send_pool_private_message_mcp_tool_supports_attachments_and_keeps_recor
             """
             SELECT filter_snapshot_json, content_preview, image_count, selected_count, eligible_count, sent_count
             FROM user_ops_send_records
-            WHERE filter_snapshot_json LIKE '%marketing_pool%'
+            WHERE CAST(filter_snapshot_json AS TEXT) LIKE '%%marketing_pool%%'
             ORDER BY id DESC
             LIMIT 2
             """
         ).fetchall()
         latest_rows = list(reversed(rows))
         assert len(latest_rows) == 2
-        assert json.loads(latest_rows[0]["filter_snapshot_json"])["owner_userid"] == "QianLan"
+        assert (latest_rows[0]["filter_snapshot_json"] if isinstance(latest_rows[0]["filter_snapshot_json"], (dict, list)) else json.loads(latest_rows[0]["filter_snapshot_json"]))["owner_userid"] == "QianLan"
         assert latest_rows[0]["content_preview"] == ""
         assert int(latest_rows[0]["image_count"]) == 0
         assert (latest_rows[0]["selected_count"], latest_rows[0]["eligible_count"], latest_rows[0]["sent_count"]) == (1, 1, 1)
-        assert json.loads(latest_rows[1]["filter_snapshot_json"])["owner_userid"] == "sales_02"
+        assert (latest_rows[1]["filter_snapshot_json"] if isinstance(latest_rows[1]["filter_snapshot_json"], (dict, list)) else json.loads(latest_rows[1]["filter_snapshot_json"]))["owner_userid"] == "sales_02"
         assert latest_rows[1]["content_preview"] == "文本 + 图片 + 附件一起发"
         assert int(latest_rows[1]["image_count"]) == 1
         assert (latest_rows[1]["selected_count"], latest_rows[1]["eligible_count"], latest_rows[1]["sent_count"]) == (1, 1, 1)
@@ -1810,6 +1794,7 @@ def test_sidebar_manual_followup_switch_updates_pool_and_preserves_trace(
             SELECT sub_stage, change_reason, state_payload_json
             FROM customer_marketing_state_history
             WHERE external_userid = ?
+              AND change_reason = 'manual_followup_segment_changed'
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -1818,15 +1803,16 @@ def test_sidebar_manual_followup_switch_updates_pool_and_preserves_trace(
 
         assert current_row["main_stage"] == "pool"
         assert current_row["sub_stage"] == expected_sub_stage
-        current_payload = json.loads(current_row["state_payload_json"])
+        current_payload = (current_row["state_payload_json"] if isinstance(current_row["state_payload_json"], (dict, list)) else json.loads(current_row["state_payload_json"]))
         assert current_payload["manual_followup_segment"] == target_segment
         assert current_payload["manual_followup_segment_source"] == "sidebar_manual"
         assert current_payload["manual_followup_segment_operator"] == "sales_24"
         assert current_payload["questionnaire_segment"] == ("top" if hit_question_count >= 4 else "normal")
 
+        assert history_row is not None, "no history row with change_reason='manual_followup_segment_changed'"
         assert history_row["sub_stage"] == expected_sub_stage
         assert history_row["change_reason"] == "manual_followup_segment_changed"
-        history_payload = json.loads(history_row["state_payload_json"])
+        history_payload = (history_row["state_payload_json"] if isinstance(history_row["state_payload_json"], (dict, list)) else json.loads(history_row["state_payload_json"]))
         assert history_payload["manual_followup_segment"] == target_segment
         assert history_payload["questionnaire_segment"] == ("top" if hit_question_count >= 4 else "normal")
 
@@ -1883,7 +1869,7 @@ def test_signup_conversion_config_api_saves_and_reads_back(app, client):
     assert save_payload["question_rules"][0]["questionnaire_question_id"] == seed["question_ids"][0]
     assert save_payload["question_rules"][0]["hit_option_ids_json"] == seed["option_ids_by_question"][seed["question_ids"][0]][:2]
 
-    read_response = client.get("/api/admin/config/marketing-automation/signup-conversion")
+    read_response = client.get("/api/admin/marketing-automation/config")
     read_payload = read_response.get_json()["config"]
 
     assert read_response.status_code == 200
@@ -2015,7 +2001,7 @@ def test_admin_marketing_automation_preview_returns_current_state_and_hits(app, 
         assert bool(state_row["eligible_for_conversion"]) is True
         assert segment_row["segment"] == "core"
         assert int(segment_row["score"]) == payload["summary"]["hit_count"]
-        assert json.loads(segment_row["matched_question_ids_json"]) == payload["summary"]["matched_question_ids"]
+        assert (segment_row["matched_question_ids_json"] if isinstance(segment_row["matched_question_ids_json"], (dict, list)) else json.loads(segment_row["matched_question_ids_json"])) == payload["summary"]["matched_question_ids"]
 
 
 def test_admin_marketing_automation_preview_supports_mobile_only_person(app, client):

@@ -2,39 +2,21 @@ from __future__ import annotations
 
 import pytest
 
-from wecom_ability_service import create_app
 from wecom_ability_service.customer_center import repo as customer_repo
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "test.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "SIDEBAR_PERSON_DETAIL_URL_TEMPLATE": "https://www.youcangogogo.com/person/{person_id}",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(
+        tmp_path,
+        WECOM_CALLBACK_TOKEN="callback-token",
+        WECOM_CALLBACK_AES_KEY="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+        SIDEBAR_PERSON_DETAIL_URL_TEMPLATE="https://www.youcangogogo.com/person/{person_id}",
+    ) as app:
+        yield app
 
 
 @pytest.fixture()
@@ -50,7 +32,7 @@ def seed_customer_fixture(app):
             INSERT INTO owner_role_map (userid, display_name, role, active)
             VALUES (?, ?, ?, ?), (?, ?, ?, ?)
             """,
-            ("sales_01", "顾问一号", "sales", 1, "sales_02", "顾问二号", "sales", 1),
+            ("sales_01", "顾问一号", "sales", True, "sales_02", "顾问二号", "sales", True),
         )
         db.execute(
             """
@@ -127,7 +109,7 @@ def seed_customer_fixture(app):
                 "wm_customer_001",
                 "sales_01",
                 "active",
-                1,
+                True,
                 "备注甲",
                 "描述甲",
                 "{}",
@@ -135,7 +117,7 @@ def seed_customer_fixture(app):
                 "wm_customer_002",
                 "sales_02",
                 "active",
-                1,
+                True,
                 "备注乙",
                 "描述乙",
                 "{}",
@@ -207,7 +189,7 @@ def seed_customer_fixture(app):
                 last_message_at, last_batch_id, last_batch_status, last_batch_window_start, last_batch_window_end,
                 last_trigger_message_at, entered_at, exited_at, exit_reason, state_payload_json, created_at, updated_at
             )
-            VALUES (?, ?, 'signup_conversion_v1', 'active', 'activated', 1, 0, 1, 'active', ?, '', ?, NULL, '', '', '', ?, ?, '', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'signup_conversion_v1', 'active', 'activated', true, false, true, 'active', ?, '', ?, NULL, '', '', '', ?, ?, NULL, '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 person_id,
@@ -414,9 +396,9 @@ def test_customer_list_scope_sql_casts_timestamp_sort_columns_for_postgres(monke
 
     sql = customer_repo._customer_list_scope_sql()
 
-    assert "NULLIF(class_status.updated_at::text, '')" in sql
-    assert "NULLIF(contact.updated_at::text, '')" in sql
-    assert "NULLIF(binding.updated_at::text, '')" in sql
+    assert "(class_status.updated_at)::timestamp::text" in sql
+    assert "(contact.updated_at)::timestamp::text" in sql
+    assert "(binding.updated_at)::timestamp::text" in sql
     assert "NULLIF(class_status.updated_at, '')" not in sql
     assert "NULLIF(contact.updated_at, '')" not in sql
     assert "NULLIF(binding.updated_at, '')" not in sql

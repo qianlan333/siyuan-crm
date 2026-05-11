@@ -90,7 +90,7 @@ def _fetch_follow_users_map(external_userids: list[str]) -> dict[str, list[dict[
     if not external_userids:
         return {}
     placeholders = ",".join(["?"] * len(external_userids))
-    bool_true = True if get_db_backend() == "postgres" else 1
+    bool_true = True
     rows = _fetchall_dict(
         f"""
         SELECT

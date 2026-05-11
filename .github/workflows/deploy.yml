@@ -25,7 +25,10 @@ jobs:
             test -n "${DATABASE_URL:-}"
             source /home/ubuntu/venvs/openclaw/bin/activate
             pip install -r requirements.txt
+            # 1) schema + ALTER 补丁 + seed 默认分层/预算（一站式幂等）
             python3 app.py init-db
+            # 2) alembic 版本对齐 — 让后续可以走标准 upgrade 路径
+            python3 -m alembic stamp head || true
             sudo systemctl restart openclaw-wecom-postgres.service
             sleep 3
             curl -sSf http://127.0.0.1:5001/health

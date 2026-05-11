@@ -25,10 +25,14 @@ def _text(value: Any) -> str:
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
     text = _text(value)
     if not text:
         return None
-    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S"):
+    import re as _re
+    text = _re.sub(r"[+-]\d{2}(:\d{2})?$", "", text).rstrip()
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f"):
         try:
             return datetime.strptime(text, pattern)
         except ValueError:

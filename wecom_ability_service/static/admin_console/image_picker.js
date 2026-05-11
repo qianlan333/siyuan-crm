@@ -1,0 +1,297 @@
+/**
+ * 图片素材库通用 picker 组件
+ *
+ * 任何需要"选图片"的位置（小程序卡片缩略图 / campaign step 编辑 / 群发任务等）
+ * 都引用此文件，调用 `mountImagePicker(container, options)` 挂载。
+ *
+ * Options:
+ *   mode: 'single' | 'multiple'   单选还是多选（默认 single）
+ *   max: number                    多选时上限（默认 9，对齐企微单消息图片上限）
+ *   value: number | number[]       初始选中的 image_library.id
+ *   onChange: (ids) => void        选中变化回调，single 模式给单个 id（或 0），multiple 给数组
+ *
+ * DOM 结构：
+ *   - 已选缩略图列表
+ *   - "上传图片" 按钮（自动入素材库 + 选中）
+ *   - "从素材库选" 按钮（弹层列出全部启用的图片）
+ *
+ * 容器只渲染需要的 UI，不强行造样式架构 — 由调用方提供外层 label。
+ */
+(function () {
+  let _libraryCache = null;
+  let _libraryCachePromise = null;
+
+  async function fetchLibrary({ force = false } = {}) {
+    if (!force && _libraryCache) return _libraryCache;
+    if (_libraryCachePromise) return _libraryCachePromise;
+    _libraryCachePromise = (async () => {
+      try {
+        const resp = await fetch('/api/admin/image-library?enabled_only=true&limit=200', { credentials: 'same-origin' });
+        const data = await resp.json();
+        _libraryCache = data.ok ? (data.items || []) : [];
+      } catch (e) {
+        _libraryCache = [];
+      }
+      _libraryCachePromise = null;
+      return _libraryCache;
+    })();
+    return _libraryCachePromise;
+  }
+
+  function invalidateCache() { _libraryCache = null; }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  async function thumbnailUrl(item) {
+    // 库列表 API 默认不带 data_base64（避免 payload 过大）。要展示缩略图就再请求一次详情。
+    if (item._thumb_url) return item._thumb_url;
+    if (item.source === 'url' && item.source_url) {
+      item._thumb_url = item.source_url;
+      return item._thumb_url;
+    }
+    try {
+      const resp = await fetch('/api/admin/image-library/' + item.id, { credentials: 'same-origin' });
+      const data = await resp.json();
+      if (data.ok && data.item.data_base64) {
+        const mime = data.item.mime_type || 'image/png';
+        item._thumb_url = 'data:' + mime + ';base64,' + data.item.data_base64;
+      }
+    } catch (e) { /* fail silently → 用占位 */ }
+    return item._thumb_url || '';
+  }
+
+  function showLibraryPickerModal({ existing, onConfirm, mode, max }) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    wrap.innerHTML = `
+      <div style="background:#fff;border-radius:8px;padding:18px;max-width:640px;width:92%;max-height:80vh;display:flex;flex-direction:column;">
+        <header style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <strong>从图片素材库选择</strong>
+          <button class="img-picker-close" type="button" style="border:0;background:transparent;font-size:22px;cursor:pointer;color:#888;">×</button>
+        </header>
+        <div class="img-picker-list" style="overflow:auto;flex:1;display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;padding:4px;">加载中…</div>
+        <footer style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:10px;">
+          <span class="img-picker-count subtle" style="color:#888;font-size:12px;"></span>
+          <div>
+            <a href="/admin/image-library" target="_blank" style="font-size:12px;color:#2c5cdb;margin-right:12px;">管理素材库</a>
+            <button class="img-picker-cancel" type="button" style="padding:6px 14px;margin-right:6px;">取消</button>
+            <button class="img-picker-confirm admin-button admin-button--primary" type="button" style="padding:6px 14px;">确定</button>
+          </div>
+        </footer>
+      </div>
+    `;
+    document.body.appendChild(wrap);
+    const listEl = wrap.querySelector('.img-picker-list');
+    const countEl = wrap.querySelector('.img-picker-count');
+
+    let chosen = mode === 'multiple' ? new Set(existing) : (existing.length ? existing[0] : 0);
+
+    function close() { wrap.remove(); }
+    wrap.querySelector('.img-picker-close').addEventListener('click', close);
+    wrap.querySelector('.img-picker-cancel').addEventListener('click', close);
+    wrap.querySelector('.img-picker-confirm').addEventListener('click', () => {
+      const ids = mode === 'multiple' ? Array.from(chosen) : (chosen ? [chosen] : []);
+      onConfirm(ids);
+      close();
+    });
+
+    fetchLibrary().then(async (items) => {
+      if (!items.length) {
+        listEl.innerHTML = '<div style="grid-column:1/-1;color:#888;font-size:13px;text-align:center;padding:30px;">素材库还是空的，先去 <a href="/admin/image-library" target="_blank">/admin/image-library</a> 上传一些。</div>';
+        return;
+      }
+      // 先渲染骨架占位，再异步填缩略图（避免一次性发 N 个详情请求）
+      listEl.innerHTML = items.map(function (it) {
+        const isSel = mode === 'multiple' ? chosen.has(it.id) : (chosen === it.id);
+        return '<label data-id="' + it.id + '" style="border:2px solid ' + (isSel ? '#2c5cdb' : '#e5e7eb') + ';border-radius:6px;padding:6px;cursor:pointer;font-size:11px;display:flex;flex-direction:column;gap:6px;">'
+          + '<div class="img-picker-thumb" style="width:100%;aspect-ratio:1;background:#f5f6f8;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#bbb;overflow:hidden;">…</div>'
+          + '<div style="display:flex;align-items:center;gap:4px;"><input type="' + (mode === 'multiple' ? 'checkbox' : 'radio') + '" name="img-picker" ' + (isSel ? 'checked' : '') + ' style="margin:0;"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.name || it.file_name || '#' + it.id) + '</span></div>'
+          + '</label>';
+      }).join('');
+      function updateCount() {
+        const n = mode === 'multiple' ? chosen.size : (chosen ? 1 : 0);
+        countEl.textContent = mode === 'multiple' ? ('已选 ' + n + (max ? ' / ' + max : '')) : (n ? '已选 1' : '');
+      }
+      updateCount();
+      // 异步填缩略图
+      items.forEach(async function (it) {
+        const url = await thumbnailUrl(it);
+        const cell = listEl.querySelector('label[data-id="' + it.id + '"] .img-picker-thumb');
+        if (cell) {
+          if (url) cell.innerHTML = '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;">';
+          else cell.textContent = '(无图)';
+        }
+      });
+      // 选择交互
+      listEl.querySelectorAll('label[data-id]').forEach(function (lbl) {
+        const id = Number(lbl.dataset.id);
+        lbl.addEventListener('click', function (e) {
+          if (e.target.tagName === 'INPUT') return;  // 让 input 自己处理
+          const input = lbl.querySelector('input');
+          input.checked = !input.checked;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        lbl.querySelector('input').addEventListener('change', function () {
+          if (mode === 'multiple') {
+            if (this.checked) {
+              if (max && chosen.size >= max) {
+                this.checked = false;
+                alert('最多只能选 ' + max + ' 张');
+                return;
+              }
+              chosen.add(id);
+            } else {
+              chosen.delete(id);
+            }
+            lbl.style.borderColor = this.checked ? '#2c5cdb' : '#e5e7eb';
+          } else {
+            chosen = this.checked ? id : 0;
+            // 单选清掉其他
+            listEl.querySelectorAll('label').forEach(function (other) {
+              other.style.borderColor = (Number(other.dataset.id) === chosen) ? '#2c5cdb' : '#e5e7eb';
+            });
+          }
+          updateCount();
+        });
+      });
+    });
+  }
+
+  /**
+   * @param {HTMLElement} container 容器元素
+   * @param {Object} options
+   * @returns {Object} { getValue: () => number|number[], setValue: (v) => void, refresh: () => void }
+   */
+  window.mountImagePicker = function mountImagePicker(container, options) {
+    options = options || {};
+    const mode = options.mode === 'multiple' ? 'multiple' : 'single';
+    const max = options.max || 9;
+    let value = options.value;
+    if (mode === 'multiple') value = Array.isArray(value) ? value.slice() : [];
+    else value = Number(value || 0);
+    const onChange = typeof options.onChange === 'function' ? options.onChange : function () {};
+
+    container.innerHTML = `
+      <div class="img-picker-root">
+        <div class="img-picker-selected" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+          <input type="file" accept="image/*" class="img-picker-upload-file" style="font-size:12px;" ${mode === 'multiple' ? 'multiple' : ''}>
+          <button type="button" class="img-picker-pick admin-button admin-button--ghost" style="font-size:12px;padding:4px 12px;">从素材库选</button>
+          <span class="img-picker-status" style="color:#888;font-size:12px;"></span>
+        </div>
+      </div>
+    `;
+    const selectedEl = container.querySelector('.img-picker-selected');
+    const fileInput = container.querySelector('.img-picker-upload-file');
+    const pickBtn = container.querySelector('.img-picker-pick');
+    const statusEl = container.querySelector('.img-picker-status');
+
+    async function renderSelected() {
+      const ids = mode === 'multiple' ? value : (value ? [value] : []);
+      if (!ids.length) {
+        selectedEl.innerHTML = '<span style="color:#aaa;font-size:12px;">未选择图片</span>';
+        return;
+      }
+      const items = await fetchLibrary();
+      selectedEl.innerHTML = ids.map(function (id) {
+        const it = items.find(function (x) { return x.id === id; }) || { id: id, name: '#' + id };
+        return '<div class="img-picker-chip" data-id="' + id + '" style="display:flex;align-items:center;gap:6px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:4px;background:#fafbfc;font-size:12px;">'
+          + '<div class="img-picker-chip-thumb" style="width:28px;height:28px;background:#f5f6f8;border-radius:3px;overflow:hidden;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:10px;">…</div>'
+          + '<span style="max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escapeHtml(it.name || it.file_name || ('#' + id)) + '</span>'
+          + '<button type="button" data-remove="' + id + '" style="border:0;background:transparent;color:#a02929;cursor:pointer;font-size:14px;">×</button>'
+          + '</div>';
+      }).join('');
+      // 异步填缩略图
+      ids.forEach(async function (id) {
+        const it = items.find(function (x) { return x.id === id; });
+        if (!it) return;
+        const url = await thumbnailUrl(it);
+        const cell = selectedEl.querySelector('.img-picker-chip[data-id="' + id + '"] .img-picker-chip-thumb');
+        if (cell && url) cell.innerHTML = '<img src="' + url + '" style="width:100%;height:100%;object-fit:cover;">';
+      });
+      // 移除按钮
+      selectedEl.querySelectorAll('[data-remove]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          const rid = Number(btn.dataset.remove);
+          if (mode === 'multiple') {
+            value = value.filter(function (x) { return x !== rid; });
+          } else {
+            value = 0;
+          }
+          renderSelected();
+          onChange(mode === 'multiple' ? value : value);
+        });
+      });
+    }
+
+    pickBtn.addEventListener('click', function () {
+      const ids = mode === 'multiple' ? value : (value ? [value] : []);
+      showLibraryPickerModal({
+        existing: ids,
+        mode: mode,
+        max: max,
+        onConfirm: function (newIds) {
+          if (mode === 'multiple') {
+            value = newIds.slice(0, max);
+          } else {
+            value = newIds.length ? newIds[0] : 0;
+          }
+          renderSelected();
+          onChange(mode === 'multiple' ? value : value);
+        },
+      });
+    });
+
+    fileInput.addEventListener('change', async function () {
+      const files = Array.from(fileInput.files || []);
+      if (!files.length) return;
+      fileInput.disabled = true;
+      let ok = 0, fail = 0;
+      for (let i = 0; i < files.length; i++) {
+        statusEl.textContent = '上传中 ' + (i + 1) + '/' + files.length + '：' + files[i].name;
+        const fd = new FormData();
+        fd.append('image', files[i]);
+        try {
+          const resp = await fetch('/api/admin/image-library/upload', { method: 'POST', credentials: 'same-origin', body: fd });
+          const data = await resp.json();
+          if (data.ok && data.item) {
+            ok++;
+            invalidateCache();  // 让新素材立刻显示在 picker 里
+            if (mode === 'multiple') {
+              if (value.length < max) value.push(data.item.id);
+            } else {
+              value = data.item.id;
+            }
+          } else {
+            fail++;
+          }
+        } catch (e) { fail++; }
+      }
+      statusEl.textContent = '已上传 ' + ok + (fail ? '，失败 ' + fail : '') + ' 张';
+      fileInput.disabled = false;
+      fileInput.value = '';
+      // 等下一帧让 invalidateCache 后的 fetchLibrary 重新拉
+      await fetchLibrary({ force: true });
+      renderSelected();
+      onChange(mode === 'multiple' ? value : value);
+    });
+
+    renderSelected();
+
+    return {
+      getValue: function () { return mode === 'multiple' ? value.slice() : value; },
+      setValue: function (v) {
+        if (mode === 'multiple') value = Array.isArray(v) ? v.slice() : [];
+        else value = Number(v || 0);
+        renderSelected();
+      },
+      refresh: function () { invalidateCache(); renderSelected(); },
+    };
+  };
+
+  // 也暴露这个，让别处可以预热缓存或失效
+  window.imageLibraryCache = { fetch: fetchLibrary, invalidate: invalidateCache };
+})();

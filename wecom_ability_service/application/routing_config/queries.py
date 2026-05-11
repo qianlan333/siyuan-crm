@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import _legacy_delegate
+from ...domains.routing_config import service as routing_domain_service
 from .dto import (
     GetOwnerRoleMapQueryDTO,
     GetOwnerRoleMapResultDTO,
@@ -16,55 +16,64 @@ from .dto import (
 
 
 class GetOwnerRoleQuery:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.get_owner_role`` via ``_legacy_delegate`` for contact enrichment and admin config callers."""
-
     def __call__(self, dto: GetOwnerRoleQueryDTO) -> GetOwnerRoleQueryResultDTO:
-        return _legacy_delegate.get_owner_role_legacy(dto)
+        return routing_domain_service.get_owner_role(str(dto.userid or "").strip())
 
     execute = __call__
 
 
 class GetOwnerRoleMapQuery:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.list_owner_role_map`` via ``_legacy_delegate`` for admin config, MCP, and compatibility-service callers."""
-
     def __call__(
         self,
         dto: GetOwnerRoleMapQueryDTO | None = None,
     ) -> GetOwnerRoleMapResultDTO:
-        return _legacy_delegate.get_owner_role_map_legacy(dto or GetOwnerRoleMapQueryDTO())
+        dto = dto or GetOwnerRoleMapQueryDTO()
+        return routing_domain_service.list_owner_role_map(active_only=bool(dto.active_only))
 
     execute = __call__
 
 
 class GetRoutingRuleQuery:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.get_routing_rule`` via ``_legacy_delegate`` for admin config edit flows."""
-
     def __call__(self, dto: GetRoutingRuleQueryDTO) -> GetRoutingRuleQueryResultDTO:
-        return _legacy_delegate.get_routing_rule_legacy(dto)
+        return routing_domain_service.get_routing_rule(str(dto.rule_key or "").strip())
 
     execute = __call__
 
 
 class GetRoutingRuleConfigQuery:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.build_routing_config`` and related legacy reads via ``_legacy_delegate`` for admin config and compatibility-service callers."""
-
     def __call__(
         self,
         dto: GetRoutingRuleConfigQueryDTO | None = None,
     ) -> GetRoutingRuleConfigResultDTO:
-        return _legacy_delegate.get_routing_rule_config_legacy(dto or GetRoutingRuleConfigQueryDTO())
+        dto = dto or GetRoutingRuleConfigQueryDTO()
+        owner_role_map = routing_domain_service.list_owner_role_map(active_only=bool(dto.active_only))
+        routing_rules = {
+            str(item.get("rule_key") or "").strip(): dict(item)
+            for item in routing_domain_service.list_routing_rules(active_only=bool(dto.active_only))
+        }
+        payload = routing_domain_service.build_routing_config(
+            owner_role_map=owner_role_map,
+            signup_tag_rules=dict(dto.signup_tag_rules or {}),
+        )
+        payload["routing_rules"] = routing_rules
+        payload["owner_role_options"] = list(routing_domain_service.OWNER_ROLE_OPTIONS)
+        payload["routing_target_options"] = list(routing_domain_service.ROUTING_TARGET_OPTIONS)
+        return payload
 
     execute = __call__
 
 
 class ResolveContactRoutingContextQuery:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.resolve_contact_routing_context`` via ``_legacy_delegate`` for contact enrichment and compatibility-service callers."""
-
     def __call__(
         self,
         dto: ResolveContactRoutingContextQueryDTO,
     ) -> ResolveContactRoutingContextResultDTO:
-        return _legacy_delegate.resolve_contact_routing_context_legacy(dto)
+        return routing_domain_service.resolve_contact_routing_context(
+            owner_userid=str(dto.owner_userid or "").strip(),
+            owner_role=str(dto.owner_role or "").strip(),
+            signup_status=str(dto.signup_status or "").strip(),
+            routing_alias=str(dto.routing_alias or "").strip(),
+        )
 
     execute = __call__
 

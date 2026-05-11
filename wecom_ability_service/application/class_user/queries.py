@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from . import _legacy_delegate
+from typing import Any
+
+from ...domains.class_user import service as class_user_domain_service
+from ...domains.contacts import repo as contacts_repo
+from ...domains.tags import service as tags_domain_service
+from ..identity_contact.dto import ResolvePersonIdentityQueryDTO
+from ..identity_contact.queries import ResolvePersonIdentityQuery
 from .dto import (
     ExportClassUserManagementRecordsQueryDTO,
     ExportClassUserManagementRecordsResultDTO,
@@ -17,94 +23,105 @@ from .dto import (
 )
 
 
-class GetClassUserStatusDefinitionQuery:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.get_class_user_status_definition`` via ``_legacy_delegate`` for marketing automation and future user-ops callers."""
+def _get_contact_row_by_external_userid(external_userid: str) -> dict[str, Any] | None:
+    row = contacts_repo.get_contact_row_by_external_userid(str(external_userid or "").strip())
+    return dict(row) if row else None
 
+
+def _resolve_person_identity_for_snapshot(*, external_userid: str = "", **_: Any) -> dict[str, Any]:
+    return ResolvePersonIdentityQuery()(
+        ResolvePersonIdentityQueryDTO(external_userid=str(external_userid or "").strip())
+    )
+
+
+class GetClassUserStatusDefinitionQuery:
     def __call__(
         self,
         dto: GetClassUserStatusDefinitionQueryDTO,
     ) -> GetClassUserStatusDefinitionResultDTO:
-        return _legacy_delegate.get_class_user_status_definition_legacy(dto)
-
-    execute = __call__
-
-
-class GetClassUserStatusCurrentQuery:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.get_class_user_status_current`` via ``_legacy_delegate`` for sidebar, admin, and customer-read callers."""
-
-    def __call__(
-        self,
-        dto: GetClassUserStatusCurrentQueryDTO,
-    ) -> GetClassUserStatusCurrentResultDTO:
-        return _legacy_delegate.get_class_user_status_current_legacy(dto)
-
-    execute = __call__
-
-
-class GetClassUserSnapshotQuery:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.get_class_user_snapshot`` via ``_legacy_delegate`` for admin-support and marketing-automation callers."""
-
-    def __call__(self, dto: GetClassUserSnapshotQueryDTO) -> GetClassUserSnapshotResultDTO:
-        return _legacy_delegate.get_class_user_snapshot_legacy(dto)
-
-    execute = __call__
-
-
-class ListSignupScopeExternalUseridsQuery:
-    """Wave 2 class-user helper query that delegates to ``domains.class_user.service.list_signup_scope_external_userids`` via ``_legacy_delegate`` for admin-support live-read callers."""
-
-    def __call__(self, corp_id: str) -> list[str]:
-        return _legacy_delegate.list_signup_scope_external_userids_legacy(str(corp_id or "").strip())
-
-    execute = __call__
-
-
-class ListClassUserLiveBaseRowsQuery:
-    """Wave 2 class-user helper query that delegates to ``domains.class_user.service.list_class_user_live_base_rows`` via ``_legacy_delegate`` for admin-support live-read callers."""
-
-    def __call__(self, corp_id: str) -> list[dict[str, object]]:
-        return _legacy_delegate.list_class_user_live_base_rows_legacy(str(corp_id or "").strip())
-
-    execute = __call__
-
-
-class ListClassUserStatusHistoryQuery:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.list_class_user_status_history`` via ``_legacy_delegate`` for admin class-user and operations-shell callers."""
-
-    def __call__(
-        self,
-        dto: ListClassUserStatusHistoryQueryDTO | None = None,
-    ) -> ListClassUserStatusHistoryResultDTO:
-        return _legacy_delegate.list_class_user_status_history_legacy(
-            dto or ListClassUserStatusHistoryQueryDTO()
+        return class_user_domain_service.get_class_user_status_definition(
+            str(dto.signup_status or "").strip()
         )
 
     execute = __call__
 
 
-class ListClassUserManagementRecordsQuery:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.list_class_user_management_records`` via ``_legacy_delegate`` for admin class-user and operations-shell callers."""
+class GetClassUserStatusCurrentQuery:
+    def __call__(
+        self,
+        dto: GetClassUserStatusCurrentQueryDTO,
+    ) -> GetClassUserStatusCurrentResultDTO:
+        return class_user_domain_service.get_class_user_status_current(
+            str(dto.external_userid or "").strip()
+        )
 
+    execute = __call__
+
+
+class GetClassUserSnapshotQuery:
+    def __call__(self, dto: GetClassUserSnapshotQueryDTO) -> GetClassUserSnapshotResultDTO:
+        return class_user_domain_service.get_class_user_snapshot(
+            str(dto.external_userid or "").strip(),
+            str(dto.owner_userid or "").strip(),
+            contact_loader=_get_contact_row_by_external_userid,
+            person_identity_resolver=_resolve_person_identity_for_snapshot,
+        )
+
+    execute = __call__
+
+
+class ListSignupScopeExternalUseridsQuery:
+    def __call__(self, corp_id: str) -> list[str]:
+        return class_user_domain_service.list_signup_scope_external_userids(
+            str(corp_id or "").strip()
+        )
+
+    execute = __call__
+
+
+class ListClassUserLiveBaseRowsQuery:
+    def __call__(self, corp_id: str) -> list[dict[str, object]]:
+        return class_user_domain_service.list_class_user_live_base_rows(
+            str(corp_id or "").strip()
+        )
+
+    execute = __call__
+
+
+class ListClassUserStatusHistoryQuery:
+    def __call__(
+        self,
+        dto: ListClassUserStatusHistoryQueryDTO | None = None,
+    ) -> ListClassUserStatusHistoryResultDTO:
+        dto = dto or ListClassUserStatusHistoryQueryDTO()
+        return class_user_domain_service.list_class_user_status_history(limit=int(dto.limit))
+
+    execute = __call__
+
+
+class ListClassUserManagementRecordsQuery:
     def __call__(
         self,
         dto: ListClassUserManagementRecordsQueryDTO | None = None,
     ) -> ListClassUserManagementRecordsResultDTO:
-        return _legacy_delegate.list_class_user_management_records_legacy(
-            dto or ListClassUserManagementRecordsQueryDTO()
+        dto = dto or ListClassUserManagementRecordsQueryDTO()
+        return class_user_domain_service.list_class_user_management_records(
+            signup_status=str(dto.signup_status or "").strip(),
+            get_signup_status_definitions=tags_domain_service.get_signup_status_definitions,
         )
 
     execute = __call__
 
 
 class ExportClassUserManagementRecordsQuery:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.export_class_user_management_records`` via ``_legacy_delegate`` for admin export callers."""
-
     def __call__(
         self,
         dto: ExportClassUserManagementRecordsQueryDTO | None = None,
     ) -> ExportClassUserManagementRecordsResultDTO:
-        return _legacy_delegate.export_class_user_management_records_legacy(
-            dto or ExportClassUserManagementRecordsQueryDTO()
+        dto = dto or ExportClassUserManagementRecordsQueryDTO()
+        return class_user_domain_service.export_class_user_management_records(
+            signup_status=str(dto.signup_status or "").strip(),
+            get_signup_status_definitions=tags_domain_service.get_signup_status_definitions,
         )
 
     execute = __call__

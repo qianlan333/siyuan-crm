@@ -32,9 +32,7 @@ def _flask_smoke_build() -> None:
         app = create_app(
             {
                 "TESTING": True,
-                "ai_customer_pulse": True,
-                "ai_followup_orchestrator": True,
-                "DATABASE_PATH": str(tmp_path / "build-smoke.sqlite3"),
+                # DATABASE_URL 从环境变量读取（PG-only，2026-05 砍 SQLite 后不再需要 DATABASE_PATH）
                 "RELEASE_SHA": "build-smoke",
                 "WECOM_CORP_ID": "ww-build",
                 "WECOM_CONTACT_SECRET": "contact-secret-build",
@@ -60,33 +58,9 @@ def _flask_smoke_build() -> None:
             sess["admin_session_login_type"] = "break_glass"
             sess["admin_session_display_name"] = "build-smoke"
             sess["admin_session_break_glass_username"] = "build-smoke"
-        response = client.get("/admin/customer-pulse")
-        if response.status_code != 410:
-            raise SystemExit(f"build smoke route failed: status={response.status_code}")
-        orchestrator_response = client.get("/admin/followup-orchestrator")
-        if orchestrator_response.status_code != 410:
-            raise SystemExit(f"build smoke followup orchestrator route failed: status={orchestrator_response.status_code}")
-        admin_api_response = client.get("/api/admin/customer-pulse")
-        if admin_api_response.status_code != 200:
-            raise SystemExit(f"build smoke admin api failed: status={admin_api_response.status_code}")
-        orchestrator_api_response = client.get("/api/admin/followup-orchestrator")
-        if orchestrator_api_response.status_code != 200:
-            raise SystemExit(f"build smoke followup orchestrator api failed: status={orchestrator_api_response.status_code}")
-        admin_stats_response = client.get("/api/admin/customer-pulse/stats")
-        if admin_stats_response.status_code != 200:
-            raise SystemExit(f"build smoke admin stats failed: status={admin_stats_response.status_code}")
-        internal_api_response = client.get(
-            "/api/internal/customer-pulse/inbox",
-            headers={"Authorization": "Bearer internal-token"},
-        )
-        if internal_api_response.status_code != 200:
-            raise SystemExit(f"build smoke internal api failed: status={internal_api_response.status_code}")
-        internal_stats_response = client.get(
-            "/api/internal/customer-pulse/stats",
-            headers={"Authorization": "Bearer internal-token"},
-        )
-        if internal_stats_response.status_code != 200:
-            raise SystemExit(f"build smoke internal stats failed: status={internal_stats_response.status_code}")
+        response = client.get("/admin/customers")
+        if response.status_code not in (200, 302):
+            raise SystemExit(f"build smoke customers route failed: status={response.status_code}")
 
 
 def main() -> int:

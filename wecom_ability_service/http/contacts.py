@@ -8,8 +8,8 @@ from ..domains.contacts.service import (
     sync_contacts_for_owner_from_wecom,
     update_contact_description_from_wecom,
 )
-from ..application.identity_contact._legacy_delegate import (
-    _get_contact_by_external_userid as get_contact_by_external_userid,
+from ..application.identity_contact._runtime import (
+    get_contact_by_external_userid,
 )
 from ..wecom_client import WeComClientError
 from .common import _default_owner_userid, _wecom_error_response

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from ...domains.identity import service as identity_domain_service
-from . import _legacy_delegate
+from ...infra.helpers import db_bool as _db_bool
+from . import _runtime
 from .dto import (
     CountExternalContactIdentityMapsQueryDTO,
     CountExternalContactIdentityMapsResultDTO,
@@ -17,64 +18,78 @@ from .dto import (
 
 
 class ResolvePersonIdentityQuery:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.resolve_person_identity`` via ``_legacy_delegate`` for HTTP identity callers and future questionnaire/user-ops readers."""
-
-    def __call__(self, dto: ResolvePersonIdentityQueryDTO | None = None) -> ResolvePersonIdentityResultDTO:
-        return _legacy_delegate.resolve_person_identity_legacy(dto or ResolvePersonIdentityQueryDTO())
-
-    execute = __call__
-
-
-class GetContactBindingStatusQuery:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.get_contact_binding_status`` via ``_legacy_delegate`` for sidebar and future admin support readers."""
-
-    def __call__(self, dto: GetContactBindingStatusQueryDTO) -> GetContactBindingStatusResultDTO:
-        return _legacy_delegate.get_contact_binding_status_legacy(dto)
-
-    execute = __call__
-
-
-class ResolveExternalContactIdentityQuery:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.resolve_external_contact_identity`` via ``_legacy_delegate`` for questionnaire and sync callers."""
-
     def __call__(
         self,
-        dto: ResolveExternalContactIdentityQueryDTO,
-    ) -> ResolveExternalContactIdentityResultDTO:
-        return _legacy_delegate.resolve_external_contact_identity_legacy(dto)
-
-    execute = __call__
-
-
-class CountExternalContactIdentityMapsQuery:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.count_external_contact_identity_maps`` via ``_legacy_delegate`` for sync summary callers."""
-
-    def __call__(
-        self,
-        dto: CountExternalContactIdentityMapsQueryDTO | None = None,
-    ) -> CountExternalContactIdentityMapsResultDTO:
-        return _legacy_delegate.count_external_contact_identity_maps_legacy(
-            dto or CountExternalContactIdentityMapsQueryDTO()
+        dto: ResolvePersonIdentityQueryDTO | None = None,
+    ) -> ResolvePersonIdentityResultDTO:
+        dto = dto or ResolvePersonIdentityQueryDTO()
+        return _runtime.resolve_person_identity(
+            external_userid=str(dto.external_userid or "").strip(),
+            mobile=str(dto.mobile or "").strip(),
+            unionid=str(dto.unionid or "").strip(),
+            corp_id=str(dto.corp_id or "").strip(),
         )
 
     execute = __call__
 
 
-class GetPrimaryFollowUserUseridQuery:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.get_primary_follow_user_userid`` via ``_legacy_delegate`` for sidebar and admin support callers."""
+class GetContactBindingStatusQuery:
+    def __call__(self, dto: GetContactBindingStatusQueryDTO) -> GetContactBindingStatusResultDTO:
+        return _runtime.get_contact_binding_status(
+            str(dto.external_userid or "").strip(),
+            str(dto.owner_userid or "").strip(),
+        )
 
+    execute = __call__
+
+
+class ResolveExternalContactIdentityQuery:
+    def __call__(
+        self,
+        dto: ResolveExternalContactIdentityQueryDTO,
+    ) -> ResolveExternalContactIdentityResultDTO:
+        corp_id = str(dto.corp_id or "").strip() or identity_domain_service.person_identity_corp_id()
+        return identity_domain_service.resolve_external_contact_identity(
+            corp_id,
+            unionid=str(dto.unionid or "").strip(),
+            openid=str(dto.openid or "").strip(),
+            external_userid=str(dto.external_userid or "").strip(),
+        )
+
+    execute = __call__
+
+
+class CountExternalContactIdentityMapsQuery:
+    def __call__(
+        self,
+        dto: CountExternalContactIdentityMapsQueryDTO | None = None,
+    ) -> CountExternalContactIdentityMapsResultDTO:
+        del dto
+        return identity_domain_service.count_external_contact_identity_maps()
+
+    execute = __call__
+
+
+class GetPrimaryFollowUserUseridQuery:
     def __call__(
         self,
         dto: GetPrimaryFollowUserUseridQueryDTO,
     ) -> GetPrimaryFollowUserUseridResultDTO:
-        return _legacy_delegate.get_primary_follow_user_userid_legacy(dto)
+        return identity_domain_service.get_primary_follow_user_userid(
+            str(dto.external_userid or "").strip(),
+            corp_id=str(dto.corp_id or "").strip(),
+            active_value=_db_bool(True),
+            contact_loader=_runtime.get_contact_by_external_userid,
+            resolve_identity=lambda corp_id, value: identity_domain_service.resolve_external_contact_identity(
+                corp_id,
+                external_userid=value,
+            ),
+        )
 
     execute = __call__
 
 
 class ListIdentityExternalUseridsForCorpQuery:
-    """Wave 2 identity query that delegates to ``domains.identity.service.list_identity_external_userids_for_corp`` for sync callers until the corp-scoped read model is formalized."""
-
     def __call__(self, corp_id: str) -> list[str]:
         return identity_domain_service.list_identity_external_userids_for_corp(str(corp_id or "").strip())
 

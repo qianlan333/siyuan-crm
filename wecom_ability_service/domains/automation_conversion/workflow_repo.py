@@ -4,455 +4,60 @@ import json
 from typing import Any
 
 from ...db import get_db
-
-
-def _normalized_text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = _normalized_text(value)
-    if not text:
-        return default
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
-
-
-def _row_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return _normalized_text(value).lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _fetchone_dict(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-    row = get_db().execute(sql, params).fetchone()
-    return dict(row) if row else None
-
-
-def _fetchall_dicts(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    rows = get_db().execute(sql, params).fetchall()
-    return [dict(row) for row in rows]
-
-
-def _serialize_profile_segment_template_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "program_id": int(row.get("program_id") or 0) or None,
-        "questionnaire_id": int(row.get("questionnaire_id") or 0) or None,
-        "segmentation_question_id": int(row.get("segmentation_question_id") or 0) or None,
-        "enabled": _row_bool(row.get("enabled")),
-        "version": int(row.get("version") or 1),
-    }
-
-
-def _serialize_profile_segment_category_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "enabled": _row_bool(row.get("enabled")),
-        "sort_order": int(row.get("sort_order") or 0),
-    }
-
-
-def _serialize_profile_segment_option_mapping_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "template_id": int(row.get("template_id") or 0),
-        "category_id": int(row.get("category_id") or 0),
-        "question_id": int(row.get("question_id") or 0),
-        "option_id": int(row.get("option_id") or 0),
-    }
-
-
-def _serialize_workflow_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "program_id": int(row.get("program_id") or 0) or None,
-        "profile_segment_template_id": int(row.get("profile_segment_template_id") or 0) or None,
-        "enabled": _row_bool(row.get("enabled")),
-        "fallback_to_standard_content": _row_bool(row.get("fallback_to_standard_content")),
-    }
-
-
-def _serialize_workflow_audience_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "workflow_id": int(row.get("workflow_id") or 0),
-    }
-
-
-def _serialize_workflow_agent_binding_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "workflow_id": int(row.get("workflow_id") or 0),
-        "node_id": int(row.get("node_id") or 0) or None,
-    }
-
-
-def _serialize_workflow_node_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "workflow_id": int(row.get("workflow_id") or 0),
-        "day_offset": int(row.get("day_offset") or 1),
-        "trigger_mode": _normalized_text(row.get("trigger_mode")) or "scheduled",
-        "position_index": int(row.get("position_index") or 0),
-        "enabled": _row_bool(row.get("enabled")),
-    }
-
-
-def _serialize_member_audience_entry_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "member_id": int(row.get("member_id") or 0),
-        "is_current": _row_bool(row.get("is_current")),
-        "source_snapshot_json": _json_loads(row.get("source_snapshot_json"), default={}),
-    }
-
-
-def _serialize_automation_member_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "id": int(row.get("id") or 0),
-        "master_customer_id": int(row.get("master_customer_id") or 0) or None,
-        "in_pool": _row_bool(row.get("in_pool")),
-    }
-
-
-def _serialize_customer_marketing_state_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "person_id": int(row.get("person_id") or 0) or None,
-        "activated": _row_bool(row.get("activated")),
-        "converted": _row_bool(row.get("converted")),
-        "eligible_for_conversion": _row_bool(row.get("eligible_for_conversion")),
-        "state_payload_json": _json_loads(row.get("state_payload_json"), default={}),
-    }
-
-
-def _serialize_node_content_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "node_id": int(row.get("node_id") or 0),
-        "fallback_to_standard_content": _row_bool(row.get("fallback_to_standard_content")),
-        "standard_content_payload_json": _json_loads(row.get("standard_content_payload_json"), default={}),
-    }
-
-
-def _serialize_node_content_variant_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "node_content_id": int(row.get("node_content_id") or 0),
-        "content_payload_json": _json_loads(row.get("content_payload_json"), default={}),
-    }
-
-
-def _serialize_workflow_execution_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "program_id": int(row.get("program_id") or 0) or None,
-        "summary_json": _json_loads(row.get("summary_json"), default={}),
-    }
-
-
-def _serialize_workflow_execution_item_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        **row,
-        "content_snapshot_json": _json_loads(row.get("content_snapshot_json"), default={}),
-    }
-
-
-def list_agent_config_codes() -> list[str]:
-    rows = _fetchall_dicts("SELECT agent_code FROM automation_agent_config ORDER BY agent_code ASC")
-    return [_normalized_text(row.get("agent_code")) for row in rows if _normalized_text(row.get("agent_code"))]
-
-
-def list_agent_config_summary_rows(*, enabled_only: bool = False) -> list[dict[str, Any]]:
-    sql = """
-        SELECT
-            agent_code,
-            display_name,
-            last_change_summary AS description,
-            CASE
-                WHEN COALESCE(enabled, FALSE) IS NOT TRUE THEN 'disabled'
-                WHEN published_version > 0 THEN 'published'
-                ELSE 'draft'
-            END AS status_code,
-            updated_at
-        FROM automation_agent_config
-        WHERE 1 = 1
-    """
-    params: list[Any] = []
-    if enabled_only:
-        sql += " AND COALESCE(enabled, FALSE) IS TRUE AND published_version > 0"
-    sql += " ORDER BY updated_at DESC, agent_code ASC"
-    return _fetchall_dicts(sql, tuple(params))
-
-
-def get_questionnaire_row(questionnaire_id: int) -> dict[str, Any] | None:
-    return _fetchone_dict(
-        """
-        SELECT id, name, title, slug, created_at, updated_at
-        FROM questionnaires
-        WHERE id = ?
-        LIMIT 1
-        """,
-        (int(questionnaire_id),),
-    )
-
-
-def list_questionnaire_rows() -> list[dict[str, Any]]:
-    return _fetchall_dicts(
-        """
-        SELECT id, name, title, slug, created_at, updated_at
-        FROM questionnaires
-        WHERE COALESCE(is_disabled, FALSE) = FALSE
-        ORDER BY updated_at DESC, id DESC
-        """
-    )
-
-
-def list_questionnaire_question_rows(questionnaire_id: int) -> list[dict[str, Any]]:
-    return _fetchall_dicts(
-        """
-        SELECT id, questionnaire_id, type, title, placeholder_text, required, sort_order, created_at, updated_at
-        FROM questionnaire_questions
-        WHERE questionnaire_id = ?
-        ORDER BY sort_order ASC, id ASC
-        """,
-        (int(questionnaire_id),),
-    )
-
-
-def get_questionnaire_question_row(questionnaire_id: int, question_id: int) -> dict[str, Any] | None:
-    return _fetchone_dict(
-        """
-        SELECT id, questionnaire_id, type, title, placeholder_text, required, sort_order, created_at, updated_at
-        FROM questionnaire_questions
-        WHERE questionnaire_id = ? AND id = ?
-        LIMIT 1
-        """,
-        (int(questionnaire_id), int(question_id)),
-    )
-
-
-def list_questionnaire_option_rows(question_id: int) -> list[dict[str, Any]]:
-    return _fetchall_dicts(
-        """
-        SELECT id, question_id, option_text, score, tag_codes, sort_order, created_at, updated_at
-        FROM questionnaire_options
-        WHERE question_id = ?
-        ORDER BY sort_order ASC, id ASC
-        """,
-        (int(question_id),),
-    )
-
-
-def list_profile_segment_template_rows(*, enabled_only: bool = False, program_id: int | None = None) -> list[dict[str, Any]]:
-    sql = """
-        SELECT *
-        FROM automation_profile_segment_template
-    """
-    where_clauses: list[str] = []
-    params: list[Any] = []
-    if program_id is not None:
-        where_clauses.append("program_id = ?")
-        params.append(int(program_id))
-    if enabled_only:
-        where_clauses.append("enabled = ?")
-        params.append(True)
-    if where_clauses:
-        sql += " WHERE " + " AND ".join(where_clauses)
-    sql += " ORDER BY updated_at DESC, id DESC"
-    return [_serialize_profile_segment_template_row(row) for row in _fetchall_dicts(sql, tuple(params))]
-
-
-def get_profile_segment_template_row(template_id: int) -> dict[str, Any] | None:
-    row = _fetchone_dict(
-        """
-        SELECT *
-        FROM automation_profile_segment_template
-        WHERE id = ?
-        LIMIT 1
-        """,
-        (int(template_id),),
-    )
-    return _serialize_profile_segment_template_row(row) if row else None
-
-
-def get_profile_segment_template_row_by_code(template_code: str) -> dict[str, Any] | None:
-    row = _fetchone_dict(
-        """
-        SELECT *
-        FROM automation_profile_segment_template
-        WHERE template_code = ?
-        LIMIT 1
-        """,
-        (_normalized_text(template_code),),
-    )
-    return _serialize_profile_segment_template_row(row) if row else None
-
-
-def insert_profile_segment_template_row(payload: dict[str, Any]) -> dict[str, Any]:
-    row = get_db().execute(
-        """
-        INSERT INTO automation_profile_segment_template (
-            program_id,
-            template_code,
-            template_name,
-            questionnaire_id,
-            segmentation_question_id,
-            description,
-            enabled,
-            version,
-            created_by,
-            updated_by,
-            created_at,
-            updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING *
-        """,
-        (
-            int(payload.get("program_id") or 0) or None,
-            _normalized_text(payload.get("template_code")),
-            _normalized_text(payload.get("template_name")),
-            payload.get("questionnaire_id"),
-            payload.get("segmentation_question_id"),
-            _normalized_text(payload.get("description")),
-            bool(payload.get("enabled", True)),
-            int(payload.get("version") or 1),
-            _normalized_text(payload.get("created_by")),
-            _normalized_text(payload.get("updated_by")),
-        ),
-    ).fetchone()
-    return _serialize_profile_segment_template_row(dict(row) if row else {})
-
-
-def update_profile_segment_template_row(template_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-    row = get_db().execute(
-        """
-        UPDATE automation_profile_segment_template
-        SET program_id = ?,
-            template_code = ?,
-            template_name = ?,
-            questionnaire_id = ?,
-            segmentation_question_id = ?,
-            description = ?,
-            enabled = ?,
-            version = ?,
-            updated_by = ?,
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = ?
-        RETURNING *
-        """,
-        (
-            int(payload.get("program_id") or 0) or None,
-            _normalized_text(payload.get("template_code")),
-            _normalized_text(payload.get("template_name")),
-            payload.get("questionnaire_id"),
-            payload.get("segmentation_question_id"),
-            _normalized_text(payload.get("description")),
-            bool(payload.get("enabled", True)),
-            int(payload.get("version") or 1),
-            _normalized_text(payload.get("updated_by")),
-            int(template_id),
-        ),
-    ).fetchone()
-    return _serialize_profile_segment_template_row(dict(row) if row else {})
-
-
-def list_profile_segment_category_rows(template_id: int) -> list[dict[str, Any]]:
-    return [
-        _serialize_profile_segment_category_row(row)
-        for row in _fetchall_dicts(
-            """
-            SELECT *
-            FROM automation_profile_segment_category
-            WHERE template_id = ?
-            ORDER BY sort_order ASC, id ASC
-            """,
-            (int(template_id),),
-        )
-    ]
-
-
-def delete_profile_segment_category_rows(template_id: int) -> None:
-    get_db().execute("DELETE FROM automation_profile_segment_category WHERE template_id = ?", (int(template_id),))
-
-
-def insert_profile_segment_category_row(payload: dict[str, Any]) -> dict[str, Any]:
-    row = get_db().execute(
-        """
-        INSERT INTO automation_profile_segment_category (
-            template_id,
-            category_key,
-            category_name,
-            description,
-            sort_order,
-            enabled,
-            created_at,
-            updated_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        RETURNING *
-        """,
-        (
-            int(payload.get("template_id") or 0),
-            _normalized_text(payload.get("category_key")),
-            _normalized_text(payload.get("category_name")),
-            _normalized_text(payload.get("description")),
-            int(payload.get("sort_order") or 0),
-            bool(payload.get("enabled", True)),
-        ),
-    ).fetchone()
-    return _serialize_profile_segment_category_row(dict(row) if row else {})
-
-
-def list_profile_segment_option_mapping_rows(template_id: int) -> list[dict[str, Any]]:
-    return [
-        _serialize_profile_segment_option_mapping_row(row)
-        for row in _fetchall_dicts(
-            """
-            SELECT *
-            FROM automation_profile_segment_option_mapping
-            WHERE template_id = ?
-            ORDER BY category_id ASC, question_id ASC, option_id ASC, id ASC
-            """,
-            (int(template_id),),
-        )
-    ]
-
-
-def delete_profile_segment_option_mapping_rows(template_id: int) -> None:
-    get_db().execute("DELETE FROM automation_profile_segment_option_mapping WHERE template_id = ?", (int(template_id),))
-
-
-def insert_profile_segment_option_mapping_row(payload: dict[str, Any]) -> dict[str, Any]:
-    row = get_db().execute(
-        """
-        INSERT INTO automation_profile_segment_option_mapping (
-            template_id,
-            category_id,
-            question_id,
-            option_id,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        RETURNING *
-        """,
-        (
-            int(payload.get("template_id") or 0),
-            int(payload.get("category_id") or 0),
-            int(payload.get("question_id") or 0),
-            int(payload.get("option_id") or 0),
-        ),
-    ).fetchone()
-    return _serialize_profile_segment_option_mapping_row(dict(row) if row else {})
+from ._repo_helpers import (  # noqa: F401  shared helpers
+    _fetchall_dicts,
+    _fetchone_dict,
+    _json_loads,
+    _normalized_text,
+    _row_bool,
+)
+from ._workflow_repo_serializers import (  # noqa: F401  Row deserialization helpers for workflow_repo (阶段 6.1)
+    _serialize_automation_member_row,
+    _serialize_customer_marketing_state_row,
+    _serialize_member_audience_entry_row,
+    _serialize_node_content_row,
+    _serialize_node_content_variant_row,
+    _serialize_profile_segment_category_row,
+    _serialize_profile_segment_option_mapping_row,
+    _serialize_profile_segment_template_row,
+    _serialize_workflow_agent_binding_row,
+    _serialize_workflow_audience_row,
+    _serialize_workflow_execution_item_row,
+    _serialize_workflow_execution_row,
+    _serialize_workflow_node_row,
+    _serialize_workflow_row,
+)
+from ._workflow_repo_profile_segment import (  # noqa: F401  Profile segment template + category + option mapping (阶段 6.1)
+    delete_profile_segment_category_rows,
+    delete_profile_segment_option_mapping_rows,
+    get_profile_segment_template_row,
+    get_profile_segment_template_row_by_code,
+    insert_profile_segment_category_row,
+    insert_profile_segment_option_mapping_row,
+    insert_profile_segment_template_row,
+    list_profile_segment_category_rows,
+    list_profile_segment_option_mapping_rows,
+    list_profile_segment_template_rows,
+    update_profile_segment_template_row,
+)
+from ._workflow_repo_questionnaire import (  # noqa: F401  Questionnaire-related read paths used by workflow runtime (阶段 6.1)
+    get_latest_any_questionnaire_submission_row,
+    get_latest_questionnaire_submission_row,
+    get_questionnaire_question_row,
+    get_questionnaire_row,
+    list_questionnaire_option_rows,
+    list_questionnaire_question_rows,
+    list_questionnaire_rows,
+    list_questionnaire_submission_answer_rows,
+)
+from ._workflow_repo_externals import (  # noqa: F401  Cross-table reads (agent_config / archived_messages / automation_member) used by workflow flows (阶段 6.1)
+    count_archived_customer_messages,
+    get_archived_customer_message_counts,
+    get_automation_member_row,
+    list_agent_config_codes,
+    list_agent_config_summary_rows,
+    list_automation_member_rows,
+)
 
 
 def list_workflow_rows(*, include_archived: bool = False, status: str = "", program_id: int | None = None) -> list[dict[str, Any]]:
@@ -1034,10 +639,15 @@ def list_current_member_audience_rows(audience_code: str) -> list[dict[str, Any]
             m.ai_cooldown_until AS member_ai_cooldown_until,
             m.current_audience_code AS member_current_audience_code,
             m.current_audience_entered_at AS member_current_audience_entered_at,
+            m.profile_segment_key AS member_profile_segment_key,
+            m.behavior_tier_key AS member_behavior_tier_key,
+            m.segment_refreshed_at AS member_segment_refreshed_at,
             m.created_at AS member_created_at,
-            m.updated_at AS member_updated_at
+            m.updated_at AS member_updated_at,
+            c.customer_name AS member_customer_name
         FROM automation_member_audience_entry e
         INNER JOIN automation_member m ON m.id = e.member_id
+        LEFT JOIN contacts c ON c.external_userid = m.external_contact_id AND m.external_contact_id <> ''
         WHERE e.audience_code = ?
           AND e.is_current = ?
         ORDER BY e.entered_at ASC, e.id ASC
@@ -1067,8 +677,12 @@ def list_current_member_audience_rows(audience_code: str) -> list[dict[str, Any]
                         "ai_cooldown_until": row.get("member_ai_cooldown_until"),
                         "current_audience_code": row.get("member_current_audience_code"),
                         "current_audience_entered_at": row.get("member_current_audience_entered_at"),
+                        "profile_segment_key": row.get("member_profile_segment_key"),
+                        "behavior_tier_key": row.get("member_behavior_tier_key"),
+                        "segment_refreshed_at": row.get("member_segment_refreshed_at"),
                         "created_at": row.get("member_created_at"),
                         "updated_at": row.get("member_updated_at"),
+                        "customer_name": row.get("member_customer_name"),
                     }
                 ),
             }
@@ -1162,30 +776,31 @@ def update_member_current_audience_row(member_id: int, *, audience_code: str, en
     )
 
 
-def list_automation_member_rows() -> list[dict[str, Any]]:
-    return [
-        _serialize_automation_member_row(row)
-        for row in _fetchall_dicts(
-            """
-            SELECT *
-            FROM automation_member
-            ORDER BY id ASC
-            """
-        )
-    ]
-
-
-def get_automation_member_row(member_id: int) -> dict[str, Any] | None:
-    row = _fetchone_dict(
+def update_member_segment_keys(
+    member_id: int,
+    *,
+    profile_segment_key: str,
+    behavior_tier_key: str,
+    refreshed_at: str,
+) -> None:
+    """Materialize profile/behavior segmentation onto automation_member."""
+    if not int(member_id or 0):
+        return
+    get_db().execute(
         """
-        SELECT *
-        FROM automation_member
+        UPDATE automation_member
+        SET profile_segment_key = ?,
+            behavior_tier_key = ?,
+            segment_refreshed_at = ?
         WHERE id = ?
-        LIMIT 1
         """,
-        (int(member_id),),
+        (
+            _normalized_text(profile_segment_key),
+            _normalized_text(behavior_tier_key),
+            _normalized_text(refreshed_at),
+            int(member_id),
+        ),
     )
-    return _serialize_automation_member_row(row) if row else None
 
 
 def get_customer_marketing_state_current_row(*, external_userid: str = "", person_id: int | None = None) -> dict[str, Any] | None:
@@ -1211,119 +826,6 @@ def get_customer_marketing_state_current_row(*, external_userid: str = "", perso
         tuple(params),
     )
     return _serialize_customer_marketing_state_row(row) if row else None
-
-
-def get_latest_questionnaire_submission_row(
-    *,
-    questionnaire_id: int,
-    external_contact_ids: list[str] | None = None,
-    phone: str = "",
-) -> dict[str, Any] | None:
-    normalized_external_contact_ids = [_normalized_text(item) for item in (external_contact_ids or []) if _normalized_text(item)]
-    normalized_phone = _normalized_text(phone)
-    filters: list[str] = []
-    params: list[Any] = [int(questionnaire_id)]
-    if normalized_external_contact_ids:
-        placeholders = ",".join("?" for _ in normalized_external_contact_ids)
-        filters.append(f"external_userid IN ({placeholders})")
-        params.extend(normalized_external_contact_ids)
-    if normalized_phone:
-        filters.append("mobile_snapshot = ?")
-        params.append(normalized_phone)
-    if not filters:
-        return None
-    row = _fetchone_dict(
-        """
-        SELECT *
-        FROM questionnaire_submissions
-        WHERE questionnaire_id = ?
-          AND (
-        """
-        + " OR ".join(filters)
-        + """
-          )
-        ORDER BY submitted_at DESC, id DESC
-        LIMIT 1
-        """,
-        tuple(params),
-    )
-    return row
-
-
-def get_latest_any_questionnaire_submission_row(*, external_contact_ids: list[str] | None = None, phone: str = "") -> dict[str, Any] | None:
-    normalized_external_contact_ids = [_normalized_text(item) for item in (external_contact_ids or []) if _normalized_text(item)]
-    normalized_phone = _normalized_text(phone)
-    filters: list[str] = []
-    params: list[Any] = []
-    if normalized_external_contact_ids:
-        placeholders = ",".join("?" for _ in normalized_external_contact_ids)
-        filters.append(f"external_userid IN ({placeholders})")
-        params.extend(normalized_external_contact_ids)
-    if normalized_phone:
-        filters.append("mobile_snapshot = ?")
-        params.append(normalized_phone)
-    if not filters:
-        return None
-    row = _fetchone_dict(
-        """
-        SELECT *
-        FROM questionnaire_submissions
-        WHERE
-        """
-        + " OR ".join(filters)
-        + """
-        ORDER BY submitted_at DESC, id DESC
-        LIMIT 1
-        """,
-        tuple(params),
-    )
-    return row
-
-
-def list_questionnaire_submission_answer_rows(submission_id: int) -> list[dict[str, Any]]:
-    return _fetchall_dicts(
-        """
-        SELECT *
-        FROM questionnaire_submission_answers
-        WHERE submission_id = ?
-        ORDER BY id ASC
-        """,
-        (int(submission_id),),
-    )
-
-
-def count_archived_customer_messages(external_userid: str) -> int:
-    row = _fetchone_dict(
-        """
-        SELECT COUNT(*) AS total
-        FROM archived_messages
-        WHERE external_userid = ?
-          AND sender = ?
-        """,
-        (_normalized_text(external_userid), _normalized_text(external_userid)),
-    ) or {}
-    return int(row.get("total") or 0)
-
-
-def get_archived_customer_message_counts(external_userids: list[str]) -> dict[str, int]:
-    normalized_userids = [_normalized_text(item) for item in external_userids if _normalized_text(item)]
-    if not normalized_userids:
-        return {}
-    placeholders = ",".join("?" for _ in normalized_userids)
-    rows = _fetchall_dicts(
-        f"""
-        SELECT external_userid, COUNT(*) AS total
-        FROM archived_messages
-        WHERE external_userid IN ({placeholders})
-          AND sender = external_userid
-        GROUP BY external_userid
-        """,
-        tuple(normalized_userids),
-    )
-    counts = {_normalized_text(row.get("external_userid")): int(row.get("total") or 0) for row in rows}
-    for external_userid in normalized_userids:
-        counts.setdefault(external_userid, 0)
-    return counts
 
 
 def list_workflow_execution_rows(

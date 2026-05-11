@@ -14,6 +14,38 @@ from . import (
 _LEGACY_AUTOMATION_MEMBER_FOLLOWUP_DECISION_COLUMN = "questionnaire" "_result"
 
 
+def _run_schema_with_forward_fk_retries(db, script: str, *, max_passes: int = 4) -> None:
+    """跑 schema_postgres.sql，对前向 FK 引用容错。
+
+    schema 里有少数 ``CREATE TABLE`` 的 FK 引用了下方才定义的表（例如
+    ``customer_value_segment_current.submission_id REFERENCES questionnaire_submissions``
+    出现在 line 759，但 ``questionnaire_submissions`` 直到 line 1414 才建）。
+
+    单次顺跑 ``executescript`` 会在第一条前向 FK 上 ``UndefinedTable`` 死掉，让
+    fresh PG 上的 ``init_db`` 整个崩。多 pass 重试容错：每轮跑通能跑通的，把
+    ``UndefinedTable`` 失败的留到下一轮 —— 等被引用表建好后再补。
+    """
+    statements = [s.strip() for s in script.split(";") if s.strip()]
+    pending = statements
+    for _ in range(max_passes):
+        if not pending:
+            return
+        next_pending: list[str] = []
+        for stmt in pending:
+            try:
+                db.execute(stmt)
+                db.commit()
+            except Exception:
+                db.rollback()
+                next_pending.append(stmt)
+        if len(next_pending) == len(pending):
+            # 没进展：剩下的就是真坏掉的，让最后一条原样抛出来便于 debug。
+            for stmt in next_pending:
+                db.execute(stmt)
+            return
+        pending = next_pending
+
+
 def _ensure_postgres_user_ops_page_tables(db) -> None:
     db.execute(
         """
@@ -806,12 +838,9 @@ def _init_postgres(db) -> None:
         ADD COLUMN IF NOT EXISTS entry_tag_group_name TEXT NOT NULL DEFAULT ''
         """
     )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_automation_channel_program
-        ON automation_channel (program_id, updated_at DESC, id DESC)
-        """
-    )
+    # idx_automation_channel_program 由 schema_postgres.sql 建（line 1533）。
+    # 这里**不要**再 CREATE INDEX —— fresh PG 上 automation_channel 表还没建，
+    # CREATE INDEX 没有 IF EXISTS 的表存在性 guard，会让整个 init_db 挂掉。
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_profile_segment_template
@@ -890,32 +919,30 @@ def _init_postgres(db) -> None:
         ADD COLUMN IF NOT EXISTS images_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb
         """
     )
-    # Existing PostgreSQL installs may already have older tables. Add columns
-    # required by schema indexes before replaying schema_postgres.sql.
-    pre_schema_tenant_backfills = (
-        "user_ops_deferred_jobs",
-        "customer_pulse_signal_events",
-        "customer_pulse_snapshots",
-        "customer_pulse_cards",
-        "customer_pulse_feedback_logs",
-        "customer_pulse_execution_logs",
-        "customer_pulse_activity_logs",
-        "customer_pulse_action_feedback",
-        "customer_pulse_metric_events",
-        "followup_orchestrator_policies",
-        "followup_orchestrator_missions",
-        "followup_orchestrator_mission_items",
-        "followup_orchestrator_assignment_decisions",
-        "followup_orchestrator_mission_feedback",
-        "followup_orchestrator_execution_logs",
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS user_ops_deferred_jobs
+        ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
+        """
     )
-    for table_name in pre_schema_tenant_backfills:
-        db.execute(
-            f"""
-            ALTER TABLE IF EXISTS {table_name}
-            ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
-            """
-        )
+    legacy_pulse_followup_tables = (
+        "customer_pulse_metric_events",
+        "customer_pulse_action_feedback",
+        "customer_pulse_activity_logs",
+        "customer_pulse_execution_logs",
+        "customer_pulse_feedback_logs",
+        "customer_pulse_cards",
+        "customer_pulse_snapshots",
+        "customer_pulse_signal_events",
+        "followup_orchestrator_execution_logs",
+        "followup_orchestrator_mission_feedback",
+        "followup_orchestrator_assignment_decisions",
+        "followup_orchestrator_mission_items",
+        "followup_orchestrator_missions",
+        "followup_orchestrator_policies",
+    )
+    for table_name in legacy_pulse_followup_tables:
+        db.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE")
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_member
@@ -931,12 +958,64 @@ def _init_postgres(db) -> None:
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_member
+        ADD COLUMN IF NOT EXISTS profile_segment_key TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_member
+        ADD COLUMN IF NOT EXISTS behavior_tier_key TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_member
+        ADD COLUMN IF NOT EXISTS segment_refreshed_at TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_member
         DROP COLUMN IF EXISTS """
         + _LEGACY_AUTOMATION_MEMBER_FOLLOWUP_DECISION_COLUMN
     )
 
+    # ----- 0004 / 0005 字段 ALTER 必须在 schema 加载之前跑！----------------
+    # schema_postgres.sql 里有 CREATE INDEX 引用 trace_id / scenario_code 等
+    # 新字段，老库上这些字段还没加，CREATE INDEX 会 UndefinedColumn 报错。
+    # 这里先把字段加上，schema 才能跑过。
+    for stmt in (
+        "ALTER TABLE IF EXISTS automation_agent_config "
+        "ADD COLUMN IF NOT EXISTS scenario_code TEXT NOT NULL DEFAULT 'one_to_one'",
+        "ALTER TABLE IF EXISTS automation_agent_run "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS outbound_tasks "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_touch_delivery_log "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow "
+        "ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'approved'",
+        "ALTER TABLE IF EXISTS automation_workflow "
+        "ADD COLUMN IF NOT EXISTS created_by_agent TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS last_error_text TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS last_error_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS next_node_id BIGINT",
+        "ALTER TABLE IF EXISTS cloud_broadcast_plans "
+        "ADD COLUMN IF NOT EXISTS segment_id BIGINT",
+        "ALTER TABLE IF EXISTS cloud_broadcast_plans "
+        "ADD COLUMN IF NOT EXISTS campaign_id BIGINT",
+    ):
+        db.execute(stmt)
+
     schema_path = Path(current_app.root_path) / "schema_postgres.sql"
-    db.executescript(schema_path.read_text(encoding="utf-8"))
+    _run_schema_with_forward_fk_retries(db, schema_path.read_text(encoding="utf-8"))
     db.execute(
         """
         ALTER TABLE IF EXISTS user_ops_deferred_jobs
@@ -947,325 +1026,6 @@ def _init_postgres(db) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_user_ops_deferred_jobs_job_tenant_status
         ON user_ops_deferred_jobs (job_type, tenant_key, status, run_after, id DESC)
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_signal_events
-        ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_signal_events_tenant_external_status
-        ON customer_pulse_signal_events (tenant_key, external_userid, signal_status, updated_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_signal_events_tenant_type
-        ON customer_pulse_signal_events (tenant_key, signal_type, updated_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_snapshots
-        ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_snapshots_tenant_external
-        ON customer_pulse_snapshots (tenant_key, external_userid, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS customer_name TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS mobile TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS owner_display_name TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS marketing_main_stage TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS marketing_sub_stage TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_cards
-        ADD COLUMN IF NOT EXISTS value_segment TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_cards_tenant_external
-        ON customer_pulse_cards (tenant_key, external_userid, updated_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_cards_tenant_status_score
-        ON customer_pulse_cards (tenant_key, card_status, priority_score DESC, due_at, updated_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_feedback_logs
-        ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_feedback_logs_tenant_card
-        ON customer_pulse_feedback_logs (tenant_key, card_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS tenant_key TEXT NOT NULL DEFAULT 'aicrm'
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS actor_userid TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS actor_role TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS resource_type TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS resource_id TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS tenant_context_json JSONB NOT NULL DEFAULT '{}'::jsonb
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS audit_labels_json JSONB NOT NULL DEFAULT '[]'::jsonb
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS rollback_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS execution_key TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS idempotency_key TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS activity_log_id BIGINT
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS outbound_task_id BIGINT
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS undo_status TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS undo_until TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        ALTER TABLE IF EXISTS customer_pulse_execution_logs
-        ADD COLUMN IF NOT EXISTS undone_at TEXT NOT NULL DEFAULT ''
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_execution_logs_tenant_card
-        ON customer_pulse_execution_logs (tenant_key, card_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_execution_logs_tenant_idempotency
-        ON customer_pulse_execution_logs (tenant_key, idempotency_key, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_execution_logs_tenant_resource
-        ON customer_pulse_execution_logs (tenant_key, resource_type, resource_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS customer_pulse_activity_logs (
-            id BIGSERIAL PRIMARY KEY,
-            card_id BIGINT NOT NULL REFERENCES customer_pulse_cards(id) ON DELETE CASCADE,
-            external_userid TEXT NOT NULL DEFAULT '',
-            owner_userid TEXT NOT NULL DEFAULT '',
-            activity_type TEXT NOT NULL DEFAULT '',
-            activity_status TEXT NOT NULL DEFAULT '',
-            activity_source TEXT NOT NULL DEFAULT 'ai_customer_pulse',
-            tenant_key TEXT NOT NULL DEFAULT 'aicrm',
-            execution_key TEXT NOT NULL DEFAULT '',
-            idempotency_key TEXT NOT NULL DEFAULT '',
-            title TEXT NOT NULL DEFAULT '',
-            summary TEXT NOT NULL DEFAULT '',
-            due_at TEXT NOT NULL DEFAULT '',
-            operator TEXT NOT NULL DEFAULT '',
-            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            undone_at TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_activity_logs_tenant_external_userid
-        ON customer_pulse_activity_logs (tenant_key, external_userid, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_activity_logs_tenant_card
-        ON customer_pulse_activity_logs (tenant_key, card_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_activity_logs_tenant_idempotency
-        ON customer_pulse_activity_logs (tenant_key, idempotency_key, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS customer_pulse_action_feedback (
-            id BIGSERIAL PRIMARY KEY,
-            card_id BIGINT NOT NULL REFERENCES customer_pulse_cards(id) ON DELETE CASCADE,
-            execution_log_id BIGINT REFERENCES customer_pulse_execution_logs(id) ON DELETE SET NULL,
-            external_userid TEXT NOT NULL DEFAULT '',
-            owner_userid TEXT NOT NULL DEFAULT '',
-            action_type TEXT NOT NULL DEFAULT '',
-            feedback_type TEXT NOT NULL DEFAULT '',
-            feedback_source TEXT NOT NULL DEFAULT '',
-            tenant_key TEXT NOT NULL DEFAULT 'aicrm',
-            operator TEXT NOT NULL DEFAULT '',
-            note TEXT NOT NULL DEFAULT '',
-            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_action_feedback_tenant_card
-        ON customer_pulse_action_feedback (tenant_key, card_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_action_feedback_tenant_execution
-        ON customer_pulse_action_feedback (tenant_key, execution_log_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_action_feedback_tenant_type
-        ON customer_pulse_action_feedback (tenant_key, feedback_type, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS customer_pulse_metric_events (
-            id BIGSERIAL PRIMARY KEY,
-            card_id BIGINT REFERENCES customer_pulse_cards(id) ON DELETE SET NULL,
-            execution_log_id BIGINT REFERENCES customer_pulse_execution_logs(id) ON DELETE SET NULL,
-            external_userid TEXT NOT NULL DEFAULT '',
-            owner_userid TEXT NOT NULL DEFAULT '',
-            action_type TEXT NOT NULL DEFAULT '',
-            event_type TEXT NOT NULL DEFAULT '',
-            event_source TEXT NOT NULL DEFAULT '',
-            tenant_key TEXT NOT NULL DEFAULT 'aicrm',
-            operator TEXT NOT NULL DEFAULT '',
-            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_metric_events_tenant_type
-        ON customer_pulse_metric_events (tenant_key, event_type, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_metric_events_tenant_card
-        ON customer_pulse_metric_events (tenant_key, card_id, created_at DESC, id DESC)
-        """
-    )
-    db.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_customer_pulse_metric_events_tenant_execution
-        ON customer_pulse_metric_events (tenant_key, execution_log_id, created_at DESC, id DESC)
         """
     )
     _ensure_postgres_questionnaire_external_push_tables(db)
@@ -1402,6 +1162,30 @@ def _init_postgres(db) -> None:
     )
     db.execute(
         """
+        ALTER TABLE IF EXISTS automation_member
+        ADD COLUMN IF NOT EXISTS profile_segment_key TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_member
+        ADD COLUMN IF NOT EXISTS behavior_tier_key TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_member
+        ADD COLUMN IF NOT EXISTS segment_refreshed_at TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_member_segments
+        ON automation_member (current_audience_code, profile_segment_key, behavior_tier_key)
+        """
+    )
+    db.execute(
+        """
         ALTER TABLE IF EXISTS automation_agent_output
         ADD COLUMN IF NOT EXISTS adopted_by TEXT NOT NULL DEFAULT ''
         """
@@ -1442,4 +1226,36 @@ def _init_postgres(db) -> None:
         ON automation_agent_output (outcome_status, created_at DESC, id DESC)
         """
     )
+    # ----- 0004 / 0005 迁移的字段 ALTER（兼容 init-db 走 schema 路径） -------
+    # 让既有 PG 库通过 init-db 升级时也能拿到 trace_id / scenario_code / review_status
+    # 等新字段；schema_postgres.sql 的 CREATE TABLE IF NOT EXISTS 不会改老表。
+    for stmt in (
+        "ALTER TABLE IF EXISTS automation_agent_config "
+        "ADD COLUMN IF NOT EXISTS scenario_code TEXT NOT NULL DEFAULT 'one_to_one'",
+        "ALTER TABLE IF EXISTS automation_agent_run "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS outbound_tasks "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_touch_delivery_log "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow "
+        "ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'approved'",
+        "ALTER TABLE IF EXISTS automation_workflow "
+        "ADD COLUMN IF NOT EXISTS created_by_agent TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS last_error_text TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS last_error_at TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
+        "ADD COLUMN IF NOT EXISTS next_node_id BIGINT",
+        "ALTER TABLE IF EXISTS cloud_broadcast_plans "
+        "ADD COLUMN IF NOT EXISTS segment_id BIGINT",
+        "ALTER TABLE IF EXISTS cloud_broadcast_plans "
+        "ADD COLUMN IF NOT EXISTS campaign_id BIGINT",
+    ):
+        db.execute(stmt)
     db.commit()

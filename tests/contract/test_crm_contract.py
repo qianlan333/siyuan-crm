@@ -76,31 +76,13 @@ def fake_wecom_post(url, params=None, json=None, timeout=None):
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "contract.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "contract-release-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-        }
-    )
-    with app.app_context():
-        init_db()
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(
+        tmp_path,
+        RELEASE_SHA="contract-release-sha",
+        MCP_BEARER_TOKEN="mcp-token",
+    ) as app:
         db = get_db()
         db.execute(
             """
@@ -166,7 +148,7 @@ def app(tmp_path):
             ("wm_ext_001", "signed_999", "已报名999", "周青", "sales_01", "13800138000", "sales_01", "success"),
         )
         db.commit()
-    yield app
+        yield app
 
 
 @pytest.fixture()
@@ -322,10 +304,11 @@ def test_contract_openclaw_conversion_mcp_reads(client, app, monkeypatch):
         db = get_db()
         db.execute(
             """
-            INSERT OR IGNORE INTO owner_role_map (userid, display_name, role, active)
+            INSERT INTO owner_role_map (userid, display_name, role, active)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
             """,
-            ("sales_01", "销售一", "sales", 1),
+            ("sales_01", "销售一", "sales", True),
         )
         db.execute(
             """
@@ -340,7 +323,7 @@ def test_contract_openclaw_conversion_mcp_reads(client, app, monkeypatch):
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (901, "contract-signup-conv", "合同转化问卷", "合同转化问卷", ""),
         )
@@ -353,7 +336,7 @@ def test_contract_openclaw_conversion_mcp_reads(client, app, monkeypatch):
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, 901, f"关键题 {index + 1}", index + 1),
             )

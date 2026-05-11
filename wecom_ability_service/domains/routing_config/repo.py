@@ -5,8 +5,8 @@ from typing import Any
 from ...db import get_db, get_db_backend
 
 
-def _db_bool(value: bool) -> bool | int:
-    return value if get_db_backend() == "postgres" else (1 if value else 0)
+def _db_bool(value: bool) -> bool:
+    return bool(value)
 
 
 def get_owner_role(userid: str):

@@ -6,10 +6,10 @@ from typing import Any
 from flask import url_for
 
 from ...domains.admin_console import repo as admin_console_repo
+from ...domains.questionnaire import preflight_service
 from ...domains.questionnaire import service as questionnaire_domain_service
 from ..identity_contact.dto import CountExternalContactIdentityMapsQueryDTO
 from ..identity_contact.queries import CountExternalContactIdentityMapsQuery
-from . import _legacy_delegate
 from .dto import (
     BuildQuestionnairePreflightQueryDTO,
     BuildQuestionnairePreflightResultDTO,
@@ -128,37 +128,31 @@ def _normalize_questionnaire_external_push_rows(rows: list[dict[str, Any]]) -> l
 
 
 class ListQuestionnairesQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.list_questionnaires`` via ``_legacy_delegate`` for admin questionnaire readers and future admin console consumers."""
-
     def __call__(self, dto: ListQuestionnairesQueryDTO | None = None) -> ListQuestionnairesResultDTO:
         del dto
-        return _legacy_delegate.list_questionnaires_legacy()
+        return questionnaire_domain_service.list_questionnaires()
 
     execute = __call__
 
 
 class ListAvailableWeComTagsQuery:
-    """Wave 3 questionnaire compatibility query that delegates to ``domains.questionnaire.service.list_available_wecom_tags`` for admin questionnaire tag pickers and preflight checks."""
-
     def __call__(
         self,
         dto: ListAvailableWeComTagsQueryDTO | None = None,
     ) -> ListAvailableWeComTagsResultDTO:
         del dto
-        return _legacy_delegate.list_available_wecom_tags_legacy()
+        return questionnaire_domain_service.list_available_wecom_tags()
 
     execute = __call__
 
 
 class BuildQuestionnairePreflightQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.preflight_service.build_questionnaire_preflight_payload`` while composing stable questionnaire and identity application queries for future admin preflight callers."""
-
     def __call__(
         self,
         dto: BuildQuestionnairePreflightQueryDTO,
     ) -> BuildQuestionnairePreflightResultDTO:
-        return _legacy_delegate.build_questionnaire_preflight_legacy(
-            dto.config_snapshot,
+        return preflight_service.build_questionnaire_preflight_payload(
+            config=dto.config_snapshot,
             list_available_wecom_tags_fn=ListAvailableWeComTagsQuery(),
             count_external_contact_identity_maps_fn=lambda: CountExternalContactIdentityMapsQuery()(
                 CountExternalContactIdentityMapsQueryDTO()
@@ -169,34 +163,32 @@ class BuildQuestionnairePreflightQuery:
 
 
 class GetLatestQuestionnaireSubmitDebugQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.get_latest_questionnaire_submit_debug`` for admin debug readers."""
-
     def __call__(
         self,
         dto: GetLatestQuestionnaireSubmitDebugQueryDTO,
     ) -> GetLatestQuestionnaireSubmitDebugResultDTO:
-        return _legacy_delegate.get_latest_questionnaire_submit_debug_legacy(dto)
+        return questionnaire_domain_service.get_latest_questionnaire_submit_debug(
+            int(dto.questionnaire_id)
+        )
 
     execute = __call__
 
 
 class GetQuestionnaireDetailQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.get_questionnaire_detail`` for admin readers and future automation-adjacent readers."""
-
     def __call__(self, dto: GetQuestionnaireDetailQueryDTO) -> GetQuestionnaireDetailResultDTO:
-        return _legacy_delegate.get_questionnaire_detail_legacy(dto)
+        return questionnaire_domain_service.get_questionnaire_detail(int(dto.questionnaire_id))
 
     execute = __call__
 
 
 class ExportQuestionnaireSubmissionsQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.export_questionnaire_submissions`` for admin export callers."""
-
     def __call__(
         self,
         dto: ExportQuestionnaireSubmissionsQueryDTO,
     ) -> ExportQuestionnaireSubmissionsResultDTO:
-        return _legacy_delegate.export_questionnaire_submissions_legacy(dto)
+        return questionnaire_domain_service.export_questionnaire_submissions(
+            int(dto.questionnaire_id)
+        )
 
     execute = __call__
 
@@ -359,26 +351,27 @@ class GetGlobalQuestionnaireExternalPushLogsQuery:
 
 
 class GetPublicQuestionnaireBySlugQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.get_public_questionnaire_by_slug`` for public read and submit callers."""
-
     def __call__(
         self,
         dto: GetPublicQuestionnaireBySlugQueryDTO,
     ) -> GetPublicQuestionnaireBySlugResultDTO:
-        return _legacy_delegate.get_public_questionnaire_by_slug_legacy(dto)
+        return questionnaire_domain_service.get_public_questionnaire_by_slug(
+            str(dto.slug or "").strip()
+        )
 
     execute = __call__
 
 
 class ResolveQuestionnaireSubmitIdentityQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.resolve_questionnaire_submit_identity`` for public submit identity lookup before the dedicated questionnaire identity service lands."""
-
     def __call__(
         self,
         dto: ResolveQuestionnaireSubmitIdentityQueryDTO | None = None,
     ) -> ResolveQuestionnaireSubmitIdentityResultDTO:
-        return _legacy_delegate.resolve_questionnaire_submit_identity_legacy(
-            dto or ResolveQuestionnaireSubmitIdentityQueryDTO()
+        dto = dto or ResolveQuestionnaireSubmitIdentityQueryDTO()
+        return questionnaire_domain_service.resolve_questionnaire_submit_identity(
+            openid=str(dto.openid or "").strip(),
+            unionid=str(dto.unionid or "").strip(),
+            external_userid=str(dto.external_userid or "").strip(),
         )
 
     execute = __call__
@@ -421,54 +414,53 @@ class ResolveQuestionnaireRespondentIdentityQuery:
 
 
 class CheckQuestionnaireSubmissionStatusQuery:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.has_questionnaire_submission`` for public read/submit duplicate checks."""
-
     def __call__(
         self,
         dto: CheckQuestionnaireSubmissionStatusQueryDTO,
     ) -> CheckQuestionnaireSubmissionStatusResultDTO:
-        return _legacy_delegate.check_questionnaire_submission_status_legacy(dto)
+        return questionnaire_domain_service.has_questionnaire_submission(
+            int(dto.questionnaire_id),
+            dict(dto.identity or {}) if dto.identity else None,
+        )
 
     execute = __call__
 
 
 class HasQuestionnaireSubmissionQuery:
-    """Wave 3 questionnaire compatibility query that delegates to ``domains.questionnaire.service.has_questionnaire_submission`` for public submit duplicate checks and legacy caller naming."""
-
     def __call__(
         self,
         dto: HasQuestionnaireSubmissionQueryDTO,
     ) -> CheckQuestionnaireSubmissionStatusResultDTO:
-        return _legacy_delegate.check_questionnaire_submission_status_legacy(
-            CheckQuestionnaireSubmissionStatusQueryDTO(
-                questionnaire_id=int(dto.questionnaire_id),
-                identity=dict(dto.identity or {}) if dto.identity else None,
-            )
+        return questionnaire_domain_service.has_questionnaire_submission(
+            int(dto.questionnaire_id),
+            dict(dto.identity or {}) if dto.identity else None,
         )
 
     execute = __call__
 
 
 class ValidateQuestionnaireAnswersQuery:
-    """Wave 3 questionnaire compatibility query that delegates to ``domains.questionnaire.service.validate_questionnaire_answers`` for legacy submit helpers while public submit wiring is still on the old path."""
-
     def __call__(
         self,
         dto: ValidateQuestionnaireAnswersQueryDTO,
     ) -> ValidateQuestionnaireAnswersResultDTO:
-        return _legacy_delegate.validate_questionnaire_answers_legacy(dto)
+        return questionnaire_domain_service.validate_questionnaire_answers(
+            dict(dto.questionnaire or {}),
+            dto.answers,
+        )
 
     execute = __call__
 
 
 class ComputeQuestionnaireSubmissionOutcomeQuery:
-    """Wave 3 questionnaire compatibility query that delegates to ``domains.questionnaire.service.compute_questionnaire_submission_outcome`` for legacy submit helpers until PR 2/3 move orchestration into application."""
-
     def __call__(
         self,
         dto: ComputeQuestionnaireSubmissionOutcomeQueryDTO,
     ) -> ComputeQuestionnaireSubmissionOutcomeResultDTO:
-        return _legacy_delegate.compute_questionnaire_submission_outcome_legacy(dto)
+        return questionnaire_domain_service.compute_questionnaire_submission_outcome(
+            dict(dto.questionnaire or {}),
+            dto.answers,
+        )
 
     execute = __call__
 

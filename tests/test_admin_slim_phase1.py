@@ -5,42 +5,16 @@ from urllib.parse import parse_qs, urlparse
 import pytest
 from werkzeug.security import generate_password_hash
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.admin_auth import save_admin_user
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "admin-slim-phase1.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-            "SECRET_KEY": "test-secret-key",
-            "ADMIN_AUTH_MODE": "wecom_sso",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path, MCP_BEARER_TOKEN="mcp-token", SECRET_KEY="test-secret-key", ADMIN_AUTH_MODE="wecom_sso") as app:
+        yield app
 
 
 @pytest.fixture()
@@ -194,7 +168,7 @@ def test_wecom_member_without_roles_cannot_login(app, client, monkeypatch):
                 wecom_userid, wecom_corpid, display_name, is_active, login_enabled, admin_level,
                 auth_source, created_at, updated_at
             )
-            VALUES (?, ?, ?, 1, 1, 'admin', 'wecom_sso', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, true, true, 'admin', 'wecom_sso', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             ("no.roles", app.config["WECOM_CORP_ID"], "无角色成员"),
         )
@@ -241,7 +215,7 @@ def test_super_admin_navigation_restores_customer_primary_entry(app, client, mon
     assert 'href="/admin/user-ops"' not in html
     assert 'href="/admin/customer-pulse"' not in html
     assert 'href="/admin/followup-orchestrator"' not in html
-    assert 'href="/admin/jobs"' not in html
+    assert 'href="/admin/jobs"' in html
     assert 'href="/admin/audit"' not in html
     assert 'href="/admin/system"' not in html
 
@@ -517,7 +491,7 @@ def test_login_access_refreshes_wecom_directory_and_authorizes_cached_member(app
 def test_sunset_pages_are_offline_and_logged(app, client, monkeypatch):
     _login_via_wecom(client, app, monkeypatch, wecom_userid="root.admin", roles=["super_admin"])
 
-    response = client.get("/admin/jobs")
+    response = client.get("/admin/audit")
     html = response.get_data(as_text=True)
 
     assert response.status_code == 410
@@ -534,7 +508,7 @@ def test_sunset_pages_are_offline_and_logged(app, client, monkeypatch):
             """
         ).fetchone()
         assert row is not None
-        assert row["target_id"] == "/admin/jobs"
+        assert row["target_id"] == "/admin/audit"
         assert row["action_type"] == "sunset_route_access"
 
 

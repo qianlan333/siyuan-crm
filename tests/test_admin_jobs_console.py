@@ -4,44 +4,67 @@ import json
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from urllib.parse import parse_qs, urlparse
+
+from wecom_ability_service.db import get_db
+from wecom_ability_service.domains.admin_auth import save_admin_user
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "admin-jobs-console.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    """PG-only：用顶层 build_pg_test_app helper 起 app（2026-05 砍 SQLite 后改造）。"""
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "AUTOMATION_INTERNAL_API_TOKEN": "internal-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(
+        tmp_path,
+        AUTOMATION_INTERNAL_API_TOKEN="internal-token",
+        SECRET_KEY="test-secret-key",
+        ADMIN_AUTH_MODE="wecom_sso",
+    ) as app:
+        yield app
 
 
-@pytest.fixture()
+@pytest.fixture
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["admin_session_user_id"] = 0
+        sess["admin_session_wecom_userid"] = ""
+        sess["admin_session_role_list"] = ["super_admin"]
+        sess["admin_session_login_type"] = "break_glass"
+        sess["admin_session_display_name"] = "test-admin"
+        sess["admin_session_break_glass_username"] = "test-admin"
+    return client
+
+
+@pytest.fixture(autouse=True)
+def _login_admin(app, client, monkeypatch):
+    with app.app_context():
+        try:
+            save_admin_user(
+                {
+                    "wecom_userid": "jobs-admin",
+                    "display_name": "Jobs Admin",
+                    "wecom_corpid": app.config["WECOM_CORP_ID"],
+                    "role_codes": ["super_admin"],
+                    "is_active": "1",
+                },
+                operator="test-suite",
+            )
+        except ValueError:
+            pass
+    start = client.get("/auth/wecom/start?mode=qr&next=/admin/jobs", follow_redirects=False)
+    state = parse_qs(urlparse(start.headers["Location"]).query).get("state", [""])[0]
+    monkeypatch.setattr(
+        "wecom_ability_service.http.internal_auth.exchange_code_for_wecom_user",
+        lambda code: {
+            "wecom_userid": "jobs-admin",
+            "display_name": "Jobs Admin",
+            "wecom_corpid": app.config["WECOM_CORP_ID"],
+            "raw_identity": {"UserId": "jobs-admin"},
+        },
+    )
+    client.get(f"/auth/wecom/callback?code=mock-code&state={state}", follow_redirects=False)
 
 
 def _internal_headers() -> dict[str, str]:
@@ -128,10 +151,10 @@ def _seed_jobs_data(app) -> None:
                 response_body_summary, last_error, last_attempted_at, next_retry_at, created_at, updated_at
             )
             VALUES
-                (1, 'openclaw_focus_message', 'external_userid', 'ext-1', 'https://openclaw.local/focus', '{"external_userid":"ext-1"}', '{"external_userid":"ext-1"}', 1, 'success', 1, 3, 202, '{"ok":true}', '', '2026-04-02 12:00:00', '', '2026-04-02 12:00:00', '2026-04-02 12:00:00'),
-                (2, 'questionnaire_submit', 'submission_id', 'sub-2', '', '{"mobile":"13800138000"}', '{"mobile":"13800138000"}', 0, 'failed', 0, 3, NULL, '', 'webhook_not_configured', '2026-04-02 12:10:00', '', '2026-04-02 12:10:00', '2026-04-02 12:10:00'),
-                (3, 'openclaw_focus_message', 'external_userid', 'ext-3', 'https://openclaw.local/focus', '{"external_userid":"ext-3"}', '{"external_userid":"ext-3"}', 1, 'retry_scheduled', 1, 3, 500, 'server error', 'http_status_500', '2026-04-02 12:20:00', '2026-04-02 12:25:00', '2026-04-02 12:20:00', '2026-04-02 12:20:00'),
-                (4, 'questionnaire_submit', 'submission_id', 'sub-4', 'https://hooks.local/q', '{"mobile":"13800138001"}', '{"mobile":"13800138001"}', 1, 'exhausted', 3, 3, 500, 'server error', 'http_status_500', '2026-04-02 12:30:00', '', '2026-04-02 12:30:00', '2026-04-02 12:30:00')
+                (1, 'openclaw_focus_message', 'external_userid', 'ext-1', 'https://openclaw.local/focus', '{"external_userid":"ext-1"}', '{"external_userid":"ext-1"}', true, 'success', 1, 3, 202, '{"ok":true}', '', '2026-04-02 12:00:00', '', '2026-04-02 12:00:00', '2026-04-02 12:00:00'),
+                (2, 'questionnaire_submit', 'submission_id', 'sub-2', '', '{"mobile":"13800138000"}', '{"mobile":"13800138000"}', false, 'failed', 0, 3, NULL, '', 'webhook_not_configured', '2026-04-02 12:10:00', '', '2026-04-02 12:10:00', '2026-04-02 12:10:00'),
+                (3, 'openclaw_focus_message', 'external_userid', 'ext-3', 'https://openclaw.local/focus', '{"external_userid":"ext-3"}', '{"external_userid":"ext-3"}', true, 'retry_scheduled', 1, 3, 500, 'server error', 'http_status_500', '2026-04-02 12:20:00', '2026-04-02 12:25:00', '2026-04-02 12:20:00', '2026-04-02 12:20:00'),
+                (4, 'questionnaire_submit', 'submission_id', 'sub-4', 'https://hooks.local/q', '{"mobile":"13800138001"}', '{"mobile":"13800138001"}', true, 'exhausted', 3, 3, 500, 'server error', 'http_status_500', '2026-04-02 12:30:00', '', '2026-04-02 12:30:00', '2026-04-02 12:30:00')
             """
         )
         db.commit()

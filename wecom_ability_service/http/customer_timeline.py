@@ -4,7 +4,6 @@ from flask import jsonify, request
 
 from ..application.customer_read_model import CustomerTimelineQueryDTO, GetCustomerTimelineQuery
 from ..customer_timeline.routes import parse_timeline_filters
-from ..domains.customer_pulse.access import current_customer_pulse_request_access_context
 
 
 def customer_timeline_detail(external_userid: str):
@@ -16,7 +15,6 @@ def customer_timeline_detail(external_userid: str):
                 event_type=str(filters.get("event_type", "") or ""),
                 limit=filters.get("limit", 50),
                 offset=filters.get("offset", 0),
-                customer_pulse_tenant_context=current_customer_pulse_request_access_context(),
             )
         )
     except ValueError as exc:

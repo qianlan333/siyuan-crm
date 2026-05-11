@@ -15,6 +15,13 @@ if config.config_file_name is not None:
 def _get_database_url() -> str:
     url = os.getenv("DATABASE_URL", "").strip()
     if url:
+        # 项目用 psycopg(3)，但 SQLAlchemy 默认 PG dialect 期望 psycopg2。
+        # 把 postgresql:// / postgres:// 显式改成 postgresql+psycopg://，
+        # 让 SQLAlchemy 用 psycopg3 driver。
+        if url.startswith("postgres://"):
+            url = "postgresql+psycopg://" + url[len("postgres://"):]
+        elif url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url[len("postgresql://"):]
         return url
     db_path = os.getenv("DATABASE_PATH", "").strip()
     if db_path:

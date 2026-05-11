@@ -98,20 +98,6 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         persistence_modules=("repo.py",),
         notes="Contact snapshot, description sync, and WeCom contact reads.",
     ),
-    "customer_pulse": DomainLayoutSpec(
-        name="customer_pulse",
-        mode="simple",
-        service_module="service.py",
-        persistence_modules=("repo.py",),
-        notes="Customer Pulse Inbox cards, snapshots, signals, and action/feedback logs.",
-    ),
-    "followup_orchestrator": DomainLayoutSpec(
-        name="followup_orchestrator",
-        mode="simple",
-        service_module="service.py",
-        persistence_modules=("repo.py",),
-        notes="Team follow-up missions, assignment decisions, AI enhancement, and execution logs.",
-    ),
     "group_chats": DomainLayoutSpec(
         name="group_chats",
         mode="simple",

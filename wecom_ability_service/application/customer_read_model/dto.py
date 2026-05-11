@@ -43,7 +43,6 @@ class CustomerTimelineQueryDTO:
     event_type: str = ""
     limit: int | str = 50
     offset: int | str = 0
-    customer_pulse_tenant_context: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)

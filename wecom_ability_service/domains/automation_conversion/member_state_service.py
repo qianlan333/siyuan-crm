@@ -407,10 +407,34 @@ def _send_channel_welcome_message(
         )
         return {"attempted": True, "sent": False, "error": "missing_welcome_code"}
 
-    request_payload = {
+    request_payload: dict[str, Any] = {
         "welcome_code": welcome_code,
         "text": {"content": welcome_message},
     }
+    welcome_library_ids: list[int] = []
+    raw_library_ids = channel.get("welcome_miniprogram_library_ids") or []
+    if isinstance(raw_library_ids, str):
+        try:
+            import json as _json
+
+            raw_library_ids = _json.loads(raw_library_ids)
+        except (ValueError, TypeError):
+            raw_library_ids = []
+    for value in raw_library_ids or []:
+        try:
+            welcome_library_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if welcome_library_ids:
+        from .. import miniprogram_library as _miniprogram_library
+
+        welcome_attachments: list[dict[str, Any]] = []
+        for lid in welcome_library_ids:
+            welcome_attachments.append(
+                _miniprogram_library.materialize_miniprogram_attachment(lid)
+            )
+        if welcome_attachments:
+            request_payload["attachments"] = welcome_attachments
     try:
         wecom_result = _legacy.get_contact_runtime_client().send_welcome_msg(request_payload)
     except (_legacy.WeComClientError, AttributeError, ValueError) as exc:

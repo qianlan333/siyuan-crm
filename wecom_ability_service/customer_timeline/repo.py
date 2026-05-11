@@ -20,7 +20,7 @@ def _normalize_limit(limit: int | None) -> int:
     return int(limit)
 
 
-def has_customer_timeline_scope(external_userid: str, *, customer_pulse_tenant_key: str = "") -> bool:
+def has_customer_timeline_scope(external_userid: str) -> bool:
     for table in [
         "contacts",
         "archived_messages",
@@ -34,19 +34,6 @@ def has_customer_timeline_scope(external_userid: str, *, customer_pulse_tenant_k
         row = get_db().execute(
             f"SELECT 1 AS found FROM {table} WHERE external_userid = ? LIMIT 1",
             (external_userid,),
-        ).fetchone()
-        if row:
-            return True
-    if str(customer_pulse_tenant_key or "").strip():
-        row = get_db().execute(
-            """
-            SELECT 1 AS found
-            FROM customer_pulse_activity_logs
-            WHERE tenant_key = ?
-              AND external_userid = ?
-            LIMIT 1
-            """,
-            (str(customer_pulse_tenant_key).strip(), external_userid),
         ).fetchone()
         if row:
             return True
@@ -210,38 +197,3 @@ def fetch_conversion_dispatch_logs(external_userid: str, *, limit: int | None = 
     )
 
 
-def fetch_customer_pulse_activity_logs(
-    external_userid: str,
-    *,
-    tenant_key: str,
-    limit: int | None = None,
-) -> list[dict[str, Any]]:
-    return _fetchall_dict(
-        """
-        SELECT
-            id,
-            card_id,
-            external_userid,
-            owner_userid,
-            activity_type,
-            activity_status,
-            activity_source,
-            tenant_key,
-            execution_key,
-            idempotency_key,
-            title,
-            summary,
-            due_at,
-            operator,
-            payload_json,
-            undone_at,
-            created_at,
-            updated_at
-        FROM customer_pulse_activity_logs
-        WHERE tenant_key = ?
-          AND external_userid = ?
-        ORDER BY created_at DESC, id DESC
-        LIMIT ?
-        """,
-        (tenant_key, external_userid, _normalize_limit(limit)),
-    )

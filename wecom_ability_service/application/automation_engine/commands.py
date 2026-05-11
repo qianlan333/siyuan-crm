@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import _legacy_delegate
+from ...domains.automation_conversion import service as automation_conversion_domain_service
+from ...domains.marketing_automation import service as marketing_automation_domain_service
+from ...domains.outbound_webhook import service as outbound_webhook_domain_service
+from ...domains.tasks import service as tasks_domain_service
 from .dto import (
     ActivationWebhookCommandDTO,
     ActivationWebhookResultDTO,
@@ -30,8 +33,6 @@ from .dto import (
 
 
 class RetryOutboundWebhookDeliveryCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.outbound_webhook.service.retry_outbound_webhook_delivery`` via ``_legacy_delegate`` while legacy customer-automation callers still invoke the command with a plain delivery id."""
-
     def __call__(
         self,
         dto: OutboundWebhookRetryCommandDTO | int,
@@ -39,14 +40,12 @@ class RetryOutboundWebhookDeliveryCommand:
         effective_dto = (
             dto if isinstance(dto, OutboundWebhookRetryCommandDTO) else OutboundWebhookRetryCommandDTO(delivery_id=int(dto))
         )
-        return _legacy_delegate.retry_outbound_webhook_delivery_legacy(effective_dto)
+        return outbound_webhook_domain_service.retry_outbound_webhook_delivery(int(effective_dto.delivery_id))
 
     execute = __call__
 
 
 class RunDueOutboundWebhookRetriesCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.outbound_webhook.service.run_due_outbound_webhook_retries`` via ``_legacy_delegate`` for admin jobs and customer-automation retry runners that will cut over in later PRs."""
-
     def __call__(
         self,
         dto: OutboundWebhookRetryBatchCommandDTO | None = None,
@@ -55,14 +54,12 @@ class RunDueOutboundWebhookRetriesCommand:
         operator: str = "",
     ) -> OutboundWebhookRetryBatchResultDTO:
         effective_dto = dto or OutboundWebhookRetryBatchCommandDTO(limit=int(limit), operator=str(operator or "").strip())
-        return _legacy_delegate.run_due_outbound_webhook_retries_legacy(effective_dto)
+        return outbound_webhook_domain_service.run_due_outbound_webhook_retries(limit=int(effective_dto.limit))
 
     execute = __call__
 
 
 class SyncAutomationMemberActivationCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.automation_conversion.service.sync_member_activation`` via ``_legacy_delegate`` for activation webhook, callback, and questionnaire bridges that will cut over later."""
-
     def __call__(
         self,
         dto: AutomationMemberActivationCommandDTO | None = None,
@@ -76,14 +73,16 @@ class SyncAutomationMemberActivationCommand:
             phone=str(phone or "").strip(),
             operator_id=str(operator_id or "system"),
         )
-        return _legacy_delegate.sync_automation_member_activation_legacy(effective_dto)
+        return automation_conversion_domain_service.sync_member_activation(
+            external_contact_id=str(effective_dto.external_contact_id or "").strip(),
+            phone=str(effective_dto.phone or "").strip(),
+            operator_id=str(effective_dto.operator_id or "system"),
+        )
 
     execute = __call__
 
 
 class HandleQrcodeEnterFromCallbackCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.automation_conversion.service.handle_qrcode_enter_from_callback`` via ``_legacy_delegate`` for WeCom callback/background callers that cut over in PR 3."""
-
     def __call__(
         self,
         *,
@@ -93,7 +92,7 @@ class HandleQrcodeEnterFromCallbackCommand:
         operator_id: str = "",
         send_welcome_message: bool = False,
     ) -> dict[str, Any]:
-        return _legacy_delegate.handle_qrcode_enter_from_callback_legacy(
+        return automation_conversion_domain_service.handle_qrcode_enter_from_callback(
             external_contact_id=str(external_contact_id or "").strip(),
             phone=str(phone or "").strip(),
             payload_json=dict(payload_json or {}),
@@ -105,8 +104,6 @@ class HandleQrcodeEnterFromCallbackCommand:
 
 
 class ApplyActivationWebhookCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.apply_activation_webhook`` via ``_legacy_delegate`` and then syncs the automation member projection via ``SyncAutomationMemberActivationCommand``; later PRs will move activation callers onto this formal owner."""
-
     def __call__(
         self,
         dto: ActivationWebhookCommandDTO | None = None,
@@ -122,7 +119,12 @@ class ApplyActivationWebhookCommand:
             operator=str(operator or "").strip(),
             source=str(source or "").strip() or "activation_webhook",
         )
-        result = _legacy_delegate.apply_activation_webhook_legacy(effective_dto)
+        result = marketing_automation_domain_service.apply_activation_webhook(
+            mobile=str(effective_dto.mobile or "").strip(),
+            activated_at=str(effective_dto.activated_at or "").strip(),
+            operator=str(effective_dto.operator or "").strip(),
+            source=str(effective_dto.source or "").strip(),
+        )
         SyncAutomationMemberActivationCommand()(
             AutomationMemberActivationCommandDTO(
                 external_contact_id=str((result.get("customer") or {}).get("external_userid") or "").strip(),
@@ -136,79 +138,125 @@ class ApplyActivationWebhookCommand:
 
 
 class SaveSignupConversionConfigCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.save_signup_conversion_config`` via ``_legacy_delegate`` for admin config callers that will cut over in PR 2."""
-
     def __call__(
         self,
         dto: SignupConversionConfigCommandDTO,
     ) -> SignupConversionConfigCommandResultDTO:
-        return _legacy_delegate.save_signup_conversion_config_legacy(dto)
+        kwargs = {
+            "enforce_required_mobile_question": bool(dto.enforce_required_mobile_question),
+        }
+        if str(dto.automation_key or "").strip():
+            kwargs["automation_key"] = str(dto.automation_key or "").strip()
+        return marketing_automation_domain_service.save_signup_conversion_config(
+            dict(dto.payload or {}),
+            **kwargs,
+        )
 
     execute = __call__
 
 
 class RecomputeSignupConversionCustomersCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.recompute_signup_conversion_customers`` via ``_legacy_delegate`` for admin config recompute callers that will cut over in PR 2."""
-
     def __call__(
         self,
         dto: SignupConversionRecomputeCommandDTO,
     ) -> SignupConversionRecomputeResultDTO:
-        return _legacy_delegate.recompute_signup_conversion_customers_legacy(dto)
+        kwargs = {
+            "persist": bool(dto.persist),
+            "external_userids": list(dto.external_userids or []),
+            "person_ids": list(dto.person_ids or []),
+        }
+        if str(dto.external_userid or "").strip():
+            kwargs["external_userid"] = str(dto.external_userid or "").strip()
+        if dto.person_id is not None:
+            kwargs["person_id"] = int(dto.person_id)
+        if str(dto.automation_key or "").strip():
+            kwargs["automation_key"] = str(dto.automation_key or "").strip()
+        return marketing_automation_domain_service.recompute_signup_conversion_customers(**kwargs)
 
     execute = __call__
 
 
 class RecordConversionFeedbackCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.tasks.service.record_conversion_feedback`` via ``_legacy_delegate`` for MCP and admin-console callers that will cut over after the formal owner is stable."""
-
     def __call__(
         self,
         dto: ConversionFeedbackCommandDTO,
     ) -> ConversionFeedbackResultDTO:
-        return _legacy_delegate.record_conversion_feedback_legacy(dto)
+        return tasks_domain_service.record_conversion_feedback(
+            feedback_type=str(dto.feedback_type or "").strip(),
+            external_userid=str(dto.external_userid or "").strip(),
+            chat_id=str(dto.chat_id or "").strip(),
+            actor=str(dto.actor or "").strip(),
+            feedback_payload=dict(dto.feedback_payload or {}) if dto.feedback_payload else None,
+        )
 
     execute = __call__
 
 
 class AcknowledgeConversionBatchCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.ack_conversion_batch`` via ``_legacy_delegate`` for MCP and admin jobs callers that will cut over later."""
-
     def __call__(
         self,
         dto: ConversionBatchAckCommandDTO,
     ) -> ConversionBatchAckResultDTO:
-        return _legacy_delegate.acknowledge_conversion_batch_legacy(dto)
+        kwargs = {
+            "acked_by": str(dto.acked_by or "").strip(),
+            "ack_note": str(dto.ack_note or "").strip(),
+        }
+        if str(dto.automation_key or "").strip():
+            kwargs["automation_key"] = str(dto.automation_key or "").strip()
+        return marketing_automation_domain_service.ack_conversion_batch(int(dto.batch_id), **kwargs)
 
     execute = __call__
 
 
 class MarkEnrolledCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.mark_enrolled`` via ``_legacy_delegate`` for sidebar, admin-support, and MCP callers that will cut over in later PRs."""
-
     def __call__(self, dto: MarkEnrolledCommandDTO) -> MarkEnrolledResultDTO:
-        return _legacy_delegate.mark_enrolled_legacy(dto)
+        kwargs = {
+            "external_userid": str(dto.external_userid or "").strip(),
+            "owner_userid": str(dto.owner_userid or "").strip(),
+            "operator": str(dto.operator or "").strip(),
+            "source": str(dto.source or "").strip() or "manual",
+        }
+        if str(dto.signup_status or "").strip():
+            kwargs["signup_status"] = str(dto.signup_status or "").strip()
+        if str(dto.automation_key or "").strip():
+            kwargs["automation_key"] = str(dto.automation_key or "").strip()
+        return marketing_automation_domain_service.mark_enrolled(**kwargs)
 
     execute = __call__
 
 
 class UnmarkEnrolledCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.unmark_enrolled`` via ``_legacy_delegate`` for sidebar, admin-support, and MCP callers that will cut over in later PRs."""
-
     def __call__(self, dto: UnmarkEnrolledCommandDTO) -> UnmarkEnrolledResultDTO:
-        return _legacy_delegate.unmark_enrolled_legacy(dto)
+        kwargs = {
+            "external_userid": str(dto.external_userid or "").strip(),
+            "owner_userid": str(dto.owner_userid or "").strip(),
+            "operator": str(dto.operator or "").strip(),
+            "source": str(dto.source or "").strip() or "manual",
+        }
+        if str(dto.restore_signup_status or "").strip():
+            kwargs["restore_signup_status"] = str(dto.restore_signup_status or "").strip()
+        if str(dto.automation_key or "").strip():
+            kwargs["automation_key"] = str(dto.automation_key or "").strip()
+        return marketing_automation_domain_service.unmark_enrolled(**kwargs)
 
     execute = __call__
 
 
 class SetManualFollowupSegmentCommand:
-    """Wave 4 automation skeleton that delegates to ``domains.marketing_automation.service.set_manual_followup_segment`` via ``_legacy_delegate`` for sidebar and pulse-adjacent callers that will cut over in later PRs."""
-
     def __call__(
         self,
         dto: ManualFollowupSegmentCommandDTO,
     ) -> ManualFollowupSegmentResultDTO:
-        return _legacy_delegate.set_manual_followup_segment_legacy(dto)
+        kwargs = {
+            "external_userid": str(dto.external_userid or "").strip(),
+            "followup_segment": str(dto.followup_segment or "").strip(),
+            "owner_userid": str(dto.owner_userid or "").strip(),
+            "operator": str(dto.operator or "").strip(),
+            "source": str(dto.source or "").strip() or "manual",
+        }
+        if str(dto.automation_key or "").strip():
+            kwargs["automation_key"] = str(dto.automation_key or "").strip()
+        return marketing_automation_domain_service.set_manual_followup_segment(**kwargs)
 
     execute = __call__
 

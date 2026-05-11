@@ -495,7 +495,7 @@ def list_customer_agent_output_rows(external_userid: str, *, limit: int = 10) ->
             COALESCE(run.input_snapshot_json, '{}') AS input_snapshot_json,
             COALESCE(run.variables_snapshot_json, '{}') AS variables_snapshot_json,
             COALESCE(run.status, '') AS run_status,
-            COALESCE(run.created_at, '') AS run_created_at
+            COALESCE(run.created_at::text, \'\') AS run_created_at
         FROM automation_agent_output output
         LEFT JOIN automation_agent_run run ON run.run_id = output.run_id
         WHERE output.external_contact_id = ?

@@ -23,17 +23,18 @@ MODULE_LABELS = {
     "automation_conversion": "自动化运营",
     "customers": "客户",
     "questionnaires": "问卷",
+    "miniprogram_library": "素材库",
     "config": "配置",
     "api_docs": "API 文档",
     "sunset": "已下线模块",
 }
 
 ROLE_MODULE_ACCESS = {
-    "super_admin": {"automation_conversion", "customers", "questionnaires", "config", "api_docs", "sunset"},
-    "automation_admin": {"automation_conversion", "customers", "api_docs", "sunset"},
+    "super_admin": {"automation_conversion", "customers", "questionnaires", "miniprogram_library", "config", "api_docs", "sunset"},
+    "automation_admin": {"automation_conversion", "customers", "miniprogram_library", "api_docs", "sunset"},
     "questionnaire_admin": {"questionnaires", "api_docs", "sunset"},
     "config_admin": {"config", "api_docs", "sunset"},
-    "viewer": {"automation_conversion", "customers", "questionnaires", "config", "api_docs", "sunset"},
+    "viewer": {"automation_conversion", "customers", "questionnaires", "miniprogram_library", "config", "api_docs", "sunset"},
 }
 
 READ_ONLY_ROLES = {"viewer"}

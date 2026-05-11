@@ -60,8 +60,8 @@ class ThirdPartyUserSyncError(RuntimeError):
     pass
 
 
-def _db_bool(value: Any) -> bool | int:
-    return value if get_db_backend() == "postgres" else (1 if bool(value) else 0)
+def _db_bool(value: Any) -> bool:
+    return bool(value)
 
 
 def get_user_ops_deferred_job_counts() -> dict[str, int]:

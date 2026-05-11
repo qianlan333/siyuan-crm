@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from . import _legacy_delegate
+from ...domains.routing_config import service as routing_domain_service
 from .dto import (
     SaveOwnerRoleSettingCommandDTO,
     SaveOwnerRoleSettingResultDTO,
@@ -10,19 +10,30 @@ from .dto import (
 
 
 class SaveOwnerRoleSettingCommand:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.save_owner_role_map_item`` via ``_legacy_delegate`` for admin config writers and future config automation callers."""
-
     def __call__(self, dto: SaveOwnerRoleSettingCommandDTO) -> SaveOwnerRoleSettingResultDTO:
-        return _legacy_delegate.save_owner_role_setting_legacy(dto)
+        return routing_domain_service.save_owner_role_map_item(
+            userid=str(dto.userid or "").strip(),
+            display_name=str(dto.display_name or "").strip(),
+            role=str(dto.role or "").strip(),
+            active=dto.active,
+        )
 
     execute = __call__
 
 
 class SaveRoutingRuleSettingCommand:
-    """Wave 2 routing-config skeleton that delegates to ``domains.routing_config.service.save_routing_rule_config_item`` via ``_legacy_delegate`` for admin config writers and future config automation callers."""
-
     def __call__(self, dto: SaveRoutingRuleSettingCommandDTO) -> SaveRoutingRuleSettingResultDTO:
-        return _legacy_delegate.save_routing_rule_setting_legacy(dto)
+        return routing_domain_service.save_routing_rule_config_item(
+            rule_key=str(dto.rule_key or "").strip(),
+            routing_alias=str(dto.routing_alias or "").strip(),
+            route_owner_userid=str(dto.route_owner_userid or "").strip(),
+            route_owner_role=str(dto.route_owner_role or "").strip(),
+            routing_target=str(dto.routing_target or "").strip(),
+            fallback_target=str(dto.fallback_target or "").strip(),
+            when_owner_role_sales=str(dto.when_owner_role_sales or "").strip(),
+            when_owner_role_delivery=str(dto.when_owner_role_delivery or "").strip(),
+            active=dto.active,
+        )
 
     execute = __call__
 

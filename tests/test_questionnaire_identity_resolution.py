@@ -6,6 +6,7 @@ import types
 from flask import Flask
 
 from wecom_ability_service.domains.questionnaire import service as questionnaire_service
+from wecom_ability_service.domains.questionnaire import _service_helpers as questionnaire_helpers
 
 
 def test_questionnaire_identity_resolution_prefers_unionid_then_openid_then_external_userid(monkeypatch):
@@ -27,7 +28,7 @@ def test_questionnaire_identity_resolution_prefers_unionid_then_openid_then_exte
             return None
 
     monkeypatch.setattr(
-        questionnaire_service,
+        questionnaire_helpers,
         "ResolveExternalContactIdentityQuery",
         FakeResolveExternalContactIdentityQuery,
     )
@@ -58,12 +59,12 @@ def test_apply_questionnaire_mobile_binding_routes_through_application_command(m
             return {"person_id": 101, "is_bound": True}
 
     monkeypatch.setattr(
-        questionnaire_service,
+        questionnaire_helpers,
         "BindExternalContactIdentityCommand",
         FakeBindExternalContactIdentityCommand,
     )
     monkeypatch.setattr(
-        questionnaire_service,
+        questionnaire_helpers,
         "ResolvePersonIdentityQuery",
         FakeResolvePersonIdentityQuery,
     )

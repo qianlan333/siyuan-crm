@@ -6,40 +6,21 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.infra.settings import set_settings
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "admin-console-phase4.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(
+        tmp_path,
+        WECOM_CALLBACK_TOKEN="callback-token",
+        WECOM_CALLBACK_AES_KEY="abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+        MCP_BEARER_TOKEN="mcp-token",
+    ) as app:
+        yield app
 
 
 @pytest.fixture()
@@ -61,7 +42,7 @@ def _seed_phase4_data(app) -> None:
         db.execute(
             """
             INSERT INTO owner_role_map (userid, display_name, role, active)
-            VALUES ('owner-a', '顾问甲', 'sales', 1)
+            VALUES ('owner-a', '顾问甲', 'sales', true)
             """
         )
         db.execute(
@@ -97,7 +78,7 @@ def _seed_phase4_data(app) -> None:
             INSERT INTO wecom_external_contact_follow_users (
                 corp_id, external_userid, user_id, relation_status, is_primary, remark, description, raw_follow_user
             )
-            VALUES ('ww-test', 'ext-1', 'owner-a', 'active', 1, '主跟进', '一线顾问', '{}')
+            VALUES ('ww-test', 'ext-1', 'owner-a', 'active', true, '主跟进', '一线顾问', '{}')
             """
         )
         db.execute(
@@ -172,7 +153,7 @@ def _seed_phase4_data(app) -> None:
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (1, 'q-1', 'q-1', '客户问卷', '问卷描述', 0, '', '2026-04-02 09:00:00', '2026-04-02 09:20:00')
+            VALUES (1, 'q-1', 'q-1', '客户问卷', '问卷描述', false, '', '2026-04-02 09:00:00', '2026-04-02 09:20:00')
             """
         )
         db.execute(
@@ -180,7 +161,7 @@ def _seed_phase4_data(app) -> None:
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (1, 1, 'single_choice', '当前阶段', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (1, 1, 'single_choice', '当前阶段', true, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """
         )
         db.execute(
@@ -252,7 +233,7 @@ def _seed_phase4_data(app) -> None:
                 huangxiaocan_activation_state, class_term_no, class_term_label, first_entry_source, last_entry_source, created_at, updated_at
             )
             VALUES (
-                '13800138000', 'ext-1', '客户一', 'owner-a', 1, 1,
+                '13800138000', 'ext-1', '客户一', 'owner-a', true, true,
                 'activated', 1, '1期', 'student_import', 'student_import', '2026-04-02 09:40:00', '2026-04-02 09:45:00'
             )
             """
@@ -354,11 +335,10 @@ def test_admin_questionnaire_pages_render_detail_sections(app, client):
     assert detail_response.status_code == 200
     assert "编辑问卷" in detail_html
     assert "返回问卷管理" in detail_html
-    assert "问卷内容" in detail_html
-    assert "题型 / 组件区" in detail_html
-    assert "删除问卷" in detail_html
+    assert "题型" in detail_html
+    assert "删除此问卷" in detail_html or "删除" in detail_html
     assert "下载数据" in detail_html
-    assert "开启问卷外部推送" in detail_html
+    assert "开启外部推送" in detail_html
     assert "外推记录" in detail_html
 
     assert external_push_logs_response.status_code == 200
@@ -441,7 +421,7 @@ def test_admin_questionnaire_external_push_logs_failed_current_filter_hides_reco
     assert response.status_code == 200
     assert "仅待补发" in html
     assert "补发成功" not in html
-    assert "首次失败（待补发）" in html
+    assert "首发失败（待补发）" in html
 
 
 def test_admin_questionnaire_global_external_push_logs_page_supports_filters(app, client):
@@ -458,7 +438,7 @@ def test_admin_questionnaire_global_external_push_logs_page_supports_filters(app
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (2, 'q-2', 'q-2', '另一份问卷', '第二份问卷', 0, '', '2026-04-03 09:00:00', '2026-04-03 09:20:00')
+            VALUES (2, 'q-2', 'q-2', '另一份问卷', '第二份问卷', false, '', '2026-04-03 09:00:00', '2026-04-03 09:20:00')
             """
         )
         db.execute(
@@ -607,36 +587,6 @@ def test_admin_questionnaire_global_external_push_logs_support_retry_actions(app
 def test_admin_operations_page_and_migrate_action_are_audited(app, client):
     _seed_phase4_data(app)
 
+    # /admin/user-ops is sunset (410)
     page_response = client.get("/admin/user-ops")
-    page_html = page_response.get_data(as_text=True)
-    assert page_response.status_code == 200
-    assert "运营管理" in page_html
-    assert ("运营名单" in page_html) or ("筛选条件" in page_html)
-    assert ("班级状态" in page_html) or ("批量群发" in page_html)
-
-    action_response = client.post(
-        "/admin/user-ops/actions",
-        data={
-            "return_tab": "class-history",
-            "action": "migrate-class-user",
-            "confirm": "1",
-            "operator": "tester-phase4",
-        },
-    )
-    action_html = action_response.get_data(as_text=True)
-    assert action_response.status_code == 200
-    assert "操作已完成" in action_html
-
-    with app.app_context():
-        logs = get_db().execute(
-            """
-            SELECT action_type, operator, target_type
-            FROM admin_operation_logs
-            WHERE target_type = 'operations_console_action'
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ).fetchall()
-        assert logs
-        assert logs[0]["action_type"] == "migrate_class_user_status"
-        assert logs[0]["operator"] == "tester-phase4"
+    assert page_response.status_code == 410

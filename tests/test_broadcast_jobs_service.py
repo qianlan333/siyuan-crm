@@ -1,0 +1,184 @@
+"""broadcast_jobs domain — service / repo 行为契约。
+
+覆盖：
+- enqueue_job 状态分支（queued vs waiting_approval）
+- claim_due_jobs 只拉到期且 queued 的
+- mark_sent / mark_failed / cancel_job / approve_job 的状态流转
+"""
+from __future__ import annotations
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+
+from wecom_ability_service import create_app
+from wecom_ability_service.db import init_db
+from wecom_ability_service.domains.broadcast_jobs import service as queue_service
+
+
+@pytest.fixture()
+def app(tmp_path):
+    db_path = tmp_path / "test.sqlite3"
+    app = create_app(
+        {
+            "TESTING": True,
+            "DATABASE_PATH": str(db_path),
+            "WECOM_CORP_ID": "ww-test",
+            "WECOM_SECRET": "secret-test",
+            "WECOM_AGENT_ID": "1000002",
+        }
+    )
+    with app.app_context():
+        init_db()
+    yield app
+
+
+def _enqueue(
+    *,
+    scheduled_for=None,
+    requires_approval=False,
+    source_type="manual",
+    source_id="1",
+    target_users=("wm_a", "wm_b"),
+    content_payload=None,
+):
+    return queue_service.enqueue_job(
+        source_type=source_type,
+        source_id=source_id,
+        source_table="manual_test",
+        scheduled_for=scheduled_for or datetime.now(timezone.utc),
+        target_external_userids=list(target_users),
+        target_summary=f"测试组 {len(target_users)} 人",
+        content_type="text",
+        content_payload=content_payload or {"fn_name": "send_text", "wecom_payload": {"content": "hello"}},
+        content_summary="测试文案",
+        requires_approval=requires_approval,
+        trace_id="trace-test",
+        created_by="pytest",
+    )
+
+
+def test_enqueue_default_status_queued(app):
+    with app.app_context():
+        job_id = _enqueue()
+        job = queue_service.get_job(job_id)
+        assert job is not None
+        assert job["status"] == "queued"
+        assert job["requires_approval"] is False
+        assert job["target_count"] == 2
+        assert job["target_external_userids"] == ["wm_a", "wm_b"]
+
+
+def test_enqueue_with_approval_goes_to_waiting(app):
+    with app.app_context():
+        job_id = _enqueue(requires_approval=True)
+        job = queue_service.get_job(job_id)
+        assert job["status"] == "waiting_approval"
+        assert job["requires_approval"] is True
+
+
+def test_enqueue_rejects_empty_targets(app):
+    with app.app_context():
+        with pytest.raises(ValueError, match="target_external_userids"):
+            _enqueue(target_users=())
+
+
+def test_enqueue_rejects_invalid_source_type(app):
+    with app.app_context():
+        with pytest.raises(ValueError, match="source_type"):
+            _enqueue(source_type="invalid_source")
+
+
+def test_claim_due_only_pulls_queued_and_due(app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        due_id = _enqueue(scheduled_for=now - timedelta(minutes=1), source_id="due-1")
+        future_id = _enqueue(scheduled_for=now + timedelta(hours=1), source_id="future-1")
+        approval_id = _enqueue(
+            scheduled_for=now - timedelta(minutes=1),
+            requires_approval=True,
+            source_id="appr-1",
+        )
+
+        claimed = queue_service.claim_due_jobs(limit=10, now=now)
+        ids = {j["id"] for j in claimed}
+        assert due_id in ids
+        assert future_id not in ids
+        assert approval_id not in ids
+        for j in claimed:
+            assert j["status"] == "claimed"
+
+
+def test_mark_sent_updates_status_and_records_outbound(app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        job_id = _enqueue(scheduled_for=now - timedelta(minutes=1))
+        queue_service.claim_due_jobs(limit=10, now=now)
+        queue_service.mark_sent(job_id, outbound_task_id=987, sent_count=2)
+        job = queue_service.get_job(job_id)
+        assert job["status"] == "sent"
+        assert job["outbound_task_id"] == 987
+        assert job["sent_count"] == 2
+        assert job["last_error"] == ""
+
+
+def test_mark_failed_records_error(app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        job_id = _enqueue(scheduled_for=now - timedelta(minutes=1))
+        queue_service.claim_due_jobs(limit=10, now=now)
+        queue_service.mark_failed(job_id, error="wecom api 401")
+        job = queue_service.get_job(job_id)
+        assert job["status"] == "failed"
+        assert "wecom api 401" in job["last_error"]
+
+
+def test_cancel_queued_job_marks_cancelled(app):
+    with app.app_context():
+        job_id = _enqueue()
+        ok = queue_service.cancel_job(job_id, cancelled_by="alice", reason="reschedule")
+        assert ok is True
+        job = queue_service.get_job(job_id)
+        assert job["status"] == "cancelled"
+        assert job["cancelled_by"] == "alice"
+        assert job["cancel_reason"] == "reschedule"
+
+
+def test_cancel_already_sent_job_is_noop(app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        job_id = _enqueue(scheduled_for=now - timedelta(minutes=1))
+        queue_service.claim_due_jobs(limit=10, now=now)
+        queue_service.mark_sent(job_id, outbound_task_id=1, sent_count=1)
+        ok = queue_service.cancel_job(job_id, cancelled_by="alice", reason="oops")
+        assert ok is False
+        job = queue_service.get_job(job_id)
+        assert job["status"] == "sent"
+
+
+def test_approve_waiting_job_makes_it_queued(app):
+    with app.app_context():
+        job_id = _enqueue(requires_approval=True)
+        ok = queue_service.approve_job(job_id, approved_by="bob")
+        assert ok is True
+        job = queue_service.get_job(job_id)
+        assert job["status"] == "queued"
+        assert job["approved_by"] == "bob"
+
+
+def test_approve_non_waiting_job_is_noop(app):
+    with app.app_context():
+        job_id = _enqueue()
+        ok = queue_service.approve_job(job_id, approved_by="bob")
+        assert ok is False
+
+
+def test_list_jobs_filters_by_status_and_source(app):
+    with app.app_context():
+        _enqueue(source_type="campaign", source_id="c1")
+        _enqueue(source_type="cloud_plan", source_id="cp1", requires_approval=True)
+        _enqueue(source_type="manual", source_id="m1")
+        only_campaign = queue_service.list_jobs(source_types=["campaign"])
+        assert {j["source_id"] for j in only_campaign} == {"c1"}
+        only_waiting = queue_service.list_jobs(statuses=["waiting_approval"])
+        assert {j["source_id"] for j in only_waiting} == {"cp1"}

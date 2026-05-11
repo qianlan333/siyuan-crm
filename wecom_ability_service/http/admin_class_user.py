@@ -76,11 +76,6 @@ def admin_class_user_management_ui():
     return _deprecated_admin_redirect("api.admin_console_class_users", replacement="/admin/class-users?tab=class-users")
 
 
-def admin_class_user_backoffice_ui():
-    return _deprecated_admin_redirect("api.admin_console_class_users", replacement="/admin/class-users?tab=class-users")
-
-
-
 def register_routes(bp):
     bp.route('/api/admin/class-user-management/bootstrap', methods=['POST'])(admin_class_user_management_bootstrap)
     bp.route('/api/admin/class-user-management/migrate', methods=['POST'])(admin_class_user_management_migrate)
@@ -88,4 +83,3 @@ def register_routes(bp):
     bp.route('/api/admin/class-user-management/export', methods=['GET'])(admin_class_user_management_export)
     bp.route('/api/admin/class-user-management/history', methods=['GET'])(admin_class_user_management_history)
     bp.route('/admin/class-user-management/ui', methods=['GET'])(admin_class_user_management_ui)
-    bp.route('/admin/class-user-backoffice/ui', methods=['GET'])(admin_class_user_backoffice_ui)

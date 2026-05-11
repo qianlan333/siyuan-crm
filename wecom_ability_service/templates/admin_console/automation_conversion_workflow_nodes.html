@@ -134,6 +134,16 @@
         <div class="ac-ops-variant-grid" id="node-variant-grid"></div>
       </section>
 
+      <div class="admin-field" id="node-miniprogram-field">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span>小程序卡片（从素材库选；执行时自动换 media_id）</span>
+          <button type="button" class="admin-button admin-button--ghost" id="node-miniprogram-pick" style="font-size:12px;">选择小程序</button>
+          <span class="ac-ops-muted" id="node-miniprogram-summary" style="font-size:12px;">已选 0 个</span>
+        </div>
+        <div id="node-miniprogram-list" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div>
+        <input type="hidden" name="miniprogram_library_ids" id="node-miniprogram-ids" value="[]">
+      </div>
+
       <label class="admin-checkbox">
         <input type="checkbox" name="enabled" value="1" checked>
         <span>启用当前节点</span>
@@ -474,6 +484,9 @@
         elements.nodeForm.elements.send_time.value = node.send_time || '09:00';
         elements.nodeForm.elements.standard_content_text.value = node.standard_content_text || '';
         elements.nodeForm.elements.enabled.checked = !!node.enabled;
+        const existingMpIds = (node.standard_content_payload && Array.isArray(node.standard_content_payload.miniprogram_library_ids))
+          ? node.standard_content_payload.miniprogram_library_ids : [];
+        elements.nodeForm.elements.miniprogram_library_ids.value = JSON.stringify(existingMpIds);
       } else {
         elements.nodeFormTitle.textContent = '新增节点';
         elements.nodeForm.elements.node_id.value = '';
@@ -481,10 +494,83 @@
         elements.nodeForm.elements.day_offset.value = 1;
         elements.nodeForm.elements.send_time.value = '09:00';
         elements.nodeForm.elements.enabled.checked = true;
+        elements.nodeForm.elements.miniprogram_library_ids.value = '[]';
       }
       syncNodeTriggerModeFields();
       syncNodeContentFields(node || null);
+      renderNodeMiniprogramList();
       elements.nodeForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    let _nodeMiniprogramCache = null;
+    async function loadNodeMiniprogramLibrary() {
+      if (_nodeMiniprogramCache) return _nodeMiniprogramCache;
+      try {
+        const resp = await fetch('/api/admin/miniprogram-library', { credentials: 'same-origin' });
+        const data = await resp.json();
+        _nodeMiniprogramCache = data.ok ? (data.items || []) : [];
+      } catch { _nodeMiniprogramCache = []; }
+      return _nodeMiniprogramCache;
+    }
+    function getNodeMiniprogramIds() {
+      try { return JSON.parse(elements.nodeForm.elements.miniprogram_library_ids.value || '[]'); }
+      catch { return []; }
+    }
+    async function renderNodeMiniprogramList() {
+      const listEl = document.getElementById('node-miniprogram-list');
+      const summaryEl = document.getElementById('node-miniprogram-summary');
+      if (!listEl || !summaryEl) return;
+      const ids = getNodeMiniprogramIds();
+      summaryEl.textContent = '已选 ' + ids.length + ' 个';
+      if (!ids.length) { listEl.innerHTML = '<div class="ac-ops-muted" style="font-size:12px;">暂未选择小程序</div>'; return; }
+      const items = await loadNodeMiniprogramLibrary();
+      listEl.innerHTML = ids.map(function (id, idx) {
+        const it = items.find(function (x) { return x.id === id; }) || { appid: '(未知)', title: '#' + id };
+        return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;border:1px solid #e5e7eb;border-radius:4px;font-size:12px;">'
+          + '<span><strong>' + (it.title || it.name || ('#' + id)) + '</strong> <span style="color:#888;">' + (it.appid || '') + ' · ' + (it.pagepath || '') + '</span></span>'
+          + '<button type="button" class="admin-button admin-button--ghost" data-mp-remove="' + idx + '" style="font-size:11px;">移除</button>'
+          + '</div>';
+      }).join('');
+      listEl.querySelectorAll('[data-mp-remove]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          const cur = getNodeMiniprogramIds();
+          cur.splice(Number(b.getAttribute('data-mp-remove')), 1);
+          elements.nodeForm.elements.miniprogram_library_ids.value = JSON.stringify(cur);
+          renderNodeMiniprogramList();
+        });
+      });
+    }
+    async function openNodeMiniprogramPicker() {
+      const items = await loadNodeMiniprogramLibrary();
+      if (!items.length) { alert('小程序素材库还是空的，先到 /admin/miniprogram-library 配置一条。'); return; }
+      const existing = new Set(getNodeMiniprogramIds());
+      const choices = items.map(function (it) {
+        const checked = existing.has(it.id) ? 'checked' : '';
+        return '<label style="display:flex;gap:8px;align-items:center;padding:8px;border:1px solid #ddd;border-radius:6px;margin-bottom:6px;">'
+          + '<input type="checkbox" data-mp-pick="' + it.id + '" ' + checked + '>'
+          + '<span><strong>' + (it.title || it.name) + '</strong>'
+          + '<br><small>' + (it.appid || '') + ' · ' + (it.pagepath || '') + '</small></span>'
+          + '</label>';
+      }).join('');
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:center;justify-content:center;';
+      wrap.innerHTML = '<div style="background:#fff;padding:16px;border-radius:8px;max-width:480px;width:90%;max-height:80vh;overflow:auto;">'
+        + '<h3 style="margin:0 0 12px;">选择小程序卡片</h3>' + choices
+        + '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">'
+        + '<button class="admin-button admin-button--ghost" type="button" data-mp-cancel>取消</button>'
+        + '<button class="admin-button admin-button--primary" type="button" data-mp-confirm>确定</button>'
+        + '</div></div>';
+      document.body.appendChild(wrap);
+      wrap.querySelector('[data-mp-cancel]').addEventListener('click', function () { wrap.remove(); });
+      wrap.querySelector('[data-mp-confirm]').addEventListener('click', function () {
+        const picked = [];
+        wrap.querySelectorAll('[data-mp-pick]:checked').forEach(function (cb) {
+          picked.push(Number(cb.getAttribute('data-mp-pick')));
+        });
+        elements.nodeForm.elements.miniprogram_library_ids.value = JSON.stringify(picked);
+        wrap.remove();
+        renderNodeMiniprogramList();
+      });
     }
 
     function closeNodeForm() {
@@ -565,6 +651,16 @@
         payload.standard_content_text = standardContentText;
       }
 
+      try {
+        const miniprogramIds = JSON.parse(elements.nodeForm.elements.miniprogram_library_ids?.value || '[]');
+        if (Array.isArray(miniprogramIds) && miniprogramIds.length) {
+          payload.standard_content_payload = Object.assign({},
+            payload.standard_content_payload || {},
+            { miniprogram_library_ids: miniprogramIds.map(Number).filter(Boolean) }
+          );
+        }
+      } catch { /* ignore malformed */ }
+
       validateNodePayload(payload, triggerMode, contentMode);
       return payload;
     }
@@ -628,6 +724,7 @@
     elements.nodeFormCancel.addEventListener('click', closeNodeForm);
     elements.nodeForm.addEventListener('submit', saveNode);
     elements.nodeForm.elements.trigger_mode.addEventListener('change', syncNodeTriggerModeFields);
+    document.getElementById('node-miniprogram-pick')?.addEventListener('click', openNodeMiniprogramPicker);
     elements.nodeTableBody.addEventListener('click', async (event) => {
       const button = event.target.closest('button[data-node-action]');
       if (!button) return;

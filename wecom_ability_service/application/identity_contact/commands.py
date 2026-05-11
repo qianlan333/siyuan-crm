@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Any
 
 from ...domains.identity import service as identity_domain_service
-from . import _legacy_delegate
+from ...domains.user_ops import service as user_ops_domain_service
+from . import _runtime
 from .dto import (
     BindExternalContactIdentityCommandDTO,
     BindExternalContactIdentityResultDTO,
@@ -21,77 +22,108 @@ from .dto import (
 
 
 class BindExternalContactIdentityCommand:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.bind_mobile_to_external_contact`` or ``bind_openid_to_external_contact`` via ``_legacy_delegate`` for sidebar and questionnaire callers."""
-
     def __call__(
         self,
         dto: BindExternalContactIdentityCommandDTO,
     ) -> BindExternalContactIdentityResultDTO:
-        return _legacy_delegate.bind_external_contact_identity_legacy(dto)
+        normalized_mobile = str(dto.mobile or "").strip()
+        if normalized_mobile:
+            _runtime.bind_user_ops_runtime()
+            return identity_domain_service.bind_mobile_to_external_contact(
+                external_userid=str(dto.external_userid or "").strip(),
+                owner_userid=str(dto.owner_userid or "").strip(),
+                bind_by_userid=str(dto.bind_by_userid or "").strip(),
+                mobile=normalized_mobile,
+                force_rebind=bool(dto.force_rebind),
+                resolve_binding_owner_userid=user_ops_domain_service._resolve_binding_owner_userid,
+                contact_profile_loader=user_ops_domain_service._sidebar_contact_profile,
+                resolve_third_party_user_id_by_mobile=user_ops_domain_service._resolve_third_party_user_id_by_mobile,
+                merge_lead_pool_after_mobile_bind=user_ops_domain_service._merge_lead_pool_after_mobile_bind,
+                conflict_error_cls=identity_domain_service.ContactBindingConflictError,
+                sync_error_cls=user_ops_domain_service.ThirdPartyUserSyncError,
+            )
+
+        normalized_openid = str(dto.openid or "").strip()
+        if normalized_openid:
+            corp_id = str(dto.corp_id or "").strip() or identity_domain_service.person_identity_corp_id()
+            return identity_domain_service.bind_openid_to_external_contact(
+                corp_id,
+                str(dto.external_userid or "").strip(),
+                normalized_openid,
+                unionid=str(dto.unionid or "").strip(),
+            )
+
+        raise ValueError("mobile or openid is required")
 
     execute = __call__
 
 
 class UpsertExternalContactIdentityCommand:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.upsert_external_contact_identity`` via ``_legacy_delegate`` for callback, sync, and admin support callers."""
-
     def __call__(
         self,
         dto: UpsertExternalContactIdentityCommandDTO,
     ) -> UpsertExternalContactIdentityResultDTO:
-        return _legacy_delegate.upsert_external_contact_identity_legacy(dto)
+        return identity_domain_service.upsert_external_contact_identity(dict(dto.record or {}))
 
     execute = __call__
 
 
 class ReplaceFollowUsersCommand:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.replace_external_contact_follow_users`` via ``_legacy_delegate`` for callback, sync, and admin support callers."""
-
     def __call__(self, dto: ReplaceFollowUsersCommandDTO) -> ReplaceFollowUsersResultDTO:
-        return _legacy_delegate.replace_follow_users_legacy(dto)
+        return identity_domain_service.replace_external_contact_follow_users(
+            str(dto.corp_id or "").strip(),
+            str(dto.external_userid or "").strip(),
+            list(dto.follow_users or []),
+            preferred_userid=str(dto.preferred_userid or "").strip(),
+        )
 
     execute = __call__
 
 
 class RefreshExternalContactIdentityOwnerCommand:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.refresh_external_contact_identity_owner`` via ``_legacy_delegate`` for callback, sync, and admin support callers."""
-
     def __call__(
         self,
         dto: RefreshExternalContactIdentityOwnerCommandDTO,
     ) -> RefreshExternalContactIdentityOwnerResultDTO:
-        return _legacy_delegate.refresh_external_contact_identity_owner_legacy(dto)
+        return identity_domain_service.refresh_external_contact_identity_owner(
+            str(dto.corp_id or "").strip(),
+            str(dto.external_userid or "").strip(),
+        )
 
     execute = __call__
 
 
 class MarkExternalContactIdentityStatusCommand:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.mark_external_contact_identity_status`` via ``_legacy_delegate`` for callback and sync lifecycle callers."""
-
     def __call__(
         self,
         dto: MarkExternalContactIdentityStatusCommandDTO,
     ) -> MarkExternalContactIdentityStatusResultDTO:
-        return _legacy_delegate.mark_external_contact_identity_status_legacy(dto)
+        return identity_domain_service.mark_external_contact_identity_status(
+            str(dto.corp_id or "").strip(),
+            str(dto.external_userid or "").strip(),
+            status=str(dto.status or "").strip(),
+            follow_user_userid=str(dto.follow_user_userid or "").strip(),
+        )
 
     execute = __call__
 
 
 class MarkExternalContactFollowUserStatusCommand:
-    """Wave 2 identity skeleton that delegates to ``domains.identity.service.mark_external_contact_follow_user_status`` via ``_legacy_delegate`` for callback and sync lifecycle callers."""
-
     def __call__(
         self,
         dto: MarkExternalContactFollowUserStatusCommandDTO,
     ) -> MarkExternalContactFollowUserStatusResultDTO:
-        return _legacy_delegate.mark_external_contact_follow_user_status_legacy(dto)
+        return identity_domain_service.mark_external_contact_follow_user_status(
+            str(dto.corp_id or "").strip(),
+            str(dto.external_userid or "").strip(),
+            user_id=str(dto.user_id or "").strip(),
+            status=str(dto.status or "").strip(),
+        )
 
     execute = __call__
 
 
 class BuildExternalContactIdentityRecordCommand:
-    """Wave 2 identity helper that delegates to ``domains.identity.service.normalize_external_contact_identity`` for callback, sync, and admin support callers while write ownership moves into application commands."""
-
     def __call__(
         self,
         *,

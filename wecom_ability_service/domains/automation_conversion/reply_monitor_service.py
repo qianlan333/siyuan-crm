@@ -324,6 +324,27 @@ def run_reply_monitor_capture(
     scanned_rows = repo.list_archived_messages_after_storage_cursor(after_id=after_cursor, limit=max(1, min(int(limit), 1000)))
     latest_cursor = max([after_cursor] + [int(item.get("id") or 0) for item in scanned_rows])
     candidate_rows = [dict(item) for item in scanned_rows if _reply_monitor_candidate_message(item)]
+
+    # 把所有 inbound 转给 Campaign 调度器停"回复后停止"的 member。Campaign
+    # 命中的用户不一定是自动化运营计划的 active member，所以这里在 active_members
+    # 过滤之前就触发。register_member_reply 内部按 external_contact_id 查
+    # campaign_members 表（已建索引），不会无谓做无效更新。
+    try:
+        from ..campaigns.scheduler import register_member_reply as _campaign_register_reply
+    except Exception:  # pragma: no cover - 防御式 import
+        _campaign_register_reply = None
+    if _campaign_register_reply:
+        seen_externals: set[str] = set()
+        for row in candidate_rows:
+            ext = _normalized_text(row.get("external_userid"))
+            if not ext or ext in seen_externals:
+                continue
+            seen_externals.add(ext)
+            try:
+                _campaign_register_reply(external_contact_id=ext)
+            except Exception:  # pragma: no cover - 不能让 campaign 一处错把 reply_monitor 堵了
+                pass
+
     active_members = repo.list_active_automation_members_by_external_contact_ids(
         list({ _normalized_text(item.get("external_userid")) for item in candidate_rows if _normalized_text(item.get("external_userid")) })
     )

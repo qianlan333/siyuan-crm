@@ -5,8 +5,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.automation_conversion import create_conversion_profile_segment_template
 
 
@@ -25,32 +24,10 @@ class FakeResponse:
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "mcp-business.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path, MCP_BEARER_TOKEN="mcp-token") as app:
+        yield app
 
 
 @pytest.fixture()
@@ -90,10 +67,11 @@ def _insert_customer(
         db = get_db()
         db.execute(
             """
-            INSERT OR IGNORE INTO owner_role_map (userid, display_name, role, active)
+            INSERT INTO owner_role_map (userid, display_name, role, active)
             VALUES (?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
             """,
-            (owner_userid, owner_userid, "sales", 1),
+            (owner_userid, owner_userid, "sales", True),
         )
         db.execute(
             """
@@ -190,7 +168,7 @@ def _seed_settings_questionnaire(app, *, questionnaire_id: int = 901) -> dict[st
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -204,7 +182,7 @@ def _seed_settings_questionnaire(app, *, questionnaire_id: int = 901) -> dict[st
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'single_choice', '你当前更关注什么？', 1, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'single_choice', '你当前更关注什么？', true, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (choice_question_id, questionnaire_id),
         )
@@ -225,7 +203,7 @@ def _seed_settings_questionnaire(app, *, questionnaire_id: int = 901) -> dict[st
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'mobile', '请填写手机号', 1, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'mobile', '请填写手机号', true, 2, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (mobile_question_id, questionnaire_id),
         )
@@ -290,11 +268,11 @@ def _seed_test_agent_config(app, *, agent_code: str, display_name: str = "") -> 
                 created_at,
                 updated_at
             )
-            VALUES (?, ?, '[]', 1, '', '', '[]', '[]', '', '', '[]', '[]', 1, 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, '[]', true, '', '', '[]', '[]', '', '', '[]', '[]', 1, 1, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ON CONFLICT(agent_code) DO UPDATE SET
                 display_name = excluded.display_name,
-                enabled = 1,
-                published_version = MAX(automation_agent_config.published_version, 1),
+                enabled = true,
+                published_version = GREATEST(automation_agent_config.published_version, 1),
                 updated_at = CURRENT_TIMESTAMP
             """,
             (agent_code, display_name or agent_code),
@@ -381,7 +359,7 @@ def test_create_private_message_task_resolves_mobile_then_executes(client, app, 
         row = get_db().execute(
             "SELECT request_payload FROM outbound_tasks WHERE task_type = 'private_message' ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        request_payload = json.loads(row["request_payload"])
+        request_payload = (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))
         assert request_payload["chat_type"] == "single"
         assert request_payload["external_userid"] == ["wm_private_001"]
         assert request_payload["sender"] == "sales_01"
@@ -426,7 +404,7 @@ def test_create_group_message_task_supports_customer_ref_list(client, app, monke
         row = get_db().execute(
             "SELECT request_payload FROM outbound_tasks WHERE task_type = 'group_message' ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        request_payload = json.loads(row["request_payload"])
+        request_payload = (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))
         assert request_payload["chat_type"] == "group"
         assert request_payload["external_userid"] == ["wm_group_001", "wm_group_002"]
         assert request_payload["sender"] == ["sales_01"]
@@ -472,7 +450,7 @@ def test_create_moment_task_supports_customer_ref_list(client, app, monkeypatch)
         row = get_db().execute(
             "SELECT request_payload FROM outbound_tasks WHERE task_type = 'moment' ORDER BY id DESC LIMIT 1"
         ).fetchone()
-        request_payload = json.loads(row["request_payload"])
+        request_payload = (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))
         assert request_payload["visible_range"]["sender_list"]["userid"] == ["sales_01", "sales_02"]
         assert request_payload["text"]["content"] == "今天有新活动说明"
 
@@ -939,7 +917,7 @@ def test_crm_automation_create_workflow_supports_split_recipient_and_content_fie
     assert workflow["content_profile_segment_template_id"] == template_seed["template_id"]
     assert workflow["segmentation_basis"] == "profile"
     assert workflow["profile_segment_template_id"] == template_seed["template_id"]
-    assert json.loads(workflow["behavior_tier_scheme"]) == {
+    assert (workflow["behavior_tier_scheme"] if isinstance(workflow["behavior_tier_scheme"], (dict, list)) else json.loads(workflow["behavior_tier_scheme"])) == {
         "recipient_filter_basis": "behavior",
         "recipient_behavior_tier_keys": ["lt_2"],
     }

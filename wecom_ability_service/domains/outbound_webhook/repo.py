@@ -14,8 +14,8 @@ def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
-def _db_bool(value: bool) -> bool | int:
-    return value if get_db_backend() == "postgres" else (1 if value else 0)
+def _db_bool(value: bool) -> bool:
+    return bool(value)
 
 
 def _serialize_delivery_row(row: dict[str, Any] | None) -> dict[str, Any] | None:

@@ -7,8 +7,7 @@ from __future__ import annotations
 import pytest
 import requests
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.db import dialect as db_dialect
 from wecom_ability_service.infra import cache as infra_cache
 from wecom_ability_service.infra import http_client
@@ -17,17 +16,10 @@ from wecom_ability_service.infra import outbox
 
 @pytest.fixture()
 def app(tmp_path):
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(tmp_path / "infra.sqlite3"),
-            "WECOM_CORP_ID": "test_corp",
-            "WECOM_SECRET": "test_secret",
-        }
-    )
-    with app.app_context():
-        init_db()
-    return app
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 # -------- dialect ----------------------------------------------------------
@@ -35,22 +27,17 @@ def app(tmp_path):
 
 def test_cast_text_emits_postgres_cast_only_under_postgres(monkeypatch):
     monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "postgres")
-    assert db_dialect.cast_text("ts.updated_at") == "ts.updated_at::text"
+    # PG-only: cast_text 使用 ::timestamp::text 确保 TIMESTAMPTZ 输出不带时区
+    assert db_dialect.cast_text("ts.updated_at") == "(ts.updated_at)::timestamp::text"
     assert db_dialect.is_postgres() is True
     assert db_dialect.is_sqlite() is False
 
-    monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "sqlite")
-    assert db_dialect.cast_text("ts.updated_at") == "ts.updated_at"
-    assert db_dialect.is_sqlite() is True
-
 
 def test_coalesce_text_chains_casts(monkeypatch):
-    monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "sqlite")
-    assert db_dialect.coalesce_text("a", "b", default="''") == "COALESCE(a, b, '')"
     monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "postgres")
     assert (
         db_dialect.coalesce_text("a", "b", default="''")
-        == "COALESCE(a::text, b::text, '')"
+        == "COALESCE((a)::timestamp::text, (b)::timestamp::text, '')"
     )
 
 

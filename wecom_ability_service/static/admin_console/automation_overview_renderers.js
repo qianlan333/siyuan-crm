@@ -31,18 +31,22 @@
         ? group.items.map((item) => {
             const phone = String(item.phone || "").trim();
             const phoneDisplay = phone || "-";
-            const dataId = escapeHtml(item.external_contact_id || "");
+            const customerName = String(item.customer_name || "").trim() || "-";
+            const externalContactId = String(item.external_contact_id || "").trim();
+            const externalContactDisplay = externalContactId || "-";
+            const dataId = escapeHtml(externalContactId);
             return `
             <tr data-external-contact-id="${dataId}">
+              <td>${escapeHtml(customerName)}</td>
               <td>${escapeHtml(phoneDisplay)}</td>
-              <td>${escapeHtml(item.questionnaire_status_label || "-")}</td>
+              <td class="admin-mono">${escapeHtml(externalContactDisplay)}</td>
               <td>${escapeHtml(item.profile_segment_label || "-")}</td>
               <td>${escapeHtml(item.behavior_segment_label || "-")}</td>
               <td>${escapeHtml(item.conversation_count || 0)}</td>
             </tr>
           `;
           }).join("")
-        : "<tr><td colspan=\"5\">当前池子还没有用户。</td></tr>";
+        : "<tr><td colspan=\"6\">当前池子还没有用户。</td></tr>";
       return `
           <article class="ac-overview-group-card">
             <div class="ac-overview-group-head">
@@ -56,8 +60,9 @@
               <table class="ac-overview-table">
                 <thead>
                   <tr>
+                    <th>昵称</th>
                     <th>手机号</th>
-                    <th>问卷状态</th>
+                    <th>企微 ID</th>
                     <th>自然画像分层</th>
                     <th>行为画像分层</th>
                     <th>对话次数</th>

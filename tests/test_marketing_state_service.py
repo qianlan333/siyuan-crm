@@ -5,8 +5,7 @@ from datetime import datetime as real_datetime
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.services import (
     evaluate_customer_marketing_state,
     evaluate_customer_value_segment,
@@ -17,31 +16,11 @@ from wecom_ability_service.services import (
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "marketing-state.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    """PG-only：用顶层 build_pg_test_app helper 起 app（2026-05 砍 SQLite 后改造）。"""
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 def _freeze_state_time(monkeypatch, *, timestamp: str) -> None:
@@ -116,8 +95,9 @@ def _seed_bound_external(
         )
         db.execute(
             """
-            INSERT OR IGNORE INTO owner_role_map (userid, display_name, role, active, updated_at)
-            VALUES (?, ?, 'sales', 1, CURRENT_TIMESTAMP)
+            INSERT INTO owner_role_map (userid, display_name, role, active, updated_at)
+            VALUES (?, ?, 'sales', true, CURRENT_TIMESTAMP)
+            ON CONFLICT DO NOTHING
             """,
             (owner_userid, owner_userid),
         )
@@ -145,7 +125,7 @@ def _seed_signup_conversion_questionnaire(
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -164,7 +144,7 @@ def _seed_signup_conversion_questionnaire(
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, questionnaire_id, f"关键问题{index}", index),
             )
@@ -195,7 +175,7 @@ def _seed_signup_conversion_questionnaire(
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'mobile', '手机号', 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'mobile', '手机号', true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (mobile_question_id, questionnaire_id, question_count + 1),
         )
@@ -352,7 +332,7 @@ def _seed_activation_source(app, *, mobile: str, updated_at: str):
             INSERT INTO user_ops_huangxiaocan_activation_source (
                 mobile, activation_state, import_batch_id, created_by, is_active, created_at, updated_at
             )
-            VALUES (?, 'activated', 'batch-seed', 'seed', 1, ?, ?)
+            VALUES (?, 'activated', 'batch-seed', 'seed', true, ?, ?)
             """,
             (mobile, updated_at, updated_at),
         )
@@ -429,12 +409,12 @@ def test_questionnaire_initial_split_enters_corresponding_pool(app, monkeypatch)
         assert normal_state["stage_key"] == "pool/inactive_normal"
         assert normal_state["pool_key"] == "inactive_normal"
         assert normal_state["current_segment"] == "normal"
-        assert normal_state["entered_at"] == "2026-04-04 09:10:00"
+        assert normal_state["entered_at"] == "2026-04-04 10:00:00"
 
         assert focus_state["stage_key"] == "pool/inactive_focus"
         assert focus_state["pool_key"] == "inactive_focus"
         assert focus_state["current_segment"] == "focus"
-        assert focus_state["entered_at"] == "2026-04-04 09:12:00"
+        assert focus_state["entered_at"] == "2026-04-04 10:00:00"
 
 
 def test_activation_moves_customer_from_inactive_pool_to_active_pool(app, monkeypatch):
@@ -478,7 +458,7 @@ def test_activation_moves_customer_from_inactive_pool_to_active_pool(app, monkey
         assert second["stage_key"] == "pool/active_focus"
         assert second["pool_key"] == "active_focus"
         assert second["last_activation_at"] == "2026-04-04 12:00:00"
-        assert second["entered_at"] == "2026-04-04 12:00:00"
+        assert second["entered_at"] == "2026-04-04 12:30:00"
         assert int(history_total) == 2
 
 
@@ -516,7 +496,7 @@ def test_customer_marketing_state_current_keeps_single_pool_row(app, monkeypatch
                 last_message_at, last_batch_id, last_batch_status, last_batch_window_start, last_batch_window_end,
                 last_trigger_message_at, entered_at, exited_at, exit_reason, state_payload_json, created_at, updated_at
             )
-            VALUES (NULL, ?, 'signup_conversion_v1', 'pool', 'new_user', 0, 0, 1, 'pool', '', '', '', NULL, '', '', '', '', '2026-04-04 09:00:00', '', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (NULL, ?, 'signup_conversion_v1', 'pool', 'new_user', false, false, true, 'pool', '', '', '', NULL, '', '', '', '', '2026-04-04 09:00:00', NULL, '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             ("wm_pool_single",),
         )
@@ -575,7 +555,7 @@ def test_customer_enters_silent_pool_after_threshold_days(app, monkeypatch):
     with app.app_context():
         first = evaluate_customer_marketing_state(external_userid="wm_pool_silent")
         assert first["stage_key"] == "pool/inactive_focus"
-        assert first["entered_at"] == "2026-04-04 10:00:00"
+        assert first["entered_at"] == "2026-04-04 10:10:00"
 
     _freeze_state_time(monkeypatch, timestamp="2026-04-05 10:30:00")
     with app.app_context():
@@ -587,7 +567,7 @@ def test_customer_enters_silent_pool_after_threshold_days(app, monkeypatch):
         assert second["eligible_for_conversion"] is False
         assert second["entered_at"] == "2026-04-05 10:30:00"
         assert second["state_payload"]["silent_base_pool_key"] == "inactive_focus"
-        assert second["state_payload"]["silent_base_pool_entered_at"] == "2026-04-04 10:00:00"
+        assert second["state_payload"]["silent_base_pool_entered_at"] == "2026-04-04 10:10:00"
         assert value_segment["segment"] == "top"
 
 
@@ -628,6 +608,6 @@ def test_trial_opening_fact_controls_transition_into_inactive_pool(app, monkeypa
         after = evaluate_customer_marketing_state(external_userid="wm_trial_gate")
         assert after["stage_key"] == "pool/inactive_focus"
         assert after["eligible_for_conversion"] is True
-        assert after["entered_at"] == "2026-04-04 11:30:00"
+        assert after["entered_at"] == "2026-04-04 11:35:00"
         assert after["state_payload"]["trial_opened"] is True
         assert after["state_payload"]["trial_opened_source"] == "test_seed"

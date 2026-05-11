@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
-from wecom_ability_service.db.helpers import _sqlite_table_columns, _sqlite_table_sql
+from wecom_ability_service.db import get_db
+from wecom_ability_service.db.helpers import _sqlite_table_columns
 from wecom_ability_service.domains.automation_conversion import (
     get_conversion_dashboard_payload,
     save_sop_v1_pool_config,
@@ -13,29 +12,10 @@ from wecom_ability_service.domains.automation_conversion import (
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "automation-conversion-cleanup.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 def _seed_contact(app, *, external_userid: str, mobile: str = "", owner_userid: str = "sales_01") -> None:
@@ -79,7 +59,7 @@ def _seed_member(
                 questionnaire_status, decision_source, source_type, last_active_pool,
                 current_audience_code, current_audience_entered_at, joined_at, created_at, updated_at
             )
-            VALUES (?, ?, 'sales_01', 1, ?, ?, ?, 'system', 'manual', '', ?, '2026-04-08 08:00:00', '2026-04-08 08:00:00', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'sales_01', true, ?, ?, ?, 'system', 'manual', '', ?, '2026-04-08 08:00:00', '2026-04-08 08:00:00', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
             """,
             (external_contact_id, phone, current_pool, follow_type, questionnaire_status, audience_code),
@@ -90,7 +70,7 @@ def _seed_member(
                 member_id, audience_code, entered_at, exited_at, is_current,
                 entry_source, entry_reason, source_snapshot_json, created_at, updated_at
             )
-            VALUES (?, ?, '2026-04-08 08:00:00', '', 1, 'test', 'seed', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, '2026-04-08 08:00:00', '', true, 'test', 'seed', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (row["id"], audience_code),
         )
@@ -102,11 +82,22 @@ def test_automation_member_schema_drops_activation_status_and_normalizes_sop_poo
         member_columns = _sqlite_table_columns(get_db(), "automation_member")
         assert "activation_status" not in member_columns
 
-        sop_sql = _sqlite_table_sql(get_db(), "automation_sop_pool_config")
-        assert "pending_questionnaire" in sop_sql
-        assert "operating" in sop_sql
-        assert "converted" in sop_sql
-        assert "new_user" not in sop_sql
+        # PG: CHECK constraint 里含 pool_key 允许值，用 pg_get_constraintdef 取出
+        db = get_db()
+        rows = db.execute(
+            """
+            SELECT pg_get_constraintdef(c.oid) AS def
+            FROM pg_constraint c
+            JOIN pg_class t ON t.oid = c.conrelid
+            WHERE t.relname = ? AND c.contype = 'c'
+            """,
+            ("automation_sop_pool_config",),
+        ).fetchall()
+        check_defs = " ".join(row["def"] for row in rows)
+        assert "pending_questionnaire" in check_defs
+        assert "operating" in check_defs
+        assert "converted" in check_defs
+        assert "new_user" not in check_defs
 
 
 def test_dashboard_payload_uses_three_audiences_and_no_activation_fields(app):

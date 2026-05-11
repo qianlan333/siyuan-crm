@@ -12,29 +12,10 @@ from wecom_ability_service.services import (
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "user-ops-lead-pool.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 def test_user_ops_lead_pool_current_allows_mobile_only_member(app):
@@ -113,8 +94,14 @@ def test_user_ops_lead_pool_upsert_writes_history(app):
     assert row["action_type"] == "lead_pool_insert"
     assert row["source_type"] == "student_import"
     assert row["operator"] == "tester"
-    assert row["before_json"] == "{}"
-    assert '"class_term_label": "5期"' in row["after_json"]
+    # PG JSON/JSONB 列返回 Python dict 而非字符串
+    before = row["before_json"]
+    assert before == {} or before == "{}"
+    after = row["after_json"]
+    if isinstance(after, dict):
+        assert after.get("class_term_label") == "5期"
+    else:
+        assert '"class_term_label": "5期"' in after
 
 
 def test_huangxiaocan_activation_source_patches_existing_member_only(app):

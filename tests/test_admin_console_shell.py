@@ -2,43 +2,28 @@ from __future__ import annotations
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "test.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 @pytest.fixture()
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["admin_session_user_id"] = 0
+        sess["admin_session_wecom_userid"] = ""
+        sess["admin_session_role_list"] = ["super_admin"]
+        sess["admin_session_login_type"] = "break_glass"
+        sess["admin_session_display_name"] = "test-admin"
+        sess["admin_session_break_glass_username"] = "test-admin"
+    return client
 
 
 def _seed_dashboard_data(app):
@@ -81,7 +66,7 @@ def _seed_dashboard_data(app):
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (1, 'q-1', '问卷一', '问卷一标题', 'desc', 0, '', '2026-04-01 09:00:00', '2026-04-02 09:00:00')
+            VALUES (1, 'q-1', '问卷一', '问卷一标题', 'desc', false, '', '2026-04-01 09:00:00', '2026-04-02 09:00:00')
             """
         )
         db.execute(
@@ -108,8 +93,8 @@ def _seed_dashboard_data(app):
                 huangxiaocan_activation_state, class_term_no, class_term_label
             )
             VALUES
-                ('13800000001', 'ext-1', '客户一', 'owner-a', 1, 1, 'activated', 1, '一班'),
-                ('13800000002', 'ext-4', '客户四', 'owner-d', 0, 0, 'not_activated', 2, '二班')
+                ('13800000001', 'ext-1', '客户一', 'owner-a', true, true, 'activated', 1, '一班'),
+                ('13800000002', 'ext-4', '客户四', 'owner-d', false, false, 'not_activated', 2, '二班')
             """
         )
         db.execute(
@@ -188,7 +173,7 @@ def test_admin_dashboard_apis_return_aggregated_metrics_and_todos(app, client):
 
     assert system_response.status_code == 200
     assert system_payload["ok"] is True
-    assert system_payload["system_status"]["database_backend"] == "sqlite"
+    assert system_payload["system_status"]["database_backend"] == "postgres"
     assert system_payload["system_status"]["release_sha"] == "release-test"
     assert system_payload["system_status"]["callback_enabled"] is True
     assert system_payload["system_status"]["last_archive_sync"]["status"] == "success"

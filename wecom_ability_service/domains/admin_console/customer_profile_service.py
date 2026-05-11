@@ -2,12 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...application.ai_assist import (
-    CustomerPulseDetailQueryDTO,
-    CustomerPulseFeatureGateQueryDTO,
-    GetCustomerPulseDetailQuery,
-    GetCustomerPulseFeatureGateQuery,
-)
 from ...application.customer_read_model import (
     CustomerDetailQueryDTO,
     CustomerListQueryDTO,
@@ -16,9 +10,6 @@ from ...application.customer_read_model import (
 )
 from ...domains.archive.service import extract_roomid_from_raw_payload, format_message_row
 from ...domains.marketing_automation.presenter import business_marketing_display
-from ...domains.customer_pulse.access import (
-    current_customer_pulse_request_access_context,
-)
 from ...domains.group_chats.repo import get_group_chat_map
 from ...infra.wecom_runtime import get_contact_runtime_client
 from . import customer_profile_repo as repo
@@ -51,35 +42,6 @@ def _normalize_offset(value: Any) -> int:
 
 def _normalize_bool(value: Any) -> bool:
     return _normalized_text(value).lower() in {"1", "true", "yes", "on"}
-
-
-def _legacy_pulse_from_customer_pulse(detail_payload: dict[str, Any]) -> dict[str, Any]:
-    card = dict(detail_payload.get("card") or {})
-    snapshot = dict(detail_payload.get("latest_snapshot") or {})
-    ai_payload = dict(snapshot.get("ai_payload") or {}) if isinstance(snapshot.get("ai_payload"), dict) else {}
-    recommendation = dict(ai_payload.get("recommendation") or {}) if isinstance(ai_payload.get("recommendation"), dict) else {}
-    recommendation_status = _normalized_text(ai_payload.get("recommendation_status"))
-    confidence = card.get("confidence")
-    assistant_output_id = _normalized_text(ai_payload.get("assistant_output_id"))
-    suggested_action_payload = dict(card.get("suggested_action_payload") or {}) if isinstance(card.get("suggested_action_payload"), dict) else {}
-    legacy_draft_message = _normalized_text(card.get("draft_message")) or _normalized_text(suggested_action_payload.get("draft_message")) or _normalized_text(recommendation.get("draftText"))
-    return {
-        "enabled": bool(detail_payload.get("enabled")),
-        "visible": bool(card),
-        "hidden_reason": "" if card else "insufficient_evidence",
-        "source": "ai_output" if confidence not in (None, "") or assistant_output_id else "rule_snapshot",
-        "source_label": "AI 推荐" if confidence not in (None, "") or assistant_output_id else "规则建议",
-        "status_label": _normalized_text(card.get("card_status_label")) or "待人工确认",
-        "confidence": confidence,
-        "next_action": _normalized_text(card.get("suggested_action_label")) or "人工确认后决定下一步",
-        "summary": _normalized_text(card.get("current_judgement") or card.get("summary")),
-        "why_now": _normalized_text(card.get("why_now") or recommendation.get("whyNow")),
-        "evidence": card.get("evidence") or [],
-        "draft_message": legacy_draft_message,
-        "draft_notice": _normalized_text(card.get("draft_notice")) or "所有外发消息默认先生成草稿，由人工确认。",
-        "need_human_confirmation": bool(card.get("need_human_confirmation")) if card else True,
-        "degraded_from_ai": recommendation_status == "fallback" or bool(card.get("draft_blocked_by_ai")),
-    }
 
 
 def _customer_profile_contact_client():
@@ -273,7 +235,6 @@ def build_customer_detail_payload(external_userid: str, *, legacy_tab: str = "")
     if not lookup or not detail:
         return None
     payload = _profile_payload_from_detail(detail, lookup=lookup)
-    access_context = current_customer_pulse_request_access_context()
     marketing_summary = dict(payload["profile"].get("marketing_summary") or _empty_marketing_summary())
     marketing_profile = dict(payload["profile"].get("marketing_profile") or {})
     marketing_page_summary = _build_customer_page_marketing_summary(marketing_summary, marketing_profile)
@@ -285,14 +246,10 @@ def build_customer_detail_payload(external_userid: str, *, legacy_tab: str = "")
         "eligibility_label": marketing_page_summary["eligibility_label"],
         "ineligible_reason_label": marketing_page_summary["ineligible_reason_label"],
     }
-    pulse_feature_gate = GetCustomerPulseFeatureGateQuery()(
-        CustomerPulseFeatureGateQueryDTO(access_context=dict(access_context))
-    )
     return {
         "customer": payload["profile"],
         "lookup": payload.get("lookup") or {},
         "initial_section": _legacy_tab_to_section(legacy_tab),
-        "customer_pulse_feature_enabled": bool(pulse_feature_gate.get("enabled")),
     }
 
 
@@ -401,31 +358,3 @@ def get_customer_messages_payload(
     }
 
 
-def get_customer_pulse_payload(
-    *,
-    external_userid: str = "",
-    mobile: str = "",
-    user_id: str = "",
-) -> dict[str, Any]:
-    profile_payload = get_customer_profile_payload(
-        external_userid=external_userid,
-        mobile=mobile,
-        user_id=user_id,
-    )
-    if not profile_payload:
-        raise LookupError("customer not found")
-    profile = profile_payload["profile"]
-    resolved_external_userid = _normalized_text(profile.get("external_userid"))
-    access_context = current_customer_pulse_request_access_context()
-    pulse_payload = GetCustomerPulseDetailQuery()(
-        CustomerPulseDetailQueryDTO(
-            external_userid=resolved_external_userid,
-            access_context=dict(access_context),
-        )
-    )
-    return {
-        "external_userid": resolved_external_userid,
-        "pulse": pulse_payload["pulse"],
-        "customer_pulse": pulse_payload["customer_pulse"],
-        "lookup": profile_payload.get("lookup") or {},
-    }

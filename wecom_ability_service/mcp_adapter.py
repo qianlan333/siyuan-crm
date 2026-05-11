@@ -1066,8 +1066,117 @@ TOOL_DEFS = [
     },
 ]
 
+
+def _build_cloud_orchestrator_tool_defs() -> list[dict[str, Any]]:
+    """Cloud 编排端 tool 集 — 在 TOOL_DEFS 末尾追加，让 MCP 列表透出"""
+    try:
+        from .domains.cloud_orchestrator import mcp_tools as cloud_mcp_tools
+    except Exception:  # pragma: no cover - defensive import
+        return []
+    out: list[dict[str, Any]] = []
+    for spec in cloud_mcp_tools.list_cloud_tool_specs():
+        side_effect = spec.get("side_effect", "read")
+        description = spec.get("description", "")
+        if side_effect == "write":
+            description = "[WRITE - 需要 approval_token] " + description
+        elif side_effect == "draft":
+            description = "[DRAFT - 不发送] " + description
+        elif side_effect == "async_write":
+            description = "[ASYNC] " + description
+        out.append(
+            {
+                "name": spec["name"],
+                "description": description,
+                "inputSchema": spec.get("input_schema") or {"type": "object", "properties": {}},
+            }
+        )
+    return out
+
+
+def _build_image_library_tool_defs() -> list[dict[str, Any]]:
+    """图片素材库 tool 集 — 给外部 Skill 通过 MCP 读写图片元数据。
+
+    不像 cloud_orchestrator 那样需要 approval_token；写操作（update_metadata /
+    upload）只标 ``[WRITE]`` 提示而不强制 token 校验，因为图片库不涉及客户外
+    发或 production 表写入，AI 自由打标的成本可控。
+    """
+    try:
+        from .domains.image_library import mcp_tools as image_library_mcp_tools
+    except Exception:  # pragma: no cover - defensive import
+        return []
+    out: list[dict[str, Any]] = []
+    for spec in image_library_mcp_tools.list_image_library_tool_specs():
+        side_effect = spec.get("side_effect", "read")
+        description = spec.get("description", "")
+        if side_effect == "write":
+            description = "[WRITE] " + description
+        out.append(
+            {
+                "name": spec["name"],
+                "description": description,
+                "inputSchema": spec.get("input_schema") or {"type": "object", "properties": {}},
+            }
+        )
+    return out
+
+
+TOOL_DEFS.extend(_build_cloud_orchestrator_tool_defs())
+TOOL_DEFS.extend(_build_image_library_tool_defs())
+
+
+def _is_cloud_orchestrator_tool(name: str) -> bool:
+    try:
+        from .domains.cloud_orchestrator import mcp_tools as cloud_mcp_tools
+    except Exception:
+        return False
+    return any(t["name"] == name for t in cloud_mcp_tools.list_cloud_tool_specs())
+
+
+def _is_image_library_tool(name: str) -> bool:
+    try:
+        from .domains.image_library import mcp_tools as image_library_mcp_tools
+    except Exception:
+        return False
+    return any(
+        t["name"] == name for t in image_library_mcp_tools.list_image_library_tool_specs()
+    )
+
+
 def execute_mcp_tool_runtime(name: str, arguments: dict[str, Any] | None = None) -> dict[str, Any]:
     """Legacy-compatible MCP runtime delegate that now routes through application dispatch."""
+    if _is_cloud_orchestrator_tool(name):
+        from .domains.cloud_orchestrator import audit, mcp_tools as cloud_mcp_tools
+
+        args = arguments or {}
+        # 调用方可在 args 里夹 trace_id / session_id / operator；缺失则现生成
+        trace_id = str(args.pop("__trace_id", "") or audit.new_trace_id("mcp"))
+        session_id = str(args.pop("__session_id", "") or audit.new_session_id())
+        operator = str(args.pop("__operator", "") or "mcp_caller")
+        result = cloud_mcp_tools.dispatch_cloud_tool(
+            tool_name=name,
+            arguments=args,
+            session_id=session_id,
+            trace_id=trace_id,
+            operator=operator,
+        )
+        return {
+            "ok": True,
+            "tool": name,
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "result": result,
+        }
+
+    if _is_image_library_tool(name):
+        from .domains.image_library import mcp_tools as image_library_mcp_tools
+
+        result = image_library_mcp_tools.dispatch_image_library_tool(
+            tool_name=name,
+            arguments=arguments or {},
+        )
+        # dispatch_image_library_tool 已经返回 ``{"ok": ..., ...}`` 形态，
+        # 直接透传给 MCP 客户端，连同 tool 名一起带回方便调用方做日志关联。
+        return {"tool": name, **result}
 
     return DispatchMcpToolCommand()(name, arguments)
 

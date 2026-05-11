@@ -4,36 +4,15 @@ import json
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "timeline.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 @pytest.fixture()
@@ -183,9 +162,9 @@ def seed_marketing_timeline_fixture(app) -> None:
                 "signup_conversion_v1",
                 "pool",
                 "active_focus",
-                1,
-                0,
-                1,
+                True,
+                False,
+                True,
                 None,
                 "pool",
                 "",
@@ -220,9 +199,9 @@ def seed_marketing_timeline_fixture(app) -> None:
                 "signup_conversion_v1",
                 "converted",
                 "enrolled",
-                1,
-                1,
-                0,
+                True,
+                True,
+                False,
                 778,
                 "converted",
                 "enrolled",
@@ -260,7 +239,7 @@ def seed_marketing_timeline_fixture(app) -> None:
                 json.dumps({"operator": "openclaw", "source": "openclaw"}, ensure_ascii=False),
                 "dispatched to openclaw",
                 "2026-03-24 10:00:00",
-                "",
+                None,
                 "2026-03-24 10:00:00",
                 "2026-03-24 10:00:01",
             ),

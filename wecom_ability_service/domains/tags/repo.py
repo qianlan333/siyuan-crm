@@ -26,7 +26,7 @@ def list_signup_tag_rules(active_only: bool = False) -> list[dict[str, Any]]:
     params: list[Any] = []
     if active_only:
         sql += " WHERE active = ?"
-        params.append(True if get_db_backend() == "postgres" else 1)
+        params.append(True)
     sql += " ORDER BY active DESC, signup_status ASC, tag_name ASC, tag_id ASC"
     rows = get_db().execute(sql, tuple(params)).fetchall()
     return [dict(row) for row in rows]
@@ -38,7 +38,7 @@ def upsert_signup_tag_rule(tag_id: str, tag_name: str, signup_status: str, activ
     normalized_status = str(signup_status or "").strip()
     if not normalized_tag_id or not normalized_tag_name or not normalized_status:
         return
-    active_value = True if get_db_backend() == "postgres" else (1 if active else 0)
+    active_value = bool(active)
     get_db().execute(
         """
         INSERT INTO signup_tag_rules (tag_id, tag_name, signup_status, active, updated_at)

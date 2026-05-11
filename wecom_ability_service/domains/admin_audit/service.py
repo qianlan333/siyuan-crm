@@ -7,83 +7,6 @@ from urllib.parse import urlencode
 
 from . import repo
 
-LEGACY_ADMIN_PATH_ROWS = [
-    {
-        "legacy_path": "/admin/user-ops/ui",
-        "strategy": "redirect",
-        "replacement": "/admin/user-ops",
-        "status": "deprecated",
-        "notes": "旧入口已收口到统一运营看板；保留 302 兼容，不再单独维护 legacy 页面。",
-    },
-    {
-        "legacy_path": "/admin/questionnaires/ui",
-        "strategy": "redirect",
-        "replacement": "/admin/questionnaires",
-        "status": "deprecated",
-        "notes": "统一跳到问卷中心；问卷 admin 不再是孤立页面。",
-    },
-    {
-        "legacy_path": "/admin/class-user-management/ui",
-        "strategy": "redirect",
-        "replacement": "/admin/class-users?tab=class-users",
-        "status": "deprecated",
-        "notes": "统一纳入运营模块，旧入口只保留兼容跳转。",
-    },
-    {
-        "legacy_path": "/admin/class-user-backoffice/ui",
-        "strategy": "redirect",
-        "replacement": "/admin/class-users?tab=class-users",
-        "status": "deprecated",
-        "notes": "统一纳入运营模块，旧入口只保留兼容跳转。",
-    },
-]
-
-RISK_CONTROL_ROWS = [
-    {
-        "scope": "客户标签操作",
-        "risk_level": "高",
-        "strategy": "先预览，再执行",
-        "confirmation": "勾选确认",
-        "notes": "客户详情页默认 dry-run 预览；勾选确认才执行真实打标/去标。",
-    },
-    {
-        "scope": "客户触达任务",
-        "risk_level": "高",
-        "strategy": "先预览，再执行",
-        "confirmation": "勾选确认",
-        "notes": "private/group/moment task 默认先生成 preview payload。",
-    },
-    {
-        "scope": "导入、回填和待处理作业",
-        "risk_level": "高",
-        "strategy": "执行前必须确认",
-        "confirmation": "勾选确认",
-        "notes": "导入、回填、跑作业统一要求确认；backfill 支持 dry-run。",
-    },
-    {
-        "scope": "系统设置",
-        "risk_level": "高",
-        "strategy": "保存前必须确认",
-        "confirmation": "明确确认后保存",
-        "notes": "secret 仅 masked 展示；保存必须显式确认并落审计。",
-    },
-    {
-        "scope": "AI 工具高风险试运行",
-        "risk_level": "高",
-        "strategy": "先预览，必要时二次确认",
-        "confirmation": "高风险二次确认",
-        "notes": "高风险 AI 工具默认不直接执行；不支持原生预览的只展示本次请求内容。",
-    },
-]
-
-RUNBOOK_ROWS = [
-    {"label": "服务状态", "href": "/api/ops/status", "description": "查看服务运行情况和健康摘要。"},
-    {"label": "聊天同步检查", "href": "/api/archive/health", "description": "检查聊天同步相关配置和连接状态。"},
-    {"label": "AI 工具控制台", "href": "/admin/mcp", "description": "查看 AI 工具状态、环境检查和试运行。"},
-    {"label": "问卷中心", "href": "/admin/questionnaires", "description": "查看问卷环境是否齐全，并检查提交结果。"},
-    {"label": "操作记录", "href": "/admin/audit", "description": "查看后台关键操作和配置变更记录。"},
-]
-
 TARGET_ROUTE_MAP = {
     "customer_tag_action": lambda target_id: f"/admin/customers/{target_id}?tab=tags",
     "customer_task_action": lambda target_id: f"/admin/customers/{target_id}?tab=tasks",
@@ -331,13 +254,3 @@ def build_admin_audit_payload(args: Any) -> dict[str, Any]:
     }
 
 
-def build_risk_control_rows() -> list[dict[str, str]]:
-    return [dict(item) for item in RISK_CONTROL_ROWS]
-
-
-def build_legacy_admin_path_rows() -> list[dict[str, str]]:
-    return [dict(item) for item in LEGACY_ADMIN_PATH_ROWS]
-
-
-def build_runbook_rows() -> list[dict[str, str]]:
-    return [dict(item) for item in RUNBOOK_ROWS]

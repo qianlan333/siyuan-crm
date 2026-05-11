@@ -5,15 +5,14 @@ from typing import Any, Iterable
 from ...db import get_db, get_db_backend
 
 
-def _db_bool(value: bool) -> bool | int:
-    return value if get_db_backend() == "postgres" else (1 if value else 0)
+def _db_bool(value: bool) -> bool:
+    return bool(value)
 
 
 def _fetch_inserted_id(cursor) -> int:
-    if get_db_backend() == "postgres":
-        row = cursor.fetchone() or {}
-        return int((row or {}).get("id") or 0)
-    return int(cursor.lastrowid)
+    """PG INSERT ... RETURNING id 后从 cursor.fetchone() 拿。"""
+    row = cursor.fetchone() or {}
+    return int((row or {}).get("id") or 0)
 
 
 def _placeholders(values: Iterable[object]) -> str:
@@ -297,67 +296,36 @@ def insert_admin_user(
     created_by: str = "",
     updated_by: str = "",
 ) -> int:
-    if get_db_backend() == "postgres":
-        cursor = get_db().execute(
-            """
-            INSERT INTO admin_users (
-                wecom_userid,
-                wecom_corpid,
-                display_name,
-                is_active,
-                login_enabled,
-                admin_level,
-                auth_source,
-                created_by,
-                updated_by,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING id
-            """,
-            (
-                str(wecom_userid or "").strip(),
-                str(wecom_corpid or "").strip(),
-                str(display_name or "").strip(),
-                _db_bool(is_active),
-                _db_bool(login_enabled),
-                str(admin_level or "").strip() or "admin",
-                str(auth_source or "").strip() or "wecom_sso",
-                str(created_by or "").strip(),
-                str(updated_by or "").strip(),
-            ),
+    cursor = get_db().execute(
+        """
+        INSERT INTO admin_users (
+            wecom_userid,
+            wecom_corpid,
+            display_name,
+            is_active,
+            login_enabled,
+            admin_level,
+            auth_source,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at
         )
-    else:
-        cursor = get_db().execute(
-            """
-            INSERT INTO admin_users (
-                wecom_userid,
-                wecom_corpid,
-                display_name,
-                is_active,
-                login_enabled,
-                admin_level,
-                auth_source,
-                created_by,
-                updated_by,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """,
-            (
-                str(wecom_userid or "").strip(),
-                str(wecom_corpid or "").strip(),
-                str(display_name or "").strip(),
-                _db_bool(is_active),
-                _db_bool(login_enabled),
-                str(admin_level or "").strip() or "admin",
-                str(auth_source or "").strip() or "wecom_sso",
-                str(created_by or "").strip(),
-                str(updated_by or "").strip(),
-            ),
-        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING id
+        """,
+        (
+            str(wecom_userid or "").strip(),
+            str(wecom_corpid or "").strip(),
+            str(display_name or "").strip(),
+            _db_bool(is_active),
+            _db_bool(login_enabled),
+            str(admin_level or "").strip() or "admin",
+            str(auth_source or "").strip() or "wecom_sso",
+            str(created_by or "").strip(),
+            str(updated_by or "").strip(),
+        ),
+    )
     get_db().commit()
     return _fetch_inserted_id(cursor)
 

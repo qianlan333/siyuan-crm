@@ -1,0 +1,870 @@
+"""Campaign 调度引擎 — 把 due 的 campaign_member 推一步。
+
+每个 ``campaign_member`` 是一条独立的旅程。Cron 调用 ``process_due_campaign_members``
+扫所有 ``status=pending`` 且 ``next_due_at <= now`` 的成员，对每个成员：
+
+1. claim — 改 status='running'（乐观锁防并发重复处理）
+2. 取下一步 step → 拼内容 → 走频次预算 → 调发送管道
+3. 写 ``automation_touch_delivery_log``（继承 trace_id）
+4. 推进 ``current_step_index`` → 算下一步 ``next_due_at`` 或标记完成
+
+回复处理：``register_member_reply`` 在 reply_monitor 收到 inbound 时被调，
+对应 campaign_member 走 ``stop_on_reply`` 逻辑。
+"""
+from __future__ import annotations
+
+import json
+import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+from ...db import get_db, get_db_backend
+
+
+logger = logging.getLogger(__name__)
+
+
+def _now_iso() -> str:
+    # 必须输出 timezone-aware ISO（含 +00:00 后缀），否则 PG TIMESTAMPTZ 字段会按
+    # server timezone（Asia/Shanghai）解读 naive 字符串 → 倒推 8 小时，cron
+    # ``WHERE next_due_at <= ?`` 永远不命中下一步 due。
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _empty_ts() -> None:
+    """``campaign_members.next_due_at / last_step_sent_at`` 的"未设置"占位值。
+
+    历史上是 PG/SQLite 双语义；2026-05 砍 SQLite 后统一返回 ``None`` (PG NULL)。
+    保留函数名让 N 处 caller 不用改。
+    """
+    return None
+
+
+def _due_at_for_step(*, anchor_date: str, day_offset: int, send_time: str) -> str:
+    try:
+        base = datetime.fromisoformat((anchor_date or "")[:10])
+    except ValueError:
+        base = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    try:
+        h, m = (send_time or "09:00").split(":")[:2]
+        base = base.replace(hour=int(h), minute=int(m))
+    except ValueError:
+        pass
+    return (base + timedelta(days=int(day_offset))).isoformat()
+
+
+def _has_inbound_since(*, external_userid: str, since_iso: str) -> bool:
+    """看 archived_messages 里 since_iso 之后这个 external_userid 有没有真实回复。
+
+    判定与 reply_monitor._reply_monitor_candidate_message 一致：private 单聊 +
+    sender == external_userid（用户作为发送方就是 inbound）+ msgtype 不在系统消息列表。
+    用复合索引 (external_userid, send_time)，扫描代价 O(log N)。
+    """
+    if not external_userid or not since_iso:
+        return False
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT 1 FROM archived_messages
+        WHERE external_userid = ?
+          AND chat_type = 'private'
+          AND sender = ?
+          AND send_time > ?
+          AND msgtype NOT IN ('event', 'revoke', 'calendar', 'vote')
+        LIMIT 1
+        """,
+        (str(external_userid), str(external_userid), str(since_iso)),
+    )
+    return cur.fetchone() is not None
+
+
+def _mark_member_replied_inline(*, member_row_id: int) -> None:
+    """同步路径：发前现查命中时，立刻把 member 标 replied。reply_monitor 异步路径也会做这件事，互为兜底。"""
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        UPDATE campaign_members SET
+            status = 'replied',
+            stop_reason = 'user_replied_inline',
+            next_due_at = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (_empty_ts(), _now_iso(), int(member_row_id)),
+    )
+    db.commit()
+
+
+def _claim_due_member(*, member_row_id: int) -> bool:
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        "UPDATE campaign_members SET status = 'running', updated_at = ? "
+        "WHERE id = ? AND status = 'pending'",
+        (_now_iso(), int(member_row_id)),
+    )
+    db.commit()
+    return (cur.rowcount or 0) > 0
+
+
+def _all_step_ids_for_campaign(campaign_id: int) -> list[str]:
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        "SELECT id FROM campaign_steps WHERE campaign_id = ?",
+        (int(campaign_id),),
+    )
+    return [str(row["id"]) for row in (cur.fetchall() or [])]
+
+
+def _next_step(
+    *, campaign_segment_id: int, after_step_index: int
+) -> dict[str, Any] | None:
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT id, step_index, day_offset, send_time, content_text,
+               content_payload_json, stop_on_reply, skip_if_recently_touched_days
+        FROM campaign_steps
+        WHERE campaign_segment_id = ? AND step_index > ?
+        ORDER BY step_index ASC LIMIT 1
+        """,
+        (int(campaign_segment_id), int(after_step_index)),
+    )
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def _resolve_step_payload(*, campaign: dict[str, Any], step: dict[str, Any]) -> dict[str, Any]:
+    """把一个 step 解析成"准备好发送的素材"：text + image_media_ids + miniprogram attachments。
+
+    与 member 无关，所以可以一次解析后批量复用给 N 个 member —— 这是聚合发送的前提。
+    返回的 dict 含 ``base_request``（缺 external_userid）+ ``trace_id`` + ``error``。
+    error 非空表示解析失败（图片/小程序素材库 resolve 失败之类），整批不应发送。
+    """
+    from ..marketing_automation.service import DEFAULT_AUTOMATION_OWNER_USERID
+
+    owner_userid = str(campaign.get("owner_userid") or "") or DEFAULT_AUTOMATION_OWNER_USERID
+
+    # PG jsonb 自动反序列化为 dict；SQLite 是字符串
+    raw_payload = step.get("content_payload_json") or "{}"
+    if isinstance(raw_payload, dict):
+        step_payload = raw_payload
+    else:
+        try:
+            step_payload = json.loads(str(raw_payload) or "{}")
+        except (TypeError, ValueError):
+            step_payload = {}
+
+    # 老格式：image_media_ids 直接是企微 media_id（兼容老 step）
+    image_media_ids = [str(x).strip() for x in (step_payload.get("image_media_ids") or []) if str(x).strip()]
+    # 新格式：image_library_ids 引用图片素材库；发送前 resolve 成有效 media_id
+    image_library_ids: list[int] = []
+    for raw_iid in (step_payload.get("image_library_ids") or []):
+        try:
+            image_library_ids.append(int(raw_iid))
+        except (TypeError, ValueError):
+            continue
+    if image_library_ids:
+        from .. import image_library as _image_library
+
+        for iid in image_library_ids:
+            try:
+                resolved = _image_library.resolve_image_media_id(iid)
+            except Exception as exc:
+                logger.exception("resolve image_library_id=%s failed: %s", iid, exc)
+                return {"error": f"image_library_resolve_failed:id={iid}:{exc}"}
+            if resolved:
+                image_media_ids.append(resolved)
+    image_media_ids = image_media_ids[:9]  # 企微单消息最多 9 张
+
+    miniprogram_library_ids: list[int] = []
+    for raw_lid in (step_payload.get("miniprogram_library_ids") or []):
+        try:
+            miniprogram_library_ids.append(int(raw_lid))
+        except (TypeError, ValueError):
+            continue
+    attachments: list[dict[str, Any]] = []
+    if miniprogram_library_ids:
+        from .. import miniprogram_library as _miniprogram_library
+
+        for lid in miniprogram_library_ids:
+            try:
+                attachments.append(_miniprogram_library.materialize_miniprogram_attachment(lid))
+            except Exception as exc:
+                logger.exception("resolve miniprogram_library_id=%s failed: %s", lid, exc)
+                return {"error": f"miniprogram_resolve_failed:id={lid}:{exc}"}
+
+    return {
+        "base_request": {
+            "sender": owner_userid,
+            "text": {"content": str(step.get("content_text") or "")},
+            "image_media_ids": image_media_ids,
+            "attachments": attachments,
+        },
+    }
+
+
+def _dispatch_step_batch(
+    *,
+    campaign: dict[str, Any],
+    members: list[dict[str, Any]],
+    step: dict[str, Any],
+) -> dict[str, Any]:
+    """**一次** dispatch 把同一 step 的素材发给 N 个 external_userid。
+
+    企微的 ``add_msg_template`` 原生支持 ``external_userid`` 数组 — 一次调用就在
+    每个员工的"客户群发"列表里产生 1 个 task（包含 N 个客户），运营点 1 次确认即可。
+    之前每个 member 单独调一次，导致运营要点 N 次确认 — 严重的产品体验 bug。
+
+    所有 ``members`` 必须是同一 ``(campaign_id, campaign_segment_id, step_index)``，
+    调用方负责分组。"""
+    from ..marketing_automation.service import dispatch_wecom_task
+
+    if not members:
+        return {"ok": False, "reason": "empty_batch"}
+
+    resolved = _resolve_step_payload(campaign=campaign, step=step)
+    if resolved.get("error"):
+        return {"ok": False, "reason": resolved["error"]}
+
+    externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
+    if not externals:
+        return {"ok": False, "reason": "no_external_userid"}
+
+    request_payload = dict(resolved["base_request"])
+    request_payload["external_userid"] = externals
+
+    try:
+        wecom_result = dispatch_wecom_task(
+            "private_message",
+            "create_private_message_task",
+            request_payload,
+        )
+        task_id = int(wecom_result.get("task_id") or 0)
+        return {"ok": True, "task_id": task_id, "recipient_count": len(externals)}
+    except Exception as exc:
+        logger.exception("campaign batch dispatch failed (%d recipients): %s", len(externals), exc)
+        return {"ok": False, "reason": f"dispatch_error:{exc}"}
+
+
+def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
+    """broadcast_jobs handler 调用 — 执行一个 campaign batch 的真发 + side effects。"""
+    campaign = batch_data.get("campaign") or {}
+    step = batch_data.get("step") or {}
+    members = batch_data.get("members") or []
+    request_payload = batch_data.get("request_payload") or {}
+    if not members:
+        return {"ok": False, "error": "empty batch"}
+    # 预排期的 job 没有 request_payload，执行时现场 resolve + claim
+    is_pre_scheduled = not request_payload
+    if is_pre_scheduled:
+        # claim 每个 member 防止 cron 同时处理
+        eligible = []
+        for m in members:
+            if _claim_due_member(member_row_id=int(m["cm_id"])):
+                eligible.append(m)
+        if not eligible:
+            return {"ok": True, "sent_count": 0, "failed_count": 0, "status": "all_members_already_claimed"}
+        members = eligible
+        resolved = _resolve_step_payload(campaign=campaign, step=step)
+        if resolved.get("error"):
+            return {"ok": False, "error": resolved["error"]}
+        externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
+        if not externals:
+            return {"ok": False, "error": "no_external_userid"}
+        request_payload = dict(resolved["base_request"])
+        request_payload["external_userid"] = externals
+
+    from ..marketing_automation.service import dispatch_wecom_task
+
+    try:
+        wecom_result = dispatch_wecom_task(
+            "private_message", "create_private_message_task", request_payload
+        )
+        send_res = {"ok": True, "task_id": int(wecom_result.get("task_id") or 0), "recipient_count": len(members)}
+    except Exception as exc:
+        logger.exception("campaign batch dispatch failed: %s", exc)
+        send_res = {"ok": False, "reason": f"dispatch_error:{exc}"}
+
+    sent_count = 0
+    failed_count = 0
+    for m in members:
+        if send_res.get("ok"):
+            sent_count += 1
+            _record_member_after_dispatch(
+                campaign=campaign, member=m, step=step, send_result=send_res,
+            )
+        else:
+            failed_count += 1
+        progress_member_after_send(
+            member_row_id=int(m["cm_id"]), step=step, send_result=send_res,
+        )
+
+    # 提前排期：当前 step 发完后，查下一步并立刻入队 broadcast_jobs
+    if send_res.get("ok"):
+        _pre_enqueue_next_step(campaign=campaign, step=step, members=members)
+
+    return {
+        "ok": send_res.get("ok", False),
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "outbound_task_id": int(send_res.get("task_id") or 0) or None,
+    }
+
+
+def _pre_enqueue_next_step(
+    *,
+    campaign: dict[str, Any],
+    step: dict[str, Any],
+    members: list[dict[str, Any]],
+) -> None:
+    """当前 step 成功后，把下一步提前写入 broadcast_jobs 以便队列页展示排期。
+
+    此处只做"排期占位"——写入一条 scheduled_for=下一步due 的 job。
+    到时间后 worker claim → handler 走 process_due_campaign_members 正常流程
+    （频次预算、inline reply 等在执行时才检查，排期阶段不做）。
+    """
+    if not members:
+        return
+    # 取第一个 member 的 campaign_segment_id 查下一步
+    first = members[0]
+    campaign_segment_id = int(first.get("campaign_segment_id") or 0)
+    if not campaign_segment_id:
+        return
+    next_step = _next_step(
+        campaign_segment_id=campaign_segment_id,
+        after_step_index=int(step.get("step_index") or 0),
+    )
+    if not next_step:
+        return
+    # 取 anchor_date 算 due 时间（同 batch 的 anchor_date 一致）
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        "SELECT anchor_date FROM campaign_members WHERE id = ?",
+        (int(first["cm_id"]),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return
+    next_due = _due_at_for_step(
+        anchor_date=str(row["anchor_date"] or ""),
+        day_offset=int(next_step["day_offset"] or 0),
+        send_time=str(next_step["send_time"] or "09:00"),
+    )
+    externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
+    if not externals:
+        return
+    from ..broadcast_jobs import service as queue_service
+
+    queue_service.enqueue_job(
+        source_type="campaign",
+        source_id=f"{campaign.get('id')}:{next_step.get('step_index', 0)}",
+        source_table="campaign_members",
+        scheduled_for=next_due,
+        target_external_userids=externals,
+        target_summary=f"campaign={campaign.get('campaign_code')} step={next_step.get('step_index')}",
+        content_type="private_message",
+        content_payload={
+            "campaign": campaign,
+            "step": next_step,
+            "members": members,
+        },
+        content_summary=str(next_step.get("content_text") or "")[:200],
+        trace_id=str(campaign.get("trace_id") or ""),
+    )
+
+
+def _record_member_after_dispatch(
+    *,
+    campaign: dict[str, Any],
+    member: dict[str, Any],
+    step: dict[str, Any],
+    send_result: dict[str, Any],
+) -> None:
+    """成功 dispatch 后，per-member 写 ``automation_touch_delivery_log`` + 频次预算消耗。
+
+    跟 dispatch 解耦，所以同一 task_id 的 N 个 member 可以分别记账，每条独立带 trace_id。
+    """
+    from ..marketing_automation import frequency_budget_service
+
+    if not send_result.get("ok"):
+        return  # 没真发出去就不记
+    task_id = int(send_result.get("task_id") or 0)
+    external = str(member.get("external_contact_id") or "")
+    member_id = int(member.get("member_id") or 0)
+    trace_id = str(member.get("trace_id") or campaign.get("trace_id") or "")
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        INSERT INTO automation_touch_delivery_log
+            (program_code, touch_surface, rule_key, member_id,
+             external_contact_id, status, detail, metadata_json, trace_id, sent_at)
+        VALUES (?, 'campaign_step', ?, ?, ?, 'sent', ?, ?, ?, ?)
+        ON CONFLICT DO NOTHING
+        """,
+        (
+            f"campaign:{campaign.get('campaign_code')}",
+            f"step:{step.get('step_index')}",
+            int(member_id) if member_id else None,
+            external,
+            f"campaign_step task_id={task_id}",
+            json.dumps(
+                {
+                    "campaign_id": campaign.get("id"),
+                    "campaign_segment_id": member.get("campaign_segment_id"),
+                    "step_index": step.get("step_index"),
+                    "wecom_task_id": task_id,
+                    "batch_recipient_count": send_result.get("recipient_count") or 1,
+                },
+                ensure_ascii=False,
+            ),
+            trace_id,
+            _now_iso(),
+        ),
+    )
+    db.commit()
+    try:
+        frequency_budget_service.record_consumption(
+            member_id=member_id or None,
+            external_contact_id=external,
+            channels=("wecom_private", "ai_initiated"),
+            program_codes=("campaign",),
+            source_kind="campaign_step",
+            source_id=str(step.get("id") or ""),
+            trace_id=trace_id,
+        )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("record_consumption failed: %s", exc)
+
+
+def progress_member_after_send(
+    *,
+    member_row_id: int,
+    step: dict[str, Any],
+    send_result: dict[str, Any],
+) -> None:
+    """发完后推进 — 计算下一步 due，或者标记成员完成 / 失败。"""
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT cm.id, cm.campaign_id, cm.campaign_segment_id, cm.anchor_date,
+               c.run_status
+        FROM campaign_members cm
+        JOIN campaigns c ON c.id = cm.campaign_id
+        WHERE cm.id = ?
+        """,
+        (int(member_row_id),),
+    )
+    row = cur.fetchone()
+    if not row:
+        return
+    if str(row["run_status"] or "") != "active":
+        cur.execute(
+            "UPDATE campaign_members SET status = 'paused', updated_at = ? WHERE id = ?",
+            (_now_iso(), int(member_row_id)),
+        )
+        db.commit()
+        return
+    next_step = _next_step(
+        campaign_segment_id=int(row["campaign_segment_id"]),
+        after_step_index=int(step.get("step_index") or 0),
+    )
+    if not next_step:
+        # 走完最后一步 → 完成
+        cur.execute(
+            """
+            UPDATE campaign_members SET
+                status = 'completed',
+                current_step_index = ?,
+                last_step_sent_at = ?,
+                next_due_at = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                int(step.get("step_index") or 0),
+                _now_iso() if send_result.get("ok") else _empty_ts(),
+                _empty_ts(),
+                _now_iso(),
+                int(member_row_id),
+            ),
+        )
+    else:
+        # 算下一步 due
+        next_due = _due_at_for_step(
+            anchor_date=str(row["anchor_date"] or ""),
+            day_offset=int(next_step["day_offset"] or 0),
+            send_time=str(next_step["send_time"] or "09:00"),
+        )
+        cur.execute(
+            """
+            UPDATE campaign_members SET
+                status = 'pending',
+                current_step_index = ?,
+                last_step_sent_at = ?,
+                next_due_at = ?,
+                last_error_text = ?,
+                retry_count = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                int(step.get("step_index") or 0),
+                _now_iso() if send_result.get("ok") else _empty_ts(),
+                next_due,
+                "" if send_result.get("ok") else str(send_result.get("reason") or "")[:300],
+                0 if send_result.get("ok") else 1,
+                _now_iso(),
+                int(member_row_id),
+            ),
+        )
+    db.commit()
+
+
+def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
+    """Cron 入口：扫一批 due 的 member、按 (segment, step) 聚合后批量推送。
+
+    两阶段：
+    1. **per-member 决策** — claim 乐观锁、stop_on_reply 同步检查、频次预算检查；
+       通过的 member 加入分组 buffer ``(campaign_segment_id, step_index) → [members]``
+    2. **per-group 批量 dispatch** — 每组**一次** ``dispatch_wecom_task``，企微侧
+       产生 1 个含 N 个客户的群发任务。运营点 1 次确认 = N 个客户都收到。
+
+    之前每 member 一个 dispatch 让运营要点 N 次确认（用户实测：64 人 = 64 个待确认任务）。
+    """
+    from ..marketing_automation import frequency_budget_service
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT cm.id AS cm_id, cm.member_id, cm.external_contact_id,
+               cm.campaign_id, cm.campaign_segment_id, cm.current_step_index,
+               cm.anchor_date, cm.trace_id, cm.last_step_sent_at,
+               c.campaign_code, c.run_status, c.owner_userid
+        FROM campaign_members cm
+        JOIN campaigns c ON c.id = cm.campaign_id
+        WHERE cm.status = 'pending'
+          AND cm.next_due_at IS NOT NULL
+          AND cm.next_due_at <= ?
+          AND c.run_status = 'active'
+        ORDER BY cm.next_due_at ASC, cm.id ASC
+        LIMIT ?
+        """,
+        (_now_iso(), int(batch_size)),
+    )
+    due = cur.fetchall() or []
+
+    # group key = (campaign_segment_id, step_index) → step + campaign_dict + members[]
+    groups: dict[tuple[int, int], dict[str, Any]] = {}
+    skipped_budget = 0
+    skipped_inline_reply = 0
+    completed_no_step = 0
+    # 同 campaign 续推不重复消耗 daily budget — 缓存 campaign_id → step_ids
+    _step_ids_cache: dict[int, list[str]] = {}
+
+    for r in due:
+        cm_id = int(r["cm_id"])
+        if not _claim_due_member(member_row_id=cm_id):
+            continue
+        # 取下一个待发的 step（current_step_index 之后的第一个）
+        step = _next_step(
+            campaign_segment_id=int(r["campaign_segment_id"]),
+            after_step_index=int(r["current_step_index"]) if r["current_step_index"] is not None else -1,
+        )
+        if not step:
+            cur.execute(
+                "UPDATE campaign_members SET status = 'completed', next_due_at = ?, updated_at = ? "
+                "WHERE id = ?",
+                (_empty_ts(), _now_iso(), cm_id),
+            )
+            db.commit()
+            completed_no_step += 1
+            continue
+        # 同步路径：第二条及之后的 step 发送前，先现查会话存档看用户有没有回复。命中
+        # 直接停，不再发，也不走频次预算扣减。第一条 step 不查（last_step_sent_at 为空）。
+        last_sent = str(r["last_step_sent_at"] or "").strip()
+        external = str(r["external_contact_id"] or "")
+        if last_sent and external and _has_inbound_since(external_userid=external, since_iso=last_sent):
+            _mark_member_replied_inline(member_row_id=cm_id)
+            skipped_inline_reply += 1
+            continue
+        if not external:
+            # 没 external_userid 的 member 直接标失败，避免整批 dispatch 时被拒绝
+            cur.execute(
+                "UPDATE campaign_members SET status = 'failed', last_error_text = ?, updated_at = ? "
+                "WHERE id = ?",
+                ("missing_external_contact_id", _now_iso(), cm_id),
+            )
+            db.commit()
+            continue
+        # 频次预算 per-member（如果该 member 跨方案累计触达超预算就跳过）
+        # 同 campaign 续推排除：同一 campaign 先前 step 的消耗不计入 daily 限额
+        campaign_id = int(r["campaign_id"])
+        member_id = int(r["member_id"] or 0)
+        if campaign_id not in _step_ids_cache:
+            _step_ids_cache[campaign_id] = _all_step_ids_for_campaign(campaign_id)
+        verdict = frequency_budget_service.check_member_budget(
+            member_id=member_id,
+            external_contact_id=external,
+            channels=("wecom_private", "ai_initiated"),
+            program_codes=("campaign",),
+            exclude_source_kind="campaign_step",
+            exclude_source_ids=_step_ids_cache[campaign_id],
+        )
+        if not verdict.allowed:
+            # 把 status 改回 pending，next_due_at 推后 1 小时避免下次 cron 立刻重试。
+            # 必须输出 timezone-aware ISO（带 +00:00 后缀），否则 PG TIMESTAMPTZ
+            # 字段会按 server timezone（Asia/Shanghai）解读 naive 字符串 → 倒推
+            # 8 小时变成已过期，下次 cron 立刻又扫到，每 15 分钟死循环。
+            retry_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+            cur.execute(
+                "UPDATE campaign_members SET status = 'pending', next_due_at = ?, "
+                "last_error_text = ?, updated_at = ? WHERE id = ?",
+                (retry_at, str(verdict.skip_reason or "")[:300], _now_iso(), cm_id),
+            )
+            db.commit()
+            skipped_budget += 1
+            continue
+
+        # 加入分组 buffer
+        member_dict = {
+            "cm_id": cm_id,
+            "member_id": member_id,
+            "external_contact_id": external,
+            "trace_id": str(r["trace_id"] or ""),
+            "campaign_segment_id": int(r["campaign_segment_id"]),
+        }
+        campaign_dict = {
+            "id": int(r["campaign_id"]),
+            "campaign_code": str(r["campaign_code"] or ""),
+            "owner_userid": str(r["owner_userid"] or ""),
+            "trace_id": str(r["trace_id"] or ""),
+        }
+        key = (int(r["campaign_segment_id"]), int(step.get("step_index") or 0))
+        if key not in groups:
+            groups[key] = {"campaign": campaign_dict, "step": step, "members": []}
+        groups[key]["members"].append(member_dict)
+
+    # 阶段 2：per-group enqueue 到 broadcast_jobs
+    from ..broadcast_jobs import service as queue_service
+    from ..broadcast_jobs import repo as queue_repo
+
+    batches_enqueued = 0
+    for key, group in groups.items():
+        members = group["members"]
+        externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
+        if not externals:
+            continue
+        campaign = group["campaign"]
+        step = group["step"]
+        source_id = f"{campaign['id']}:{step.get('step_index', 0)}"
+        # 去重：如果预排期的 job 已存在（queued/claimed），跳过
+        existing = queue_repo.fetch_jobs_filtered(
+            statuses=["queued", "claimed"],
+            source_types=["campaign"],
+            limit=1,
+        )
+        already_scheduled = any(
+            str(j.get("source_id") or "") == source_id for j in existing
+        )
+        if already_scheduled:
+            continue
+        resolved = _resolve_step_payload(campaign=campaign, step=step)
+        if resolved.get("error"):
+            for m in members:
+                progress_member_after_send(
+                    member_row_id=int(m["cm_id"]),
+                    step=step,
+                    send_result={"ok": False, "reason": resolved["error"]},
+                )
+            continue
+        request_payload = dict(resolved["base_request"])
+        request_payload["external_userid"] = externals
+        queue_service.enqueue_job(
+            source_type="campaign",
+            source_id=source_id,
+            source_table="campaign_members",
+            scheduled_for=datetime.now(timezone.utc),
+            target_external_userids=externals,
+            target_summary=f"campaign={campaign.get('campaign_code')} step={step.get('step_index')}",
+            content_type="private_message",
+            content_payload={
+                "request_payload": request_payload,
+                "campaign": campaign,
+                "step": step,
+                "members": members,
+            },
+            content_summary=str(request_payload.get("text", {}).get("content") or "")[:200],
+            trace_id=str(campaign.get("trace_id") or ""),
+        )
+        batches_enqueued += 1
+
+    # 阶段 3：为尚未入队的未来 step 预排期（让队列页能看到排期）
+    future_enqueued = _pre_enqueue_future_campaign_steps(queue_service=queue_service, queue_repo=queue_repo)
+
+    return {
+        "processed": len(due),
+        "batches_enqueued": batches_enqueued,
+        "future_enqueued": future_enqueued,
+        "skipped_budget": skipped_budget,
+        "skipped_inline_reply": skipped_inline_reply,
+        "completed_no_step": completed_no_step,
+        "scanned_at": _now_iso(),
+    }
+
+
+def _pre_enqueue_future_campaign_steps(*, queue_service: Any, queue_repo: Any) -> int:
+    """扫描所有 pending + 有 next_due_at 的成员，按 (campaign, step) 分组后预排期。
+
+    只排"尚未在 broadcast_jobs 里的"组合，避免重复。
+    """
+    db = get_db()
+    cur = db.cursor()
+    not_empty_clause = "cm.next_due_at IS NOT NULL" if get_db_backend() == "postgres" else "cm.next_due_at <> ''"
+    cur.execute(
+        f"""
+        SELECT cm.id AS cm_id, cm.member_id, cm.external_contact_id,
+               cm.campaign_id, cm.campaign_segment_id, cm.current_step_index,
+               cm.anchor_date, cm.trace_id, cm.next_due_at,
+               c.campaign_code, c.owner_userid
+        FROM campaign_members cm
+        JOIN campaigns c ON c.id = cm.campaign_id
+        WHERE cm.status = 'pending'
+          AND {not_empty_clause}
+          AND cm.next_due_at > ?
+          AND c.run_status = 'active'
+        ORDER BY cm.next_due_at ASC
+        LIMIT 500
+        """,
+        (_now_iso(),),
+    )
+    future = cur.fetchall() or []
+    if not future:
+        return 0
+
+    # 已有的 queued campaign jobs → 用于去重
+    existing_jobs = queue_repo.fetch_jobs_filtered(
+        statuses=["queued", "claimed"],
+        source_types=["campaign"],
+        limit=200,
+    )
+    existing_source_ids = {str(j.get("source_id") or "") for j in existing_jobs}
+
+    # 按 (campaign_segment_id, next_step_index) 分组
+    groups: dict[str, dict[str, Any]] = {}
+    for r in future:
+        next_step = _next_step(
+            campaign_segment_id=int(r["campaign_segment_id"]),
+            after_step_index=int(r["current_step_index"]) if r["current_step_index"] is not None else -1,
+        )
+        if not next_step:
+            continue
+        source_id = f"{int(r['campaign_id'])}:{next_step.get('step_index', 0)}"
+        if source_id in existing_source_ids:
+            continue
+        if source_id not in groups:
+            groups[source_id] = {
+                "campaign": {
+                    "id": int(r["campaign_id"]),
+                    "campaign_code": str(r["campaign_code"] or ""),
+                    "owner_userid": str(r["owner_userid"] or ""),
+                    "trace_id": str(r["trace_id"] or ""),
+                },
+                "step": next_step,
+                "members": [],
+                "next_due": str(r["next_due_at"] or ""),
+            }
+        external = str(r["external_contact_id"] or "")
+        if external:
+            groups[source_id]["members"].append({
+                "cm_id": int(r["cm_id"]),
+                "member_id": int(r["member_id"] or 0),
+                "external_contact_id": external,
+                "trace_id": str(r["trace_id"] or ""),
+                "campaign_segment_id": int(r["campaign_segment_id"]),
+            })
+
+    enqueued = 0
+    for source_id, group in groups.items():
+        members = group["members"]
+        externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
+        if not externals:
+            continue
+        campaign = group["campaign"]
+        step = group["step"]
+        queue_service.enqueue_job(
+            source_type="campaign",
+            source_id=source_id,
+            source_table="campaign_members",
+            scheduled_for=group["next_due"],
+            target_external_userids=externals,
+            target_summary=f"campaign={campaign.get('campaign_code')} step={step.get('step_index')}",
+            content_type="private_message",
+            content_payload={
+                "campaign": campaign,
+                "step": step,
+                "members": members,
+            },
+            content_summary=str(step.get("content_text") or "")[:200],
+            trace_id=str(campaign.get("trace_id") or ""),
+        )
+        existing_source_ids.add(source_id)
+        enqueued += 1
+    return enqueued
+
+
+def register_member_reply(
+    *,
+    external_contact_id: str = "",
+    member_id: int | None = None,
+) -> int:
+    """reply_monitor 收到 inbound 时调 — 把对应 campaign_member 标记为已回复，停止后续步骤。
+
+    返回被影响的成员数。
+    """
+    if not external_contact_id and member_id is None:
+        return 0
+    db = get_db()
+    cur = db.cursor()
+    if member_id is not None:
+        cur.execute(
+            """
+            UPDATE campaign_members SET
+                status = 'replied',
+                stop_reason = 'user_replied',
+                next_due_at = ?,
+                updated_at = ?
+            WHERE member_id = ? AND status IN ('pending','running')
+            """,
+            (_empty_ts(), _now_iso(), int(member_id)),
+        )
+    else:
+        cur.execute(
+            """
+            UPDATE campaign_members SET
+                status = 'replied',
+                stop_reason = 'user_replied',
+                next_due_at = ?,
+                updated_at = ?
+            WHERE external_contact_id = ? AND status IN ('pending','running')
+            """,
+            (_empty_ts(), _now_iso(), str(external_contact_id)),
+        )
+    db.commit()
+    return int(cur.rowcount or 0)
+
+
+__all__ = [
+    "process_due_campaign_members",
+    "progress_member_after_send",
+    "register_member_reply",
+]

@@ -20,3 +20,5 @@ exports/
 /outputs/
 .codex_artifacts/
 *.swp
+
+.claude/

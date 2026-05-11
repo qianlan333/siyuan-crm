@@ -4,12 +4,6 @@ import json
 from datetime import datetime
 from typing import Any
 
-from ..domains.customer_pulse.access import (
-    CUSTOMER_PULSE_LEGACY_INTERNAL_MODE,
-    customer_pulse_context_tenant_key,
-    customer_pulse_default_tenant_key,
-    customer_pulse_tenant_mode,
-)
 from ..domains.marketing_automation.presenter import (
     conversion_marked_summary as business_conversion_marked_summary,
     marketing_state_change_summary as business_marketing_state_change_summary,
@@ -19,7 +13,6 @@ from ..services import extract_roomid_from_raw_payload, format_message_row, get_
 from .dto import TimelineDTO, TimelineItemDTO
 from .repo import (
     fetch_archived_messages,
-    fetch_customer_pulse_activity_logs,
     fetch_conversion_dispatch_logs,
     fetch_marketing_state_changes,
     fetch_questionnaire_submissions,
@@ -96,18 +89,6 @@ def _dispatch_summary(row: dict[str, Any]) -> str:
     if dispatch_status:
         return f"OpenClaw 转化候选 {batch_label} 状态更新为 {dispatch_status}"
     return f"OpenClaw 转化候选 {batch_label} 已记录"
-
-
-def _customer_pulse_tenant_key(tenant_context: dict[str, Any] | None = None) -> str:
-    if customer_pulse_tenant_mode() == CUSTOMER_PULSE_LEGACY_INTERNAL_MODE:
-        return customer_pulse_default_tenant_key()
-    context = dict(tenant_context or {})
-    if not context:
-        return ""
-    try:
-        return customer_pulse_context_tenant_key(context, require_valid=not bool(context.get("legacy_mode")))
-    except PermissionError:
-        return ""
 
 
 def _message_items(external_userid: str, *, limit: int | None = None) -> list[TimelineItemDTO]:
@@ -373,59 +354,14 @@ def _openclaw_dispatch_items(external_userid: str, *, limit: int | None = None) 
     return items
 
 
-def _customer_pulse_activity_items(
-    external_userid: str,
-    *,
-    tenant_key: str,
-    limit: int | None = None,
-) -> list[TimelineItemDTO]:
-    if not _stringify(tenant_key):
-        return []
-    rows = fetch_customer_pulse_activity_logs(external_userid, tenant_key=tenant_key, limit=limit)
-    items: list[TimelineItemDTO] = []
-    for row in rows:
-        payload_json = _json_loads(row.get("payload_json"), default={})
-        if not isinstance(payload_json, dict):
-            payload_json = {}
-        event_time = _coalesce_text(row.get("created_at"), row.get("updated_at"))
-        summary = _coalesce_text(
-            row.get("summary"),
-            payload_json.get("summary"),
-            payload_json.get("draft_message"),
-        )
-        if _stringify(row.get("activity_status")) == "undone":
-            summary = summary or "已撤销该 AI 执行动作"
-        items.append(
-            TimelineItemDTO(
-                event_id=f"customer_pulse_activity:{row['id']}",
-                event_type="customer_pulse_activity",
-                type="customer_pulse_activity",
-                event_time=event_time,
-                occurred_at=event_time,
-                title=_coalesce_text(row.get("title"), payload_json.get("title"), "AI 推进行动"),
-                summary=summary or "AI 推进行动已记录",
-                source_table="customer_pulse_activity_logs",
-                source_id=str(row["id"]),
-                operator_userid=_coalesce_text(row.get("operator"), row.get("owner_userid")),
-                external_userid=external_userid,
-                payload={**dict(row), "payload_json": payload_json},
-                metadata={**dict(row), "payload_json": payload_json},
-            )
-        )
-    return items
-
-
 def _get_customer_timeline_impl(
     external_userid: str,
     filters: dict[str, Any],
-    *,
-    customer_pulse_tenant_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     normalized_external_userid = _stringify(external_userid)
     if not normalized_external_userid:
         return None
-    pulse_tenant_key = _customer_pulse_tenant_key(customer_pulse_tenant_context)
-    if not has_customer_timeline_scope(normalized_external_userid, customer_pulse_tenant_key=pulse_tenant_key):
+    if not has_customer_timeline_scope(normalized_external_userid):
         return None
 
     limit = int(filters["normalized_limit"])
@@ -446,11 +382,6 @@ def _get_customer_timeline_impl(
         + _conversion_marked_items(normalized_external_userid, marketing_state_rows)
         + _value_segment_change_items(normalized_external_userid, value_segment_rows)
         + _openclaw_dispatch_items(normalized_external_userid, limit=per_source_limit)
-        + _customer_pulse_activity_items(
-            normalized_external_userid,
-            tenant_key=pulse_tenant_key,
-            limit=per_source_limit,
-        )
     )
 
     event_type = _stringify(filters.get("event_type"))
@@ -480,8 +411,6 @@ def _get_customer_timeline_impl(
 def get_customer_timeline(
     external_userid: str,
     filters: dict[str, Any],
-    *,
-    customer_pulse_tenant_context: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Legacy compatibility wrapper around the Wave 1 customer read-model query."""
 
@@ -494,6 +423,5 @@ def get_customer_timeline(
             event_type=str(raw_filters.get("event_type", "") or ""),
             limit=raw_filters.get("limit", raw_filters.get("normalized_limit", 50)),
             offset=raw_filters.get("offset", raw_filters.get("normalized_offset", 0)),
-            customer_pulse_tenant_context=customer_pulse_tenant_context,
         )
     )

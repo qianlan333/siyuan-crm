@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import time
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -2169,6 +2170,7 @@ def _build_dashboard_member_detail_item(
         "member_id": int(member.get("id") or 0) or None,
         "external_contact_id": external_contact_id,
         "phone": _normalized_text(member.get("phone")),
+        "customer_name": _normalized_text(member.get("customer_name")),
         "audience_code": audience_code,
         "audience_label": _normalized_text((audience_meta_map.get(audience_code) or {}).get("label")),
         "questionnaire_status": questionnaire_status,
@@ -2185,6 +2187,32 @@ def _build_dashboard_member_detail_item(
     return payload
 
 
+def _maybe_persist_member_segment_keys(
+    *, row: dict[str, Any], item: dict[str, Any], refreshed_at: str
+) -> None:
+    member = dict(row.get("member") or {})
+    member_id = int(member.get("id") or 0)
+    if not member_id:
+        return
+    new_profile_key = _normalized_text(item.get("profile_segment_key"))
+    new_behavior_key = _normalized_text(item.get("behavior_segment_key"))
+    old_profile_key = _normalized_text(member.get("profile_segment_key"))
+    old_behavior_key = _normalized_text(member.get("behavior_tier_key"))
+    if new_profile_key == old_profile_key and new_behavior_key == old_behavior_key:
+        return
+    try:
+        workflow_repo.update_member_segment_keys(
+            member_id,
+            profile_segment_key=new_profile_key,
+            behavior_tier_key=new_behavior_key,
+            refreshed_at=refreshed_at,
+        )
+    except Exception:
+        # Persistence is best-effort; the dashboard render must still succeed
+        # if a single UPDATE fails (e.g. concurrent modification).
+        pass
+
+
 def _build_dashboard_audience_member_details(*, program_id: int | None = None) -> dict[str, Any]:
     audience_definitions = list_supported_conversion_audiences()
     audience_meta_map = _conversion_audience_meta_map()
@@ -2197,18 +2225,24 @@ def _build_dashboard_audience_member_details(*, program_id: int | None = None) -
     profile_segment_template_bundle = _latest_enabled_profile_segment_template_bundle(program_id=program_id)
     groups: list[dict[str, Any]] = []
     total = 0
+    refreshed_at_value = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     for definition in audience_definitions:
         audience_code = _normalized_text(definition.get("audience_code"))
         rows = rows_by_audience.get(audience_code) or []
-        items = [
-            _build_dashboard_member_detail_item(
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            item = _build_dashboard_member_detail_item(
                 row,
                 message_activity_counts_by_match_key=message_activity_counts_by_match_key,
                 profile_segment_template_bundle=profile_segment_template_bundle,
                 audience_meta_map=audience_meta_map,
             )
-            for row in rows
-        ]
+            items.append(item)
+            _maybe_persist_member_segment_keys(
+                row=row,
+                item=item,
+                refreshed_at=refreshed_at_value,
+            )
         total += len(items)
         groups.append(
             {
@@ -2219,6 +2253,10 @@ def _build_dashboard_audience_member_details(*, program_id: int | None = None) -
                 "items": items,
             }
         )
+    try:
+        get_db().commit()
+    except Exception:
+        pass
     template = dict(profile_segment_template_bundle.get("template") or {})
     validity = dict(profile_segment_template_bundle.get("validity") or {})
     selection = dict(profile_segment_template_bundle.get("selection") or {})

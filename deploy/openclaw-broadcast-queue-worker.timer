@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw Broadcast Queue Worker every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=openclaw-broadcast-queue-worker.service
+
+[Install]
+WantedBy=timers.target

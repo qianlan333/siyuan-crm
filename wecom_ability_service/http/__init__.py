@@ -4,8 +4,6 @@ from flask import Blueprint
 
 from .admin_jobs import register_routes as register_admin_jobs_console_routes
 from .admin_customers import register_routes as register_admin_customer_console_routes
-from .admin_customer_pulse import register_routes as register_admin_customer_pulse_routes
-from .admin_followup_orchestrator import register_routes as register_admin_followup_orchestrator_routes
 from .admin_audit import register_routes as register_admin_audit_console_routes
 from .admin_api_docs import register_routes as register_admin_api_docs_routes
 from .internal_auth import register_routes as register_internal_auth_routes
@@ -22,6 +20,9 @@ from .admin_class_user import register_routes as register_admin_class_user_route
 from .admin_questionnaires import register_routes as register_admin_questionnaires_routes
 from .admin_user_ops import register_routes as register_admin_user_ops_routes
 from .automation_conversion import register_routes as register_automation_conversion_routes
+from .cloud_orchestrator_endpoint import register_routes as register_cloud_orchestrator_routes
+from .miniprogram_library_endpoint import register_routes as register_miniprogram_library_routes
+from .image_library_endpoint import register_routes as register_image_library_routes
 from .archive import register_routes as register_archive_routes
 from .callbacks import register_routes as register_callback_routes
 from .contacts import register_routes as register_contacts_routes
@@ -67,8 +68,6 @@ HTTP_ROUTE_MODULES = {
     "admin_audit": "wecom_ability_service.http.admin_audit",
     "admin_api_docs": "wecom_ability_service.http.admin_api_docs",
     "admin_customers": "wecom_ability_service.http.admin_customers",
-    "admin_customer_pulse": "wecom_ability_service.http.admin_customer_pulse",
-    "admin_followup_orchestrator": "wecom_ability_service.http.admin_followup_orchestrator",
     "admin_mcp": "wecom_ability_service.http.admin_mcp",
     "admin_operations": "wecom_ability_service.http.admin_operations",
     "admin_questionnaire_console": "wecom_ability_service.http.admin_questionnaire_console",
@@ -95,8 +94,6 @@ HTTP_ROUTE_PLACEMENT = {
         "admin_jobs.py for /admin/jobs and confirmed sync/task actions",
         "admin_audit.py for /admin/audit governance page and /api/admin/audit/logs",
         "admin_customers.py for /admin/customers* pages and customer detail actions",
-        "admin_customer_pulse.py for /admin/customer-pulse and /api/admin/customer-pulse* action-card flows",
-        "admin_followup_orchestrator.py for /admin/followup-orchestrator and /api/admin/followup-orchestrator* mission orchestration flows",
         "admin_api_docs.py for /admin/api-docs human-readable API documentation",
         "admin_mcp.py for legacy /admin/mcp compatibility redirect only",
         "admin_operations.py for /admin/user-ops, /admin/class-users, and confirmed operations actions",
@@ -105,7 +102,7 @@ HTTP_ROUTE_PLACEMENT = {
         "automation_conversion.py for /admin/automation-conversion* and /api/admin/automation-conversion*",
         "admin_dashboard.py for /api/admin/dashboard/* shell status",
         "admin_user_ops.py for /api/admin/user-ops* and /admin/user-ops/ui",
-        "admin_class_user.py for /api/admin/class-user-management* and /admin/class-user-backoffice/ui",
+        "admin_class_user.py for /api/admin/class-user-management*",
         "admin_questionnaires.py for /api/admin/questionnaires* and /admin/questionnaires/ui",
     ),
     "callbacks": (
@@ -132,8 +129,6 @@ HTTP_ROUTE_REGISTRARS = (
     ("admin_jobs", register_admin_jobs_console_routes),
     ("admin_audit", register_admin_audit_console_routes),
     ("admin_customers", register_admin_customer_console_routes),
-    ("admin_customer_pulse", register_admin_customer_pulse_routes),
-    ("admin_followup_orchestrator", register_admin_followup_orchestrator_routes),
     ("admin_mcp", register_admin_mcp_console_routes),
     ("admin_operations", register_admin_operations_console_routes),
     ("admin_questionnaire_console", register_admin_questionnaire_console_routes),
@@ -143,6 +138,9 @@ HTTP_ROUTE_REGISTRARS = (
     ("admin_class_user", register_admin_class_user_routes),
     ("admin_questionnaires", register_admin_questionnaires_routes),
     ("automation_conversion", register_automation_conversion_routes),
+    ("cloud_orchestrator", register_cloud_orchestrator_routes),
+    ("miniprogram_library", register_miniprogram_library_routes),
+    ("image_library", register_image_library_routes),
     ("customer_center", register_customer_center_routes),
     ("customer_automation", register_customer_automation_routes),
     ("customer_timeline", register_customer_timeline_routes),

@@ -6,7 +6,7 @@ from copy import deepcopy
 from typing import Any, Callable
 
 MAX_PRIVATE_MESSAGE_IMAGES = 3
-SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES = {"file"}
+SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES = {"file", "miniprogram"}
 
 
 def _normalize_str(value: Any) -> str:
@@ -141,6 +141,25 @@ def normalize_private_message_attachments(payload: dict[str, Any]) -> list[dict[
             media_id = str(attachment_payload.get("media_id") or "").strip()
             if not media_id:
                 raise ValueError("file attachments must include media_id")
+        elif msgtype == "miniprogram":
+            appid = str(attachment_payload.get("appid") or "").strip()
+            pagepath = str(attachment_payload.get("pagepath") or "").strip()
+            title = str(attachment_payload.get("title") or "").strip()
+            thumb_media_id = str(attachment_payload.get("thumb_media_id") or "").strip()
+            if not appid:
+                raise ValueError("miniprogram attachments must include appid")
+            if not pagepath:
+                raise ValueError("miniprogram attachments must include pagepath")
+            if not title:
+                raise ValueError("miniprogram attachments must include title")
+            if not thumb_media_id:
+                raise ValueError("miniprogram attachments must include thumb_media_id")
+            normalized[msgtype] = {
+                "appid": appid,
+                "pagepath": pagepath,
+                "title": title,
+                "thumb_media_id": thumb_media_id,
+            }
         normalized["msgtype"] = msgtype
         attachments.append(normalized)
     return attachments

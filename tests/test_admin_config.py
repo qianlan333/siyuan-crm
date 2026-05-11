@@ -23,35 +23,15 @@ def _asia_shanghai_today() -> datetime.date:
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "admin-config.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-            "SECRET_KEY": "test-secret-key",
-            "ADMIN_AUTH_MODE": "wecom_sso",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(
+        tmp_path,
+        MCP_BEARER_TOKEN="mcp-token",
+        SECRET_KEY="test-secret-key",
+        ADMIN_AUTH_MODE="wecom_sso",
+    ) as app:
+        yield app
 
 
 @pytest.fixture()
@@ -96,7 +76,7 @@ def _seed_signup_conversion_questionnaire(
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -114,7 +94,7 @@ def _seed_signup_conversion_questionnaire(
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, questionnaire_id, f"关键问题{index}", index),
             )
@@ -145,7 +125,7 @@ def _seed_signup_conversion_questionnaire(
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'mobile', '手机号', 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'mobile', '手机号', true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (mobile_question_id, questionnaire_id, question_count + 1),
         )
@@ -284,13 +264,13 @@ def _seed_marketing_dispatch_history(app) -> None:
                     last_message_at, last_batch_id, last_batch_status, last_batch_window_start, last_batch_window_end,
                     last_trigger_message_at, entered_at, exited_at, exit_reason, state_payload_json, created_at, updated_at
                 )
-                VALUES (?, 'signup_conversion_v1', ?, ?, 0, ?, 0, ?, '', '', '', ?, ?, '', '', '', ?, '', '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, 'signup_conversion_v1', ?, ?, false, ?, false, ?, '', '', '', ?, ?, '', '', '', ?, NULL, '', '{}', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (
                     item["external_userid"],
                     item["main_stage"],
                     item["sub_stage"],
-                    1 if item["main_stage"] == "converted" else 0,
+                    item["main_stage"] == "converted",
                     item["main_stage"],
                     item["batch_id"],
                     item["dispatch_status"],
@@ -339,7 +319,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000001",
             "follow_type": "",
             "current_pool": "pending_questionnaire",
-            "in_pool": 1,
+            "in_pool": True,
             "current_audience_code": "pending_questionnaire",
             "questionnaire_status": "pending",
             "joined_at": f"{today} 09:00:00",
@@ -350,7 +330,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000002",
             "follow_type": "normal",
             "current_pool": "operating",
-            "in_pool": 1,
+            "in_pool": True,
             "current_audience_code": "operating",
             "questionnaire_status": "submitted",
             "joined_at": f"{today} 10:00:00",
@@ -361,7 +341,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000003",
             "follow_type": "focus",
             "current_pool": "operating",
-            "in_pool": 1,
+            "in_pool": True,
             "current_audience_code": "operating",
             "questionnaire_status": "submitted",
             "joined_at": f"{yesterday} 11:00:00",
@@ -372,7 +352,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000004",
             "follow_type": "normal",
             "current_pool": "operating",
-            "in_pool": 1,
+            "in_pool": True,
             "current_audience_code": "operating",
             "questionnaire_status": "submitted",
             "joined_at": f"{today} 12:00:00",
@@ -383,7 +363,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000005",
             "follow_type": "focus",
             "current_pool": "operating",
-            "in_pool": 1,
+            "in_pool": True,
             "current_audience_code": "operating",
             "questionnaire_status": "submitted",
             "joined_at": f"{yesterday} 13:00:00",
@@ -394,7 +374,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000006",
             "follow_type": "normal",
             "current_pool": "operating",
-            "in_pool": 1,
+            "in_pool": True,
             "current_audience_code": "operating",
             "questionnaire_status": "submitted",
             "joined_at": f"{yesterday} 14:00:00",
@@ -405,7 +385,7 @@ def _seed_automation_conversion_stage_board(app) -> None:
             "phone": "13800000007",
             "follow_type": "focus",
             "current_pool": "converted",
-            "in_pool": 0,
+            "in_pool": False,
             "current_audience_code": "converted",
             "questionnaire_status": "submitted",
             "joined_at": f"{today} 15:00:00",
@@ -757,9 +737,8 @@ def test_admin_automation_conversion_page_renders_saved_config_and_preview_panel
     assert "默认自动化转化方案" in visible_text
     assert f"/admin/automation-conversion/programs/{default_program_id}/overview" in html
     assert overview_response.status_code == 200
-    assert "数据概览" in overview_text
-    assert "池子用户明细" in overview_text
-    assert "任务流执行摘要" in overview_text
+    assert "运行概况" in overview_text
+    assert "任务流执行" in overview_text
     assert "未填问卷人群" in overview_text
     assert "运营中人群" in overview_text
     assert "已转化人群" in overview_text

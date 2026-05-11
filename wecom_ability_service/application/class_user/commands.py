@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import _legacy_delegate
+from ...domains.class_user import service as class_user_domain_service
+from ...domains.tags import service as tags_domain_service
 from .dto import (
     ApplyClassUserStatusChangeCommandDTO,
     ApplyClassUserStatusChangeResultDTO,
@@ -16,65 +17,71 @@ from .dto import (
 
 
 class ApplyClassUserStatusChangeCommand:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.apply_class_user_status_change`` via ``_legacy_delegate`` for admin-support, marketing-automation, and future user-ops callers."""
-
     def __call__(
         self,
         dto: ApplyClassUserStatusChangeCommandDTO,
     ) -> ApplyClassUserStatusChangeResultDTO:
-        return _legacy_delegate.apply_class_user_status_change_legacy(dto)
+        return class_user_domain_service.apply_class_user_status_change(
+            external_userid=str(dto.external_userid or "").strip(),
+            signup_status=str(dto.signup_status or "").strip(),
+            set_by_userid=str(dto.set_by_userid or "").strip(),
+            customer_name_snapshot=str(dto.customer_name_snapshot or "").strip(),
+            owner_userid_snapshot=str(dto.owner_userid_snapshot or "").strip(),
+            mobile_snapshot=str(dto.mobile_snapshot or "").strip(),
+        )
 
     execute = __call__
 
 
 class UpdateClassUserStatusSyncResultCommand:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.update_class_user_status_sync_result`` via ``_legacy_delegate`` for admin-support sync-result writers."""
-
     def __call__(
         self,
         dto: UpdateClassUserStatusSyncResultCommandDTO,
     ) -> UpdateClassUserStatusSyncResultResultDTO:
-        return _legacy_delegate.update_class_user_status_sync_result_legacy(dto)
+        return class_user_domain_service.update_class_user_status_sync_result(
+            str(dto.external_userid or "").strip(),
+            wecom_tag_sync_status=str(dto.wecom_tag_sync_status or "").strip(),
+            wecom_tag_sync_error=str(dto.wecom_tag_sync_error or "").strip(),
+        )
 
     execute = __call__
 
 
 class ClearClassUserStatusCurrentCommand:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.clear_class_user_status_current`` via ``_legacy_delegate`` for marketing-automation callers that clear the current class-user state."""
-
     def __call__(
         self,
         dto: ClearClassUserStatusCurrentCommandDTO,
     ) -> ClearClassUserStatusCurrentResultDTO:
-        return _legacy_delegate.clear_class_user_status_current_legacy(dto)
+        return class_user_domain_service.clear_class_user_status_current(
+            external_userid=str(dto.external_userid or "").strip(),
+            set_by_userid=str(dto.set_by_userid or "").strip(),
+            customer_name_snapshot=str(dto.customer_name_snapshot or "").strip(),
+            owner_userid_snapshot=str(dto.owner_userid_snapshot or "").strip(),
+            mobile_snapshot=str(dto.mobile_snapshot or "").strip(),
+        )
 
     execute = __call__
 
 
 class MigrateClassUserStatusFromContactTagsCommand:
-    """Wave 2 class-user skeleton that delegates to ``domains.class_user.service.migrate_class_user_status_from_contact_tags`` via ``_legacy_delegate`` for admin class-user and operations-shell callers."""
-
     def __call__(
         self,
         dto: MigrateClassUserStatusFromContactTagsCommandDTO | None = None,
     ) -> MigrateClassUserStatusFromContactTagsResultDTO:
-        return _legacy_delegate.migrate_class_user_status_from_contact_tags_legacy(
-            dto or MigrateClassUserStatusFromContactTagsCommandDTO()
+        _ = dto or MigrateClassUserStatusFromContactTagsCommandDTO()
+        return class_user_domain_service.migrate_class_user_status_from_contact_tags(
+            get_signup_status_definition_by_tag_name=tags_domain_service.get_signup_status_definition_by_tag_name,
         )
 
     execute = __call__
 
 
 def upsert_class_user_status_current_primitive(**kwargs: Any) -> None:
-    """Internal Wave 2 class-user primitive that delegates to ``domains.class_user.service.upsert_class_user_status_current`` via ``_legacy_delegate``. Compatibility shim only; future callers must use formal application commands instead of invoking this primitive directly."""
-
-    return _legacy_delegate.upsert_class_user_status_current_legacy(**kwargs)
+    return class_user_domain_service.upsert_class_user_status_current(**kwargs)
 
 
 def append_class_user_status_history_primitive(**kwargs: Any) -> None:
-    """Internal Wave 2 class-user primitive that delegates to ``domains.class_user.service.append_class_user_status_history`` via ``_legacy_delegate``. Compatibility shim only; future callers must use formal application commands instead of invoking this primitive directly."""
-
-    return _legacy_delegate.append_class_user_status_history_legacy(**kwargs)
+    return class_user_domain_service.append_class_user_status_history(**kwargs)
 
 
 __all__ = [

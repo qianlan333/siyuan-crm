@@ -38,6 +38,7 @@ JOB_TABS = (
     {"key": "batches", "label": "消息批次"},
     {"key": "deferred", "label": "待处理作业"},
     {"key": "webhooks", "label": "Webhook 投递"},
+    {"key": "broadcast_queue", "label": "群发队列", "href": "/admin/broadcast-jobs"},
 )
 
 
@@ -155,7 +156,7 @@ def jobs_tabs(active_key: str) -> list[dict[str, Any]]:
         {
             **item,
             "active": item["key"] == normalized_active_key,
-            "href": f"/admin/jobs?tab={item['key']}",
+            "href": _normalized_text(item.get("href")) or f"/admin/jobs?tab={item['key']}",
         }
         for item in JOB_TABS
     ]

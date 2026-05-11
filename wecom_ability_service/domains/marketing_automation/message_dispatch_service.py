@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import logging
+import uuid
 from typing import Any
 
 from . import service as _legacy
+
+
+logger = logging.getLogger(__name__)
 
 
 def send_pool_private_message(
@@ -15,6 +20,9 @@ def send_pool_private_message(
     images: list[dict[str, Any]] | None = None,
     image_media_ids: list[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    trace_id: str = "",
+    source_kind: str = "manual_pool_send",
+    source_id: str = "",
 ) -> dict[str, Any]:
     """Internal automation message-dispatch owner for pool private-message sends."""
 
@@ -24,6 +32,7 @@ def send_pool_private_message(
         if normalized_pool_key == _legacy.POOL_SILENT:
             raise ValueError("silent pool is record-only and does not support batch send")
         raise ValueError("pool_key is invalid")
+    effective_trace_id = (trace_id or "").strip() or f"manual-{uuid.uuid4().hex}"
 
     payload = {
         "content": _legacy._normalized_text(content),
@@ -111,6 +120,35 @@ def send_pool_private_message(
         operator=_legacy._normalized_text(operator) or "openclaw_pool_send",
         status=status,
     )
+    # 频次预算消耗记录：按 sender 分组、对成功的 group 里的每个 item 写一条
+    try:
+        from .frequency_budget_service import record_consumption
+
+        successful_senders = {
+            _legacy._normalized_text(item.get("sender_userid"))
+            for item in task_results
+            if _legacy._normalized_text(item.get("status")) != "failed"
+        }
+        for sender_userid, items in grouped_targets.items():
+            if sender_userid not in successful_senders:
+                continue
+            for item in items:
+                external_userid = _legacy._normalized_text(item.get("external_userid"))
+                if not external_userid:
+                    continue
+                record_consumption(
+                    member_id=int(item.get("automation_member_id") or 0) or None,
+                    external_contact_id=external_userid,
+                    channels=("wecom_private",),
+                    program_codes=(_legacy.DEFAULT_SCENARIO_KEY,),
+                    pool_keys=(normalized_pool_key,),
+                    source_kind=source_kind,
+                    source_id=str(source_id or record_id or ""),
+                    trace_id=effective_trace_id,
+                )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning("record_consumption skipped due to error: %s", exc)
+
     result.update(
         {
             "record_id": int(record_id),
@@ -118,6 +156,7 @@ def send_pool_private_message(
             "executed": True,
             "task_results": task_results,
             "status": status,
+            "trace_id": effective_trace_id,
         }
     )
     return result

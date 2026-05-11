@@ -58,7 +58,7 @@ def list_customer_questionnaire_history(external_userid: str, *, limit: int = 20
             COALESCE(q.title, '') AS questionnaire_title,
             COALESCE(apply_logs.status, '') AS scrm_apply_status,
             COALESCE(apply_logs.error_message, '') AS scrm_apply_error,
-            COALESCE(apply_logs.created_at, '') AS scrm_apply_at
+            COALESCE(apply_logs.created_at::text, \'\') AS scrm_apply_at
         FROM questionnaire_submissions qs
         LEFT JOIN questionnaires q
           ON q.id = qs.questionnaire_id

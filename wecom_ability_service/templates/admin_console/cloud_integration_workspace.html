@@ -1,0 +1,76 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<div class="cloud-int-page">
+  <section class="admin-card">
+    <header class="admin-card-head">
+      <h2 class="admin-card-title">Claude Code · 接入凭证</h2>
+      <p class="admin-card-summary">把下面的连接信息粘到你的 Claude Code MCP 配置里，重启就能用 AI 直接驱动 CRM。</p>
+    </header>
+
+    <h3>① MCP 端点</h3>
+    <pre id="cloud-int-endpoint">https://&lt;your-crm-host&gt;/mcp</pre>
+
+    <h3>② Bearer Token</h3>
+    <p>在 CRM 的 <code>app_settings.MCP_BEARER_TOKEN</code> 里配置（运维负责）。请从工程师那里获取。</p>
+    <pre>Authorization: Bearer &lt;TOKEN&gt;</pre>
+
+    <h3>③ Claude Code 配置示例</h3>
+    <p>编辑你的 Claude Code MCP 配置文件（<code>~/.config/claude-code/mcp.json</code> 或当前项目的 <code>.mcp.json</code>）：</p>
+<pre>{
+  "mcpServers": {
+    "crm": {
+      "type": "http",
+      "url": "https://&lt;your-crm-host&gt;/mcp",
+      "headers": {
+        "Authorization": "Bearer &lt;TOKEN&gt;"
+      }
+    }
+  }
+}</pre>
+
+    <h3>④ 喂给 Claude Code 的方法论文档（重要）</h3>
+    <p>把下面 4 个文档整段粘到你项目的 <code>CLAUDE.md</code>，让 Claude Code 一开机就知道怎么用 CRM：</p>
+    <ul>
+      <li><code>docs/claude_code_integration/README.md</code> — 接入总览 + 立即可用的 5 句话场景</li>
+      <li><code>docs/claude_code_integration/tools.md</code> — 21 个工具的标准用法</li>
+      <li><code>docs/claude_code_integration/patterns.md</code> — 9 个典型运营场景方法论</li>
+      <li><code>docs/claude_code_integration/rules.md</code> — 8 条必守规则（防骚扰 / 互斥 / token / 人工 review）</li>
+      <li><code>docs/claude_code_integration/troubleshooting.md</code> — 排错速查</li>
+    </ul>
+
+    <h3>⑤ 试一下</h3>
+    <p>在 Claude Code 里输入：</p>
+    <pre>列一下当前所有等待审阅的 Campaign，告诉我每个的目标和候选人数。</pre>
+    <p>Claude Code 应当：调 <code>list_campaigns</code> → 调 <code>get_campaign</code> 看每条详情 → 用业务语言回报你。</p>
+
+    <h3>三端协作图</h3>
+    <pre>
+                 ┌──────────────────────┐
+                 │  Claude Code（你）   │  ← 提目标、写策略、调工具
+                 └──────────┬───────────┘
+                            │ MCP HTTP
+                ┌───────────▼────────────┐
+                │  CRM（能力服务方）      │  ← 池子、画像、互动、调度、发送
+                └─────────┬──────────────┘
+                          │ 工单
+                ┌─────────▼───────────────┐
+                │  话术 AI（DeepSeek）    │  ← 写多变体话术
+                └─────────────────────────┘
+    </pre>
+
+    <h3>必读三件事</h3>
+    <ol>
+      <li><strong>真发只能在 CRM 后台</strong>。Claude Code 永远只能 propose，最后那一下"启动"必须在 <code>/admin/cloud-orchestrator/campaigns</code> 页人工点击。</li>
+      <li><strong>互斥保障是数据库 UNIQUE 约束</strong>。同一个用户哪怕被 N 个分层命中，在同一个 Campaign 内只占 1 条节奏。Claude Code 给每个 segment 设 priority 决定谁优先抢人。</li>
+      <li><strong>每次操作带 trace_id</strong>。出问题在 <a href="/admin/cloud-orchestrator/observability">可观察性页</a> 输 trace_id 一查到底。</li>
+    </ol>
+  </section>
+</div>
+<style>
+.cloud-int-page pre { background:#f7f7f8; padding:12px; border-radius:6px; overflow:auto; font-size:12.5px; line-height:1.5; }
+.cloud-int-page h3 { margin-top:24px; font-size:15px; }
+.cloud-int-page code { background:#f4f4f5; padding:1px 4px; border-radius:3px; font-size:12.5px; }
+.cloud-int-page ol li, .cloud-int-page ul li { margin:6px 0; }
+</style>
+{% endblock %}

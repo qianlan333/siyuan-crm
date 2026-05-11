@@ -3,11 +3,15 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from ..db import get_db_backend
 
+def db_bool(value: bool) -> bool:
+    """传给 PG BOOLEAN 字段的值。
 
-def db_bool(value: bool) -> bool | int:
-    return value if get_db_backend() == "postgres" else (1 if value else 0)
+    历史上需要 ``bool`` (PG) / ``int`` (SQLite) 双语义，2026-05 砍 SQLite 后统一
+    返回 Python bool。callers 不需要改 — 行为兼容（True/False 在 SQLite TEXT 也
+    能写入，虽然现在用不上了）。
+    """
+    return bool(value)
 
 
 def stringify_db_timestamp(value: Any) -> str:

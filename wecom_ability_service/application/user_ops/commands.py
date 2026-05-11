@@ -3,7 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from . import _legacy_delegate
+from ...domains.user_ops import service as user_ops_domain_service
+from . import _runtime
 from .dto import (
     BackfillOwnerClassTermsCommandDTO,
     BackfillOwnerClassTermsResultDTO,
@@ -70,118 +71,175 @@ class MigrateLegacyUserOpsPoolToLeadPoolCommandDTO:
 
 
 class UpsertLeadPoolMemberCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.upsert_user_ops_lead_pool_member`` via ``_legacy_delegate``. Compatibility note: this is still a lead-pool primitive-shaped write owner, and future caller cutovers should prefer higher-level commands instead of calling it directly."""
-
     def __call__(self, dto: UpsertLeadPoolMemberCommandDTO) -> UpsertLeadPoolMemberResultDTO:
-        return _legacy_delegate.upsert_lead_pool_member_legacy(dto)
-
-    execute = __call__
-
-
-class WriteLeadPoolHistoryCommand:
-    """Internal Wave 2 user-ops primitive that delegates to ``domains.user_ops.service.write_user_ops_lead_pool_history`` via ``_legacy_delegate``. Compatibility shim only; future callers must use formal application commands instead of invoking this primitive directly."""
-
-    def __call__(self, dto: WriteLeadPoolHistoryCommandDTO) -> WriteLeadPoolHistoryResultDTO:
-        return _legacy_delegate.write_lead_pool_history_legacy(dto)
-
-    execute = __call__
-
-
-class ScheduleUserOpsAutoAssignClassTermJobCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.schedule_user_ops_auto_assign_class_term_job`` via ``_legacy_delegate`` for callback and background-job callers once they cut over."""
-
-    def __call__(
-        self,
-        dto: ScheduleUserOpsAutoAssignClassTermJobCommandDTO,
-    ) -> ScheduleUserOpsAutoAssignClassTermJobResultDTO:
-        return _legacy_delegate.schedule_user_ops_auto_assign_class_term_job_legacy(dto)
-
-    execute = __call__
-
-
-class RunDueUserOpsDeferredJobsCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.run_due_user_ops_deferred_jobs`` via ``_legacy_delegate`` for admin jobs and background-job callers once they cut over."""
-
-    def __call__(
-        self,
-        dto: RunDueUserOpsDeferredJobsCommandDTO | None = None,
-    ) -> RunDueUserOpsDeferredJobsResultDTO:
-        return _legacy_delegate.run_due_user_ops_deferred_jobs_legacy(
-            dto or RunDueUserOpsDeferredJobsCommandDTO()
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.upsert_user_ops_lead_pool_member(
+            mobile=str(dto.mobile or "").strip(),
+            external_userid=str(dto.external_userid or "").strip(),
+            customer_name=str(dto.customer_name or "").strip(),
+            owner_userid=str(dto.owner_userid or "").strip(),
+            is_wecom_added=bool(dto.is_wecom_added),
+            is_mobile_bound=bool(dto.is_mobile_bound),
+            huangxiaocan_activation_state=str(dto.huangxiaocan_activation_state or "").strip(),
+            class_term_no=dto.class_term_no,
+            class_term_label=str(dto.class_term_label or "").strip(),
+            entry_source=str(dto.entry_source or "").strip(),
+            operator=str(dto.operator or "").strip(),
+            remark=str(dto.remark or "").strip(),
         )
 
     execute = __call__
 
 
-class ImportExperienceLeadsCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.import_experience_leads`` via ``_legacy_delegate`` for admin import callers once they cut over."""
+class WriteLeadPoolHistoryCommand:
+    def __call__(self, dto: WriteLeadPoolHistoryCommandDTO) -> WriteLeadPoolHistoryResultDTO:
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.write_user_ops_lead_pool_history(
+            mobile=str(dto.mobile or "").strip(),
+            external_userid=str(dto.external_userid or "").strip(),
+            action_type=str(dto.action_type or "").strip(),
+            source_type=str(dto.source_type or "").strip(),
+            operator=str(dto.operator or "").strip(),
+            before_payload=dto.before_payload,
+            after_payload=dto.after_payload,
+            remark=str(dto.remark or "").strip(),
+        )
 
+    execute = __call__
+
+
+class ScheduleUserOpsAutoAssignClassTermJobCommand:
+    def __call__(
+        self,
+        dto: ScheduleUserOpsAutoAssignClassTermJobCommandDTO,
+    ) -> ScheduleUserOpsAutoAssignClassTermJobResultDTO:
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.schedule_user_ops_auto_assign_class_term_job(
+            external_userid=str(dto.external_userid or "").strip(),
+            owner_userid=str(dto.owner_userid or "").strip(),
+            delay_seconds=dto.run_after_seconds if dto.delay_seconds is None else int(dto.delay_seconds),
+            operator=str(dto.operator or "").strip(),
+        )
+
+    execute = __call__
+
+
+class RunDueUserOpsDeferredJobsCommand:
+    def __call__(
+        self,
+        dto: RunDueUserOpsDeferredJobsCommandDTO | None = None,
+    ) -> RunDueUserOpsDeferredJobsResultDTO:
+        effective_dto = dto or RunDueUserOpsDeferredJobsCommandDTO()
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.run_due_user_ops_deferred_jobs(limit=int(effective_dto.limit))
+
+    execute = __call__
+
+
+class ImportExperienceLeadsCommand:
     def __call__(self, dto: ImportExperienceLeadsCommandDTO) -> ImportExperienceLeadsResultDTO:
-        return _legacy_delegate.import_experience_leads_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.import_experience_leads(
+            pasted_text=str(dto.pasted_text or ""),
+            file_name=str(dto.file_name or ""),
+            file_bytes=dto.file_bytes,
+            created_by=str(dto.created_by or "").strip(),
+        )
 
     execute = __call__
 
 
 class ImportMobileClassTermCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.import_mobile_class_term_source`` via ``_legacy_delegate`` for admin import callers once they cut over."""
-
     def __call__(self, dto: ImportMobileClassTermCommandDTO) -> ImportMobileClassTermResultDTO:
-        return _legacy_delegate.import_mobile_class_term_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.import_mobile_class_term_source(
+            pasted_text=str(dto.pasted_text or ""),
+            file_name=str(dto.file_name or ""),
+            file_bytes=dto.file_bytes,
+            created_by=str(dto.created_by or "").strip(),
+        )
 
     execute = __call__
 
 
 class ImportActivationStatusCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.import_activation_status_source`` via ``_legacy_delegate`` for admin import callers once they cut over."""
-
     def __call__(self, dto: ImportActivationStatusCommandDTO) -> ImportActivationStatusResultDTO:
-        return _legacy_delegate.import_activation_status_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.import_activation_status_source(
+            pasted_text=str(dto.pasted_text or ""),
+            file_name=str(dto.file_name or ""),
+            file_bytes=dto.file_bytes,
+            created_by=str(dto.created_by or "").strip(),
+        )
 
     execute = __call__
 
 
 class BackfillOwnerClassTermsCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.backfill_owner_class_terms_into_lead_pool`` via ``_legacy_delegate`` for admin and maintenance callers once they cut over."""
-
     def __call__(self, dto: BackfillOwnerClassTermsCommandDTO) -> BackfillOwnerClassTermsResultDTO:
-        return _legacy_delegate.backfill_owner_class_terms_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.backfill_owner_class_terms_into_lead_pool(
+            owner_userid=str(dto.owner_userid or "").strip(),
+            class_term_min=int(dto.class_term_min),
+            class_term_max=int(dto.class_term_max),
+            dry_run=bool(dto.dry_run),
+            operator=str(dto.operator or "").strip(),
+            entry_source=str(dto.entry_source or "").strip(),
+        )
 
     execute = __call__
 
 
 class RefreshUserOpsContactTagsCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.refresh_user_ops_contact_tags_for_external_userid`` or ``refresh_user_ops_contact_tags_for_owner`` via ``_legacy_delegate`` for maintenance callers once they cut over."""
-
     def __call__(
         self,
         dto: RefreshUserOpsContactTagsCommandDTO,
     ) -> RefreshUserOpsContactTagsResultDTO:
-        return _legacy_delegate.refresh_user_ops_contact_tags_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        refresh_scope = str(dto.refresh_scope or "").strip().lower() or "external_userid"
+        if refresh_scope == "owner":
+            return user_ops_domain_service.refresh_user_ops_contact_tags_for_owner(
+                str(dto.owner_userid or "").strip()
+            )
+        if dto.scoped_tag_ids:
+            return user_ops_domain_service.refresh_contact_tags_for_external_userid(
+                external_userid=str(dto.external_userid or "").strip(),
+                owner_userid=str(dto.owner_userid or "").strip(),
+                scoped_tag_ids=list(dto.scoped_tag_ids or []),
+            )
+        return user_ops_domain_service.refresh_user_ops_contact_tags_for_external_userid(
+            external_userid=str(dto.external_userid or "").strip(),
+            owner_userid=str(dto.owner_userid or "").strip(),
+        )
 
     execute = __call__
 
 
 class RefreshContactTagsForExternalUseridCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.refresh_contact_tags_for_external_userid`` via ``_legacy_delegate`` for maintenance callers that need full or scoped tag snapshot refresh semantics."""
-
     def __call__(
         self,
         dto: RefreshContactTagsForExternalUseridCommandDTO,
     ) -> RefreshContactTagsForExternalUseridResultDTO:
-        return _legacy_delegate.refresh_contact_tags_for_external_userid_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        scoped_tag_ids = dto.scoped_tag_ids
+        if scoped_tag_ids is not None:
+            scoped_tag_ids = list(scoped_tag_ids or [])
+        return user_ops_domain_service.refresh_contact_tags_for_external_userid(
+            external_userid=str(dto.external_userid or "").strip(),
+            owner_userid=str(dto.owner_userid or "").strip(),
+            scoped_tag_ids=scoped_tag_ids,
+        )
 
     execute = __call__
 
 
 class UpsertSidebarLeadPoolClassTermCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.upsert_sidebar_lead_pool_class_term`` via ``_legacy_delegate`` for sidebar class-term patch callers after caller cutover."""
-
     def __call__(
         self,
         dto: UpsertSidebarLeadPoolClassTermCommandDTO,
     ) -> UpsertSidebarLeadPoolClassTermResultDTO:
-        _legacy_delegate._bind_user_ops_runtime()
-        return _legacy_delegate.user_ops_domain_service.upsert_sidebar_lead_pool_class_term(
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.upsert_sidebar_lead_pool_class_term(
             external_userid=str(dto.external_userid or "").strip(),
             owner_userid=str(dto.owner_userid or "").strip(),
             class_term_no=int(dto.class_term_no),
@@ -192,38 +250,46 @@ class UpsertSidebarLeadPoolClassTermCommand:
 
 
 class BackfillClassTermForOwnerCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.backfill_class_term_for_owner`` via ``_legacy_delegate`` for compatibility callers that still use the legacy owner-level maintenance entry."""
-
     def __call__(
         self,
         dto: BackfillClassTermForOwnerCommandDTO,
     ) -> BackfillClassTermForOwnerResultDTO:
-        return _legacy_delegate.backfill_class_term_for_owner_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.backfill_class_term_for_owner(
+            owner_userid=str(dto.owner_userid or "").strip(),
+            dry_run=bool(dto.dry_run),
+            operator=str(dto.operator or "").strip(),
+        )
 
     execute = __call__
 
 
 class UpsertUserOpsHuangxiaocanActivationSourceCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.upsert_user_ops_huangxiaocan_activation_source`` via ``_legacy_delegate`` for import and patch compatibility callers."""
-
     def __call__(
         self,
         dto: UpsertUserOpsHuangxiaocanActivationSourceCommandDTO,
     ) -> UpsertUserOpsHuangxiaocanActivationSourceResultDTO:
-        return _legacy_delegate.upsert_user_ops_huangxiaocan_activation_source_legacy(dto)
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.upsert_user_ops_huangxiaocan_activation_source(
+            mobile=str(dto.mobile or "").strip(),
+            activation_state=str(dto.activation_state or "").strip(),
+            import_batch_id=dto.import_batch_id,
+            created_by=str(dto.created_by or "").strip(),
+            is_active=bool(dto.is_active),
+        )
 
     execute = __call__
 
 
 class MigrateLegacyUserOpsPoolToLeadPoolCommand:
-    """Wave 2 user-ops command that delegates to ``domains.user_ops.service.migrate_legacy_user_ops_pool_to_lead_pool`` via ``_legacy_delegate`` for one-time compatibility migration callers."""
-
     def __call__(
         self,
         dto: MigrateLegacyUserOpsPoolToLeadPoolCommandDTO | None = None,
     ) -> MigrateLegacyUserOpsPoolToLeadPoolResultDTO:
-        return _legacy_delegate.migrate_legacy_user_ops_pool_to_lead_pool_legacy(
-            dto or MigrateLegacyUserOpsPoolToLeadPoolCommandDTO()
+        effective_dto = dto or MigrateLegacyUserOpsPoolToLeadPoolCommandDTO()
+        _runtime.bind_user_ops_runtime()
+        return user_ops_domain_service.migrate_legacy_user_ops_pool_to_lead_pool(
+            operator=str(effective_dto.operator or "").strip(),
         )
 
     execute = __call__

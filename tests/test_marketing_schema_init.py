@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 
-from wecom_ability_service import create_app
 from wecom_ability_service.db import get_db, init_db
 
 REQUIRED_TABLES = {
@@ -32,39 +31,35 @@ REQUIRED_INDEXES = {
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "marketing-schema.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    return create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 def _sqlite_object_names(db, object_type: str) -> set[str]:
-    rows = db.execute(
-        """
-        SELECT name
-        FROM sqlite_master
-        WHERE type = ?
-        """,
-        (object_type,),
-    ).fetchall()
+    """PG-only：用 information_schema 替代 SQLite 的 sqlite_master。
+
+    object_type 仅支持 ``'table'`` / ``'index'``。
+    """
+    if object_type == "table":
+        rows = db.execute(
+            """
+            SELECT table_name AS name
+            FROM information_schema.tables
+            WHERE table_schema = current_schema()
+            """
+        ).fetchall()
+    elif object_type == "index":
+        rows = db.execute(
+            """
+            SELECT indexname AS name
+            FROM pg_indexes
+            WHERE schemaname = current_schema()
+            """
+        ).fetchall()
+    else:
+        rows = []
     return {str(row["name"]) for row in rows}
 
 
@@ -104,6 +99,7 @@ def test_init_db_backfills_missing_marketing_automation_tables_on_existing_sqlit
         assert REQUIRED_TABLES.issubset(table_names)
 
 
+@pytest.mark.skip(reason="2026-05 砍 SQLite 后此 test 测的 SQLite migration 路径不再适用（AUTOINCREMENT / DROP TABLE 等 SQLite-only 语法）")
 def test_init_db_adds_program_id_before_schema_indexes_on_existing_sqlite_db(app):
     with app.app_context():
         db = get_db()
@@ -176,6 +172,7 @@ def test_init_db_adds_program_id_before_schema_indexes_on_existing_sqlite_db(app
         assert "idx_automation_workflow_execution_program" in index_names
 
 
+@pytest.mark.skip(reason="2026-05 砍 SQLite 后此 test 测的 SQLite migration 路径不再适用（DROP TABLE 等 SQLite-only 语法）")
 def test_init_db_rebuilds_legacy_marketing_state_current_without_fake_external_userid(app):
     with app.app_context():
         init_db()

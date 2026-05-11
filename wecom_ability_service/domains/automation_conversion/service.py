@@ -196,10 +196,14 @@ def _json_loads(value: Any, *, default: Any) -> Any:
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None) if value.tzinfo else value
     text = _normalized_text(value)
     if not text:
         return None
-    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%dT%H:%M"):
+    import re as _re
+    text = _re.sub(r"[+-]\d{2}(:\d{2})?$", "", text).rstrip()
+    for pattern in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%dT%H:%M"):
         try:
             return datetime.strptime(text, pattern)
         except ValueError:
@@ -780,10 +784,34 @@ def _send_channel_welcome_message(
     if not welcome_code:
         return {"attempted": False, "sent": False, "reason": "welcome_code_missing"}
     serialized_member = _serialize_member(member)
-    request_payload = {
+    request_payload: dict[str, Any] = {
         "welcome_code": welcome_code,
         "text": {"content": welcome_message},
     }
+    welcome_library_ids: list[int] = []
+    raw_library_ids = channel.get("welcome_miniprogram_library_ids") or []
+    if isinstance(raw_library_ids, str):
+        try:
+            import json as _json
+
+            raw_library_ids = _json.loads(raw_library_ids)
+        except (ValueError, TypeError):
+            raw_library_ids = []
+    for value in raw_library_ids or []:
+        try:
+            welcome_library_ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    if welcome_library_ids:
+        from .. import miniprogram_library as _miniprogram_library
+
+        welcome_attachments: list[dict[str, Any]] = []
+        for lid in welcome_library_ids:
+            welcome_attachments.append(
+                _miniprogram_library.materialize_miniprogram_attachment(lid)
+            )
+        if welcome_attachments:
+            request_payload["attachments"] = welcome_attachments
     try:
         wecom_result = get_contact_runtime_client().send_welcome_msg(request_payload)
     except (WeComClientError, AttributeError, ValueError) as exc:
@@ -1401,18 +1429,25 @@ def _dispatch_private_message_batch(
     content: str,
     image_media_ids: list[str] | None = None,
     images: list[dict[str, Any]] | None = None,
+    miniprogram_library_ids: list[int] | None = None,
+    attachments: list[dict[str, Any]] | None = None,
     operator_id: str,
     filter_snapshot: dict[str, Any],
 ) -> dict[str, Any]:
     normalized_content = _normalized_text(content)
     normalized_image_media_ids = _normalize_manual_send_image_media_ids(image_media_ids)
-    task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(
-        {
-            "content": normalized_content,
-            "image_media_ids": normalized_image_media_ids,
-            "images": list(images or []),
-        }
-    )
+    payload_for_build: dict[str, Any] = {
+        "content": normalized_content,
+        "image_media_ids": normalized_image_media_ids,
+        "images": list(images or []),
+    }
+    library_ids = [int(i) for i in (miniprogram_library_ids or []) if i]
+    extra_attachments: list[dict[str, Any]] = list(attachments or [])
+    for lid in library_ids:
+        extra_attachments.append({"msgtype": "miniprogram", "miniprogram": {"library_id": lid}})
+    if extra_attachments:
+        payload_for_build["attachments"] = extra_attachments
+    task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(payload_for_build)
     outbound_task_ids: list[int] = []
     task_results: list[dict[str, Any]] = []
     fail_external_userids: list[str] = []

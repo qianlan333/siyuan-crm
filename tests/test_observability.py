@@ -4,38 +4,14 @@ import logging
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import init_db
-
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "observability.sqlite3"
-    receipts_path = tmp_path / "temporary-webhook-receiver.jsonl"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "RELEASE_SHA": "release-test-sha",
-            "TEMP_WEBHOOK_RECEIPTS_PATH": str(receipts_path),
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    receipts_path = tmp_path / "temporary-webhook-receiver.jsonl"
+    with build_pg_test_app(tmp_path, TEMP_WEBHOOK_RECEIPTS_PATH=str(receipts_path)) as app:
+        yield app
 
 
 @pytest.fixture()

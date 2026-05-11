@@ -6,32 +6,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PYTHON_TARGETS = [
-    "wecom_ability_service/domains/customer_pulse",
-    "wecom_ability_service/domains/followup_orchestrator",
     "wecom_ability_service/db",
     "wecom_ability_service/infra/settings.py",
     "wecom_ability_service/domains/admin_config/service.py",
     "wecom_ability_service/domains/admin_dashboard/service.py",
-    "wecom_ability_service/http/admin_customer_pulse.py",
-    "wecom_ability_service/http/admin_followup_orchestrator.py",
     "wecom_ability_service/http/admin_console.py",
     "wecom_ability_service/domains/admin_console/customer_profile_service.py",
     "wecom_ability_service/http/admin_customers.py",
     "scripts/run_lint.py",
     "scripts/run_typecheck.py",
     "scripts/run_build.py",
-    "scripts/run_customer_pulse_quality_gates.py",
-    "scripts/seed_customer_pulse_demo.py",
-    "tests/test_customer_pulse_inbox.py",
-    "tests/test_customer_pulse_quality_gates.py",
-    "tests/test_followup_orchestrator_skeleton.py",
 ]
 SCAN_ROOTS = [
     ROOT / "wecom_ability_service",
     ROOT / "tests",
     ROOT / "scripts",
-    ROOT / "docs" / "ai-customer-pulse",
-    ROOT / "docs" / "ai-followup-orchestrator",
 ]
 TEXT_SUFFIXES = {".py", ".js", ".html", ".css", ".md", ".sql", ".toml"}
 SKIP_DIR_NAMES = {".git", ".venv310", "__pycache__", ".pytest_cache", "node_modules"}

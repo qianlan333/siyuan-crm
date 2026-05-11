@@ -5,8 +5,7 @@ from datetime import datetime as real_datetime
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.services import (
     get_signup_conversion_batch,
     list_signup_conversion_batches,
@@ -19,32 +18,10 @@ from wecom_ability_service.services import (
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "conversion-service.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
+    from tests.conftest import build_pg_test_app
 
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    with build_pg_test_app(tmp_path, MCP_BEARER_TOKEN="mcp-token") as app:
+        yield app
 
 
 @pytest.fixture()
@@ -103,7 +80,7 @@ def _seed_signup_conversion_questionnaire(app, *, questionnaire_id: int = 51) ->
             INSERT INTO questionnaires (
                 id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, '', 0, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, '', false, '', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 questionnaire_id,
@@ -121,7 +98,7 @@ def _seed_signup_conversion_questionnaire(app, *, questionnaire_id: int = 51) ->
                 INSERT INTO questionnaire_questions (
                     id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
                 )
-                VALUES (?, ?, 'single_choice', ?, 1, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                VALUES (?, ?, 'single_choice', ?, true, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
                 """,
                 (question_id, questionnaire_id, f"关键问题{index}", index),
             )
@@ -146,7 +123,7 @@ def _seed_signup_conversion_questionnaire(app, *, questionnaire_id: int = 51) ->
             INSERT INTO questionnaire_questions (
                 id, questionnaire_id, type, title, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, 'mobile', '手机号', 1, 6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, 'mobile', '手机号', true, 6, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (mobile_question_id, questionnaire_id),
         )
@@ -246,8 +223,9 @@ def _seed_bound_customer(
         db = get_db()
         db.execute(
             """
-            INSERT OR IGNORE INTO owner_role_map (userid, display_name, role, active, updated_at)
-            VALUES (?, ?, 'sales', 1, CURRENT_TIMESTAMP)
+            INSERT INTO owner_role_map (userid, display_name, role, active, updated_at)
+            VALUES (?, ?, 'sales', true, CURRENT_TIMESTAMP)
+            ON CONFLICT DO NOTHING
             """,
             (owner_userid, owner_userid),
         )
@@ -314,7 +292,7 @@ def _seed_activation_source(app, *, mobile: str, updated_at: str = "2026-04-04 0
             INSERT INTO user_ops_huangxiaocan_activation_source (
                 mobile, activation_state, import_batch_id, created_by, is_active, created_at, updated_at
             )
-            VALUES (?, 'activated', 'batch-seed', 'seed', 1, ?, ?)
+            VALUES (?, 'activated', 'batch-seed', 'seed', true, ?, ?)
             """,
             (mobile, updated_at, updated_at),
         )
@@ -418,7 +396,7 @@ def test_mark_enrolled_cancels_pending_candidate_and_unmark_recomputes_to_activa
             (batch_id, "wm_conv_task05"),
         ).fetchone()
         assert dispatch_row["dispatch_status"] == "converted_before_dispatch"
-        dispatch_payload = json.loads(dispatch_row["dispatch_payload_json"])
+        dispatch_payload = (dispatch_row["dispatch_payload_json"] if isinstance(dispatch_row["dispatch_payload_json"], (dict, list)) else json.loads(dispatch_row["dispatch_payload_json"]))
         assert dispatch_payload["source"] == "sidebar_manual"
         assert dispatch_payload["action"] == "mark_enrolled"
 

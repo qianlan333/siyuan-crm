@@ -166,7 +166,7 @@ def list_stale_pending_events(*, age_seconds: int = 120, limit: int = 50) -> lis
                process_status, retry_count, created_at, updated_at
         FROM wecom_external_contact_event_logs
         WHERE process_status IN ('pending', 'processing')
-          AND created_at <= datetime('now', '-' || ? || ' seconds')
+          AND created_at <= NOW() - (? || ' seconds')::interval
         ORDER BY id ASC
         LIMIT ?
         """,

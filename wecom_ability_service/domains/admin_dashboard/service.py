@@ -6,17 +6,16 @@ from flask import current_app
 
 from ..admin_auth import admin_role_can_access_module
 from ..admin_jobs import build_jobs_dashboard_groups, build_jobs_runtime_snapshot
-from ..customer_pulse import build_customer_pulse_dashboard_group, is_customer_pulse_inbox_enabled
-from ..customer_pulse.access import (
-    build_customer_pulse_legacy_tenant_context,
-    current_customer_pulse_request_access_context,
-)
 from . import repo
 
 ADMIN_NAV_ITEMS = (
     {"key": "automation_conversion", "label": "自动化运营", "endpoint": "api.admin_automation_conversion"},
+    {"key": "cloud_orchestrator", "label": "AI 助手", "endpoint": "api.admin_cloud_orchestrator_workspace"},
     {"key": "customers", "label": "客户", "endpoint": "api.admin_console_customers"},
     {"key": "questionnaires", "label": "问卷", "endpoint": "api.admin_console_questionnaires"},
+    {"key": "image_library", "label": "图片素材库", "endpoint": "api.admin_image_library_workspace"},
+    {"key": "miniprogram_library", "label": "小程序素材库", "endpoint": "api.admin_miniprogram_library_workspace"},
+    {"key": "jobs", "label": "同步任务", "endpoint": "api.admin_console_jobs"},
     {"key": "config", "label": "配置", "endpoint": "api.admin_config_home"},
     {"key": "api_docs", "label": "API 文档", "endpoint": "api.admin_console_api_docs"},
 )
@@ -348,7 +347,7 @@ def _build_mcp_runtime_group() -> dict[str, Any]:
         "tone": "warn" if items else "ok",
         "items": items,
         "empty_title": "AI 工具配置正常",
-        "href": "/admin/mcp",
+        "href": "/admin/api-docs",
     }
 
 
@@ -359,19 +358,6 @@ def build_dashboard_todos() -> dict[str, Any]:
         _build_questionnaire_preflight_group(),
         _build_mcp_runtime_group(),
     ]
-    if is_customer_pulse_inbox_enabled(access_context=current_customer_pulse_request_access_context()):
-        pulse_context: dict[str, Any] = dict(current_customer_pulse_request_access_context())
-        groups.append(
-            build_customer_pulse_dashboard_group(
-                tenant_context=pulse_context
-                or dict(
-                    build_customer_pulse_legacy_tenant_context(
-                    operator="admin_dashboard",
-                    source="legacy_internal_dashboard",
-                    )
-                )
-            )
-        )
     return {
         "groups": groups,
         "total_pending": sum(int(group["count"]) for group in groups),

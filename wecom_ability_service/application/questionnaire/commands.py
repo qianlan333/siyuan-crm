@@ -12,7 +12,6 @@ from ...infra.wechat_oauth import (
     exchange_wechat_oauth_code,
     fetch_wechat_userinfo,
 )
-from . import _legacy_delegate
 from .dto import (
     ApplyQuestionnaireMobileBindingCommandDTO,
     ApplyQuestionnaireMobileBindingCommandResultDTO,
@@ -50,6 +49,19 @@ def _bind_questionnaire_submit_runtime() -> None:
     questionnaire_domain_service._normalize_mobile = identity_domain_service.normalize_mobile
 
 
+def _build_submit_payload(dto: SubmitQuestionnaireCommandDTO) -> dict[str, Any]:
+    payload = dict(dto.payload or {})
+    if dto.answers is not None:
+        payload["answers"] = dto.answers
+    for key, value in (dto.hidden_identity or {}).items():
+        if value not in (None, "") and key not in payload:
+            payload[key] = value
+    for key, value in (dto.source_params or {}).items():
+        if value not in (None, "") and key not in payload:
+            payload[key] = value
+    return payload
+
+
 class QuestionnaireOauthExchangePayloadError(RuntimeError):
     def __init__(self, payload: dict[str, Any]):
         super().__init__("wechat_oauth_exchange_failed")
@@ -57,26 +69,23 @@ class QuestionnaireOauthExchangePayloadError(RuntimeError):
 
 
 class CreateQuestionnaireCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.create_questionnaire`` for admin CRUD callers."""
-
     def __call__(self, dto: CreateQuestionnaireCommandDTO) -> CreateQuestionnaireCommandResultDTO:
-        return _legacy_delegate.create_questionnaire_legacy(dto)
+        return questionnaire_domain_service.create_questionnaire(dict(dto.payload or {}))
 
     execute = __call__
 
 
 class UpdateQuestionnaireCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.update_questionnaire`` for admin CRUD callers."""
-
     def __call__(self, dto: UpdateQuestionnaireCommandDTO) -> UpdateQuestionnaireCommandResultDTO:
-        return _legacy_delegate.update_questionnaire_legacy(dto)
+        return questionnaire_domain_service.update_questionnaire(
+            int(dto.questionnaire_id),
+            dict(dto.payload or {}),
+        )
 
     execute = __call__
 
 
 class CreateOrUpdateQuestionnaireCommand:
-    """Wave 3 questionnaire compatibility command that delegates to ``domains.questionnaire.service.create_questionnaire`` or ``update_questionnaire`` via ``_legacy_delegate`` for admin CRUD callers while both legacy entrypoints still exist."""
-
     def __call__(
         self,
         dto: CreateOrUpdateQuestionnaireCommandDTO,
@@ -100,74 +109,76 @@ class CreateOrUpdateQuestionnaireCommand:
 
 
 class DisableQuestionnaireCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.disable_questionnaire`` for admin lifecycle callers."""
-
     def __call__(self, dto: DisableQuestionnaireCommandDTO) -> DisableQuestionnaireCommandResultDTO:
-        return _legacy_delegate.disable_questionnaire_legacy(dto)
+        return questionnaire_domain_service.disable_questionnaire(
+            int(dto.questionnaire_id),
+            bool(dto.is_disabled),
+        )
 
     execute = __call__
 
 
 class DeleteQuestionnaireSubmissionsBySlugCommand:
-    """Wave 3 questionnaire compatibility command that delegates to ``domains.questionnaire.service.delete_questionnaire_submissions_by_slug`` for historical maintenance callers."""
-
     def __call__(
         self,
         dto: DeleteQuestionnaireSubmissionsBySlugCommandDTO,
     ) -> DeleteQuestionnaireSubmissionsBySlugCommandResultDTO:
-        return _legacy_delegate.delete_questionnaire_submissions_by_slug_legacy(dto)
+        return questionnaire_domain_service.delete_questionnaire_submissions_by_slug(
+            str(dto.slug or "").strip()
+        )
 
     execute = __call__
 
 
 class DeleteQuestionnaireCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.delete_questionnaire`` for admin lifecycle callers."""
-
     def __call__(self, dto: DeleteQuestionnaireCommandDTO) -> DeleteQuestionnaireCommandResultDTO:
-        return _legacy_delegate.delete_questionnaire_legacy(dto)
+        return questionnaire_domain_service.delete_questionnaire(int(dto.questionnaire_id))
 
     execute = __call__
 
 
 class SaveQuestionnaireSubmissionCommand:
-    """Wave 3 questionnaire compatibility command that delegates to ``domains.questionnaire.service.save_questionnaire_submission`` for legacy submit orchestration until PR 2/3 move submit ownership into application."""
-
     def __call__(
         self,
         dto: SaveQuestionnaireSubmissionCommandDTO,
     ) -> SaveQuestionnaireSubmissionCommandResultDTO:
-        return _legacy_delegate.save_questionnaire_submission_legacy(dto)
+        return questionnaire_domain_service.save_questionnaire_submission(
+            dict(dto.questionnaire or {}),
+            dict(dto.identity or {}) if dto.identity else None,
+            dict(dto.computed_result or {}),
+            dto.answers,
+            request_meta=dict(dto.request_meta or {}) if dto.request_meta else None,
+        )
 
     execute = __call__
 
 
 class ApplyQuestionnaireMobileBindingCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.apply_questionnaire_mobile_binding`` for submit-side identity binding hooks."""
-
     def __call__(
         self,
         dto: ApplyQuestionnaireMobileBindingCommandDTO,
     ) -> ApplyQuestionnaireMobileBindingCommandResultDTO:
-        return _legacy_delegate.apply_questionnaire_mobile_binding_legacy(dto)
+        submission_snapshot = dict(dto.submission_snapshot or {})
+        if dto.submission_id and "id" not in submission_snapshot:
+            submission_snapshot["id"] = int(dto.submission_id)
+        return questionnaire_domain_service.apply_questionnaire_mobile_binding(submission_snapshot)
 
     execute = __call__
 
 
 class ApplyQuestionnaireSubmissionTagsCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm`` for submit-side SCRM apply hooks."""
-
     def __call__(
         self,
         dto: ApplyQuestionnaireSubmissionTagsCommandDTO,
     ) -> ApplyQuestionnaireSubmissionTagsCommandResultDTO:
-        return _legacy_delegate.apply_questionnaire_submission_tags_legacy(dto)
+        return questionnaire_domain_service.apply_questionnaire_submission_tags_to_scrm(
+            int(dto.submission_id)
+        )
 
     execute = __call__
 
 
 class ApplyQuestionnaireResultToScrmCommand:
-    """Wave 3 questionnaire compatibility command that delegates to ``domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm`` via ``_legacy_delegate`` for submit-side SCRM apply hooks and future admin retry tooling."""
-
     def __call__(
         self,
         dto: ApplyQuestionnaireResultToScrmCommandDTO,
@@ -183,14 +194,16 @@ class ApplyQuestionnaireResultToScrmCommand:
 
 
 class SubmitQuestionnaireCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.submit_questionnaire`` for public submit callers and future questionnaire submit service orchestration."""
-
     def __call__(
         self,
         dto: SubmitQuestionnaireCommandDTO,
     ) -> SubmitQuestionnaireCommandResultDTO:
         _bind_questionnaire_submit_runtime()
-        return _legacy_delegate.submit_questionnaire_legacy(dto)
+        return questionnaire_domain_service.submit_questionnaire(
+            str(dto.slug or "").strip(),
+            _build_submit_payload(dto),
+            request_meta=dict(dto.request_meta or {}) if dto.request_meta else None,
+        )
 
     execute = __call__
 
@@ -268,32 +281,30 @@ class CompleteQuestionnaireOauthCallbackCommand:
 
 
 class RetryQuestionnaireExternalPushLogCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.retry_questionnaire_external_push_log`` for future admin external-push console callers."""
-
     def __call__(
         self,
         dto: RetryQuestionnaireExternalPushLogCommandDTO,
     ) -> RetryQuestionnaireExternalPushLogCommandResultDTO:
-        return _legacy_delegate.retry_questionnaire_external_push_log_legacy(dto)
+        return questionnaire_domain_service.retry_questionnaire_external_push_log(
+            int(dto.push_log_id)
+        )
 
     execute = __call__
 
 
 class RetryQuestionnaireExternalPushLogsCommand:
-    """Wave 3 questionnaire skeleton that delegates to ``domains.questionnaire.service.retry_questionnaire_external_push_logs`` for future admin external-push batch retry callers."""
-
     def __call__(
         self,
         dto: RetryQuestionnaireExternalPushLogsCommandDTO,
     ) -> RetryQuestionnaireExternalPushLogsCommandResultDTO:
-        return _legacy_delegate.retry_questionnaire_external_push_logs_legacy(dto)
+        return questionnaire_domain_service.retry_questionnaire_external_push_logs(
+            list(dto.push_log_ids or [])
+        )
 
     execute = __call__
 
 
 class RetryQuestionnaireExternalPushCommand:
-    """Wave 3 questionnaire compatibility command that delegates to ``domains.questionnaire.service.retry_questionnaire_external_push_log`` or ``retry_questionnaire_external_push_logs`` via ``_legacy_delegate`` for future admin external-push console callers with a single formal command name."""
-
     def __call__(
         self,
         dto: RetryQuestionnaireExternalPushCommandDTO,

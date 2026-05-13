@@ -1431,6 +1431,256 @@
       line-height: 1.7;
       margin-top: 14px;
     }
+    .assessment-template-mode .template-step-list {
+      display: grid;
+      gap: 8px;
+    }
+    .assessment-template-mode .template-step {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid transparent;
+      background: transparent;
+      color: #344054;
+      text-align: left;
+      border-radius: 10px;
+      padding: 12px;
+      cursor: pointer;
+    }
+    .assessment-template-mode .template-step.active {
+      background: #eef5ff;
+      border-color: #bfdbfe;
+      color: #175cd3;
+      font-weight: 800;
+    }
+    .assessment-template-mode .template-step-num {
+      width: 25px;
+      height: 25px;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: #e4e7ec;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 800;
+      flex: none;
+    }
+    .assessment-template-mode .template-step.active .template-step-num {
+      background: #2563eb;
+      color: #fff;
+    }
+    .assessment-template-mode .template-page {
+      width: 100%;
+      padding: 22px;
+    }
+    .assessment-template-mode .template-page-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+    .assessment-template-mode .template-page-head h2 {
+      margin: 0 0 6px;
+      font-size: 22px;
+    }
+    .assessment-template-mode .template-page-head p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+    .assessment-template-mode .template-grid-3 {
+      display: grid;
+      grid-template-columns: 280px minmax(460px, 1fr) 360px;
+      gap: 14px;
+      align-items: start;
+    }
+    .assessment-template-mode .template-grid-2 {
+      display: grid;
+      grid-template-columns: 320px minmax(520px, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .assessment-template-mode .template-panel {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+    .assessment-template-mode .template-panel-head {
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .assessment-template-mode .template-panel-head h3 {
+      margin: 0;
+      font-size: 15px;
+    }
+    .assessment-template-mode .template-panel-head p,
+    .assessment-template-mode .template-muted {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .assessment-template-mode .template-panel-body {
+      padding: 14px;
+    }
+    .assessment-template-mode .dimension-list,
+    .assessment-template-mode .result-list-v2 {
+      display: grid;
+      gap: 10px;
+    }
+    .assessment-template-mode .dimension-card-v2,
+    .assessment-template-mode .result-card-v2,
+    .assessment-template-mode .tier-card-v2 {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 11px;
+      padding: 12px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .assessment-template-mode .dimension-card-v2.active,
+    .assessment-template-mode .result-card-v2.active,
+    .assessment-template-mode .tier-card-v2.active {
+      border-color: #93c5fd;
+      background: #f8fbff;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.08);
+    }
+    .assessment-template-mode .dimension-card-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-weight: 800;
+      margin-bottom: 7px;
+    }
+    .assessment-template-mode .template-stat-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .assessment-template-mode .template-status {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid #d0d5dd;
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-size: 11px;
+      font-weight: 750;
+      background: #f9fafb;
+      color: #667085;
+      white-space: nowrap;
+    }
+    .assessment-template-mode .template-status.ok {
+      background: #ecfdf3;
+      border-color: #abefc6;
+      color: #067647;
+    }
+    .assessment-template-mode .template-status.warn {
+      background: #fffaeb;
+      border-color: #fedf89;
+      color: #b54708;
+    }
+    .assessment-template-mode .question-card-v2 {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+    .assessment-template-mode .question-card-v2.selected {
+      border-color: #f0b5a7;
+      box-shadow: 0 0 0 3px rgba(240, 181, 167, 0.16);
+    }
+    .assessment-template-mode .question-card-head-v2 {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 12px;
+      background: #f8fafc;
+      border-bottom: 1px solid var(--line);
+    }
+    .assessment-template-mode .option-row-v2 {
+      display: grid;
+      grid-template-columns: minmax(180px, 1fr) 82px 126px auto;
+      gap: 8px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .assessment-template-mode .result-tabs-v2 {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+    .assessment-template-mode .result-tabs-v2 button.active {
+      background: #2563eb;
+      border-color: #2563eb;
+      color: #fff;
+    }
+    .assessment-template-mode .phone-preview-v2 {
+      width: 375px;
+      height: 760px;
+      margin: 0 auto;
+      background: #111827;
+      border-radius: 34px;
+      padding: 12px;
+      box-shadow: 0 24px 60px rgba(15,23,42,.22);
+    }
+    .assessment-template-mode .phone-screen-v2 {
+      height: 100%;
+      overflow: auto;
+      border-radius: 26px;
+      background: #fffaf3;
+      padding: 18px;
+    }
+    .assessment-template-mode .phone-notch-v2 {
+      width: 112px;
+      height: 18px;
+      border-radius: 999px;
+      background: #2b2118;
+      margin: 0 auto 18px;
+    }
+    .assessment-template-mode .h5-card-v2,
+    .assessment-template-mode .h5-question-v2,
+    .assessment-template-mode .h5-result-card-v2 {
+      border: 1px solid #dbe7f5;
+      border-radius: 14px;
+      background: #fff;
+      padding: 14px;
+      margin-bottom: 12px;
+    }
+    .assessment-template-mode .h5-option-v2 {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      border: 1px solid #f2d5b7;
+      border-radius: 10px;
+      background: #fffaf3;
+      padding: 9px 10px;
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .assessment-template-mode .h5-option-v2 small {
+      color: var(--muted);
+      white-space: nowrap;
+    }
+    @media (max-width: 1320px) {
+      .assessment-template-mode .template-grid-3,
+      .assessment-template-mode .template-grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
     @media (max-width: 1220px) {
       .assessment-template-mode .workspace {
         grid-template-columns: 260px minmax(420px, 1fr);
@@ -1628,6 +1878,13 @@
       selection: { kind: 'questionnaire' },
       ruleMode: false,
       lastRuleKey: '',
+      assessmentStep: 'basic',
+      assessmentResultTab: 'dimension',
+      assessmentPreviewMode: 'full',
+      selectedDimensionKey: '',
+      selectedQuestionKey: '',
+      selectedAssessmentTypeKey: '',
+      selectedOverallLevelKey: '',
       initialSnapshot: '',
       persistedIsDisabled: false,
       listSearch: '',
@@ -1953,7 +2210,18 @@
         local_key: type.local_key || nextLocalKey('assessment_type'),
         key: String(type.key || type.name || `type_${index + 1}`).trim() || `type_${index + 1}`,
         name: String(type.name || `类型 ${index + 1}`).trim() || `类型 ${index + 1}`,
+        title: String(type.title || type.name || `类型 ${index + 1}`).trim() || `类型 ${index + 1}`,
+        greeting: String(type.greeting || '').trim(),
         summary: String(type.summary || '').trim(),
+        diagnosis: String(type.diagnosis || type.summary || type.description || '').trim(),
+        problem_hint: String(type.problem_hint || '').trim(),
+        recommended_action: String(type.recommended_action || '').trim(),
+        course_name: String(type.course_name || '').trim(),
+        course_url: String(type.course_url || type.cta_url || '').trim(),
+        cta_text: String(type.cta_text || '').trim(),
+        enabled: type.enabled === undefined ? true : Boolean(type.enabled),
+        show_in_result: type.show_in_result === undefined ? true : Boolean(type.show_in_result),
+        sort_order: type.sort_order ?? (index + 1),
         tag_codes: normalizeTagIds(type.tag_codes || []),
       };
     }
@@ -1964,7 +2232,14 @@
         min_score: level.min_score ?? '',
         max_score: level.max_score ?? '',
         title: String(level.title || `分层 ${index + 1}`).trim() || `分层 ${index + 1}`,
-        summary: String(level.summary || '').trim(),
+        greeting: String(level.greeting || '').trim(),
+        summary: String(level.summary || level.diagnosis || '').trim(),
+        recommended_action: String(level.recommended_action || '').trim(),
+        course_name: String(level.course_name || '').trim(),
+        course_url: String(level.course_url || level.cta_url || '').trim(),
+        cta_text: String(level.cta_text || '').trim(),
+        enabled: level.enabled === undefined ? true : Boolean(level.enabled),
+        sort_order: level.sort_order ?? (index + 1),
         tag_codes: normalizeTagIds(level.tag_codes || []),
       };
     }
@@ -1992,6 +2267,13 @@
         key: String(dimension.key || `dimension_${index + 1}`).trim() || `dimension_${index + 1}`,
         name: String(dimension.name || `维度 ${index + 1}`).trim() || `维度 ${index + 1}`,
         summary: String(dimension.summary || '').trim(),
+        weight: dimension.weight ?? '',
+        scoring_method: String(dimension.scoring_method || 'sum').trim() || 'sum',
+        category_method: String(dimension.category_method || 'most_selected').trim() || 'most_selected',
+        enabled: dimension.enabled === undefined ? true : Boolean(dimension.enabled),
+        participates_in_total_score: dimension.participates_in_total_score === undefined ? true : Boolean(dimension.participates_in_total_score),
+        show_in_result: dimension.show_in_result === undefined ? true : Boolean(dimension.show_in_result),
+        sort_order: dimension.sort_order ?? (index + 1),
         types: sortedTypes,
         levels: rawLevels.length
           ? rawLevels.map((item, itemIndex) => createAssessmentLevel(item, itemIndex))
@@ -2024,6 +2306,23 @@
               createAssessmentLevel({ min_score: 71, max_score: 100, title: '优势明显' }, 2),
             ],
         recommendations: Array.isArray(normalized.recommendations) ? normalized.recommendations : [],
+        final_recommendation: normalized.final_recommendation && typeof normalized.final_recommendation === 'object'
+          ? {
+              enabled: Boolean(normalized.final_recommendation.enabled),
+              title: String(normalized.final_recommendation.title || '').trim(),
+              description: String(normalized.final_recommendation.description || '').trim(),
+              course_name: String(normalized.final_recommendation.course_name || '').trim(),
+              course_url: String(normalized.final_recommendation.course_url || '').trim(),
+              cta_text: String(normalized.final_recommendation.cta_text || '').trim(),
+            }
+          : {
+              enabled: false,
+              title: '下一步建议',
+              description: '',
+              course_name: '',
+              course_url: '',
+              cta_text: '查看完整课程',
+            },
       };
     }
 
@@ -2040,29 +2339,69 @@
           min_score: level.min_score === '' ? null : Number(level.min_score),
           max_score: level.max_score === '' ? null : Number(level.max_score),
           title: level.title || `分层 ${index + 1}`,
+          greeting: level.greeting || '',
           summary: level.summary || '',
+          recommended_action: level.recommended_action || '',
+          course_name: level.course_name || '',
+          course_url: level.course_url || '',
+          cta_text: level.cta_text || '',
+          enabled: level.enabled !== false,
+          sort_order: Number(level.sort_order || (index + 1)),
           tag_codes: normalizeTagIds(level.tag_codes),
         })),
         dimensions: dimensions.map((dimension, index) => ({
           key: dimension.key || `dimension_${index + 1}`,
           name: dimension.name || `维度 ${index + 1}`,
           summary: dimension.summary || '',
+          weight: dimension.weight === '' ? null : Number(dimension.weight || 0),
+          scoring_method: dimension.scoring_method || 'sum',
+          category_method: dimension.category_method || 'most_selected',
+          enabled: dimension.enabled !== false,
+          participates_in_total_score: dimension.participates_in_total_score !== false,
+          show_in_result: dimension.show_in_result !== false,
+          sort_order: Number(dimension.sort_order || (index + 1)),
           type_priority: (dimension.types || []).map((type) => type.key),
           types: (dimension.types || []).map((type, typeIndex) => ({
             key: type.key || `type_${index + 1}_${typeIndex + 1}`,
             name: type.name || `类型 ${typeIndex + 1}`,
+            title: type.title || type.name || `类型 ${typeIndex + 1}`,
+            greeting: type.greeting || '',
             summary: type.summary || '',
+            diagnosis: type.diagnosis || type.summary || '',
+            problem_hint: type.problem_hint || '',
+            recommended_action: type.recommended_action || '',
+            course_name: type.course_name || '',
+            course_url: type.course_url || '',
+            cta_text: type.cta_text || '',
+            enabled: type.enabled !== false,
+            show_in_result: type.show_in_result !== false,
+            sort_order: Number(type.sort_order || (typeIndex + 1)),
             tag_codes: normalizeTagIds(type.tag_codes),
           })),
           levels: (dimension.levels || []).map((level, levelIndex) => ({
             min_score: level.min_score === '' ? null : Number(level.min_score),
             max_score: level.max_score === '' ? null : Number(level.max_score),
             title: level.title || `分层 ${levelIndex + 1}`,
+            greeting: level.greeting || '',
             summary: level.summary || '',
+            recommended_action: level.recommended_action || '',
+            course_name: level.course_name || '',
+            course_url: level.course_url || '',
+            cta_text: level.cta_text || '',
+            enabled: level.enabled !== false,
+            sort_order: Number(level.sort_order || (levelIndex + 1)),
             tag_codes: normalizeTagIds(level.tag_codes),
           })),
         })),
         recommendations: builder.recommendations || [],
+        final_recommendation: {
+          enabled: Boolean(builder.final_recommendation?.enabled),
+          title: builder.final_recommendation?.title || '',
+          description: builder.final_recommendation?.description || '',
+          course_name: builder.final_recommendation?.course_name || '',
+          course_url: builder.final_recommendation?.course_url || '',
+          cta_text: builder.final_recommendation?.cta_text || '',
+        },
       };
       const assetKind = String(builder.asset_kind || '').trim();
       if (assetKind) {
@@ -2326,7 +2665,7 @@
       clearTimeout(toastTimer);
       toastTimer = window.setTimeout(() => {
         toastEl.className = 'toast hidden';
-      }, isError ? 7800 : 4200);
+      }, isError ? 18000 : 12600);
     }
 
     function openDrawer(title, rows = []) {
@@ -3009,7 +3348,7 @@
       const topbarSubtitleEl = document.getElementById('topbar-subtitle');
       if (topbarSubtitleEl) {
         topbarSubtitleEl.textContent = editorConfig.defaultAssessment
-          ? '左侧添加题目，中间预览，右侧配置每道题、维度分型和结果页规则。'
+          ? '基础信息、设置维度、结果配置、H5 预览 / 发布按步骤配置。'
           : '';
       }
       if (editorPageTitleEl) {
@@ -3084,7 +3423,7 @@
           card.className = `preview-question${state.selection.kind === 'question' && state.selection.key === question.local_key ? ' active' : ''}`;
           if (editorConfig.defaultAssessment) {
             const dimensionName = formatAssessmentDimensionName(question.assessment_dimension_key) || question.assessment_dimension_key || '未选择维度';
-            const optionPreview = (question.options || []).slice(0, 2).map((option) => `
+            const optionPreview = (question.options || []).map((option) => `
               <div class="option-pill">
                 <span>${escapeHtml(option.option_text || '选项')}</span>
                 <small>${escapeHtml(formatAssessmentTypeName(question.assessment_dimension_key, option.assessment_type_key) || option.assessment_type_key || '未选择类型')} / ${escapeHtml(String(option.score ?? 0))}分</small>
@@ -4084,7 +4423,968 @@
       });
     }
 
+    const ASSESSMENT_TEMPLATE_STEPS = [
+      { key: 'basic', label: '基础信息' },
+      { key: 'dimensions', label: '设置维度' },
+      { key: 'results', label: '结果配置' },
+      { key: 'preview', label: 'H5 预览 / 发布' },
+    ];
+
+    function setAssessmentTemplateStep(step) {
+      state.assessmentStep = step;
+      state.selection = { kind: 'assessment' };
+      renderWorkspace();
+    }
+
+    function ensureAssessmentEditorState() {
+      const builder = ensureAssessmentBuilder();
+      const dimensions = builder.dimensions || [];
+      if (!dimensions.some((dimension) => dimension.key === state.selectedDimensionKey)) {
+        state.selectedDimensionKey = dimensions[0]?.key || '';
+      }
+      const currentDimension = dimensions.find((dimension) => dimension.key === state.selectedDimensionKey) || null;
+      const questions = currentDimension
+        ? state.questionnaire.questions.filter((question) => question.assessment_dimension_key === currentDimension.key)
+        : [];
+      if (!questions.some((question) => question.local_key === state.selectedQuestionKey)) {
+        state.selectedQuestionKey = questions[0]?.local_key || '';
+      }
+      const types = currentDimension?.types || [];
+      if (!types.some((type) => type.key === state.selectedAssessmentTypeKey)) {
+        state.selectedAssessmentTypeKey = types[0]?.key || '';
+      }
+      const levels = builder.overall_levels || [];
+      if (!levels.some((level) => level.local_key === state.selectedOverallLevelKey)) {
+        state.selectedOverallLevelKey = levels[0]?.local_key || '';
+      }
+      if (!state.assessmentResultTab) state.assessmentResultTab = 'dimension';
+      if (!state.assessmentPreviewMode) state.assessmentPreviewMode = 'full';
+      return { builder, dimensions, currentDimension, questions };
+    }
+
+    function selectedAssessmentDimension() {
+      const builder = ensureAssessmentBuilder();
+      return (builder.dimensions || []).find((dimension) => dimension.key === state.selectedDimensionKey) || null;
+    }
+
+    function selectedAssessmentType() {
+      const dimension = selectedAssessmentDimension();
+      return (dimension?.types || []).find((type) => type.key === state.selectedAssessmentTypeKey) || null;
+    }
+
+    function selectedOverallLevel() {
+      const builder = ensureAssessmentBuilder();
+      return (builder.overall_levels || []).find((level) => level.local_key === state.selectedOverallLevelKey) || null;
+    }
+
+    function questionsForDimension(dimensionKey) {
+      return (state.questionnaire.questions || []).filter((question) => question.assessment_dimension_key === dimensionKey);
+    }
+
+    function optionCountForDimension(dimensionKey) {
+      return questionsForDimension(dimensionKey).reduce((total, question) => total + (question.options || []).length, 0);
+    }
+
+    function dimensionConfigStatus(dimension) {
+      if (!dimension) return { label: '待补充', className: 'warn' };
+      const questionCount = questionsForDimension(dimension.key).length;
+      const hasTypes = (dimension.types || []).length > 0;
+      const hasResultCopy = (dimension.types || []).some((type) => (
+        type.greeting || type.diagnosis || type.summary || type.recommended_action || type.course_url
+      ));
+      if (!questionCount) return { label: '待补题', className: 'warn' };
+      if (!hasTypes || !hasResultCopy) return { label: '缺结果', className: 'warn' };
+      return { label: '已配置', className: 'ok' };
+    }
+
+    function uniqueAssessmentKey(base, existingKeys) {
+      const raw = String(base || '').trim() || 'dimension';
+      let normalized = raw.replace(/\s+/g, '_').replace(/[^\w\u4e00-\u9fa5-]/g, '');
+      if (!normalized) normalized = 'dimension';
+      let candidate = normalized;
+      let index = 2;
+      while (existingKeys.includes(candidate)) {
+        candidate = `${normalized}_${index}`;
+        index += 1;
+      }
+      return candidate;
+    }
+
+    function renderAssessmentStepNav() {
+      const sidebarCard = document.querySelector('.sidebar .section-card');
+      if (!sidebarCard) return;
+      sidebarCard.innerHTML = `
+        <div class="section-head">
+          <div>
+            <h3>配置步骤</h3>
+            <p class="section-subtitle">先配置维度模型，再配置结果规则，最后统一预览 H5。</p>
+          </div>
+        </div>
+        <div class="template-step-list">
+          ${ASSESSMENT_TEMPLATE_STEPS.map((step, index) => `
+            <button type="button" class="template-step${state.assessmentStep === step.key ? ' active' : ''}" data-assessment-step="${escapeHtml(step.key)}">
+              <span class="template-step-num">${index + 1}</span>
+              <span>${escapeHtml(step.label)}</span>
+            </button>
+          `).join('')}
+        </div>
+        <div class="assessment-template-note">这里创建的是“测评模板资产”。普通问卷只能整组引用模板，不在普通问卷里编辑模板内部题目、维度和结果页。</div>
+      `;
+      sidebarCard.querySelectorAll('[data-assessment-step]').forEach((button) => {
+        button.addEventListener('click', () => setAssessmentTemplateStep(button.dataset.assessmentStep));
+      });
+    }
+
+    function setInspectorContent(title, subtitle, bodyHtml) {
+      inspectorTitleEl.textContent = title;
+      inspectorSubtitleEl.textContent = subtitle;
+      inspectorBodyEl.innerHTML = bodyHtml;
+    }
+
+    function renderAssessmentBasicPage() {
+      const phoneStage = document.querySelector('.phone-stage');
+      phoneStage.innerHTML = `
+        <div class="template-page">
+          <div class="template-page-head">
+            <div>
+              <h2>基础信息</h2>
+              <p>只配置测评基础展示信息。这里不放题目、不放结果规则。</p>
+            </div>
+          </div>
+          <div class="template-panel" style="max-width:880px;">
+            <div class="template-panel-head"><h3>测评基础配置</h3></div>
+            <div class="template-panel-body">
+              <label class="field">问卷名称
+                <input id="v2-basic-name" type="text" value="${escapeHtml(state.questionnaire.name)}">
+              </label>
+              <label class="field">问卷标题
+                <input id="v2-basic-title" type="text" value="${escapeHtml(state.questionnaire.title)}">
+              </label>
+              <label class="field">副标题 / 简介
+                <textarea id="v2-basic-description">${escapeHtml(state.questionnaire.description)}</textarea>
+              </label>
+              <div class="field-grid compact">
+                <label class="field">分享标识
+                  <input id="v2-basic-slug" type="text" value="${escapeHtml(state.questionnaire.slug)}" placeholder="保存时可自动生成">
+                </label>
+                <label class="field"><span style="display:block;margin-bottom:7px;">是否停用</span>
+                  <label class="field" style="margin-bottom:0;font-weight:600;"><input id="v2-basic-disabled" type="checkbox" ${state.questionnaire.is_disabled ? 'checked' : ''}> 停用问卷</label>
+                </label>
+              </div>
+              <label class="field">提交后动作 / 跳转地址
+                <input id="v2-basic-redirect" type="text" value="${escapeHtml(state.questionnaire.redirect_url)}" placeholder="为空时提交后展示测评结果页">
+              </label>
+            </div>
+          </div>
+        </div>
+      `;
+      phoneStage.querySelector('#v2-basic-name').addEventListener('input', (event) => {
+        state.questionnaire.name = event.target.value;
+        renderTopbar();
+      });
+      phoneStage.querySelector('#v2-basic-title').addEventListener('input', (event) => {
+        state.questionnaire.title = event.target.value;
+        renderTopbar();
+      });
+      phoneStage.querySelector('#v2-basic-description').addEventListener('input', (event) => {
+        state.questionnaire.description = event.target.value;
+        updateDraftIndicator();
+      });
+      phoneStage.querySelector('#v2-basic-slug').addEventListener('input', (event) => {
+        state.questionnaire.slug = event.target.value;
+        updateDraftIndicator();
+      });
+      phoneStage.querySelector('#v2-basic-disabled').addEventListener('change', (event) => {
+        state.questionnaire.is_disabled = event.target.checked;
+        updateDraftIndicator();
+      });
+      phoneStage.querySelector('#v2-basic-redirect').addEventListener('input', (event) => {
+        state.questionnaire.redirect_url = event.target.value;
+        updateDraftIndicator();
+      });
+      setInspectorContent(
+        '基础信息',
+        '正式编辑流程不展示填写模板案例。',
+        `<section class="config-group">
+          <div class="helper-note">题型只是题目属性；维度、题目和结果规则分别在后续步骤维护。</div>
+          <button type="button" class="btn primary" data-next-step="dimensions" style="width:100%;margin-top:12px;">下一步：设置维度</button>
+        </section>`,
+      );
+      inspectorBodyEl.querySelector('[data-next-step]').addEventListener('click', () => setAssessmentTemplateStep('dimensions'));
+    }
+
+    function renderDimensionCards(dimensions) {
+      if (!dimensions.length) {
+        return '<div class="empty-state">当前还没有维度。点击“添加维度”后再配置题目。</div>';
+      }
+      return dimensions.map((dimension, index) => {
+        const status = dimensionConfigStatus(dimension);
+        return `
+          <button type="button" class="dimension-card-v2${dimension.key === state.selectedDimensionKey ? ' active' : ''}" data-dimension-key="${escapeHtml(dimension.key)}">
+            <div class="dimension-card-title">
+              <span>${escapeHtml(dimension.name || `维度 ${index + 1}`)}</span>
+              <span class="template-status ${status.className}">${escapeHtml(status.label)}</span>
+            </div>
+            <div class="template-stat-row">
+              <span>${escapeHtml(String(questionsForDimension(dimension.key).length))} 道题</span>
+              <span>${escapeHtml(String(optionCountForDimension(dimension.key)))} 个选项</span>
+              <span>${dimension.enabled === false ? '停用' : '启用'}</span>
+            </div>
+          </button>
+        `;
+      }).join('');
+    }
+
+    function renderQuestionEditor(question, index, dimension) {
+      const typeOptions = ['single_choice', 'multi_choice', 'textarea', 'mobile'].map((type) => `
+        <option value="${type}" ${question.type === type ? 'selected' : ''}>${formatQuestionType(type)}</option>
+      `).join('');
+      const optionRows = ['textarea', 'mobile'].includes(question.type)
+        ? '<div class="empty-state">文本题和手机号题没有选项。</div>'
+        : (question.options || []).map((option, optionIndex) => {
+            const typeOptionsHtml = (dimension?.types || []).map((type) => `
+              <option value="${escapeHtml(type.key)}" ${type.key === option.assessment_type_key ? 'selected' : ''}>${escapeHtml(type.name)}</option>
+            `).join('');
+            return `
+              <div class="option-row-v2" data-option-key="${escapeHtml(option.local_key)}">
+                <input data-option-field="option_text" value="${escapeHtml(option.option_text)}" placeholder="选项文案">
+                <input data-option-field="score" type="number" step="1" value="${escapeHtml(String(option.score ?? 0))}" placeholder="分值">
+                <select data-option-field="assessment_type_key">
+                  <option value="">未分类</option>
+                  ${typeOptionsHtml}
+                </select>
+                <button type="button" class="link-btn danger" data-remove-option="${escapeHtml(option.local_key)}">删除</button>
+              </div>
+            `;
+          }).join('');
+      return `
+        <article class="question-card-v2${question.local_key === state.selectedQuestionKey ? ' selected' : ''}" data-question-key="${escapeHtml(question.local_key)}">
+          <div class="question-card-head-v2">
+            <div>
+              <div class="template-muted">Q${String(index + 1).padStart(2, '0')} / ${escapeHtml(dimension?.name || '未分组维度')}</div>
+              <input data-question-field="title" value="${escapeHtml(question.title)}" placeholder="题目标题" style="margin-top:8px;">
+            </div>
+            <div style="display:flex;gap:6px;align-items:flex-start;">
+              <button type="button" class="btn ghost" data-move-question="${escapeHtml(question.local_key)}" data-direction="-1">上移</button>
+              <button type="button" class="btn ghost" data-move-question="${escapeHtml(question.local_key)}" data-direction="1">下移</button>
+              <button type="button" class="link-btn danger" data-remove-question="${escapeHtml(question.local_key)}">删除</button>
+            </div>
+          </div>
+          <div class="template-panel-body">
+            <div class="field-grid compact">
+              <label class="field">题型
+                <select data-question-field="type">${typeOptions}</select>
+              </label>
+              <label class="field"><span style="display:block;margin-bottom:7px;">是否必填</span>
+                <label class="field" style="font-weight:600;"><input data-question-field="required" type="checkbox" ${question.required ? 'checked' : ''}> 必填</label>
+              </label>
+            </div>
+            <label class="field">题目说明 / 占位提示
+              <input data-question-field="placeholder_text" value="${escapeHtml(question.placeholder_text || '')}" placeholder="可选">
+            </label>
+            <div class="config-head" style="margin:8px 0;">
+              <div><h4 style="margin:0;font-size:13px;">选项</h4></div>
+              <button type="button" class="btn secondary" data-add-option="${escapeHtml(question.local_key)}" ${['textarea', 'mobile'].includes(question.type) ? 'disabled' : ''}>添加选项</button>
+            </div>
+            ${optionRows}
+          </div>
+        </article>
+      `;
+    }
+
+    function renderAssessmentDimensionsPage() {
+      const { builder, dimensions, currentDimension, questions } = ensureAssessmentEditorState();
+      const phoneStage = document.querySelector('.phone-stage');
+      phoneStage.innerHTML = `
+        <div class="template-page">
+          <div class="template-page-head">
+            <div>
+              <h2>设置维度</h2>
+              <p>维度是一级对象。每个维度下面管理题目；每道题下面管理全部选项。</p>
+            </div>
+            <button type="button" class="btn primary" id="v2-add-dimension">添加维度</button>
+          </div>
+          <div class="template-grid-3">
+            <section class="template-panel">
+              <div class="template-panel-head"><div><h3>维度列表</h3><p>点击只切换当前编辑对象，不新增数据。</p></div></div>
+              <div class="template-panel-body"><div class="dimension-list">${renderDimensionCards(dimensions)}</div></div>
+            </section>
+            <section class="template-panel">
+              <div class="template-panel-head">
+                <div><h3>${escapeHtml(currentDimension?.name || '未选择维度')}：题目与选项</h3><p>所有选项都会进入 H5 预览和提交计算。</p></div>
+                <button type="button" class="btn secondary" id="v2-add-question" ${currentDimension ? '' : 'disabled'}>添加题目</button>
+              </div>
+              <div class="template-panel-body">
+                ${currentDimension
+                  ? (questions.length ? questions.map((question, index) => renderQuestionEditor(question, index, currentDimension)).join('') : '<div class="empty-state">当前维度还没有题目。</div>')
+                  : '<div class="empty-state">请先添加或选择一个维度。</div>'}
+              </div>
+            </section>
+            <section class="template-panel">
+              <div class="template-panel-head"><div><h3>维度设置</h3><p>默认展示当前维度设置，不和题目设置混在一起。</p></div></div>
+              <div class="template-panel-body" id="v2-dimension-settings">
+                ${currentDimension ? `
+                  <label class="field">维度名称<input id="v2-dim-name" value="${escapeHtml(currentDimension.name)}"></label>
+                  <label class="field">维度说明<textarea id="v2-dim-summary">${escapeHtml(currentDimension.summary || '')}</textarea></label>
+                  <div class="field-grid compact">
+                    <label class="field">维度权重<input id="v2-dim-weight" type="number" step="1" value="${escapeHtml(String(currentDimension.weight ?? ''))}"></label>
+                    <label class="field">计分方式<select id="v2-dim-scoring"><option value="sum" ${currentDimension.scoring_method === 'sum' ? 'selected' : ''}>选项分值累加</option></select></label>
+                  </div>
+                  <label class="field">维度内分类方式<select id="v2-dim-category-method"><option value="most_selected" ${currentDimension.category_method === 'most_selected' ? 'selected' : ''}>按选中分类出现次数最多</option></select></label>
+                  <label class="field"><input id="v2-dim-enabled" type="checkbox" ${currentDimension.enabled !== false ? 'checked' : ''}> 启用维度</label>
+                  <label class="field"><input id="v2-dim-total" type="checkbox" ${currentDimension.participates_in_total_score !== false ? 'checked' : ''}> 参与总分</label>
+                  <label class="field"><input id="v2-dim-show" type="checkbox" ${currentDimension.show_in_result !== false ? 'checked' : ''}> 参与结果页展示</label>
+                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                    <button type="button" class="btn ghost" id="v2-move-dimension-up">上移</button>
+                    <button type="button" class="btn ghost" id="v2-move-dimension-down">下移</button>
+                    <button type="button" class="link-btn danger" id="v2-delete-dimension">删除维度</button>
+                  </div>
+                ` : '<div class="empty-state">选择维度后在这里编辑。</div>'}
+              </div>
+            </section>
+          </div>
+        </div>
+      `;
+      phoneStage.querySelector('#v2-add-dimension').addEventListener('click', () => addAssessmentDimensionV2());
+      phoneStage.querySelectorAll('[data-dimension-key]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.selectedDimensionKey = button.dataset.dimensionKey;
+          renderWorkspace();
+        });
+      });
+      phoneStage.querySelector('#v2-add-question')?.addEventListener('click', () => addAssessmentQuestionV2(currentDimension));
+      bindDimensionQuestionEvents(phoneStage, currentDimension);
+      bindDimensionSettingEvents(phoneStage, builder, currentDimension);
+      setInspectorContent(
+        '设置维度',
+        '添加维度才创建维度，点击导航和卡片只切换。',
+        `<section class="config-group">
+          <div class="helper-note">删除维度会二次确认。第一版采用“删除维度时连同该维度下题目和选项一起删除”的策略。</div>
+          <button type="button" class="btn primary" data-next-step="results" style="width:100%;margin-top:12px;">下一步：结果配置</button>
+        </section>`,
+      );
+      inspectorBodyEl.querySelector('[data-next-step]').addEventListener('click', () => setAssessmentTemplateStep('results'));
+    }
+
+    function bindDimensionQuestionEvents(root, dimension) {
+      root.querySelectorAll('.question-card-v2').forEach((card) => {
+        card.addEventListener('click', (event) => {
+          if (event.target.closest('input,select,button,textarea')) return;
+          state.selectedQuestionKey = card.dataset.questionKey;
+          renderWorkspace();
+        });
+      });
+      root.querySelectorAll('[data-question-field]').forEach((input) => {
+        input.addEventListener('input', (event) => updateQuestionFieldV2(input, event));
+        input.addEventListener('change', (event) => updateQuestionFieldV2(input, event));
+      });
+      root.querySelectorAll('[data-option-field]').forEach((input) => {
+        input.addEventListener('input', (event) => updateOptionFieldV2(input, event));
+        input.addEventListener('change', (event) => updateOptionFieldV2(input, event));
+      });
+      root.querySelectorAll('[data-add-option]').forEach((button) => {
+        button.addEventListener('click', () => addOptionV2(button.dataset.addOption));
+      });
+      root.querySelectorAll('[data-remove-option]').forEach((button) => {
+        button.addEventListener('click', () => removeOptionV2(button.closest('[data-question-key]')?.dataset.questionKey, button.dataset.removeOption));
+      });
+      root.querySelectorAll('[data-remove-question]').forEach((button) => {
+        button.addEventListener('click', () => removeQuestionV2(button.dataset.removeQuestion));
+      });
+      root.querySelectorAll('[data-move-question]').forEach((button) => {
+        button.addEventListener('click', () => moveQuestionV2(button.dataset.moveQuestion, Number(button.dataset.direction || 0)));
+      });
+    }
+
+    function bindDimensionSettingEvents(root, builder, dimension) {
+      if (!dimension) return;
+      root.querySelector('#v2-dim-name')?.addEventListener('input', (event) => {
+        dimension.name = event.target.value;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-summary')?.addEventListener('input', (event) => {
+        dimension.summary = event.target.value;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-weight')?.addEventListener('input', (event) => {
+        dimension.weight = event.target.value;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-scoring')?.addEventListener('change', (event) => {
+        dimension.scoring_method = event.target.value;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-category-method')?.addEventListener('change', (event) => {
+        dimension.category_method = event.target.value;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-enabled')?.addEventListener('change', (event) => {
+        dimension.enabled = event.target.checked;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-total')?.addEventListener('change', (event) => {
+        dimension.participates_in_total_score = event.target.checked;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-dim-show')?.addEventListener('change', (event) => {
+        dimension.show_in_result = event.target.checked;
+        updateDraftIndicator();
+      });
+      root.querySelector('#v2-delete-dimension')?.addEventListener('click', () => deleteAssessmentDimensionV2(dimension.key));
+      root.querySelector('#v2-move-dimension-up')?.addEventListener('click', () => moveAssessmentDimensionV2(dimension.key, -1));
+      root.querySelector('#v2-move-dimension-down')?.addEventListener('click', () => moveAssessmentDimensionV2(dimension.key, 1));
+    }
+
+    function addAssessmentDimensionV2() {
+      const builder = ensureAssessmentBuilder();
+      const name = `维度 ${builder.dimensions.length + 1}`;
+      const key = uniqueAssessmentKey(name, builder.dimensions.map((dimension) => dimension.key));
+      const dimension = createAssessmentDimension({ key, name }, builder.dimensions.length);
+      builder.dimensions.push(dimension);
+      state.selectedDimensionKey = dimension.key;
+      state.selectedAssessmentTypeKey = dimension.types[0]?.key || '';
+      renderWorkspace();
+      showToast('已添加维度');
+    }
+
+    function deleteAssessmentDimensionV2(dimensionKey) {
+      const builder = ensureAssessmentBuilder();
+      const dimension = builder.dimensions.find((item) => item.key === dimensionKey);
+      if (!dimension) return;
+      const count = questionsForDimension(dimensionKey).length;
+      if (!window.confirm(`删除维度“${dimension.name}”会同时删除该维度下 ${count} 道题和全部选项，确认删除吗？`)) return;
+      builder.dimensions = builder.dimensions.filter((item) => item.key !== dimensionKey);
+      state.questionnaire.questions = state.questionnaire.questions
+        .filter((question) => question.assessment_dimension_key !== dimensionKey)
+        .map((question, index) => ({ ...question, sort_order: index + 1 }));
+      state.selectedDimensionKey = builder.dimensions[0]?.key || '';
+      renderWorkspace();
+      showToast('维度已删除');
+    }
+
+    function moveAssessmentDimensionV2(dimensionKey, direction) {
+      const builder = ensureAssessmentBuilder();
+      const index = builder.dimensions.findIndex((item) => item.key === dimensionKey);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= builder.dimensions.length) return;
+      const items = [...builder.dimensions];
+      const [moved] = items.splice(index, 1);
+      items.splice(nextIndex, 0, moved);
+      builder.dimensions = items.map((item, itemIndex) => ({ ...item, sort_order: itemIndex + 1 }));
+      renderWorkspace();
+    }
+
+    function addAssessmentQuestionV2(dimension) {
+      if (!dimension) return;
+      const question = createQuestion('single_choice', {
+        type: 'single_choice',
+        title: '新测评题',
+        required: true,
+        assessment_dimension_key: dimension.key,
+        options: (dimension.types || []).slice(0, 4).map((type, index) => ({
+          option_text: `选项 ${index + 1}`,
+          score: index + 1,
+          assessment_type_key: type.key,
+          tag_codes: [],
+        })),
+      }, state.questionnaire.questions.length);
+      state.questionnaire.questions.push(question);
+      state.selectedQuestionKey = question.local_key;
+      renderWorkspace();
+    }
+
+    function findQuestionByLocalKey(questionKey) {
+      return state.questionnaire.questions.find((question) => question.local_key === questionKey) || null;
+    }
+
+    function updateQuestionFieldV2(input, event) {
+      const question = input.closest('[data-question-key]') ? findQuestionByLocalKey(input.closest('[data-question-key]').dataset.questionKey) : null;
+      if (!question) return;
+      const field = input.dataset.questionField;
+      if (field === 'required') question.required = event.target.checked;
+      else if (field === 'type') {
+        question.type = event.target.value;
+        if (['textarea', 'mobile'].includes(question.type)) question.options = [];
+        else if (!question.options.length) question.options = [createOption({}, 0)];
+      } else {
+        question[field] = event.target.value;
+      }
+      updateDraftIndicator();
+      if (field === 'type') renderWorkspace();
+    }
+
+    function updateOptionFieldV2(input, event) {
+      const question = input.closest('[data-question-key]') ? findQuestionByLocalKey(input.closest('[data-question-key]').dataset.questionKey) : null;
+      const option = question?.options?.find((item) => item.local_key === input.closest('[data-option-key]')?.dataset.optionKey);
+      if (!option) return;
+      option[input.dataset.optionField] = input.dataset.optionField === 'score' ? Number(event.target.value || 0) : event.target.value;
+      updateDraftIndicator();
+    }
+
+    function addOptionV2(questionKey) {
+      const question = findQuestionByLocalKey(questionKey);
+      if (!question || ['textarea', 'mobile'].includes(question.type)) return;
+      const dimension = getAssessmentDimensionByKey(question.assessment_dimension_key);
+      const type = dimension?.types?.[question.options.length % Math.max(1, dimension.types.length)];
+      question.options.push(createOption({
+        option_text: `选项 ${question.options.length + 1}`,
+        score: question.options.length + 1,
+        assessment_type_key: type?.key || '',
+      }, question.options.length));
+      renderWorkspace();
+    }
+
+    function removeOptionV2(questionKey, optionKey) {
+      const question = findQuestionByLocalKey(questionKey);
+      if (!question) return;
+      if (!window.confirm('确认删除这个选项吗？')) return;
+      question.options = question.options.filter((option) => option.local_key !== optionKey);
+      renderWorkspace();
+    }
+
+    function removeQuestionV2(questionKey) {
+      const question = findQuestionByLocalKey(questionKey);
+      if (!question) return;
+      if (!window.confirm(`确认删除题目“${question.title || '未命名题目'}”吗？该题下的选项也会删除。`)) return;
+      state.questionnaire.questions = state.questionnaire.questions.filter((item) => item.local_key !== questionKey);
+      renderWorkspace();
+    }
+
+    function moveQuestionV2(questionKey, direction) {
+      const question = findQuestionByLocalKey(questionKey);
+      if (!question) return;
+      const dimensionQuestions = questionsForDimension(question.assessment_dimension_key);
+      const from = dimensionQuestions.findIndex((item) => item.local_key === questionKey);
+      const to = from + direction;
+      if (from < 0 || to < 0 || to >= dimensionQuestions.length) return;
+      const ordered = [...dimensionQuestions];
+      const [moved] = ordered.splice(from, 1);
+      ordered.splice(to, 0, moved);
+      const orderedKeys = ordered.map((item) => item.local_key);
+      state.questionnaire.questions = state.questionnaire.questions
+        .slice()
+        .sort((left, right) => {
+          const leftIdx = orderedKeys.indexOf(left.local_key);
+          const rightIdx = orderedKeys.indexOf(right.local_key);
+          if (leftIdx >= 0 && rightIdx >= 0) return leftIdx - rightIdx;
+          if (leftIdx >= 0) return -1;
+          if (rightIdx >= 0) return 1;
+          return Number(left.sort_order || 0) - Number(right.sort_order || 0);
+        })
+        .map((item, index) => ({ ...item, sort_order: index + 1 }));
+      renderWorkspace();
+    }
+
+    function renderAssessmentResultsPage() {
+      const { builder, dimensions, currentDimension } = ensureAssessmentEditorState();
+      const phoneStage = document.querySelector('.phone-stage');
+      const tab = state.assessmentResultTab || 'dimension';
+      phoneStage.innerHTML = `
+        <div class="template-page">
+          <div class="template-page-head">
+            <div>
+              <h2>结果配置</h2>
+              <p>独立配置维度分类结果、总分分层和尾部集中推荐。</p>
+            </div>
+          </div>
+          <div class="result-tabs-v2">
+            ${[
+              ['dimension', '维度结果配置'],
+              ['overall', '总分分层配置'],
+              ['final', '尾部集中推荐'],
+            ].map(([key, label]) => `<button type="button" class="btn ghost${tab === key ? ' active' : ''}" data-result-tab="${key}">${label}</button>`).join('')}
+          </div>
+          ${tab === 'dimension' ? renderDimensionResultConfig(dimensions, currentDimension) : ''}
+          ${tab === 'overall' ? renderOverallResultConfig(builder) : ''}
+          ${tab === 'final' ? renderFinalRecommendationConfig(builder) : ''}
+        </div>
+      `;
+      phoneStage.querySelectorAll('[data-result-tab]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.assessmentResultTab = button.dataset.resultTab;
+          renderWorkspace();
+        });
+      });
+      bindResultPageEvents(phoneStage);
+      setInspectorContent(
+        '结果配置',
+        '空配置也能进入编辑，课程链接第一版就是普通 URL。',
+        `<section class="config-group">
+          <div class="helper-note">总分分层是主结果；维度分类结果用于辅助诊断和分课程推荐；尾部集中推荐是统一转化入口。</div>
+          <button type="button" class="btn primary" data-next-step="preview" style="width:100%;margin-top:12px;">下一步：H5 预览 / 发布</button>
+        </section>`,
+      );
+      inspectorBodyEl.querySelector('[data-next-step]').addEventListener('click', () => setAssessmentTemplateStep('preview'));
+    }
+
+    function renderDimensionResultConfig(dimensions, currentDimension) {
+      const selectedType = selectedAssessmentType();
+      return `
+        <div class="template-grid-3">
+          <section class="template-panel">
+            <div class="template-panel-head"><div><h3>维度列表</h3><p>选择要配置结果的维度。</p></div></div>
+            <div class="template-panel-body"><div class="dimension-list">${renderDimensionCards(dimensions)}</div></div>
+          </section>
+          <section class="template-panel">
+            <div class="template-panel-head">
+              <div><h3>${escapeHtml(currentDimension?.name || '未选择维度')}：分类结果</h3><p>每个“维度 + 分类”都可以独立配置结果。</p></div>
+              <button type="button" class="btn secondary" id="v2-add-type" ${currentDimension ? '' : 'disabled'}>添加维度分类结果</button>
+            </div>
+            <div class="template-panel-body">
+              <div class="result-list-v2">
+                ${(currentDimension?.types || []).map((type) => `
+                  <button type="button" class="result-card-v2${type.key === state.selectedAssessmentTypeKey ? ' active' : ''}" data-type-key="${escapeHtml(type.key)}">
+                    <div class="dimension-card-title"><span>${escapeHtml(type.name)}</span><span class="template-status ${type.diagnosis || type.summary ? 'ok' : 'warn'}">${type.diagnosis || type.summary ? '已配置' : '待补充'}</span></div>
+                    <div class="template-muted">${escapeHtml(type.diagnosis || type.summary || '点击进入配置')}</div>
+                  </button>
+                `).join('') || '<div class="empty-state">当前维度还没有分类结果。</div>'}
+              </div>
+            </div>
+          </section>
+          <section class="template-panel">
+            <div class="template-panel-head"><div><h3>分类结果配置</h3><p>课程链接可为空，前端会自动隐藏按钮。</p></div></div>
+            <div class="template-panel-body">
+              ${selectedType ? renderTypeResultForm(selectedType) : '<div class="empty-state">选择或添加一个分类结果。</div>'}
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
+    function renderTypeResultForm(type) {
+      return `
+        <label class="field">分类名称<input data-type-result-field="name" value="${escapeHtml(type.name)}"></label>
+        <label class="field">结果标题<input data-type-result-field="title" value="${escapeHtml(type.title || type.name)}"></label>
+        <label class="field">寒暄话 / 开场话<textarea data-type-result-field="greeting">${escapeHtml(type.greeting || '')}</textarea></label>
+        <label class="field">诊断说明<textarea data-type-result-field="diagnosis">${escapeHtml(type.diagnosis || type.summary || '')}</textarea></label>
+        <label class="field">问题提醒<textarea data-type-result-field="problem_hint">${escapeHtml(type.problem_hint || '')}</textarea></label>
+        <label class="field">推荐动作<textarea data-type-result-field="recommended_action">${escapeHtml(type.recommended_action || '')}</textarea></label>
+        <label class="field">推荐课程名称<input data-type-result-field="course_name" value="${escapeHtml(type.course_name || '')}"></label>
+        <label class="field">推荐课程跳转链接<input data-type-result-field="course_url" value="${escapeHtml(type.course_url || '')}" placeholder="https://example.com/course"></label>
+        <label class="field">CTA 按钮文案<input data-type-result-field="cta_text" value="${escapeHtml(type.cta_text || '')}"></label>
+        <label class="field"><input data-type-result-field="enabled" type="checkbox" ${type.enabled !== false ? 'checked' : ''}> 启用</label>
+        <label class="field"><input data-type-result-field="show_in_result" type="checkbox" ${type.show_in_result !== false ? 'checked' : ''}> 展示在最终结果页</label>
+        <button type="button" class="link-btn danger" id="v2-remove-type">删除分类结果</button>
+      `;
+    }
+
+    function renderOverallResultConfig(builder) {
+      const selectedLevel = selectedOverallLevel();
+      return `
+        <div class="template-grid-2">
+          <section class="template-panel">
+            <div class="template-panel-head">
+              <div><h3>总分分层</h3><p>按 min_score <= total_score <= max_score 命中。</p></div>
+              <button type="button" class="btn secondary" id="v2-add-overall-level">添加分层</button>
+            </div>
+            <div class="template-panel-body">
+              <div class="result-list-v2">
+                ${(builder.overall_levels || []).map((level) => `
+                  <button type="button" class="tier-card-v2${level.local_key === state.selectedOverallLevelKey ? ' active' : ''}" data-overall-key="${escapeHtml(level.local_key)}">
+                    <div class="dimension-card-title"><span>${escapeHtml(level.title || '未命名分层')}</span><span>${escapeHtml(String(level.min_score ?? ''))} - ${escapeHtml(String(level.max_score ?? ''))}</span></div>
+                    <div class="template-muted">${escapeHtml(level.summary || '点击进入配置')}</div>
+                  </button>
+                `).join('') || '<div class="empty-state">还没有总分分层。</div>'}
+              </div>
+            </div>
+          </section>
+          <section class="template-panel">
+            <div class="template-panel-head"><div><h3>分层配置</h3><p>区间重叠会阻止保存；区间缺口会提醒。</p></div></div>
+            <div class="template-panel-body">
+              ${selectedLevel ? renderOverallLevelForm(selectedLevel) : '<div class="empty-state">选择或添加一个分层。</div>'}
+            </div>
+          </section>
+        </div>
+      `;
+    }
+
+    function renderOverallLevelForm(level) {
+      return `
+        <div class="field-grid compact">
+          <label class="field">最低分<input data-overall-field="min_score" type="number" step="1" value="${escapeHtml(String(level.min_score ?? ''))}"></label>
+          <label class="field">最高分<input data-overall-field="max_score" type="number" step="1" value="${escapeHtml(String(level.max_score ?? ''))}"></label>
+        </div>
+        <label class="field">分层名称<input data-overall-field="title" value="${escapeHtml(level.title || '')}"></label>
+        <label class="field">寒暄话 / 开场话<textarea data-overall-field="greeting">${escapeHtml(level.greeting || '')}</textarea></label>
+        <label class="field">总体诊断<textarea data-overall-field="summary">${escapeHtml(level.summary || '')}</textarea></label>
+        <label class="field">推荐动作<textarea data-overall-field="recommended_action">${escapeHtml(level.recommended_action || '')}</textarea></label>
+        <label class="field">推荐课程名称<input data-overall-field="course_name" value="${escapeHtml(level.course_name || '')}"></label>
+        <label class="field">推荐课程跳转链接<input data-overall-field="course_url" value="${escapeHtml(level.course_url || '')}" placeholder="https://example.com/course-main"></label>
+        <label class="field">CTA 按钮文案<input data-overall-field="cta_text" value="${escapeHtml(level.cta_text || '')}"></label>
+        <label class="field"><input data-overall-field="enabled" type="checkbox" ${level.enabled !== false ? 'checked' : ''}> 启用</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn ghost" id="v2-move-overall-up">上移</button>
+          <button type="button" class="btn ghost" id="v2-move-overall-down">下移</button>
+          <button type="button" class="link-btn danger" id="v2-remove-overall-level">删除分层</button>
+        </div>
+      `;
+    }
+
+    function renderFinalRecommendationConfig(builder) {
+      const finalRec = builder.final_recommendation || {};
+      return `
+        <div class="template-panel" style="max-width:840px;">
+          <div class="template-panel-head"><div><h3>尾部集中推荐</h3><p>展示在最终 H5 结果页底部，不影响总分和维度推荐。</p></div></div>
+          <div class="template-panel-body">
+            <label class="field"><input data-final-field="enabled" type="checkbox" ${finalRec.enabled ? 'checked' : ''}> 启用尾部集中推荐</label>
+            <label class="field">推荐区标题<input data-final-field="title" value="${escapeHtml(finalRec.title || '')}"></label>
+            <label class="field">推荐区说明<textarea data-final-field="description">${escapeHtml(finalRec.description || '')}</textarea></label>
+            <label class="field">推荐课程名称<input data-final-field="course_name" value="${escapeHtml(finalRec.course_name || '')}"></label>
+            <label class="field">推荐课程链接<input data-final-field="course_url" value="${escapeHtml(finalRec.course_url || '')}" placeholder="https://example.com/main-course"></label>
+            <label class="field">CTA 按钮文案<input data-final-field="cta_text" value="${escapeHtml(finalRec.cta_text || '')}"></label>
+          </div>
+        </div>
+      `;
+    }
+
+    function bindResultPageEvents(root) {
+      root.querySelectorAll('[data-dimension-key]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.selectedDimensionKey = button.dataset.dimensionKey;
+          state.selectedAssessmentTypeKey = '';
+          renderWorkspace();
+        });
+      });
+      root.querySelector('#v2-add-type')?.addEventListener('click', () => {
+        const dimension = selectedAssessmentDimension();
+        if (!dimension) return;
+        const key = uniqueAssessmentKey(`type_${(dimension.types || []).length + 1}`, (dimension.types || []).map((type) => type.key));
+        const type = createAssessmentType({ key, name: `分类 ${dimension.types.length + 1}` }, dimension.types.length);
+        dimension.types.push(type);
+        state.selectedAssessmentTypeKey = type.key;
+        renderWorkspace();
+      });
+      root.querySelectorAll('[data-type-key]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.selectedAssessmentTypeKey = button.dataset.typeKey;
+          renderWorkspace();
+        });
+      });
+      root.querySelectorAll('[data-type-result-field]').forEach((input) => {
+        input.addEventListener('input', (event) => updateTypeResultField(input, event));
+        input.addEventListener('change', (event) => updateTypeResultField(input, event));
+      });
+      root.querySelector('#v2-remove-type')?.addEventListener('click', () => {
+        const dimension = selectedAssessmentDimension();
+        if (!dimension || !state.selectedAssessmentTypeKey) return;
+        if (!window.confirm('确认删除这个维度分类结果吗？相关选项上的分类会被清空。')) return;
+        state.questionnaire.questions.forEach((question) => {
+          if (question.assessment_dimension_key !== dimension.key) return;
+          (question.options || []).forEach((option) => {
+            if (option.assessment_type_key === state.selectedAssessmentTypeKey) option.assessment_type_key = '';
+          });
+        });
+        dimension.types = dimension.types.filter((type) => type.key !== state.selectedAssessmentTypeKey);
+        state.selectedAssessmentTypeKey = dimension.types[0]?.key || '';
+        renderWorkspace();
+      });
+      root.querySelector('#v2-add-overall-level')?.addEventListener('click', () => {
+        const builder = ensureAssessmentBuilder();
+        const level = createAssessmentLevel({ title: `分层 ${builder.overall_levels.length + 1}` }, builder.overall_levels.length);
+        builder.overall_levels.push(level);
+        state.selectedOverallLevelKey = level.local_key;
+        renderWorkspace();
+      });
+      root.querySelectorAll('[data-overall-key]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.selectedOverallLevelKey = button.dataset.overallKey;
+          renderWorkspace();
+        });
+      });
+      root.querySelectorAll('[data-overall-field]').forEach((input) => {
+        input.addEventListener('input', (event) => updateOverallField(input, event));
+        input.addEventListener('change', (event) => updateOverallField(input, event));
+      });
+      root.querySelector('#v2-remove-overall-level')?.addEventListener('click', () => {
+        const builder = ensureAssessmentBuilder();
+        if (!state.selectedOverallLevelKey) return;
+        if (!window.confirm('确认删除这个总分分层吗？')) return;
+        builder.overall_levels = builder.overall_levels.filter((level) => level.local_key !== state.selectedOverallLevelKey);
+        state.selectedOverallLevelKey = builder.overall_levels[0]?.local_key || '';
+        renderWorkspace();
+      });
+      root.querySelector('#v2-move-overall-up')?.addEventListener('click', () => moveOverallLevelV2(-1));
+      root.querySelector('#v2-move-overall-down')?.addEventListener('click', () => moveOverallLevelV2(1));
+      root.querySelectorAll('[data-final-field]').forEach((input) => {
+        input.addEventListener('input', (event) => updateFinalRecommendationField(input, event));
+        input.addEventListener('change', (event) => updateFinalRecommendationField(input, event));
+      });
+    }
+
+    function updateTypeResultField(input, event) {
+      const type = selectedAssessmentType();
+      if (!type) return;
+      const field = input.dataset.typeResultField;
+      type[field] = input.type === 'checkbox' ? event.target.checked : event.target.value;
+      if (field === 'diagnosis') type.summary = event.target.value;
+      updateDraftIndicator();
+    }
+
+    function updateOverallField(input, event) {
+      const level = selectedOverallLevel();
+      if (!level) return;
+      const field = input.dataset.overallField;
+      level[field] = input.type === 'checkbox' ? event.target.checked : event.target.value;
+      updateDraftIndicator();
+    }
+
+    function updateFinalRecommendationField(input, event) {
+      const builder = ensureAssessmentBuilder();
+      builder.final_recommendation = builder.final_recommendation || {};
+      const field = input.dataset.finalField;
+      builder.final_recommendation[field] = input.type === 'checkbox' ? event.target.checked : event.target.value;
+      updateDraftIndicator();
+    }
+
+    function moveOverallLevelV2(direction) {
+      const builder = ensureAssessmentBuilder();
+      const index = builder.overall_levels.findIndex((level) => level.local_key === state.selectedOverallLevelKey);
+      const next = index + direction;
+      if (index < 0 || next < 0 || next >= builder.overall_levels.length) return;
+      const items = [...builder.overall_levels];
+      const [moved] = items.splice(index, 1);
+      items.splice(next, 0, moved);
+      builder.overall_levels = items.map((level, levelIndex) => ({ ...level, sort_order: levelIndex + 1 }));
+      renderWorkspace();
+    }
+
+    function renderAssessmentPreviewPage() {
+      const { builder, dimensions, currentDimension } = ensureAssessmentEditorState();
+      const phoneStage = document.querySelector('.phone-stage');
+      const previewQuestions = state.assessmentPreviewMode === 'dimension' && currentDimension
+        ? questionsForDimension(currentDimension.key)
+        : state.questionnaire.questions;
+      phoneStage.innerHTML = `
+        <div class="template-page">
+          <div class="template-page-head">
+            <div>
+              <h2>H5 预览 / 发布</h2>
+              <p>这里只做最终预览。手机内部滚动，所有题目的所有选项都会完整展示。</p>
+            </div>
+            <button type="button" class="btn primary" id="v2-publish-save">保存并发布</button>
+          </div>
+          <div class="template-grid-2" style="grid-template-columns:minmax(480px,1fr) 380px;">
+            <section class="template-panel">
+              <div class="template-panel-body">
+                <div class="phone-preview-v2"><div class="phone-screen-v2">
+                  <div class="phone-notch-v2"></div>
+                  ${state.assessmentPreviewMode === 'result' ? renderH5ResultPreview(builder, dimensions) : renderH5QuestionPreview(previewQuestions)}
+                </div></div>
+              </div>
+            </section>
+            <section class="template-panel">
+              <div class="template-panel-head"><div><h3>预览控制</h3><p>模拟不同问卷范围和结果页命中。</p></div></div>
+              <div class="template-panel-body">
+                <label class="field">预览范围
+                  <select id="v2-preview-mode">
+                    <option value="full" ${state.assessmentPreviewMode === 'full' ? 'selected' : ''}>预览完整问卷</option>
+                    <option value="dimension" ${state.assessmentPreviewMode === 'dimension' ? 'selected' : ''}>只预览当前维度</option>
+                    <option value="result" ${state.assessmentPreviewMode === 'result' ? 'selected' : ''}>预览结果页</option>
+                  </select>
+                </label>
+                <label class="field">当前维度
+                  <select id="v2-preview-dimension">
+                    ${dimensions.map((dimension) => `<option value="${escapeHtml(dimension.key)}" ${dimension.key === state.selectedDimensionKey ? 'selected' : ''}>${escapeHtml(dimension.name)}</option>`).join('')}
+                  </select>
+                </label>
+                <label class="field">总分分层
+                  <select id="v2-preview-overall">
+                    ${(builder.overall_levels || []).map((level) => `<option value="${escapeHtml(level.local_key)}" ${level.local_key === state.selectedOverallLevelKey ? 'selected' : ''}>${escapeHtml(level.title || '未命名分层')}</option>`).join('')}
+                  </select>
+                </label>
+                <button type="button" class="btn ghost" id="v2-save-draft" style="width:100%;margin-top:8px;">保存草稿</button>
+              </div>
+            </section>
+          </div>
+        </div>
+      `;
+      phoneStage.querySelector('#v2-preview-mode').addEventListener('change', (event) => {
+        state.assessmentPreviewMode = event.target.value;
+        renderWorkspace();
+      });
+      phoneStage.querySelector('#v2-preview-dimension').addEventListener('change', (event) => {
+        state.selectedDimensionKey = event.target.value;
+        renderWorkspace();
+      });
+      phoneStage.querySelector('#v2-preview-overall').addEventListener('change', (event) => {
+        state.selectedOverallLevelKey = event.target.value;
+        renderWorkspace();
+      });
+      phoneStage.querySelector('#v2-save-draft').addEventListener('click', () => saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true)));
+      phoneStage.querySelector('#v2-publish-save').addEventListener('click', () => saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true)));
+      setInspectorContent(
+        'H5 预览 / 发布',
+        '预览页不承担题目和结果配置主职责。',
+        `<section class="config-group"><div class="helper-note">如果 Q01 有 4 个选项，这里会完整显示 4 个；高度不够时手机内部滚动。</div></section>`,
+      );
+    }
+
+    function renderH5QuestionPreview(questions) {
+      return `
+        <div class="h5-card-v2">
+          <span class="question-type">测评模板预览</span>
+          <h3 style="margin:8px 0 6px;">${escapeHtml(state.questionnaire.title || '问卷标题')}</h3>
+          <p class="template-muted">${escapeHtml(state.questionnaire.description || '问卷简介')}</p>
+        </div>
+        ${questions.map((question, index) => `
+          <div class="h5-question-v2">
+            <div class="question-meta-row"><span>Q${String(index + 1).padStart(2, '0')} / ${escapeHtml(formatAssessmentDimensionName(question.assessment_dimension_key) || '未分组维度')}</span><span>${escapeHtml(formatQuestionType(question.type))}</span></div>
+            <strong>${escapeHtml(question.title || '题目标题')}</strong>
+            ${['textarea', 'mobile'].includes(question.type)
+              ? `<div class="h5-option-v2"><span>${escapeHtml(question.placeholder_text || '开放输入')}</span></div>`
+              : (question.options || []).map((option) => `<div class="h5-option-v2"><span>${escapeHtml(option.option_text || '选项')}</span><small>${escapeHtml(formatAssessmentTypeName(question.assessment_dimension_key, option.assessment_type_key) || option.assessment_type_key || '未分类')} / ${escapeHtml(String(option.score ?? 0))}分</small></div>`).join('')}
+          </div>
+        `).join('') || '<div class="empty-state">暂无题目</div>'}
+      `;
+    }
+
+    function renderH5ResultPreview(builder, dimensions) {
+      const level = selectedOverallLevel() || {};
+      const finalRec = builder.final_recommendation || {};
+      return `
+        <div class="h5-card-v2">
+          <span class="question-type">测评结果</span>
+          <h3 style="margin:8px 0 6px;">${escapeHtml(level.greeting || level.title || '总分分层结果')}</h3>
+          <p class="template-muted">${escapeHtml(level.summary || '这里展示总体诊断说明。')}</p>
+          ${level.course_url ? `<a class="btn primary" style="margin-top:10px;width:100%;" href="${escapeHtml(level.course_url)}">${escapeHtml(level.cta_text || '查看推荐课程')}</a>` : ''}
+        </div>
+        ${dimensions.filter((dimension) => dimension.show_in_result !== false).map((dimension) => {
+          const type = (dimension.types || [])[0] || {};
+          return `<div class="h5-result-card-v2">
+            <strong>${escapeHtml(dimension.name)}：${escapeHtml(type.title || type.name || '未分类')}</strong>
+            <p class="template-muted">${escapeHtml(type.diagnosis || type.summary || '暂未配置该分类结果。')}</p>
+            ${type.recommended_action ? `<p class="template-muted">${escapeHtml(type.recommended_action)}</p>` : ''}
+            ${type.course_url ? `<a class="btn ghost" style="margin-top:8px;width:100%;" href="${escapeHtml(type.course_url)}">${escapeHtml(type.cta_text || '查看课程')}</a>` : ''}
+          </div>`;
+        }).join('')}
+        ${finalRec.enabled ? `<div class="h5-card-v2">
+          <strong>${escapeHtml(finalRec.title || '下一步建议')}</strong>
+          <p class="template-muted">${escapeHtml(finalRec.description || '')}</p>
+          ${finalRec.course_url ? `<a class="btn primary" style="margin-top:10px;width:100%;" href="${escapeHtml(finalRec.course_url)}">${escapeHtml(finalRec.cta_text || '查看完整课程')}</a>` : ''}
+        </div>` : ''}
+      `;
+    }
+
+    function renderAssessmentTemplateWorkspaceV2() {
+      ensureAssessmentEditorState();
+      renderTopbar();
+      renderAssessmentStepNav();
+      if (state.assessmentStep === 'basic') renderAssessmentBasicPage();
+      else if (state.assessmentStep === 'dimensions') renderAssessmentDimensionsPage();
+      else if (state.assessmentStep === 'results') renderAssessmentResultsPage();
+      else renderAssessmentPreviewPage();
+      renderList();
+      updateDraftIndicator();
+    }
+
     function renderInspector() {
+      if (editorConfig.defaultAssessment) {
+        if (state.assessmentStep === 'basic') renderAssessmentBasicPage();
+        else if (state.assessmentStep === 'dimensions') renderAssessmentDimensionsPage();
+        else if (state.assessmentStep === 'results') renderAssessmentResultsPage();
+        else renderAssessmentPreviewPage();
+        return;
+      }
       if (state.ruleMode) {
         const rule = currentRule();
         renderRuleInspector(rule);
@@ -4122,6 +5422,10 @@
     }
 
     function renderWorkspace() {
+      if (editorConfig.defaultAssessment) {
+        renderAssessmentTemplateWorkspaceV2();
+        return;
+      }
       renderTopbar();
       renderPreview();
       renderInspector();
@@ -4276,7 +5580,67 @@
       showToast(`已添加“${templateReference.name}”整组测评模板`);
     }
 
+    function validateUrlField(value, label) {
+      const text = String(value || '').trim();
+      if (!text) return;
+      try {
+        const parsed = new URL(text);
+        if (!['http:', 'https:'].includes(parsed.protocol)) {
+          throw new Error(`${label}必须以 http:// 或 https:// 开头`);
+        }
+      } catch (error) {
+        if (error && /必须/.test(error.message || '')) throw error;
+        throw new Error(`${label}格式不正确，请填写完整链接或留空`);
+      }
+    }
+
+    function validateAssessmentConfigBeforeSave() {
+      if (!state.questionnaire?.assessment_enabled) return;
+      const builder = ensureAssessmentBuilder();
+      (builder.overall_levels || []).forEach((level, index) => {
+        const min = level.min_score === '' || level.min_score === null ? null : Number(level.min_score);
+        const max = level.max_score === '' || level.max_score === null ? null : Number(level.max_score);
+        if (min === null || Number.isNaN(min)) {
+          throw new Error(`总分分层“${level.title || `分层 ${index + 1}`}”的最低分必须填写数字`);
+        }
+        if (max === null || Number.isNaN(max)) {
+          throw new Error(`总分分层“${level.title || `分层 ${index + 1}`}”的最高分必须填写数字`);
+        }
+        if (max < min) {
+          throw new Error(`总分分层“${level.title || `分层 ${index + 1}`}”的最高分必须大于等于最低分`);
+        }
+        validateUrlField(level.course_url, `总分分层“${level.title || `分层 ${index + 1}`}”的课程链接`);
+      });
+      const enabledLevels = (builder.overall_levels || [])
+        .filter((level) => level.enabled !== false)
+        .map((level, index) => ({
+          index,
+          title: level.title || `分层 ${index + 1}`,
+          min: Number(level.min_score),
+          max: Number(level.max_score),
+        }))
+        .sort((left, right) => left.min - right.min);
+      for (let index = 1; index < enabledLevels.length; index += 1) {
+        const previous = enabledLevels[index - 1];
+        const current = enabledLevels[index];
+        if (current.min <= previous.max) {
+          throw new Error(`总分分层区间重叠：“${previous.title}”和“${current.title}”分数范围有交叉，请调整后保存`);
+        }
+      }
+      const hasGap = enabledLevels.some((level, index) => index > 0 && level.min > enabledLevels[index - 1].max + 1);
+      if (hasGap) {
+        showToast('总分分层存在分数缺口。可以保存，但未命中的分数会在 H5 结果页使用兜底结果。');
+      }
+      (builder.dimensions || []).forEach((dimension) => {
+        (dimension.types || []).forEach((type) => {
+          validateUrlField(type.course_url, `维度“${dimension.name}”分类“${type.name}”的课程链接`);
+        });
+      });
+      validateUrlField(builder.final_recommendation?.course_url, '尾部集中推荐课程链接');
+    }
+
     async function saveQuestionnaire() {
+      validateAssessmentConfigBeforeSave();
       const wasEditing = Boolean(state.currentId);
       const payload = serializePayload();
       const url = state.currentId ? `/api/admin/questionnaires/${state.currentId}` : '/api/admin/questionnaires';
@@ -4329,18 +5693,18 @@
         renderList();
       });
     }
-    document.getElementById('add-single').addEventListener('click', () => addQuestion('single_choice'));
-    document.getElementById('add-multi').addEventListener('click', () => addQuestion('multi_choice'));
-    document.getElementById('add-textarea').addEventListener('click', () => addQuestion('textarea'));
-    document.getElementById('add-mobile').addEventListener('click', () => {
+    document.getElementById('add-single')?.addEventListener('click', () => addQuestion('single_choice'));
+    document.getElementById('add-multi')?.addEventListener('click', () => addQuestion('multi_choice'));
+    document.getElementById('add-textarea')?.addEventListener('click', () => addQuestion('textarea'));
+    document.getElementById('add-mobile')?.addEventListener('click', () => {
       if (editorConfig.defaultAssessment) {
         applyAssessmentPreset();
         return;
       }
       addQuestion('mobile');
     });
-    document.getElementById('open-assessment-settings').addEventListener('click', () => openAssessmentSettings());
-    document.getElementById('add-rule').addEventListener('click', () => {
+    document.getElementById('open-assessment-settings')?.addEventListener('click', () => openAssessmentSettings());
+    document.getElementById('add-rule')?.addEventListener('click', () => {
       if (editorConfig.defaultAssessment) {
         selectAssessmentSettings();
         return;

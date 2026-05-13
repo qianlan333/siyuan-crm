@@ -746,6 +746,9 @@ def _assessment_dimension_configs(config: dict[str, Any]) -> list[dict[str, Any]
                 "key": key,
                 "name": str(item.get("name") or item.get("title") or key).strip(),
                 "sort_order": int(item.get("sort_order") or index),
+                "enabled": _normalize_bool(item.get("enabled", True)),
+                "participates_in_total_score": _normalize_bool(item.get("participates_in_total_score", True)),
+                "show_in_result": _normalize_bool(item.get("show_in_result", True)),
             }
         )
     dimensions.sort(key=lambda item: (int(item.get("sort_order") or 0), str(item.get("key") or "")))
@@ -767,6 +770,17 @@ def _assessment_types_map(dimension_config: dict[str, Any]) -> dict[str, dict[st
             **item,
             "key": key,
             "name": str(item.get("name") or item.get("title") or key).strip(),
+            "title": str(item.get("title") or item.get("name") or key).strip(),
+            "greeting": str(item.get("greeting") or "").strip(),
+            "diagnosis": str(item.get("diagnosis") or item.get("summary") or item.get("description") or "").strip(),
+            "problem_hint": str(item.get("problem_hint") or "").strip(),
+            "recommended_action": str(item.get("recommended_action") or "").strip(),
+            "course_name": str(item.get("course_name") or "").strip(),
+            "course_url": str(item.get("course_url") or item.get("cta_url") or "").strip(),
+            "cta_text": str(item.get("cta_text") or "").strip(),
+            "enabled": _normalize_bool(item.get("enabled", True)),
+            "show_in_result": _normalize_bool(item.get("show_in_result", True)),
+            "sort_order": int(item.get("sort_order") or len(type_map) + 1),
             "tag_codes": _normalize_tag_codes(item.get("tag_codes")),
         }
     return type_map
@@ -797,7 +811,13 @@ def _match_assessment_level(levels: Any, *, score: float, score_percent: float |
             "key": str(item.get("key") or item.get("level_key") or "").strip(),
             "name": str(item.get("name") or item.get("title") or item.get("label") or "").strip(),
             "title": str(item.get("title") or item.get("name") or item.get("label") or "").strip(),
-            "summary": str(item.get("summary") or item.get("description") or "").strip(),
+            "greeting": str(item.get("greeting") or "").strip(),
+            "summary": str(item.get("summary") or item.get("description") or item.get("diagnosis") or "").strip(),
+            "recommended_action": str(item.get("recommended_action") or "").strip(),
+            "course_name": str(item.get("course_name") or "").strip(),
+            "course_url": str(item.get("course_url") or item.get("cta_url") or "").strip(),
+            "cta_text": str(item.get("cta_text") or "").strip(),
+            "enabled": _normalize_bool(item.get("enabled", True)),
             "tag_codes": _normalize_tag_codes(item.get("tag_codes")),
         }
     return None
@@ -815,6 +835,8 @@ def _assessment_question_max_score(question: dict[str, Any]) -> float:
 
 def _select_assessment_type(
     type_counts: dict[str, int],
+    type_scores: dict[str, float],
+    type_sort_orders: dict[str, int],
     dimension_config: dict[str, Any],
     type_map: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
@@ -822,6 +844,12 @@ def _select_assessment_type(
         return {}
     top_count = max(type_counts.values())
     candidates = {key for key, count in type_counts.items() if count == top_count}
+    if len(candidates) > 1:
+        top_score = max(float(type_scores.get(key) or 0) for key in candidates)
+        candidates = {key for key in candidates if float(type_scores.get(key) or 0) == top_score}
+    if len(candidates) > 1:
+        best_sort_order = min(int(type_sort_orders.get(key) or 999999) for key in candidates)
+        candidates = {key for key in candidates if int(type_sort_orders.get(key) or 999999) == best_sort_order}
     priority = [str(item or "").strip() for item in dimension_config.get("type_priority") or []]
     if not priority:
         priority = list(type_map.keys())
@@ -836,8 +864,19 @@ def _select_assessment_type(
     return {
         "key": dominant_key,
         "name": str(type_config.get("name") or dominant_key).strip(),
+        "title": str(type_config.get("title") or type_config.get("name") or dominant_key).strip(),
         "count": int(type_counts[dominant_key]),
-        "summary": str(type_config.get("summary") or type_config.get("description") or "").strip(),
+        "score": float(type_scores.get(dominant_key) or 0),
+        "greeting": str(type_config.get("greeting") or "").strip(),
+        "summary": str(type_config.get("summary") or type_config.get("diagnosis") or type_config.get("description") or "").strip(),
+        "diagnosis": str(type_config.get("diagnosis") or type_config.get("summary") or type_config.get("description") or "").strip(),
+        "problem_hint": str(type_config.get("problem_hint") or "").strip(),
+        "recommended_action": str(type_config.get("recommended_action") or "").strip(),
+        "course_name": str(type_config.get("course_name") or "").strip(),
+        "course_url": str(type_config.get("course_url") or type_config.get("cta_url") or "").strip(),
+        "cta_text": str(type_config.get("cta_text") or "").strip(),
+        "enabled": _normalize_bool(type_config.get("enabled", True)),
+        "show_in_result": _normalize_bool(type_config.get("show_in_result", True)),
         "tag_codes": _normalize_tag_codes(type_config.get("tag_codes")),
     }
 
@@ -880,6 +919,24 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
     config = _normalize_questionnaire_assessment_config(questionnaire.get("assessment_config"))
     dimension_config_by_key = _assessment_dimension_by_key(config)
     dimension_order = list(dimension_config_by_key.keys())
+    default_dimension_key = "ungrouped"
+    has_ungrouped_question = any(
+        str((item.get("question") or {}).get("type") or "").strip() in {"single_choice", "multi_choice"}
+        and not str((item.get("question") or {}).get("assessment_dimension_key") or "").strip()
+        for item in validated_answers
+    )
+    if has_ungrouped_question and default_dimension_key not in dimension_config_by_key:
+        dimension_config_by_key[default_dimension_key] = {
+            "key": default_dimension_key,
+            "name": "未分组维度",
+            "sort_order": len(dimension_order) + 1,
+            "enabled": True,
+            "participates_in_total_score": True,
+            "show_in_result": True,
+            "types": [],
+            "type_priority": [],
+        }
+        dimension_order.append(default_dimension_key)
     accumulator: dict[str, dict[str, Any]] = {}
 
     def ensure_dimension(key: str) -> dict[str, Any]:
@@ -897,6 +954,8 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
                 "max_score": 0.0,
                 "answer_count": 0,
                 "type_counts": {},
+                "type_scores": {},
+                "type_sort_orders": {},
             }
         return accumulator[key]
 
@@ -908,9 +967,7 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
         question_type = str(question.get("type") or "").strip()
         if question_type not in {"single_choice", "multi_choice"}:
             continue
-        dimension_key = str(question.get("assessment_dimension_key") or "").strip()
-        if not dimension_key:
-            continue
+        dimension_key = str(question.get("assessment_dimension_key") or "").strip() or default_dimension_key
         bucket = ensure_dimension(dimension_key)
         selected_options = item.get("selected_options") or []
         bucket["max_score"] += _assessment_question_max_score(question)
@@ -919,21 +976,46 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
         if selected_options:
             bucket["answer_count"] += 1
         type_counts = bucket["type_counts"]
+        type_scores = bucket["type_scores"]
+        type_sort_orders = bucket["type_sort_orders"]
         for option in selected_options:
             type_key = str(option.get("assessment_type_key") or "").strip()
             if not type_key:
+                type_key = "unknown"
+                type_sort_orders.setdefault(type_key, 999999)
+            else:
+                type_sort_orders[type_key] = min(
+                    int(type_sort_orders.get(type_key) or 999999),
+                    int(option.get("sort_order") or 999999),
+                )
+            if not type_key:
                 continue
             type_counts[type_key] = int(type_counts.get(type_key) or 0) + 1
+            type_scores[type_key] = float(type_scores.get(type_key) or 0) + float(option.get("score") or 0)
 
     dimensions: list[dict[str, Any]] = []
     assessment_tag_codes: list[str] = []
     for key, bucket in accumulator.items():
         cfg = dimension_config_by_key.get(key) or {"key": key, "name": bucket["name"]}
         type_map = _assessment_types_map(cfg)
+        if "unknown" in (bucket.get("type_counts") or {}) and "unknown" not in type_map:
+            type_map["unknown"] = {
+                "key": "unknown",
+                "name": "未分类",
+                "title": "未分类",
+                "summary": "该维度暂未配置明确分类结果。",
+                "tag_codes": [],
+            }
         max_score = float(bucket.get("max_score") or 0)
         score = float(bucket.get("score") or 0)
         score_percent = round(score / max_score * 100, 2) if max_score > 0 else None
-        dominant_type = _select_assessment_type(bucket.get("type_counts") or {}, cfg, type_map)
+        dominant_type = _select_assessment_type(
+            bucket.get("type_counts") or {},
+            bucket.get("type_scores") or {},
+            bucket.get("type_sort_orders") or {},
+            cfg,
+            type_map,
+        )
         dimension_level = _match_assessment_level(
             cfg.get("levels") or cfg.get("score_levels"),
             score=score,
@@ -946,6 +1028,9 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
             {
                 "key": key,
                 "name": str(cfg.get("name") or bucket["name"] or key).strip(),
+                "enabled": _normalize_bool(cfg.get("enabled", True)),
+                "participates_in_total_score": _normalize_bool(cfg.get("participates_in_total_score", True)),
+                "show_in_result": _normalize_bool(cfg.get("show_in_result", True)),
                 "score": score,
                 "max_score": max_score,
                 "score_percent": score_percent,
@@ -962,11 +1047,18 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
         )
 
     dimensions.sort(key=lambda item: (int((dimension_config_by_key.get(item["key"]) or {}).get("sort_order") or 0), item["key"]))
-    total_score = sum(float(item.get("score") or 0) for item in dimensions)
-    total_max_score = sum(float(item.get("max_score") or 0) for item in dimensions)
+    total_score = sum(float(item.get("score") or 0) for item in dimensions if item.get("participates_in_total_score") is not False)
+    total_max_score = sum(float(item.get("max_score") or 0) for item in dimensions if item.get("participates_in_total_score") is not False)
     overall_level = _match_assessment_level(config.get("overall_levels"), score=total_score)
     if overall_level:
         assessment_tag_codes.extend(_normalize_tag_codes(overall_level.get("tag_codes")))
+    else:
+        overall_level = {
+            "key": "fallback",
+            "name": "暂未命中分层",
+            "title": "暂未命中分层",
+            "summary": "当前总分没有命中已配置的分数区间，请联系管理员完善分层配置。",
+        }
 
     ranked = sorted(
         dimensions,
@@ -995,6 +1087,7 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
         "recommendations": [
             {key: value for key, value in item.items() if key != "tag_codes"} for item in recommendations
         ],
+        "final_recommendation": config.get("final_recommendation") if isinstance(config.get("final_recommendation"), dict) else {},
         "tag_codes": _dedupe_strings(assessment_tag_codes),
     }
 

@@ -2837,7 +2837,12 @@ def _build_assessment_questionnaire_payload(**overrides) -> dict:
                 "min_score": 5,
                 "max_score": 99,
                 "title": "进阶型",
+                "greeting": "你已经有基础商业动作。",
                 "summary": "已经有基础动作，可以继续补短板。",
+                "recommended_action": "先把成交和维护动作标准化。",
+                "course_name": "AI 私域商业闭环课",
+                "course_url": "https://example.com/main-course",
+                "cta_text": "领取提升方案",
                 "tag_codes": ["assessment_high"],
             },
         ],
@@ -2848,7 +2853,19 @@ def _build_assessment_questionnaire_payload(**overrides) -> dict:
                 "type_priority": ["push", "passive"],
                 "types": [
                     {"key": "passive", "name": "被动型"},
-                    {"key": "push", "name": "推销型", "summary": "成交动作主动但需要更稳。", "tag_codes": ["assessment_deal_push"]},
+                    {
+                        "key": "push",
+                        "name": "推销型",
+                        "title": "成交推进型",
+                        "greeting": "你已经愿意主动推进成交。",
+                        "summary": "成交动作主动但需要更稳。",
+                        "diagnosis": "成交动作主动但节奏还需要标准化。",
+                        "recommended_action": "整理异议处理和跟进话术。",
+                        "course_name": "成交话术 SOP 课",
+                        "course_url": "https://example.com/deal-course",
+                        "cta_text": "学习成交话术",
+                        "tag_codes": ["assessment_deal_push"],
+                    },
                 ],
                 "levels": [
                     {"min_score": 3, "max_score": 5, "title": "成交可用", "tag_codes": ["assessment_deal_ok"]},
@@ -2873,6 +2890,14 @@ def _build_assessment_questionnaire_payload(**overrides) -> dict:
                 "tag_codes": ["assessment_reco_maintain"],
             }
         ],
+        "final_recommendation": {
+            "enabled": True,
+            "title": "下一步建议",
+            "description": "把获客、维护和成交一次搭起来。",
+            "course_name": "小 IP 商业闭环训练营",
+            "course_url": "https://example.com/final-course",
+            "cta_text": "查看完整课程",
+        },
     }
     payload["questions"][0]["assessment_dimension_key"] = "deal"
     payload["questions"][0]["options"][0]["assessment_type_key"] = "passive"
@@ -3362,7 +3387,6 @@ def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client,
             "assessment_high",
             "assessment_deal_push",
             "assessment_deal_ok",
-            "assessment_maintain_nurture",
             "assessment_reco_maintain",
         }.issubset(set(final_tags))
         snapshot = (
@@ -3372,17 +3396,24 @@ def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client,
         )
         assert snapshot["enabled"] is True
         assert snapshot["overall_level"]["title"] == "进阶型"
+        assert snapshot["overall_level"]["course_url"] == "https://example.com/main-course"
+        assert snapshot["overall_level"]["recommended_action"] == "先把成交和维护动作标准化。"
         assert [item["key"] for item in snapshot["dimensions"]] == ["deal", "maintain"]
         assert snapshot["dimensions"][0]["dominant_type"]["name"] == "推销型"
-        assert snapshot["dimensions"][1]["dominant_type"]["name"] == "养鱼型"
+        assert snapshot["dimensions"][0]["dominant_type"]["course_url"] == "https://example.com/deal-course"
+        assert snapshot["dimensions"][1]["dominant_type"]["name"] == "暖男女型"
+        assert snapshot["final_recommendation"]["course_url"] == "https://example.com/final-course"
 
     result_page = client.get(submit_result["result_url"])
     body = result_page.get_data(as_text=True)
     assert result_page.status_code == 200
     assert "进阶型" in body
+    assert "领取提升方案" in body
     assert "成交能力" in body
+    assert "成交话术 SOP 课" in body
     assert "用户维护" in body
-    assert "养鱼型" in body
+    assert "暖男女型" in body
+    assert "小 IP 商业闭环训练营" in body
 
 
 def test_questionnaire_submit_prefers_session_identity(client, app):

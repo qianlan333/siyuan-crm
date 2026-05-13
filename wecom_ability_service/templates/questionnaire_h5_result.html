@@ -159,13 +159,25 @@
   <main class="page">
     <section class="hero">
       <p class="eyebrow">测评结果</p>
-      <h1>{{ level.title or level.name or result_payload.questionnaire.title }}</h1>
+      <h1>{{ level.greeting or level.title or level.name or result_payload.questionnaire.title }}</h1>
       <div class="score">
         <strong>{{ "%.0f"|format(result.total_score or 0) }}</strong>
         <span>总分{% if result.total_max_score %} / {{ "%.0f"|format(result.total_max_score) }}{% endif %}</span>
       </div>
+      {% if level.title or level.name %}
+        <p class="summary">{{ level.title or level.name }}</p>
+      {% endif %}
       {% if level.summary %}
         <p class="summary">{{ level.summary }}</p>
+      {% endif %}
+      {% if level.recommended_action %}
+        <p class="summary">{{ level.recommended_action }}</p>
+      {% endif %}
+      {% if level.course_name %}
+        <p class="summary">{{ level.course_name }}</p>
+      {% endif %}
+      {% if level.course_url %}
+        <a class="cta" href="{{ level.course_url }}">{{ level.cta_text or level.course_name or "查看推荐课程" }}</a>
       {% endif %}
     </section>
 
@@ -192,6 +204,7 @@
     <section class="section">
       <h2>维度详情</h2>
       {% for item in result.dimensions or [] %}
+        {% if item.enabled is not sameas false and item.show_in_result is not sameas false %}
         <article class="dimension">
           <div class="dimension-head">
             <div>
@@ -208,7 +221,20 @@
           {% if item.dominant_type and item.dominant_type.summary %}
             <p class="meta">{{ item.dominant_type.summary }}</p>
           {% endif %}
+          {% if item.dominant_type and item.dominant_type.problem_hint %}
+            <p class="meta">{{ item.dominant_type.problem_hint }}</p>
+          {% endif %}
+          {% if item.dominant_type and item.dominant_type.recommended_action %}
+            <p class="meta">{{ item.dominant_type.recommended_action }}</p>
+          {% endif %}
+          {% if item.dominant_type and item.dominant_type.course_name %}
+            <p class="meta">{{ item.dominant_type.course_name }}</p>
+          {% endif %}
+          {% if item.dominant_type and item.dominant_type.course_url %}
+            <a class="cta" href="{{ item.dominant_type.course_url }}">{{ item.dominant_type.cta_text or item.dominant_type.course_name or "查看推荐课程" }}</a>
+          {% endif %}
         </article>
+        {% endif %}
       {% endfor %}
     </section>
 
@@ -224,6 +250,22 @@
             {% endif %}
           </article>
         {% endfor %}
+      </section>
+    {% endif %}
+
+    {% set final_recommendation = result.final_recommendation or {} %}
+    {% if final_recommendation.enabled %}
+      <section class="section">
+        <h2>{{ final_recommendation.title or "下一步建议" }}</h2>
+        {% if final_recommendation.description %}
+          <p class="meta">{{ final_recommendation.description }}</p>
+        {% endif %}
+        {% if final_recommendation.course_name %}
+          <p class="meta">{{ final_recommendation.course_name }}</p>
+        {% endif %}
+        {% if final_recommendation.course_url %}
+          <a class="cta" href="{{ final_recommendation.course_url }}">{{ final_recommendation.cta_text or final_recommendation.course_name or "查看完整课程" }}</a>
+        {% endif %}
       </section>
     {% endif %}
   </main>

@@ -1099,9 +1099,326 @@
       box-shadow: 0 14px 28px rgba(15, 23, 42, 0.18);
     }
     .toast.error { background: rgba(245, 74, 69, 0.96); }
+    .topbar-subtitle {
+      display: none;
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* Directly align the assessment-template editor with the approved demo. */
+    body.assessment-template-mode {
+      --bg: #eef2f7;
+      --panel: #ffffff;
+      --line: #d9dee7;
+      --line-strong: #d9dee7;
+      --text: #17202a;
+      --muted: #667085;
+      --soft: #eaf1ff;
+      --primary: #2563eb;
+      --primary-strong: #2563eb;
+      --shadow: 0 18px 45px rgba(15, 23, 42, 0.09);
+      background: var(--bg);
+      font-family: "PingFang SC", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    }
+    .assessment-template-mode .shell {
+      padding: 0;
+      min-height: 100vh;
+    }
+    .assessment-template-mode .topbar {
+      max-width: none;
+      min-height: 90px;
+      margin: 0;
+      padding: 18px max(24px, calc((100vw - 1480px) / 2 + 24px));
+      border: 0;
+      border-bottom: 1px solid var(--line);
+      border-radius: 0;
+      background: rgba(238, 242, 247, 0.92);
+      box-shadow: none;
+    }
+    .assessment-template-mode .topbar h1 {
+      font-size: 23px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+    .assessment-template-mode .topbar-subtitle {
+      display: block;
+    }
+    .assessment-template-mode .draft-indicator {
+      background: var(--soft);
+      color: var(--primary);
+      border-radius: 8px;
+    }
+    .assessment-template-mode .btn {
+      border-radius: 8px;
+      min-height: 40px;
+      padding: 10px 14px;
+      box-shadow: none;
+    }
+    .assessment-template-mode .btn.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      box-shadow: none;
+    }
+    .assessment-template-mode .btn.ghost,
+    .assessment-template-mode .btn.secondary {
+      background: #fff;
+      color: var(--text);
+      border: 1px solid var(--line);
+    }
+    .assessment-template-mode .workspace {
+      max-width: 1480px;
+      padding: 22px 24px 42px;
+      grid-template-columns: 290px minmax(460px, 1fr) 390px;
+      gap: 16px;
+      align-items: stretch;
+    }
+    .assessment-template-mode .card {
+      border-radius: 8px;
+      border-color: #edf1f6;
+      background: #fff;
+      box-shadow: var(--shadow);
+      backdrop-filter: none;
+    }
+    .assessment-template-mode .sidebar,
+    .assessment-template-mode .inspector-column {
+      top: 92px;
+      max-height: calc(100vh - 116px);
+    }
+    .assessment-template-mode .section-card,
+    .assessment-template-mode .inspector-card {
+      padding: 16px;
+    }
+    .assessment-template-mode .section-head {
+      display: block;
+    }
+    .assessment-template-mode .section-head h3,
+    .assessment-template-mode .section-head h2,
+    .assessment-template-mode .inspector-card h2 {
+      font-size: 18px;
+      margin: 0 0 4px;
+    }
+    .assessment-template-mode .section-subtitle {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+      margin-bottom: 14px;
+    }
+    .assessment-template-mode #tag-catalog-message,
+    .assessment-template-mode #add-multi,
+    .assessment-template-mode #add-textarea {
+      display: none;
+    }
+    .assessment-template-mode #add-single { order: 1; }
+    .assessment-template-mode #open-assessment-settings { order: 2; }
+    .assessment-template-mode #add-rule { order: 3; }
+    .assessment-template-mode #add-mobile { order: 4; }
+    .assessment-template-mode .tool-grid {
+      gap: 9px;
+      margin-top: 14px;
+    }
+    .assessment-template-mode .tool-card {
+      border-radius: 8px;
+      background: #fffaf4;
+      border-color: #edf1f6;
+      padding: 13px;
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr);
+      align-items: center;
+    }
+    .assessment-template-mode .tool-card:hover {
+      border-color: #f0b5a7;
+    }
+    .assessment-template-mode .tool-card .tool-mark {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      background: var(--soft);
+      color: var(--primary);
+    }
+    .assessment-template-mode .phone-stage {
+      min-height: 690px;
+      padding: 22px;
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+    }
+    .assessment-template-mode .phone-frame {
+      width: min(100%, 430px);
+      border-radius: 8px;
+      padding: 14px;
+      background: #fbfcfe;
+      border: 1px solid #dfe6ef;
+      box-shadow: inset 0 0 0 10px #f7efe2, 0 14px 32px rgba(15, 23, 42, 0.08);
+    }
+    .assessment-template-mode .phone-topbar {
+      margin-bottom: 18px;
+    }
+    .assessment-template-mode .phone-notch {
+      width: 120px;
+      height: 16px;
+      background: #3d3328;
+    }
+    .assessment-template-mode .phone-screen {
+      min-height: 610px;
+      padding: 16px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid #dde7f5;
+      overflow: hidden;
+    }
+    .assessment-template-mode .preview-head {
+      padding: 0;
+      border: 0;
+      box-shadow: none;
+      background: transparent;
+      border-radius: 0;
+      margin-bottom: 14px;
+    }
+    .assessment-template-mode .preview-head.active {
+      box-shadow: none;
+      border-color: transparent;
+    }
+    .assessment-template-mode .preview-head .question-type {
+      margin-bottom: 10px;
+    }
+    .assessment-template-mode .preview-head h2 {
+      font-size: 20px;
+      margin: 0 0 7px;
+      letter-spacing: 0;
+    }
+    .assessment-template-mode .preview-head p {
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .assessment-template-mode .preview-stack {
+      gap: 10px;
+      margin-top: 14px;
+    }
+    .assessment-template-mode .preview-question,
+    .assessment-template-mode .preview-rule,
+    .assessment-template-mode .preview-template-group {
+      border-radius: 8px;
+      border-color: var(--line);
+      background: #fff;
+      padding: 12px;
+    }
+    .assessment-template-mode .preview-question.active,
+    .assessment-template-mode .preview-rule.active,
+    .assessment-template-mode .preview-template-group.active {
+      border-color: #f0b5a7;
+      background: #fff8f4;
+      box-shadow: none;
+    }
+    .assessment-template-mode .question-meta-row {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 5px;
+    }
+    .assessment-template-mode .preview-question h4 {
+      margin: 0;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .assessment-template-mode .preview-options {
+      margin-top: 9px;
+      gap: 7px;
+    }
+    .assessment-template-mode .option-pill {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      border-radius: 8px;
+      border-color: #f3e1ca;
+      background: #fff8ef;
+      padding: 8px 10px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .assessment-template-mode .option-pill small {
+      display: inline;
+      margin: 0;
+      white-space: nowrap;
+      font-size: 12px;
+    }
+    .assessment-template-mode .preview-footer-note {
+      display: none;
+    }
+    .assessment-template-mode .inspector-card {
+      position: sticky;
+      top: 92px;
+      max-height: calc(100vh - 116px);
+      height: auto;
+      overflow: auto;
+    }
+    .assessment-template-mode .config-group,
+    .assessment-template-mode .option-editor {
+      border-radius: 8px;
+      background: #fffaf4;
+      border: 1px solid #edf1f6;
+      padding: 13px;
+      margin-bottom: 12px;
+    }
+    .assessment-template-mode .option-editor {
+      background: #fff;
+      display: grid;
+      gap: 10px;
+    }
+    .assessment-template-mode .config-head {
+      margin-bottom: 10px;
+    }
+    .assessment-template-mode .config-head h3 {
+      font-size: 14px;
+    }
+    .assessment-template-mode .field input,
+    .assessment-template-mode .field textarea,
+    .assessment-template-mode .field select {
+      border-radius: 8px;
+      border-color: var(--line);
+      background: #fff;
+      min-height: 40px;
+    }
+    .assessment-template-mode .field textarea {
+      min-height: 78px;
+      resize: vertical;
+    }
+    .assessment-template-mode .field-grid.triple {
+      grid-template-columns: minmax(0, 1fr) 86px 128px;
+    }
+    .assessment-template-mode .tag-picker-host {
+      display: none;
+    }
+    .assessment-template-mode .assessment-template-note {
+      border: 1px dashed #c9dcff;
+      background: #f8fbff;
+      border-radius: 8px;
+      padding: 11px;
+      color: #475467;
+      font-size: 13px;
+      line-height: 1.7;
+      margin-top: 14px;
+    }
+    @media (max-width: 1220px) {
+      .assessment-template-mode .workspace {
+        grid-template-columns: 260px minmax(420px, 1fr);
+      }
+      .assessment-template-mode .inspector-column {
+        grid-column: 1 / -1;
+        position: static;
+        max-height: none;
+      }
+      .assessment-template-mode .inspector-card {
+        position: static;
+        max-height: none;
+      }
+    }
   </style>
 </head>
-<body>
+<body class="{% if editor_default_assessment %}assessment-template-mode{% endif %}">
   <div class="shell">
     <header class="topbar">
       <div class="topbar-meta-wrap">
@@ -1111,12 +1428,13 @@
             <h1 id="topbar-title">{{ editor_heading or "新建问卷" }}</h1>
             <span id="draft-indicator" class="draft-indicator hidden">未保存修改</span>
           </div>
+          <p id="topbar-subtitle" class="topbar-subtitle">{% if editor_default_assessment %}{{ editor_subtitle or "" }}{% endif %}</p>
         </div>
       </div>
       <div class="topbar-actions">
         <div id="editor-secondary-actions" class="header-actions"></div>
-        <button id="reset-btn" type="button" class="btn ghost">重置当前</button>
-        <button id="save-btn" type="button" class="btn primary">保存问卷</button>
+        <button id="reset-btn" type="button" class="btn ghost">{% if editor_default_assessment %}保存草稿{% else %}重置当前{% endif %}</button>
+        <button id="save-btn" type="button" class="btn primary">{% if editor_default_assessment %}创建测评问卷模板{% else %}保存问卷{% endif %}</button>
       </div>
     </header>
 
@@ -1126,14 +1444,14 @@
           <div class="section-head">
             <div>
               <h3>添加题目</h3>
-              <p class="section-subtitle">点击添加到当前问卷。</p>
+              <p class="section-subtitle">{% if editor_default_assessment %}这是专门创建测评模板的页面，左侧只放模板建设需要的动作。{% else %}点击添加到当前问卷。{% endif %}</p>
             </div>
           </div>
           <div id="tag-catalog-message" class="inline-alert hidden" style="margin-bottom:12px;">企微标签加载失败，可稍后重试或手工填写 tag_id</div>
           <div class="tool-grid">
             <button id="add-single" type="button" class="tool-card">
               <span class="tool-mark">单</span>
-              <span><strong>单选题</strong><span>只能选一个。</span></span>
+              <span><strong>{% if editor_default_assessment %}单选测评题{% else %}单选题{% endif %}</strong><span>{% if editor_default_assessment %}每个选项配置分数和类型{% else %}只能选一个。{% endif %}</span></span>
             </button>
             <button id="add-multi" type="button" class="tool-card">
               <span class="tool-mark">多</span>
@@ -1144,21 +1462,24 @@
               <span><strong>文本题</strong><span>开放回答。</span></span>
             </button>
             <button id="add-mobile" type="button" class="tool-card">
-              <span class="tool-mark">号</span>
-              <span><strong>手机号题</strong><span>收集联系方式。</span></span>
+              <span class="tool-mark">{% if editor_default_assessment %}模{% else %}号{% endif %}</span>
+              <span><strong>{% if editor_default_assessment %}填入示例模板{% else %}手机号题{% endif %}</strong><span>{% if editor_default_assessment %}小 IP 商业力 25 题{% else %}收集联系方式。{% endif %}</span></span>
             </button>
             <button id="open-assessment-settings" type="button" class="tool-card">
-              <span class="tool-mark">测</span>
+              <span class="tool-mark">{% if editor_default_assessment %}维{% else %}测{% endif %}</span>
               <span>
-                <strong>{% if editor_default_assessment %}测评模板配置{% else %}添加多维测评模板{% endif %}</strong>
-                <span>{% if editor_default_assessment %}配置题目、结果页和分型。{% else %}从已创建模板中整组添加。{% endif %}</span>
+                <strong>{% if editor_default_assessment %}添加维度{% else %}添加多维测评模板{% endif %}</strong>
+                <span>{% if editor_default_assessment %}维度不限数量，可继续追加{% else %}从已创建模板中整组添加。{% endif %}</span>
               </span>
             </button>
             <button id="add-rule" type="button" class="tool-card">
-              <span class="tool-mark">规</span>
-              <span><strong>分数规则</strong><span>按总分区间打标签。</span></span>
+              <span class="tool-mark">{% if editor_default_assessment %}结{% else %}规{% endif %}</span>
+              <span><strong>{% if editor_default_assessment %}结果页配置{% else %}分数规则{% endif %}</strong><span>{% if editor_default_assessment %}综合分层、维度分层、类型反馈{% else %}按总分区间打标签。{% endif %}</span></span>
             </button>
           </div>
+          {% if editor_default_assessment %}
+            <div class="assessment-template-note">这里创建的是“测评模板”，不会直接生成公开问卷。公开问卷需要在普通问卷里引用它。</div>
+          {% endif %}
         </section>
       </aside>
 
@@ -2209,7 +2530,7 @@
       state.ruleMode = false;
       state.lastRuleKey = state.questionnaire.score_rules[0]?.local_key || '';
       state.selection = editorConfig.defaultAssessment && !data
-        ? { kind: 'assessment', dimensionKey: state.questionnaire.assessment_builder?.dimensions?.[0]?.key || '' }
+        ? { kind: 'question', key: state.questionnaire.questions[0]?.local_key || '' }
         : { kind: 'questionnaire' };
       rememberDraftSnapshot();
       renderWorkspace();
@@ -2496,6 +2817,18 @@
 
     function renderEditorSecondaryActions() {
       if (!editorSecondaryActionsEl) return;
+      if (editorConfig.defaultAssessment) {
+        editorSecondaryActionsEl.innerHTML = '<button id="editor-assessment-result-preview-btn" type="button" class="btn ghost">打开 H5 结果页</button>';
+        document.getElementById('editor-assessment-result-preview-btn')?.addEventListener('click', () => {
+          const publicUrl = buildPublicUrl();
+          if (!publicUrl) {
+            showToast('保存模板后可打开 H5 结果页', true);
+            return;
+          }
+          window.open(publicUrl, '_blank');
+        });
+        return;
+      }
       editorSecondaryActionsEl.innerHTML = `
         <button id="editor-global-external-push-logs-btn" type="button" class="btn ghost">外推总览</button>
         ${state.currentId ? `
@@ -2525,7 +2858,13 @@
     function renderTopbar() {
       const title = questionnaireDisplayName(state.questionnaire, state.currentId ? '编辑问卷' : '新建问卷');
       const pageKind = state.currentId ? '编辑问卷' : (editorConfig.defaultAssessment ? '创建测评问卷模板' : '新建问卷');
-      topbarTitleEl.textContent = title;
+      topbarTitleEl.textContent = editorConfig.defaultAssessment ? pageKind : title;
+      const topbarSubtitleEl = document.getElementById('topbar-subtitle');
+      if (topbarSubtitleEl) {
+        topbarSubtitleEl.textContent = editorConfig.defaultAssessment
+          ? '左侧添加题目，中间预览，右侧配置每道题、维度分型和结果页规则。'
+          : '';
+      }
       if (editorPageTitleEl) {
         editorPageTitleEl.textContent = pageKind;
       }
@@ -2542,11 +2881,19 @@
       const questionnaire = state.questionnaire;
       const isQuestionnaireSelected = state.selection.kind === 'questionnaire';
       previewHeadEl.className = `preview-head${isQuestionnaireSelected ? ' active' : ''}`;
-      previewHeadEl.innerHTML = `
-        <div class="question-type">问卷设置</div>
-        <h2>${escapeHtml(questionnaire.title || '问卷标题')}</h2>
-        <p>${escapeHtml(questionnaire.description || '在右侧编辑问卷信息')}</p>
-      `;
+      if (editorConfig.defaultAssessment) {
+        previewHeadEl.innerHTML = `
+          <div class="question-type">测评模板预览</div>
+          <h2>${escapeHtml(questionnaire.title || '小 IP 商业力测评')}</h2>
+          <p>模板含 <b>${escapeHtml(String(assessmentDimensions().length))}</b> 个维度、<b>${escapeHtml(String(questionnaire.questions.length))}</b> 道题。题目可继续增删，维度不固定。</p>
+        `;
+      } else {
+        previewHeadEl.innerHTML = `
+          <div class="question-type">问卷设置</div>
+          <h2>${escapeHtml(questionnaire.title || '问卷标题')}</h2>
+          <p>${escapeHtml(questionnaire.description || '在右侧编辑问卷信息')}</p>
+        `;
+      }
       previewHeadEl.onclick = () => selectQuestionnaire();
 
       previewQuestionsEl.innerHTML = '';
@@ -2554,8 +2901,8 @@
         previewQuestionsEl.innerHTML = '<div class="empty-state">从左侧添加题目</div>';
       } else {
         const renderedTemplateIds = new Set();
-        questionnaire.questions.forEach((question) => {
-          if (question.assessment_template_id) {
+        questionnaire.questions.forEach((question, questionIndex) => {
+          if (question.assessment_template_id && !editorConfig.defaultAssessment) {
             if (renderedTemplateIds.has(question.assessment_template_id)) return;
             renderedTemplateIds.add(question.assessment_template_id);
             const group = assessmentTemplateGroupById(question.assessment_template_id);
@@ -2588,25 +2935,40 @@
           }
           const card = document.createElement('article');
           card.className = `preview-question${state.selection.kind === 'question' && state.selection.key === question.local_key ? ' active' : ''}`;
-          const optionPreview = question.type === 'textarea'
-            ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '多行文本输入')}</div>`
-            : question.type === 'mobile'
-              ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '请输入手机号')}</div>`
-              : (question.options || []).map((option) => `
-                  <div class="option-pill">
-                    ${escapeHtml(option.option_text || '选项')}
-                    ${state.questionnaire.assessment_enabled && option.assessment_type_key
-                      ? `<small>分型：${escapeHtml(formatAssessmentTypeName(question.assessment_dimension_key, option.assessment_type_key) || option.assessment_type_key)}</small>`
-                      : ''}
-                  </div>
-                `).join('');
-          card.innerHTML = `
-            <span class="question-type">
-              ${escapeHtml(formatQuestionType(question.type))}${question.required ? ' · 必填' : ''}${state.questionnaire.assessment_enabled && question.assessment_dimension_key ? ` · ${escapeHtml(formatAssessmentDimensionName(question.assessment_dimension_key) || question.assessment_dimension_key)}` : ''}
-            </span>
-            <h4>${escapeHtml(question.title || '题目标题')}</h4>
-            <div class="preview-options">${optionPreview}</div>
-          `;
+          if (editorConfig.defaultAssessment) {
+            const dimensionName = formatAssessmentDimensionName(question.assessment_dimension_key) || question.assessment_dimension_key || '未选择维度';
+            const optionPreview = (question.options || []).slice(0, 2).map((option) => `
+              <div class="option-pill">
+                <span>${escapeHtml(option.option_text || '选项')}</span>
+                <small>${escapeHtml(formatAssessmentTypeName(question.assessment_dimension_key, option.assessment_type_key) || option.assessment_type_key || '未选择类型')} / ${escapeHtml(String(option.score ?? 0))}分</small>
+              </div>
+            `).join('');
+            card.innerHTML = `
+              <div class="question-meta-row"><span>Q${escapeHtml(String(questionIndex + 1).padStart(2, '0'))} / ${escapeHtml(dimensionName)}</span><span>单选测评题</span></div>
+              <h4>${escapeHtml(question.title || '题目标题')}</h4>
+              <div class="preview-options">${optionPreview}</div>
+            `;
+          } else {
+            const optionPreview = question.type === 'textarea'
+              ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '多行文本输入')}</div>`
+              : question.type === 'mobile'
+                ? `<div class="option-pill">${escapeHtml(question.placeholder_text || '请输入手机号')}</div>`
+                : (question.options || []).map((option) => `
+                    <div class="option-pill">
+                      ${escapeHtml(option.option_text || '选项')}
+                      ${state.questionnaire.assessment_enabled && option.assessment_type_key
+                        ? `<small>分型：${escapeHtml(formatAssessmentTypeName(question.assessment_dimension_key, option.assessment_type_key) || option.assessment_type_key)}</small>`
+                        : ''}
+                    </div>
+                  `).join('');
+            card.innerHTML = `
+              <span class="question-type">
+                ${escapeHtml(formatQuestionType(question.type))}${question.required ? ' · 必填' : ''}${state.questionnaire.assessment_enabled && question.assessment_dimension_key ? ` · ${escapeHtml(formatAssessmentDimensionName(question.assessment_dimension_key) || question.assessment_dimension_key)}` : ''}
+              </span>
+              <h4>${escapeHtml(question.title || '题目标题')}</h4>
+              <div class="preview-options">${optionPreview}</div>
+            `;
+          }
           card.addEventListener('click', () => selectQuestion(question.local_key));
           previewQuestionsEl.appendChild(card);
         });
@@ -3177,12 +3539,14 @@
     }
 
     function renderQuestionInspector(question) {
-      inspectorTitleEl.textContent = formatQuestionType(question.type);
-      inspectorSubtitleEl.textContent = '编辑题目内容、选项与分值。';
+      inspectorTitleEl.textContent = editorConfig.defaultAssessment ? '配置区' : formatQuestionType(question.type);
+      inspectorSubtitleEl.textContent = editorConfig.defaultAssessment
+        ? '右侧只使用中文可选项，内部字段由系统生成。'
+        : '编辑题目内容、选项与分值。';
       const dimensions = assessmentDimensions();
       const selectedDimension = getAssessmentDimensionByKey(question.assessment_dimension_key);
       const dimensionOptionsHtml = [
-        '<option value="">不计入测评</option>',
+        `<option value="">${editorConfig.defaultAssessment ? '请选择维度' : '不计入测评'}</option>`,
         ...dimensions.map((dimension) => `
           <option value="${escapeHtml(dimension.key)}" ${dimension.key === question.assessment_dimension_key ? 'selected' : ''}>${escapeHtml(dimension.name)}</option>
         `),
@@ -3209,9 +3573,13 @@
                   <input data-option-field="option_text" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(option.option_text)}">
                 </label>
                 <label class="field">分值
-                  <input data-option-field="score" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(String(option.score ?? 0))}">
+                  ${editorConfig.defaultAssessment
+                    ? `<select data-option-field="score" data-option-key="${escapeHtml(option.local_key)}">
+                        ${[1, 2, 3, 4].map((score) => `<option value="${score}" ${Number(option.score || 0) === score ? 'selected' : ''}>${score} 分</option>`).join('')}
+                      </select>`
+                    : `<input data-option-field="score" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(String(option.score ?? 0))}">`}
                 </label>
-                <label class="field">测评分型
+                <label class="field">${editorConfig.defaultAssessment ? '测评类型' : '测评分型'}
                   <select data-option-field="assessment_type_key" data-option-key="${escapeHtml(option.local_key)}" ${selectedDimension ? '' : 'disabled'}>
                     ${optionTypeOptionsHtml}
                   </select>
@@ -3229,16 +3597,17 @@
           </div>
           <label class="field">题型
             <select id="question-type">
-              <option value="single_choice">单选题</option>
-              <option value="multi_choice">多选题</option>
-              <option value="textarea">文本题</option>
-              <option value="mobile">手机号题</option>
+              ${editorConfig.defaultAssessment
+                ? '<option value="single_choice">单选测评题</option>'
+                : '<option value="single_choice">单选题</option><option value="multi_choice">多选题</option><option value="textarea">文本题</option><option value="mobile">手机号题</option>'}
             </select>
           </label>
-          <label class="field">题目标题
-            <input id="question-title" type="text" value="${escapeHtml(question.title)}">
+          <label class="field">${editorConfig.defaultAssessment ? '题目标题' : '题目标题'}
+            ${editorConfig.defaultAssessment
+              ? `<textarea id="question-title">${escapeHtml(question.title)}</textarea>`
+              : `<input id="question-title" type="text" value="${escapeHtml(question.title)}">`}
           </label>
-          <label class="field">测评维度
+          <label class="field">${editorConfig.defaultAssessment ? '所属维度' : '测评维度'}
             <select id="question-assessment-dimension-key">
               ${dimensionOptionsHtml}
             </select>
@@ -3310,12 +3679,14 @@
       }
 
       inspectorBodyEl.querySelectorAll('[data-option-field]').forEach((input) => {
-        input.addEventListener('input', (event) => {
+        const updateOptionField = (event) => {
           const option = question.options.find((item) => item.local_key === event.target.dataset.optionKey);
           if (!option) return;
           option[event.target.dataset.optionField] = event.target.value;
           renderPreview();
-        });
+        };
+        input.addEventListener('input', updateOptionField);
+        input.addEventListener('change', updateOptionField);
       });
       inspectorBodyEl.querySelectorAll('.remove-option-btn').forEach((button) => {
         button.addEventListener('click', () => {
@@ -3524,7 +3895,25 @@
     }
 
     function addQuestion(type) {
-      const question = createQuestion(type, {}, state.questionnaire.questions.length);
+      const dimension = editorConfig.defaultAssessment ? assessmentDimensions()[0] : null;
+      const questionSeed = editorConfig.defaultAssessment && type === 'single_choice' && dimension
+        ? {
+            type: 'single_choice',
+            title: '新测评题',
+            required: true,
+            assessment_dimension_key: dimension.key,
+            assessment_template_id: DEFAULT_ASSESSMENT_TEMPLATE_ID,
+            assessment_template_name: DEFAULT_ASSESSMENT_TEMPLATE_NAME,
+            options: (dimension.types || []).slice(0, 4).map((assessmentType, index) => ({
+              option_text: `选项 ${index + 1}`,
+              score: index + 1,
+              assessment_type_key: assessmentType.key,
+              tag_codes: [],
+              sort_order: index + 1,
+            })),
+          }
+        : {};
+      const question = createQuestion(type, questionSeed, state.questionnaire.questions.length);
       state.questionnaire.questions.push(question);
       state.ruleMode = false;
       state.selection = { kind: 'question', key: question.local_key };
@@ -3550,6 +3939,22 @@
 
     function applyAssessmentPreset() {
       const preset = buildSiyuanIpAssessmentPreset();
+      if (editorConfig.defaultAssessment) {
+        state.questionnaire.assessment_enabled = true;
+        state.questionnaire.assessment_config = preset.assessment_config;
+        state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(preset.assessment_config);
+        state.questionnaire.name = preset.name;
+        state.questionnaire.title = preset.title;
+        state.questionnaire.description = preset.description;
+        state.questionnaire.questions = preset.questions
+          .map((question, index) => createQuestionFromAssessmentPreset(question, index))
+          .map((question, index) => ({ ...question, sort_order: index + 1 }));
+        state.ruleMode = false;
+        state.selection = { kind: 'question', key: state.questionnaire.questions[0]?.local_key || '' };
+        renderWorkspace();
+        showToast(`已填入“${DEFAULT_ASSESSMENT_TEMPLATE_NAME}”示例模板`);
+        return;
+      }
       const existingGroup = assessmentTemplateGroupById(DEFAULT_ASSESSMENT_TEMPLATE_ID);
       if (existingGroup) {
         selectAssessmentTemplateGroup(DEFAULT_ASSESSMENT_TEMPLATE_ID);
@@ -3615,6 +4020,10 @@
       });
     }
     document.getElementById('reset-btn').addEventListener('click', () => {
+      if (editorConfig.defaultAssessment) {
+        saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true));
+        return;
+      }
       if (!confirmDiscardChanges()) return;
       if (state.currentId) {
         loadQuestionnaire(state.currentId, { skipConfirm: true }).catch((error) => showToast(error.message || '重置失败，请稍后重试', true));
@@ -3641,9 +4050,21 @@
     document.getElementById('add-single').addEventListener('click', () => addQuestion('single_choice'));
     document.getElementById('add-multi').addEventListener('click', () => addQuestion('multi_choice'));
     document.getElementById('add-textarea').addEventListener('click', () => addQuestion('textarea'));
-    document.getElementById('add-mobile').addEventListener('click', () => addQuestion('mobile'));
+    document.getElementById('add-mobile').addEventListener('click', () => {
+      if (editorConfig.defaultAssessment) {
+        applyAssessmentPreset();
+        return;
+      }
+      addQuestion('mobile');
+    });
     document.getElementById('open-assessment-settings').addEventListener('click', () => openAssessmentSettings());
-    document.getElementById('add-rule').addEventListener('click', () => enterRuleMode());
+    document.getElementById('add-rule').addEventListener('click', () => {
+      if (editorConfig.defaultAssessment) {
+        selectAssessmentSettings();
+        return;
+      }
+      enterRuleMode();
+    });
     document.getElementById('drawer-close').addEventListener('click', closeDrawer);
     document.getElementById('tag-modal-close').addEventListener('click', closeTagModal);
     document.getElementById('tag-modal-cancel').addEventListener('click', closeTagModal);

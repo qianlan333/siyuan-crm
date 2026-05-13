@@ -68,6 +68,18 @@
     font-weight: 800;
   }
 
+  .questionnaire-type-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(51, 112, 255, 0.10);
+    color: #1456f0;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+
   .questionnaire-row-muted {
     color: var(--muted);
     margin-top: 6px;
@@ -181,6 +193,7 @@
     </div>
     <div class="admin-toolbar">
       <a class="admin-button admin-button--primary" href="{{ url_for('api.admin_console_questionnaire_new') }}">创建新问卷</a>
+      <a class="admin-button admin-button--secondary" href="{{ url_for('api.admin_console_questionnaire_new') }}?mode=assessment">创建测评问卷</a>
       <button id="questionnaire-reload-btn" type="button" class="admin-button admin-button--ghost">刷新</button>
     </div>
   </div>
@@ -202,7 +215,7 @@
 
   <div id="questionnaire-empty-state" class="admin-state" hidden>
     <strong>还没有问卷</strong>
-    <span>点击「创建新问卷」开始搭建。</span>
+    <span>点击「创建新问卷」或「创建测评问卷」开始搭建。</span>
   </div>
 
   <div id="questionnaire-table-wrap" class="admin-table-wrap">
@@ -341,7 +354,7 @@
     const items = filteredQuestionnaires();
     const hasAny = state.questionnaires.length > 0;
     if (!hasAny) {
-      renderEmptyState('还没有问卷', '点击「创建新问卷」开始搭建。');
+      renderEmptyState('还没有问卷', '点击「创建新问卷」或「创建测评问卷」开始搭建。');
       tableBodyEl.innerHTML = '';
       tableWrapEl.hidden = true;
       return;
@@ -359,6 +372,7 @@
         <td>
           <div class="questionnaire-name-line">
             <span class="questionnaire-name-main">${escapeHtml(questionnaireDisplayName(item))}</span>
+            ${item.assessment_enabled ? '<span class="questionnaire-type-chip">多维测评</span>' : ''}
             <span class="admin-inline-chip${item.is_disabled ? ' admin-inline-chip--danger' : ' admin-inline-chip--ok'}">
               ${item.is_disabled ? '已停用' : '启用中'}
             </span>

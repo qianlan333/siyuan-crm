@@ -69,6 +69,8 @@ def _render_questionnaire_editor_page(
             else "从空白模板开始搭建题目、标签和分数规则。"
         ),
         editor_back_href=url_for("api.admin_console_questionnaires"),
+        editor_default_assessment=questionnaire_id is None
+        and str(request.args.get("mode") or "").strip() == "assessment",
         initial_questionnaire=questionnaire,
         initial_questionnaire_id=questionnaire_id,
     )

@@ -1436,6 +1436,8 @@ def test_admin_questionnaire_management_page_exists(client):
     assert "客户管理后台" in text
     assert "问卷管理" in text
     assert "创建新问卷" in text
+    assert "创建测评问卷" in text
+    assert "多维测评" in text
     assert "问卷名称" in text
     assert "创建时间" in text
     assert "提交数" in text
@@ -1457,8 +1459,23 @@ def test_admin_questionnaire_editor_new_page_contains_tag_picker_fallback(client
     assert "题型" in text
     assert "手工填写" in text or "tag_id" in text
     assert "企微标签加载失败" in text
+    assert "多维测评" in text
+    assert "测评维度 Key" in text
+    assert "测评类型 Key" in text
+    assert "填入 5 维模板" in text
     assert "从空白模板开始搭建题目、标签和分数规则。" not in text
     assert '<div id="questionnaire-list"' not in text
+
+
+def test_admin_questionnaire_editor_assessment_mode_prefills_config(client):
+    response = client.get("/admin/questionnaires/new?mode=assessment")
+    text = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'defaultAssessment: true' in text
+    assert "IP 引流变现综合评估" in text
+    assert "traffic" in text
+    assert "conversion" in text
 
 
 def test_admin_questionnaire_editor_existing_page_contains_editor(client):

@@ -1011,6 +1011,18 @@ def _init_postgres(db) -> None:
         "ADD COLUMN IF NOT EXISTS segment_id BIGINT",
         "ALTER TABLE IF EXISTS cloud_broadcast_plans "
         "ADD COLUMN IF NOT EXISTS campaign_id BIGINT",
+        "ALTER TABLE IF EXISTS questionnaires "
+        "ADD COLUMN IF NOT EXISTS assessment_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE IF EXISTS questionnaires "
+        "ADD COLUMN IF NOT EXISTS assessment_config JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE IF EXISTS questionnaire_questions "
+        "ADD COLUMN IF NOT EXISTS assessment_dimension_key TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS questionnaire_options "
+        "ADD COLUMN IF NOT EXISTS assessment_type_key TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS questionnaire_submissions "
+        "ADD COLUMN IF NOT EXISTS assessment_result_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE IF EXISTS questionnaire_submissions "
+        "ADD COLUMN IF NOT EXISTS result_token TEXT NOT NULL DEFAULT ''",
     ):
         db.execute(stmt)
 

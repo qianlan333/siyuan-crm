@@ -1197,11 +1197,11 @@
       border: 1px solid var(--line);
     }
     .assessment-template-mode .workspace {
-      max-width: 1480px;
+      max-width: 1720px;
       padding: 22px 24px 42px;
-      grid-template-columns: 290px minmax(460px, 1fr) 390px;
-      gap: 16px;
-      align-items: stretch;
+      grid-template-columns: 260px minmax(0, 1fr) 360px;
+      gap: 18px;
+      align-items: start;
     }
     .assessment-template-mode .card {
       border-radius: 8px;
@@ -1267,11 +1267,10 @@
       color: var(--primary);
     }
     .assessment-template-mode .phone-stage {
-      min-height: 690px;
-      padding: 22px;
-      display: flex;
-      justify-content: center;
-      align-items: flex-start;
+      min-height: calc(100vh - 150px);
+      padding: 0;
+      display: block;
+      overflow: hidden;
     }
     .assessment-template-mode .phone-frame {
       width: min(100%, 430px);
@@ -1473,7 +1472,8 @@
     }
     .assessment-template-mode .template-page {
       width: 100%;
-      padding: 22px;
+      min-width: 0;
+      padding: 38px 48px;
     }
     .assessment-template-mode .template-page-head {
       display: flex;
@@ -1493,17 +1493,25 @@
     }
     .assessment-template-mode .template-grid-3 {
       display: grid;
-      grid-template-columns: 280px minmax(460px, 1fr) 360px;
+      grid-template-columns: 260px minmax(0, 1fr);
       gap: 14px;
       align-items: start;
     }
     .assessment-template-mode .template-grid-2 {
       display: grid;
-      grid-template-columns: 320px minmax(520px, 1fr);
+      grid-template-columns: 280px minmax(0, 1fr);
       gap: 14px;
       align-items: start;
     }
+    .assessment-template-mode .template-grid-single {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      max-width: 920px;
+    }
     .assessment-template-mode .template-panel {
+      min-width: 0;
       background: #fff;
       border: 1px solid var(--line);
       border-radius: 12px;
@@ -1530,6 +1538,7 @@
       line-height: 1.55;
     }
     .assessment-template-mode .template-panel-body {
+      min-width: 0;
       padding: 14px;
     }
     .assessment-template-mode .dimension-list,
@@ -1609,12 +1618,52 @@
       background: #f8fafc;
       border-bottom: 1px solid var(--line);
     }
+    .assessment-template-mode .question-card-head-v2 > div:first-child {
+      min-width: 0;
+      flex: 1;
+    }
+    .assessment-template-mode .question-card-actions {
+      display: flex;
+      gap: 6px;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      flex: none;
+    }
+    .assessment-template-mode .question-card-v2 input:not([type="checkbox"]):not([type="radio"]),
+    .assessment-template-mode .question-card-v2 textarea,
+    .assessment-template-mode .question-card-v2 select,
+    .assessment-template-mode .template-panel input:not([type="checkbox"]):not([type="radio"]),
+    .assessment-template-mode .template-panel textarea,
+    .assessment-template-mode .template-panel select {
+      width: 100%;
+      min-width: 0;
+      min-height: 40px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 9px 11px;
+      color: var(--text);
+      font: inherit;
+    }
+    .assessment-template-mode .question-title-input {
+      margin-top: 8px;
+      font-weight: 800;
+      font-size: 15px;
+    }
     .assessment-template-mode .option-row-v2 {
       display: grid;
-      grid-template-columns: minmax(180px, 1fr) 82px 126px auto;
+      grid-template-columns: minmax(0, 1fr) 82px 132px 44px;
       gap: 8px;
       align-items: center;
       margin-top: 8px;
+    }
+    .assessment-template-mode .option-row-v2 > * {
+      min-width: 0;
+    }
+    .assessment-template-mode .option-row-v2 .link-btn {
+      justify-self: end;
+      white-space: nowrap;
     }
     .assessment-template-mode .result-tabs-v2 {
       display: flex;
@@ -1680,10 +1729,16 @@
       .assessment-template-mode .template-grid-2 {
         grid-template-columns: 1fr;
       }
+      .assessment-template-mode .template-page {
+        padding: 28px;
+      }
+      .assessment-template-mode .option-row-v2 {
+        grid-template-columns: minmax(0, 1fr) 78px 120px 44px;
+      }
     }
     @media (max-width: 1220px) {
       .assessment-template-mode .workspace {
-        grid-template-columns: 260px minmax(420px, 1fr);
+        grid-template-columns: 240px minmax(420px, 1fr);
       }
       .assessment-template-mode .inspector-column {
         grid-column: 1 / -1;
@@ -4662,9 +4717,9 @@
           <div class="question-card-head-v2">
             <div>
               <div class="template-muted">Q${String(index + 1).padStart(2, '0')} / ${escapeHtml(dimension?.name || '未分组维度')}</div>
-              <input data-question-field="title" value="${escapeHtml(question.title)}" placeholder="题目标题" style="margin-top:8px;">
+              <input class="question-title-input" data-question-field="title" value="${escapeHtml(question.title)}" placeholder="题目标题">
             </div>
-            <div style="display:flex;gap:6px;align-items:flex-start;">
+            <div class="question-card-actions">
               <button type="button" class="btn ghost" data-move-question="${escapeHtml(question.local_key)}" data-direction="-1">上移</button>
               <button type="button" class="btn ghost" data-move-question="${escapeHtml(question.local_key)}" data-direction="1">下移</button>
               <button type="button" class="link-btn danger" data-remove-question="${escapeHtml(question.local_key)}">删除</button>
@@ -4689,6 +4744,29 @@
             ${optionRows}
           </div>
         </article>
+      `;
+    }
+
+    function renderDimensionSettingsForm(currentDimension) {
+      if (!currentDimension) return '<div class="empty-state">选择维度后在这里编辑。</div>';
+      return `
+        <section class="config-group">
+          <label class="field">维度名称<input id="v2-dim-name" value="${escapeHtml(currentDimension.name)}"></label>
+          <label class="field">维度说明<textarea id="v2-dim-summary">${escapeHtml(currentDimension.summary || '')}</textarea></label>
+          <div class="field-grid compact">
+            <label class="field">维度权重<input id="v2-dim-weight" type="number" step="1" value="${escapeHtml(String(currentDimension.weight ?? ''))}"></label>
+            <label class="field">计分方式<select id="v2-dim-scoring"><option value="sum" ${currentDimension.scoring_method === 'sum' ? 'selected' : ''}>选项分值累加</option></select></label>
+          </div>
+          <label class="field">维度内分类方式<select id="v2-dim-category-method"><option value="most_selected" ${currentDimension.category_method === 'most_selected' ? 'selected' : ''}>按选中分类出现次数最多</option></select></label>
+          <label class="field"><input id="v2-dim-enabled" type="checkbox" ${currentDimension.enabled !== false ? 'checked' : ''}> 启用维度</label>
+          <label class="field"><input id="v2-dim-total" type="checkbox" ${currentDimension.participates_in_total_score !== false ? 'checked' : ''}> 参与总分</label>
+          <label class="field"><input id="v2-dim-show" type="checkbox" ${currentDimension.show_in_result !== false ? 'checked' : ''}> 参与结果页展示</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button type="button" class="btn ghost" id="v2-move-dimension-up">上移</button>
+            <button type="button" class="btn ghost" id="v2-move-dimension-down">下移</button>
+            <button type="button" class="link-btn danger" id="v2-delete-dimension">删除维度</button>
+          </div>
+        </section>
       `;
     }
 
@@ -4720,28 +4798,6 @@
                   : '<div class="empty-state">请先添加或选择一个维度。</div>'}
               </div>
             </section>
-            <section class="template-panel">
-              <div class="template-panel-head"><div><h3>维度设置</h3><p>默认展示当前维度设置，不和题目设置混在一起。</p></div></div>
-              <div class="template-panel-body" id="v2-dimension-settings">
-                ${currentDimension ? `
-                  <label class="field">维度名称<input id="v2-dim-name" value="${escapeHtml(currentDimension.name)}"></label>
-                  <label class="field">维度说明<textarea id="v2-dim-summary">${escapeHtml(currentDimension.summary || '')}</textarea></label>
-                  <div class="field-grid compact">
-                    <label class="field">维度权重<input id="v2-dim-weight" type="number" step="1" value="${escapeHtml(String(currentDimension.weight ?? ''))}"></label>
-                    <label class="field">计分方式<select id="v2-dim-scoring"><option value="sum" ${currentDimension.scoring_method === 'sum' ? 'selected' : ''}>选项分值累加</option></select></label>
-                  </div>
-                  <label class="field">维度内分类方式<select id="v2-dim-category-method"><option value="most_selected" ${currentDimension.category_method === 'most_selected' ? 'selected' : ''}>按选中分类出现次数最多</option></select></label>
-                  <label class="field"><input id="v2-dim-enabled" type="checkbox" ${currentDimension.enabled !== false ? 'checked' : ''}> 启用维度</label>
-                  <label class="field"><input id="v2-dim-total" type="checkbox" ${currentDimension.participates_in_total_score !== false ? 'checked' : ''}> 参与总分</label>
-                  <label class="field"><input id="v2-dim-show" type="checkbox" ${currentDimension.show_in_result !== false ? 'checked' : ''}> 参与结果页展示</label>
-                  <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                    <button type="button" class="btn ghost" id="v2-move-dimension-up">上移</button>
-                    <button type="button" class="btn ghost" id="v2-move-dimension-down">下移</button>
-                    <button type="button" class="link-btn danger" id="v2-delete-dimension">删除维度</button>
-                  </div>
-                ` : '<div class="empty-state">选择维度后在这里编辑。</div>'}
-              </div>
-            </section>
           </div>
         </div>
       `;
@@ -4754,15 +4810,16 @@
       });
       phoneStage.querySelector('#v2-add-question')?.addEventListener('click', () => addAssessmentQuestionV2(currentDimension));
       bindDimensionQuestionEvents(phoneStage, currentDimension);
-      bindDimensionSettingEvents(phoneStage, builder, currentDimension);
       setInspectorContent(
         '设置维度',
-        '添加维度才创建维度，点击导航和卡片只切换。',
-        `<section class="config-group">
+        '当前维度的名称、计分和展示规则统一在这里维护。',
+        `${renderDimensionSettingsForm(currentDimension)}
+        <section class="config-group">
           <div class="helper-note">删除维度会二次确认。第一版采用“删除维度时连同该维度下题目和选项一起删除”的策略。</div>
           <button type="button" class="btn primary" data-next-step="results" style="width:100%;margin-top:12px;">下一步：结果配置</button>
         </section>`,
       );
+      bindDimensionSettingEvents(inspectorBodyEl, builder, currentDimension);
       inspectorBodyEl.querySelector('[data-next-step]').addEventListener('click', () => setAssessmentTemplateStep('results'));
     }
 
@@ -5009,16 +5066,17 @@
       setInspectorContent(
         '结果配置',
         '空配置也能进入编辑，课程链接第一版就是普通 URL。',
-        `<section class="config-group">
+        `${renderResultInspectorContent(tab, builder)}
+        <section class="config-group">
           <div class="helper-note">总分分层是主结果；维度分类结果用于辅助诊断和分课程推荐；尾部集中推荐是统一转化入口。</div>
           <button type="button" class="btn primary" data-next-step="preview" style="width:100%;margin-top:12px;">下一步：H5 预览 / 发布</button>
         </section>`,
       );
+      bindResultPageEvents(inspectorBodyEl);
       inspectorBodyEl.querySelector('[data-next-step]').addEventListener('click', () => setAssessmentTemplateStep('preview'));
     }
 
     function renderDimensionResultConfig(dimensions, currentDimension) {
-      const selectedType = selectedAssessmentType();
       return `
         <div class="template-grid-3">
           <section class="template-panel">
@@ -5039,12 +5097,6 @@
                   </button>
                 `).join('') || '<div class="empty-state">当前维度还没有分类结果。</div>'}
               </div>
-            </div>
-          </section>
-          <section class="template-panel">
-            <div class="template-panel-head"><div><h3>分类结果配置</h3><p>课程链接可为空，前端会自动隐藏按钮。</p></div></div>
-            <div class="template-panel-body">
-              ${selectedType ? renderTypeResultForm(selectedType) : '<div class="empty-state">选择或添加一个分类结果。</div>'}
             </div>
           </section>
         </div>
@@ -5069,9 +5121,8 @@
     }
 
     function renderOverallResultConfig(builder) {
-      const selectedLevel = selectedOverallLevel();
       return `
-        <div class="template-grid-2">
+        <div class="template-grid-single">
           <section class="template-panel">
             <div class="template-panel-head">
               <div><h3>总分分层</h3><p>按 min_score <= total_score <= max_score 命中。</p></div>
@@ -5086,12 +5137,6 @@
                   </button>
                 `).join('') || '<div class="empty-state">还没有总分分层。</div>'}
               </div>
-            </div>
-          </section>
-          <section class="template-panel">
-            <div class="template-panel-head"><div><h3>分层配置</h3><p>区间重叠会阻止保存；区间缺口会提醒。</p></div></div>
-            <div class="template-panel-body">
-              ${selectedLevel ? renderOverallLevelForm(selectedLevel) : '<div class="empty-state">选择或添加一个分层。</div>'}
             </div>
           </section>
         </div>
@@ -5123,18 +5168,53 @@
     function renderFinalRecommendationConfig(builder) {
       const finalRec = builder.final_recommendation || {};
       return `
-        <div class="template-panel" style="max-width:840px;">
+        <div class="template-grid-single">
+        <section class="template-panel">
           <div class="template-panel-head"><div><h3>尾部集中推荐</h3><p>展示在最终 H5 结果页底部，不影响总分和维度推荐。</p></div></div>
           <div class="template-panel-body">
-            <label class="field"><input data-final-field="enabled" type="checkbox" ${finalRec.enabled ? 'checked' : ''}> 启用尾部集中推荐</label>
-            <label class="field">推荐区标题<input data-final-field="title" value="${escapeHtml(finalRec.title || '')}"></label>
-            <label class="field">推荐区说明<textarea data-final-field="description">${escapeHtml(finalRec.description || '')}</textarea></label>
-            <label class="field">推荐课程名称<input data-final-field="course_name" value="${escapeHtml(finalRec.course_name || '')}"></label>
-            <label class="field">推荐课程链接<input data-final-field="course_url" value="${escapeHtml(finalRec.course_url || '')}" placeholder="https://example.com/main-course"></label>
-            <label class="field">CTA 按钮文案<input data-final-field="cta_text" value="${escapeHtml(finalRec.cta_text || '')}"></label>
+            <div class="result-card-v2 active" style="cursor:default;">
+              <div class="dimension-card-title">
+                <span>${escapeHtml(finalRec.title || '未设置推荐区标题')}</span>
+                <span class="template-status ${finalRec.enabled ? 'ok' : 'warn'}">${finalRec.enabled ? '启用' : '未启用'}</span>
+              </div>
+              <div class="template-muted">${escapeHtml(finalRec.description || '右侧配置推荐区说明、课程链接和 CTA 文案。')}</div>
+            </div>
           </div>
+        </section>
         </div>
       `;
+    }
+
+    function renderFinalRecommendationForm(builder) {
+      const finalRec = builder.final_recommendation || {};
+      return `
+        <section class="config-group">
+          <label class="field"><input data-final-field="enabled" type="checkbox" ${finalRec.enabled ? 'checked' : ''}> 启用尾部集中推荐</label>
+          <label class="field">推荐区标题<input data-final-field="title" value="${escapeHtml(finalRec.title || '')}"></label>
+          <label class="field">推荐区说明<textarea data-final-field="description">${escapeHtml(finalRec.description || '')}</textarea></label>
+          <label class="field">推荐课程名称<input data-final-field="course_name" value="${escapeHtml(finalRec.course_name || '')}"></label>
+          <label class="field">推荐课程链接<input data-final-field="course_url" value="${escapeHtml(finalRec.course_url || '')}" placeholder="https://example.com/main-course"></label>
+          <label class="field">CTA 按钮文案<input data-final-field="cta_text" value="${escapeHtml(finalRec.cta_text || '')}"></label>
+        </section>
+      `;
+    }
+
+    function renderResultInspectorContent(tab, builder) {
+      if (tab === 'overall') {
+        const selectedLevel = selectedOverallLevel();
+        return `<section class="config-group">
+          <div class="config-head"><h3>分层配置</h3><p>区间重叠会阻止保存；区间缺口会提醒。</p></div>
+          ${selectedLevel ? renderOverallLevelForm(selectedLevel) : '<div class="empty-state">选择或添加一个分层。</div>'}
+        </section>`;
+      }
+      if (tab === 'final') {
+        return `${renderFinalRecommendationForm(builder)}`;
+      }
+      const selectedType = selectedAssessmentType();
+      return `<section class="config-group">
+        <div class="config-head"><h3>分类结果配置</h3><p>课程链接可为空，前端会自动隐藏按钮。</p></div>
+        ${selectedType ? renderTypeResultForm(selectedType) : '<div class="empty-state">选择或添加一个分类结果。</div>'}
+      </section>`;
     }
 
     function bindResultPageEvents(root) {
@@ -5263,7 +5343,7 @@
             </div>
             <button type="button" class="btn primary" id="v2-publish-save">保存并发布</button>
           </div>
-          <div class="template-grid-2" style="grid-template-columns:minmax(480px,1fr) 380px;">
+          <div class="template-grid-single">
             <section class="template-panel">
               <div class="template-panel-body">
                 <div class="phone-preview-v2"><div class="phone-screen-v2">
@@ -5272,51 +5352,49 @@
                 </div></div>
               </div>
             </section>
-            <section class="template-panel">
-              <div class="template-panel-head"><div><h3>预览控制</h3><p>模拟不同问卷范围和结果页命中。</p></div></div>
-              <div class="template-panel-body">
-                <label class="field">预览范围
-                  <select id="v2-preview-mode">
-                    <option value="full" ${state.assessmentPreviewMode === 'full' ? 'selected' : ''}>预览完整问卷</option>
-                    <option value="dimension" ${state.assessmentPreviewMode === 'dimension' ? 'selected' : ''}>只预览当前维度</option>
-                    <option value="result" ${state.assessmentPreviewMode === 'result' ? 'selected' : ''}>预览结果页</option>
-                  </select>
-                </label>
-                <label class="field">当前维度
-                  <select id="v2-preview-dimension">
-                    ${dimensions.map((dimension) => `<option value="${escapeHtml(dimension.key)}" ${dimension.key === state.selectedDimensionKey ? 'selected' : ''}>${escapeHtml(dimension.name)}</option>`).join('')}
-                  </select>
-                </label>
-                <label class="field">总分分层
-                  <select id="v2-preview-overall">
-                    ${(builder.overall_levels || []).map((level) => `<option value="${escapeHtml(level.local_key)}" ${level.local_key === state.selectedOverallLevelKey ? 'selected' : ''}>${escapeHtml(level.title || '未命名分层')}</option>`).join('')}
-                  </select>
-                </label>
-                <button type="button" class="btn ghost" id="v2-save-draft" style="width:100%;margin-top:8px;">保存草稿</button>
-              </div>
-            </section>
           </div>
         </div>
       `;
-      phoneStage.querySelector('#v2-preview-mode').addEventListener('change', (event) => {
-        state.assessmentPreviewMode = event.target.value;
-        renderWorkspace();
-      });
-      phoneStage.querySelector('#v2-preview-dimension').addEventListener('change', (event) => {
-        state.selectedDimensionKey = event.target.value;
-        renderWorkspace();
-      });
-      phoneStage.querySelector('#v2-preview-overall').addEventListener('change', (event) => {
-        state.selectedOverallLevelKey = event.target.value;
-        renderWorkspace();
-      });
-      phoneStage.querySelector('#v2-save-draft').addEventListener('click', () => saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true)));
       phoneStage.querySelector('#v2-publish-save').addEventListener('click', () => saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true)));
       setInspectorContent(
         'H5 预览 / 发布',
-        '预览页不承担题目和结果配置主职责。',
-        `<section class="config-group"><div class="helper-note">如果 Q01 有 4 个选项，这里会完整显示 4 个；高度不够时手机内部滚动。</div></section>`,
+        '预览控制集中在这里，预览页不承担题目和结果配置主职责。',
+        `<section class="config-group">
+          <div class="config-head"><h3>预览控制</h3><p>模拟不同问卷范围和结果页命中。</p></div>
+          <label class="field">预览范围
+            <select id="v2-preview-mode">
+              <option value="full" ${state.assessmentPreviewMode === 'full' ? 'selected' : ''}>预览完整问卷</option>
+              <option value="dimension" ${state.assessmentPreviewMode === 'dimension' ? 'selected' : ''}>只预览当前维度</option>
+              <option value="result" ${state.assessmentPreviewMode === 'result' ? 'selected' : ''}>预览结果页</option>
+            </select>
+          </label>
+          <label class="field">当前维度
+            <select id="v2-preview-dimension">
+              ${dimensions.map((dimension) => `<option value="${escapeHtml(dimension.key)}" ${dimension.key === state.selectedDimensionKey ? 'selected' : ''}>${escapeHtml(dimension.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="field">总分分层
+            <select id="v2-preview-overall">
+              ${(builder.overall_levels || []).map((level) => `<option value="${escapeHtml(level.local_key)}" ${level.local_key === state.selectedOverallLevelKey ? 'selected' : ''}>${escapeHtml(level.title || '未命名分层')}</option>`).join('')}
+            </select>
+          </label>
+          <button type="button" class="btn ghost" id="v2-save-draft" style="width:100%;margin-top:8px;">保存草稿</button>
+        </section>
+        <section class="config-group"><div class="helper-note">如果 Q01 有 4 个选项，这里会完整显示 4 个；高度不够时手机内部滚动。</div></section>`,
       );
+      inspectorBodyEl.querySelector('#v2-preview-mode').addEventListener('change', (event) => {
+        state.assessmentPreviewMode = event.target.value;
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelector('#v2-preview-dimension').addEventListener('change', (event) => {
+        state.selectedDimensionKey = event.target.value;
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelector('#v2-preview-overall').addEventListener('change', (event) => {
+        state.selectedOverallLevelKey = event.target.value;
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelector('#v2-save-draft').addEventListener('click', () => saveQuestionnaire().catch((error) => showToast(error.message || '保存失败，请检查当前配置后重试', true)));
     }
 
     function renderH5QuestionPreview(questions) {

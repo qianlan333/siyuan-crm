@@ -300,10 +300,17 @@ def get_customer_questionnaire_answers_payload(
         external_userid=_normalized_text(profile.get("external_userid")),
         mobile=_normalized_text(profile.get("mobile")),
     )
+    assessment_results = repo.list_customer_questionnaire_assessment_results(
+        external_userid=_normalized_text(profile.get("external_userid")),
+        mobile=_normalized_text(profile.get("mobile")),
+        limit=3,
+    )
     return {
         "external_userid": _normalized_text(profile.get("external_userid")),
         "mobile": _normalized_text(profile.get("mobile")),
         "answers": answers,
+        "assessment_results": assessment_results,
+        "latest_assessment_result": assessment_results[0] if assessment_results else None,
         "count": len(answers),
         "lookup": lookup,
     }
@@ -356,5 +363,4 @@ def get_customer_messages_payload(
         "count": len(messages),
         "lookup": profile_payload.get("lookup") or {},
     }
-
 

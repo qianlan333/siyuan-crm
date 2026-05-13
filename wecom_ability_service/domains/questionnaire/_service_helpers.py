@@ -291,6 +291,17 @@ def _normalize_questionnaire_external_push_custom_params(value: Any) -> list[dic
     return normalized
 
 
+def _normalize_questionnaire_assessment_config(value: Any) -> dict[str, Any]:
+    if value in (None, ""):
+        return {}
+    raw_value = _json_loads(value, default={}) if isinstance(value, str) else value
+    if raw_value in (None, ""):
+        return {}
+    if not isinstance(raw_value, dict):
+        raise ValueError("assessment_config must be an object")
+    return raw_value
+
+
 def _normalize_questionnaire_payload(
     payload: dict[str, Any],
     *,
@@ -322,6 +333,12 @@ def _normalize_questionnaire_payload(
     ).strip()
     external_push_custom_params = _normalize_questionnaire_external_push_custom_params(
         payload.get("external_push_custom_params", (existing or {}).get("external_push_custom_params"))
+    )
+    assessment_enabled = _normalize_bool(
+        payload.get("assessment_enabled", (existing or {}).get("assessment_enabled"))
+    )
+    assessment_config = _normalize_questionnaire_assessment_config(
+        payload.get("assessment_config", (existing or {}).get("assessment_config"))
     )
     slug_source = str(raw_slug or (existing or {}).get("slug") or name or title).strip()
     slug = _slugify_questionnaire(slug_source)
@@ -358,6 +375,9 @@ def _normalize_questionnaire_payload(
             "type": question_type,
             "title": question_title,
             "placeholder_text": "",
+            "assessment_dimension_key": str(
+                item.get("assessment_dimension_key") or item.get("dimension_key") or ""
+            ).strip(),
             "required": _normalize_bool(item.get("required")),
             "sort_order": _normalize_int(item.get("sort_order"), index),
             "options": [],
@@ -380,6 +400,9 @@ def _normalize_questionnaire_payload(
                         "id": int(option["id"]) if option.get("id") not in (None, "") else None,
                         "option_text": option_text,
                         "score": _normalize_required_integer(option.get("score"), "score"),
+                        "assessment_type_key": str(
+                            option.get("assessment_type_key") or option.get("type_key") or ""
+                        ).strip(),
                         "tag_codes": _validate_tag_codes_payload(option.get("tag_codes"), "tag_codes"),
                         "sort_order": _normalize_int(option.get("sort_order"), option_index),
                     }
@@ -420,6 +443,8 @@ def _normalize_questionnaire_payload(
         "description": description,
         "is_disabled": _normalize_bool(payload.get("is_disabled", (existing or {}).get("is_disabled"))),
         "redirect_url": redirect_url,
+        "assessment_enabled": assessment_enabled,
+        "assessment_config": assessment_config,
         "external_push_enabled": external_push_enabled,
         "external_push_url": external_push_url,
         "external_push_day": external_push_day,
@@ -435,6 +460,7 @@ def _get_questionnaire_row(questionnaire_id: int) -> dict[str, Any] | None:
     return get_db().execute(
         """
         SELECT id, slug, name, title, description, is_disabled, redirect_url,
+               assessment_enabled, assessment_config,
                external_push_enabled, external_push_url, external_push_day, external_push_frequency,
                external_push_remark, external_push_custom_params, created_at, updated_at
         FROM questionnaires
@@ -453,6 +479,8 @@ def _serialize_questionnaire_row(row: dict[str, Any]) -> dict[str, Any]:
         "description": row.get("description", "") or "",
         "is_disabled": _normalize_bool(row.get("is_disabled")),
         "redirect_url": row.get("redirect_url", "") or "",
+        "assessment_enabled": _normalize_bool(row.get("assessment_enabled")),
+        "assessment_config": _normalize_questionnaire_assessment_config(row.get("assessment_config")),
         "external_push_enabled": _normalize_bool(row.get("external_push_enabled")),
         "external_push_url": row.get("external_push_url", "") or "",
         "external_push_day": int(row["external_push_day"]) if row.get("external_push_day") is not None else "",
@@ -471,7 +499,8 @@ def _serialize_questionnaire_row(row: dict[str, Any]) -> dict[str, Any]:
 def _load_questionnaire_questions(questionnaire_id: int) -> list[dict[str, Any]]:
     question_rows = get_db().execute(
         """
-        SELECT id, questionnaire_id, type, title, placeholder_text, required, sort_order, created_at, updated_at
+        SELECT id, questionnaire_id, type, title, placeholder_text, assessment_dimension_key,
+               required, sort_order, created_at, updated_at
         FROM questionnaire_questions
         WHERE questionnaire_id = ?
         ORDER BY sort_order ASC, id ASC
@@ -484,7 +513,7 @@ def _load_questionnaire_questions(questionnaire_id: int) -> list[dict[str, Any]]
     placeholders = ",".join("?" for _ in question_ids)
     option_rows = get_db().execute(
         f"""
-        SELECT id, question_id, option_text, score, tag_codes, sort_order, created_at, updated_at
+        SELECT id, question_id, option_text, score, assessment_type_key, tag_codes, sort_order, created_at, updated_at
         FROM questionnaire_options
         WHERE question_id IN ({placeholders})
         ORDER BY sort_order ASC, id ASC
@@ -499,6 +528,7 @@ def _load_questionnaire_questions(questionnaire_id: int) -> list[dict[str, Any]]
                 "question_id": int(row["question_id"]),
                 "option_text": row.get("option_text", ""),
                 "score": float(row.get("score") or 0),
+                "assessment_type_key": row.get("assessment_type_key", "") or "",
                 "tag_codes": _normalize_tag_codes(row.get("tag_codes")),
                 "sort_order": int(row.get("sort_order") or 0),
                 "created_at": row.get("created_at", ""),
@@ -512,6 +542,7 @@ def _load_questionnaire_questions(questionnaire_id: int) -> list[dict[str, Any]]
             "type": row.get("type", ""),
             "title": row.get("title", ""),
             "placeholder_text": row.get("placeholder_text", "") or "",
+            "assessment_dimension_key": row.get("assessment_dimension_key", "") or "",
             "required": _normalize_bool(row.get("required")),
             "sort_order": int(row.get("sort_order") or 0),
             "created_at": row.get("created_at", ""),
@@ -576,14 +607,15 @@ def _insert_questionnaire_options(question_id: int, options: list[dict[str, Any]
         db.execute(
             """
             INSERT INTO questionnaire_options (
-                question_id, option_text, score, tag_codes, sort_order, created_at, updated_at
+                question_id, option_text, score, assessment_type_key, tag_codes, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """,
             (
                 int(question_id),
                 item["option_text"],
                 item["score"],
+                item.get("assessment_type_key", "") or "",
                 _json_dumps(item["tag_codes"]),
                 item["sort_order"],
             ),
@@ -598,9 +630,10 @@ def _sync_questionnaire_questions(questionnaire_id: int, questions: list[dict[st
         row = db.execute(
             """
             INSERT INTO questionnaire_questions (
-                questionnaire_id, type, title, placeholder_text, required, sort_order, created_at, updated_at
+                questionnaire_id, type, title, placeholder_text, assessment_dimension_key,
+                required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
             """,
             (
@@ -608,6 +641,7 @@ def _sync_questionnaire_questions(questionnaire_id: int, questions: list[dict[st
                 item["type"],
                 item["title"],
                 item.get("placeholder_text", "") or "",
+                item.get("assessment_dimension_key", "") or "",
                 item["required"],
                 item["sort_order"],
             ),
@@ -656,6 +690,7 @@ __all__ = [
     "_normalize_bool",
     "_normalize_float",
     "_normalize_int",
+    "_normalize_questionnaire_assessment_config",
     "_normalize_questionnaire_external_push_custom_params",
     "_normalize_questionnaire_payload",
     "_normalize_required_integer",

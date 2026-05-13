@@ -63,6 +63,7 @@ from ._service_helpers import (  # noqa: F401  helpers — 阶段 7.2
     _normalize_bool,
     _normalize_float,
     _normalize_int,
+    _normalize_questionnaire_assessment_config,
     _normalize_questionnaire_external_push_custom_params,
     _normalize_questionnaire_payload,
     _normalize_required_integer,
@@ -83,12 +84,14 @@ def list_questionnaires() -> list[dict[str, Any]]:
     rows = get_db().execute(
         """
         SELECT q.id, q.slug, q.name, q.title, q.description, q.is_disabled, q.redirect_url,
+               q.assessment_enabled, q.assessment_config,
                q.external_push_enabled, q.external_push_url, q.external_push_day, q.external_push_frequency,
                q.external_push_remark, q.external_push_custom_params, q.created_at, q.updated_at,
                COUNT(s.id) AS submission_count, MAX(s.submitted_at) AS last_submitted_at
         FROM questionnaires q
         LEFT JOIN questionnaire_submissions s ON s.questionnaire_id = q.id
         GROUP BY q.id, q.slug, q.name, q.title, q.description, q.is_disabled, q.redirect_url,
+                 q.assessment_enabled, q.assessment_config,
                  q.external_push_enabled, q.external_push_url, q.external_push_day, q.external_push_frequency,
                  q.external_push_remark, q.external_push_custom_params, q.created_at, q.updated_at
         ORDER BY q.updated_at DESC, q.id DESC
@@ -132,7 +135,8 @@ def get_latest_questionnaire_submit_debug(questionnaire_id: int) -> dict[str, An
     submission = get_db().execute(
         """
         SELECT id, questionnaire_id, submitted_at, matched_by, identity_map_id, openid, unionid,
-               external_userid, follow_user_userid, total_score, final_tags, redirect_url_snapshot
+               external_userid, follow_user_userid, total_score, final_tags,
+               assessment_result_snapshot, result_token, redirect_url_snapshot
         FROM questionnaire_submissions
         WHERE questionnaire_id = ?
         ORDER BY submitted_at DESC, id DESC
@@ -165,6 +169,10 @@ def get_latest_questionnaire_submit_debug(questionnaire_id: int) -> dict[str, An
         "follow_user_userid": submission.get("follow_user_userid", "") or "",
         "total_score": float(submission.get("total_score") or 0),
         "final_tags": _dedupe_strings(_json_array(submission.get("final_tags"))),
+        "assessment_result_snapshot": _normalize_questionnaire_assessment_config(
+            submission.get("assessment_result_snapshot")
+        ),
+        "result_token": submission.get("result_token", "") or "",
         "redirect_url_snapshot": submission.get("redirect_url_snapshot", "") or "",
         "scrm_apply_status": (scrm_apply or {}).get("status", "") or "",
         "scrm_apply_error": (scrm_apply or {}).get("error_message", "") or "",
@@ -179,10 +187,11 @@ def create_questionnaire(payload: dict[str, Any]) -> dict[str, Any]:
             """
             INSERT INTO questionnaires (
                 slug, name, title, description, is_disabled, redirect_url,
+                assessment_enabled, assessment_config,
                 external_push_enabled, external_push_url, external_push_day, external_push_frequency,
                 external_push_remark, external_push_custom_params, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
             """,
             (
@@ -192,6 +201,8 @@ def create_questionnaire(payload: dict[str, Any]) -> dict[str, Any]:
                 normalized["description"],
                 normalized["is_disabled"],
                 normalized["redirect_url"],
+                normalized["assessment_enabled"],
+                _json_dumps(normalized["assessment_config"]),
                 normalized["external_push_enabled"],
                 normalized["external_push_url"],
                 normalized["external_push_day"],
@@ -231,6 +242,7 @@ def update_questionnaire(questionnaire_id: int, payload: dict[str, Any]) -> dict
             """
             UPDATE questionnaires
             SET slug = ?, name = ?, title = ?, description = ?, is_disabled = ?, redirect_url = ?,
+                assessment_enabled = ?, assessment_config = ?,
                 external_push_enabled = ?, external_push_url = ?, external_push_day = ?, external_push_frequency = ?,
                 external_push_remark = ?, external_push_custom_params = ?, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?
@@ -242,6 +254,8 @@ def update_questionnaire(questionnaire_id: int, payload: dict[str, Any]) -> dict
                 normalized["description"],
                 normalized["is_disabled"],
                 normalized["redirect_url"],
+                normalized["assessment_enabled"],
+                _json_dumps(normalized["assessment_config"]),
                 normalized["external_push_enabled"],
                 normalized["external_push_url"],
                 normalized["external_push_day"],
@@ -286,7 +300,8 @@ def _list_questionnaire_export_records(questionnaire_id: int) -> tuple[list[dict
     submission_rows = db.execute(
         """
         SELECT id, submitted_at, respondent_key, openid, unionid, external_userid, follow_user_userid,
-               matched_by, source_channel, campaign_id, staff_id, total_score, final_tags
+               matched_by, source_channel, campaign_id, staff_id, total_score, final_tags,
+               assessment_result_snapshot
         FROM questionnaire_submissions
         WHERE questionnaire_id = ?
         ORDER BY submitted_at DESC, id DESC
@@ -363,6 +378,20 @@ def _build_questionnaire_export_row(
     answer_map: dict[int, str],
     question_order: list[int],
 ) -> list[str]:
+    assessment_result = _normalize_questionnaire_assessment_config(submission.get("assessment_result_snapshot"))
+    overall_level = assessment_result.get("overall_level") if isinstance(assessment_result, dict) else {}
+    dimensions = assessment_result.get("dimensions") if isinstance(assessment_result, dict) else []
+    dimension_summary = ""
+    if isinstance(dimensions, list):
+        dimension_summary = " / ".join(
+            _dedupe_strings(
+                [
+                    f"{item.get('name') or item.get('key')}: {item.get('score')}"
+                    for item in dimensions
+                    if isinstance(item, dict) and (item.get("name") or item.get("key"))
+                ]
+            )
+        )
     return [
         submission.get("submitted_at", "") or "",
         questionnaire_name,
@@ -377,6 +406,10 @@ def _build_questionnaire_export_row(
         submission.get("staff_id", "") or "",
         str(submission.get("total_score", "") or 0),
         "/".join(_dedupe_strings(_json_array(submission.get("final_tags")))),
+        str((overall_level or {}).get("title") or (overall_level or {}).get("name") or ""),
+        "/".join(item.get("name", "") for item in assessment_result.get("strengths", []) if isinstance(item, dict)),
+        "/".join(item.get("name", "") for item in assessment_result.get("weaknesses", []) if isinstance(item, dict)),
+        dimension_summary,
         *[answer_map.get(question_id, "") for question_id in question_order],
     ]
 
@@ -405,6 +438,10 @@ def export_questionnaire_submissions(questionnaire_id: int) -> dict[str, Any]:
         "staff_id",
         "总分",
         "最终标签",
+        "测评等级",
+        "测评优势项",
+        "测评劣势项",
+        "五维分数摘要",
         *question_headers,
     ]
     rows: list[list[str]] = []
@@ -431,6 +468,7 @@ def get_public_questionnaire_by_slug(slug: str) -> dict[str, Any] | None:
     row = get_db().execute(
         """
         SELECT id, slug, name, title, description, is_disabled, redirect_url,
+               assessment_enabled, assessment_config,
                external_push_enabled, external_push_url, external_push_day, external_push_frequency,
                external_push_remark, external_push_custom_params, created_at, updated_at
         FROM questionnaires
@@ -464,6 +502,8 @@ def get_public_questionnaire_by_slug(slug: str) -> dict[str, Any] | None:
     detail.pop("score_rules", None)
     detail.pop("submission_count", None)
     detail.pop("last_submitted_at", None)
+    detail.pop("assessment_enabled", None)
+    detail.pop("assessment_config", None)
     detail.pop("external_push_enabled", None)
     detail.pop("external_push_url", None)
     detail.pop("external_push_day", None)
@@ -471,6 +511,56 @@ def get_public_questionnaire_by_slug(slug: str) -> dict[str, Any] | None:
     detail.pop("external_push_remark", None)
     detail.pop("external_push_custom_params", None)
     return detail
+
+
+def get_questionnaire_assessment_result_by_token(slug: str, result_token: str) -> dict[str, Any] | None:
+    normalized_slug = str(slug or "").strip()
+    normalized_token = str(result_token or "").strip()
+    if not normalized_slug or not normalized_token:
+        return None
+    row = get_db().execute(
+        """
+        SELECT
+            q.id AS questionnaire_id,
+            q.slug,
+            q.name,
+            q.title,
+            q.description,
+            s.id AS submission_id,
+            s.submitted_at,
+            s.total_score,
+            s.final_tags,
+            s.assessment_result_snapshot,
+            s.result_token
+        FROM questionnaire_submissions s
+        JOIN questionnaires q ON q.id = s.questionnaire_id
+        WHERE q.slug = ? AND q.is_disabled = ? AND s.result_token = ?
+        LIMIT 1
+        """,
+        (normalized_slug, False, normalized_token),
+    ).fetchone()
+    if not row:
+        return None
+    assessment_result = _normalize_questionnaire_assessment_config(row.get("assessment_result_snapshot"))
+    if not assessment_result:
+        return None
+    return {
+        "questionnaire": {
+            "id": int(row["questionnaire_id"]),
+            "slug": row.get("slug", "") or "",
+            "name": row.get("name", "") or "",
+            "title": row.get("title", "") or "",
+            "description": row.get("description", "") or "",
+        },
+        "submission": {
+            "id": int(row["submission_id"]),
+            "submitted_at": row.get("submitted_at", "") or "",
+            "total_score": float(row.get("total_score") or 0),
+            "final_tags": _dedupe_strings(_json_array(row.get("final_tags"))),
+            "result_token": row.get("result_token", "") or "",
+        },
+        "assessment_result": assessment_result,
+    }
 
 
 def delete_questionnaire_submissions_by_slug(slug: str) -> dict[str, Any]:
@@ -633,6 +723,282 @@ def validate_questionnaire_answers(questionnaire: dict[str, Any], answers: Any) 
     return validated
 
 
+def _as_assessment_list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _assessment_dimension_configs(config: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_dimensions = config.get("dimensions") or []
+    if isinstance(raw_dimensions, dict):
+        raw_dimensions = [{"key": key, **(value if isinstance(value, dict) else {})} for key, value in raw_dimensions.items()]
+    dimensions: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, item in enumerate(_as_assessment_list(raw_dimensions), start=1):
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or item.get("dimension_key") or "").strip()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        dimensions.append(
+            {
+                **item,
+                "key": key,
+                "name": str(item.get("name") or item.get("title") or key).strip(),
+                "sort_order": int(item.get("sort_order") or index),
+            }
+        )
+    dimensions.sort(key=lambda item: (int(item.get("sort_order") or 0), str(item.get("key") or "")))
+    return dimensions
+
+
+def _assessment_types_map(dimension_config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    raw_types = dimension_config.get("types") or dimension_config.get("type_options") or []
+    if isinstance(raw_types, dict):
+        raw_types = [{"key": key, **(value if isinstance(value, dict) else {})} for key, value in raw_types.items()]
+    type_map: dict[str, dict[str, Any]] = {}
+    for item in _as_assessment_list(raw_types):
+        if not isinstance(item, dict):
+            continue
+        key = str(item.get("key") or item.get("type_key") or "").strip()
+        if not key:
+            continue
+        type_map[key] = {
+            **item,
+            "key": key,
+            "name": str(item.get("name") or item.get("title") or key).strip(),
+            "tag_codes": _normalize_tag_codes(item.get("tag_codes")),
+        }
+    return type_map
+
+
+def _assessment_dimension_by_key(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {item["key"]: item for item in _assessment_dimension_configs(config)}
+
+
+def _match_assessment_level(levels: Any, *, score: float, score_percent: float | None = None) -> dict[str, Any] | None:
+    for item in _as_assessment_list(levels):
+        if not isinstance(item, dict):
+            continue
+        min_score = item.get("min_score")
+        max_score = item.get("max_score")
+        min_percent = item.get("min_percent")
+        max_percent = item.get("max_percent")
+        if min_score not in (None, "") and score < float(min_score):
+            continue
+        if max_score not in (None, "") and score > float(max_score):
+            continue
+        if score_percent is not None:
+            if min_percent not in (None, "") and score_percent < float(min_percent):
+                continue
+            if max_percent not in (None, "") and score_percent > float(max_percent):
+                continue
+        return {
+            "key": str(item.get("key") or item.get("level_key") or "").strip(),
+            "name": str(item.get("name") or item.get("title") or item.get("label") or "").strip(),
+            "title": str(item.get("title") or item.get("name") or item.get("label") or "").strip(),
+            "summary": str(item.get("summary") or item.get("description") or "").strip(),
+            "tag_codes": _normalize_tag_codes(item.get("tag_codes")),
+        }
+    return None
+
+
+def _assessment_question_max_score(question: dict[str, Any]) -> float:
+    option_scores = [float(option.get("score") or 0) for option in question.get("options") or []]
+    if not option_scores:
+        return 0.0
+    if question.get("type") == "multi_choice":
+        positive_total = sum(score for score in option_scores if score > 0)
+        return positive_total if positive_total > 0 else max(option_scores)
+    return max(option_scores)
+
+
+def _select_assessment_type(
+    type_counts: dict[str, int],
+    dimension_config: dict[str, Any],
+    type_map: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    if not type_counts:
+        return {}
+    top_count = max(type_counts.values())
+    candidates = {key for key, count in type_counts.items() if count == top_count}
+    priority = [str(item or "").strip() for item in dimension_config.get("type_priority") or []]
+    if not priority:
+        priority = list(type_map.keys())
+    dominant_key = ""
+    for key in priority:
+        if key in candidates:
+            dominant_key = key
+            break
+    if not dominant_key:
+        dominant_key = sorted(candidates)[0]
+    type_config = type_map.get(dominant_key) or {"key": dominant_key, "name": dominant_key, "tag_codes": []}
+    return {
+        "key": dominant_key,
+        "name": str(type_config.get("name") or dominant_key).strip(),
+        "count": int(type_counts[dominant_key]),
+        "summary": str(type_config.get("summary") or type_config.get("description") or "").strip(),
+        "tag_codes": _normalize_tag_codes(type_config.get("tag_codes")),
+    }
+
+
+def _assessment_recommendations(
+    config: dict[str, Any],
+    dimensions: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    rules = _as_assessment_list(config.get("recommendations") or config.get("recommendation_rules"))
+    recommendations: list[dict[str, Any]] = []
+    dimension_by_key = {item["key"]: item for item in dimensions}
+    for item in rules:
+        if not isinstance(item, dict):
+            continue
+        dimension_key = str(item.get("dimension_key") or "").strip()
+        dimension = dimension_by_key.get(dimension_key) if dimension_key else None
+        score = float((dimension or {}).get("score") or 0)
+        score_percent = (dimension or {}).get("score_percent")
+        if dimension_key and not dimension:
+            continue
+        matched_level = _match_assessment_level([item], score=score, score_percent=score_percent)
+        if not matched_level:
+            continue
+        recommendations.append(
+            {
+                "dimension_key": dimension_key,
+                "title": str(item.get("title") or item.get("name") or "").strip(),
+                "summary": str(item.get("summary") or item.get("description") or "").strip(),
+                "cta_text": str(item.get("cta_text") or "").strip(),
+                "cta_url": str(item.get("cta_url") or "").strip(),
+                "tag_codes": _normalize_tag_codes(item.get("tag_codes")),
+            }
+        )
+    return recommendations
+
+
+def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers: list[dict[str, Any]]) -> dict[str, Any]:
+    if not _normalize_bool(questionnaire.get("assessment_enabled")):
+        return {}
+    config = _normalize_questionnaire_assessment_config(questionnaire.get("assessment_config"))
+    dimension_config_by_key = _assessment_dimension_by_key(config)
+    dimension_order = list(dimension_config_by_key.keys())
+    accumulator: dict[str, dict[str, Any]] = {}
+
+    def ensure_dimension(key: str) -> dict[str, Any]:
+        if key not in accumulator:
+            cfg = dimension_config_by_key.get(key) or {
+                "key": key,
+                "name": key,
+                "sort_order": len(dimension_order) + len(accumulator) + 1,
+            }
+            accumulator[key] = {
+                "key": key,
+                "name": str(cfg.get("name") or key).strip(),
+                "sort_order": int(cfg.get("sort_order") or 0),
+                "score": 0.0,
+                "max_score": 0.0,
+                "answer_count": 0,
+                "type_counts": {},
+            }
+        return accumulator[key]
+
+    for key in dimension_order:
+        ensure_dimension(key)
+
+    for item in validated_answers:
+        question = item.get("question") or {}
+        question_type = str(question.get("type") or "").strip()
+        if question_type not in {"single_choice", "multi_choice"}:
+            continue
+        dimension_key = str(question.get("assessment_dimension_key") or "").strip()
+        if not dimension_key:
+            continue
+        bucket = ensure_dimension(dimension_key)
+        selected_options = item.get("selected_options") or []
+        bucket["max_score"] += _assessment_question_max_score(question)
+        selected_score = sum(float(option.get("score") or 0) for option in selected_options)
+        bucket["score"] += selected_score
+        if selected_options:
+            bucket["answer_count"] += 1
+        type_counts = bucket["type_counts"]
+        for option in selected_options:
+            type_key = str(option.get("assessment_type_key") or "").strip()
+            if not type_key:
+                continue
+            type_counts[type_key] = int(type_counts.get(type_key) or 0) + 1
+
+    dimensions: list[dict[str, Any]] = []
+    assessment_tag_codes: list[str] = []
+    for key, bucket in accumulator.items():
+        cfg = dimension_config_by_key.get(key) or {"key": key, "name": bucket["name"]}
+        type_map = _assessment_types_map(cfg)
+        max_score = float(bucket.get("max_score") or 0)
+        score = float(bucket.get("score") or 0)
+        score_percent = round(score / max_score * 100, 2) if max_score > 0 else None
+        dominant_type = _select_assessment_type(bucket.get("type_counts") or {}, cfg, type_map)
+        dimension_level = _match_assessment_level(
+            cfg.get("levels") or cfg.get("score_levels"),
+            score=score,
+            score_percent=score_percent,
+        )
+        assessment_tag_codes.extend(_normalize_tag_codes(dominant_type.get("tag_codes")))
+        if dimension_level:
+            assessment_tag_codes.extend(_normalize_tag_codes(dimension_level.get("tag_codes")))
+        dimensions.append(
+            {
+                "key": key,
+                "name": str(cfg.get("name") or bucket["name"] or key).strip(),
+                "score": score,
+                "max_score": max_score,
+                "score_percent": score_percent,
+                "answer_count": int(bucket.get("answer_count") or 0),
+                "type_counts": dict(bucket.get("type_counts") or {}),
+                "dominant_type": {
+                    key: value for key, value in dominant_type.items() if key != "tag_codes"
+                },
+                "level": {
+                    key: value for key, value in (dimension_level or {}).items() if key != "tag_codes"
+                },
+                "feedback": cfg.get("feedback") if isinstance(cfg.get("feedback"), dict) else {},
+            }
+        )
+
+    dimensions.sort(key=lambda item: (int((dimension_config_by_key.get(item["key"]) or {}).get("sort_order") or 0), item["key"]))
+    total_score = sum(float(item.get("score") or 0) for item in dimensions)
+    total_max_score = sum(float(item.get("max_score") or 0) for item in dimensions)
+    overall_level = _match_assessment_level(config.get("overall_levels"), score=total_score)
+    if overall_level:
+        assessment_tag_codes.extend(_normalize_tag_codes(overall_level.get("tag_codes")))
+
+    ranked = sorted(
+        dimensions,
+        key=lambda item: (
+            item.get("score_percent") if item.get("score_percent") is not None else float(item.get("score") or 0),
+            float(item.get("score") or 0),
+        ),
+        reverse=True,
+    )
+    strength_count = int(config.get("strength_count") or 2)
+    weakness_count = int(config.get("weakness_count") or 2)
+    strengths = ranked[: max(0, strength_count)]
+    weaknesses = list(reversed(ranked[-max(0, weakness_count) :])) if weakness_count > 0 else []
+    recommendations = _assessment_recommendations(config, dimensions)
+    for item in recommendations:
+        assessment_tag_codes.extend(_normalize_tag_codes(item.get("tag_codes")))
+
+    return {
+        "enabled": True,
+        "total_score": total_score,
+        "total_max_score": total_max_score,
+        "overall_level": {key: value for key, value in (overall_level or {}).items() if key != "tag_codes"},
+        "strengths": [{"key": item["key"], "name": item["name"], "score": item["score"]} for item in strengths],
+        "weaknesses": [{"key": item["key"], "name": item["name"], "score": item["score"]} for item in weaknesses],
+        "dimensions": dimensions,
+        "recommendations": [
+            {key: value for key, value in item.items() if key != "tag_codes"} for item in recommendations
+        ],
+        "tag_codes": _dedupe_strings(assessment_tag_codes),
+    }
+
+
 def compute_questionnaire_submission_outcome(questionnaire: dict[str, Any], answers: Any) -> dict[str, Any]:
     validated_answers = answers if isinstance(answers, list) and answers and "question" in answers[0] else validate_questionnaire_answers(questionnaire, answers)
     total_score = 0.0
@@ -667,6 +1033,10 @@ def compute_questionnaire_submission_outcome(questionnaire: dict[str, Any], answ
             }
         )
 
+    assessment_result = _compute_assessment_result(questionnaire, validated_answers)
+    if assessment_result:
+        total_score = float(assessment_result.get("total_score") or 0)
+
     matched_rule_tags: list[str] = []
     for rule in questionnaire.get("score_rules") or []:
         min_score = rule.get("min_score")
@@ -677,13 +1047,20 @@ def compute_questionnaire_submission_outcome(questionnaire: dict[str, Any], answ
             continue
         matched_rule_tags.extend(_normalize_tag_codes(rule.get("tag_codes")))
 
-    final_tags = _dedupe_strings(option_tags + matched_rule_tags)
+    result_token = uuid4().hex if assessment_result else ""
+    result_url = f"/s/{questionnaire.get('slug')}/result/{result_token}" if result_token else ""
+    if assessment_result and result_url:
+        assessment_result["result_path"] = result_url
+    final_tags = _dedupe_strings(option_tags + matched_rule_tags + _normalize_tag_codes(assessment_result.get("tag_codes")))
     return {
         "validated_answers": validated_answers,
         "answer_snapshots": answer_snapshots,
         "total_score": total_score,
         "final_tags": final_tags,
-        "redirect_url": questionnaire.get("redirect_url", "") or "",
+        "assessment_result": assessment_result,
+        "result_token": result_token,
+        "result_url": result_url,
+        "redirect_url": result_url or questionnaire.get("redirect_url", "") or "",
     }
 
 
@@ -798,14 +1175,16 @@ def save_questionnaire_submission(
     external_userid = str(identity.get("external_userid") or meta.get("external_userid") or "").strip()
     follow_user_userid = str(identity.get("follow_user_userid") or "").strip()
     mobile_snapshot = str(computed_result.get("mobile_snapshot") or "").strip()
+    assessment_result_snapshot = computed_result.get("assessment_result") or {}
+    result_token = str(computed_result.get("result_token") or "").strip()
     row = db.execute(
         """
         INSERT INTO questionnaire_submissions (
             questionnaire_id, identity_map_id, respondent_key, openid, unionid, external_userid,
             follow_user_userid, matched_by, mobile_snapshot, source_channel, campaign_id, staff_id,
-            total_score, final_tags, redirect_url_snapshot, submitted_at
+            total_score, final_tags, assessment_result_snapshot, result_token, redirect_url_snapshot, submitted_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         RETURNING id, submitted_at
         """,
         (
@@ -823,6 +1202,8 @@ def save_questionnaire_submission(
             str(meta.get("staff_id") or "").strip(),
             float(computed_result.get("total_score") or 0),
             _json_dumps(computed_result.get("final_tags") or []),
+            _json_dumps(assessment_result_snapshot),
+            result_token,
             str(computed_result.get("redirect_url") or questionnaire.get("redirect_url") or "").strip(),
         ),
     ).fetchone()
@@ -871,16 +1252,24 @@ def save_questionnaire_submission(
         "mobile_snapshot": mobile_snapshot,
         "total_score": float(computed_result.get("total_score") or 0),
         "final_tags": computed_result.get("final_tags") or [],
+        "assessment_result_snapshot": assessment_result_snapshot,
+        "result_token": result_token,
+        "result_url": str(computed_result.get("result_url") or "").strip(),
         "redirect_url_snapshot": str(computed_result.get("redirect_url") or questionnaire.get("redirect_url") or "").strip(),
     }
 
 
-def _questionnaire_submit_webhook_payload(submission: dict[str, Any]) -> dict[str, str]:
-    return {
+def _questionnaire_submit_webhook_payload(submission: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "mobile": str((submission or {}).get("mobile_snapshot") or "").strip(),
         "userid": str((submission or {}).get("follow_user_userid") or "").strip(),
         "unionid": str((submission or {}).get("unionid") or "").strip(),
     }
+    assessment_result = (submission or {}).get("assessment_result_snapshot")
+    if isinstance(assessment_result, dict) and assessment_result:
+        payload["assessment_result_snapshot"] = assessment_result
+        payload["assessment_result_url"] = str((submission or {}).get("result_url") or "").strip()
+    return payload
 
 
 def _questionnaire_external_push_timeout_seconds() -> float:
@@ -972,6 +1361,9 @@ def _build_questionnaire_external_push_payload(
     remark = str(questionnaire.get("external_push_remark") or "").strip()
     if remark:
         payload["remark"] = remark
+    assessment_result = computed_result.get("assessment_result")
+    if isinstance(assessment_result, dict) and assessment_result:
+        payload["assessment_result_snapshot"] = assessment_result
     for item in _normalize_questionnaire_external_push_custom_params(questionnaire.get("external_push_custom_params")):
         payload[item["name"]] = item["value"]
     return payload
@@ -1500,6 +1892,7 @@ def submit_questionnaire(slug: str, payload: dict[str, Any], request_meta: dict[
     row = get_db().execute(
         """
         SELECT id, slug, name, title, description, is_disabled, redirect_url,
+               assessment_enabled, assessment_config,
                external_push_enabled, external_push_url, external_push_day, external_push_frequency,
                external_push_remark, external_push_custom_params, created_at, updated_at
         FROM questionnaires
@@ -1600,6 +1993,7 @@ def submit_questionnaire(slug: str, payload: dict[str, Any], request_meta: dict[
     _deliver_questionnaire_external_push(questionnaire, submission, computed_result)
     return {
         "success": True,
-        "redirect_url": computed_result.get("redirect_url", "") or "",
+        "redirect_url": submission.get("result_url") or computed_result.get("redirect_url", "") or "",
+        "result_url": submission.get("result_url", "") or "",
         "message": "已收到提交",
     }

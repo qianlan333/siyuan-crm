@@ -2776,6 +2776,64 @@ def _build_questionnaire_payload_with_mobile(**overrides) -> dict:
     return payload
 
 
+def _build_assessment_questionnaire_payload(**overrides) -> dict:
+    payload = _build_questionnaire_payload(**overrides)
+    payload["assessment_enabled"] = True
+    payload["assessment_config"] = {
+        "strength_count": 1,
+        "weakness_count": 1,
+        "overall_levels": [
+            {"min_score": 0, "max_score": 4, "title": "待破局", "tag_codes": ["assessment_low"]},
+            {
+                "min_score": 5,
+                "max_score": 99,
+                "title": "进阶型",
+                "summary": "已经有基础动作，可以继续补短板。",
+                "tag_codes": ["assessment_high"],
+            },
+        ],
+        "dimensions": [
+            {
+                "key": "deal",
+                "name": "成交能力",
+                "type_priority": ["push", "passive"],
+                "types": [
+                    {"key": "passive", "name": "被动型"},
+                    {"key": "push", "name": "推销型", "summary": "成交动作主动但需要更稳。", "tag_codes": ["assessment_deal_push"]},
+                ],
+                "levels": [
+                    {"min_score": 3, "max_score": 5, "title": "成交可用", "tag_codes": ["assessment_deal_ok"]},
+                ],
+            },
+            {
+                "key": "maintain",
+                "name": "用户维护",
+                "type_priority": ["nurture", "warm"],
+                "types": [
+                    {"key": "warm", "name": "暖男女型"},
+                    {"key": "nurture", "name": "养鱼型", "tag_codes": ["assessment_maintain_nurture"]},
+                ],
+            },
+        ],
+        "recommendations": [
+            {
+                "dimension_key": "maintain",
+                "max_score": 3,
+                "title": "先补维护节奏",
+                "summary": "把用户维护动作固定下来。",
+                "tag_codes": ["assessment_reco_maintain"],
+            }
+        ],
+    }
+    payload["questions"][0]["assessment_dimension_key"] = "deal"
+    payload["questions"][0]["options"][0]["assessment_type_key"] = "passive"
+    payload["questions"][0]["options"][1]["assessment_type_key"] = "push"
+    payload["questions"][1]["assessment_dimension_key"] = "maintain"
+    payload["questions"][1]["options"][0]["assessment_type_key"] = "warm"
+    payload["questions"][1]["options"][1]["assessment_type_key"] = "nurture"
+    return payload
+
+
 WECHAT_BROWSER_HEADERS = {"User-Agent": "Mozilla/5.0 MicroMessenger"}
 
 
@@ -3195,6 +3253,87 @@ def test_questionnaire_submit_matches_identity_and_marks_tags(client, app, monke
         "focus_service",
         "score_high",
     }
+
+
+def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client, app):
+    create_response = client.post("/api/admin/questionnaires", json=_build_assessment_questionnaire_payload())
+    assert create_response.status_code == 200
+    questionnaire = create_response.get_json()["questionnaire"]
+    assert questionnaire["assessment_enabled"] is True
+    assert questionnaire["questions"][0]["assessment_dimension_key"] == "deal"
+    assert questionnaire["questions"][0]["options"][1]["assessment_type_key"] == "push"
+
+    public_response = client.get(
+        f"/api/h5/questionnaires/{questionnaire['slug']}",
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+    assert public_response.status_code == 200
+    public_payload = public_response.get_json()["questionnaire"]
+    assert "assessment_config" not in public_payload
+
+    detail = client.get(f"/api/admin/questionnaires/{questionnaire['id']}").get_json()["questionnaire"]
+    q1, q2, q3 = detail["questions"]
+    submit_response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "respondent_key": "assessment-user-001",
+            "answers": {
+                str(q1["id"]): q1["options"][1]["id"],
+                str(q2["id"]): [q2["options"][0]["id"], q2["options"][1]["id"]],
+                str(q3["id"]): "希望先看测评结果。",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+
+    assert submit_response.status_code == 200
+    submit_result = submit_response.get_json()
+    assert submit_result["success"] is True
+    assert submit_result["result_url"].startswith(f"/s/{questionnaire['slug']}/result/")
+    assert submit_result["redirect_url"] == submit_result["result_url"]
+
+    with app.app_context():
+        submission = get_db().execute(
+            """
+            SELECT total_score, final_tags, assessment_result_snapshot, result_token, redirect_url_snapshot
+            FROM questionnaire_submissions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        assert float(submission["total_score"]) == 6.0
+        assert submission["result_token"]
+        assert submission["redirect_url_snapshot"] == submit_result["result_url"]
+        final_tags = submission["final_tags"] if isinstance(submission["final_tags"], list) else json.loads(submission["final_tags"])
+        assert {
+            "budget_mid",
+            "focus_result",
+            "focus_service",
+            "score_high",
+            "assessment_high",
+            "assessment_deal_push",
+            "assessment_deal_ok",
+            "assessment_maintain_nurture",
+            "assessment_reco_maintain",
+        }.issubset(set(final_tags))
+        snapshot = (
+            submission["assessment_result_snapshot"]
+            if isinstance(submission["assessment_result_snapshot"], dict)
+            else json.loads(submission["assessment_result_snapshot"])
+        )
+        assert snapshot["enabled"] is True
+        assert snapshot["overall_level"]["title"] == "进阶型"
+        assert [item["key"] for item in snapshot["dimensions"]] == ["deal", "maintain"]
+        assert snapshot["dimensions"][0]["dominant_type"]["name"] == "推销型"
+        assert snapshot["dimensions"][1]["dominant_type"]["name"] == "养鱼型"
+
+    result_page = client.get(submit_result["result_url"])
+    body = result_page.get_data(as_text=True)
+    assert result_page.status_code == 200
+    assert "进阶型" in body
+    assert "成交能力" in body
+    assert "用户维护" in body
+    assert "养鱼型" in body
 
 
 def test_questionnaire_submit_prefers_session_identity(client, app):
@@ -5723,5 +5862,3 @@ def test_customer_center_detail_aggregates_sidebar_related_data(client, app):
     assert customer["sidebar_context"]["signup_tag_status"]["current_signup_status"] == "lead"
     assert customer["tags"][0]["tag_name"] == "高净值"
     assert customer["follow_users"][0]["userid"] == "sales_09"
-
-

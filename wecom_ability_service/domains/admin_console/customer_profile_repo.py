@@ -318,6 +318,97 @@ def list_customer_questionnaire_answers(
     return answers
 
 
+def list_customer_questionnaire_assessment_results(
+    *,
+    external_userid: str = "",
+    mobile: str = "",
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    normalized_external_userid = _normalized_text(external_userid)
+    normalized_mobile = _normalized_text(mobile)
+    if not normalized_external_userid and not normalized_mobile:
+        return []
+
+    clauses: list[str] = []
+    params: list[Any] = []
+    if normalized_external_userid:
+        clauses.append("qs.external_userid = ?")
+        params.append(normalized_external_userid)
+    if normalized_mobile:
+        clauses.append("qs.mobile_snapshot = ?")
+        params.append(normalized_mobile)
+    params.append(max(1, min(int(limit or 3), 20)))
+
+    rows = _fetchall_dict(
+        f"""
+        SELECT
+            qs.id AS submission_id,
+            qs.questionnaire_id,
+            qs.external_userid,
+            qs.mobile_snapshot,
+            qs.submitted_at,
+            qs.total_score,
+            qs.assessment_result_snapshot,
+            qs.result_token,
+            COALESCE(q.slug, '') AS questionnaire_slug,
+            COALESCE(q.name, '') AS questionnaire_title
+        FROM questionnaire_submissions qs
+        LEFT JOIN questionnaires q
+          ON q.id = qs.questionnaire_id
+        WHERE ({' OR '.join(clauses)})
+          AND qs.result_token <> ''
+        ORDER BY qs.submitted_at DESC, qs.id DESC
+        LIMIT ?
+        """,
+        tuple(params),
+    )
+    results: list[dict[str, Any]] = []
+    for row in rows:
+        snapshot = _json_loads(row.get("assessment_result_snapshot"), default={})
+        if not isinstance(snapshot, dict) or not snapshot:
+            continue
+        overall_level = snapshot.get("overall_level") if isinstance(snapshot.get("overall_level"), dict) else {}
+        dimensions = snapshot.get("dimensions") if isinstance(snapshot.get("dimensions"), list) else []
+        dimension_summary = [
+            {
+                "key": _normalized_text(item.get("key")),
+                "name": _normalized_text(item.get("name")),
+                "score": float(item.get("score") or 0),
+                "dominant_type_name": _normalized_text((item.get("dominant_type") or {}).get("name"))
+                if isinstance(item.get("dominant_type"), dict)
+                else "",
+            }
+            for item in dimensions
+            if isinstance(item, dict)
+        ]
+        results.append(
+            {
+                "submission_id": int(row["submission_id"]),
+                "questionnaire_id": int(row["questionnaire_id"]),
+                "questionnaire_title": _normalized_text(row.get("questionnaire_title")),
+                "questionnaire_slug": _normalized_text(row.get("questionnaire_slug")),
+                "submitted_at": _normalized_text(row.get("submitted_at")),
+                "external_userid": _normalized_text(row.get("external_userid")),
+                "mobile": _normalized_text(row.get("mobile_snapshot")),
+                "total_score": float(row.get("total_score") or snapshot.get("total_score") or 0),
+                "overall_level_title": _normalized_text(overall_level.get("title") or overall_level.get("name")),
+                "strengths": [
+                    _normalized_text(item.get("name"))
+                    for item in (snapshot.get("strengths") or [])
+                    if isinstance(item, dict) and _normalized_text(item.get("name"))
+                ],
+                "weaknesses": [
+                    _normalized_text(item.get("name"))
+                    for item in (snapshot.get("weaknesses") or [])
+                    if isinstance(item, dict) and _normalized_text(item.get("name"))
+                ],
+                "dimensions": dimension_summary,
+                "result_url": f"/s/{_normalized_text(row.get('questionnaire_slug'))}/result/{_normalized_text(row.get('result_token'))}",
+            }
+        )
+    return results
+
+
 def list_customer_message_rows(
     external_userid: str,
     *,

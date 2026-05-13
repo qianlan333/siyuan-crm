@@ -13,11 +13,13 @@ from ..application.questionnaire.commands import (
 )
 from ..application.questionnaire.dto import (
     GetPublicQuestionnaireBySlugQueryDTO,
+    GetQuestionnaireAssessmentResultByTokenQueryDTO,
     HasQuestionnaireSubmissionQueryDTO,
     SubmitQuestionnaireCommandDTO,
 )
 from ..application.questionnaire.queries import (
     GetPublicQuestionnaireBySlugQuery,
+    GetQuestionnaireAssessmentResultByTokenQuery,
     HasQuestionnaireSubmissionQuery,
     ResolveQuestionnaireRespondentIdentityQuery,
 )
@@ -56,6 +58,15 @@ _QUESTIONNAIRE_META_FIELDS = (
 def _load_public_questionnaire(slug: str) -> dict[str, Any] | None:
     return GetPublicQuestionnaireBySlugQuery()(
         GetPublicQuestionnaireBySlugQueryDTO(slug=str(slug or "").strip())
+    )
+
+
+def _load_questionnaire_assessment_result(slug: str, result_token: str) -> dict[str, Any] | None:
+    return GetQuestionnaireAssessmentResultByTokenQuery()(
+        GetQuestionnaireAssessmentResultByTokenQueryDTO(
+            slug=str(slug or "").strip(),
+            result_token=str(result_token or "").strip(),
+        )
     )
 
 
@@ -284,6 +295,13 @@ def questionnaire_h5_submitted(slug: str):
     return render_template("questionnaire_h5_submitted.html")
 
 
+def questionnaire_h5_assessment_result(slug: str, result_token: str):
+    result_payload = _load_questionnaire_assessment_result(slug, result_token)
+    if not result_payload:
+        abort(404)
+    return render_template("questionnaire_h5_result.html", result_payload=result_payload)
+
+
 def public_get_questionnaire(slug: str):
     wechat_gate = _require_wechat_browser_api()
     if wechat_gate is not None:
@@ -496,6 +514,7 @@ def h5_wechat_oauth_callback():
 def register_routes(bp):
     bp.route('/s/<slug>', methods=['GET'])(questionnaire_h5_page)
     bp.route('/s/<slug>/submitted', methods=['GET'])(questionnaire_h5_submitted)
+    bp.route('/s/<slug>/result/<result_token>', methods=['GET'])(questionnaire_h5_assessment_result)
     bp.route('/api/h5/questionnaires/<slug>', methods=['GET'])(public_get_questionnaire)
     bp.route('/api/h5/questionnaires/<slug>/submit', methods=['POST'])(public_submit_questionnaire)
     bp.route('/api/h5/questionnaires/<slug>/client-diagnostics', methods=['POST'])(public_questionnaire_client_diagnostics)

@@ -23,6 +23,8 @@ from .dto import (
     GetLatestQuestionnaireSubmitDebugResultDTO,
     GetPublicQuestionnaireBySlugQueryDTO,
     GetPublicQuestionnaireBySlugResultDTO,
+    GetQuestionnaireAssessmentResultByTokenQueryDTO,
+    GetQuestionnaireAssessmentResultByTokenResultDTO,
     GetQuestionnaireDetailQueryDTO,
     GetQuestionnaireDetailResultDTO,
     HasQuestionnaireSubmissionQueryDTO,
@@ -362,6 +364,19 @@ class GetPublicQuestionnaireBySlugQuery:
     execute = __call__
 
 
+class GetQuestionnaireAssessmentResultByTokenQuery:
+    def __call__(
+        self,
+        dto: GetQuestionnaireAssessmentResultByTokenQueryDTO,
+    ) -> GetQuestionnaireAssessmentResultByTokenResultDTO:
+        return questionnaire_domain_service.get_questionnaire_assessment_result_by_token(
+            str(dto.slug or "").strip(),
+            str(dto.result_token or "").strip(),
+        )
+
+    execute = __call__
+
+
 class ResolveQuestionnaireSubmitIdentityQuery:
     def __call__(
         self,
@@ -473,6 +488,7 @@ __all__ = [
     "GetGlobalQuestionnaireExternalPushLogsQuery",
     "GetLatestQuestionnaireSubmitDebugQuery",
     "GetPublicQuestionnaireBySlugQuery",
+    "GetQuestionnaireAssessmentResultByTokenQuery",
     "GetQuestionnaireExternalPushLogsQuery",
     "GetQuestionnaireDetailQuery",
     "HasQuestionnaireSubmissionQuery",

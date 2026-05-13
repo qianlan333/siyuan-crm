@@ -12,6 +12,7 @@ GetLatestQuestionnaireSubmitDebugResultDTO = dict[str, Any] | None
 GetQuestionnaireDetailResultDTO = dict[str, Any] | None
 ExportQuestionnaireSubmissionsResultDTO = dict[str, Any]
 GetPublicQuestionnaireBySlugResultDTO = dict[str, Any] | None
+GetQuestionnaireAssessmentResultByTokenResultDTO = dict[str, Any] | None
 ResolveQuestionnaireSubmitIdentityResultDTO = dict[str, Any] | None
 CheckQuestionnaireSubmissionStatusResultDTO = bool
 ValidateQuestionnaireAnswersResultDTO = list[dict[str, Any]]
@@ -66,6 +67,12 @@ class ExportQuestionnaireSubmissionsQueryDTO:
 @dataclass(slots=True)
 class GetPublicQuestionnaireBySlugQueryDTO:
     slug: str
+
+
+@dataclass(slots=True)
+class GetQuestionnaireAssessmentResultByTokenQueryDTO:
+    slug: str
+    result_token: str
 
 
 @dataclass(slots=True)
@@ -228,6 +235,8 @@ __all__ = [
     "GetLatestQuestionnaireSubmitDebugResultDTO",
     "GetPublicQuestionnaireBySlugQueryDTO",
     "GetPublicQuestionnaireBySlugResultDTO",
+    "GetQuestionnaireAssessmentResultByTokenQueryDTO",
+    "GetQuestionnaireAssessmentResultByTokenResultDTO",
     "GetQuestionnaireDetailQueryDTO",
     "GetQuestionnaireDetailResultDTO",
     "ListAvailableWeComTagsQueryDTO",

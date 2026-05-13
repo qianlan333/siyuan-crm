@@ -32,17 +32,28 @@
     const bodyNode = document.querySelector("[data-profile-questionnaire-body]");
     if (!stateNode || !wrapNode || !bodyNode) return;
     const answers = payload && Array.isArray(payload.answers) ? payload.answers : [];
-    if (!answers.length) {
+    const latestAssessment = payload && payload.latest_assessment_result ? payload.latest_assessment_result : null;
+    if (!answers.length && !latestAssessment) {
       wrapNode.hidden = true;
       showSectionEmpty(stateNode, "当前没有问卷记录", "暂未找到可展示的问卷问答。");
       return;
     }
-    bodyNode.innerHTML = answers
+    const assessmentRows = latestAssessment ? `
+          <tr>
+            <td>测评结果</td>
+            <td>${escapeHtml([
+              latestAssessment.overall_level_title || "未分层",
+              latestAssessment.total_score !== undefined ? `总分 ${latestAssessment.total_score}` : "",
+              latestAssessment.weaknesses && latestAssessment.weaknesses.length ? `短板 ${latestAssessment.weaknesses.join("/")}` : "",
+            ].filter(Boolean).join(" / "))}</td>
+          </tr>
+        ` : "";
+    bodyNode.innerHTML = assessmentRows + answers
       .map(
         (item) => `
           <tr>
-            <td>${item.question || "未命名问题"}</td>
-            <td>${item.answer || "未填写"}</td>
+            <td>${escapeHtml(item.question || "未命名问题")}</td>
+            <td>${escapeHtml(item.answer || "未填写")}</td>
           </tr>
         `,
       )

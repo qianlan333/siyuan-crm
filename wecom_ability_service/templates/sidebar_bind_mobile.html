@@ -884,11 +884,23 @@
       try {
         const payload = await requestJson(url);
         const answers = Array.isArray(payload.answers) ? payload.answers : [];
-        if (!answers.length) {
+        const latestAssessment = payload && payload.latest_assessment_result ? payload.latest_assessment_result : null;
+        if (!answers.length && !latestAssessment) {
           showEmptyState(questionnaireState, questionnaireList, '当前没有问卷记录。');
           return payload;
         }
-        questionnaireList.innerHTML = answers
+        const assessmentCard = latestAssessment ? (
+          '<article class="answer-card">' +
+            '<span>测评结果</span>' +
+            '<strong>' + escapeHtml(latestAssessment.overall_level_title || '未分层') + '</strong>' +
+            '<p>' + escapeHtml([
+              latestAssessment.total_score !== undefined ? '总分 ' + String(latestAssessment.total_score) : '',
+              Array.isArray(latestAssessment.strengths) && latestAssessment.strengths.length ? '优势 ' + latestAssessment.strengths.join('/') : '',
+              Array.isArray(latestAssessment.weaknesses) && latestAssessment.weaknesses.length ? '短板 ' + latestAssessment.weaknesses.join('/') : ''
+            ].filter(Boolean).join(' / ')) + '</p>' +
+          '</article>'
+        ) : '';
+        questionnaireList.innerHTML = assessmentCard + answers
           .map((item) => (
             '<article class="answer-card">' +
               '<span>问题</span>' +

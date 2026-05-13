@@ -1101,8 +1101,51 @@ def _init_postgres(db) -> None:
     )
     db.execute(
         """
+        ALTER TABLE IF EXISTS questionnaires
+        ADD COLUMN IF NOT EXISTS assessment_enabled BOOLEAN NOT NULL DEFAULT FALSE
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ADD COLUMN IF NOT EXISTS assessment_config JSONB NOT NULL DEFAULT '{}'::jsonb
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE questionnaire_questions
+        ADD COLUMN IF NOT EXISTS assessment_dimension_key TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE questionnaire_options
+        ADD COLUMN IF NOT EXISTS assessment_type_key TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
         ALTER TABLE questionnaire_submissions
         ADD COLUMN IF NOT EXISTS mobile_snapshot TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE questionnaire_submissions
+        ADD COLUMN IF NOT EXISTS assessment_result_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE questionnaire_submissions
+        ADD COLUMN IF NOT EXISTS result_token TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_questionnaire_submissions_result_token
+        ON questionnaire_submissions (result_token)
+        WHERE result_token <> ''
         """
     )
     db.execute(

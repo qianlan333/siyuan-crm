@@ -979,6 +979,8 @@ CREATE TABLE IF NOT EXISTS questionnaires (
     description TEXT NOT NULL DEFAULT '',
     is_disabled BOOLEAN NOT NULL DEFAULT FALSE,
     redirect_url TEXT NOT NULL DEFAULT '',
+    assessment_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    assessment_config JSONB NOT NULL DEFAULT '{}'::jsonb,
     external_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     external_push_url TEXT NOT NULL DEFAULT '',
     external_push_day INTEGER,
@@ -1004,6 +1006,7 @@ CREATE TABLE IF NOT EXISTS questionnaire_questions (
     type VARCHAR(32) NOT NULL CHECK (type IN ('single_choice', 'multi_choice', 'textarea', 'mobile')),
     title TEXT NOT NULL,
     placeholder_text TEXT NOT NULL DEFAULT '',
+    assessment_dimension_key TEXT NOT NULL DEFAULT '',
     required BOOLEAN NOT NULL DEFAULT FALSE,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1018,6 +1021,7 @@ CREATE TABLE IF NOT EXISTS questionnaire_options (
     question_id BIGINT NOT NULL REFERENCES questionnaire_questions(id) ON DELETE CASCADE,
     option_text TEXT NOT NULL,
     score DOUBLE PRECISION NOT NULL DEFAULT 0,
+    assessment_type_key TEXT NOT NULL DEFAULT '',
     tag_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -1057,6 +1061,8 @@ CREATE TABLE IF NOT EXISTS questionnaire_submissions (
     staff_id TEXT NOT NULL DEFAULT '',
     total_score DOUBLE PRECISION NOT NULL DEFAULT 0,
     final_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    assessment_result_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    result_token TEXT NOT NULL DEFAULT '',
     redirect_url_snapshot TEXT NOT NULL DEFAULT '',
     submitted_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -1069,6 +1075,10 @@ ON questionnaire_submissions (identity_map_id);
 
 CREATE INDEX IF NOT EXISTS idx_questionnaire_submissions_external
 ON questionnaire_submissions (external_userid);
+
+CREATE INDEX IF NOT EXISTS idx_questionnaire_submissions_result_token
+ON questionnaire_submissions (result_token)
+WHERE result_token <> '';
 
 CREATE TABLE IF NOT EXISTS questionnaire_submission_answers (
     id BIGSERIAL PRIMARY KEY,

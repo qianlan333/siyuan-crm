@@ -1464,7 +1464,8 @@ def test_admin_questionnaire_editor_new_page_contains_tag_picker_fallback(client
     assert "添加多维测评模板" in text
     assert "测评维度" in text
     assert "测评分型" in text
-    assert "添加多维测评模板到当前问卷" in text
+    assert "选择测评模板资产" in text
+    assert "添加这个模板到当前问卷" in text
     assert "从空白模板开始搭建题目、标签和分数规则。" not in text
     assert '<div id="questionnaire-list"' not in text
 

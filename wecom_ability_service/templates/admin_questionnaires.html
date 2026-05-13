@@ -1471,6 +1471,83 @@
         ['用户裂变', '你的产品阶梯 / 客单价分布是？', [['一锤子型', 1, '只有一个产品 / 客单价'], ['随缘型', 2, '有几个产品但没明确升单逻辑'], ['利诱型', 3, '有阶梯，但靠优惠券推进'], ['共生型', 4, '完整产品阶梯，自然进阶到高客单']]],
         ['用户裂变', '你对老用户的看法，更接近哪种？', [['一锤子型', 1, '老客户太磨人，不如开发新客'], ['随缘型', 2, '老客户重要，但没时间维护'], ['利诱型', 3, '会做专属动作或返现激励'], ['共生型', 4, '老客户是核心资产']]],
       ];
+      const dimensionFeedback = {
+        '用户获取': {
+          levels: [
+            ['待破局', '现在主要靠偶发曝光或熟人介绍，获客动作不稳定。先固定一个目标人群和一个引流入口。'],
+            ['入门', '已经有一些获客动作，但钩子和渠道还不够稳定。建议把最有效的动作重复跑 2-3 周。'],
+            ['进阶', '有明确获客方法，能持续带来线索。下一步重点是提升精准度和承接效率。'],
+            ['专家', '获客入口比较稳定，用户会被内容、人设或活动主动吸引。可以开始做渠道放大和内容矩阵。'],
+          ],
+          types: {
+            '磁铁型': '用户更容易被你的内容、人设或观点主动吸引，适合持续放大内容资产和个人定位。',
+            '钩子型': '你会用资料、活动或明确利益点吸引用户，适合继续打磨钩子和投放场景。',
+            '莽撞型': '你愿意主动出击，但容易靠加人、拉群、投放堆数量，需要补筛选和承接逻辑。',
+            '佛系型': '获客更多依赖熟人、自然曝光或运气，短期需要先建立固定的引流动作。',
+          },
+          recommendation: '先选定一个主渠道，设计一个能筛出目标用户的钩子，并连续复盘来源、加粉成本和有效咨询数。',
+        },
+        '用户维护': {
+          levels: [
+            ['待破局', '加来的用户容易沉默，关系维护没有固定动作。先补新好友破冰和老用户触达。'],
+            ['入门', '会做一些互动和朋友圈维护，但节奏不稳定。建议沉淀固定的内容和私聊 SOP。'],
+            ['进阶', '关系经营已有方法，用户愿意互动。下一步可以按用户阶段做分层维护。'],
+            ['专家', '用户关系资产化程度较高，能持续获得反馈、复购和转介绍线索。适合导入自动化标签和提醒。'],
+          ],
+          types: {
+            '养鱼型': '你会有节奏地养熟关系，适合做用户分层、朋友圈剧本和周期性触达。',
+            '暖男/女型': '你愿意真诚互动，但还比较依赖个人状态，需要把互动动作标准化。',
+            '心急型': '你容易过早进入销售，用户还没建立信任就被推产品，需要先补价值和信任素材。',
+            '僵尸粉型': '加到用户后缺少持续触达，用户容易变成沉默好友，需要先建立最小维护节奏。',
+          },
+          recommendation: '建立“新好友 3 步破冰 + 7 天价值触达 + 老用户月度回访”的最小维护 SOP。',
+        },
+        '用户成交': {
+          levels: [
+            ['待破局', '成交主要靠用户主动问和临场发挥，缺少推进动作。先补咨询、异议和跟进话术。'],
+            ['入门', '能讲清产品价值，但成交节奏不够稳。建议把常见异议和案例统一整理。'],
+            ['进阶', '有比较完整的成交动作，能主动推进。下一步重点是提高成交率和客单价。'],
+            ['专家', '能基于需求、案例和时机推动成交，成交链路成熟。适合做标准化话术和团队复用。'],
+          ],
+          types: {
+            '催眠型': '你能围绕用户需求、故事和案例让用户自己看到购买理由，是比较成熟的成交方式。',
+            '推销型': '你擅长讲卖点和性价比，但需要更多追问用户真实阻碍，避免只是在介绍产品。',
+            '压迫型': '你常用限时、优惠、倒计时推进，短期有效但容易损伤信任，需要补价值确认。',
+            '被动型': '你习惯等用户自己决定，缺少主动跟进和异议处理，容易丢掉本可成交的线索。',
+          },
+          recommendation: '整理 10 个真实成交案例，配套“需求确认、异议处理、跟进提醒、成交复盘”四段动作。',
+        },
+        '用户交付': {
+          levels: [
+            ['待破局', '交付缺少主动管理，用户容易不清楚下一步。先补付款后的欢迎和流程说明。'],
+            ['入门', '能完成服务，但过程缺少记忆点和预期管理。建议补节点提醒和阶段反馈。'],
+            ['进阶', '交付过程较稳定，用户体验可控。下一步可以加入超预期动作和复购铺垫。'],
+            ['专家', '交付有仪式、有反馈、有结案，用户能感受到专业度。适合沉淀交付模板和案例素材。'],
+          ],
+          types: {
+            '惊喜型': '你重视交付体验和超预期设计，用户更容易产生信任、复购和主动推荐。',
+            '打工型': '你能认真完成服务，但体验偏功能性，需要增加节点感、结果感和案例沉淀。',
+            '割韭菜型': '用户可能感到收款前后落差，需要补齐服务承诺、过程反馈和售后说明。',
+            '放羊型': '交付中主动联系少、规则不清楚，用户容易焦虑，需要先建立基础交付流程。',
+          },
+          recommendation: '设置“付款欢迎、服务前对齐、服务中反馈、结案总结”四个固定交付节点。',
+        },
+        '用户裂变': {
+          levels: [
+            ['待破局', '老用户价值没有被持续经营，复购和转介绍主要靠运气。先补老用户回访和下一步产品。'],
+            ['入门', '知道老用户重要，但缺少固定升单和转介绍动作。建议先设计一个老用户专属机制。'],
+            ['进阶', '已有复购或转介绍动作，能从老用户中获得增长。下一步是产品阶梯和权益体系。'],
+            ['专家', '老用户已经成为核心资产，能自然带来复购、升单和推荐。适合做会员制或高阶产品。'],
+          ],
+          types: {
+            '共生型': '你把老用户当长期资产经营，产品阶梯和关系维护能自然带来复购与推荐。',
+            '利诱型': '你会用优惠、返现或礼品刺激复购转介绍，但需要补价值驱动和长期机制。',
+            '随缘型': '你认可老用户重要，但没有固定动作，复购和推荐主要靠关系或运气。',
+            '一锤子型': '你更重视首单成交，老用户经营不足，需要先设计一个可承接的下一步产品。',
+          },
+          recommendation: '为老用户设计“回访问题、专属权益、转介绍理由、进阶产品”四件套。',
+        },
+      };
       return {
         name: '小 IP 商业力测评',
         title: '小 IP 商业力测评',
@@ -1484,10 +1561,10 @@
           strength_count: 2,
           weakness_count: 2,
           overall_levels: [
-            { min_score: 0, max_score: 44, title: '待破局', summary: '基础链路还不稳定，优先补齐获客、承接和成交动作。' },
-            { min_score: 45, max_score: 64, title: '入门', summary: '已经有一些可用动作，但还需要把关键环节标准化。' },
-            { min_score: 65, max_score: 84, title: '进阶', summary: '整体链路比较完整，可以优先放大优势维度。' },
-            { min_score: 85, max_score: 100, title: '专家', summary: '商业闭环成熟，适合做规模化复制和精细运营。' },
+            { min_score: 0, max_score: 44, title: '待破局', summary: '当前商业闭环还比较散，最优先的不是做复杂运营，而是先让获客、维护、成交、交付和复购各有一个能跑起来的基础动作。' },
+            { min_score: 45, max_score: 64, title: '入门', summary: '你已经有一些有效动作，但更多依赖个人状态和临场发挥。下一步要把高频动作标准化，先解决最弱的 1-2 个维度。' },
+            { min_score: 65, max_score: 84, title: '进阶', summary: '整体链路已经比较完整，部分维度能稳定产生结果。建议优先放大优势项，同时把短板维度做成固定流程。' },
+            { min_score: 85, max_score: 100, title: '专家', summary: '你已经具备成熟的小 IP 商业闭环，适合把方法论产品化、自动化，并通过内容、老用户和高客单产品继续放大。' },
           ],
           dimensions: dimensions.map((dimension) => ({
             key: dimension.key,
@@ -1497,20 +1574,20 @@
             types: dimension.priority.map((name) => ({
               key: name,
               name,
-              summary: `${name}代表用户在“${dimension.key}”上的主要行为偏好，可在这里改成更具体的结果页解释。`,
+              summary: dimensionFeedback[dimension.key]?.types?.[name] || `${name}代表用户在“${dimension.key}”上的主要行为偏好。`,
             })),
-            levels: [
-              { min_score: 0, max_score: 8, title: '待破局', summary: `${dimension.key}当前较弱，需要先补基础动作。` },
-              { min_score: 9, max_score: 12, title: '入门', summary: `${dimension.key}已经有动作，但稳定性还不够。` },
-              { min_score: 13, max_score: 16, title: '进阶', summary: `${dimension.key}表现可用，建议沉淀成固定流程。` },
-              { min_score: 17, max_score: 20, title: '专家', summary: `${dimension.key}是当前优势，可以进一步放大。` },
-            ],
+            levels: (dimensionFeedback[dimension.key]?.levels || []).map(([title, summary], index) => ({
+              min_score: [0, 9, 13, 17][index],
+              max_score: [8, 12, 16, 20][index],
+              title,
+              summary,
+            })),
           })),
           recommendations: dimensions.map((dimension) => ({
             dimension_key: dimension.key,
             max_score: 12,
             title: `优先优化${dimension.key}`,
-            summary: dimension.cta,
+            summary: dimensionFeedback[dimension.key]?.recommendation || dimension.cta,
           })),
         },
       };
@@ -1955,15 +2032,18 @@
     }
 
     function createQuestionFromAssessmentPreset(item, index = 0) {
+      const presetQuestion = Array.isArray(item)
+        ? { dim: item[0], title: item[1], options: item[2] }
+        : (item || {});
       const question = {
         type: 'single_choice',
-        title: item.title,
+        title: presetQuestion.title,
         required: true,
-        assessment_dimension_key: item.dim,
+        assessment_dimension_key: presetQuestion.dim,
         assessment_template_id: DEFAULT_ASSESSMENT_TEMPLATE_ID,
         assessment_template_name: DEFAULT_ASSESSMENT_TEMPLATE_NAME,
         sort_order: index + 1,
-        options: (item.options || []).map((option, optionIndex) => ({
+        options: (presetQuestion.options || []).map((option, optionIndex) => ({
           option_text: option[2],
           score: option[1],
           assessment_type_key: option[0],

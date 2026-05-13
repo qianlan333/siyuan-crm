@@ -3007,6 +3007,7 @@
       inspectorTitleEl.textContent = '问卷设置';
       inspectorSubtitleEl.textContent = '编辑当前问卷的基础信息。';
       const deleteDisabled = !state.persistedIsDisabled;
+      const assessmentGroup = assessmentTemplateGroups()[0] || null;
       const customParamsHtml = (state.questionnaire.external_push_custom_params || []).length
         ? state.questionnaire.external_push_custom_params.map((param) => `
             <div class="option-editor" data-custom-param-key="${escapeHtml(param.local_key)}">
@@ -3075,16 +3076,18 @@
         <section class="config-group">
           <div class="config-head">
             <div>
-              <h3>多维测评</h3>
-              <p>按维度计分，选项同时绑定分值和中文分型。</p>
+              <h3>多维测评模板</h3>
+              <p>普通问卷只引用模板，不在这里编辑模板内部题目、维度和结果页。</p>
             </div>
-            <button id="open-assessment-config-btn" type="button" class="btn secondary">配置维度与分型</button>
+            <button id="open-assessment-config-btn" type="button" class="btn secondary">${assessmentGroup ? '查看已添加模板' : '添加多维测评模板'}</button>
           </div>
           <label class="field" style="margin-bottom:8px;font-weight:600;">
             <input id="field-assessment-enabled" type="checkbox" ${state.questionnaire.assessment_enabled ? 'checked' : ''}> 启用多维测评结果页
           </label>
           <div class="helper-note">
-            已配置 ${assessmentDimensions().length} 个维度。运营只需要维护维度名称、分型名称和分数区间；系统会自动生成保存所需的底层配置。
+            ${assessmentGroup
+              ? `已引用“${escapeHtml(assessmentGroup.name)}”，包含 ${escapeHtml(String(assessmentGroup.questions.length))} 道题。模板内部内容请到“创建测评问卷模板”里维护。`
+              : '从已创建的测评模板中选择，插入后作为一整组题管理。手机号、标签、webhook 和普通题继续复用现有问卷能力。'}
           </div>
         </section>
         <details class="config-group config-advanced" ${state.questionnaire.external_push_enabled ? 'open' : ''}>
@@ -3142,7 +3145,7 @@
         renderPreview();
         updateDraftIndicator();
       });
-      inspectorBodyEl.querySelector('#open-assessment-config-btn').addEventListener('click', () => selectAssessmentSettings());
+      inspectorBodyEl.querySelector('#open-assessment-config-btn').addEventListener('click', () => openAssessmentSettings());
       inspectorBodyEl.querySelector('#field-external-push-enabled').addEventListener('change', (event) => {
         state.questionnaire.external_push_enabled = event.target.checked;
         updateDraftIndicator();
@@ -3216,6 +3219,55 @@
     function renderAssessmentInspector() {
       const builder = ensureAssessmentBuilder();
       const preset = buildSiyuanIpAssessmentPreset();
+      if (!editorConfig.defaultAssessment) {
+        const group = assessmentTemplateGroups()[0] || null;
+        inspectorTitleEl.textContent = group ? '测评模板引用' : '添加多维测评模板';
+        inspectorSubtitleEl.textContent = group
+          ? '普通问卷只管理这个模板引用，模板内容不在这里改。'
+          : '从已创建模板中选择一组题插入当前问卷。';
+        const groupDimensions = group
+          ? [...new Set((group.questions || []).map((item) => item.assessment_dimension_key).filter(Boolean))]
+          : [];
+        inspectorBodyEl.innerHTML = `
+          <section class="config-group">
+            <div class="config-head">
+              <div>
+                <h3>${group ? escapeHtml(group.name) : escapeHtml(preset.title)}</h3>
+                <p>${group ? '已作为整组测评模板插入当前问卷。' : '选择后会整组插入题目、维度、分型和结果页规则。'}</p>
+              </div>
+            </div>
+            <div class="helper-note">
+              ${group
+                ? `${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group.questions || []).length))} 道题、含结果页规则。`
+                : `${escapeHtml(preset.title)}：${escapeHtml(String(preset.dimensions.length))} 个维度、${escapeHtml(String(preset.questions.length))} 道单选测评题。`}
+              ${group ? '手机号、标签、webhook 和普通题继续复用当前问卷能力。' : '插入后在普通问卷里按整组管理；要改模板内容，请回到测评模板页维护。'}
+            </div>
+            <div class="template-group-actions">
+              ${group
+                ? '<button id="remove-template-group-btn" type="button" class="btn ghost">删除整组模板</button>'
+                : '<button id="apply-assessment-preset-btn" type="button" class="btn primary" style="width:100%;">添加多维测评模板到当前问卷</button>'}
+            </div>
+          </section>
+          <section class="config-group">
+            <div class="config-head">
+              <div>
+                <h3>配置边界</h3>
+                <p>这里是普通问卷，不编辑测评模板内部内容。</p>
+              </div>
+            </div>
+            <div class="helper-note">
+              普通问卷负责手机号、城市、来源、标签、webhook、分享和提交记录；测评模板负责题目、维度、分型和结果页说明。
+            </div>
+          </section>
+        `;
+        inspectorBodyEl.querySelector('#apply-assessment-preset-btn')?.addEventListener('click', () => {
+          applyAssessmentPreset();
+        });
+        inspectorBodyEl.querySelector('#remove-template-group-btn')?.addEventListener('click', () => {
+          removeAssessmentTemplateGroup(group.id);
+        });
+        return;
+      }
       inspectorTitleEl.textContent = editorConfig.defaultAssessment ? '测评模板配置' : '维度与结果页';
       inspectorSubtitleEl.textContent = editorConfig.defaultAssessment
         ? '用中文配置模板题目、维度分型和结果页反馈。'
@@ -3502,7 +3554,7 @@
       const builder = ensureAssessmentBuilder();
       const groupDimensions = [...new Set((group?.questions || []).map((item) => item.assessment_dimension_key).filter(Boolean))];
       inspectorTitleEl.textContent = '测评模板引用';
-      inspectorSubtitleEl.textContent = '这组题来自同一个模板，在普通问卷里整组管理。';
+      inspectorSubtitleEl.textContent = '普通问卷只管理这个模板引用，模板内容不在这里改。';
       inspectorBodyEl.innerHTML = `
         <section class="config-group">
           <div class="config-head">
@@ -3512,27 +3564,22 @@
             </div>
           </div>
           <div class="helper-note">
-            ${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group?.questions || []).length))} 道题、${escapeHtml(String((builder.overall_levels || []).length))} 个综合分层。题目来自同一模板，当前问卷里建议整组保留或整组删除。
+            ${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group?.questions || []).length))} 道题、${escapeHtml(String((builder.overall_levels || []).length))} 个综合分层。题目来自同一模板，当前问卷里只能整组保留或整组删除。
           </div>
           <div class="template-group-actions">
-            <button id="open-template-result-config-btn" type="button" class="btn secondary">查看结果页配置</button>
             <button id="remove-template-group-btn" type="button" class="btn ghost">删除整组模板</button>
           </div>
         </section>
         <section class="config-group">
           <div class="config-head">
             <div>
-              <h3>普通问卷能力继续复用</h3>
-              <p>手机号、城市、来源渠道、标签、webhook、分享链接和提交记录不需要重做。</p>
+              <h3>配置边界</h3>
+              <p>普通问卷能力继续复用。</p>
             </div>
           </div>
-          <div class="helper-note">如果需要改题目、分型或结果页文案，进入“结果页配置”或回到测评模板编辑页处理。</div>
+          <div class="helper-note">手机号、城市、来源渠道、标签、webhook、分享链接和提交记录都留在普通问卷里处理。如果需要改题目、分型或结果页文案，请回到测评模板页维护。</div>
         </section>
       `;
-      inspectorBodyEl.querySelector('#open-template-result-config-btn').addEventListener('click', () => {
-        state.selection = { kind: 'assessment', dimensionKey: builder.dimensions[0]?.key || '' };
-        renderWorkspace();
-      });
       inspectorBodyEl.querySelector('#remove-template-group-btn').addEventListener('click', () => {
         removeAssessmentTemplateGroup(group.id);
       });
@@ -3931,7 +3978,13 @@
 
     function openAssessmentSettings() {
       if (!editorConfig.defaultAssessment) {
-        applyAssessmentPreset();
+        const existingGroup = assessmentTemplateGroups()[0] || null;
+        if (existingGroup) {
+          selectAssessmentTemplateGroup(existingGroup.id);
+          return;
+        }
+        state.selection = { kind: 'assessment' };
+        renderWorkspace();
         return;
       }
       selectAssessmentSettings();
@@ -3964,15 +4017,6 @@
       state.questionnaire.assessment_enabled = true;
       state.questionnaire.assessment_config = preset.assessment_config;
       state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(preset.assessment_config);
-      if (!String(state.questionnaire.name || '').trim()) {
-        state.questionnaire.name = preset.name;
-      }
-      if (!String(state.questionnaire.title || '').trim()) {
-        state.questionnaire.title = preset.title;
-      }
-      if (!String(state.questionnaire.description || '').trim()) {
-        state.questionnaire.description = preset.description;
-      }
       const existingTitles = new Set(state.questionnaire.questions.map((question) => String(question.title || '').trim()));
       const questionsToInsert = preset.questions
         .filter((question) => !existingTitles.has(String(question.title || '').trim()))
@@ -3988,7 +4032,7 @@
         state.ruleMode = false;
         state.selection = { kind: 'assessment_template_group', templateId: DEFAULT_ASSESSMENT_TEMPLATE_ID };
       } else {
-        state.selection = { kind: 'assessment', dimensionKey: state.questionnaire.assessment_builder.dimensions[0]?.key || '' };
+        state.selection = { kind: 'assessment_template_group', templateId: DEFAULT_ASSESSMENT_TEMPLATE_ID };
       }
       renderWorkspace();
       showToast(questionsToInsert.length ? `已添加“${DEFAULT_ASSESSMENT_TEMPLATE_NAME}”整组模板` : '模板题目已经在当前问卷里');

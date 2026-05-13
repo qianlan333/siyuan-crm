@@ -2010,6 +2010,8 @@
       return {
         template_id: String(normalized.template_id || '').trim(),
         template_name: String(normalized.template_name || '').trim(),
+        asset_kind: String(normalized.asset_kind || '').trim(),
+        source_questionnaire_id: normalized.source_questionnaire_id ?? '',
         total_score_title: String(normalized.total_score_title || '多维测评综合结果').trim() || '多维测评综合结果',
         strength_count: Number(normalized.strength_count || 2),
         weakness_count: Number(normalized.weakness_count || 2),
@@ -2028,7 +2030,7 @@
     function buildAssessmentConfigFromBuilder(builder = {}) {
       const dimensions = Array.isArray(builder.dimensions) ? builder.dimensions : [];
       if (!dimensions.length) return {};
-      return {
+      const config = {
         template_id: builder.template_id || '',
         template_name: builder.template_name || '',
         total_score_title: builder.total_score_title || '多维测评综合结果',
@@ -2062,6 +2064,14 @@
         })),
         recommendations: builder.recommendations || [],
       };
+      const assetKind = String(builder.asset_kind || '').trim();
+      if (assetKind) {
+        config.asset_kind = assetKind;
+      }
+      if (builder.source_questionnaire_id !== undefined && builder.source_questionnaire_id !== '') {
+        config.source_questionnaire_id = builder.source_questionnaire_id;
+      }
+      return config;
     }
 
     function ensureAssessmentBuilder() {
@@ -2201,18 +2211,30 @@
       return Number(item?.question_count || 0);
     }
 
-    function isAssessmentTemplateCandidate(item) {
+    function assessmentAssetKind(item) {
+      const config = normalizeAssessmentConfig(item?.assessment_config);
+      return String(config.asset_kind || '').trim();
+    }
+
+    function isSavedAssessmentTemplateAsset(item) {
       if (!item || !item.assessment_enabled) return false;
-      if (state.currentId && Number(item.id) === Number(state.currentId)) return false;
       const config = normalizeAssessmentConfig(item.assessment_config);
+      const assetKind = assessmentAssetKind(item);
+      if (assetKind) return assetKind === 'assessment_template';
+      return String(config.template_id || '').trim() === DEFAULT_ASSESSMENT_TEMPLATE_ID;
+    }
+
+    function isAssessmentTemplateCandidate(item) {
+      if (!isSavedAssessmentTemplateAsset(item)) return false;
+      if (state.currentId && Number(item.id) === Number(state.currentId)) return false;
+      return true;
+    }
+
+    function assessmentTemplateBadge(item) {
+      if (isSavedAssessmentTemplateAsset(item)) return '<span class="type-badge">测评模板</span>';
       return Boolean(
-        item.assessment_enabled
-        && (
-          Array.isArray(config.dimensions)
-          || config.template_id
-          || config.total_score_title
-        )
-      );
+        item?.assessment_enabled
+      ) ? '<span class="type-badge">多维测评</span>' : '';
     }
 
     function availableAssessmentTemplates() {
@@ -2630,6 +2652,32 @@
       renderWorkspace();
     }
 
+    function sourceQuestionnaireIdFromTemplateGroup(group) {
+      const matched = String(group?.id || '').match(/^questionnaire_template_(\d+)$/);
+      return matched ? Number(matched[1]) : '';
+    }
+
+    function buildSerializableAssessmentConfig() {
+      const config = buildAssessmentConfigFromBuilder(ensureAssessmentBuilder());
+      if (editorConfig.defaultAssessment) {
+        config.asset_kind = 'assessment_template';
+        delete config.source_questionnaire_id;
+        return config;
+      }
+      if (config.asset_kind === 'assessment_template') {
+        delete config.asset_kind;
+      }
+      const group = assessmentTemplateGroups()[0] || null;
+      if (group) {
+        config.asset_kind = 'assessment_template_reference';
+        if (!config.source_questionnaire_id) {
+          const sourceId = sourceQuestionnaireIdFromTemplateGroup(group);
+          if (sourceId) config.source_questionnaire_id = sourceId;
+        }
+      }
+      return config;
+    }
+
     function serializePayload(options = {}) {
       return {
         name: state.questionnaire.name,
@@ -2638,7 +2686,7 @@
         redirect_url: state.questionnaire.redirect_url,
         assessment_enabled: Boolean(state.questionnaire.assessment_enabled),
         assessment_config: state.questionnaire.assessment_enabled
-          ? buildAssessmentConfigFromBuilder(ensureAssessmentBuilder())
+          ? buildSerializableAssessmentConfig()
           : buildAssessmentConfigFromBuilder(ensureAssessmentBuilder()),
         external_push_enabled: Boolean(state.questionnaire.external_push_enabled),
         external_push_url: state.questionnaire.external_push_url,
@@ -2871,7 +2919,7 @@
                 <td>
                   <div class="name-line">
                     <span class="name-main">${escapeHtml(item.name || '未命名问卷')}</span>
-                    ${item.assessment_enabled ? '<span class="type-badge">多维测评</span>' : ''}
+                    ${assessmentTemplateBadge(item)}
                     <span class="status-badge${item.is_disabled ? ' disabled' : ''}">${item.is_disabled ? '已停用' : '启用中'}</span>
                   </div>
                   ${item.title ? `<div class="name-sub">${escapeHtml(item.title)}</div>` : ''}
@@ -4190,8 +4238,8 @@
       }
       const data = await fetchJson(`/api/admin/questionnaires/${id}`);
       const template = data.questionnaire || {};
-      if (!template.assessment_enabled) {
-        throw new Error('这个问卷不是多维测评模板，不能作为模板添加');
+      if (!isSavedAssessmentTemplateAsset(template)) {
+        throw new Error('这个问卷不是通过「创建测评问卷模板」保存的模板资产，不能作为模板添加');
       }
       const templateQuestions = (template.questions || []).filter((question) => question.assessment_dimension_key);
       if (!templateQuestions.length) {
@@ -4206,6 +4254,8 @@
         ...sourceConfig,
         template_id: templateReference.id,
         template_name: templateReference.name,
+        asset_kind: 'assessment_template_reference',
+        source_questionnaire_id: id,
       };
       state.questionnaire.assessment_enabled = true;
       state.questionnaire.assessment_config = assessmentConfig;

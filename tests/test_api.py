@@ -1449,6 +1449,29 @@ def test_admin_questionnaire_management_page_exists(client):
     assert '<div class="workspace">' not in text
 
 
+def test_assessment_template_asset_detection_distinguishes_templates_from_references():
+    from wecom_ability_service.http.admin_questionnaire_console import _is_assessment_template_asset
+
+    assert _is_assessment_template_asset(
+        {"assessment_enabled": True, "assessment_config": {"asset_kind": "assessment_template"}}
+    )
+    assert not _is_assessment_template_asset(
+        {
+            "assessment_enabled": True,
+            "assessment_config": {
+                "asset_kind": "assessment_template_reference",
+                "source_questionnaire_id": 1,
+            },
+        }
+    )
+    assert _is_assessment_template_asset(
+        {"assessment_enabled": True, "assessment_config": {"template_id": "siyuan_ip_business"}}
+    )
+    assert not _is_assessment_template_asset(
+        {"assessment_enabled": True, "assessment_config": {"template_id": "questionnaire_template_1"}}
+    )
+
+
 def test_admin_questionnaire_editor_new_page_contains_tag_picker_fallback(client):
     response = client.get("/admin/questionnaires/new")
     text = response.get_data(as_text=True)
@@ -1466,6 +1489,7 @@ def test_admin_questionnaire_editor_new_page_contains_tag_picker_fallback(client
     assert "测评分型" in text
     assert "选择测评模板资产" in text
     assert "添加这个模板到当前问卷" in text
+    assert "assessment_template_reference" in text
     assert "从空白模板开始搭建题目、标签和分数规则。" not in text
     assert '<div id="questionnaire-list"' not in text
 
@@ -1481,6 +1505,7 @@ def test_admin_questionnaire_editor_assessment_mode_prefills_config(client):
     assert "多维测评模板 · 整组引用" in text
     assert "综合分层说明" in text
     assert "这一层的结果说明" in text
+    assert "assessment_template" in text
     assert "用户获取" in text
     assert "用户成交" in text
 

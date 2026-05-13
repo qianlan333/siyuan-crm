@@ -797,6 +797,35 @@
       border-color: rgba(51, 112, 255, 0.34);
       box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.10);
     }
+    .assessment-template-list {
+      display: grid;
+      gap: 12px;
+      margin-top: 10px;
+    }
+    .assessment-template-card {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.76);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+    }
+    .assessment-template-card h4 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      line-height: 1.4;
+    }
+    .assessment-template-card p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .assessment-template-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 12px 0;
+    }
     .assessment-type-grid,
     .assessment-level-grid {
       display: grid;
@@ -2148,6 +2177,48 @@
       return title || name || fallback;
     }
 
+    function assessmentTemplateReferenceId(item) {
+      const rawId = String(item?.id ?? '').trim();
+      if (rawId) return `questionnaire_template_${rawId}`;
+      const config = normalizeAssessmentConfig(item?.assessment_config);
+      return String(config.template_id || DEFAULT_ASSESSMENT_TEMPLATE_ID).trim() || DEFAULT_ASSESSMENT_TEMPLATE_ID;
+    }
+
+    function assessmentTemplateReferenceName(item) {
+      return questionnaireDisplayName(item, DEFAULT_ASSESSMENT_TEMPLATE_NAME);
+    }
+
+    function assessmentTemplateDimensionCount(item) {
+      const config = normalizeAssessmentConfig(item?.assessment_config);
+      return Array.isArray(config.dimensions) ? config.dimensions.length : 0;
+    }
+
+    function assessmentTemplateQuestionCount(item) {
+      if (Array.isArray(item?.questions)) {
+        const assessmentQuestions = item.questions.filter((question) => question.assessment_dimension_key);
+        return assessmentQuestions.length || item.questions.length;
+      }
+      return Number(item?.question_count || 0);
+    }
+
+    function isAssessmentTemplateCandidate(item) {
+      if (!item || !item.assessment_enabled) return false;
+      if (state.currentId && Number(item.id) === Number(state.currentId)) return false;
+      const config = normalizeAssessmentConfig(item.assessment_config);
+      return Boolean(
+        item.assessment_enabled
+        && (
+          Array.isArray(config.dimensions)
+          || config.template_id
+          || config.total_score_title
+        )
+      );
+    }
+
+    function availableAssessmentTemplates() {
+      return (state.list || []).filter((item) => isAssessmentTemplateCandidate(item));
+    }
+
     function fieldLabel(fieldName) {
       const labels = {
         name: '问卷名称',
@@ -2373,6 +2444,29 @@
         })),
       };
       return createQuestion('single_choice', question, index);
+    }
+
+    function createQuestionFromAssessmentTemplateQuestion(item, index = 0, templateReference = {}) {
+      const questionType = item.type || 'single_choice';
+      return createQuestion(questionType, {
+        id: null,
+        type: questionType,
+        title: item.title || '',
+        placeholder_text: item.placeholder_text || '',
+        required: Boolean(item.required),
+        assessment_dimension_key: item.assessment_dimension_key || '',
+        assessment_template_id: templateReference.id || '',
+        assessment_template_name: templateReference.name || DEFAULT_ASSESSMENT_TEMPLATE_NAME,
+        sort_order: index + 1,
+        options: (item.options || []).map((option, optionIndex) => ({
+          id: null,
+          option_text: option.option_text || '',
+          score: option.score ?? 0,
+          assessment_type_key: option.assessment_type_key || '',
+          tag_codes: normalizeTagIds(option.tag_codes || []),
+          sort_order: optionIndex + 1,
+        })),
+      }, index);
     }
 
     function createRule(rule = {}, index = 0) {
@@ -2677,16 +2771,21 @@
     }
 
     async function loadList() {
-      if (!listEl) return;
       state.loadingList = true;
-      listEl.innerHTML = '<div class="empty-state">问卷列表加载中...</div>';
+      if (listEl) {
+        listEl.innerHTML = '<div class="empty-state">问卷列表加载中...</div>';
+      }
       try {
         const data = await fetchJson('/api/admin/questionnaires');
         state.list = data.questionnaires || [];
-        renderList();
+        if (listEl) {
+          renderList();
+        }
       } catch (error) {
         state.list = [];
-        listEl.innerHTML = `<div class="empty-state">${escapeHtml(error.message || '问卷列表加载失败，请稍后重试')}</div>`;
+        if (listEl) {
+          listEl.innerHTML = `<div class="empty-state">${escapeHtml(error.message || '问卷列表加载失败，请稍后重试')}</div>`;
+        }
       } finally {
         state.loadingList = false;
       }
@@ -3218,9 +3317,9 @@
 
     function renderAssessmentInspector() {
       const builder = ensureAssessmentBuilder();
-      const preset = buildSiyuanIpAssessmentPreset();
       if (!editorConfig.defaultAssessment) {
         const group = assessmentTemplateGroups()[0] || null;
+        const templates = availableAssessmentTemplates();
         inspectorTitleEl.textContent = group ? '测评模板引用' : '添加多维测评模板';
         inspectorSubtitleEl.textContent = group
           ? '普通问卷只管理这个模板引用，模板内容不在这里改。'
@@ -3228,24 +3327,57 @@
         const groupDimensions = group
           ? [...new Set((group.questions || []).map((item) => item.assessment_dimension_key).filter(Boolean))]
           : [];
+        const templateListHtml = state.loadingList
+          ? '<div class="empty-state">正在读取已创建的测评模板...</div>'
+          : templates.length
+            ? `
+              <div class="assessment-template-list">
+                ${templates.map((template) => {
+                  const dimensionCount = assessmentTemplateDimensionCount(template);
+                  const questionCount = assessmentTemplateQuestionCount(template);
+                  return `
+                    <article class="assessment-template-card">
+                      <h4>${escapeHtml(assessmentTemplateReferenceName(template))}</h4>
+                      <p>${escapeHtml(template.description || '从「创建测评问卷模板」保存出来的测评模板资产。')}</p>
+                      <div class="assessment-template-meta">
+                        <span class="template-group-chip">${dimensionCount ? `${escapeHtml(String(dimensionCount))} 个维度` : '维度随模板导入'}</span>
+                        <span class="template-group-chip">${questionCount ? `${escapeHtml(String(questionCount))} 道题` : '题目点击后读取'}</span>
+                        <span class="template-group-chip">含结果页规则</span>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn primary"
+                        style="width:100%;"
+                        data-assessment-template-questionnaire-id="${escapeHtml(String(template.id))}"
+                      >添加这个模板到当前问卷</button>
+                    </article>
+                  `;
+                }).join('')}
+              </div>
+            `
+            : `
+              <div class="empty-state">
+                还没有可添加的测评模板。先回到问卷管理，点击「创建测评问卷模板」保存一个模板资产，再在这里选择。
+              </div>
+            `;
         inspectorBodyEl.innerHTML = `
           <section class="config-group">
             <div class="config-head">
               <div>
-                <h3>${group ? escapeHtml(group.name) : escapeHtml(preset.title)}</h3>
+                <h3>${group ? escapeHtml(group.name) : '选择测评模板资产'}</h3>
                 <p>${group ? '已作为整组测评模板插入当前问卷。' : '选择后会整组插入题目、维度、分型和结果页规则。'}</p>
               </div>
             </div>
-            <div class="helper-note">
-              ${group
-                ? `${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group.questions || []).length))} 道题、含结果页规则。`
-                : `${escapeHtml(preset.title)}：${escapeHtml(String(preset.dimensions.length))} 个维度、${escapeHtml(String(preset.questions.length))} 道单选测评题。`}
-              ${group ? '手机号、标签、webhook 和普通题继续复用当前问卷能力。' : '插入后在普通问卷里按整组管理；要改模板内容，请回到测评模板页维护。'}
-            </div>
+            ${group
+              ? `<div class="helper-note">
+                  ${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group.questions || []).length))} 道题、含结果页规则。
+                  手机号、标签、webhook 和普通题继续复用当前问卷能力。
+                </div>`
+              : templateListHtml}
             <div class="template-group-actions">
               ${group
                 ? '<button id="remove-template-group-btn" type="button" class="btn ghost">删除整组模板</button>'
-                : '<button id="apply-assessment-preset-btn" type="button" class="btn primary" style="width:100%;">添加多维测评模板到当前问卷</button>'}
+                : ''}
             </div>
           </section>
           <section class="config-group">
@@ -3260,8 +3392,15 @@
             </div>
           </section>
         `;
-        inspectorBodyEl.querySelector('#apply-assessment-preset-btn')?.addEventListener('click', () => {
-          applyAssessmentPreset();
+        inspectorBodyEl.querySelectorAll('[data-assessment-template-questionnaire-id]').forEach((button) => {
+          button.addEventListener('click', () => {
+            button.disabled = true;
+            applyAssessmentTemplateFromQuestionnaire(button.dataset.assessmentTemplateQuestionnaireId)
+              .catch((error) => {
+                button.disabled = false;
+                showToast(error.message || '测评模板添加失败，请稍后重试', true);
+              });
+          });
         });
         inspectorBodyEl.querySelector('#remove-template-group-btn')?.addEventListener('click', () => {
           removeAssessmentTemplateGroup(group.id);
@@ -4038,6 +4177,55 @@
       showToast(questionsToInsert.length ? `已添加“${DEFAULT_ASSESSMENT_TEMPLATE_NAME}”整组模板` : '模板题目已经在当前问卷里');
     }
 
+    async function applyAssessmentTemplateFromQuestionnaire(questionnaireId) {
+      const existingGroup = assessmentTemplateGroups()[0] || null;
+      if (existingGroup) {
+        selectAssessmentTemplateGroup(existingGroup.id);
+        showToast('当前问卷已经添加过测评模板，如需更换请先删除整组模板');
+        return;
+      }
+      const id = Number(questionnaireId);
+      if (!id) {
+        throw new Error('请选择一个已保存的测评模板');
+      }
+      const data = await fetchJson(`/api/admin/questionnaires/${id}`);
+      const template = data.questionnaire || {};
+      if (!template.assessment_enabled) {
+        throw new Error('这个问卷不是多维测评模板，不能作为模板添加');
+      }
+      const templateQuestions = (template.questions || []).filter((question) => question.assessment_dimension_key);
+      if (!templateQuestions.length) {
+        throw new Error('这个测评模板还没有配置带维度的测评题');
+      }
+      const templateReference = {
+        id: assessmentTemplateReferenceId(template),
+        name: assessmentTemplateReferenceName(template),
+      };
+      const sourceConfig = normalizeAssessmentConfig(template.assessment_config);
+      const assessmentConfig = {
+        ...sourceConfig,
+        template_id: templateReference.id,
+        template_name: templateReference.name,
+      };
+      state.questionnaire.assessment_enabled = true;
+      state.questionnaire.assessment_config = assessmentConfig;
+      state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(assessmentConfig);
+      const startIndex = state.questionnaire.questions.length;
+      const clonedQuestions = templateQuestions.map((question, index) => createQuestionFromAssessmentTemplateQuestion(
+        question,
+        startIndex + index,
+        templateReference,
+      ));
+      state.questionnaire.questions = [
+        ...state.questionnaire.questions,
+        ...clonedQuestions,
+      ].map((question, index) => ({ ...question, sort_order: index + 1 }));
+      state.ruleMode = false;
+      state.selection = { kind: 'assessment_template_group', templateId: templateReference.id };
+      renderWorkspace();
+      showToast(`已添加“${templateReference.name}”整组测评模板`);
+    }
+
     async function saveQuestionnaire() {
       const wasEditing = Boolean(state.currentId);
       const payload = serializePayload();
@@ -4142,8 +4330,7 @@
     } else {
       resetDraft();
     }
-    const bootTasks = [loadAvailableTags()];
-    if (listEl) bootTasks.push(loadList());
+    const bootTasks = [loadAvailableTags(), loadList()];
     Promise.all(bootTasks).then(() => {
       renderWorkspace();
     }).catch((error) => {

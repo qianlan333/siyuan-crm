@@ -1436,7 +1436,8 @@ def test_admin_questionnaire_management_page_exists(client):
     assert "客户管理后台" in text
     assert "问卷管理" in text
     assert "创建新问卷" in text
-    assert "创建测评问卷" in text
+    assert "创建测评问卷模板" in text
+    assert "多维测评按“模板资产”管理" in text
     assert "多维测评" in text
     assert "问卷名称" in text
     assert "创建时间" in text
@@ -1460,9 +1461,10 @@ def test_admin_questionnaire_editor_new_page_contains_tag_picker_fallback(client
     assert "手工填写" in text or "tag_id" in text
     assert "企微标签加载失败" in text
     assert "多维测评" in text
+    assert "添加多维测评模板" in text
     assert "测评维度" in text
     assert "测评分型" in text
-    assert "一键添加多维测评题目" in text
+    assert "添加多维测评模板到当前问卷" in text
     assert "从空白模板开始搭建题目、标签和分数规则。" not in text
     assert '<div id="questionnaire-list"' not in text
 
@@ -1473,7 +1475,11 @@ def test_admin_questionnaire_editor_assessment_mode_prefills_config(client):
 
     assert response.status_code == 200
     assert 'defaultAssessment: true' in text
+    assert "创建测评问卷模板" in text
     assert "小 IP 商业力测评" in text
+    assert "多维测评模板 · 整组引用" in text
+    assert "综合分层说明" in text
+    assert "这一层的结果说明" in text
     assert "用户获取" in text
     assert "用户成交" in text
 

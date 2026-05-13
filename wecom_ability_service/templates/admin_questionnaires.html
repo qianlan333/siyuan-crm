@@ -623,6 +623,7 @@
     .field-grid.compact { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .field-grid.triple { display: grid; gap: 10px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .field input[type="text"],
+    .field input[type="number"],
     .field textarea,
     .field select {
       width: 100%;
@@ -748,17 +749,50 @@
       font-size: 13px;
       line-height: 1.6;
     }
-    .assessment-json-textarea {
-      min-height: 260px;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 12px;
-      line-height: 1.55;
-    }
     .assessment-mini-help {
       margin-top: -4px;
       color: var(--muted);
       font-size: 12px;
       line-height: 1.6;
+    }
+    .assessment-config-list {
+      display: grid;
+      gap: 12px;
+    }
+    .assessment-config-item {
+      padding: 12px;
+      border-radius: 14px;
+      background: #ffffff;
+      border: 1px solid var(--line);
+    }
+    .assessment-config-item.is-selected {
+      border-color: rgba(51, 112, 255, 0.34);
+      box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.10);
+    }
+    .assessment-type-grid,
+    .assessment-level-grid {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .assessment-type-row,
+    .assessment-level-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .assessment-level-row {
+      grid-template-columns: minmax(70px, 0.5fr) minmax(70px, 0.5fr) minmax(0, 1fr) auto;
+    }
+    .assessment-type-row input,
+    .assessment-level-row input {
+      width: 100%;
+      padding: 10px 11px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #ffffff;
+      outline: none;
     }
     .empty-state {
       padding: 24px 18px;
@@ -1087,7 +1121,7 @@
             </button>
             <button id="open-assessment-settings" type="button" class="tool-card">
               <span class="tool-mark">测</span>
-              <span><strong>多维测评</strong><span>配置维度、分型和结果页。</span></span>
+              <span><strong>多维测评模板</strong><span>配置模板并一键插入题目。</span></span>
             </button>
             <button id="add-rule" type="button" class="tool-card">
               <span class="tool-mark">规</span>
@@ -1277,7 +1311,7 @@
 
     function buildDefaultAssessmentConfig() {
       return {
-        total_score_title: 'IP 引流变现综合评估',
+        total_score_title: '多维测评综合结果',
         strength_count: 2,
         weakness_count: 2,
         overall_levels: [
@@ -1369,47 +1403,229 @@
       };
     }
 
+    function buildSiyuanIpAssessmentPreset() {
+      const dimensions = [
+        { key: '用户获取', full: '用户获取（流量引入能力）', cta: '流量诊断 + 钩子设计轻咨询', priority: ['磁铁型', '钩子型', '莽撞型', '佛系型'] },
+        { key: '用户维护', full: '用户维护（关系升温能力）', cta: '朋友圈剧本 / 私域 SOP 工具包', priority: ['养鱼型', '暖男/女型', '心急型', '僵尸粉型'] },
+        { key: '用户成交', full: '用户成交（临门一脚能力）', cta: '成交话术 SOP + 案例库', priority: ['催眠型', '推销型', '压迫型', '被动型'] },
+        { key: '用户交付', full: '用户交付（预期管理能力）', cta: '交付仪式 + 超预期设计模板', priority: ['惊喜型', '打工型', '割韭菜型', '放羊型'] },
+        { key: '用户裂变', full: '用户裂变 / 升单（价值挖掘能力）', cta: '老客户运营 + 产品阶梯设计', priority: ['共生型', '利诱型', '随缘型', '一锤子型'] },
+      ];
+      const questions = [
+        ['用户获取', '你想给自己加 100 个新精准粉，第一反应是？', [['佛系型', 1, '朋友圈吼一嗓子“求介绍”，等天上掉馅饼'], ['莽撞型', 2, '进十几个群拉人，能加多少加多少，先有量再说'], ['钩子型', 3, '设计个钩子，定向丢到目标群里钓鱼'], ['磁铁型', 4, '写一篇戳痛点的内容发到小红书 / 视频号，等他们主动来加']]],
+        ['用户获取', '你目前主要的引流方式是？', [['佛系型', 1, '老客户介绍 / 朋友帮忙拉，听天由命'], ['莽撞型', 2, '不停加人 / 进群拉人，量大概率高'], ['钩子型', 3, '几个固定的钩子和引流活动'], ['磁铁型', 4, '内容矩阵让人主动来']]],
+        ['用户获取', '你的引流钩子长什么样？', [['佛系型', 1, '没有固定钩子，临时想啥发啥'], ['莽撞型', 2, '进群送资料、加我送 XXX 这类无差别钩子'], ['钩子型', 3, '针对特定问题的解决方案'], ['磁铁型', 4, '通过持续内容 / 人设吸引']]],
+        ['用户获取', '看到同行 IP 涨粉很快，你的反应通常是？', [['佛系型', 1, '羡慕一下，觉得人家命好'], ['莽撞型', 2, '去他的评论区 / 粉丝群里加人'], ['钩子型', 3, '拆解他的钩子并照着设计一个'], ['磁铁型', 4, '研究人设和定位，思考自己的差异化']]],
+        ['用户获取', '如果有 1000 块预算专门用来涨粉，你会怎么花？', [['佛系型', 1, '不舍得花，宁可自然涨'], ['莽撞型', 2, '全部砸到投流上'], ['钩子型', 3, '设计引流活动，钱花在钩子物料和投放上'], ['磁铁型', 4, '投在内容创作上']]],
+        ['用户维护', '一个新朋友刚加你微信、备注好了，你下一步会做什么？', [['僵尸粉型', 1, '先放着，等他自己来找我说话'], ['心急型', 2, '立刻甩一份产品介绍 / 价目表'], ['暖男/女型', 3, '简单聊几句，问问他做什么的'], ['养鱼型', 4, '有破冰节奏：自我介绍 + 小礼物 + 选择题']]],
+        ['用户维护', '翻一下你最近一周的朋友圈，主要内容是？', [['僵尸粉型', 1, '有空才发，没空就空着'], ['心急型', 2, '几乎全是产品广告 / 带货链接'], ['暖男/女型', 3, '一半生活一半干货'], ['养鱼型', 4, '每条都有定位，按节奏发']]],
+        ['用户维护', '让你立刻说出最赚钱的 10 个客户是谁，你的反应是？', [['僵尸粉型', 1, '没想过这个问题'], ['心急型', 2, '大概有印象，但说不出共同点'], ['暖男/女型', 3, '能说出名字和大概特征'], ['养鱼型', 4, '能打开表格 / 笔记说清楚']]],
+        ['用户维护', '你上一次主动联系老用户，不是为了卖东西，是什么时候？', [['僵尸粉型', 1, '想不起来了'], ['心急型', 2, '上次卖东西时顺便聊了两句'], ['暖男/女型', 3, '节日发过群祝福'], ['养鱼型', 4, '这周内给他发了有用内容 / 资料']]],
+        ['用户维护', '用户和你的日常互动是？', [['僵尸粉型', 1, '几乎零互动'], ['心急型', 2, '偶尔点赞我的促销动态'], ['暖男/女型', 3, '经常点赞评论，关系还不错'], ['养鱼型', 4, '主动期待更新，会私信问问题']]],
+        ['用户成交', '用户问完产品细节后说“我再考虑一下”，你的第一反应是？', [['被动型', 1, '好的，您慢慢考虑'], ['压迫型', 2, '今天最后一天优惠，反复催'], ['推销型', 3, '再次强调产品好处和性价比'], ['催眠型', 4, '先问他主要纠结哪一点']]],
+        ['用户成交', '卖一个 999 元的产品，你的成交话术大概是？', [['被动型', 1, '没有固定话术，对方问什么答什么'], ['压迫型', 2, '限时优惠、错过没了、倒计时'], ['推销型', 3, '产品有三大好处，性价比高'], ['催眠型', 4, '用案例和故事让用户自己看到需求']]],
+        ['用户成交', '用户犹豫“有点贵”时，你最常用的应对是？', [['被动型', 1, '那您再考虑'], ['压迫型', 2, '今天真的最后一天'], ['推销型', 3, '帮他算账，分摊到每天很便宜'], ['催眠型', 4, '先确认是预算问题还是时机问题']]],
+        ['用户成交', '当你成交了一单，你最常做的复盘是？', [['被动型', 1, '几乎不复盘'], ['压迫型', 2, '看有没有给足紧迫感'], ['推销型', 3, '看哪个卖点 / 价格打动他'], ['催眠型', 4, '拆解购买动机和流失节点']]],
+        ['用户成交', '你最相信下面哪句话？', [['被动型', 1, '缘分到了自然就成'], ['压迫型', 2, '用户都是被推一把才动的'], ['推销型', 3, '价值讲透，用户就会买'], ['催眠型', 4, '用户买的是产品解决的问题']]],
+        ['用户交付', '用户付款的那一刻，你给他发的第一条消息通常是？', [['放羊型', 1, '没发，等他自己来问'], ['割韭菜型', 2, '感谢支持，然后就消失'], ['打工型', 3, '感谢购买，稍后安排服务'], ['惊喜型', 4, '欢迎仪式：感谢 + 下一步明细 + 小惊喜']]],
+        ['用户交付', '服务开始前，你会怎么让用户清楚会得到什么？', [['放羊型', 1, '不会刻意对齐'], ['割韭菜型', 2, '简单说一句包含 ABC'], ['打工型', 3, '发服务清单 / 流程图'], ['惊喜型', 4, '一对一确认时间、阶段成果和不包含项']]],
+        ['用户交付', '服务过程中用户说效果没达到预期，你怎么处理？', [['放羊型', 1, '让他自己消化'], ['割韭菜型', 2, '简单解释，能搪塞过去就好'], ['打工型', 3, '认真听反馈，调整服务内容'], ['惊喜型', 4, '共情，拆解 gap，并给补救方案']]],
+        ['用户交付', '服务结束后的最后一次互动，通常是？', [['放羊型', 1, '服务一结束就各回各家'], ['割韭菜型', 2, '感谢支持，再见'], ['打工型', 3, '发反馈问卷'], ['惊喜型', 4, '结案仪式，顺势铺垫下一阶段']]],
+        ['用户交付', '用户反馈中，最让你紧张的是哪句话？', [['放羊型', 1, '你怎么从来不主动联系我'], ['割韭菜型', 2, '你收钱前后态度不一样'], ['打工型', 3, '没毛病，但没记忆点'], ['惊喜型', 4, '你比我预期的还用心']]],
+        ['用户裂变', '老用户买完一次后，你的设计里他下一步会做什么？', [['一锤子型', 1, '没设计，看他自己'], ['随缘型', 2, '期待他自己再来买'], ['利诱型', 3, '发优惠券 / 回访求他再来'], ['共生型', 4, '有清晰产品阶梯，自然想买进阶款']]],
+        ['用户裂变', '你对老用户会有专门的优惠方案吗？', [['一锤子型', 1, '买了就是买了，不分新老'], ['随缘型', 2, '看关系，关系好的便宜点'], ['利诱型', 3, '偶尔做折扣 / 返现活动'], ['共生型', 4, '有明确新老客价格体系和增值方案']]],
+        ['用户裂变', '上个月有几个老用户主动给你介绍了新客户？', [['一锤子型', 1, '一个都没有'], ['随缘型', 2, '1-2 个，凭朋友帮忙'], ['利诱型', 3, '5 个左右，因为有红包 / 礼品'], ['共生型', 4, '10 个以上，老用户主动安利']]],
+        ['用户裂变', '你的产品阶梯 / 客单价分布是？', [['一锤子型', 1, '只有一个产品 / 客单价'], ['随缘型', 2, '有几个产品但没明确升单逻辑'], ['利诱型', 3, '有阶梯，但靠优惠券推进'], ['共生型', 4, '完整产品阶梯，自然进阶到高客单']]],
+        ['用户裂变', '你对老用户的看法，更接近哪种？', [['一锤子型', 1, '老客户太磨人，不如开发新客'], ['随缘型', 2, '老客户重要，但没时间维护'], ['利诱型', 3, '会做专属动作或返现激励'], ['共生型', 4, '老客户是核心资产']]],
+      ];
+      return {
+        name: '小 IP 商业力测评',
+        title: '小 IP 商业力测评',
+        description: '评估用户在用户获取、用户维护、用户成交、用户交付、用户裂变上的当前状态，并给出可运营的标签和建议。',
+        dimensions,
+        questions,
+        assessment_config: {
+          total_score_title: '小 IP 商业力测评结果',
+          strength_count: 2,
+          weakness_count: 2,
+          overall_levels: [
+            { min_score: 0, max_score: 44, title: '待破局', summary: '基础链路还不稳定，优先补齐获客、承接和成交动作。' },
+            { min_score: 45, max_score: 64, title: '入门', summary: '已经有一些可用动作，但还需要把关键环节标准化。' },
+            { min_score: 65, max_score: 84, title: '进阶', summary: '整体链路比较完整，可以优先放大优势维度。' },
+            { min_score: 85, max_score: 100, title: '专家', summary: '商业闭环成熟，适合做规模化复制和精细运营。' },
+          ],
+          dimensions: dimensions.map((dimension) => ({
+            key: dimension.key,
+            name: dimension.key,
+            summary: dimension.full,
+            type_priority: dimension.priority,
+            types: dimension.priority.map((name) => ({ key: name, name, summary: '' })),
+            levels: [
+              { min_score: 0, max_score: 8, title: '待破局' },
+              { min_score: 9, max_score: 12, title: '入门' },
+              { min_score: 13, max_score: 16, title: '进阶' },
+              { min_score: 17, max_score: 20, title: '专家' },
+            ],
+          })),
+          recommendations: dimensions.map((dimension) => ({
+            dimension_key: dimension.key,
+            max_score: 12,
+            title: `优先优化${dimension.key}`,
+            summary: dimension.cta,
+          })),
+        },
+      };
+    }
+
     function normalizeAssessmentConfig(value) {
       if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
       return value;
     }
 
-    function formatAssessmentConfigForEditor(value) {
-      return JSON.stringify(normalizeAssessmentConfig(value), null, 2);
+    function createAssessmentType(type = {}, index = 0) {
+      return {
+        local_key: type.local_key || nextLocalKey('assessment_type'),
+        key: String(type.key || type.name || `type_${index + 1}`).trim() || `type_${index + 1}`,
+        name: String(type.name || `类型 ${index + 1}`).trim() || `类型 ${index + 1}`,
+        summary: String(type.summary || '').trim(),
+        tag_codes: normalizeTagIds(type.tag_codes || []),
+      };
     }
 
-    function hasMeaningfulAssessmentConfigText(value) {
-      const raw = String(value || '').trim();
-      return raw && raw !== '{}';
+    function createAssessmentLevel(level = {}, index = 0) {
+      return {
+        local_key: level.local_key || nextLocalKey('assessment_level'),
+        min_score: level.min_score ?? '',
+        max_score: level.max_score ?? '',
+        title: String(level.title || `分层 ${index + 1}`).trim() || `分层 ${index + 1}`,
+        summary: String(level.summary || '').trim(),
+        tag_codes: normalizeTagIds(level.tag_codes || []),
+      };
     }
 
-    function parseAssessmentConfigText(value, options = {}) {
-      const raw = String(value || '').trim();
-      if (!raw) return {};
-      try {
-        const parsed = JSON.parse(raw);
-        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-          throw new Error('not_object');
-        }
-        return parsed;
-      } catch (error) {
-        if (options.allowInvalid) return { __raw_assessment_config_text: raw };
-        throw new Error('测评结果规则 JSON 格式不正确');
-      }
+    function createAssessmentDimension(dimension = {}, index = 0) {
+      const rawTypes = Array.isArray(dimension.types) ? dimension.types : [];
+      const types = rawTypes.length
+        ? rawTypes.map((item, itemIndex) => createAssessmentType(item, itemIndex))
+        : [
+            createAssessmentType({ key: `type_${index + 1}_1`, name: '类型 A' }, 0),
+            createAssessmentType({ key: `type_${index + 1}_2`, name: '类型 B' }, 1),
+          ];
+      const priority = Array.isArray(dimension.type_priority)
+        ? dimension.type_priority.map((item) => String(item || '').trim()).filter(Boolean)
+        : [];
+      const sortedTypes = priority.length
+        ? [
+            ...priority.map((key) => types.find((item) => item.key === key)).filter(Boolean),
+            ...types.filter((item) => !priority.includes(item.key)),
+          ]
+        : types;
+      const rawLevels = Array.isArray(dimension.levels) ? dimension.levels : [];
+      return {
+        local_key: dimension.local_key || nextLocalKey('assessment_dimension'),
+        key: String(dimension.key || `dimension_${index + 1}`).trim() || `dimension_${index + 1}`,
+        name: String(dimension.name || `维度 ${index + 1}`).trim() || `维度 ${index + 1}`,
+        summary: String(dimension.summary || '').trim(),
+        types: sortedTypes,
+        levels: rawLevels.length
+          ? rawLevels.map((item, itemIndex) => createAssessmentLevel(item, itemIndex))
+          : [
+              createAssessmentLevel({ min_score: 0, max_score: 8, title: '薄弱' }, 0),
+              createAssessmentLevel({ min_score: 9, max_score: 16, title: '可用' }, 1),
+              createAssessmentLevel({ min_score: 17, max_score: 20, title: '优势' }, 2),
+            ],
+      };
     }
 
-    function serializeAssessmentConfig(options = {}) {
-      if (state.questionnaire.assessment_enabled || options.allowInvalidAssessmentConfig) {
-        return parseAssessmentConfigText(
-          state.questionnaire.assessment_config_text,
-          { allowInvalid: Boolean(options.allowInvalidAssessmentConfig) },
-        );
+    function createAssessmentBuilderFromConfig(config = {}) {
+      const normalized = normalizeAssessmentConfig(config);
+      const rawDimensions = Array.isArray(normalized.dimensions) ? normalized.dimensions : [];
+      const rawOverallLevels = Array.isArray(normalized.overall_levels) ? normalized.overall_levels : [];
+      return {
+        total_score_title: String(normalized.total_score_title || '多维测评综合结果').trim() || '多维测评综合结果',
+        strength_count: Number(normalized.strength_count || 2),
+        weakness_count: Number(normalized.weakness_count || 2),
+        dimensions: rawDimensions.map((item, index) => createAssessmentDimension(item, index)),
+        overall_levels: rawOverallLevels.length
+          ? rawOverallLevels.map((item, index) => createAssessmentLevel(item, index))
+          : [
+              createAssessmentLevel({ min_score: 0, max_score: 40, title: '待提升' }, 0),
+              createAssessmentLevel({ min_score: 41, max_score: 70, title: '成长中' }, 1),
+              createAssessmentLevel({ min_score: 71, max_score: 100, title: '优势明显' }, 2),
+            ],
+        recommendations: Array.isArray(normalized.recommendations) ? normalized.recommendations : [],
+      };
+    }
+
+    function buildAssessmentConfigFromBuilder(builder = {}) {
+      const dimensions = Array.isArray(builder.dimensions) ? builder.dimensions : [];
+      if (!dimensions.length) return {};
+      return {
+        total_score_title: builder.total_score_title || '多维测评综合结果',
+        strength_count: Number(builder.strength_count || 2),
+        weakness_count: Number(builder.weakness_count || 2),
+        overall_levels: (builder.overall_levels || []).map((level, index) => ({
+          min_score: level.min_score === '' ? null : Number(level.min_score),
+          max_score: level.max_score === '' ? null : Number(level.max_score),
+          title: level.title || `分层 ${index + 1}`,
+          summary: level.summary || '',
+          tag_codes: normalizeTagIds(level.tag_codes),
+        })),
+        dimensions: dimensions.map((dimension, index) => ({
+          key: dimension.key || `dimension_${index + 1}`,
+          name: dimension.name || `维度 ${index + 1}`,
+          summary: dimension.summary || '',
+          type_priority: (dimension.types || []).map((type) => type.key),
+          types: (dimension.types || []).map((type, typeIndex) => ({
+            key: type.key || `type_${index + 1}_${typeIndex + 1}`,
+            name: type.name || `类型 ${typeIndex + 1}`,
+            summary: type.summary || '',
+            tag_codes: normalizeTagIds(type.tag_codes),
+          })),
+          levels: (dimension.levels || []).map((level, levelIndex) => ({
+            min_score: level.min_score === '' ? null : Number(level.min_score),
+            max_score: level.max_score === '' ? null : Number(level.max_score),
+            title: level.title || `分层 ${levelIndex + 1}`,
+            summary: level.summary || '',
+            tag_codes: normalizeTagIds(level.tag_codes),
+          })),
+        })),
+        recommendations: builder.recommendations || [],
+      };
+    }
+
+    function ensureAssessmentBuilder() {
+      if (!state.questionnaire.assessment_builder) {
+        state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(state.questionnaire.assessment_config || {});
       }
-      try {
-        return parseAssessmentConfigText(state.questionnaire.assessment_config_text);
-      } catch (error) {
-        return {};
+      return state.questionnaire.assessment_builder;
+    }
+
+    function assessmentDimensions() {
+      return ensureAssessmentBuilder().dimensions || [];
+    }
+
+    function getAssessmentDimensionByKey(key) {
+      return assessmentDimensions().find((item) => item.key === key) || null;
+    }
+
+    function formatAssessmentDimensionName(key) {
+      const dimension = getAssessmentDimensionByKey(key);
+      return dimension ? dimension.name : '';
+    }
+
+    function formatAssessmentTypeName(dimensionKey, typeKey) {
+      const dimension = getAssessmentDimensionByKey(dimensionKey);
+      const type = dimension?.types?.find((item) => item.key === typeKey);
+      return type ? type.name : '';
+    }
+
+    function ensureAssessmentTemplateIfEmpty() {
+      const builder = ensureAssessmentBuilder();
+      if (!builder.dimensions.length) {
+        state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(buildDefaultAssessmentConfig());
       }
+      return state.questionnaire.assessment_builder;
     }
 
     function buildUnknownTag(tagId) {
@@ -1466,8 +1682,8 @@
         score: '分值',
         tag_codes: '标签',
         assessment_config: '测评结果规则',
-        assessment_dimension_key: '测评维度 Key',
-        assessment_type_key: '测评类型 Key',
+        assessment_dimension_key: '测评维度',
+        assessment_type_key: '测评分型',
       };
       return labels[fieldName] || fieldName;
     }
@@ -1653,6 +1869,24 @@
       };
     }
 
+    function createQuestionFromAssessmentPreset(item, index = 0) {
+      const question = {
+        type: 'single_choice',
+        title: item.title,
+        required: true,
+        assessment_dimension_key: item.dim,
+        sort_order: index + 1,
+        options: (item.options || []).map((option, optionIndex) => ({
+          option_text: option[2],
+          score: option[1],
+          assessment_type_key: option[0],
+          tag_codes: [],
+          sort_order: optionIndex + 1,
+        })),
+      };
+      return createQuestion('single_choice', question, index);
+    }
+
     function createRule(rule = {}, index = 0) {
       return {
         id: rule.id ?? null,
@@ -1675,6 +1909,7 @@
 
     function blankQuestionnaire() {
       const defaultAssessmentConfig = editorConfig.defaultAssessment ? buildDefaultAssessmentConfig() : {};
+      const defaultAssessmentBuilder = createAssessmentBuilderFromConfig(defaultAssessmentConfig);
       return {
         id: null,
         public_url: '',
@@ -1684,7 +1919,7 @@
         redirect_url: '',
         assessment_enabled: Boolean(editorConfig.defaultAssessment),
         assessment_config: defaultAssessmentConfig,
-        assessment_config_text: formatAssessmentConfigForEditor(defaultAssessmentConfig),
+        assessment_builder: defaultAssessmentBuilder,
         external_push_enabled: false,
         external_push_url: '',
         external_push_day: '',
@@ -1705,6 +1940,9 @@
       const assessmentConfig = hasSource
         ? normalizeAssessmentConfig(questionnaire.assessment_config)
         : draft.assessment_config;
+      const assessmentBuilder = hasSource
+        ? createAssessmentBuilderFromConfig(assessmentConfig)
+        : draft.assessment_builder;
       return {
         ...draft,
         id: questionnaire.id ?? null,
@@ -1715,7 +1953,7 @@
         redirect_url: questionnaire.redirect_url || '',
         assessment_enabled: hasSource ? Boolean(questionnaire.assessment_enabled) : draft.assessment_enabled,
         assessment_config: assessmentConfig,
-        assessment_config_text: formatAssessmentConfigForEditor(assessmentConfig),
+        assessment_builder: assessmentBuilder,
         external_push_enabled: Boolean(questionnaire.external_push_enabled),
         external_push_url: questionnaire.external_push_url || '',
         external_push_day: questionnaire.external_push_day ?? '',
@@ -1744,6 +1982,14 @@
     function selectQuestionnaire() {
       state.ruleMode = false;
       state.selection = { kind: 'questionnaire' };
+      renderWorkspace();
+    }
+
+    function selectAssessmentSettings() {
+      state.ruleMode = false;
+      state.questionnaire.assessment_enabled = true;
+      ensureAssessmentTemplateIfEmpty();
+      state.selection = { kind: 'assessment' };
       renderWorkspace();
     }
 
@@ -1779,7 +2025,9 @@
       state.currentId = state.questionnaire.id;
       state.ruleMode = false;
       state.lastRuleKey = state.questionnaire.score_rules[0]?.local_key || '';
-      state.selection = { kind: 'questionnaire' };
+      state.selection = editorConfig.defaultAssessment && !data
+        ? { kind: 'assessment', dimensionKey: state.questionnaire.assessment_builder?.dimensions?.[0]?.key || '' }
+        : { kind: 'questionnaire' };
       rememberDraftSnapshot();
       renderWorkspace();
     }
@@ -1791,7 +2039,9 @@
         description: state.questionnaire.description,
         redirect_url: state.questionnaire.redirect_url,
         assessment_enabled: Boolean(state.questionnaire.assessment_enabled),
-        assessment_config: serializeAssessmentConfig(options),
+        assessment_config: state.questionnaire.assessment_enabled
+          ? buildAssessmentConfigFromBuilder(ensureAssessmentBuilder())
+          : buildAssessmentConfigFromBuilder(ensureAssessmentBuilder()),
         external_push_enabled: Boolean(state.questionnaire.external_push_enabled),
         external_push_url: state.questionnaire.external_push_url,
         external_push_day: state.questionnaire.external_push_day === '' ? '' : Number(state.questionnaire.external_push_day),
@@ -1836,7 +2086,7 @@
     }
 
     function serializeDraftSnapshot() {
-      return JSON.stringify(serializePayload({ allowInvalidAssessmentConfig: true }));
+      return JSON.stringify(serializePayload());
     }
 
     function isDraftDirty() {
@@ -2100,6 +2350,10 @@
       updateDraftIndicator();
     }
 
+    function renderAssessmentSummary() {
+      updateDraftIndicator();
+    }
+
     function renderPreview() {
       const questionnaire = state.questionnaire;
       const isQuestionnaireSelected = state.selection.kind === 'questionnaire';
@@ -2126,13 +2380,13 @@
                   <div class="option-pill">
                     ${escapeHtml(option.option_text || '选项')}
                     ${state.questionnaire.assessment_enabled && option.assessment_type_key
-                      ? `<small>类型：${escapeHtml(option.assessment_type_key)}</small>`
+                      ? `<small>分型：${escapeHtml(formatAssessmentTypeName(question.assessment_dimension_key, option.assessment_type_key) || option.assessment_type_key)}</small>`
                       : ''}
                   </div>
                 `).join('');
           card.innerHTML = `
             <span class="question-type">
-              ${escapeHtml(formatQuestionType(question.type))}${question.required ? ' · 必填' : ''}${state.questionnaire.assessment_enabled && question.assessment_dimension_key ? ` · 维度 ${escapeHtml(question.assessment_dimension_key)}` : ''}
+              ${escapeHtml(formatQuestionType(question.type))}${question.required ? ' · 必填' : ''}${state.questionnaire.assessment_enabled && question.assessment_dimension_key ? ` · ${escapeHtml(formatAssessmentDimensionName(question.assessment_dimension_key) || question.assessment_dimension_key)}` : ''}
             </span>
             <h4>${escapeHtml(question.title || '题目标题')}</h4>
             <div class="preview-options">${optionPreview}</div>
@@ -2240,26 +2494,21 @@
             </label>
           </div>
         </section>
-        <details class="config-group config-advanced" ${state.questionnaire.assessment_enabled ? 'open' : ''}>
-          <summary>
-            <span class="config-advanced-label">多维测评</span>
-            <span class="config-advanced-hint">每题归属一个维度，选项带分数和类型</span>
-          </summary>
-          <label class="field" style="margin:12px 0;font-weight:600;">
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>多维测评</h3>
+              <p>按维度计分，选项同时绑定分值和中文分型。</p>
+            </div>
+            <button id="open-assessment-config-btn" type="button" class="btn secondary">配置维度与分型</button>
+          </div>
+          <label class="field" style="margin-bottom:8px;font-weight:600;">
             <input id="field-assessment-enabled" type="checkbox" ${state.questionnaire.assessment_enabled ? 'checked' : ''}> 启用多维测评结果页
           </label>
           <div class="helper-note">
-            题目里填写「测评维度 Key」，选项里填写「测评类型 Key」。提交后系统会按维度累加分数，并按类型出现次数决定该维度分型；平票时按 type_priority 的顺序处理。
+            已配置 ${assessmentDimensions().length} 个维度。运营只需要维护维度名称、分型名称和分数区间；系统会自动生成保存所需的底层配置。
           </div>
-          <div class="config-head" style="margin-top:12px;">
-            <div><h4 style="margin:0;font-size:13px;">结果规则 JSON</h4></div>
-            <button id="load-default-assessment-config-btn" type="button" class="btn secondary">填入 5 维模板</button>
-          </div>
-          <label class="field">维度、分层、分型优先级
-            <textarea id="field-assessment-config" class="assessment-json-textarea" spellcheck="false">${escapeHtml(state.questionnaire.assessment_config_text || '{}')}</textarea>
-          </label>
-          <div class="assessment-mini-help">常用维度 Key：traffic、trust、offer、conversion、operation。常用类型 Key 在 JSON 的 types 里维护。</div>
-        </details>
+        </section>
         <details class="config-group config-advanced" ${state.questionnaire.external_push_enabled ? 'open' : ''}>
           <summary>
             <span class="config-advanced-label">外部推送</span>
@@ -2309,26 +2558,13 @@
       });
       inspectorBodyEl.querySelector('#field-assessment-enabled').addEventListener('change', (event) => {
         state.questionnaire.assessment_enabled = event.target.checked;
-        if (event.target.checked && !hasMeaningfulAssessmentConfigText(state.questionnaire.assessment_config_text)) {
-          state.questionnaire.assessment_config = buildDefaultAssessmentConfig();
-          state.questionnaire.assessment_config_text = formatAssessmentConfigForEditor(state.questionnaire.assessment_config);
-          renderQuestionnaireInspector();
+        if (event.target.checked) {
+          ensureAssessmentTemplateIfEmpty();
         }
         renderPreview();
         updateDraftIndicator();
       });
-      inspectorBodyEl.querySelector('#field-assessment-config').addEventListener('input', (event) => {
-        state.questionnaire.assessment_config_text = event.target.value;
-        updateDraftIndicator();
-      });
-      inspectorBodyEl.querySelector('#load-default-assessment-config-btn').addEventListener('click', () => {
-        state.questionnaire.assessment_enabled = true;
-        state.questionnaire.assessment_config = buildDefaultAssessmentConfig();
-        state.questionnaire.assessment_config_text = formatAssessmentConfigForEditor(state.questionnaire.assessment_config);
-        renderQuestionnaireInspector();
-        renderPreview();
-        updateDraftIndicator();
-      });
+      inspectorBodyEl.querySelector('#open-assessment-config-btn').addEventListener('click', () => selectAssessmentSettings());
       inspectorBodyEl.querySelector('#field-external-push-enabled').addEventListener('change', (event) => {
         state.questionnaire.external_push_enabled = event.target.checked;
         updateDraftIndicator();
@@ -2399,13 +2635,311 @@
       }
     }
 
+    function renderAssessmentInspector() {
+      const builder = ensureAssessmentBuilder();
+      const preset = buildSiyuanIpAssessmentPreset();
+      inspectorTitleEl.textContent = '维度与分型';
+      inspectorSubtitleEl.textContent = '用中文配置维度、分型优先级和结果页分层。';
+      if (!builder.dimensions.length) {
+        builder.dimensions = [createAssessmentDimension({}, 0)];
+      }
+      const selectedKey = state.selection.dimensionKey || builder.dimensions[0]?.key || '';
+      const selectedDimension = builder.dimensions.find((item) => item.key === selectedKey) || builder.dimensions[0];
+      state.selection.dimensionKey = selectedDimension?.key || '';
+      const dimensionNavHtml = builder.dimensions.map((dimension, index) => `
+        <button type="button" class="rule-nav-item${dimension.key === state.selection.dimensionKey ? ' active' : ''}" data-assessment-dimension-select="${escapeHtml(dimension.key)}">
+          <strong>${escapeHtml(dimension.name || `维度 ${index + 1}`)}</strong>
+          <span>${escapeHtml((dimension.types || []).map((type) => type.name).join(' / ') || '未配置分型')}</span>
+          <span>${escapeHtml((dimension.levels || []).map((level) => level.title).join(' / ') || '未配置分层')}</span>
+        </button>
+      `).join('');
+      const typeRowsHtml = selectedDimension ? (selectedDimension.types || []).map((type, index) => `
+        <div class="assessment-type-row" data-assessment-type-key="${escapeHtml(type.key)}">
+          <input data-assessment-type-field="name" data-type-key="${escapeHtml(type.key)}" value="${escapeHtml(type.name)}" placeholder="例如 被动型">
+          <input data-assessment-type-field="summary" data-type-key="${escapeHtml(type.key)}" value="${escapeHtml(type.summary)}" placeholder="这个分型的说明">
+          <button type="button" class="link-btn danger" data-assessment-type-remove="${escapeHtml(type.key)}" ${selectedDimension.types.length <= 1 ? 'disabled' : ''}>删除</button>
+        </div>
+      `).join('') : '';
+      const levelRowsHtml = selectedDimension ? (selectedDimension.levels || []).map((level) => `
+        <div class="assessment-level-row" data-assessment-level-key="${escapeHtml(level.local_key)}">
+          <input data-assessment-level-field="min_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.min_score ?? ''))}" placeholder="最低分">
+          <input data-assessment-level-field="max_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.max_score ?? ''))}" placeholder="最高分">
+          <input data-assessment-level-field="title" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(level.title)}" placeholder="例如 可用">
+          <button type="button" class="link-btn danger" data-assessment-level-remove="${escapeHtml(level.local_key)}" ${selectedDimension.levels.length <= 1 ? 'disabled' : ''}>删除</button>
+        </div>
+      `).join('') : '';
+      const overallRowsHtml = (builder.overall_levels || []).map((level) => `
+        <div class="assessment-level-row" data-overall-level-key="${escapeHtml(level.local_key)}">
+          <input data-overall-level-field="min_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.min_score ?? ''))}" placeholder="最低分">
+          <input data-overall-level-field="max_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.max_score ?? ''))}" placeholder="最高分">
+          <input data-overall-level-field="title" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(level.title)}" placeholder="例如 成长期">
+          <button type="button" class="link-btn danger" data-overall-level-remove="${escapeHtml(level.local_key)}" ${builder.overall_levels.length <= 1 ? 'disabled' : ''}>删除</button>
+        </div>
+      `).join('');
+
+      inspectorBodyEl.innerHTML = `
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>多维测评预设模板</h3>
+              <p>从 demo 明细生成的模板，可一键追加到当前问卷。</p>
+            </div>
+          </div>
+          <div class="helper-note">
+            ${escapeHtml(preset.title)}：${preset.dimensions.length} 个维度，${preset.questions.length} 道单选题。导入后仍可在中间预览里逐题修改，也能继续使用手机号、标签、webhook 和普通分数规则。
+          </div>
+          <button id="apply-assessment-preset-btn" type="button" class="btn primary" style="width:100%;margin-top:12px;">一键添加多维测评题目</button>
+        </section>
+
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>测评开关</h3>
+              <p>开启后，提交成功页会进入测评结果页。</p>
+            </div>
+          </div>
+          <label class="field" style="font-weight:600;">
+            <input id="assessment-enabled-toggle" type="checkbox" ${state.questionnaire.assessment_enabled ? 'checked' : ''}> 启用多维测评
+          </label>
+          <div class="field-grid compact">
+            <label class="field">结果页标题
+              <input id="assessment-total-score-title" type="text" value="${escapeHtml(builder.total_score_title || '')}" placeholder="例如 小 IP 商业力测评">
+            </label>
+            <label class="field">优势 / 劣势展示数量
+              <input id="assessment-strength-weakness-count" type="number" min="1" step="1" value="${escapeHtml(String(builder.strength_count || 2))}">
+            </label>
+          </div>
+        </section>
+
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>维度</h3>
+              <p>不限数量。题目会从这里选择归属维度。</p>
+            </div>
+            <div class="header-actions">
+              <button id="load-assessment-template-btn" type="button" class="btn ghost">填入示例模板</button>
+              <button id="add-assessment-dimension-btn" type="button" class="btn secondary">添加维度</button>
+            </div>
+          </div>
+          <div class="rule-nav-list">${dimensionNavHtml}</div>
+        </section>
+
+        ${selectedDimension ? `
+          <section class="config-group">
+            <div class="config-head">
+              <div>
+                <h3>当前维度</h3>
+                <p>维度名称会显示在结果页和题目配置下拉里。</p>
+              </div>
+              <button id="remove-assessment-dimension-btn" type="button" class="link-btn danger" ${builder.dimensions.length <= 1 ? 'disabled' : ''}>删除维度</button>
+            </div>
+            <label class="field">维度名称
+              <input id="assessment-dimension-name" type="text" value="${escapeHtml(selectedDimension.name)}" placeholder="例如 成交能力">
+            </label>
+            <label class="field">维度说明
+              <textarea id="assessment-dimension-summary" placeholder="给结果页看的简短说明">${escapeHtml(selectedDimension.summary || '')}</textarea>
+            </label>
+          </section>
+
+          <section class="config-group">
+            <div class="config-head">
+              <div>
+                <h3>分型</h3>
+                <p>从上到下就是平票优先级。题目选项会从这里选择类型。</p>
+              </div>
+              <button id="add-assessment-type-btn" type="button" class="btn secondary">添加分型</button>
+            </div>
+            <div class="assessment-mini-help" style="margin:0 0 8px;">左列填分型名称，右列填结果页说明。</div>
+            <div class="assessment-type-grid">${typeRowsHtml}</div>
+          </section>
+
+          <section class="config-group">
+            <div class="config-head">
+              <div>
+                <h3>单维分层</h3>
+                <p>按这个维度自己的分数判断好与不好。</p>
+              </div>
+              <button id="add-assessment-level-btn" type="button" class="btn secondary">添加分层</button>
+            </div>
+            <div class="assessment-level-grid">${levelRowsHtml}</div>
+          </section>
+        ` : ''}
+
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>综合分层</h3>
+              <p>只用于结果页总览，不决定单维分型。</p>
+            </div>
+            <button id="add-overall-level-btn" type="button" class="btn secondary">添加分层</button>
+          </div>
+          <div class="assessment-level-grid">${overallRowsHtml}</div>
+        </section>
+      `;
+
+      inspectorBodyEl.querySelector('#assessment-enabled-toggle').addEventListener('change', (event) => {
+        state.questionnaire.assessment_enabled = event.target.checked;
+        updateDraftIndicator();
+        renderAssessmentSummary();
+      });
+      inspectorBodyEl.querySelector('#apply-assessment-preset-btn').addEventListener('click', () => {
+        applyAssessmentPreset();
+      });
+      inspectorBodyEl.querySelector('#assessment-total-score-title').addEventListener('input', (event) => {
+        builder.total_score_title = event.target.value;
+        updateDraftIndicator();
+        renderAssessmentSummary();
+      });
+      inspectorBodyEl.querySelector('#assessment-strength-weakness-count').addEventListener('input', (event) => {
+        const count = Math.max(1, Number(event.target.value || 1));
+        builder.strength_count = count;
+        builder.weakness_count = count;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#add-assessment-dimension-btn').addEventListener('click', () => {
+        const dimension = createAssessmentDimension({ name: `维度 ${builder.dimensions.length + 1}` }, builder.dimensions.length);
+        builder.dimensions.push(dimension);
+        state.selection = { kind: 'assessment', dimensionKey: dimension.key };
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelector('#load-assessment-template-btn').addEventListener('click', () => {
+        state.questionnaire.assessment_enabled = true;
+        state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(buildDefaultAssessmentConfig());
+        state.selection = { kind: 'assessment', dimensionKey: state.questionnaire.assessment_builder.dimensions[0]?.key || '' };
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelectorAll('[data-assessment-dimension-select]').forEach((button) => {
+        button.addEventListener('click', () => {
+          state.selection = { kind: 'assessment', dimensionKey: button.dataset.assessmentDimensionSelect };
+          renderWorkspace();
+        });
+      });
+      const removeDimensionBtn = inspectorBodyEl.querySelector('#remove-assessment-dimension-btn');
+      if (removeDimensionBtn && selectedDimension) {
+        removeDimensionBtn.addEventListener('click', () => {
+          builder.dimensions = builder.dimensions.filter((item) => item.key !== selectedDimension.key);
+          state.questionnaire.questions.forEach((question) => {
+            if (question.assessment_dimension_key === selectedDimension.key) {
+              question.assessment_dimension_key = '';
+              question.options.forEach((option) => { option.assessment_type_key = ''; });
+            }
+          });
+          state.selection = { kind: 'assessment', dimensionKey: builder.dimensions[0]?.key || '' };
+          renderWorkspace();
+        });
+      }
+      const dimensionNameInput = inspectorBodyEl.querySelector('#assessment-dimension-name');
+      const dimensionSummaryInput = inspectorBodyEl.querySelector('#assessment-dimension-summary');
+      if (dimensionNameInput && selectedDimension) {
+        dimensionNameInput.addEventListener('input', (event) => {
+          selectedDimension.name = event.target.value;
+          renderAssessmentSummary();
+          updateDraftIndicator();
+        });
+      }
+      if (dimensionSummaryInput && selectedDimension) {
+        dimensionSummaryInput.addEventListener('input', (event) => {
+          selectedDimension.summary = event.target.value;
+          updateDraftIndicator();
+        });
+      }
+      const addTypeBtn = inspectorBodyEl.querySelector('#add-assessment-type-btn');
+      if (addTypeBtn && selectedDimension) {
+        addTypeBtn.addEventListener('click', () => {
+          selectedDimension.types.push(createAssessmentType({ name: `分型 ${selectedDimension.types.length + 1}` }, selectedDimension.types.length));
+          renderWorkspace();
+        });
+      }
+      inspectorBodyEl.querySelectorAll('[data-assessment-type-field]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const type = selectedDimension?.types.find((item) => item.key === input.dataset.typeKey);
+          if (!type) return;
+          type[event.target.dataset.assessmentTypeField] = event.target.value;
+          updateDraftIndicator();
+          renderPreview();
+        });
+      });
+      inspectorBodyEl.querySelectorAll('[data-assessment-type-remove]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!selectedDimension || selectedDimension.types.length <= 1) return;
+          selectedDimension.types = selectedDimension.types.filter((item) => item.key !== button.dataset.assessmentTypeRemove);
+          state.questionnaire.questions.forEach((question) => {
+            if (question.assessment_dimension_key !== selectedDimension.key) return;
+            question.options.forEach((option) => {
+              if (option.assessment_type_key === button.dataset.assessmentTypeRemove) option.assessment_type_key = '';
+            });
+          });
+          renderWorkspace();
+        });
+      });
+      const addLevelBtn = inspectorBodyEl.querySelector('#add-assessment-level-btn');
+      if (addLevelBtn && selectedDimension) {
+        addLevelBtn.addEventListener('click', () => {
+          selectedDimension.levels.push(createAssessmentLevel({ title: `分层 ${selectedDimension.levels.length + 1}` }, selectedDimension.levels.length));
+          renderWorkspace();
+        });
+      }
+      inspectorBodyEl.querySelectorAll('[data-assessment-level-field]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const level = selectedDimension?.levels.find((item) => item.local_key === input.dataset.levelKey);
+          if (!level) return;
+          level[event.target.dataset.assessmentLevelField] = event.target.value;
+          updateDraftIndicator();
+        });
+      });
+      inspectorBodyEl.querySelectorAll('[data-assessment-level-remove]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!selectedDimension || selectedDimension.levels.length <= 1) return;
+          selectedDimension.levels = selectedDimension.levels.filter((item) => item.local_key !== button.dataset.assessmentLevelRemove);
+          renderWorkspace();
+        });
+      });
+      inspectorBodyEl.querySelector('#add-overall-level-btn').addEventListener('click', () => {
+        builder.overall_levels.push(createAssessmentLevel({ title: `综合分层 ${builder.overall_levels.length + 1}` }, builder.overall_levels.length));
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelectorAll('[data-overall-level-field]').forEach((input) => {
+        input.addEventListener('input', (event) => {
+          const level = builder.overall_levels.find((item) => item.local_key === input.dataset.levelKey);
+          if (!level) return;
+          level[event.target.dataset.overallLevelField] = event.target.value;
+          updateDraftIndicator();
+        });
+      });
+      inspectorBodyEl.querySelectorAll('[data-overall-level-remove]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (builder.overall_levels.length <= 1) return;
+          builder.overall_levels = builder.overall_levels.filter((item) => item.local_key !== button.dataset.overallLevelRemove);
+          renderWorkspace();
+        });
+      });
+    }
+
     function renderQuestionInspector(question) {
       inspectorTitleEl.textContent = formatQuestionType(question.type);
       inspectorSubtitleEl.textContent = '编辑题目内容、选项与分值。';
+      const dimensions = assessmentDimensions();
+      const selectedDimension = getAssessmentDimensionByKey(question.assessment_dimension_key);
+      const dimensionOptionsHtml = [
+        '<option value="">不计入测评</option>',
+        ...dimensions.map((dimension) => `
+          <option value="${escapeHtml(dimension.key)}" ${dimension.key === question.assessment_dimension_key ? 'selected' : ''}>${escapeHtml(dimension.name)}</option>
+        `),
+      ].join('');
       const optionsHtml = ['textarea', 'mobile'].includes(question.type)
         ? ''
-        : (question.options || []).map((option, index) => `
-            <div class="option-editor" data-option-key="${escapeHtml(option.local_key)}" draggable="true">
+        : (question.options || []).map((option, index) => {
+            const optionTypeOptionsHtml = selectedDimension
+              ? [
+                  '<option value="">请选择分型</option>',
+                  ...(selectedDimension.types || []).map((type) => `
+                    <option value="${escapeHtml(type.key)}" ${type.key === option.assessment_type_key ? 'selected' : ''}>${escapeHtml(type.name)}</option>
+                  `),
+                ].join('')
+              : '<option value="">先选择测评维度</option>';
+            return `
+              <div class="option-editor" data-option-key="${escapeHtml(option.local_key)}" draggable="true">
               <div class="option-editor-head">
                 <span class="mini-label" title="拖拽调整顺序">⋮⋮ 选项 ${index + 1}</span>
                 <button type="button" class="link-btn danger remove-option-btn" data-option-key="${escapeHtml(option.local_key)}">删除</button>
@@ -2417,13 +2951,16 @@
                 <label class="field">分值
                   <input data-option-field="score" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(String(option.score ?? 0))}">
                 </label>
-                <label class="field">测评类型 Key
-                  <input data-option-field="assessment_type_key" data-option-key="${escapeHtml(option.local_key)}" type="text" value="${escapeHtml(option.assessment_type_key || '')}" placeholder="例如 passive">
+                <label class="field">测评分型
+                  <select data-option-field="assessment_type_key" data-option-key="${escapeHtml(option.local_key)}" ${selectedDimension ? '' : 'disabled'}>
+                    ${optionTypeOptionsHtml}
+                  </select>
                 </label>
               </div>
               <div class="tag-picker-host" data-option-tag-host="${escapeHtml(option.local_key)}"></div>
             </div>
-          `).join('');
+            `;
+          }).join('');
       inspectorBodyEl.innerHTML = `
         <section class="config-group">
           <div class="config-head">
@@ -2441,9 +2978,11 @@
           <label class="field">题目标题
             <input id="question-title" type="text" value="${escapeHtml(question.title)}">
           </label>
-          <label class="field">测评维度 Key
-            <input id="question-assessment-dimension-key" type="text" value="${escapeHtml(question.assessment_dimension_key || '')}" placeholder="例如 conversion">
-            <div class="assessment-mini-help">启用多维测评后，此题只会计入这里填写的维度。</div>
+          <label class="field">测评维度
+            <select id="question-assessment-dimension-key">
+              ${dimensionOptionsHtml}
+            </select>
+            <div class="assessment-mini-help">启用多维测评后，此题只会计入选中的维度。维度可在「维度与分型」里增删。</div>
           </label>
           <label class="field${['textarea', 'mobile'].includes(question.type) ? '' : ' hidden'}" id="question-placeholder-field">提示文字
             <input
@@ -2472,8 +3011,9 @@
         renderPreview();
       });
       inspectorBodyEl.querySelector('#question-assessment-dimension-key').addEventListener('input', (event) => {
-        question.assessment_dimension_key = event.target.value.trim();
-        renderPreview();
+        question.assessment_dimension_key = event.target.value;
+        question.options.forEach((option) => { option.assessment_type_key = ''; });
+        renderWorkspace();
       });
       const questionPlaceholderInput = inspectorBodyEl.querySelector('#question-placeholder-text');
       if (questionPlaceholderInput) {
@@ -2689,6 +3229,10 @@
         renderQuestionnaireInspector();
         return;
       }
+      if (state.selection.kind === 'assessment') {
+        renderAssessmentInspector();
+        return;
+      }
       if (state.selection.kind === 'question') {
         const question = currentQuestion();
         if (!question) {
@@ -2727,14 +3271,46 @@
     }
 
     function openAssessmentSettings() {
-      state.ruleMode = false;
-      state.selection = { kind: 'questionnaire' };
+      selectAssessmentSettings();
+    }
+
+    function applyAssessmentPreset() {
+      const preset = buildSiyuanIpAssessmentPreset();
+      if (state.questionnaire.questions.length) {
+        const confirmed = window.confirm(`将向当前问卷追加 ${preset.questions.length} 道多维测评题，并启用测评结果页。是否继续？`);
+        if (!confirmed) return;
+      }
       state.questionnaire.assessment_enabled = true;
-      if (!hasMeaningfulAssessmentConfigText(state.questionnaire.assessment_config_text)) {
-        state.questionnaire.assessment_config = buildDefaultAssessmentConfig();
-        state.questionnaire.assessment_config_text = formatAssessmentConfigForEditor(state.questionnaire.assessment_config);
+      state.questionnaire.assessment_config = preset.assessment_config;
+      state.questionnaire.assessment_builder = createAssessmentBuilderFromConfig(preset.assessment_config);
+      if (!String(state.questionnaire.name || '').trim()) {
+        state.questionnaire.name = preset.name;
+      }
+      if (!String(state.questionnaire.title || '').trim()) {
+        state.questionnaire.title = preset.title;
+      }
+      if (!String(state.questionnaire.description || '').trim()) {
+        state.questionnaire.description = preset.description;
+      }
+      const existingTitles = new Set(state.questionnaire.questions.map((question) => String(question.title || '').trim()));
+      const questionsToInsert = preset.questions
+        .filter((question) => !existingTitles.has(String(question.title || '').trim()))
+        .map((question, index) => createQuestionFromAssessmentPreset(
+          question,
+          state.questionnaire.questions.length + index,
+        ));
+      state.questionnaire.questions = [
+        ...state.questionnaire.questions,
+        ...questionsToInsert,
+      ].map((question, index) => ({ ...question, sort_order: index + 1 }));
+      if (questionsToInsert.length) {
+        state.ruleMode = false;
+        state.selection = { kind: 'question', key: questionsToInsert[0].local_key };
+      } else {
+        state.selection = { kind: 'assessment', dimensionKey: state.questionnaire.assessment_builder.dimensions[0]?.key || '' };
       }
       renderWorkspace();
+      showToast(questionsToInsert.length ? `已添加 ${questionsToInsert.length} 道测评题` : '模板题目已经在当前问卷里');
     }
 
     async function saveQuestionnaire() {

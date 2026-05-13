@@ -477,7 +477,8 @@
       margin-top: 12px;
     }
     .preview-question,
-    .preview-rule {
+    .preview-rule,
+    .preview-template-group {
       padding: 14px;
       border-radius: 16px;
       background: #ffffff;
@@ -485,16 +486,43 @@
       cursor: pointer;
     }
     .preview-question h4,
-    .preview-rule h4 {
+    .preview-rule h4,
+    .preview-template-group h4 {
       margin: 8px 0 6px;
       font-size: 16px;
       line-height: 1.5;
     }
     .preview-question .muted,
-    .preview-rule .muted {
+    .preview-rule .muted,
+    .preview-template-group .muted {
       color: var(--muted);
       font-size: 13px;
       line-height: 1.6;
+    }
+    .preview-template-group {
+      background: linear-gradient(135deg, rgba(235, 242, 255, 0.96), rgba(255, 255, 255, 0.98));
+      border-color: rgba(20, 86, 240, 0.18);
+    }
+    .preview-template-group.active {
+      border-color: rgba(20, 86, 240, 0.42);
+      box-shadow: 0 0 0 3px rgba(20, 86, 240, 0.10);
+    }
+    .template-group-meta,
+    .template-group-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .template-group-chip {
+      display: inline-flex;
+      align-items: center;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: rgba(51, 112, 255, 0.10);
+      color: var(--primary-strong);
+      font-size: 12px;
+      font-weight: 800;
     }
     .question-type {
       display: inline-flex;
@@ -783,7 +811,7 @@
       align-items: end;
     }
     .assessment-level-row {
-      grid-template-columns: minmax(70px, 0.5fr) minmax(70px, 0.5fr) minmax(0, 1fr) auto;
+      grid-template-columns: minmax(64px, 0.45fr) minmax(64px, 0.45fr) minmax(92px, 0.75fr) minmax(0, 1.2fr) auto;
     }
     .assessment-type-row input,
     .assessment-level-row input {
@@ -1121,7 +1149,10 @@
             </button>
             <button id="open-assessment-settings" type="button" class="tool-card">
               <span class="tool-mark">测</span>
-              <span><strong>多维测评模板</strong><span>配置模板并一键插入题目。</span></span>
+              <span>
+                <strong>{% if editor_default_assessment %}测评模板配置{% else %}添加多维测评模板{% endif %}</strong>
+                <span>{% if editor_default_assessment %}配置题目、结果页和分型。{% else %}从已创建模板中整组添加。{% endif %}</span>
+              </span>
             </button>
             <button id="add-rule" type="button" class="tool-card">
               <span class="tool-mark">规</span>
@@ -1261,6 +1292,8 @@
     };
     let localSeq = 0;
     let toastTimer = null;
+    const DEFAULT_ASSESSMENT_TEMPLATE_ID = 'siyuan_ip_business';
+    const DEFAULT_ASSESSMENT_TEMPLATE_NAME = '小 IP 商业力测评';
 
     function nextLocalKey(prefix) {
       localSeq += 1;
@@ -1445,6 +1478,8 @@
         dimensions,
         questions,
         assessment_config: {
+          template_id: DEFAULT_ASSESSMENT_TEMPLATE_ID,
+          template_name: DEFAULT_ASSESSMENT_TEMPLATE_NAME,
           total_score_title: '小 IP 商业力测评结果',
           strength_count: 2,
           weakness_count: 2,
@@ -1459,12 +1494,16 @@
             name: dimension.key,
             summary: dimension.full,
             type_priority: dimension.priority,
-            types: dimension.priority.map((name) => ({ key: name, name, summary: '' })),
+            types: dimension.priority.map((name) => ({
+              key: name,
+              name,
+              summary: `${name}代表用户在“${dimension.key}”上的主要行为偏好，可在这里改成更具体的结果页解释。`,
+            })),
             levels: [
-              { min_score: 0, max_score: 8, title: '待破局' },
-              { min_score: 9, max_score: 12, title: '入门' },
-              { min_score: 13, max_score: 16, title: '进阶' },
-              { min_score: 17, max_score: 20, title: '专家' },
+              { min_score: 0, max_score: 8, title: '待破局', summary: `${dimension.key}当前较弱，需要先补基础动作。` },
+              { min_score: 9, max_score: 12, title: '入门', summary: `${dimension.key}已经有动作，但稳定性还不够。` },
+              { min_score: 13, max_score: 16, title: '进阶', summary: `${dimension.key}表现可用，建议沉淀成固定流程。` },
+              { min_score: 17, max_score: 20, title: '专家', summary: `${dimension.key}是当前优势，可以进一步放大。` },
             ],
           })),
           recommendations: dimensions.map((dimension) => ({
@@ -1542,6 +1581,8 @@
       const rawDimensions = Array.isArray(normalized.dimensions) ? normalized.dimensions : [];
       const rawOverallLevels = Array.isArray(normalized.overall_levels) ? normalized.overall_levels : [];
       return {
+        template_id: String(normalized.template_id || '').trim(),
+        template_name: String(normalized.template_name || '').trim(),
         total_score_title: String(normalized.total_score_title || '多维测评综合结果').trim() || '多维测评综合结果',
         strength_count: Number(normalized.strength_count || 2),
         weakness_count: Number(normalized.weakness_count || 2),
@@ -1561,6 +1602,8 @@
       const dimensions = Array.isArray(builder.dimensions) ? builder.dimensions : [];
       if (!dimensions.length) return {};
       return {
+        template_id: builder.template_id || '',
+        template_name: builder.template_name || '',
         total_score_title: builder.total_score_title || '多维测评综合结果',
         strength_count: Number(builder.strength_count || 2),
         weakness_count: Number(builder.weakness_count || 2),
@@ -1618,6 +1661,46 @@
       const dimension = getAssessmentDimensionByKey(dimensionKey);
       const type = dimension?.types?.find((item) => item.key === typeKey);
       return type ? type.name : '';
+    }
+
+    function assessmentTemplateGroups() {
+      const groups = new Map();
+      (state.questionnaire?.questions || []).forEach((question) => {
+        const templateId = String(question.assessment_template_id || '').trim();
+        if (!templateId) return;
+        if (!groups.has(templateId)) {
+          groups.set(templateId, {
+            id: templateId,
+            name: question.assessment_template_name || DEFAULT_ASSESSMENT_TEMPLATE_NAME,
+            questions: [],
+          });
+        }
+        groups.get(templateId).questions.push(question);
+      });
+      return [...groups.values()];
+    }
+
+    function assessmentTemplateGroupById(templateId) {
+      return assessmentTemplateGroups().find((item) => item.id === templateId) || null;
+    }
+
+    function selectAssessmentTemplateGroup(templateId) {
+      state.ruleMode = false;
+      state.selection = { kind: 'assessment_template_group', templateId };
+      renderWorkspace();
+    }
+
+    function removeAssessmentTemplateGroup(templateId) {
+      state.questionnaire.questions = state.questionnaire.questions
+        .filter((question) => question.assessment_template_id !== templateId)
+        .map((question, index) => ({ ...question, sort_order: index + 1 }));
+      const hasAssessmentQuestion = state.questionnaire.questions.some((question) => question.assessment_dimension_key);
+      if (!hasAssessmentQuestion) {
+        state.questionnaire.assessment_enabled = false;
+      }
+      state.selection = { kind: 'questionnaire' };
+      renderWorkspace();
+      showToast('已删除整组测评模板');
     }
 
     function ensureAssessmentTemplateIfEmpty() {
@@ -1859,6 +1942,8 @@
         title: question.title || '',
         placeholder_text: question.placeholder_text || '',
         assessment_dimension_key: question.assessment_dimension_key || '',
+        assessment_template_id: question.assessment_template_id || '',
+        assessment_template_name: question.assessment_template_name || '',
         required: Boolean(question.required),
         sort_order: question.sort_order ?? (index + 1),
         options: ['textarea', 'mobile'].includes(normalizedType)
@@ -1875,6 +1960,8 @@
         title: item.title,
         required: true,
         assessment_dimension_key: item.dim,
+        assessment_template_id: DEFAULT_ASSESSMENT_TEMPLATE_ID,
+        assessment_template_name: DEFAULT_ASSESSMENT_TEMPLATE_NAME,
         sort_order: index + 1,
         options: (item.options || []).map((option, optionIndex) => ({
           option_text: option[2],
@@ -1908,14 +1995,15 @@
     }
 
     function blankQuestionnaire() {
-      const defaultAssessmentConfig = editorConfig.defaultAssessment ? buildDefaultAssessmentConfig() : {};
+      const defaultPreset = editorConfig.defaultAssessment ? buildSiyuanIpAssessmentPreset() : null;
+      const defaultAssessmentConfig = defaultPreset ? defaultPreset.assessment_config : {};
       const defaultAssessmentBuilder = createAssessmentBuilderFromConfig(defaultAssessmentConfig);
       return {
         id: null,
         public_url: '',
-        name: '',
-        title: '',
-        description: '',
+        name: defaultPreset ? defaultPreset.name : '',
+        title: defaultPreset ? defaultPreset.title : '',
+        description: defaultPreset ? defaultPreset.description : '',
         redirect_url: '',
         assessment_enabled: Boolean(editorConfig.defaultAssessment),
         assessment_config: defaultAssessmentConfig,
@@ -1928,7 +2016,9 @@
         external_push_custom_params: [],
         slug: '',
         is_disabled: false,
-        questions: [],
+        questions: defaultPreset
+          ? defaultPreset.questions.map((question, index) => createQuestionFromAssessmentPreset(question, index))
+          : [],
         score_rules: [],
       };
     }
@@ -1943,6 +2033,19 @@
       const assessmentBuilder = hasSource
         ? createAssessmentBuilderFromConfig(assessmentConfig)
         : draft.assessment_builder;
+      const templateId = String(assessmentConfig.template_id || '').trim();
+      const templateName = String(assessmentConfig.template_name || '').trim() || DEFAULT_ASSESSMENT_TEMPLATE_NAME;
+      const sourceQuestions = hasSource ? (questionnaire.questions || []) : draft.questions;
+      const hydratedQuestions = sourceQuestions.map((question, index) => createQuestion(question.type || 'single_choice', question, index))
+        .map((question) => (
+          templateId && question.assessment_dimension_key
+            ? {
+                ...question,
+                assessment_template_id: templateId,
+                assessment_template_name: templateName,
+              }
+            : question
+        ));
       return {
         ...draft,
         id: questionnaire.id ?? null,
@@ -1964,7 +2067,7 @@
         ),
         slug: questionnaire.slug || '',
         is_disabled: Boolean(questionnaire.is_disabled),
-        questions: (questionnaire.questions || []).map((question, index) => createQuestion(question.type || 'single_choice', question, index)),
+        questions: hydratedQuestions,
         score_rules: (questionnaire.score_rules || []).map((rule, index) => createRule(rule, index)),
       };
     }
@@ -2341,11 +2444,12 @@
 
     function renderTopbar() {
       const title = questionnaireDisplayName(state.questionnaire, state.currentId ? '编辑问卷' : '新建问卷');
+      const pageKind = state.currentId ? '编辑问卷' : (editorConfig.defaultAssessment ? '创建测评问卷模板' : '新建问卷');
       topbarTitleEl.textContent = title;
       if (editorPageTitleEl) {
-        editorPageTitleEl.textContent = state.currentId ? '编辑问卷' : '新建问卷';
+        editorPageTitleEl.textContent = pageKind;
       }
-      document.title = `${state.currentId ? '编辑问卷' : '新建问卷'} · ${title || '问卷编辑'}`;
+      document.title = `${pageKind} · ${title || '问卷编辑'}`;
       renderEditorSecondaryActions();
       updateDraftIndicator();
     }
@@ -2369,7 +2473,39 @@
       if (!questionnaire.questions.length) {
         previewQuestionsEl.innerHTML = '<div class="empty-state">从左侧添加题目</div>';
       } else {
+        const renderedTemplateIds = new Set();
         questionnaire.questions.forEach((question) => {
+          if (question.assessment_template_id) {
+            if (renderedTemplateIds.has(question.assessment_template_id)) return;
+            renderedTemplateIds.add(question.assessment_template_id);
+            const group = assessmentTemplateGroupById(question.assessment_template_id);
+            if (!group) return;
+            const groupDimensions = [...new Set(group.questions.map((item) => item.assessment_dimension_key).filter(Boolean))];
+            const groupCard = document.createElement('article');
+            groupCard.className = `preview-template-group${state.selection.kind === 'assessment_template_group' && state.selection.templateId === group.id ? ' active' : ''}`;
+            groupCard.innerHTML = `
+              <span class="question-type">多维测评模板 · 整组引用</span>
+              <h4>${escapeHtml(group.name)}</h4>
+              <div class="muted">这组题来自同一个测评模板，普通问卷里按整组添加、整组删除。</div>
+              <div class="template-group-meta">
+                <span class="template-group-chip">${escapeHtml(String(groupDimensions.length))} 个维度</span>
+                <span class="template-group-chip">${escapeHtml(String(group.questions.length))} 道题</span>
+                <span class="template-group-chip">含结果页规则</span>
+              </div>
+              <div class="preview-options">
+                ${group.questions.slice(0, 3).map((item) => `
+                  <div class="option-pill">
+                    ${escapeHtml(item.title || '题目标题')}
+                    <small>${escapeHtml(formatAssessmentDimensionName(item.assessment_dimension_key) || item.assessment_dimension_key || '未选择维度')}</small>
+                  </div>
+                `).join('')}
+                ${group.questions.length > 3 ? `<div class="option-pill">其余 ${escapeHtml(String(group.questions.length - 3))} 题随模板一起保存</div>` : ''}
+              </div>
+            `;
+            groupCard.addEventListener('click', () => selectAssessmentTemplateGroup(group.id));
+            previewQuestionsEl.appendChild(groupCard);
+            return;
+          }
           const card = document.createElement('article');
           card.className = `preview-question${state.selection.kind === 'question' && state.selection.key === question.local_key ? ' active' : ''}`;
           const optionPreview = question.type === 'textarea'
@@ -2638,8 +2774,10 @@
     function renderAssessmentInspector() {
       const builder = ensureAssessmentBuilder();
       const preset = buildSiyuanIpAssessmentPreset();
-      inspectorTitleEl.textContent = '维度与分型';
-      inspectorSubtitleEl.textContent = '用中文配置维度、分型优先级和结果页分层。';
+      inspectorTitleEl.textContent = editorConfig.defaultAssessment ? '测评模板配置' : '维度与结果页';
+      inspectorSubtitleEl.textContent = editorConfig.defaultAssessment
+        ? '用中文配置模板题目、维度分型和结果页反馈。'
+        : '配置当前引用模板的维度、分型优先级和结果页分层。';
       if (!builder.dimensions.length) {
         builder.dimensions = [createAssessmentDimension({}, 0)];
       }
@@ -2665,6 +2803,7 @@
           <input data-assessment-level-field="min_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.min_score ?? ''))}" placeholder="最低分">
           <input data-assessment-level-field="max_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.max_score ?? ''))}" placeholder="最高分">
           <input data-assessment-level-field="title" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(level.title)}" placeholder="例如 可用">
+          <input data-assessment-level-field="summary" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(level.summary || '')}" placeholder="这一层的结果说明">
           <button type="button" class="link-btn danger" data-assessment-level-remove="${escapeHtml(level.local_key)}" ${selectedDimension.levels.length <= 1 ? 'disabled' : ''}>删除</button>
         </div>
       `).join('') : '';
@@ -2673,6 +2812,7 @@
           <input data-overall-level-field="min_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.min_score ?? ''))}" placeholder="最低分">
           <input data-overall-level-field="max_score" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(String(level.max_score ?? ''))}" placeholder="最高分">
           <input data-overall-level-field="title" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(level.title)}" placeholder="例如 成长期">
+          <input data-overall-level-field="summary" data-level-key="${escapeHtml(level.local_key)}" value="${escapeHtml(level.summary || '')}" placeholder="这一层的总览说明">
           <button type="button" class="link-btn danger" data-overall-level-remove="${escapeHtml(level.local_key)}" ${builder.overall_levels.length <= 1 ? 'disabled' : ''}>删除</button>
         </div>
       `).join('');
@@ -2681,20 +2821,20 @@
         <section class="config-group">
           <div class="config-head">
             <div>
-              <h3>多维测评预设模板</h3>
-              <p>从 demo 明细生成的模板，可一键追加到当前问卷。</p>
+              <h3>测评问卷模板</h3>
+              <p>${editorConfig.defaultAssessment ? '这里维护可被普通问卷引用的测评模板。' : '从已创建模板中选择，作为一组题插入当前问卷。'}</p>
             </div>
           </div>
           <div class="helper-note">
-            ${escapeHtml(preset.title)}：${preset.dimensions.length} 个维度，${preset.questions.length} 道单选题。导入后仍可在中间预览里逐题修改，也能继续使用手机号、标签、webhook 和普通分数规则。
+            ${escapeHtml(preset.title)}：${preset.dimensions.length} 个维度，${preset.questions.length} 道单选题。${editorConfig.defaultAssessment ? '保存后可作为普通问卷的一组测评模板使用。' : '插入后在普通问卷里按整组管理，手机号、标签、webhook 和普通题继续复用现有能力。'}
           </div>
-          <button id="apply-assessment-preset-btn" type="button" class="btn primary" style="width:100%;margin-top:12px;">一键添加多维测评题目</button>
+          <button id="apply-assessment-preset-btn" type="button" class="btn primary" style="width:100%;margin-top:12px;">${editorConfig.defaultAssessment ? '填入小 IP 模板题目' : '添加多维测评模板到当前问卷'}</button>
         </section>
 
         <section class="config-group">
           <div class="config-head">
             <div>
-              <h3>测评开关</h3>
+              <h3>结果页开关</h3>
               <p>开启后，提交成功页会进入测评结果页。</p>
             </div>
           </div>
@@ -2758,7 +2898,7 @@
             <div class="config-head">
               <div>
                 <h3>单维分层</h3>
-                <p>按这个维度自己的分数判断好与不好。</p>
+                <p>按这个维度自己的分数判断好与不好，每层可以填写结果页说明。</p>
               </div>
               <button id="add-assessment-level-btn" type="button" class="btn secondary">添加分层</button>
             </div>
@@ -2769,8 +2909,8 @@
         <section class="config-group">
           <div class="config-head">
             <div>
-              <h3>综合分层</h3>
-              <p>只用于结果页总览，不决定单维分型。</p>
+              <h3>综合分层说明</h3>
+              <p>只用于结果页总览，不决定单维分型。每层都可以单独配置解释文案。</p>
             </div>
             <button id="add-overall-level-btn" type="button" class="btn secondary">添加分层</button>
           </div>
@@ -2913,6 +3053,46 @@
           builder.overall_levels = builder.overall_levels.filter((item) => item.local_key !== button.dataset.overallLevelRemove);
           renderWorkspace();
         });
+      });
+    }
+
+    function renderAssessmentTemplateGroupInspector(group) {
+      const builder = ensureAssessmentBuilder();
+      const groupDimensions = [...new Set((group?.questions || []).map((item) => item.assessment_dimension_key).filter(Boolean))];
+      inspectorTitleEl.textContent = '测评模板引用';
+      inspectorSubtitleEl.textContent = '这组题来自同一个模板，在普通问卷里整组管理。';
+      inspectorBodyEl.innerHTML = `
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>${escapeHtml(group?.name || DEFAULT_ASSESSMENT_TEMPLATE_NAME)}</h3>
+              <p>已作为整组测评模板插入当前问卷。</p>
+            </div>
+          </div>
+          <div class="helper-note">
+            ${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group?.questions || []).length))} 道题、${escapeHtml(String((builder.overall_levels || []).length))} 个综合分层。题目来自同一模板，当前问卷里建议整组保留或整组删除。
+          </div>
+          <div class="template-group-actions">
+            <button id="open-template-result-config-btn" type="button" class="btn secondary">查看结果页配置</button>
+            <button id="remove-template-group-btn" type="button" class="btn ghost">删除整组模板</button>
+          </div>
+        </section>
+        <section class="config-group">
+          <div class="config-head">
+            <div>
+              <h3>普通问卷能力继续复用</h3>
+              <p>手机号、城市、来源渠道、标签、webhook、分享链接和提交记录不需要重做。</p>
+            </div>
+          </div>
+          <div class="helper-note">如果需要改题目、分型或结果页文案，进入“结果页配置”或回到测评模板编辑页处理。</div>
+        </section>
+      `;
+      inspectorBodyEl.querySelector('#open-template-result-config-btn').addEventListener('click', () => {
+        state.selection = { kind: 'assessment', dimensionKey: builder.dimensions[0]?.key || '' };
+        renderWorkspace();
+      });
+      inspectorBodyEl.querySelector('#remove-template-group-btn').addEventListener('click', () => {
+        removeAssessmentTemplateGroup(group.id);
       });
     }
 
@@ -3233,6 +3413,16 @@
         renderAssessmentInspector();
         return;
       }
+      if (state.selection.kind === 'assessment_template_group') {
+        const group = assessmentTemplateGroupById(state.selection.templateId);
+        if (group) {
+          renderAssessmentTemplateGroupInspector(group);
+          return;
+        }
+        state.selection = { kind: 'questionnaire' };
+        renderQuestionnaireInspector();
+        return;
+      }
       if (state.selection.kind === 'question') {
         const question = currentQuestion();
         if (!question) {
@@ -3271,14 +3461,20 @@
     }
 
     function openAssessmentSettings() {
+      if (!editorConfig.defaultAssessment) {
+        applyAssessmentPreset();
+        return;
+      }
       selectAssessmentSettings();
     }
 
     function applyAssessmentPreset() {
       const preset = buildSiyuanIpAssessmentPreset();
-      if (state.questionnaire.questions.length) {
-        const confirmed = window.confirm(`将向当前问卷追加 ${preset.questions.length} 道多维测评题，并启用测评结果页。是否继续？`);
-        if (!confirmed) return;
+      const existingGroup = assessmentTemplateGroupById(DEFAULT_ASSESSMENT_TEMPLATE_ID);
+      if (existingGroup) {
+        selectAssessmentTemplateGroup(DEFAULT_ASSESSMENT_TEMPLATE_ID);
+        showToast('当前问卷已经添加过这个测评模板');
+        return;
       }
       state.questionnaire.assessment_enabled = true;
       state.questionnaire.assessment_config = preset.assessment_config;
@@ -3305,12 +3501,12 @@
       ].map((question, index) => ({ ...question, sort_order: index + 1 }));
       if (questionsToInsert.length) {
         state.ruleMode = false;
-        state.selection = { kind: 'question', key: questionsToInsert[0].local_key };
+        state.selection = { kind: 'assessment_template_group', templateId: DEFAULT_ASSESSMENT_TEMPLATE_ID };
       } else {
         state.selection = { kind: 'assessment', dimensionKey: state.questionnaire.assessment_builder.dimensions[0]?.key || '' };
       }
       renderWorkspace();
-      showToast(questionsToInsert.length ? `已添加 ${questionsToInsert.length} 道测评题` : '模板题目已经在当前问卷里');
+      showToast(questionsToInsert.length ? `已添加“${DEFAULT_ASSESSMENT_TEMPLATE_NAME}”整组模板` : '模板题目已经在当前问卷里');
     }
 
     async function saveQuestionnaire() {

@@ -56,21 +56,27 @@ def _render_questionnaire_editor_page(
     if questionnaire_id is not None and not payload:
         return _questionnaire_not_found_response(questionnaire_id)
     questionnaire = payload["questionnaire"] if payload else None
+    default_assessment = questionnaire_id is None and str(request.args.get("mode") or "").strip() == "assessment"
+    new_heading = "创建测评问卷模板" if default_assessment else "新建问卷"
+    new_subtitle = (
+        "配置测评题目、维度分型和结果页规则，保存后可作为普通问卷的整组引用模板。"
+        if default_assessment
+        else "从空白模板开始搭建题目、标签和分数规则。"
+    )
     return render_template(
         "admin_questionnaires.html",
         editor_mode="edit" if questionnaire_id is not None else "new",
         editor_page_title=(questionnaire or {}).get("title")
         or (questionnaire or {}).get("name")
-        or ("编辑问卷" if questionnaire_id is not None else "新建问卷"),
-        editor_heading="编辑问卷" if questionnaire_id is not None else "新建问卷",
+        or ("编辑问卷" if questionnaire_id is not None else new_heading),
+        editor_heading="编辑问卷" if questionnaire_id is not None else new_heading,
         editor_subtitle=(
             "维护当前问卷的题目、分数规则和发布设置。"
             if questionnaire_id is not None
-            else "从空白模板开始搭建题目、标签和分数规则。"
+            else new_subtitle
         ),
         editor_back_href=url_for("api.admin_console_questionnaires"),
-        editor_default_assessment=questionnaire_id is None
-        and str(request.args.get("mode") or "").strip() == "assessment",
+        editor_default_assessment=default_assessment,
         initial_questionnaire=questionnaire,
         initial_questionnaire_id=questionnaire_id,
     )

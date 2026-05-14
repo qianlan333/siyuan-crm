@@ -149,7 +149,8 @@ def get_latest_questionnaire_submit_debug(questionnaire_id: int) -> dict[str, An
 
     scrm_apply = get_db().execute(
         """
-        SELECT status, error_message
+        SELECT status, error_message, add_tag_ids, matched_score_tier_id, matched_score_tier_name,
+               matched_dimension_categories
         FROM questionnaire_scrm_apply_logs
         WHERE submission_id = ?
         ORDER BY id DESC
@@ -157,6 +158,19 @@ def get_latest_questionnaire_submit_debug(questionnaire_id: int) -> dict[str, An
         """,
         (int(submission["id"]),),
     ).fetchone()
+    assessment_result = _normalize_questionnaire_assessment_config(
+        submission.get("assessment_result_snapshot")
+    )
+    tag_plan = assessment_result.get("tag_plan") if isinstance(assessment_result.get("tag_plan"), dict) else {}
+    matched_dimension_categories = tag_plan.get("matched_dimension_categories") or []
+    dimension_category_tag_ids = _dedupe_strings(
+        tag
+        for item in matched_dimension_categories
+        for tag in _normalize_tag_codes((item or {}).get("tag_ids"))
+    )
+    score_tier_tag_ids = _normalize_tag_codes(tag_plan.get("score_tier_tag_ids"))
+    scrm_dimension_categories = _json_array((scrm_apply or {}).get("matched_dimension_categories"))
+    scrm_add_tag_ids = _json_array((scrm_apply or {}).get("add_tag_ids"))
     return {
         "questionnaire_id": int(submission["questionnaire_id"]),
         "submission_id": int(submission["id"]),
@@ -169,9 +183,14 @@ def get_latest_questionnaire_submit_debug(questionnaire_id: int) -> dict[str, An
         "follow_user_userid": submission.get("follow_user_userid", "") or "",
         "total_score": float(submission.get("total_score") or 0),
         "final_tags": _dedupe_strings(_json_array(submission.get("final_tags"))),
-        "assessment_result_snapshot": _normalize_questionnaire_assessment_config(
-            submission.get("assessment_result_snapshot")
-        ),
+        "assessment_result_snapshot": assessment_result,
+        "matched_score_tier_id": (scrm_apply or {}).get("matched_score_tier_id", "") or tag_plan.get("matched_score_tier_id", "") or "",
+        "matched_score_tier_name": (scrm_apply or {}).get("matched_score_tier_name", "") or tag_plan.get("matched_score_tier_name", "") or "",
+        "matched_dimension_categories": scrm_dimension_categories or matched_dimension_categories,
+        "dimension_category_tag_ids": dimension_category_tag_ids,
+        "score_tier_tag_ids": score_tier_tag_ids,
+        "final_add_tag_ids": _dedupe_strings(scrm_add_tag_ids or tag_plan.get("final_tag_ids") or _json_array(submission.get("final_tags"))),
+        "identity_resolved": bool(str(submission.get("external_userid") or "").strip()),
         "result_token": submission.get("result_token", "") or "",
         "redirect_url_snapshot": submission.get("redirect_url_snapshot", "") or "",
         "scrm_apply_status": (scrm_apply or {}).get("status", "") or "",
@@ -995,6 +1014,8 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
 
     dimensions: list[dict[str, Any]] = []
     assessment_tag_codes: list[str] = []
+    dimension_category_tag_codes: list[str] = []
+    matched_dimension_categories: list[dict[str, Any]] = []
     for key, bucket in accumulator.items():
         cfg = dimension_config_by_key.get(key) or {"key": key, "name": bucket["name"]}
         type_map = _assessment_types_map(cfg)
@@ -1021,9 +1042,18 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
             score=score,
             score_percent=score_percent,
         )
-        assessment_tag_codes.extend(_normalize_tag_codes(dominant_type.get("tag_codes")))
-        if dimension_level:
-            assessment_tag_codes.extend(_normalize_tag_codes(dimension_level.get("tag_codes")))
+        dominant_type_tag_codes = _normalize_tag_codes(dominant_type.get("tag_codes"))
+        dimension_category_tag_codes.extend(dominant_type_tag_codes)
+        assessment_tag_codes.extend(dominant_type_tag_codes)
+        matched_dimension_categories.append(
+            {
+                "dimension_key": key,
+                "dimension_name": str(cfg.get("name") or bucket["name"] or key).strip(),
+                "category_key": str(dominant_type.get("key") or "").strip(),
+                "category_name": str(dominant_type.get("name") or dominant_type.get("title") or "").strip(),
+                "tag_ids": dominant_type_tag_codes,
+            }
+        )
         dimensions.append(
             {
                 "key": key,
@@ -1050,8 +1080,10 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
     total_score = sum(float(item.get("score") or 0) for item in dimensions if item.get("participates_in_total_score") is not False)
     total_max_score = sum(float(item.get("max_score") or 0) for item in dimensions if item.get("participates_in_total_score") is not False)
     overall_level = _match_assessment_level(config.get("overall_levels"), score=total_score)
+    score_tier_tag_codes: list[str] = []
     if overall_level:
-        assessment_tag_codes.extend(_normalize_tag_codes(overall_level.get("tag_codes")))
+        score_tier_tag_codes = _normalize_tag_codes(overall_level.get("tag_codes"))
+        assessment_tag_codes.extend(score_tier_tag_codes)
     else:
         overall_level = {
             "key": "fallback",
@@ -1073,8 +1105,9 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
     strengths = ranked[: max(0, strength_count)]
     weaknesses = list(reversed(ranked[-max(0, weakness_count) :])) if weakness_count > 0 else []
     recommendations = _assessment_recommendations(config, dimensions)
-    for item in recommendations:
-        assessment_tag_codes.extend(_normalize_tag_codes(item.get("tag_codes")))
+    final_tag_codes = _dedupe_strings(assessment_tag_codes)
+    overall_level_key = str((overall_level or {}).get("key") or (overall_level or {}).get("local_key") or "").strip()
+    overall_level_name = str((overall_level or {}).get("name") or (overall_level or {}).get("title") or "").strip()
 
     return {
         "enabled": True,
@@ -1088,12 +1121,21 @@ def _compute_assessment_result(questionnaire: dict[str, Any], validated_answers:
             {key: value for key, value in item.items() if key != "tag_codes"} for item in recommendations
         ],
         "final_recommendation": config.get("final_recommendation") if isinstance(config.get("final_recommendation"), dict) else {},
-        "tag_codes": _dedupe_strings(assessment_tag_codes),
+        "tag_codes": final_tag_codes,
+        "tag_plan": {
+            "matched_score_tier_id": overall_level_key,
+            "matched_score_tier_name": overall_level_name,
+            "matched_dimension_categories": matched_dimension_categories,
+            "dimension_category_tag_ids": _dedupe_strings(dimension_category_tag_codes),
+            "score_tier_tag_ids": score_tier_tag_codes,
+            "final_tag_ids": final_tag_codes,
+        },
     }
 
 
 def compute_questionnaire_submission_outcome(questionnaire: dict[str, Any], answers: Any) -> dict[str, Any]:
     validated_answers = answers if isinstance(answers, list) and answers and "question" in answers[0] else validate_questionnaire_answers(questionnaire, answers)
+    is_assessment = _normalize_bool(questionnaire.get("assessment_enabled"))
     total_score = 0.0
     option_tags: list[str] = []
     answer_snapshots: list[dict[str, Any]] = []
@@ -1110,7 +1152,8 @@ def compute_questionnaire_submission_outcome(questionnaire: dict[str, Any], answ
         score_contribution = sum(selected_option_scores)
         if question["type"] in {"single_choice", "multi_choice"}:
             total_score += score_contribution
-            option_tags.extend(selected_option_tags)
+            if not is_assessment:
+                option_tags.extend(selected_option_tags)
 
         answer_snapshots.append(
             {
@@ -1131,20 +1174,21 @@ def compute_questionnaire_submission_outcome(questionnaire: dict[str, Any], answ
         total_score = float(assessment_result.get("total_score") or 0)
 
     matched_rule_tags: list[str] = []
-    for rule in questionnaire.get("score_rules") or []:
-        min_score = rule.get("min_score")
-        max_score = rule.get("max_score")
-        if min_score is not None and total_score < float(min_score):
-            continue
-        if max_score is not None and total_score > float(max_score):
-            continue
-        matched_rule_tags.extend(_normalize_tag_codes(rule.get("tag_codes")))
+    if not is_assessment:
+        for rule in questionnaire.get("score_rules") or []:
+            min_score = rule.get("min_score")
+            max_score = rule.get("max_score")
+            if min_score is not None and total_score < float(min_score):
+                continue
+            if max_score is not None and total_score > float(max_score):
+                continue
+            matched_rule_tags.extend(_normalize_tag_codes(rule.get("tag_codes")))
 
     result_token = uuid4().hex if assessment_result else ""
     result_url = f"/s/{questionnaire.get('slug')}/result/{result_token}" if result_token else ""
     if assessment_result and result_url:
         assessment_result["result_path"] = result_url
-    final_tags = _dedupe_strings(option_tags + matched_rule_tags + _normalize_tag_codes(assessment_result.get("tag_codes")))
+    final_tags = _dedupe_strings(_normalize_tag_codes(assessment_result.get("tag_codes")) if is_assessment else option_tags + matched_rule_tags)
     return {
         "validated_answers": validated_answers,
         "answer_snapshots": answer_snapshots,
@@ -1860,26 +1904,44 @@ def apply_questionnaire_mobile_binding(submission: dict[str, Any]) -> dict[str, 
 def _log_questionnaire_scrm_apply(
     submission_id: int,
     *,
+    questionnaire_id: int = 0,
+    openid: str = "",
+    unionid: str = "",
     external_userid: str,
     follow_user_userid: str,
     final_tags: list[str],
     status: str,
     error_message: str = "",
+    matched_score_tier_id: str = "",
+    matched_score_tier_name: str = "",
+    matched_dimension_categories: list[dict[str, Any]] | None = None,
+    add_tag_ids: list[str] | None = None,
+    wecom_response: Any = None,
 ) -> None:
     get_db().execute(
         """
         INSERT INTO questionnaire_scrm_apply_logs (
-            submission_id, external_userid, follow_user_userid, final_tags, status, error_message, created_at
+            submission_id, questionnaire_id, openid, unionid, external_userid, follow_user_userid,
+            final_tags, matched_score_tier_id, matched_score_tier_name, matched_dimension_categories,
+            add_tag_ids, status, error_message, wecom_response, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
         """,
         (
             int(submission_id),
+            int(questionnaire_id or 0),
+            openid,
+            unionid,
             external_userid,
             follow_user_userid,
             _json_dumps(final_tags),
+            matched_score_tier_id,
+            matched_score_tier_name,
+            _json_dumps(matched_dimension_categories or []),
+            _json_dumps(add_tag_ids if add_tag_ids is not None else final_tags),
             status,
             error_message,
+            _json_dumps(wecom_response if isinstance(wecom_response, (dict, list)) else {}),
         ),
     )
     get_db().commit()
@@ -1888,7 +1950,8 @@ def _log_questionnaire_scrm_apply(
 def apply_questionnaire_submission_tags_to_scrm(submission_id: int) -> dict[str, Any]:
     submission = get_db().execute(
         """
-        SELECT id, external_userid, follow_user_userid, final_tags
+        SELECT id, questionnaire_id, openid, unionid, external_userid, follow_user_userid,
+               final_tags, assessment_result_snapshot
         FROM questionnaire_submissions
         WHERE id = ?
         """,
@@ -1900,14 +1963,26 @@ def apply_questionnaire_submission_tags_to_scrm(submission_id: int) -> dict[str,
     external_userid = str(submission.get("external_userid") or "").strip()
     follow_user_userid = str(submission.get("follow_user_userid") or "").strip()
     final_tags = _dedupe_strings(_json_array(submission.get("final_tags")))
+    assessment_result = _normalize_questionnaire_assessment_config(submission.get("assessment_result_snapshot"))
+    tag_plan = assessment_result.get("tag_plan") if isinstance(assessment_result.get("tag_plan"), dict) else {}
+    log_context = {
+        "questionnaire_id": int(submission.get("questionnaire_id") or 0),
+        "openid": str(submission.get("openid") or "").strip(),
+        "unionid": str(submission.get("unionid") or "").strip(),
+        "external_userid": external_userid,
+        "follow_user_userid": follow_user_userid,
+        "final_tags": final_tags,
+        "matched_score_tier_id": str(tag_plan.get("matched_score_tier_id") or "").strip(),
+        "matched_score_tier_name": str(tag_plan.get("matched_score_tier_name") or "").strip(),
+        "matched_dimension_categories": tag_plan.get("matched_dimension_categories") if isinstance(tag_plan.get("matched_dimension_categories"), list) else [],
+        "add_tag_ids": final_tags,
+    }
     if not external_userid:
         _log_questionnaire_scrm_apply(
             submission_id,
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            status="skipped",
-            error_message="no_external_userid",
+            **log_context,
+            status="identity_unresolved",
+            error_message="external_userid 未解析，已跳过企微打标签",
         )
         questionnaire_logger.info("questionnaire scrm skip submission_id=%s reason=no_external_userid", submission_id)
         return {"applied": False, "reason": "no_external_userid"}
@@ -1915,11 +1990,9 @@ def apply_questionnaire_submission_tags_to_scrm(submission_id: int) -> dict[str,
     if not follow_user_userid:
         _log_questionnaire_scrm_apply(
             submission_id,
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            status="skipped",
-            error_message="no_follow_user_userid",
+            **log_context,
+            status="identity_unresolved",
+            error_message="follow_user_userid 未解析，已跳过企微打标签",
         )
         questionnaire_logger.info("questionnaire scrm skip submission_id=%s reason=no_follow_user_userid", submission_id)
         return {"applied": False, "reason": "no_follow_user_userid"}
@@ -1927,11 +2000,9 @@ def apply_questionnaire_submission_tags_to_scrm(submission_id: int) -> dict[str,
     if not final_tags:
         _log_questionnaire_scrm_apply(
             submission_id,
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            status="skipped",
-            error_message="no_final_tags",
+            **log_context,
+            status="skipped_no_tags",
+            error_message="本次命中的维度分类和总分分层没有配置标签",
         )
         questionnaire_logger.info("questionnaire scrm skip submission_id=%s reason=no_final_tags", submission_id)
         return {"applied": False, "reason": "no_final_tags"}
@@ -1949,10 +2020,9 @@ def apply_questionnaire_submission_tags_to_scrm(submission_id: int) -> dict[str,
         tags_repo.save_tag_snapshot(follow_user_userid, external_userid, final_tags)
         _log_questionnaire_scrm_apply(
             submission_id,
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
+            **log_context,
             status="success",
+            wecom_response=result,
         )
         questionnaire_logger.info(
             "questionnaire scrm applied submission_id=%s external_userid=%s follow_user_userid=%s tags=%s",
@@ -1963,12 +2033,11 @@ def apply_questionnaire_submission_tags_to_scrm(submission_id: int) -> dict[str,
         )
         return {"applied": True, "result": result}
     except Exception as exc:
+        status = "wecom_not_configured" if "not configured" in str(exc).lower() or "is not configured" in str(exc).lower() else "failed"
         _log_questionnaire_scrm_apply(
             submission_id,
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            status="failed",
+            **log_context,
+            status=status,
             error_message=str(exc),
         )
         questionnaire_logger.exception(
@@ -2050,10 +2119,17 @@ def submit_questionnaire(slug: str, payload: dict[str, Any], request_meta: dict[
         "external_userid": str((identity or {}).get("external_userid") or payload_external_userid or "").strip(),
         "unionid": str((identity or {}).get("unionid") or resolved_unionid or "").strip(),
         "openid": str((identity or {}).get("openid") or resolved_openid or "").strip(),
-        "respondent_key": _build_respondent_key(identity, submit_meta),
+        "respondent_key": str(submit_meta.get("respondent_key") or "").strip(),
     }
-    if has_questionnaire_submission(int(questionnaire["id"]), duplicate_identity):
+    has_strict_identity = any(str(duplicate_identity.get(field) or "").strip() for field in ["external_userid", "unionid", "openid", "respondent_key"])
+    if has_strict_identity and has_questionnaire_submission(int(questionnaire["id"]), duplicate_identity):
         raise QuestionnaireAlreadySubmittedError("已经提交")
+    if not has_strict_identity:
+        questionnaire_logger.info(
+            "questionnaire duplicate guard identity_unresolved slug=%s questionnaire_id=%s",
+            slug_value,
+            int(questionnaire["id"]),
+        )
 
     validated_answers = validate_questionnaire_answers(questionnaire, answers)
     computed_result = compute_questionnaire_submission_outcome(questionnaire, validated_answers)

@@ -2543,7 +2543,7 @@
     }
 
     function buildUnknownTag(tagId) {
-      return { tag_id: tagId, tag_name: `未知标签（${tagId}）`, group_name: '未知标签' };
+      return { tag_id: tagId, tag_name: `未匹配标签（${tagId}）`, group_name: '未匹配标签' };
     }
 
     function ensureTagKnown(tagId) {
@@ -5114,6 +5114,11 @@
         <label class="field">推荐课程名称<input data-type-result-field="course_name" value="${escapeHtml(type.course_name || '')}"></label>
         <label class="field">推荐课程跳转链接<input data-type-result-field="course_url" value="${escapeHtml(type.course_url || '')}" placeholder="https://example.com/course"></label>
         <label class="field">CTA 按钮文案<input data-type-result-field="cta_text" value="${escapeHtml(type.cta_text || '')}"></label>
+        <div class="config-head inline">
+          <h3>企微打标签</h3>
+          <p>命中此维度分类后打标签。实际保存 tag_id，不保存标签名称。</p>
+        </div>
+        <div id="v2-type-tag-host"></div>
         <label class="field"><input data-type-result-field="enabled" type="checkbox" ${type.enabled !== false ? 'checked' : ''}> 启用</label>
         <label class="field"><input data-type-result-field="show_in_result" type="checkbox" ${type.show_in_result !== false ? 'checked' : ''}> 展示在最终结果页</label>
         <button type="button" class="link-btn danger" id="v2-remove-type">删除分类结果</button>
@@ -5156,6 +5161,11 @@
         <label class="field">推荐课程名称<input data-overall-field="course_name" value="${escapeHtml(level.course_name || '')}"></label>
         <label class="field">推荐课程跳转链接<input data-overall-field="course_url" value="${escapeHtml(level.course_url || '')}" placeholder="https://example.com/course-main"></label>
         <label class="field">CTA 按钮文案<input data-overall-field="cta_text" value="${escapeHtml(level.cta_text || '')}"></label>
+        <div class="config-head inline">
+          <h3>企微打标签</h3>
+          <p>命中此总分分层后打标签。实际保存 tag_id，不保存标签名称。</p>
+        </div>
+        <div id="v2-overall-tag-host"></div>
         <label class="field"><input data-overall-field="enabled" type="checkbox" ${level.enabled !== false ? 'checked' : ''}> 启用</label>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button type="button" class="btn ghost" id="v2-move-overall-up">上移</button>
@@ -5244,6 +5254,23 @@
         input.addEventListener('input', (event) => updateTypeResultField(input, event));
         input.addEventListener('change', (event) => updateTypeResultField(input, event));
       });
+      const typeTagHost = root.querySelector('#v2-type-tag-host');
+      if (typeTagHost) {
+        const dimension = selectedAssessmentDimension();
+        const type = selectedAssessmentType();
+        if (dimension && type) {
+          const apply = (tagIds) => {
+            type.tag_codes = normalizeTagIds(tagIds);
+            updateDraftIndicator();
+          };
+          apply.currentValue = () => type.tag_codes;
+          mountTagPicker(typeTagHost, type.tag_codes, apply, {
+            type: 'assessment_type',
+            dimensionKey: dimension.key,
+            typeKey: type.key,
+          });
+        }
+      }
       root.querySelector('#v2-remove-type')?.addEventListener('click', () => {
         const dimension = selectedAssessmentDimension();
         if (!dimension || !state.selectedAssessmentTypeKey) return;
@@ -5275,6 +5302,21 @@
         input.addEventListener('input', (event) => updateOverallField(input, event));
         input.addEventListener('change', (event) => updateOverallField(input, event));
       });
+      const overallTagHost = root.querySelector('#v2-overall-tag-host');
+      if (overallTagHost) {
+        const level = selectedOverallLevel();
+        if (level) {
+          const apply = (tagIds) => {
+            level.tag_codes = normalizeTagIds(tagIds);
+            updateDraftIndicator();
+          };
+          apply.currentValue = () => level.tag_codes;
+          mountTagPicker(overallTagHost, level.tag_codes, apply, {
+            type: 'assessment_overall_level',
+            levelKey: level.local_key,
+          });
+        }
+      }
       root.querySelector('#v2-remove-overall-level')?.addEventListener('click', () => {
         const builder = ensureAssessmentBuilder();
         if (!state.selectedOverallLevelKey) return;
@@ -5802,6 +5844,15 @@
       if (state.tagModal.target?.type === 'rule') {
         const rule = state.questionnaire.score_rules.find((item) => item.local_key === state.tagModal.target.ruleKey);
         if (rule) rule.tag_codes = merged;
+      }
+      if (state.tagModal.target?.type === 'assessment_type') {
+        const dimension = assessmentDimensions().find((item) => item.key === state.tagModal.target.dimensionKey);
+        const type = (dimension?.types || []).find((item) => item.key === state.tagModal.target.typeKey);
+        if (type) type.tag_codes = merged;
+      }
+      if (state.tagModal.target?.type === 'assessment_overall_level') {
+        const level = (ensureAssessmentBuilder().overall_levels || []).find((item) => item.local_key === state.tagModal.target.levelKey);
+        if (level) level.tag_codes = merged;
       }
       closeTagModal();
       renderWorkspace();

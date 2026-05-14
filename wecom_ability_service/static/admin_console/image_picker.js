@@ -21,13 +21,24 @@
   let _libraryCache = null;
   let _libraryCachePromise = null;
 
+  function requestJson(url, options) {
+    if (window.ImageUploadClient && window.ImageUploadClient.requestJson) {
+      return window.ImageUploadClient.requestJson(url, options || {});
+    }
+    return fetch(url, options || { credentials: 'same-origin' }).then(function (resp) {
+      return resp.text().then(function (text) {
+        try { return text ? JSON.parse(text) : {}; }
+        catch (e) { return { ok: false, error: '服务返回了非 JSON 响应' }; }
+      });
+    });
+  }
+
   async function fetchLibrary({ force = false } = {}) {
     if (!force && _libraryCache) return _libraryCache;
     if (_libraryCachePromise) return _libraryCachePromise;
     _libraryCachePromise = (async () => {
       try {
-        const resp = await fetch('/api/admin/image-library?enabled_only=true&limit=200', { credentials: 'same-origin' });
-        const data = await resp.json();
+        const data = await requestJson('/api/admin/image-library?enabled_only=true&limit=200');
         _libraryCache = data.ok ? (data.items || []) : [];
       } catch (e) {
         _libraryCache = [];
@@ -53,8 +64,7 @@
       return item._thumb_url;
     }
     try {
-      const resp = await fetch('/api/admin/image-library/' + item.id, { credentials: 'same-origin' });
-      const data = await resp.json();
+      const data = await requestJson('/api/admin/image-library/' + item.id);
       if (data.ok && data.item.data_base64) {
         const mime = data.item.mime_type || 'image/png';
         item._thumb_url = 'data:' + mime + ';base64,' + data.item.data_base64;
@@ -251,12 +261,20 @@
       fileInput.disabled = true;
       let ok = 0, fail = 0;
       for (let i = 0; i < files.length; i++) {
-        statusEl.textContent = '上传中 ' + (i + 1) + '/' + files.length + '：' + files[i].name;
-        const fd = new FormData();
-        fd.append('image', files[i]);
+        statusEl.textContent = '处理中 ' + (i + 1) + '/' + files.length + '：' + files[i].name;
         try {
-          const resp = await fetch('/api/admin/image-library/upload', { method: 'POST', credentials: 'same-origin', body: fd });
-          const data = await resp.json();
+          const prepared = window.ImageUploadClient
+            ? await window.ImageUploadClient.prepareImageForUpload(files[i])
+            : { file: files[i], compressed: false };
+          statusEl.textContent = (prepared.compressed ? '压缩后上传 ' : '上传中 ')
+            + (i + 1) + '/' + files.length + '：' + files[i].name;
+          const fd = new FormData();
+          fd.append('image', prepared.file);
+          const data = await requestJson('/api/admin/image-library/upload', {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: fd,
+          });
           if (data.ok && data.item) {
             ok++;
             invalidateCache();  // 让新素材立刻显示在 picker 里
@@ -267,8 +285,12 @@
             }
           } else {
             fail++;
+            statusEl.textContent = '上传失败：' + (data.error || '未知错误');
           }
-        } catch (e) { fail++; }
+        } catch (e) {
+          fail++;
+          statusEl.textContent = '上传失败：' + String((e && e.message) || e);
+        }
       }
       statusEl.textContent = '已上传 ' + ok + (fail ? '，失败 ' + fail : '') + ' 张';
       fileInput.disabled = false;

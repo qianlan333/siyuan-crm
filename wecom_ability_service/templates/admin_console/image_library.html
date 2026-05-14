@@ -1,6 +1,7 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
+<script src="{{ url_for('static', filename='admin_console/image_upload_client.js') }}"></script>
 <style>
   /* ========== 顶部工具栏 ========== */
   .il-toolbar {
@@ -321,20 +322,20 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function getJSON(url) {
-    return fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); });
+    return window.ImageUploadClient.requestJson(url);
   }
   function putJSON(url, body) {
-    return fetch(url, {
+    return window.ImageUploadClient.requestJson(url, {
       method: 'PUT', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
-    }).then(function (r) { return r.json(); });
+    });
   }
   function postForm(url, fd) {
-    return fetch(url, { method: 'POST', credentials: 'same-origin', body: fd }).then(function (r) { return r.json(); });
+    return window.ImageUploadClient.requestJson(url, { method: 'POST', credentials: 'same-origin', body: fd });
   }
   function deleteReq(url) {
-    return fetch(url, { method: 'DELETE', credentials: 'same-origin' }).then(function (r) { return r.json(); });
+    return window.ImageUploadClient.requestJson(url, { method: 'DELETE', credentials: 'same-origin' });
   }
   function fmtBytes(n) {
     n = Number(n) || 0;
@@ -655,16 +656,24 @@
     }
     btn.disabled = true;
     $uploadStatus.className = 'il-modal-status busy';
-    $uploadStatus.textContent = '上传中…';
-
-    var fd = new FormData();
-    fd.append('image', f);
-    fd.append('name', document.getElementById('il-upload-name').value.trim());
-    fd.append('description', document.getElementById('il-upload-description').value.trim());
-    fd.append('tags', document.getElementById('il-upload-tags').value.trim());
-    fd.append('category', document.getElementById('il-upload-category').value.trim());
+    $uploadStatus.textContent = '处理中…';
 
     try {
+      var prepared = await window.ImageUploadClient.prepareImageForUpload(f);
+      if (prepared.compressed) {
+        $uploadStatus.textContent = '已压缩 ' + window.ImageUploadClient.fmtBytes(prepared.originalSize)
+          + ' → ' + window.ImageUploadClient.fmtBytes(prepared.uploadSize) + '，上传中…';
+      } else {
+        $uploadStatus.textContent = '上传中…';
+      }
+
+      var fd = new FormData();
+      fd.append('image', prepared.file);
+      fd.append('name', document.getElementById('il-upload-name').value.trim());
+      fd.append('description', document.getElementById('il-upload-description').value.trim());
+      fd.append('tags', document.getElementById('il-upload-tags').value.trim());
+      fd.append('category', document.getElementById('il-upload-category').value.trim());
+
       var d = await postForm('/api/admin/image-library/upload', fd);
       if (d.ok) {
         $uploadStatus.className = 'il-modal-status success';

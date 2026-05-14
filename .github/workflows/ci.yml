@@ -78,7 +78,9 @@ jobs:
         timeout-minutes: 15
 
   full-test:
-    # 跑全量 pytest 在真 PG 上。2026-05 砍 SQLite 后所有测试统一用 PG。
+    # 保留 job 名称，避免已有 GitHub check/rules 失配：
+    # - push: 跑和 PR 相同的高信号 smoke，控制 main 合并等待时间。
+    # - schedule/workflow_dispatch: 跑全量 PG 回归。
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     services:
@@ -113,7 +115,36 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Run push smoke tests (PG-only, parallel)
+        if: github.event_name == 'push'
+        run: |
+          python -m pytest \
+            tests/integration/test_pg_compat_smoke.py \
+            tests/test_campaigns_due_calc.py \
+            tests/test_broadcast_jobs_service.py \
+            tests/test_run_broadcast_queue_worker.py \
+            tests/test_send_task.py \
+            tests/test_campaign_hard_delete.py \
+            tests/test_http_registration_contract.py \
+            tests/test_refactor_guardrails.py \
+            tests/test_service_layer_layout.py \
+            tests/test_run_cloud_orchestrator_scan.py \
+            tests/test_cloud_orchestrator_external_agent.py \
+            tests/test_marketing_schema_init.py \
+            tests/test_config_schema.py \
+            tests/test_route_inventory_contract.py \
+            tests/test_admin_customer_profile_console.py \
+            tests/test_questionnaire_application_contract.py \
+            tests/test_questionnaire_external_push_contract.py \
+            tests/test_questionnaire_identity_resolution.py \
+            -n auto --dist=loadfile -q --tb=short --timeout=120 --timeout-method=thread
+          python -m pytest tests/test_api.py \
+            -k "questionnaire or assessment or sidebar or customer_center_detail" \
+            -n auto --dist=loadfile -q --tb=short --timeout=120 --timeout-method=thread
+        timeout-minutes: 15
+
       - name: Run all tests (PG-only, parallel)
+        if: github.event_name != 'push'
         # ``-n auto`` 让 pytest-xdist 按 CPU 核数派发 test 到 worker 子进程；
         # conftest._resolve_worker_database_url 给每个 worker 路由到独立 PG DB
         # ``test_<worker_id>``。CI runner 默认 4 vCPU → ~4 worker 并行。

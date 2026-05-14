@@ -57,6 +57,7 @@ def test_create_modal_submits_to_post_endpoint(source: str):
     assert "/api/admin/miniprogram-library" in source
     assert "method: 'POST'" in source
     assert "thumb_image_id: thumbId" in source
+    assert "ImageUploadClient.requestJson" in source
 
 
 def test_create_modal_has_open_close_handlers(source: str):

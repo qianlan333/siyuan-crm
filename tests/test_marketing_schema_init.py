@@ -280,3 +280,13 @@ def test_postgres_init_adds_program_id_columns_before_schema_indexes():
         table_index = init_postgres_source.index(f"ALTER TABLE IF EXISTS {table_name}")
         assert "ADD COLUMN IF NOT EXISTS program_id BIGINT" in init_postgres_source[table_index:schema_replay_index]
         assert table_index < schema_replay_index
+
+
+def test_postgres_init_backfills_miniprogram_thumb_image_id_column():
+    db_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "db" / "migrations" / "postgres_migrations.py"
+    source = db_path.read_text(encoding="utf-8")
+
+    assert "def _ensure_postgres_miniprogram_library_thumb_image_id" in source
+    assert "ALTER TABLE IF EXISTS miniprogram_library" in source
+    assert "ADD COLUMN IF NOT EXISTS thumb_image_id BIGINT" in source
+    assert "_ensure_postgres_miniprogram_library_thumb_image_id(db)" in source

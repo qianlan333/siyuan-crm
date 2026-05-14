@@ -1104,11 +1104,19 @@ ON questionnaire_submission_answers (question_id);
 CREATE TABLE IF NOT EXISTS questionnaire_scrm_apply_logs (
     id BIGSERIAL PRIMARY KEY,
     submission_id BIGINT NOT NULL REFERENCES questionnaire_submissions(id) ON DELETE CASCADE,
+    questionnaire_id BIGINT NOT NULL DEFAULT 0,
+    openid TEXT NOT NULL DEFAULT '',
+    unionid TEXT NOT NULL DEFAULT '',
     external_userid TEXT NOT NULL DEFAULT '',
     follow_user_userid TEXT NOT NULL DEFAULT '',
     final_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    matched_score_tier_id TEXT NOT NULL DEFAULT '',
+    matched_score_tier_name TEXT NOT NULL DEFAULT '',
+    matched_dimension_categories JSONB NOT NULL DEFAULT '[]'::jsonb,
+    add_tag_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     status VARCHAR(32) NOT NULL DEFAULT 'skipped',
     error_message TEXT NOT NULL DEFAULT '',
+    wecom_response JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

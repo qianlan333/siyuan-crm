@@ -324,6 +324,28 @@ def _ensure_postgres_questionnaire_external_push_tables(db) -> None:
     )
 
 
+def _ensure_postgres_questionnaire_scrm_apply_log_columns(db) -> None:
+    for stmt in (
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS questionnaire_id BIGINT NOT NULL DEFAULT 0",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS openid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS unionid TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS matched_score_tier_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS matched_score_tier_name TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS matched_dimension_categories JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS add_tag_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "ALTER TABLE IF EXISTS questionnaire_scrm_apply_logs "
+        "ADD COLUMN IF NOT EXISTS wecom_response JSONB NOT NULL DEFAULT '{}'::jsonb",
+    ):
+        db.execute(stmt)
+
+
 def _ensure_postgres_customer_value_segment_tables(db) -> None:
     db.execute(
         """
@@ -1041,6 +1063,7 @@ def _init_postgres(db) -> None:
         """
     )
     _ensure_postgres_questionnaire_external_push_tables(db)
+    _ensure_postgres_questionnaire_scrm_apply_log_columns(db)
     _ensure_postgres_user_ops_page_tables(db)
     _ensure_postgres_automation_agent_config_tables(db)
     db.execute(

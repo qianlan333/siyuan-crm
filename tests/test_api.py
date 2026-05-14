@@ -3379,16 +3379,7 @@ def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client,
         assert submission["result_token"]
         assert submission["redirect_url_snapshot"] == submit_result["result_url"]
         final_tags = submission["final_tags"] if isinstance(submission["final_tags"], list) else json.loads(submission["final_tags"])
-        assert {
-            "budget_mid",
-            "focus_result",
-            "focus_service",
-            "score_high",
-            "assessment_high",
-            "assessment_deal_push",
-            "assessment_deal_ok",
-            "assessment_reco_maintain",
-        }.issubset(set(final_tags))
+        assert set(final_tags) == {"assessment_high", "assessment_deal_push"}
         snapshot = (
             submission["assessment_result_snapshot"]
             if isinstance(submission["assessment_result_snapshot"], dict)
@@ -3403,6 +3394,8 @@ def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client,
         assert snapshot["dimensions"][0]["dominant_type"]["course_url"] == "https://example.com/deal-course"
         assert snapshot["dimensions"][1]["dominant_type"]["name"] == "暖男女型"
         assert snapshot["final_recommendation"]["course_url"] == "https://example.com/final-course"
+        assert snapshot["tag_plan"]["score_tier_tag_ids"] == ["assessment_high"]
+        assert snapshot["tag_plan"]["dimension_category_tag_ids"] == ["assessment_deal_push"]
 
     result_page = client.get(submit_result["result_url"])
     body = result_page.get_data(as_text=True)
@@ -3414,6 +3407,76 @@ def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client,
     assert "用户维护" in body
     assert "暖男女型" in body
     assert "小 IP 商业闭环训练营" in body
+
+
+def test_assessment_questionnaire_applies_only_result_tags(client, app, monkeypatch):
+    captured_mark_payloads = []
+
+    def capturing_post(url, params=None, json=None, timeout=None):
+        if url.endswith("/cgi-bin/externalcontact/mark_tag"):
+            captured_mark_payloads.append(json or {})
+        return fake_wecom_post(url, params=params, json=json, timeout=timeout)
+
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", capturing_post)
+
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO wecom_external_contact_identity_map (
+                corp_id, external_userid, unionid, openid, follow_user_userid, name, status, raw_profile
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("ww-test", "wm_ext_assessment_001", "union-assessment-001", "openid-assessment-001", "sales_01", "测评客户", "active", "{}"),
+        )
+        db.commit()
+
+    create_response = client.post("/api/admin/questionnaires", json=_build_assessment_questionnaire_payload())
+    questionnaire = create_response.get_json()["questionnaire"]
+    detail = client.get(f"/api/admin/questionnaires/{questionnaire['id']}").get_json()["questionnaire"]
+    q1, q2, q3 = detail["questions"]
+
+    submit_response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "openid": "openid-assessment-001",
+            "answers": {
+                str(q1["id"]): q1["options"][1]["id"],
+                str(q2["id"]): [q2["options"][0]["id"], q2["options"][1]["id"]],
+                str(q3["id"]): "希望先看测评结果。",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+    assert submit_response.status_code == 200
+
+    assert len(captured_mark_payloads) == 1
+    assert set(captured_mark_payloads[0]["add_tag"]) == {"assessment_high", "assessment_deal_push"}
+    assert "remove_tag" not in captured_mark_payloads[0]
+
+    with app.app_context():
+        row = get_db().execute(
+            """
+            SELECT status, add_tag_ids, matched_score_tier_name, matched_dimension_categories
+            FROM questionnaire_scrm_apply_logs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        assert row["status"] == "success"
+        add_tag_ids = row["add_tag_ids"] if isinstance(row["add_tag_ids"], list) else json.loads(row["add_tag_ids"])
+        assert set(add_tag_ids) == {"assessment_high", "assessment_deal_push"}
+        assert row["matched_score_tier_name"] == "进阶型"
+        categories = row["matched_dimension_categories"] if isinstance(row["matched_dimension_categories"], list) else json.loads(row["matched_dimension_categories"])
+        assert categories[0]["category_key"] == "push"
+
+    debug_response = client.get(f"/api/admin/questionnaires/{questionnaire['id']}/latest-submit-debug")
+    debug_payload = debug_response.get_json()
+    assert debug_payload["ok"] is True
+    assert debug_payload["final_add_tag_ids"] == ["assessment_deal_push", "assessment_high"]
+    assert debug_payload["scrm_apply_status"] == "success"
 
 
 def test_questionnaire_submit_prefers_session_identity(client, app):

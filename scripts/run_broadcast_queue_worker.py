@@ -38,6 +38,7 @@ logger = logging.getLogger("broadcast_queue_worker")
 
 
 def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
+    from wecom_ability_service.db import get_db
     from wecom_ability_service.domains.broadcast_jobs import service as queue_service
     from wecom_ability_service.domains.broadcast_jobs.handlers import execute_job
 
@@ -57,6 +58,10 @@ def _process_one_job(job: dict[str, Any]) -> dict[str, Any]:
             "sent_count": int(result.get("sent_count") or 0),
         }
     error_msg = str(result.get("error") or "unknown error")
+    try:
+        get_db().rollback()
+    except Exception:
+        pass
     queue_service.mark_failed(job_id, error=error_msg)
     logger.error("broadcast_job dispatch failed id=%s: %s", job_id, error_msg)
     return {"id": job_id, "status": "failed", "reason": error_msg}
@@ -71,7 +76,11 @@ def run(batch_size: int) -> dict[str, Any]:
     sent_ok = 0
     sent_failed = 0
     for job in claimed:
-        outcome = _process_one_job(job)
+        try:
+            outcome = _process_one_job(job)
+        except Exception as exc:
+            logger.exception("broadcast_job id=%s crashed: %s", job.get("id"), exc)
+            outcome = {"id": job.get("id"), "status": "crashed", "reason": str(exc)}
         results.append(outcome)
         if outcome["status"] == "sent":
             sent_ok += 1

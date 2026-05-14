@@ -40,6 +40,14 @@ ALLOWED_TABLES = frozenset(
         "automation_focus_send_batch",
         "automation_focus_send_batch_item",
         "user_ops_pool_current",
+        # 客户档案双源里另一半 (lead_pool ∪ pool_current 互补, 详见 PR #259 hxc_dashboard
+        # 看板的双源合并). pool_current 单表覆盖 ~6300 个 external_userid, lead_pool 还
+        # 覆盖额外 ~100 个仅在线索池的客户. 不加进来, Agent 写 segment SQL 用 lead_pool
+        # 独有客户会被沙箱拒, 漏掉真实可触达人群.
+        "user_ops_lead_pool_current",
+        # 黄小璨激活漏斗预聚合快照 (CRM 三表 × 黄小璨 MySQL, 每 30 分钟刷新).
+        # 技能 md §3.4 承诺"直接 SQL 喂 propose_segment", 这里把约束跟文档对齐.
+        "user_ops_hxc_dashboard_snapshot",
         "user_ops_send_records",
         "contact_tags",
         "automation_value_segment_current",
@@ -244,6 +252,31 @@ def fetch_member_ids(
     return [int(r["member_id"]) for r in res["rows"]]
 
 
+def fetch_member_rows(
+    *,
+    sql: str,
+    params: dict[str, Any] | None = None,
+    max_rows: int = MAX_ROWS,
+) -> list[dict[str, Any]]:
+    """返回 ``[{"member_id": int, "external_contact_id": str|""}]`` 列表.
+
+    Campaign 互斥分配 (``_allocate_members``) 优先用 SQL 自带的 external_contact_id;
+    SQL 没输出时 (老的 ``SELECT m.id AS member_id ... FROM automation_member m`` 模板)
+    回退到 automation_member.id 反查. 这样既兼容老 segment, 也能让按 ``user_ops_pool_current``
+    或其他白名单表写的新 segment 直接拿到 external_contact_id (历史 bug: pool_current.id ≠
+    automation_member.id, 之前 reverse-lookup 失败导致 campaign_members.external_contact_id
+    全空, 启动后 dispatch 因 no_external_userid 直接 skip).
+    """
+    res = run_segment_query(sql=sql, params=params, max_rows=max_rows)
+    return [
+        {
+            "member_id": int(r["member_id"]),
+            "external_contact_id": str(r.get("external_contact_id") or ""),
+        }
+        for r in res["rows"]
+    ]
+
+
 __all__ = [
     "ALLOWED_TABLES",
     "FORBIDDEN_KEYWORDS",
@@ -251,6 +284,7 @@ __all__ = [
     "MAX_SQL_LENGTH",
     "SqlSandboxError",
     "fetch_member_ids",
+    "fetch_member_rows",
     "run_segment_query",
     "validate_segment_sql",
 ]

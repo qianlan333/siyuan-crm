@@ -2649,3 +2649,97 @@ ON broadcast_jobs (trace_id, id DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_broadcast_jobs_source_scheduled
 ON broadcast_jobs (source_table, source_id, scheduled_for)
 WHERE source_id <> '';
+
+-- ---------- 用户激活漏斗看板快照 (alembic 0010) ----------
+-- CRM × 黄小璨 聚合快照, 每 30 分钟 TRUNCATE + 重写, 供 admin 看板页 + 外部 API.
+-- 注意: 这段注释里禁止出现 分号 字符. _run_schema_with_forward_fk_retries
+-- 按字符切 SQL 会把注释里的分号也当成语句分隔符, 触发 syntax error.
+CREATE TABLE IF NOT EXISTS user_ops_hxc_dashboard_snapshot (
+    id                       BIGSERIAL PRIMARY KEY,
+    mobile                   TEXT NOT NULL UNIQUE,
+    phone_match_key          TEXT NOT NULL DEFAULT '',
+    in_lead_pool             BOOLEAN NOT NULL DEFAULT FALSE,
+    in_people                BOOLEAN NOT NULL DEFAULT FALSE,
+    in_questionnaire         BOOLEAN NOT NULL DEFAULT FALSE,
+    customer_name            TEXT NOT NULL DEFAULT '',
+    external_userid          TEXT NOT NULL DEFAULT '',
+    owner_userid             TEXT NOT NULL DEFAULT '',
+    is_wecom_added           BOOLEAN,
+    is_mobile_bound          BOOLEAN,
+    class_term_no            INTEGER,
+    class_term_label         TEXT NOT NULL DEFAULT '',
+    first_entry_source       TEXT NOT NULL DEFAULT '',
+    last_entry_source        TEXT NOT NULL DEFAULT '',
+    crm_hxc_state            TEXT NOT NULL DEFAULT '',
+    crm_created_at           DATE,
+    questionnaires           TEXT NOT NULL DEFAULT '',
+    questionnaire_count      INTEGER NOT NULL DEFAULT 0,
+    last_questionnaire_at    DATE,
+    hxc_member_hit           BOOLEAN NOT NULL DEFAULT FALSE,
+    hxc_user_hit             BOOLEAN NOT NULL DEFAULT FALSE,
+    funnel_state             TEXT NOT NULL DEFAULT 'inactive',
+    hxc_user_id              TEXT NOT NULL DEFAULT '',
+    hxc_nickname             TEXT NOT NULL DEFAULT '',
+    hxc_member_status        TEXT NOT NULL DEFAULT '',
+    hxc_registered_at        TIMESTAMPTZ,
+    hxc_last_login_at        TIMESTAMPTZ,
+    hxc_silent_days          INTEGER,
+    membership_type          TEXT NOT NULL DEFAULT '',
+    membership_status        TEXT NOT NULL DEFAULT '',
+    membership_end_at        TIMESTAMPTZ,
+    membership_days_left     INTEGER,
+    membership_source        TEXT NOT NULL DEFAULT '',
+    consultation_used        INTEGER,
+    consultation_limit       INTEGER,
+    conv_chat                INTEGER NOT NULL DEFAULT 0,
+    conv_consult             INTEGER NOT NULL DEFAULT 0,
+    conv_lesson              INTEGER NOT NULL DEFAULT 0,
+    msg_user                 INTEGER NOT NULL DEFAULT 0,
+    msg_ai                   INTEGER NOT NULL DEFAULT 0,
+    consult_completed        INTEGER NOT NULL DEFAULT 0,
+    consult_avg_turn         NUMERIC(6, 2),
+    last_msg_at              TIMESTAMPTZ,
+    refreshed_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_hxc_snapshot_funnel
+ON user_ops_hxc_dashboard_snapshot (funnel_state);
+
+CREATE INDEX IF NOT EXISTS idx_hxc_snapshot_owner
+ON user_ops_hxc_dashboard_snapshot (owner_userid) WHERE owner_userid <> '';
+
+CREATE INDEX IF NOT EXISTS idx_hxc_snapshot_class_term
+ON user_ops_hxc_dashboard_snapshot (class_term_label) WHERE class_term_label <> '';
+
+CREATE INDEX IF NOT EXISTS idx_hxc_snapshot_membership_type
+ON user_ops_hxc_dashboard_snapshot (membership_type) WHERE membership_type <> '';
+
+CREATE INDEX IF NOT EXISTS idx_hxc_snapshot_refreshed_at
+ON user_ops_hxc_dashboard_snapshot (refreshed_at DESC);
+
+CREATE TABLE IF NOT EXISTS user_ops_hxc_dashboard_meta (
+    id              BIGSERIAL PRIMARY KEY,
+    started_at      TIMESTAMPTZ NOT NULL,
+    finished_at     TIMESTAMPTZ,
+    status          TEXT NOT NULL DEFAULT 'running',
+    row_count       INTEGER NOT NULL DEFAULT 0,
+    member_hit      INTEGER NOT NULL DEFAULT 0,
+    user_hit        INTEGER NOT NULL DEFAULT 0,
+    only_member     INTEGER NOT NULL DEFAULT 0,
+    error_message   TEXT NOT NULL DEFAULT '',
+    trigger_source  TEXT NOT NULL DEFAULT 'scheduled'
+);
+
+CREATE INDEX IF NOT EXISTS idx_hxc_snapshot_meta_started_at
+ON user_ops_hxc_dashboard_meta (started_at DESC);
+
+-- 激活漏斗看板 - 发送人白名单 (alembic 0011)
+CREATE TABLE IF NOT EXISTS user_ops_hxc_send_config (
+    id              BIGSERIAL PRIMARY KEY,
+    sender_userid   TEXT NOT NULL UNIQUE,
+    display_name    TEXT NOT NULL DEFAULT '',
+    priority        INTEGER NOT NULL DEFAULT 100,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);

@@ -18,7 +18,10 @@ jobs:
           script: |
             set -e
             cd '/home/ubuntu/极简 crm'
-            git pull origin main
+            if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
+              git stash push --include-untracked -m "deploy-backup-$(date -u +%Y%m%dT%H%M%SZ)"
+            fi
+            git pull --ff-only origin main
             set -a
             source /home/ubuntu/.openclaw-wecom-pg.env
             set +a

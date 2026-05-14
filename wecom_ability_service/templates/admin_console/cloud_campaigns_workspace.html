@@ -36,31 +36,37 @@
     </table>
   </section>
 
-  <section class="admin-card" hidden id="cloud-camp-detail-section">
-    <header class="admin-card-head cloud-camp-detail-head">
-      <div class="cloud-camp-detail-head-left">
-        <h3 class="admin-card-title">
-          <span id="cloud-camp-detail-name"></span>
-          <span class="cloud-orch-status-chip" id="cloud-camp-detail-review"></span>
-          <span class="cloud-orch-status-chip" id="cloud-camp-detail-run"></span>
-        </h3>
-        <span class="cloud-orch-trace-id" id="cloud-camp-detail-trace"></span>
-      </div>
-      <div class="cloud-camp-actions-menu">
-        <button class="admin-button admin-button--ghost cloud-camp-more-btn" id="cloud-camp-more">⋯ 更多</button>
-        <div class="cloud-camp-more-pop" id="cloud-camp-more-pop" hidden>
-          <button class="cloud-camp-more-item" id="cloud-camp-pause">暂停</button>
-          <button class="cloud-camp-more-item" id="cloud-camp-edit" title="编辑功能开发中" disabled>编辑</button>
-          <button class="cloud-camp-more-item cloud-camp-danger" id="cloud-camp-delete">删除</button>
+  <div class="cloud-camp-drawer" id="cloud-camp-detail-drawer" hidden>
+    <div class="cloud-camp-drawer-mask" data-detail-close></div>
+    <aside class="cloud-camp-drawer-panel cloud-camp-detail-panel">
+      <header class="cloud-camp-detail-head">
+        <div class="cloud-camp-detail-head-left">
+          <h3 class="admin-card-title" style="margin:0;font-size:15px;">
+            <span id="cloud-camp-detail-name"></span>
+            <span class="cloud-orch-status-chip" id="cloud-camp-detail-review"></span>
+            <span class="cloud-orch-status-chip" id="cloud-camp-detail-run"></span>
+          </h3>
+          <span class="cloud-orch-trace-id" id="cloud-camp-detail-trace"></span>
         </div>
-      </div>
-    </header>
-    <div id="cloud-camp-detail-body" class="cloud-camp-detail-body"></div>
-    <footer class="cloud-camp-detail-footer">
-      <button class="admin-button admin-button--primary" id="cloud-camp-start">启动</button>
-      <button class="admin-button admin-button--ghost cloud-camp-reject" id="cloud-camp-reject">拒绝</button>
-    </footer>
-  </section>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <div class="cloud-camp-actions-menu">
+            <button class="admin-button admin-button--ghost cloud-camp-more-btn" id="cloud-camp-more">⋯</button>
+            <div class="cloud-camp-more-pop" id="cloud-camp-more-pop" hidden>
+              <button class="cloud-camp-more-item" id="cloud-camp-pause">暂停</button>
+              <button class="cloud-camp-more-item" id="cloud-camp-edit" title="编辑功能开发中" disabled>编辑</button>
+              <button class="cloud-camp-more-item cloud-camp-danger" id="cloud-camp-delete">删除</button>
+            </div>
+          </div>
+          <button class="cloud-camp-drawer-close" data-detail-close>×</button>
+        </div>
+      </header>
+      <div class="cloud-camp-drawer-body" id="cloud-camp-detail-body" style="padding:16px 18px;"></div>
+      <footer class="cloud-camp-detail-footer" style="padding:12px 18px;border-top:1px solid #f0f0f0;margin:0;">
+        <button class="admin-button admin-button--primary" id="cloud-camp-start">启动</button>
+        <button class="admin-button admin-button--ghost cloud-camp-reject" id="cloud-camp-reject">拒绝</button>
+      </footer>
+    </aside>
+  </div>
 
   <div class="cloud-camp-drawer" id="cloud-camp-members-drawer" hidden>
     <div class="cloud-camp-drawer-mask" data-close></div>
@@ -159,6 +165,7 @@
 .cloud-camp-drawer[hidden] { display:none; }  /* class 的 display:flex 优先级高于 [hidden] 默认样式，必须显式覆盖否则抽屉一直显示 */
 .cloud-camp-drawer-mask { flex:1; background:rgba(0,0,0,0.3); }
 .cloud-camp-drawer-panel { width:520px; max-width:96vw; background:#fff; height:100%; display:flex; flex-direction:column; box-shadow:-2px 0 16px rgba(0,0,0,0.08); }
+.cloud-camp-detail-panel { width:720px; }
 .cloud-camp-drawer-panel header { display:flex; justify-content:space-between; align-items:center; padding:14px 18px; border-bottom:1px solid #f0f0f0; }
 .cloud-camp-drawer-close { border:0; background:transparent; font-size:22px; cursor:pointer; color:#888; line-height:1; }
 .cloud-camp-drawer-toolbar { display:flex; align-items:center; gap:10px; padding:10px 18px; border-bottom:1px solid #f0f0f0; }
@@ -176,7 +183,7 @@
   const root = document.querySelector('[data-cloud-camp-root]');
   if (!root) return;
   const tbody = root.querySelector('#cloud-camp-tbody');
-  const detailSection = root.querySelector('#cloud-camp-detail-section');
+  const detailDrawer = root.querySelector('#cloud-camp-detail-drawer');
   const detailName = root.querySelector('#cloud-camp-detail-name');
   const detailReview = root.querySelector('#cloud-camp-detail-review');
   const detailRun = root.querySelector('#cloud-camp-detail-run');
@@ -318,24 +325,123 @@
       tbody.innerHTML = '<tr><td colspan="8">暂无运营计划</td></tr>';
       return;
     }
+    // 按 group_code 分桶: 同一份名单按 owner 拆 N 个 campaign 时, 同 group_code
+    // 的多个 campaign 聚合成 1 张展开/收起的卡片 (技能 md §3.5).
+    const groups = new Map();
+    const standalone = [];
     for (const c of data.campaigns) {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>
-          <div class="cloud-camp-name">${escapeHtml(c.display_name) || '<em>未命名</em>'}</div>
-          <code class="cloud-camp-code">${escapeHtml(c.campaign_code).slice(0, 18)}</code>
-        </td>
-        <td><div class="cloud-camp-intent-cell" title="${escapeHtml(c.intent)}">${escapeHtml(c.intent)}</div></td>
-        <td>${fmt(c.segment_count || 0)}</td>
-        <td>${fmt(c.member_count || 0)}</td>
-        <td><span class="cloud-orch-status-chip ${escapeHtml(c.review_status)}">${escapeHtml(reviewLabel(c.review_status))}</span></td>
-        <td><span class="cloud-orch-status-chip ${escapeHtml(c.run_status)}">${escapeHtml(runLabel(c.run_status))}</span></td>
-        <td>${escapeHtml(formatYMD(c.updated_at))}</td>
-        <td><button class="admin-button admin-button--ghost" data-code="${escapeHtml(c.campaign_code)}">查看</button></td>
-      `;
-      tr.querySelector('button').addEventListener('click', e => loadDetail(e.currentTarget.dataset.code));
-      tbody.appendChild(tr);
+      const gcode = (c.group_code || '').trim();
+      if (!gcode) { standalone.push(c); continue; }
+      if (!groups.has(gcode)) {
+        groups.set(gcode, { code: gcode, label: c.group_label || gcode, campaigns: [] });
+      }
+      groups.get(gcode).campaigns.push(c);
     }
+    // group 排序: 各 group 内最大 id 倒序; 然后跟 standalone 按 id 整体合并
+    const groupArr = Array.from(groups.values()).sort((a, b) => {
+      const maxA = Math.max(...a.campaigns.map(c => Number(c.id) || 0));
+      const maxB = Math.max(...b.campaigns.map(c => Number(c.id) || 0));
+      return maxB - maxA;
+    });
+    const standaloneSorted = standalone.slice().sort((a, b) => (Number(b.id) || 0) - (Number(a.id) || 0));
+    // 简单合并: group 显示在前 (新建任务常常 group, 优先看), standalone 跟在后面
+    for (const g of groupArr) renderGroupRow(g);
+    for (const c of standaloneSorted) appendCampaignRow(c, false);
+  }
+
+  function aggLabelByKey(camps, key, labelFn) {
+    const counts = {};
+    for (const c of camps) counts[c[key]] = (counts[c[key]] || 0) + 1;
+    return Object.entries(counts).map(([s, n]) => `${n} ${labelFn(s)}`).join(' · ');
+  }
+
+  function renderGroupRow(g) {
+    const total = g.campaigns.reduce((s, c) => s + (Number(c.member_count) || 0), 0);
+    const owners = Array.from(new Set(g.campaigns.map(c => c.owner_userid || '').filter(Boolean)));
+    const hasDraft = g.campaigns.some(c => ['draft', 'pending_review'].includes(c.review_status) && ['draft', 'paused'].includes(c.run_status));
+    const headTr = document.createElement('tr');
+    headTr.className = 'cloud-camp-group-head';
+    headTr.style.cssText = 'cursor:pointer;background:#fff8e6;border-top:2px solid #f0b400;';
+    headTr.innerHTML = `
+      <td colspan="2">
+        <div class="cloud-camp-name"><span data-toggle-icon>▶</span> 📦 ${escapeHtml(g.label)}</div>
+        <code class="cloud-camp-code" style="opacity:0.65;">group=${escapeHtml(g.code)} · ${g.campaigns.length} 个 sub-Campaign${owners.length ? ' · senders=' + escapeHtml(owners.join(', ')) : ''}</code>
+      </td>
+      <td>${g.campaigns.length}</td>
+      <td><strong>${fmt(total)}</strong></td>
+      <td><small>${escapeHtml(aggLabelByKey(g.campaigns, 'review_status', reviewLabel))}</small></td>
+      <td><small>${escapeHtml(aggLabelByKey(g.campaigns, 'run_status', runLabel))}</small></td>
+      <td><em style="color:#666;font-size:12px;">点行展开 ↓</em></td>
+      <td>${hasDraft ? `<button class="admin-button admin-button--primary" data-batch-start="${escapeHtml(g.code)}" style="font-size:12px;padding:4px 10px;white-space:nowrap;">全部启动</button>` : ''}</td>
+    `;
+    tbody.appendChild(headTr);
+
+    const batchBtn = headTr.querySelector('[data-batch-start]');
+    if (batchBtn) {
+      batchBtn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const gcode = batchBtn.dataset.batchStart;
+        const draftCount = g.campaigns.filter(c => ['draft', 'pending_review'].includes(c.review_status) && ['draft', 'paused'].includes(c.run_status)).length;
+        if (!confirm(`将批量审批并启动 ${draftCount} 个 sub-Campaign，确认？`)) return;
+        const operator = (window.prompt('确认人（仅做审计标记）', 'ui_user') || '').trim();
+        if (!operator) return;
+        batchBtn.disabled = true;
+        batchBtn.textContent = '启动中…';
+        try {
+          const resp = await fetch('/api/admin/cloud-orchestrator/campaigns/batch-start', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ group_code: gcode, operator }),
+          });
+          const d = await resp.json().catch(() => ({}));
+          if (!resp.ok || !d.ok) { alert('批量启动失败：' + (d.error || `HTTP ${resp.status}`)); return; }
+          alert(`批量启动完成 ✓\n成功：${d.started_count}\n跳过（已启动/拒绝）：${d.skipped_count}\n失败：${d.failed_count}`);
+          loadList();
+        } finally {
+          batchBtn.disabled = false;
+          batchBtn.textContent = '全部启动';
+        }
+      });
+    }
+
+    const childTrs = [];
+    for (const c of g.campaigns) {
+      const tr = appendCampaignRow(c, true);
+      tr.classList.add('cloud-camp-group-child');
+      tr.style.display = 'none';
+      childTrs.push(tr);
+    }
+
+    headTr.addEventListener('click', (ev) => {
+      if (ev.target.tagName === 'BUTTON') return;
+      const opening = childTrs[0]?.style.display === 'none';
+      childTrs.forEach(tr => { tr.style.display = opening ? '' : 'none'; });
+      const icon = headTr.querySelector('[data-toggle-icon]');
+      if (icon) icon.textContent = opening ? '▼' : '▶';
+    });
+  }
+
+  function appendCampaignRow(c, isChild) {
+    const tr = document.createElement('tr');
+    const namePrefix = isChild ? '<span style="opacity:0.45;">└─ </span>' : '';
+    tr.innerHTML = `
+      <td${isChild ? ' style="padding-left:24px;"' : ''}>
+        <div class="cloud-camp-name">${namePrefix}${escapeHtml(c.display_name) || '<em>未命名</em>'}</div>
+        <code class="cloud-camp-code">${escapeHtml(c.campaign_code).slice(0, 18)}${c.owner_userid ? ' · sender=' + escapeHtml(c.owner_userid) : ''}</code>
+      </td>
+      <td><div class="cloud-camp-intent-cell" title="${escapeHtml(c.intent)}">${escapeHtml(c.intent)}</div></td>
+      <td>${fmt(c.segment_count || 0)}</td>
+      <td>${fmt(c.member_count || 0)}</td>
+      <td><span class="cloud-orch-status-chip ${escapeHtml(c.review_status)}">${escapeHtml(reviewLabel(c.review_status))}</span></td>
+      <td><span class="cloud-orch-status-chip ${escapeHtml(c.run_status)}">${escapeHtml(runLabel(c.run_status))}</span></td>
+      <td>${escapeHtml(formatYMD(c.updated_at))}</td>
+      <td><button class="admin-button admin-button--ghost" data-code="${escapeHtml(c.campaign_code)}">查看</button></td>
+    `;
+    tr.querySelector('button').addEventListener('click', e => {
+      e.stopPropagation();
+      loadDetail(e.currentTarget.dataset.code);
+    });
+    tbody.appendChild(tr);
+    return tr;
   }
 
   async function loadDetail(code) {
@@ -345,7 +451,7 @@
     if (!data.ok) { alert('找不到 Campaign'); return; }
     const overview = data.campaign;
     const camp = overview.campaign;
-    detailSection.hidden = false;
+    detailDrawer.hidden = false;
     detailName.textContent = camp.display_name || camp.campaign_code;
     detailReview.className = 'cloud-orch-status-chip ' + escapeHtml(camp.review_status);
     detailReview.textContent = reviewLabel(camp.review_status);
@@ -576,7 +682,7 @@
       alert('删除失败：' + (data.error || `HTTP ${resp.status}`));
       return;
     }
-    detailSection.hidden = true;
+    detailDrawer.hidden = true;
     currentCode = '';
     loadList();
   });
@@ -681,6 +787,8 @@
   }
   function closeMembersDrawer() { drawer.hidden = true; }
   drawer.querySelectorAll('[data-close]').forEach(el => el.addEventListener('click', closeMembersDrawer));
+  function closeDetailDrawer() { detailDrawer.hidden = true; }
+  detailDrawer.querySelectorAll('[data-detail-close]').forEach(el => el.addEventListener('click', closeDetailDrawer));
   drawerStatus.addEventListener('change', loadMembers);
   async function loadMembers() {
     if (!drawerCampCode) return;

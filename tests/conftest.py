@@ -179,6 +179,10 @@ _TABLES_TO_TRUNCATE = [
     "class_term_tag_mapping",
     "user_ops_send_records",
     "user_ops_deferred_jobs",
+    # — 激活漏斗看板 (alembic 0010-0011)
+    "user_ops_hxc_send_config",
+    "user_ops_hxc_dashboard_snapshot",
+    "user_ops_hxc_dashboard_meta",
     # — message batches
     "message_batch_items",
     "message_batches",

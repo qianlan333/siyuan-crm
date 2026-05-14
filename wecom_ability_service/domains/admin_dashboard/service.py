@@ -12,6 +12,7 @@ ADMIN_NAV_ITEMS = (
     {"key": "automation_conversion", "label": "自动化运营", "endpoint": "api.admin_automation_conversion"},
     {"key": "cloud_orchestrator", "label": "AI 助手", "endpoint": "api.admin_cloud_orchestrator_workspace"},
     {"key": "customers", "label": "客户", "endpoint": "api.admin_console_customers"},
+    {"key": "user_ops_funnel", "label": "激活漏斗", "endpoint": "api.admin_hxc_dashboard_workspace"},
     {"key": "questionnaires", "label": "问卷", "endpoint": "api.admin_console_questionnaires"},
     {"key": "image_library", "label": "图片素材库", "endpoint": "api.admin_image_library_workspace"},
     {"key": "miniprogram_library", "label": "小程序素材库", "endpoint": "api.admin_miniprogram_library_workspace"},

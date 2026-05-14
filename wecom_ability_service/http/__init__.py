@@ -17,6 +17,7 @@ from .admin_config import register_routes as register_admin_config_routes
 from .admin_console import register_routes as register_admin_console_routes
 from .admin_dashboard import register_routes as register_admin_dashboard_routes
 from .admin_class_user import register_routes as register_admin_class_user_routes
+from .admin_hxc_dashboard import register_routes as register_admin_hxc_dashboard_routes
 from .admin_questionnaires import register_routes as register_admin_questionnaires_routes
 from .admin_user_ops import register_routes as register_admin_user_ops_routes
 from .automation_conversion import register_routes as register_automation_conversion_routes
@@ -135,6 +136,7 @@ HTTP_ROUTE_REGISTRARS = (
     ("admin_config", register_admin_config_routes),
     ("admin_dashboard", register_admin_dashboard_routes),
     ("admin_user_ops", register_admin_user_ops_routes),
+    ("admin_hxc_dashboard", register_admin_hxc_dashboard_routes),
     ("admin_class_user", register_admin_class_user_routes),
     ("admin_questionnaires", register_admin_questionnaires_routes),
     ("automation_conversion", register_automation_conversion_routes),

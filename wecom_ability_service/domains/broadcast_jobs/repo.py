@@ -197,6 +197,31 @@ def fetch_jobs_filtered(
     return [_row_to_dict(r) for r in rows]
 
 
+def fetch_job_by_source(
+    *,
+    source_type: str,
+    source_id: str,
+    source_table: str = "",
+    statuses: list[str] | None = None,
+) -> dict[str, Any] | None:
+    where = ["source_type = ?", "source_id = ?"]
+    params: list[Any] = [str(source_type or ""), str(source_id or "")]
+    if source_table:
+        where.append("source_table = ?")
+        params.append(str(source_table or ""))
+    if statuses:
+        placeholders = ", ".join("?" * len(statuses))
+        where.append(f"status IN ({placeholders})")
+        params.extend(statuses)
+    sql = (
+        f"SELECT {_BASE_COLUMNS} FROM broadcast_jobs "
+        f"WHERE {' AND '.join(where)} "
+        "ORDER BY id DESC LIMIT 1"
+    )
+    row = get_db().execute(sql, tuple(params)).fetchone()
+    return _row_to_dict(row) if row else None
+
+
 def claim_due_jobs(*, now: Any, limit: int) -> list[dict[str, Any]]:
     """原子地把到期的 queued 任务标 claimed 并返回。
 

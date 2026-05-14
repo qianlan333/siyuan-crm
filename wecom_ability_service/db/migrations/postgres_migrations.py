@@ -73,6 +73,15 @@ def _ensure_postgres_user_ops_page_tables(db) -> None:
     )
 
 
+def _ensure_postgres_miniprogram_library_thumb_image_id(db) -> None:
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS miniprogram_library
+        ADD COLUMN IF NOT EXISTS thumb_image_id BIGINT
+        """
+    )
+
+
 def _ensure_postgres_automation_agent_config_tables(db) -> None:
     db.execute(
         """
@@ -1065,6 +1074,7 @@ def _init_postgres(db) -> None:
     _ensure_postgres_questionnaire_external_push_tables(db)
     _ensure_postgres_questionnaire_scrm_apply_log_columns(db)
     _ensure_postgres_user_ops_page_tables(db)
+    _ensure_postgres_miniprogram_library_thumb_image_id(db)
     _ensure_postgres_automation_agent_config_tables(db)
     db.execute(
         """

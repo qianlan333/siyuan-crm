@@ -286,24 +286,24 @@
     return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
   function getJSON(url) {
-    return fetch(url, { credentials: 'same-origin' }).then(function (r) { return r.json(); });
+    return window.ImageUploadClient.requestJson(url);
   }
   function postJSON(url, body) {
-    return fetch(url, {
+    return window.ImageUploadClient.requestJson(url, {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
-    }).then(function (r) { return r.json(); });
+    });
   }
   function putJSON(url, body) {
-    return fetch(url, {
+    return window.ImageUploadClient.requestJson(url, {
       method: 'PUT', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body || {}),
-    }).then(function (r) { return r.json(); });
+    });
   }
   function deleteReq(url) {
-    return fetch(url, { method: 'DELETE', credentials: 'same-origin' }).then(function (r) { return r.json(); });
+    return window.ImageUploadClient.requestJson(url, { method: 'DELETE', credentials: 'same-origin' });
   }
 
   // ---------- 状态 ---------- //

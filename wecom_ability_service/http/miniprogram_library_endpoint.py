@@ -69,6 +69,9 @@ def admin_miniprogram_library_create() -> Response:
         return jsonify({"ok": True, "item": _serialize_for_api(item)})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive production envelope
+        logger.exception("miniprogram_library_create failed")
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 def admin_miniprogram_library_update(library_id: int) -> Response:
@@ -78,6 +81,9 @@ def admin_miniprogram_library_update(library_id: int) -> Response:
         return jsonify({"ok": True, "item": _serialize_for_api(item)})
     except ValueError as exc:
         return jsonify({"ok": False, "error": str(exc)}), 400
+    except Exception as exc:  # pragma: no cover - defensive production envelope
+        logger.exception("miniprogram_library_update failed library_id=%s", library_id)
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 def admin_miniprogram_library_delete(library_id: int) -> Response:

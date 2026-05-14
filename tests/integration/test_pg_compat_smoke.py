@@ -254,10 +254,15 @@ def test_pg_bug_192_200_206_scheduler_full_cycle_batch(app):
     )
     assert started["run_status"] == "active"
 
-    # 改 next_due_at 到过去（默认是当天 10:00，可能未来），让 process_due 立即扫到
+    # start_campaign 已同步一条 broadcast_jobs 排期；把 member/job 都拉到过去，
+    # 让 worker 立即消费，同时验证 run_due 不会抢 claim。
     cur.execute(
         "UPDATE campaign_members SET next_due_at = ? WHERE campaign_id = ?",
         ("2020-01-01 00:00:00+00:00", int(camp_id)),
+    )
+    cur.execute(
+        "UPDATE broadcast_jobs SET scheduled_for = ? WHERE source_type = 'campaign' AND status = 'queued'",
+        ("2020-01-01 00:00:00+00:00",),
     )
     db.commit()
 
@@ -280,7 +285,7 @@ def test_pg_bug_192_200_206_scheduler_full_cycle_batch(app):
         side_effect=_fake_dispatch,
     ):
         scan_result = scheduler.process_due_campaign_members(batch_size=10)
-        assert scan_result["batches_enqueued"] == 1, f"enqueue failed: {scan_result}"
+        assert scan_result["batches_enqueued"] == 0, f"run_due should not duplicate queued job: {scan_result}"
         worker_result = worker.run(batch_size=10)
 
     # 关键断言：3 个 member，1 次 dispatch，1 个 task 含 3 人
@@ -296,6 +301,337 @@ def test_pg_bug_192_200_206_scheduler_full_cycle_batch(app):
     for r in rows:
         assert r["status"] == "completed", f"member status not completed: {dict(r)}"
         assert int(r["current_step_index"]) == 0
+
+
+def test_propose_campaign_segment_sql_carries_external_contact_id(app):
+    """Segment SQL 自带 external_contact_id 时, propose_campaign 必须直接用, 不再走
+    automation_member.id 反查.
+
+    回归: 历史 service.py 硬编码 ``SELECT ext FROM automation_member WHERE id=?``,
+    导致用 user_ops_pool_current 等非 automation_member 表写 segment 时,
+    campaign_members.external_contact_id 被填空, 启动后 dispatch 直接 skip
+    no_external_userid (issue 2026-05-12 灰度记忆 campaign 实战暴露).
+    """
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+
+    db = get_db()
+    cur = db.cursor()
+    # 在 user_ops_pool_current 造 2 个真实客户 (sandbox 白名单允许)
+    # 注意: 不在 automation_member 表里 → 老逻辑会拿不到 ext_id
+    cur.execute(
+        """
+        INSERT INTO user_ops_pool_current
+            (id, mobile, external_userid, customer_name, owner_userid,
+             current_status, is_wecom_bound, activation_status,
+             class_term_no, class_term_label, source_type)
+        VALUES
+            (888001, '13800000001', 'wm-pc-001', 'A',  'Sender1',
+             'active_focus', true, 'activated', NULL, '', 'manual'),
+            (888002, '13800000002', 'wm-pc-002', 'B',  'Sender1',
+             'active_focus', true, 'activated', NULL, '', 'manual')
+        ON CONFLICT (id) DO UPDATE SET external_userid = excluded.external_userid
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO segments
+            (segment_code, display_name, source_type, sql_query, sql_params_json,
+             cached_headcount, status)
+        VALUES (?, ?, 'sql', ?, '{}', 0, 'active')
+        ON CONFLICT (segment_code) DO UPDATE SET status = 'active', sql_query = excluded.sql_query
+        """,
+        (
+            "seg-pool-current-pilot",
+            "test pool_current segment",
+            "SELECT id AS member_id, external_userid AS external_contact_id "
+            "FROM user_ops_pool_current WHERE id IN (888001, 888002)",
+        ),
+    )
+    db.commit()
+
+    overview = campaign_service.propose_campaign(
+        display_name="pool_current pilot",
+        intent="验证 segment SQL 自带 ext 时 propose 不丢",
+        segments=[{
+            "segment_code": "seg-pool-current-pilot",
+            "priority": 100,
+            "steps": [
+                {"step_index": 0, "day_offset": 0, "send_time": "10:00",
+                 "content_text": "hi", "stop_on_reply": True},
+            ],
+        }],
+        anchor_mode="campaign_start_date",
+    )
+    assert overview["allocation"]["allocated"] == 2
+
+    cur.execute(
+        "SELECT member_id, external_contact_id FROM campaign_members "
+        "WHERE campaign_id = ? ORDER BY member_id",
+        (int(overview["campaign"]["id"]),),
+    )
+    rows = [dict(r) for r in cur.fetchall()]
+    assert len(rows) == 2
+    # 关键: external_contact_id 必须从 SQL 输出直接取, 不能为空
+    assert rows[0]["member_id"] == 888001
+    assert rows[0]["external_contact_id"] == "wm-pc-001"
+    assert rows[1]["member_id"] == 888002
+    assert rows[1]["external_contact_id"] == "wm-pc-002"
+
+
+def test_campaign_dispatch_resolves_source_member_id_before_fk_touch_log(app):
+    """Campaign member_id may be a source-pool row id, not automation_member.id.
+
+    The dispatch path must resolve by external_contact_id before writing FK-backed
+    touch logs, otherwise the worker can fail after WeCom dispatch and leave members
+    stuck in running.
+    """
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import scheduler
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        INSERT INTO automation_member (id, external_contact_id, phone, current_audience_code, in_pool)
+        VALUES (990, 'wm-source-pool-001', '', 'operating', ?)
+        """,
+        (True,),
+    )
+    cur.execute(
+        """
+        INSERT INTO automation_frequency_budget
+            (budget_code, scope, scope_key, window_seconds, max_count, description, enabled)
+        VALUES ('test_campaign_resolve_member', 'global', '', 604800, 3, 'test', ?)
+        """,
+        (True,),
+    )
+    cur.execute(
+        """
+        INSERT INTO segments
+            (segment_code, display_name, source_type, sql_query, sql_params_json, cached_headcount, status)
+        VALUES ('seg-source-pool-id', 'source pool id', 'sql',
+                'SELECT id AS member_id, external_userid AS external_contact_id FROM user_ops_pool_current',
+                '{}', 0, 'active')
+        RETURNING id
+        """
+    )
+    seg_id = int(cur.fetchone()["id"])
+    cur.execute(
+        """
+        INSERT INTO campaigns (campaign_code, display_name, intent, anchor_mode, anchor_date,
+                               review_status, run_status, owner_userid, metadata_json)
+        VALUES ('camp-source-pool-id', 'source pool id campaign', '', 'campaign_start_date',
+                '2026-05-13', 'approved', 'active', 'ZhaoYanFang', '{}')
+        RETURNING id
+        """
+    )
+    camp_id = int(cur.fetchone()["id"])
+    cur.execute(
+        """
+        INSERT INTO campaign_segments (campaign_id, segment_id, segment_code, priority)
+        VALUES (?, ?, 'seg-source-pool-id', 100)
+        RETURNING id
+        """,
+        (camp_id, seg_id),
+    )
+    cs_id = int(cur.fetchone()["id"])
+    cur.execute(
+        """
+        INSERT INTO campaign_steps
+            (campaign_id, campaign_segment_id, step_index, day_offset, send_time,
+             timezone, content_text, stop_on_reply)
+        VALUES (?, ?, 0, 0, '10:00', 'Asia/Shanghai', 'step 0', ?)
+        RETURNING id
+        """,
+        (camp_id, cs_id, False),
+    )
+    step0_id = int(cur.fetchone()["id"])
+    cur.execute(
+        """
+        INSERT INTO campaign_steps
+            (campaign_id, campaign_segment_id, step_index, day_offset, send_time,
+             timezone, content_text, stop_on_reply)
+        VALUES (?, ?, 1, 1, '10:00', 'Asia/Shanghai', 'step 1', ?)
+        """,
+        (camp_id, cs_id, False),
+    )
+    cur.execute(
+        """
+        INSERT INTO campaign_members
+            (campaign_id, campaign_segment_id, segment_id, member_id, external_contact_id,
+             status, current_step_index, next_due_at, anchor_date, trace_id)
+        VALUES (?, ?, ?, 888001, 'wm-source-pool-001',
+                'running', -1, '2026-05-13 10:00:00+08', '2026-05-13', 'trace-source-pool')
+        RETURNING id
+        """,
+        (camp_id, cs_id, seg_id),
+    )
+    cm_id = int(cur.fetchone()["id"])
+    db.commit()
+
+    with patch(
+        "wecom_ability_service.domains.marketing_automation.service.dispatch_wecom_task",
+        return_value={"task_id": 9900},
+    ):
+        result = scheduler.run_campaign_batch(
+            batch_data={
+                "campaign": {
+                    "id": camp_id,
+                    "campaign_code": "camp-source-pool-id",
+                    "owner_userid": "ZhaoYanFang",
+                    "trace_id": "trace-source-pool",
+                },
+                "step": {"id": step0_id, "step_index": 0, "content_text": "step 0"},
+                "members": [{
+                    "cm_id": cm_id,
+                    "member_id": 888001,
+                    "external_contact_id": "wm-source-pool-001",
+                    "campaign_segment_id": cs_id,
+                    "trace_id": "trace-source-pool",
+                }],
+                "request_payload": {
+                    "external_userid": ["wm-source-pool-001"],
+                    "text": {"content": "step 0"},
+                },
+            }
+        )
+
+    assert result["ok"] is True
+    assert result["sent_count"] == 1
+    cur.execute(
+        "SELECT member_id, external_contact_id FROM automation_touch_delivery_log "
+        "WHERE external_contact_id = 'wm-source-pool-001'",
+    )
+    delivery = cur.fetchone()
+    assert delivery is not None
+    assert int(delivery["member_id"]) == 990
+    cur.execute(
+        "SELECT member_id FROM automation_frequency_consumption "
+        "WHERE external_contact_id = 'wm-source-pool-001'",
+    )
+    consumption = cur.fetchone()
+    assert consumption is not None
+    assert int(consumption["member_id"]) == 990
+    cur.execute("SELECT status, current_step_index FROM campaign_members WHERE id = ?", (cm_id,))
+    member = cur.fetchone()
+    assert member["status"] == "pending"
+    assert int(member["current_step_index"]) == 0
+
+
+def test_propose_campaign_group_code_round_trip(app):
+    """propose_campaign 传 group_code/group_label 后:
+    1. 落进 campaigns.metadata_json
+    2. list_campaigns 返回顶层 group_code/group_label, 让 admin 前端按 group 折叠
+
+    回归: 同一份名单按 owner_userid 拆 N 个 campaign 时, 用 group 把这 N 个
+    在 admin 列表合并成 1 张折叠卡 (2026-05-12 observation_invite 97 人拆 12 个
+    campaign 实战引入).
+    """
+    import json as _json
+
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        INSERT INTO user_ops_pool_current
+            (id, mobile, external_userid, customer_name, owner_userid,
+             current_status, is_wecom_bound, activation_status,
+             class_term_no, class_term_label, source_type)
+        VALUES
+            (999001, '13900000001', 'wm-grp-001', 'A', 'Sender1',
+             'active_focus', true, 'activated', NULL, '', 'manual'),
+            (999002, '13900000002', 'wm-grp-002', 'B', 'Sender2',
+             'active_focus', true, 'activated', NULL, '', 'manual')
+        ON CONFLICT (id) DO UPDATE SET external_userid = excluded.external_userid
+        """
+    )
+    cur.execute(
+        """
+        INSERT INTO segments
+            (segment_code, display_name, source_type, sql_query, sql_params_json,
+             cached_headcount, status)
+        VALUES (?, ?, 'sql', ?, '{}', 0, 'active'),
+               (?, ?, 'sql', ?, '{}', 0, 'active')
+        ON CONFLICT (segment_code) DO UPDATE SET status = 'active', sql_query = excluded.sql_query
+        """,
+        (
+            "seg-grp-sender1", "grp seg sender1",
+            "SELECT id AS member_id, external_userid AS external_contact_id "
+            "FROM user_ops_pool_current WHERE id = 999001",
+            "seg-grp-sender2", "grp seg sender2",
+            "SELECT id AS member_id, external_userid AS external_contact_id "
+            "FROM user_ops_pool_current WHERE id = 999002",
+        ),
+    )
+    db.commit()
+
+    overview_a = campaign_service.propose_campaign(
+        display_name="GRP test A · Sender1",
+        intent="集合卡测试 A",
+        owner_userid="Sender1",
+        group_code="grp_test_2026_05_12",
+        group_label="集合卡测试组",
+        segments=[{
+            "segment_code": "seg-grp-sender1", "priority": 100,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00",
+                       "content_text": "hi A", "stop_on_reply": True}],
+        }],
+    )
+    overview_b = campaign_service.propose_campaign(
+        display_name="GRP test B · Sender2",
+        intent="集合卡测试 B",
+        owner_userid="Sender2",
+        group_code="grp_test_2026_05_12",
+        group_label="集合卡测试组",
+        segments=[{
+            "segment_code": "seg-grp-sender2", "priority": 100,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00",
+                       "content_text": "hi B", "stop_on_reply": True}],
+        }],
+    )
+
+    # 1) metadata_json 落库正确
+    cur.execute(
+        "SELECT metadata_json FROM campaigns WHERE id IN (?, ?) ORDER BY id",
+        (int(overview_a["campaign"]["id"]), int(overview_b["campaign"]["id"])),
+    )
+    rows = cur.fetchall() or []
+    assert len(rows) == 2
+    for r in rows:
+        raw = r["metadata_json"]
+        meta = raw if isinstance(raw, dict) else _json.loads(raw or "{}")
+        assert meta.get("group_code") == "grp_test_2026_05_12"
+        assert meta.get("group_label") == "集合卡测试组"
+
+    # 2) list_campaigns 顶层暴露 group_code/group_label
+    campaigns = campaign_service.list_campaigns(limit=20)
+    grp_rows = [c for c in campaigns if c.get("group_code") == "grp_test_2026_05_12"]
+    assert len(grp_rows) == 2
+    for c in grp_rows:
+        assert c["group_label"] == "集合卡测试组"
+        assert c["owner_userid"] in ("Sender1", "Sender2")
+
+    # 3) 不传 group_code 的 campaign 不被错误归组 (空字符串)
+    overview_c = campaign_service.propose_campaign(
+        display_name="GRP test C · standalone",
+        intent="独立 campaign",
+        owner_userid="Sender1",
+        segments=[{
+            "segment_code": "seg-grp-sender1", "priority": 50,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00",
+                       "content_text": "hi C", "stop_on_reply": True}],
+        }],
+    )
+    campaigns2 = campaign_service.list_campaigns(limit=20)
+    standalone = next((c for c in campaigns2
+                       if c["campaign_code"] == overview_c["campaign"]["campaign_code"]), None)
+    assert standalone is not None
+    assert standalone["group_code"] == ""
+    assert standalone["group_label"] == ""
 
 
 def test_pg_bug_200_register_member_reply_clears_next_due(app):
@@ -422,6 +758,10 @@ def test_campaign_multi_step_not_blocked_by_own_daily_budget(app):
         "UPDATE campaign_members SET next_due_at = ? WHERE campaign_id = ?",
         ("2020-01-01 00:00:00+00:00", int(camp_id)),
     )
+    cur.execute(
+        "UPDATE broadcast_jobs SET scheduled_for = ? WHERE source_type = 'campaign' AND status = 'queued'",
+        ("2020-01-01 00:00:00+00:00",),
+    )
     db.commit()
 
     dispatched: list[dict[str, Any]] = []
@@ -435,7 +775,7 @@ def test_campaign_multi_step_not_blocked_by_own_daily_budget(app):
         side_effect=_fake_dispatch,
     ):
         r1 = scheduler.process_due_campaign_members(batch_size=10)
-        assert r1["batches_enqueued"] == 1, f"step 0 enqueue failed: {r1}"
+        assert r1["batches_enqueued"] == 0, f"run_due should not duplicate queued step 0: {r1}"
         worker.run(batch_size=10)
 
     # step 0 写了 consumption → daily budget 已扣 1 次
@@ -473,6 +813,234 @@ def test_campaign_multi_step_not_blocked_by_own_daily_budget(app):
     )
     row = cur.fetchone()
     assert row["status"] == "completed", f"member not completed: {dict(row)}"
+
+
+def test_campaign_scheduler_does_not_claim_member_when_open_job_exists(app):
+    """预排期 job 已存在时, run-due 不能先把 member 抢成 running。
+
+    否则 queue worker 到点后会因为 member 已不是 pending 而不发送, 形成生产上
+    看到的 "queued job 存在但不推送"。
+    """
+    import sys
+    from pathlib import Path
+
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+    from wecom_ability_service.domains.campaigns import scheduler
+    from wecom_ability_service.domains.cloud_orchestrator import approval_token
+
+    _insert_segment_with_known_member(app, segment_code="seg-open-job", member_id=960, external_id="ext-960")
+    overview = campaign_service.propose_campaign(
+        display_name="open job guard",
+        intent="预排期 job 已存在时避免 run-due 抢占",
+        segments=[{
+            "segment_code": "seg-open-job",
+            "priority": 100,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00", "content_text": "hello"}],
+        }],
+        anchor_mode="campaign_start_date",
+    )
+    camp_id = int(overview["campaign"]["id"])
+    token = approval_token.issue_token(
+        plan_id=overview["campaign"]["campaign_code"],
+        operator="alice",
+        scope="start_campaign",
+    )
+    campaign_service.start_campaign(
+        campaign_id=camp_id,
+        human_approver="alice",
+        approval_token_value=token["token"],
+    )
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        "UPDATE campaign_members SET next_due_at = ? WHERE campaign_id = ?",
+        ("2020-01-01 00:00:00+00:00", camp_id),
+    )
+    cur.execute(
+        "UPDATE broadcast_jobs SET scheduled_for = ? WHERE source_type = 'campaign' AND status = 'queued'",
+        ("2020-01-01 00:00:00+00:00",),
+    )
+    cur.execute(
+        """
+        SELECT cm.id AS cm_id, cm.member_id, cm.external_contact_id,
+               cm.campaign_segment_id, cm.trace_id, c.campaign_code, c.owner_userid
+        FROM campaign_members cm
+        JOIN campaigns c ON c.id = cm.campaign_id
+        WHERE cm.campaign_id = ?
+        """,
+        (camp_id,),
+    )
+    member_row = dict(cur.fetchone())
+    db.commit()
+
+    scan = scheduler.process_due_campaign_members(batch_size=10)
+    assert scan["batches_enqueued"] == 0
+    cur.execute("SELECT status FROM campaign_members WHERE id = ?", (int(member_row["cm_id"]),))
+    assert cur.fetchone()["status"] == "pending"
+
+    scripts_dir = Path(__file__).resolve().parent.parent.parent / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    import run_broadcast_queue_worker as worker
+
+    dispatched: list[dict[str, Any]] = []
+
+    def _fake_dispatch(task_type: str, fn_name: str, payload: dict) -> dict:
+        dispatched.append(payload)
+        return {"task_id": 960}
+
+    with patch(
+        "wecom_ability_service.domains.marketing_automation.service.dispatch_wecom_task",
+        side_effect=_fake_dispatch,
+    ):
+        worker_result = worker.run(batch_size=10)
+
+    assert worker_result["sent_ok"] == 1
+    assert dispatched and dispatched[0]["external_userid"] == ["ext-960"]
+    cur.execute("SELECT status, current_step_index FROM campaign_members WHERE id = ?", (int(member_row["cm_id"]),))
+    progressed = cur.fetchone()
+    assert progressed["status"] == "completed"
+    assert int(progressed["current_step_index"]) == 0
+
+
+def test_start_campaign_prequeues_first_step_at_step_timezone(app):
+    """start 时直接同步第一步排期, 并按 step.timezone 写入精确发送时间。"""
+    from zoneinfo import ZoneInfo
+
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+    from wecom_ability_service.domains.cloud_orchestrator import approval_token
+
+    _insert_segment_with_known_member(app, segment_code="seg-prequeue-tz", member_id=965, external_id="ext-965")
+    overview = campaign_service.propose_campaign(
+        display_name="prequeue timezone",
+        intent="启动即排期并保持本地发送时间",
+        segments=[{
+            "segment_code": "seg-prequeue-tz",
+            "priority": 100,
+            "steps": [{
+                "step_index": 0,
+                "day_offset": 0,
+                "send_time": "19:30",
+                "timezone": "Asia/Shanghai",
+                "content_text": "hello",
+            }],
+        }],
+        anchor_mode="campaign_start_date",
+        anchor_date="2026-05-12",
+    )
+    camp_id = int(overview["campaign"]["id"])
+    token = approval_token.issue_token(
+        plan_id=overview["campaign"]["campaign_code"],
+        operator="alice",
+        scope="start_campaign",
+    )
+    campaign_service.start_campaign(
+        campaign_id=camp_id,
+        human_approver="alice",
+        approval_token_value=token["token"],
+    )
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT source_id, scheduled_for, target_count
+        FROM broadcast_jobs
+        WHERE source_type = 'campaign'
+          AND source_table = 'campaign_members'
+          AND status = 'queued'
+          AND source_id LIKE ?
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (f"{camp_id}:%",),
+    )
+    job = cur.fetchone()
+    assert job is not None
+    assert str(job["source_id"]).count(":") == 2
+    assert int(job["target_count"]) == 1
+
+    raw = job["scheduled_for"]
+    if isinstance(raw, datetime):
+        scheduled = raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+    else:
+        text = str(raw).replace("Z", "+00:00")
+        scheduled = datetime.fromisoformat(text)
+        if scheduled.tzinfo is None:
+            scheduled = scheduled.replace(tzinfo=timezone.utc)
+    local_time = scheduled.astimezone(ZoneInfo("Asia/Shanghai"))
+    assert local_time.strftime("%Y-%m-%d %H:%M") == "2026-05-12 19:30"
+
+    cur.execute("SELECT status FROM campaign_members WHERE campaign_id = ?", (camp_id,))
+    assert cur.fetchone()["status"] == "pending"
+
+
+def test_start_campaign_rejects_active_external_conflict(app):
+    """同一个 external_userid 已有 active pending/running campaign 时, 新 campaign 不应启动。"""
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+    from wecom_ability_service.domains.cloud_orchestrator import approval_token
+
+    old_seg_id = _insert_segment_with_known_member(app, segment_code="seg-dupe-old", member_id=970, external_id="ext-dupe")
+    new_seg_id = _insert_segment_with_known_member(app, segment_code="seg-dupe-new", member_id=970, external_id="ext-dupe")
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        INSERT INTO campaigns (campaign_code, display_name, intent, anchor_mode, anchor_date,
+                               review_status, run_status, metadata_json)
+        VALUES ('camp-dupe-old', 'old active', '', 'campaign_start_date', '2026-05-12',
+                'approved', 'active', '{}')
+        RETURNING id
+        """
+    )
+    old_campaign_id = int(cur.fetchone()["id"])
+    cur.execute(
+        "INSERT INTO campaign_segments (campaign_id, segment_id, segment_code, priority) VALUES (?, ?, 'seg-dupe-old', 100) RETURNING id",
+        (old_campaign_id, old_seg_id),
+    )
+    old_campaign_segment_id = int(cur.fetchone()["id"])
+    cur.execute(
+        """
+        INSERT INTO campaign_members (campaign_id, campaign_segment_id, segment_id, member_id,
+                                      external_contact_id, status, current_step_index)
+        VALUES (?, ?, ?, 970, 'ext-dupe', 'pending', -1)
+        """,
+        (old_campaign_id, old_campaign_segment_id, old_seg_id),
+    )
+    db.commit()
+
+    overview = campaign_service.propose_campaign(
+        display_name="new duplicate",
+        intent="重复 external 应被拦截",
+        segments=[{
+            "segment_code": "seg-dupe-new",
+            "priority": 100,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00", "content_text": "hello"}],
+        }],
+        anchor_mode="campaign_start_date",
+    )
+    assert new_seg_id
+    camp_id = int(overview["campaign"]["id"])
+    token = approval_token.issue_token(
+        plan_id=overview["campaign"]["campaign_code"],
+        operator="alice",
+        scope="start_campaign",
+    )
+    try:
+        campaign_service.start_campaign(
+            campaign_id=camp_id,
+            human_approver="alice",
+            approval_token_value=token["token"],
+        )
+    except PermissionError as exc:
+        assert "already pending/running" in str(exc)
+    else:
+        raise AssertionError("start_campaign should reject active external conflict")
 
 
 # ----------------------------------------------------------------------------

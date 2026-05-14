@@ -31,7 +31,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from ...db import get_db, get_db_backend
 from ..segments.service import get_segment, increment_usage
-from ..segments.sql_sandbox import fetch_member_ids
+from ..segments.sql_sandbox import fetch_member_rows
 
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,55 @@ def _now_iso() -> str:
 
 def _new_campaign_code() -> str:
     return f"camp-{uuid.uuid4().hex[:12]}"
+
+
+def _find_active_member_conflicts(*, campaign_id: int, limit: int = 10) -> dict[str, Any]:
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT COUNT(*) AS conflict_count
+        FROM campaign_members cm
+        JOIN campaign_members other_cm
+          ON other_cm.external_contact_id = cm.external_contact_id
+         AND other_cm.campaign_id <> cm.campaign_id
+         AND other_cm.status IN ('pending', 'running')
+        JOIN campaigns other_c
+          ON other_c.id = other_cm.campaign_id
+         AND other_c.run_status = 'active'
+        WHERE cm.campaign_id = ?
+          AND cm.status = 'pending'
+          AND cm.external_contact_id <> ''
+        """,
+        (int(campaign_id),),
+    )
+    count_row = cur.fetchone()
+    total = int(count_row["conflict_count"] or 0) if count_row else 0
+    if not total:
+        return {"count": 0, "examples": []}
+    cur.execute(
+        """
+        SELECT cm.external_contact_id,
+               other_c.id AS campaign_id,
+               other_c.campaign_code,
+               other_c.display_name
+        FROM campaign_members cm
+        JOIN campaign_members other_cm
+          ON other_cm.external_contact_id = cm.external_contact_id
+         AND other_cm.campaign_id <> cm.campaign_id
+         AND other_cm.status IN ('pending', 'running')
+        JOIN campaigns other_c
+          ON other_c.id = other_cm.campaign_id
+         AND other_c.run_status = 'active'
+        WHERE cm.campaign_id = ?
+          AND cm.status = 'pending'
+          AND cm.external_contact_id <> ''
+        ORDER BY other_c.started_at DESC, other_c.id DESC, cm.id ASC
+        LIMIT ?
+        """,
+        (int(campaign_id), int(limit)),
+    )
+    return {"count": total, "examples": [dict(row) for row in (cur.fetchall() or [])]}
 
 
 def _compute_first_step_due_iso(
@@ -282,24 +331,29 @@ def allocate_campaign_members(
         except (TypeError, ValueError):
             params = {}
         try:
-            member_ids = fetch_member_ids(sql=str(s["sql_query"] or ""), params=params)
+            member_rows = fetch_member_rows(sql=str(s["sql_query"] or ""), params=params)
         except Exception as exc:  # pragma: no cover - defensive
             logger.warning("segment %s sql failed during allocation: %s", s["segment_code"], exc)
             continue
         bucket = per_segment.setdefault(cs_id, {"matched": 0, "allocated": 0, "skipped": 0})
-        bucket["matched"] += len(member_ids)
-        for mid in member_ids:
+        bucket["matched"] += len(member_rows)
+        for mr_in in member_rows:
+            mid = mr_in["member_id"]
+            sql_ext = mr_in.get("external_contact_id", "")
             if mid in seen_member_ids:
                 collision += 1
                 bucket["skipped"] += 1
                 continue
-            # 取 external_contact_id 兜底
-            cur.execute(
-                "SELECT external_contact_id FROM automation_member WHERE id = ?",
-                (int(mid),),
-            )
-            mr = cur.fetchone()
-            external = str(mr["external_contact_id"] or "") if mr else ""
+            # 优先用 segment SQL 自带的 external_contact_id (允许 user_ops_pool_current 等表
+            # 直接输出 ext_id), 没带才 fallback 到 automation_member.id 反查 (兼容老 segment).
+            external = sql_ext
+            if not external:
+                cur.execute(
+                    "SELECT external_contact_id FROM automation_member WHERE id = ?",
+                    (int(mid),),
+                )
+                mr = cur.fetchone()
+                external = str(mr["external_contact_id"] or "") if mr else ""
             try:
                 cur.execute(
                     """
@@ -370,6 +424,17 @@ def start_campaign(
         raise LookupError("campaign not found")
     if camp.get("run_status") in ("active", "paused", "finished"):
         return camp
+    conflicts = _find_active_member_conflicts(campaign_id=campaign_id)
+    if conflicts["count"]:
+        sample = ", ".join(
+            f"{item.get('external_contact_id')}->{item.get('campaign_code')}"
+            for item in conflicts["examples"][:5]
+        )
+        raise PermissionError(
+            f"campaign has {conflicts['count']} member(s) already pending/running "
+            f"in active campaigns; examples: {sample}; pause or finish the existing "
+            "campaign before starting this one"
+        )
     token_check = approval_token.consume_token(
         token=approval_token_value,
         plan_id=str(camp["campaign_code"]),
@@ -446,6 +511,12 @@ def start_campaign(
             (due_iso, int(mr["cm_id"])),
         )
     db.commit()
+    try:
+        from .scheduler import ensure_campaign_scheduled_jobs
+
+        ensure_campaign_scheduled_jobs(campaign_id=int(campaign_id))
+    except Exception as exc:  # pragma: no cover - scheduling fallback remains run-due
+        logger.warning("campaign %s schedule sync failed after start: %s", campaign_id, exc)
     logger.info("campaign %s started by %s", campaign_id, human_approver)
     return get_campaign(campaign_id=campaign_id) or {}
 
@@ -584,7 +655,7 @@ def list_campaigns(
     *,
     review_status: str = "",
     run_status: str = "",
-    limit: int = 50,
+    limit: int = 500,
 ) -> list[dict[str, Any]]:
     db = get_db()
     cur = db.cursor()
@@ -600,8 +671,9 @@ def list_campaigns(
     cur.execute(
         f"""
         SELECT c.id, c.campaign_code, c.display_name, c.intent, c.anchor_mode, c.anchor_date,
-               c.review_status, c.run_status, c.created_by_agent, c.started_at, c.finished_at,
-               c.created_at, c.updated_at,
+               c.review_status, c.run_status, c.created_by_agent,
+               c.owner_userid, c.started_at, c.finished_at,
+               c.created_at, c.updated_at, c.metadata_json,
                (SELECT COUNT(*) FROM campaign_segments cs WHERE cs.campaign_id = c.id) AS segment_count,
                (SELECT COUNT(*) FROM campaign_members cm WHERE cm.campaign_id = c.id) AS member_count
         FROM campaigns c WHERE {' AND '.join(where)}
@@ -609,7 +681,22 @@ def list_campaigns(
         """,
         tuple(args),
     )
-    return [dict(r) for r in (cur.fetchall() or [])]
+    rows: list[dict[str, Any]] = []
+    for r in (cur.fetchall() or []):
+        d = dict(r)
+        # 解 metadata_json 拿 group_code / group_label, 让前端按 group 折叠
+        raw_meta = d.get("metadata_json") or "{}"
+        if isinstance(raw_meta, dict):
+            meta = raw_meta
+        else:
+            try:
+                meta = json.loads(str(raw_meta) or "{}")
+            except (TypeError, ValueError):
+                meta = {}
+        d["group_code"] = str(meta.get("group_code") or "")
+        d["group_label"] = str(meta.get("group_label") or "")
+        rows.append(d)
+    return rows
 
 
 def update_campaign_step(
@@ -848,14 +935,25 @@ def assemble_campaign_overview(*, campaign_id: int) -> dict[str, Any]:
         cur.execute(
             """
             SELECT step_index, day_offset, send_time, content_text, stop_on_reply,
-                   skip_if_recently_touched_days
+                   skip_if_recently_touched_days, content_payload_json
             FROM campaign_steps
             WHERE campaign_segment_id = ?
             ORDER BY step_index ASC
             """,
             (cs_id,),
         )
-        steps = [dict(r) for r in (cur.fetchall() or [])]
+        steps = []
+        for r in (cur.fetchall() or []):
+            sd = dict(r)
+            raw = sd.get("content_payload_json")
+            if isinstance(raw, str):
+                try:
+                    sd["content_payload_json"] = json.loads(raw or "{}")
+                except (TypeError, ValueError):
+                    sd["content_payload_json"] = {}
+            elif raw is None:
+                sd["content_payload_json"] = {}
+            steps.append(sd)
         d = dict(row)
         d["steps"] = steps
         segments.append(d)
@@ -891,6 +989,9 @@ def propose_campaign(
     session_id: str = "",
     trace_id: str = "",
     auto_allocate: bool = True,
+    group_code: str = "",
+    group_label: str = "",
+    metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Agent 一次调用搞定整个 Campaign 草稿。
 
@@ -912,6 +1013,14 @@ def propose_campaign(
     """
     if not segments:
         raise ValueError("at least one segment is required")
+    # group_code / group_label 落进 metadata_json, 让 admin list 接口按 group
+    # 折叠展示多 campaign (典型场景: 同一份名单按 owner_userid 拆 N 个 campaign,
+    # 业务上仍是 1 个推送计划, 见技能 md §3.5 拆 Campaign 模式)
+    merged_metadata: dict[str, Any] = dict(metadata or {})
+    if group_code:
+        merged_metadata["group_code"] = str(group_code)
+    if group_label:
+        merged_metadata["group_label"] = str(group_label)
     camp = create_campaign_draft(
         display_name=display_name,
         intent=intent,
@@ -921,6 +1030,7 @@ def propose_campaign(
         operator=operator,
         session_id=session_id,
         trace_id=trace_id,
+        metadata=merged_metadata or None,
     )
     camp_id = int(camp["id"])
     for seg_spec in segments:

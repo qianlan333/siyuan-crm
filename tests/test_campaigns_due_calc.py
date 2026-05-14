@@ -19,6 +19,9 @@ from datetime import datetime, timedelta, timezone
 from wecom_ability_service.domains.campaigns.service import (
     _compute_first_step_due_iso,
 )
+from wecom_ability_service.domains.campaigns.scheduler import (
+    _due_at_for_step,
+)
 
 
 _TZ_SUFFIX_PATTERN = re.compile(r"(?:Z|[+-]\d{2}:\d{2})$")
@@ -106,6 +109,28 @@ def test_first_step_due_invalid_send_time_uses_default():
         step_timezone="Asia/Shanghai",
     )
     assert _TZ_SUFFIX_PATTERN.search(iso)
+
+
+def test_due_at_for_step_includes_tz_suffix():
+    """_due_at_for_step 必须输出 tz-aware ISO，防止 PG 二次套时区偏移 8 小时。"""
+    iso = _due_at_for_step(anchor_date="2026-05-12", day_offset=0, send_time="19:00")
+    assert _TZ_SUFFIX_PATTERN.search(iso), f"missing tz suffix: {iso!r}"
+
+
+def test_due_at_for_step_19_00_asia_shanghai():
+    """anchor 5/12 + D+0 + 19:00 → 北京时间 19:00（UTC 11:00）。"""
+    iso = _due_at_for_step(anchor_date="2026-05-12", day_offset=0, send_time="19:00")
+    parsed = datetime.fromisoformat(iso)
+    assert parsed.utcoffset() == timedelta(hours=8)
+    assert parsed.astimezone(timezone.utc) == datetime(2026, 5, 12, 11, 0, tzinfo=timezone.utc)
+
+
+def test_due_at_for_step_day_offset():
+    """day_offset=1 → 日期推一天。"""
+    iso = _due_at_for_step(anchor_date="2026-05-12", day_offset=1, send_time="19:00")
+    parsed = datetime.fromisoformat(iso)
+    assert parsed.day == 13
+    assert parsed.hour == 19
 
 
 def test_scheduler_retry_at_is_tz_aware():

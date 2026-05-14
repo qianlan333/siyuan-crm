@@ -524,6 +524,18 @@ _TOOL_SPECS: list[dict[str, Any]] = [
                     },
                 },
                 "auto_allocate": {"type": "boolean"},
+                "group_code": {
+                    "type": "string",
+                    "description": "可选: 同一份名单按 owner_userid 拆多个 campaign 时, 给所有兄弟 campaign 传同一个 group_code, admin 列表会按 group 折叠成 1 张大卡片. 见技能 md §3.5.",
+                },
+                "group_label": {
+                    "type": "string",
+                    "description": "可选: group 卡片显示的中文名 (如 '观察邀请 · 2026-05-12'). 通常给同 group 第 1 个 campaign 传就够, 后续会用第一次见到的值.",
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "可选: 任意 KV 落到 campaigns.metadata_json, group_code/group_label 会自动合并进来.",
+                },
             },
             "required": ["display_name", "intent", "segments"],
         },
@@ -925,6 +937,9 @@ def dispatch_cloud_tool(
                 session_id=session_id,
                 trace_id=trace_id,
                 auto_allocate=bool(args.get("auto_allocate", True)),
+                group_code=str(args.get("group_code") or ""),
+                group_label=str(args.get("group_label") or ""),
+                metadata=dict(args.get("metadata") or {}),
             )
             return ctx["result"]
 

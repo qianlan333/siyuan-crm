@@ -124,7 +124,7 @@ def cloud_orchestrator_reject_plan(plan_id: str) -> Response:
 def cloud_orchestrator_audit() -> Response:
     session_id = (request.args.get("session_id") or "").strip()
     trace_id = (request.args.get("trace_id") or "").strip()
-    limit = int(request.args.get("limit") or 50)
+    limit = int(request.args.get("limit") or 500)
     rows = audit_module.list_recent_audit(
         session_id=session_id,
         trace_id=trace_id,
@@ -272,7 +272,7 @@ def cloud_orchestrator_preview_segment(segment_code: str) -> Response:
 def cloud_orchestrator_list_campaigns() -> Response:
     review_status = (request.args.get("review_status") or "").strip()
     run_status = (request.args.get("run_status") or "").strip()
-    limit = int(request.args.get("limit") or 50)
+    limit = int(request.args.get("limit") or 500)
     rows = campaign_service.list_campaigns(
         review_status=review_status,
         run_status=run_status,
@@ -456,6 +456,51 @@ def cloud_orchestrator_list_campaign_members(campaign_code: str) -> Response:
     return jsonify({"ok": True, **result})
 
 
+def cloud_orchestrator_batch_start_campaigns() -> Response:
+    """按 group_code 批量审批+启动同组所有 draft campaign。"""
+    body = request.get_json(silent=True) or {}
+    group_code = str(body.get("group_code") or "").strip()
+    operator = str(body.get("operator") or "").strip()
+    if not group_code or not operator:
+        return jsonify({"ok": False, "error": "group_code and operator are required"}), 400
+
+    all_camps = campaign_service.list_campaigns(limit=500)
+    group_camps = [c for c in all_camps if c.get("group_code") == group_code]
+    if not group_camps:
+        return jsonify({"ok": False, "error": "no campaigns found for group_code"}), 404
+
+    started, skipped, failed = [], [], []
+    for camp in group_camps:
+        code = camp["campaign_code"]
+        if camp.get("run_status") not in ("draft", "paused") or camp.get("review_status") not in ("draft", "pending_review"):
+            skipped.append(code)
+            continue
+        try:
+            tok = approval_token_module.issue_token(
+                plan_id=code, operator=operator, ttl_seconds=300,
+                scope="start_campaign",
+                metadata={"display_name": camp.get("display_name", "")[:120]},
+            )
+            campaign_service.start_campaign(
+                campaign_id=int(camp["id"]),
+                human_approver=operator,
+                approval_token_value=tok.get("token", ""),
+            )
+            started.append(code)
+        except Exception as exc:
+            failed.append({"code": code, "error": str(exc)})
+
+    return jsonify({
+        "ok": True,
+        "started_count": len(started),
+        "skipped_count": len(skipped),
+        "failed_count": len(failed),
+        "started": started,
+        "skipped": skipped,
+        "failed": failed,
+    })
+
+
 def cloud_orchestrator_reject_campaign(campaign_code: str) -> Response:
     body = request.get_json(silent=True) or {}
     camp = campaign_service.get_campaign(campaign_code=campaign_code)
@@ -621,6 +666,10 @@ def register_routes(bp):
         methods=["GET"],
     )(cloud_orchestrator_preview_segment)
     # ---- Campaigns ----
+    bp.route(
+        "/api/admin/cloud-orchestrator/campaigns/batch-start",
+        methods=["POST"],
+    )(cloud_orchestrator_batch_start_campaigns)
     bp.route(
         "/api/admin/cloud-orchestrator/campaigns",
         methods=["GET"],

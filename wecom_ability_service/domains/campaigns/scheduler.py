@@ -1,12 +1,13 @@
-"""Campaign 调度引擎 — 把 due 的 campaign_member 推一步。
+"""Campaign 调度引擎 — 把 due 的 campaign_member 同步到 broadcast_jobs。
 
 每个 ``campaign_member`` 是一条独立的旅程。Cron 调用 ``process_due_campaign_members``
-扫所有 ``status=pending`` 且 ``next_due_at <= now`` 的成员，对每个成员：
+扫所有 ``status=pending`` 且 ``next_due_at <= now`` 的成员，对没有队列任务的成员：
 
 1. claim — 改 status='running'（乐观锁防并发重复处理）
-2. 取下一步 step → 拼内容 → 走频次预算 → 调发送管道
-3. 写 ``automation_touch_delivery_log``（继承 trace_id）
-4. 推进 ``current_step_index`` → 算下一步 ``next_due_at`` 或标记完成
+2. 取下一步 step → 拼内容 → 走频次预算 → 写入 ``broadcast_jobs``
+
+已有队列任务时，由 broadcast queue worker 到点 claim、发送、写
+``automation_touch_delivery_log`` 并推进 ``current_step_index``。
 
 回复处理：``register_member_reply`` 在 reply_monitor 收到 inbound 时被调，
 对应 campaign_member 走 ``stop_on_reply`` 逻辑。
@@ -17,11 +18,13 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from ...db import get_db, get_db_backend
 
 
 logger = logging.getLogger(__name__)
+_OPEN_JOB_STATUSES = ["waiting_approval", "queued", "claimed"]
 
 
 def _now_iso() -> str:
@@ -40,17 +43,29 @@ def _empty_ts() -> None:
     return None
 
 
-def _due_at_for_step(*, anchor_date: str, day_offset: int, send_time: str) -> str:
+def _due_at_for_step(
+    *,
+    anchor_date: str,
+    day_offset: int,
+    send_time: str,
+    step_timezone: str = "Asia/Shanghai",
+) -> str:
+    """算 step 的 due ISO — 必须输出 tz-aware，防止 PG 二次套时区。"""
+    try:
+        tzinfo = ZoneInfo(step_timezone or "Asia/Shanghai")
+    except Exception:
+        tzinfo = ZoneInfo("Asia/Shanghai")
     try:
         base = datetime.fromisoformat((anchor_date or "")[:10])
     except ValueError:
-        base = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+        base = datetime.now(tzinfo).replace(hour=0, minute=0, second=0, microsecond=0)
     try:
         h, m = (send_time or "09:00").split(":")[:2]
         base = base.replace(hour=int(h), minute=int(m))
     except ValueError:
         pass
-    return (base + timedelta(days=int(day_offset))).isoformat()
+    base = base + timedelta(days=int(day_offset))
+    return base.replace(tzinfo=tzinfo).isoformat()
 
 
 def _has_inbound_since(*, external_userid: str, since_iso: str) -> bool:
@@ -79,6 +94,80 @@ def _has_inbound_since(*, external_userid: str, since_iso: str) -> bool:
     return cur.fetchone() is not None
 
 
+def _campaign_job_source_id(*, campaign_id: int, campaign_segment_id: int, step_index: int) -> str:
+    return f"{int(campaign_id)}:{int(campaign_segment_id)}:{int(step_index)}"
+
+
+def _legacy_campaign_job_source_id(*, campaign_id: int, step_index: int) -> str:
+    return f"{int(campaign_id)}:{int(step_index)}"
+
+
+def _campaign_job_source_ids(*, campaign_id: int, campaign_segment_id: int, step_index: int) -> tuple[str, str]:
+    return (
+        _campaign_job_source_id(
+            campaign_id=campaign_id,
+            campaign_segment_id=campaign_segment_id,
+            step_index=step_index,
+        ),
+        _legacy_campaign_job_source_id(campaign_id=campaign_id, step_index=step_index),
+    )
+
+
+def _open_campaign_job_exists(*, queue_repo: Any, source_ids: tuple[str, ...]) -> bool:
+    return any(
+        queue_repo.fetch_job_by_source(
+            source_type="campaign",
+            source_table="campaign_members",
+            source_id=str(source_id or ""),
+            statuses=_OPEN_JOB_STATUSES,
+        )
+        for source_id in source_ids
+    )
+
+
+def _resolve_automation_member_id(
+    *,
+    candidate_member_id: int | None,
+    external_contact_id: str,
+) -> int | None:
+    """Return a real ``automation_member.id`` for campaign-side member data.
+
+    Campaign segments may come from non-automation_member pools where
+    ``member_id`` is only the source table row id. FK-backed touch tables must
+    never use that id directly.
+    """
+    candidate = int(candidate_member_id or 0)
+    external = str(external_contact_id or "").strip()
+    db = get_db()
+    cur = db.cursor()
+    try:
+        if candidate > 0:
+            cur.execute("SELECT id FROM automation_member WHERE id = ? LIMIT 1", (candidate,))
+            row = cur.fetchone()
+            if row:
+                return int(row["id"])
+        if external:
+            cur.execute(
+                "SELECT id FROM automation_member WHERE external_contact_id = ? ORDER BY id DESC LIMIT 1",
+                (external,),
+            )
+            row = cur.fetchone()
+            if row:
+                return int(row["id"])
+    except Exception as exc:  # pragma: no cover - defensive against partial schemas
+        logger.warning(
+            "resolve automation member failed (candidate=%s external=%s): %s",
+            candidate,
+            external,
+            exc,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
+    return None
+
+
 def _mark_member_replied_inline(*, member_row_id: int) -> None:
     """同步路径：发前现查命中时，立刻把 member 标 replied。reply_monitor 异步路径也会做这件事，互为兜底。"""
     db = get_db()
@@ -95,6 +184,40 @@ def _mark_member_replied_inline(*, member_row_id: int) -> None:
         (_empty_ts(), _now_iso(), int(member_row_id)),
     )
     db.commit()
+
+
+def _datetime_from_db(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            dt = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _load_pending_member_context(*, member_row_id: int) -> dict[str, Any] | None:
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        """
+        SELECT id, status, member_id, external_contact_id, next_due_at,
+               last_step_sent_at, trace_id, campaign_segment_id
+        FROM campaign_members
+        WHERE id = ?
+        """,
+        (int(member_row_id),),
+    )
+    row = cur.fetchone()
+    return dict(row) if row else None
 
 
 def _claim_due_member(*, member_row_id: int) -> bool:
@@ -127,7 +250,7 @@ def _next_step(
     cur.execute(
         """
         SELECT id, step_index, day_offset, send_time, content_text,
-               content_payload_json, stop_on_reply, skip_if_recently_touched_days
+               timezone, content_payload_json, stop_on_reply, skip_if_recently_touched_days
         FROM campaign_steps
         WHERE campaign_segment_id = ? AND step_index > ?
         ORDER BY step_index ASC LIMIT 1
@@ -262,11 +385,69 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
     # 预排期的 job 没有 request_payload，执行时现场 resolve + claim
     is_pre_scheduled = not request_payload
     if is_pre_scheduled:
-        # claim 每个 member 防止 cron 同时处理
+        from ..marketing_automation import frequency_budget_service
+
+        now = datetime.now(timezone.utc)
+        campaign_id = int(campaign.get("id") or 0)
+        exclude_step_ids = _all_step_ids_for_campaign(campaign_id) if campaign_id else []
+        # 到点执行时重新做 per-member 判定；预排期只解决"何时发送"，不提前消耗预算。
         eligible = []
         for m in members:
-            if _claim_due_member(member_row_id=int(m["cm_id"])):
-                eligible.append(m)
+            cm_id = int(m["cm_id"])
+            context = _load_pending_member_context(member_row_id=cm_id)
+            if not context or str(context.get("status") or "") != "pending":
+                continue
+            due_at = _datetime_from_db(context.get("next_due_at"))
+            if due_at and due_at > now:
+                continue
+            if not _claim_due_member(member_row_id=cm_id):
+                continue
+            external = str(context.get("external_contact_id") or m.get("external_contact_id") or "")
+            last_sent_dt = _datetime_from_db(context.get("last_step_sent_at"))
+            if last_sent_dt and external and _has_inbound_since(
+                external_userid=external,
+                since_iso=last_sent_dt.isoformat(),
+            ):
+                _mark_member_replied_inline(member_row_id=cm_id)
+                continue
+            if not external:
+                db = get_db()
+                db.execute(
+                    "UPDATE campaign_members SET status = 'failed', last_error_text = ?, updated_at = ? WHERE id = ?",
+                    ("missing_external_contact_id", _now_iso(), cm_id),
+                )
+                db.commit()
+                continue
+            automation_member_id = _resolve_automation_member_id(
+                candidate_member_id=int(context.get("member_id") or 0) or None,
+                external_contact_id=external,
+            )
+            verdict = frequency_budget_service.check_member_budget(
+                member_id=automation_member_id,
+                external_contact_id=external,
+                channels=("wecom_private", "ai_initiated"),
+                program_codes=("campaign",),
+                exclude_source_kind="campaign_step",
+                exclude_source_ids=exclude_step_ids,
+            )
+            if not verdict.allowed:
+                retry_at = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+                db = get_db()
+                db.execute(
+                    "UPDATE campaign_members SET status = 'pending', next_due_at = ?, "
+                    "last_error_text = ?, updated_at = ? WHERE id = ?",
+                    (retry_at, str(verdict.skip_reason or "")[:300], _now_iso(), cm_id),
+                )
+                db.commit()
+                continue
+            member_payload = dict(m)
+            member_payload.update({
+                "member_id": int(context.get("member_id") or 0),
+                "external_contact_id": external,
+                "trace_id": str(context.get("trace_id") or m.get("trace_id") or ""),
+                "campaign_segment_id": int(context.get("campaign_segment_id") or m.get("campaign_segment_id") or 0),
+            })
+            eligible.append(member_payload)
         if not eligible:
             return {"ok": True, "sent_count": 0, "failed_count": 0, "status": "all_members_already_claimed"}
         members = eligible
@@ -355,15 +536,25 @@ def _pre_enqueue_next_step(
         anchor_date=str(row["anchor_date"] or ""),
         day_offset=int(next_step["day_offset"] or 0),
         send_time=str(next_step["send_time"] or "09:00"),
+        step_timezone=str(next_step.get("timezone") or "Asia/Shanghai"),
     )
     externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
     if not externals:
         return
     from ..broadcast_jobs import service as queue_service
+    from ..broadcast_jobs import repo as queue_repo
+
+    source_ids = _campaign_job_source_ids(
+        campaign_id=int(campaign.get("id") or 0),
+        campaign_segment_id=campaign_segment_id,
+        step_index=int(next_step.get("step_index") or 0),
+    )
+    if _open_campaign_job_exists(queue_repo=queue_repo, source_ids=source_ids):
+        return
 
     queue_service.enqueue_job(
         source_type="campaign",
-        source_id=f"{campaign.get('id')}:{next_step.get('step_index', 0)}",
+        source_id=source_ids[0],
         source_table="campaign_members",
         scheduled_for=next_due,
         target_external_userids=externals,
@@ -397,42 +588,58 @@ def _record_member_after_dispatch(
     task_id = int(send_result.get("task_id") or 0)
     external = str(member.get("external_contact_id") or "")
     member_id = int(member.get("member_id") or 0)
+    automation_member_id = _resolve_automation_member_id(
+        candidate_member_id=member_id or None,
+        external_contact_id=external,
+    )
     trace_id = str(member.get("trace_id") or campaign.get("trace_id") or "")
 
     db = get_db()
     cur = db.cursor()
-    cur.execute(
-        """
-        INSERT INTO automation_touch_delivery_log
-            (program_code, touch_surface, rule_key, member_id,
-             external_contact_id, status, detail, metadata_json, trace_id, sent_at)
-        VALUES (?, 'campaign_step', ?, ?, ?, 'sent', ?, ?, ?, ?)
-        ON CONFLICT DO NOTHING
-        """,
-        (
-            f"campaign:{campaign.get('campaign_code')}",
-            f"step:{step.get('step_index')}",
-            int(member_id) if member_id else None,
-            external,
-            f"campaign_step task_id={task_id}",
-            json.dumps(
-                {
-                    "campaign_id": campaign.get("id"),
-                    "campaign_segment_id": member.get("campaign_segment_id"),
-                    "step_index": step.get("step_index"),
-                    "wecom_task_id": task_id,
-                    "batch_recipient_count": send_result.get("recipient_count") or 1,
-                },
-                ensure_ascii=False,
+    try:
+        cur.execute(
+            """
+            INSERT INTO automation_touch_delivery_log
+                (program_code, touch_surface, rule_key, member_id,
+                 external_contact_id, status, detail, metadata_json, trace_id, sent_at)
+            VALUES (?, 'campaign_step', ?, ?, ?, 'sent', ?, ?, ?, ?)
+            ON CONFLICT DO NOTHING
+            """,
+            (
+                f"campaign:{campaign.get('campaign_code')}",
+                f"step:{step.get('step_index')}",
+                automation_member_id,
+                external,
+                f"campaign_step task_id={task_id}",
+                json.dumps(
+                    {
+                        "campaign_id": campaign.get("id"),
+                        "campaign_segment_id": member.get("campaign_segment_id"),
+                        "step_index": step.get("step_index"),
+                        "wecom_task_id": task_id,
+                        "batch_recipient_count": send_result.get("recipient_count") or 1,
+                    },
+                    ensure_ascii=False,
+                ),
+                trace_id,
+                _now_iso(),
             ),
-            trace_id,
-            _now_iso(),
-        ),
-    )
-    db.commit()
+        )
+        db.commit()
+    except Exception as exc:
+        logger.warning(
+            "delivery_log insert failed (campaign_member_id=%s automation_member_id=%s): %s",
+            member_id,
+            automation_member_id,
+            exc,
+        )
+        try:
+            db.rollback()
+        except Exception:
+            pass
     try:
         frequency_budget_service.record_consumption(
-            member_id=member_id or None,
+            member_id=automation_member_id,
             external_contact_id=external,
             channels=("wecom_private", "ai_initiated"),
             program_codes=("campaign",),
@@ -503,6 +710,7 @@ def progress_member_after_send(
             anchor_date=str(row["anchor_date"] or ""),
             day_offset=int(next_step["day_offset"] or 0),
             send_time=str(next_step["send_time"] or "09:00"),
+            step_timezone=str(next_step.get("timezone") or "Asia/Shanghai"),
         )
         cur.execute(
             """
@@ -530,17 +738,19 @@ def progress_member_after_send(
 
 
 def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
-    """Cron 入口：扫一批 due 的 member、按 (segment, step) 聚合后批量推送。
+    """Cron 入口：扫一批 due 的 member、按 (segment, step) 聚合后入 broadcast_jobs。
 
     两阶段：
     1. **per-member 决策** — claim 乐观锁、stop_on_reply 同步检查、频次预算检查；
        通过的 member 加入分组 buffer ``(campaign_segment_id, step_index) → [members]``
-    2. **per-group 批量 dispatch** — 每组**一次** ``dispatch_wecom_task``，企微侧
+    2. **per-group 批量入队** — worker 每组**一次** ``dispatch_wecom_task``，企微侧
        产生 1 个含 N 个客户的群发任务。运营点 1 次确认 = N 个客户都收到。
 
     之前每 member 一个 dispatch 让运营要点 N 次确认（用户实测：64 人 = 64 个待确认任务）。
     """
     from ..marketing_automation import frequency_budget_service
+    from ..broadcast_jobs import service as queue_service
+    from ..broadcast_jobs import repo as queue_repo
 
     db = get_db()
     cur = db.cursor()
@@ -573,14 +783,14 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
 
     for r in due:
         cm_id = int(r["cm_id"])
-        if not _claim_due_member(member_row_id=cm_id):
-            continue
         # 取下一个待发的 step（current_step_index 之后的第一个）
         step = _next_step(
             campaign_segment_id=int(r["campaign_segment_id"]),
             after_step_index=int(r["current_step_index"]) if r["current_step_index"] is not None else -1,
         )
         if not step:
+            if not _claim_due_member(member_row_id=cm_id):
+                continue
             cur.execute(
                 "UPDATE campaign_members SET status = 'completed', next_due_at = ?, updated_at = ? "
                 "WHERE id = ?",
@@ -588,6 +798,18 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
             )
             db.commit()
             completed_no_step += 1
+            continue
+        source_ids = _campaign_job_source_ids(
+            campaign_id=int(r["campaign_id"]),
+            campaign_segment_id=int(r["campaign_segment_id"]),
+            step_index=int(step.get("step_index") or 0),
+        )
+        # 若已经有预排期/已领取的 broadcast_job，让 queue worker 负责 claim member。
+        # 这里不能先把 member 改 running，否则 worker 到点后会看到 "already claimed"
+        # 而跳过真发，形成“不推送”的卡死状态。
+        if _open_campaign_job_exists(queue_repo=queue_repo, source_ids=source_ids):
+            continue
+        if not _claim_due_member(member_row_id=cm_id):
             continue
         # 同步路径：第二条及之后的 step 发送前，先现查会话存档看用户有没有回复。命中
         # 直接停，不再发，也不走频次预算扣减。第一条 step 不查（last_step_sent_at 为空）。
@@ -610,10 +832,14 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
         # 同 campaign 续推排除：同一 campaign 先前 step 的消耗不计入 daily 限额
         campaign_id = int(r["campaign_id"])
         member_id = int(r["member_id"] or 0)
+        automation_member_id = _resolve_automation_member_id(
+            candidate_member_id=member_id or None,
+            external_contact_id=external,
+        )
         if campaign_id not in _step_ids_cache:
             _step_ids_cache[campaign_id] = _all_step_ids_for_campaign(campaign_id)
         verdict = frequency_budget_service.check_member_budget(
-            member_id=member_id,
+            member_id=automation_member_id,
             external_contact_id=external,
             channels=("wecom_private", "ai_initiated"),
             program_codes=("campaign",),
@@ -655,9 +881,6 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
         groups[key]["members"].append(member_dict)
 
     # 阶段 2：per-group enqueue 到 broadcast_jobs
-    from ..broadcast_jobs import service as queue_service
-    from ..broadcast_jobs import repo as queue_repo
-
     batches_enqueued = 0
     for key, group in groups.items():
         members = group["members"]
@@ -666,17 +889,12 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
             continue
         campaign = group["campaign"]
         step = group["step"]
-        source_id = f"{campaign['id']}:{step.get('step_index', 0)}"
-        # 去重：如果预排期的 job 已存在（queued/claimed），跳过
-        existing = queue_repo.fetch_jobs_filtered(
-            statuses=["queued", "claimed"],
-            source_types=["campaign"],
-            limit=1,
+        source_ids = _campaign_job_source_ids(
+            campaign_id=int(campaign["id"]),
+            campaign_segment_id=int(key[0]),
+            step_index=int(step.get("step_index") or 0),
         )
-        already_scheduled = any(
-            str(j.get("source_id") or "") == source_id for j in existing
-        )
-        if already_scheduled:
+        if _open_campaign_job_exists(queue_repo=queue_repo, source_ids=source_ids):
             continue
         resolved = _resolve_step_payload(campaign=campaign, step=step)
         if resolved.get("error"):
@@ -691,7 +909,7 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
         request_payload["external_userid"] = externals
         queue_service.enqueue_job(
             source_type="campaign",
-            source_id=source_id,
+            source_id=source_ids[0],
             source_table="campaign_members",
             scheduled_for=datetime.now(timezone.utc),
             target_external_userids=externals,
@@ -708,8 +926,8 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
         )
         batches_enqueued += 1
 
-    # 阶段 3：为尚未入队的未来 step 预排期（让队列页能看到排期）
-    future_enqueued = _pre_enqueue_future_campaign_steps(queue_service=queue_service, queue_repo=queue_repo)
+    # 阶段 3：同步尚未入队的 pending step（让队列页能看到准确排期）
+    future_enqueued = ensure_campaign_scheduled_jobs()
 
     return {
         "processed": len(due),
@@ -722,14 +940,26 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
     }
 
 
-def _pre_enqueue_future_campaign_steps(*, queue_service: Any, queue_repo: Any) -> int:
-    """扫描所有 pending + 有 next_due_at 的成员，按 (campaign, step) 分组后预排期。
+def _pre_enqueue_future_campaign_steps(
+    *,
+    queue_service: Any,
+    queue_repo: Any,
+    campaign_id: int | None = None,
+    limit: int = 500,
+) -> int:
+    """扫描所有 pending + 有 next_due_at 的成员，按 campaign segment step 分组排期。
 
     只排"尚未在 broadcast_jobs 里的"组合，避免重复。
     """
     db = get_db()
     cur = db.cursor()
     not_empty_clause = "cm.next_due_at IS NOT NULL" if get_db_backend() == "postgres" else "cm.next_due_at <> ''"
+    where_extra = ""
+    args: list[Any] = []
+    if campaign_id is not None:
+        where_extra = " AND cm.campaign_id = ?"
+        args.append(int(campaign_id))
+    args.append(int(limit))
     cur.execute(
         f"""
         SELECT cm.id AS cm_id, cm.member_id, cm.external_contact_id,
@@ -740,26 +970,18 @@ def _pre_enqueue_future_campaign_steps(*, queue_service: Any, queue_repo: Any) -
         JOIN campaigns c ON c.id = cm.campaign_id
         WHERE cm.status = 'pending'
           AND {not_empty_clause}
-          AND cm.next_due_at > ?
           AND c.run_status = 'active'
+          {where_extra}
         ORDER BY cm.next_due_at ASC
-        LIMIT 500
+        LIMIT ?
         """,
-        (_now_iso(),),
+        tuple(args),
     )
     future = cur.fetchall() or []
     if not future:
         return 0
 
-    # 已有的 queued campaign jobs → 用于去重
-    existing_jobs = queue_repo.fetch_jobs_filtered(
-        statuses=["queued", "claimed"],
-        source_types=["campaign"],
-        limit=200,
-    )
-    existing_source_ids = {str(j.get("source_id") or "") for j in existing_jobs}
-
-    # 按 (campaign_segment_id, next_step_index) 分组
+    # 按 (campaign_id, campaign_segment_id, next_step_index) 分组
     groups: dict[str, dict[str, Any]] = {}
     for r in future:
         next_step = _next_step(
@@ -768,10 +990,22 @@ def _pre_enqueue_future_campaign_steps(*, queue_service: Any, queue_repo: Any) -
         )
         if not next_step:
             continue
-        source_id = f"{int(r['campaign_id'])}:{next_step.get('step_index', 0)}"
-        if source_id in existing_source_ids:
+        source_ids = _campaign_job_source_ids(
+            campaign_id=int(r["campaign_id"]),
+            campaign_segment_id=int(r["campaign_segment_id"]),
+            step_index=int(next_step.get("step_index") or 0),
+        )
+        source_id = source_ids[0]
+        if _open_campaign_job_exists(queue_repo=queue_repo, source_ids=source_ids):
             continue
         if source_id not in groups:
+            due_val = r["next_due_at"]
+            if isinstance(due_val, datetime):
+                if due_val.tzinfo is None:
+                    due_val = due_val.replace(tzinfo=timezone.utc)
+                due_str = due_val.isoformat()
+            else:
+                due_str = str(due_val or "")
             groups[source_id] = {
                 "campaign": {
                     "id": int(r["campaign_id"]),
@@ -781,7 +1015,7 @@ def _pre_enqueue_future_campaign_steps(*, queue_service: Any, queue_repo: Any) -
                 },
                 "step": next_step,
                 "members": [],
-                "next_due": str(r["next_due_at"] or ""),
+                "next_due": due_str,
             }
         external = str(r["external_contact_id"] or "")
         if external:
@@ -817,9 +1051,20 @@ def _pre_enqueue_future_campaign_steps(*, queue_service: Any, queue_repo: Any) -
             content_summary=str(step.get("content_text") or "")[:200],
             trace_id=str(campaign.get("trace_id") or ""),
         )
-        existing_source_ids.add(source_id)
         enqueued += 1
     return enqueued
+
+
+def ensure_campaign_scheduled_jobs(*, campaign_id: int | None = None, limit: int = 500) -> int:
+    from ..broadcast_jobs import repo as queue_repo
+    from ..broadcast_jobs import service as queue_service
+
+    return _pre_enqueue_future_campaign_steps(
+        queue_service=queue_service,
+        queue_repo=queue_repo,
+        campaign_id=campaign_id,
+        limit=limit,
+    )
 
 
 def register_member_reply(
@@ -864,6 +1109,7 @@ def register_member_reply(
 
 
 __all__ = [
+    "ensure_campaign_scheduled_jobs",
     "process_due_campaign_members",
     "progress_member_after_send",
     "register_member_reply",

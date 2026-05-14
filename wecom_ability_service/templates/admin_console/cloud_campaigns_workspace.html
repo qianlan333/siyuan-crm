@@ -1,6 +1,7 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
+<script src="{{ url_for('static', filename='admin_console/image_upload_client.js') }}"></script>
 <script src="{{ url_for('static', filename='admin_console/image_picker.js') }}"></script>
 {% endblock %}
 

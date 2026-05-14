@@ -178,6 +178,7 @@ def test_thumb_cache_avoids_duplicate_fetch(source: str):
 # ---------- image_picker 集成 ---------- #
 
 def test_image_picker_script_loaded(source: str):
+    assert "image_upload_client.js" in source
     assert "image_picker.js" in source
 
 

@@ -61,6 +61,11 @@ def test_upload_modal_present(source: str):
     assert 'id="il-upload-tags"' in source
 
 
+def test_upload_client_script_loaded(source: str):
+    """图片上传页必须加载统一上传客户端，避免 nginx HTML 413 被当成 JSON 解析。"""
+    assert "image_upload_client.js" in source
+
+
 def test_upload_modal_submit_passes_metadata_in_multipart(source: str):
     """multipart 上传必须把 description / tags / category 一起 append。"""
     assert "fd.append('image'" in source
@@ -68,6 +73,13 @@ def test_upload_modal_submit_passes_metadata_in_multipart(source: str):
     assert "fd.append('tags'" in source
     assert "fd.append('category'" in source
     assert "/api/admin/image-library/upload" in source
+
+
+def test_upload_modal_prepares_large_image_before_post(source: str):
+    """上传前先校验/压缩图片，避免 1MB+ 文件被 nginx 直接 413 成 HTML。"""
+    assert "prepareImageForUpload(f)" in source
+    assert "prepared.file" in source
+    assert "ImageUploadClient.requestJson" in source
 
 
 def test_upload_modal_has_open_close_handlers(source: str):

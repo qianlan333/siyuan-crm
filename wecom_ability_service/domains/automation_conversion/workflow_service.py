@@ -1041,7 +1041,9 @@ def _build_node_bundle(
         and bool(content.get("fallback_to_standard_content"))
         and bool(_normalized_text(content.get("standard_content_text")))
     )
+    content_payload = _strip_node_content_meta(content.get("standard_content_payload_json") or {}) if content else {}
     exposes_standard_content = _content_mode_uses_standard_content(content_mode) or manual_layered_profile_fallback_enabled
+    exposes_standard_payload = exposes_standard_content or bool(content_payload)
     standard_content_text = _normalized_text(content.get("standard_content_text")) if exposes_standard_content else ""
     return {
         "id": int(node["id"]),
@@ -1058,7 +1060,7 @@ def _build_node_bundle(
         "content_mode": content_mode,
         "segmentation_basis": segmentation_basis,
         "standard_content_text": standard_content_text,
-        "standard_content_payload": _strip_node_content_meta(content.get("standard_content_payload_json") or {}) if exposes_standard_content else {},
+        "standard_content_payload": content_payload if exposes_standard_payload else {},
         "fallback_to_standard_content": bool(content.get("fallback_to_standard_content")) if content and exposes_standard_content else False,
         "agent_bindings": node_binding_items,
         "content_variants": [
@@ -1299,8 +1301,8 @@ def _normalize_node_payload(payload: dict[str, Any], workflow_bundle: dict[str, 
     raw_segmentation_basis = source.get("segmentation_basis") if "segmentation_basis" in source else current.get("segmentation_basis")
     inherited_content_mode = _workflow_generation_mode_to_node_content_mode(workflow.get("generation_mode"))
     content_mode = _normalize_node_content_mode(raw_content_mode, default=inherited_content_mode)
-    explicit_content_mode = _normalized_text(raw_content_mode) != ""
-    explicit_segmentation_basis = _normalized_text(raw_segmentation_basis) != ""
+    explicit_content_mode = "content_mode" in source and _normalized_text(source.get("content_mode")) != ""
+    explicit_segmentation_basis = "segmentation_basis" in source and _normalized_text(source.get("segmentation_basis")) != ""
     bindings_input = source.get("agent_bindings") if "agent_bindings" in source else current.get("agent_bindings") or []
     normalized_binding_payloads = _normalize_workflow_agent_bindings(bindings_input)
     uses_inherited_workflow_config = not explicit_content_mode and not explicit_segmentation_basis and not normalized_binding_payloads

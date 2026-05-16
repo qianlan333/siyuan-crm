@@ -116,12 +116,59 @@ def _parse_xlsx_rows(file_bytes: bytes) -> list[list[str]]:
         return rows
 
 
+def _decode_utf8_text_file(file_bytes: bytes) -> str:
+    try:
+        return file_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError("only .xlsx or utf-8 text files are supported") from exc
+
+
+def _split_text_values(text: str) -> list[str]:
+    return [item for item in re.split(r"[\s,，;；]+", str(text or "").strip()) if item.strip()]
+
+
+def _nonempty_text_lines(text: str) -> list[str]:
+    return [line.strip() for line in str(text or "").splitlines() if line.strip()]
+
+
+def _parse_column_lines_from_file(
+    *,
+    file_name: str,
+    file_bytes: bytes,
+    column_count: int,
+) -> list[str]:
+    normalized_name = str(file_name or "").strip().lower()
+    if normalized_name.endswith(".xlsx"):
+        lines: list[str] = []
+        for row in _parse_xlsx_rows(file_bytes):
+            normalized_row = [str(item or "").strip() for item in row[:column_count]]
+            if any(normalized_row):
+                lines.append(",".join(normalized_row))
+        return lines
+    return _nonempty_text_lines(_decode_utf8_text_file(file_bytes))
+
+
+def _resolve_import_operator(created_by: str, *, runtime: ImportRuntime) -> str:
+    return str(created_by or runtime.current_operator_resolver()).strip() or "admin_user_ops"
+
+
+def _build_import_error_summary(invalid_rows: list[str], duplicate_count: int) -> str:
+    error_summary_parts: list[str] = []
+    if invalid_rows:
+        preview = " / ".join(invalid_rows[:5])
+        suffix = " ..." if len(invalid_rows) > 5 else ""
+        error_summary_parts.append(f"invalid: {preview}{suffix}")
+    if duplicate_count:
+        error_summary_parts.append(f"duplicates: {duplicate_count}")
+    return "; ".join(error_summary_parts)
+
+
 def _parse_experience_leads_from_text(
     pasted_text: str,
     *,
     runtime: ImportRuntime,
 ) -> dict[str, Any]:
-    raw_values = [item for item in re.split(r"[\s,，;；]+", str(pasted_text or "").strip()) if item.strip()]
+    raw_values = _split_text_values(pasted_text)
     result = _collect_experience_lead_mobiles(raw_values, runtime=runtime)
     result["input_mode"] = "pasted_text"
     return result
@@ -137,11 +184,7 @@ def _parse_experience_leads_from_file(
     if normalized_name.endswith(".xlsx"):
         raw_values = [row[0] for row in _parse_xlsx_rows(file_bytes) if row]
     else:
-        try:
-            decoded = file_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("only .xlsx or utf-8 text files are supported") from exc
-        raw_values = [item for item in re.split(r"[\r\n,，;；\t ]+", decoded) if item.strip()]
+        raw_values = _split_text_values(_decode_utf8_text_file(file_bytes))
     result = _collect_experience_lead_mobiles(raw_values, runtime=runtime)
     result["input_mode"] = "file"
     result["file_name"] = str(file_name or "").strip()
@@ -193,7 +236,7 @@ def _parse_class_term_source_from_text(
     *,
     runtime: ImportRuntime,
 ) -> dict[str, Any]:
-    lines = [line.strip() for line in str(pasted_text or "").splitlines() if line.strip()]
+    lines = _nonempty_text_lines(pasted_text)
     rows: list[dict[str, Any]] = []
     invalid_rows: list[str] = []
     total_rows = 0
@@ -230,21 +273,7 @@ def _parse_class_term_source_from_file(
     file_bytes: bytes,
     runtime: ImportRuntime,
 ) -> dict[str, Any]:
-    normalized_name = str(file_name or "").strip().lower()
-    if normalized_name.endswith(".xlsx"):
-        raw_rows = _parse_xlsx_rows(file_bytes)
-        lines = []
-        for row in raw_rows:
-            normalized_row = [str(item or "").strip() for item in row[:2]]
-            if not any(normalized_row):
-                continue
-            lines.append(",".join(normalized_row))
-    else:
-        try:
-            decoded = file_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("only .xlsx or utf-8 text files are supported") from exc
-        lines = [line.strip() for line in decoded.splitlines() if line.strip()]
+    lines = _parse_column_lines_from_file(file_name=file_name, file_bytes=file_bytes, column_count=2)
     result = _parse_class_term_source_from_text("\n".join(lines), runtime=runtime)
     result["input_mode"] = "file"
     result["file_name"] = str(file_name or "").strip()
@@ -466,10 +495,12 @@ def _apply_activation_status_to_user_ops_pool_current_member(
     *,
     mobile: str,
     activation_status: str,
+    activation_remark: str = "",
     runtime: ImportRuntime,
 ) -> dict[str, Any]:
     normalized_mobile = runtime.normalize_mobile(mobile)
     normalized_status = str(activation_status or "").strip() or "not_activated"
+    normalized_remark = str(activation_remark or "").strip()
     existing = _get_user_ops_pool_current_member_by_identity(mobile=normalized_mobile)
     if not existing:
         return {"matched_member": False}
@@ -481,7 +512,7 @@ def _apply_activation_status_to_user_ops_pool_current_member(
         """,
         (
             normalized_status,
-            "已激活" if normalized_status == "activated" else "未激活",
+            normalized_remark or ("已激活" if normalized_status == "activated" else "未激活"),
             int(existing["id"]),
         ),
     )
@@ -500,10 +531,10 @@ def _parse_activation_status_line(
     mobile = runtime.normalize_mobile(parts[0])
     if len(parts) < 2:
         raise ValueError("activation_status is required")
-    if len(parts) > 2:
-        raise ValueError("activation_status rows must contain only mobile and activation_status")
+    if len(parts) > 3:
+        raise ValueError("activation_status rows must contain mobile, activation_status and optional remark")
     activation_status = _normalize_activation_status_value(parts[1])
-    return mobile, activation_status, ""
+    return mobile, activation_status, str(parts[2] if len(parts) > 2 else "").strip()
 
 
 def _parse_activation_status_from_text(
@@ -511,7 +542,7 @@ def _parse_activation_status_from_text(
     *,
     runtime: ImportRuntime,
 ) -> dict[str, Any]:
-    lines = [line.strip() for line in str(pasted_text or "").splitlines() if line.strip()]
+    lines = _nonempty_text_lines(pasted_text)
     rows: list[dict[str, str]] = []
     invalid_rows: list[str] = []
     total_rows = 0
@@ -548,21 +579,7 @@ def _parse_activation_status_from_file(
     file_bytes: bytes,
     runtime: ImportRuntime,
 ) -> dict[str, Any]:
-    normalized_name = str(file_name or "").strip().lower()
-    if normalized_name.endswith(".xlsx"):
-        raw_rows = _parse_xlsx_rows(file_bytes)
-        lines = []
-        for row in raw_rows:
-            normalized_row = [str(item or "").strip() for item in row[:2]]
-            if not any(normalized_row):
-                continue
-            lines.append(",".join(normalized_row))
-    else:
-        try:
-            decoded = file_bytes.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise ValueError("only .xlsx or utf-8 text files are supported") from exc
-        lines = [line.strip() for line in decoded.splitlines() if line.strip()]
+    lines = _parse_column_lines_from_file(file_name=file_name, file_bytes=file_bytes, column_count=3)
     result = _parse_activation_status_from_text("\n".join(lines), runtime=runtime)
     result["input_mode"] = "file"
     result["file_name"] = str(file_name or "").strip()
@@ -615,6 +632,7 @@ def upsert_user_ops_huangxiaocan_activation_source(
     *,
     mobile: str,
     activation_state: str,
+    activation_remark: str = "",
     import_batch_id: str = "",
     created_by: str = "",
     is_active: bool = True,
@@ -627,7 +645,8 @@ def upsert_user_ops_huangxiaocan_activation_source(
         activation_state,
         allow_unknown=False,
     )
-    operator = str(created_by or runtime.current_operator_resolver()).strip() or "admin_user_ops"
+    normalized_remark = str(activation_remark or "").strip()
+    operator = _resolve_import_operator(created_by, runtime=runtime)
     db = get_db()
     existing = db.execute(
         """
@@ -664,11 +683,12 @@ def upsert_user_ops_huangxiaocan_activation_source(
         activation_state=normalized_state,
         operator=operator,
         source_type="huangxiaocan_activation_import",
-        remark="patched existing lead member from activation source",
+        remark=normalized_remark or "patched existing lead member from activation source",
     )
     current_pool_apply_payload = _apply_activation_status_to_user_ops_pool_current_member(
         mobile=normalized_mobile,
         activation_status=normalized_state,
+        activation_remark=normalized_remark,
         runtime=runtime,
     )
     source_row = db.execute(
@@ -709,7 +729,7 @@ def import_experience_leads(
 ) -> dict[str, Any]:
     """Internal stable owner for experience-lead imports; legacy service facade may call this."""
 
-    operator = str(created_by or runtime.current_operator_resolver()).strip() or "admin_user_ops"
+    operator = _resolve_import_operator(created_by, runtime=runtime)
     if file_bytes is not None:
         parsed = _parse_experience_leads_from_file(
             file_name=file_name,
@@ -729,14 +749,7 @@ def import_experience_leads(
     if not unique_mobiles:
         raise ValueError("no valid mobile numbers found")
 
-    error_summary_parts: list[str] = []
-    if invalid_rows:
-        preview = " / ".join(invalid_rows[:5])
-        suffix = " ..." if len(invalid_rows) > 5 else ""
-        error_summary_parts.append(f"invalid: {preview}{suffix}")
-    if duplicate_count:
-        error_summary_parts.append(f"duplicates: {duplicate_count}")
-    error_summary = "; ".join(error_summary_parts)
+    error_summary = _build_import_error_summary(invalid_rows, duplicate_count)
 
     db = get_db()
     batch_id = _create_user_ops_import_batch(
@@ -827,7 +840,7 @@ def import_mobile_class_term_source(
 ) -> dict[str, Any]:
     """Internal stable owner for class-term import pipeline; legacy service facade may call this."""
 
-    operator = str(created_by or runtime.current_operator_resolver()).strip() or "admin_user_ops"
+    operator = _resolve_import_operator(created_by, runtime=runtime)
     if file_bytes is not None:
         parsed = _parse_class_term_source_from_file(
             file_name=file_name,
@@ -847,14 +860,7 @@ def import_mobile_class_term_source(
 
     unique_rows, duplicate_count = _dedupe_user_ops_import_rows_by_mobile(rows)
 
-    error_summary_parts: list[str] = []
-    if invalid_rows:
-        preview = " / ".join(invalid_rows[:5])
-        suffix = " ..." if len(invalid_rows) > 5 else ""
-        error_summary_parts.append(f"invalid: {preview}{suffix}")
-    if duplicate_count:
-        error_summary_parts.append(f"duplicates: {duplicate_count}")
-    error_summary = "; ".join(error_summary_parts)
+    error_summary = _build_import_error_summary(invalid_rows, duplicate_count)
 
     db = get_db()
     batch_id = _create_user_ops_import_batch(
@@ -931,7 +937,7 @@ def import_activation_status_source(
 ) -> dict[str, Any]:
     """Internal stable owner for activation-status imports; legacy service facade may call this."""
 
-    operator = str(created_by or runtime.current_operator_resolver()).strip() or "admin_user_ops"
+    operator = _resolve_import_operator(created_by, runtime=runtime)
     if file_bytes is not None:
         parsed = _parse_activation_status_from_file(
             file_name=file_name,
@@ -954,14 +960,7 @@ def import_activation_status_source(
         raise ValueError("no valid activation rows found")
 
     unique_rows, duplicate_count = _dedupe_user_ops_import_rows_by_mobile(rows)
-    error_summary_parts: list[str] = []
-    if invalid_rows:
-        preview = " / ".join(invalid_rows[:5])
-        suffix = " ..." if len(invalid_rows) > 5 else ""
-        error_summary_parts.append(f"invalid: {preview}{suffix}")
-    if duplicate_count:
-        error_summary_parts.append(f"duplicates: {duplicate_count}")
-    error_summary = "; ".join(error_summary_parts)
+    error_summary = _build_import_error_summary(invalid_rows, duplicate_count)
 
     batch_id = _create_user_ops_import_batch(
         import_type="activation_status",
@@ -979,6 +978,7 @@ def import_activation_status_source(
         result = upsert_user_ops_huangxiaocan_activation_source(
             mobile=str(row["mobile"]),
             activation_state=str(row["activation_status"]),
+            activation_remark=str(row.get("activation_remark") or ""),
             import_batch_id=str(batch_id),
             created_by=operator,
             is_active=True,

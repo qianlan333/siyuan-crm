@@ -1,0 +1,8 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+{% set workspace = operations_workspace or {} %}
+{% set compact_program_context = true %}
+{% include "admin_console/_automation_program_context.html" %}
+{% include "admin_console/_automation_operation_orchestration_panel.html" %}
+{% endblock %}

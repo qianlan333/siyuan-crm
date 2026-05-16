@@ -5,7 +5,10 @@ import mimetypes
 from copy import deepcopy
 from typing import Any, Callable
 
+from ..wecom_media_limits import validate_wecom_image_upload
+
 MAX_PRIVATE_MESSAGE_IMAGES = 3
+MAX_PRIVATE_MESSAGE_ATTACHMENTS = 9
 SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES = {"file", "miniprogram"}
 
 
@@ -36,6 +39,27 @@ def _normalize_sender(value: Any) -> str:
                 return normalized_item
         return ""
     return _normalize_str(value).strip()
+
+
+def _normalize_miniprogram_for_add_msg_template(attachment_payload: dict[str, Any]) -> dict[str, str]:
+    appid = str(attachment_payload.get("appid") or "").strip()
+    page = str(attachment_payload.get("page") or attachment_payload.get("pagepath") or "").strip()
+    title = str(attachment_payload.get("title") or "").strip()
+    pic_media_id = str(attachment_payload.get("pic_media_id") or attachment_payload.get("thumb_media_id") or "").strip()
+    if not appid:
+        raise ValueError("miniprogram attachments must include appid")
+    if not page:
+        raise ValueError("miniprogram attachments must include page")
+    if not title:
+        raise ValueError("miniprogram attachments must include title")
+    if not pic_media_id:
+        raise ValueError("miniprogram attachments must include pic_media_id")
+    return {
+        "appid": appid,
+        "page": page,
+        "title": title,
+        "pic_media_id": pic_media_id,
+    }
 
 
 def _normalize_binary_image_spec(item: Any, index: int) -> dict[str, Any]:
@@ -142,26 +166,11 @@ def normalize_private_message_attachments(payload: dict[str, Any]) -> list[dict[
             if not media_id:
                 raise ValueError("file attachments must include media_id")
         elif msgtype == "miniprogram":
-            appid = str(attachment_payload.get("appid") or "").strip()
-            pagepath = str(attachment_payload.get("pagepath") or "").strip()
-            title = str(attachment_payload.get("title") or "").strip()
-            thumb_media_id = str(attachment_payload.get("thumb_media_id") or "").strip()
-            if not appid:
-                raise ValueError("miniprogram attachments must include appid")
-            if not pagepath:
-                raise ValueError("miniprogram attachments must include pagepath")
-            if not title:
-                raise ValueError("miniprogram attachments must include title")
-            if not thumb_media_id:
-                raise ValueError("miniprogram attachments must include thumb_media_id")
-            normalized[msgtype] = {
-                "appid": appid,
-                "pagepath": pagepath,
-                "title": title,
-                "thumb_media_id": thumb_media_id,
-            }
+            normalized[msgtype] = _normalize_miniprogram_for_add_msg_template(attachment_payload)
         normalized["msgtype"] = msgtype
         attachments.append(normalized)
+    if len(attachments) > MAX_PRIVATE_MESSAGE_ATTACHMENTS:
+        raise ValueError(f"at most {MAX_PRIVATE_MESSAGE_ATTACHMENTS} attachments are allowed")
     return attachments
 
 
@@ -210,12 +219,19 @@ def build_private_message_request_payload(
                     content_type = content_type_from_url
             else:
                 file_bytes = _decode_base64(str(spec.get("data_base64") or ""))
+            content_type = validate_wecom_image_upload(
+                file_bytes,
+                file_name=str(spec.get("file_name") or "image.png"),
+                mime_type=content_type,
+            )
             media_id = upload_image(str(spec.get("file_name") or "image.png"), file_bytes, content_type)
         attachments.append({"msgtype": "image", "image": {"media_id": media_id}})
         image_count += 1
 
     if image_count > MAX_PRIVATE_MESSAGE_IMAGES:
         raise ValueError(f"at most {MAX_PRIVATE_MESSAGE_IMAGES} images are allowed")
+    if len(attachments) > MAX_PRIVATE_MESSAGE_ATTACHMENTS:
+        raise ValueError(f"at most {MAX_PRIVATE_MESSAGE_ATTACHMENTS} attachments are allowed")
 
     normalized_payload.pop("images", None)
     normalized_payload.pop("image_media_ids", None)

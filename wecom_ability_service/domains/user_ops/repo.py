@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-from ...db import get_db, get_db_backend
-
-
-def db_backend() -> str:
-    return get_db_backend()
+from ...db import get_db
 
 
 def db():

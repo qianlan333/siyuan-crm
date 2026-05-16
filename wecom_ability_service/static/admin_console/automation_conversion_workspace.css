@@ -448,6 +448,18 @@
   display: none;
 }
 
+.ac-workspace-tabs--program-hero {
+  width: 100%;
+  justify-content: flex-end;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.ac-workspace-tabs--program-hero .ac-workspace-tab {
+  min-height: 38px;
+}
+
 .ac-section-link {
   border-radius: 8px;
   background: #f5f6f7;

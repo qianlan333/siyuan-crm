@@ -18,13 +18,11 @@ from .hxc_dashboard_snapshot_service import (
     FUNNEL_USER_NO_MEMBER,
     get_latest_snapshot_meta,
 )
+from .phone_helpers import mask_mobile
 
 
 def _mask_mobile(phone: str | None) -> str:
-    text = str(phone or "")
-    if len(text) < 7:
-        return text
-    return f"{text[:3]}****{text[-4:]}"
+    return mask_mobile(phone)
 
 
 def _to_iso(value: Any) -> str:

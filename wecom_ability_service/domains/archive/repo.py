@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
 
 
 def count_archived_messages() -> int:
@@ -18,7 +18,6 @@ def insert_archived_messages(messages: list[dict[str, Any]], *, commit: bool = T
 
 def insert_archived_messages_detailed(messages: list[dict[str, Any]], *, commit: bool = True) -> list[dict[str, Any]]:
     db = get_db()
-    backend = get_db_backend()
     inserted_rows: list[dict[str, Any]] = []
     for normalized in messages:
         sql = """
@@ -26,11 +25,8 @@ def insert_archived_messages_detailed(messages: list[dict[str, Any]], *, commit:
                 seq, msgid, chat_type, external_userid, owner_userid, sender, receiver,
                 msgtype, content, send_time, raw_payload
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (msgid) DO NOTHING
         """
-        if backend == "postgres":
-            sql += " ON CONFLICT (msgid) DO NOTHING"
-        else:
-            sql = sql.replace("INSERT INTO", "INSERT OR IGNORE INTO", 1)
         cursor = db.execute(
             sql,
             (

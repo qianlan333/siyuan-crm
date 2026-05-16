@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from xml.sax.saxutils import escape as xml_escape
 
 from flask import current_app, jsonify, redirect, request, url_for
@@ -13,7 +13,7 @@ callback_logger = logging.getLogger("callback")
 archive_logger = logging.getLogger("archive_sync")
 contacts_logger = logging.getLogger("contacts_sync")
 wecom_logger = logging.getLogger("wecom_api")
-APP_STARTED_AT = datetime.utcnow()
+APP_STARTED_AT = datetime.now(timezone.utc).replace(tzinfo=None)
 APP_STARTED_AT_TEXT = APP_STARTED_AT.replace(microsecond=0).isoformat() + "Z"
 
 

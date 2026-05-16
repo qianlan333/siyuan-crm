@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Any
 
-from ...db import get_db, is_postgres
+from ...db import get_db
 
 
 VALID_STATUSES = (
@@ -19,6 +19,7 @@ VALID_SOURCE_TYPES = (
     "campaign",
     "sop",
     "workflow",
+    "operation_task",
     "cloud_plan",
     "focus_send",
     "deferred",
@@ -56,7 +57,7 @@ def _normalize_dt(value: Any) -> str:
 
 
 def _bool_to_db(value: bool) -> Any:
-    return bool(value) if is_postgres() else (1 if value else 0)
+    return bool(value)
 
 
 def _to_jsonb_text(payload: Any, *, default: str = "{}") -> str:
@@ -226,59 +227,29 @@ def claim_due_jobs(*, now: Any, limit: int) -> list[dict[str, Any]]:
     """原子地把到期的 queued 任务标 claimed 并返回。
 
     用 UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING
-    在 PG 下保证多 worker 并发安全；SQLite 单线程下退化为普通 UPDATE。
+    保证多 worker 并发安全。
     """
     db = get_db()
     cutoff = _normalize_dt(now)
-    if is_postgres():
-        sql = f"""
-            UPDATE broadcast_jobs
-            SET status = 'claimed',
-                claimed_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP,
-                attempt_count = attempt_count + 1
-            WHERE id IN (
-                SELECT id FROM broadcast_jobs
-                WHERE status = 'queued' AND scheduled_for <= ?
-                ORDER BY scheduled_for ASC, priority ASC, id ASC
-                LIMIT ?
-                FOR UPDATE SKIP LOCKED
-            )
-            RETURNING {_BASE_COLUMNS}
-        """
-        rows = db.execute(sql, (cutoff, int(limit))).fetchall()
-        db.commit()
-        return [_row_to_dict(r) for r in rows]
-    select_rows = db.execute(
-        """
-        SELECT id FROM broadcast_jobs
-        WHERE status = 'queued' AND scheduled_for <= ?
-        ORDER BY scheduled_for ASC, priority ASC, id ASC
-        LIMIT ?
-        """,
-        (cutoff, int(limit)),
-    ).fetchall()
-    ids = [int(r["id"]) for r in select_rows]
-    if not ids:
-        return []
-    placeholders = ", ".join("?" * len(ids))
-    db.execute(
+    rows = db.execute(
         f"""
         UPDATE broadcast_jobs
         SET status = 'claimed',
             claimed_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP,
             attempt_count = attempt_count + 1
-        WHERE id IN ({placeholders})
+        WHERE id IN (
+            SELECT id FROM broadcast_jobs
+            WHERE status = 'queued' AND scheduled_for <= ?
+            ORDER BY scheduled_for ASC, priority ASC, id ASC
+            LIMIT ?
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING {_BASE_COLUMNS}
         """,
-        tuple(ids),
-    )
-    db.commit()
-    rows = db.execute(
-        f"SELECT {_BASE_COLUMNS} FROM broadcast_jobs WHERE id IN ({placeholders}) "
-        f"ORDER BY scheduled_for ASC, priority ASC, id ASC",
-        tuple(ids),
+        (cutoff, int(limit)),
     ).fetchall()
+    db.commit()
     return [_row_to_dict(r) for r in rows]
 
 

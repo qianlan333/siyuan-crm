@@ -5,8 +5,8 @@
 2. 关键字黑名单：DROP / DELETE / UPDATE / INSERT / ALTER / CREATE / TRUNCATE /
    ATTACH / DETACH / PRAGMA / VACUUM / REPLACE / GRANT / REVOKE
 3. 必须涉及白名单表（automation_member 等只读 / 衍生表）
-4. 强制最大返回行数（1 万）— 通过 SQLite/PG ``LIMIT`` 包裹
-5. 强制只读事务 + 查询超时（5 秒）
+4. 强制最大返回行数（1 万）— 通过 PG ``LIMIT`` 包裹
+5. 静态只读校验 + 查询耗时观测（默认 5 秒告警）
 6. 输出必须含 ``member_id`` 列；可选 ``external_contact_id``
 
 这是 Agent 的"代笔"安全护栏 — Agent 自由地写筛选逻辑，但写错了不会爆库。
@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import Any, Iterable
+from typing import Any
 
 from ...db import get_db
 
@@ -162,25 +162,6 @@ def run_segment_query(
     db = get_db()
     cur = db.cursor()
     started = time.monotonic()
-    # 检测后端 — 不同的只读保护手段：
-    # - SQLite：PRAGMA query_only（局部 cursor 级，错就 try/except 静默）
-    # - PG    ：不动事务 / 不发 SET，只靠静态 SQL 校验防写（避免污染调用方事务）
-    #
-    # ★ 用 get_db_backend() 直接拿配置，不要靠 instance/module 名字判断 ——
-    # PostgresConnection 是我们的包装类，__module__ 不含 "psycopg"。之前用
-    # "psycopg" in db.__class__.__module__ 永远是 False，导致 PG 上也走
-    # PRAGMA query_only ON 路径，PG 报 syntax error → 事务被 abort →
-    # 后续所有 SQL 全部 "transaction aborted, commands ignored"。
-    from ...db import get_db_backend
-
-    is_postgres = get_db_backend() == "postgres"
-    pragma_was_set = False
-    if not is_postgres:
-        try:
-            cur.execute("PRAGMA query_only = ON")
-            pragma_was_set = True
-        except Exception:
-            pragma_was_set = False
     try:
         cur.execute(safe_sql, params or {})
         rows = cur.fetchmany(int(max_rows))
@@ -188,18 +169,7 @@ def run_segment_query(
     except Exception as exc:
         elapsed_ms = int((time.monotonic() - started) * 1000)
         logger.warning("segment sql failed: %s", exc)
-        if pragma_was_set:
-            try:
-                cur.execute("PRAGMA query_only = OFF")
-            except Exception:
-                pass
         raise SqlSandboxError(f"sql_runtime_error:{exc}") from exc
-    finally:
-        if pragma_was_set:
-            try:
-                cur.execute("PRAGMA query_only = OFF")
-            except Exception:
-                pass
 
     if elapsed_ms > timeout_seconds * 1000:
         logger.warning("segment sql slow: %d ms", elapsed_ms)

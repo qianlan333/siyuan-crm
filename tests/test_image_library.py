@@ -10,12 +10,9 @@
 from __future__ import annotations
 
 import base64
-import json
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import init_db
 from wecom_ability_service.domains import image_library
 from wecom_ability_service.domains.image_library import (
     _decode_jsonb,
@@ -23,6 +20,7 @@ from wecom_ability_service.domains.image_library import (
     _normalize_tags,
     _to_jsonb_text,
 )
+from wecom_ability_service.domains.wecom_media_limits import WECOM_IMAGE_MAX_BYTES
 
 
 # 1x1 PNG，已知工作的最小 base64
@@ -34,32 +32,14 @@ _TINY_PNG_B64 = base64.b64encode(_TINY_PNG_BYTES).decode("ascii")
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "image-library.sqlite3"
-    private_key_path = tmp_path / "wecom_private_key.pem"
-    sdk_lib_path = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key_path.write_text("fake-key", encoding="utf-8")
-    sdk_lib_path.write_text("fake-so", encoding="utf-8")
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key_path),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib_path),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-            "MCP_BEARER_TOKEN": "mcp-token",
-            "AUTOMATION_INTERNAL_API_TOKEN": "internal-token",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(
+        tmp_path,
+        MCP_BEARER_TOKEN="mcp-token",
+        AUTOMATION_INTERNAL_API_TOKEN="internal-token",
+    ) as app:
+        yield app
 
 
 # ---------- 工具函数 ---------- #
@@ -166,6 +146,73 @@ def test_create_defaults_empty_metadata_when_omitted(app):
         assert item["tags"] == []
         assert item["category"] == ""
         assert item["ai_metadata"] == {}
+
+
+def test_create_from_upload_rejects_images_over_wecom_limit(app):
+    oversized_png = b"\x89PNG\r\n\x1a\n" + (b"0" * WECOM_IMAGE_MAX_BYTES)
+    with app.app_context():
+        with pytest.raises(ValueError, match="max 2MB"):
+            image_library.create_image_from_upload(
+                file_bytes=oversized_png,
+                file_name="too-large.png",
+                mime_type="image/png",
+            )
+
+
+def test_create_from_upload_rejects_unsupported_wecom_image_type(app):
+    gif_bytes = b"GIF89a" + (b"0" * 32)
+    with app.app_context():
+        with pytest.raises(ValueError, match="JPG/PNG"):
+            image_library.create_image_from_upload(
+                file_bytes=gif_bytes,
+                file_name="animated.gif",
+                mime_type="image/gif",
+            )
+
+
+def test_create_from_base64_normalizes_jpg_alias(app):
+    jpeg_bytes = b"\xff\xd8\xff" + (b"0" * 32)
+    jpeg_b64 = base64.b64encode(jpeg_bytes).decode("ascii")
+    with app.app_context():
+        item = image_library.create_image_from_base64(
+            data_base64=f"data:image/jpg;base64,{jpeg_b64}",
+            file_name="alias.jpg",
+            mime_type="image/jpg",
+        )
+        assert item["mime_type"] == "image/jpeg"
+
+
+def test_create_from_url_rejects_explicit_unsupported_mime(app):
+    with app.app_context():
+        with pytest.raises(ValueError, match="JPG/PNG"):
+            image_library.create_image_from_url(
+                url="https://cdn.example.com/a.gif",
+                mime_type="image/gif",
+            )
+
+
+def test_resolve_image_media_id_rejects_legacy_oversized_record_before_upload(app):
+    oversized_png = b"\x89PNG\r\n\x1a\n" + (b"0" * WECOM_IMAGE_MAX_BYTES)
+    called = []
+
+    with app.app_context():
+        image_id = image_library._insert_image(
+            name="历史超限图",
+            file_name="legacy-too-large.png",
+            source="upload",
+            source_url="",
+            data_base64=base64.b64encode(oversized_png).decode("ascii"),
+            mime_type="image/png",
+            file_size=len(oversized_png),
+        )
+
+        def _upload(*args):
+            called.append(args)
+            return "should-not-upload"
+
+        with pytest.raises(ValueError, match="max 2MB"):
+            image_library.resolve_image_media_id(image_id, upload_image=_upload)
+        assert called == []
 
 
 # ---------- update：partial 语义 ---------- #
@@ -421,13 +468,12 @@ def test_ai_metadata_roundtrip_complex_dict(app):
             ai_metadata=payload,
         )
         assert created["ai_metadata"] == payload
-        # 直接 SQL 看一下底层存的是合法 JSON 字符串（SQLite 路径）
-        from wecom_ability_service.db import get_db, get_db_backend
-        if get_db_backend() == "sqlite":
-            cur = get_db().cursor()
-            cur.execute(
-                "SELECT ai_metadata FROM image_library WHERE id = ?",
-                (created["id"],),
-            )
-            row = cur.fetchone()
-            assert json.loads(row["ai_metadata"]) == payload
+        from wecom_ability_service.db import get_db
+
+        cur = get_db().cursor()
+        cur.execute(
+            "SELECT ai_metadata FROM image_library WHERE id = ?",
+            (created["id"],),
+        )
+        row = cur.fetchone()
+        assert dict(row)["ai_metadata"] == payload

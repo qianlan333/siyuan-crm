@@ -40,7 +40,10 @@ class FakeResponse:
 
 
 def _test_image_data_url(label: str = "img") -> str:
-    encoded = base64.b64encode(f"fake-image-{label}".encode("utf-8")).decode("ascii")
+    _ = label
+    encoded = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAEAAAcAAekVCC0AAAAASUVORK5CYII="
+    )
     return f"data:image/png;base64,{encoded}"
 
 
@@ -313,6 +316,10 @@ def fake_wecom_post(url, params=None, json=None, timeout=None, files=None):
         )
     if url.endswith("/cgi-bin/externalcontact/add_corp_tag"):
         return FakeResponse({"errcode": 0, "errmsg": "ok", "tag_group": {"group_id": "g1"}})
+    if url.endswith("/cgi-bin/externalcontact/edit_corp_tag"):
+        return FakeResponse({"errcode": 0, "errmsg": "ok"})
+    if url.endswith("/cgi-bin/externalcontact/del_corp_tag"):
+        return FakeResponse({"errcode": 0, "errmsg": "ok"})
     if url.endswith("/cgi-bin/externalcontact/mark_tag"):
         return FakeResponse({"errcode": 0, "errmsg": "ok"})
     if url.endswith("/cgi-bin/externalcontact/remark"):
@@ -963,6 +970,59 @@ def test_create_private_message_task_keeps_emoji_and_image_attachment(client, ap
         assert saved_payload["attachments"] == [{"msgtype": "image", "image": {"media_id": "media-emoji-proof.png"}}]
 
 
+def test_create_private_message_task_maps_miniprogram_attachment_for_add_msg_template(client, app, monkeypatch):
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+
+    captured_payloads: list[dict[str, object]] = []
+
+    def fake_post(url, params=None, json=None, timeout=None, files=None):
+        if url.endswith("/cgi-bin/externalcontact/add_msg_template"):
+            captured_payloads.append(json or {})
+        return fake_wecom_post(url, params=params, json=json, timeout=timeout, files=files)
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    response = client.post(
+        "/api/tasks/private-message",
+        json={
+            "sender": ["sales_01"],
+            "external_userid": ["wm_ext_001"],
+            "text": {"content": "点这里继续体验"},
+            "attachments": [
+                {
+                    "msgtype": "miniprogram",
+                    "miniprogram": {
+                        "appid": "wx0ca836834b18e989",
+                        "pagepath": "pages/home/home?from=wecom_card",
+                        "title": "黄小璨AI｜找老黄聊聊",
+                        "thumb_media_id": "media-thumb-001",
+                    },
+                }
+            ],
+        },
+    )
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["wecom_result"]["msgid"] == "task-msg-001"
+    assert captured_payloads[0]["attachments"] == [
+        {
+            "msgtype": "miniprogram",
+            "miniprogram": {
+                "appid": "wx0ca836834b18e989",
+                "page": "pages/home/home?from=wecom_card",
+                "title": "黄小璨AI｜找老黄聊聊",
+                "pic_media_id": "media-thumb-001",
+            },
+        }
+    ]
+
+    with app.app_context():
+        row = get_db().execute("SELECT request_payload FROM outbound_tasks ORDER BY id DESC LIMIT 1").fetchone()
+        saved_payload = (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))
+        assert saved_payload["attachments"] == captured_payloads[0]["attachments"]
+
+
 def test_create_private_message_task_supports_pure_image_and_limits_to_three(client, monkeypatch):
     monkeypatch.setattr("requests.get", fake_wecom_get)
     monkeypatch.setattr("requests.post", fake_wecom_post)
@@ -1205,6 +1265,102 @@ def test_admin_list_wecom_tags(client, monkeypatch):
         {"tag_id": "et-tag-003", "tag_name": "低意向", "group_name": "客户分层", "group_id": "group-001"},
         {"tag_id": "et-tag-001", "tag_name": "高意向", "group_name": "客户分层", "group_id": "group-001"},
     ]
+    assert data["total_tags"] == 3
+    assert data["tag_limit"] == 1000
+    assert [group["group_name"] for group in data["groups"]] == ["业务标签", "客户分层"]
+    assert data["groups"][1]["tags"][0]["tag_id"] == "et-tag-003"
+
+
+def test_admin_wecom_tag_management_crud_payloads(client, monkeypatch):
+    state = {"created": [], "edited": [], "deleted": []}
+
+    def fake_admin_tag_post(url, params=None, json=None, timeout=None, files=None):
+        if url.endswith("/cgi-bin/externalcontact/get_corp_tag_list"):
+            return FakeResponse(
+                {
+                    "errcode": 0,
+                    "errmsg": "ok",
+                    "tag_group": [
+                        {
+                            "group_id": "group-001",
+                            "group_name": "客户分层",
+                            "tag": [{"id": "tag-001", "name": "高意向"}],
+                        }
+                    ],
+                }
+            )
+        if url.endswith("/cgi-bin/externalcontact/add_corp_tag"):
+            state["created"].append(json or {})
+            return FakeResponse({"errcode": 0, "errmsg": "ok", "tag_group": {"group_id": "group-new"}})
+        if url.endswith("/cgi-bin/externalcontact/edit_corp_tag"):
+            state["edited"].append(json or {})
+            return FakeResponse({"errcode": 0, "errmsg": "ok"})
+        if url.endswith("/cgi-bin/externalcontact/del_corp_tag"):
+            state["deleted"].append(json or {})
+            return FakeResponse({"errcode": 0, "errmsg": "ok"})
+        return fake_wecom_post(url, params=params, json=json, timeout=timeout, files=files)
+
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", fake_admin_tag_post)
+
+    group_response = client.post(
+        "/api/admin/wecom/tag-groups",
+        json={"group_name": "新标签组", "first_tag_name": "首个标签"},
+    )
+    assert group_response.status_code == 200
+    assert state["created"][-1] == {"group_name": "新标签组", "tag": [{"name": "首个标签"}]}
+
+    tag_response = client.post(
+        "/api/admin/wecom/tags",
+        json={"group_id": "group-001", "tag_name": "中意向"},
+    )
+    assert tag_response.status_code == 200
+    assert state["created"][-1] == {"group_id": "group-001", "tag": [{"name": "中意向"}]}
+
+    group_update = client.put("/api/admin/wecom/tag-groups/group-001", json={"group_name": "客户阶段"})
+    assert group_update.status_code == 200
+    assert state["edited"][-1] == {"id": "group-001", "name": "客户阶段"}
+
+    tag_update = client.put("/api/admin/wecom/tags/tag-001", json={"tag_name": "高意向客户"})
+    assert tag_update.status_code == 200
+    assert state["edited"][-1] == {"id": "tag-001", "name": "高意向客户"}
+
+    group_delete = client.delete("/api/admin/wecom/tag-groups/group-001")
+    assert group_delete.status_code == 200
+    assert state["deleted"][-1] == {"group_id": ["group-001"]}
+
+    tag_delete = client.delete("/api/admin/wecom/tags/tag-001")
+    assert tag_delete.status_code == 200
+    assert state["deleted"][-1] == {"tag_id": ["tag-001"]}
+
+
+def test_admin_wecom_tag_management_blocks_create_when_limit_reached(client, monkeypatch):
+    def fake_full_tag_post(url, params=None, json=None, timeout=None, files=None):
+        if url.endswith("/cgi-bin/externalcontact/get_corp_tag_list"):
+            return FakeResponse(
+                {
+                    "errcode": 0,
+                    "errmsg": "ok",
+                    "tag_group": [
+                        {
+                            "group_id": "group-full",
+                            "group_name": "满额标签组",
+                            "tag": [{"id": f"tag-{index}", "name": f"标签{index}"} for index in range(1000)],
+                        }
+                    ],
+                }
+            )
+        if url.endswith("/cgi-bin/externalcontact/add_corp_tag"):
+            raise AssertionError("add_corp_tag should not be called when tag limit is reached")
+        return fake_wecom_post(url, params=params, json=json, timeout=timeout, files=files)
+
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", fake_full_tag_post)
+
+    response = client.post("/api/admin/wecom/tags", json={"group_id": "group-full", "tag_name": "超限标签"})
+    data = response.get_json()
+    assert response.status_code == 400
+    assert data["error"] == "标签数量已达到 1000 上限，不能继续新增标签。"
 
 
 def test_class_user_management_bootstrap_creates_missing_lead_tag(client, app, monkeypatch):
@@ -2183,8 +2339,8 @@ def test_mcp_tools_and_message_batches(client, app, monkeypatch):
     assert "get_contact" in tool_names
     assert "get_pending_message_batches" in tool_names
     assert "get_owner_role_map" in tool_names
-    assert "get_signup_tag_rules" in tool_names
-    assert "get_routing_config" in tool_names
+    assert "get_signup_tag_rules" not in tool_names
+    assert "get_routing_config" not in tool_names
 
     contact_resp = client.post(
         "/mcp",
@@ -2201,22 +2357,6 @@ def test_mcp_tools_and_message_batches(client, app, monkeypatch):
     assert contact_payload["tags"][0]["tag_id"] == "tag-999"
     assert contact_payload["signup_status"] == "signed_999"
     assert contact_payload["routing_context"]["routing_target"] == "sales_handle"
-
-    routing_resp = client.post(
-        "/mcp",
-        headers=headers,
-        json={
-            "jsonrpc": "2.0",
-            "id": 22,
-            "method": "tools/call",
-            "params": {"name": "get_routing_config", "arguments": {}},
-        },
-    )
-    routing_payload = routing_resp.get_json()["result"]["structuredContent"]
-    assert routing_payload["owner_role_map"][0]["userid"] == "sales_01"
-    assert routing_payload["signup_tag_rules"]["tag_group_name"] == "AI 产品报名情况"
-    assert routing_payload["signup_tag_rules"]["items"][0]["tag_id"] in {"tag-999", "tag-3999"}
-    assert routing_payload["routing_rules"]["signed_3999"]["when_owner_role_sales"] == "delivery_redirect"
 
     pending_resp = client.post(
         "/mcp",
@@ -2917,6 +3057,7 @@ def test_questionnaire_admin_routes_and_public_h5(client):
     questionnaire = create_response.get_json()["questionnaire"]
     questionnaire_id = questionnaire["id"]
     slug = questionnaire["slug"]
+    assert questionnaire["answer_display_mode"] == "all_in_one"
 
     list_response = client.get("/api/admin/questionnaires")
     list_payload = list_response.get_json()
@@ -2927,12 +3068,36 @@ def test_questionnaire_admin_routes_and_public_h5(client):
     detail_response = client.get(f"/api/admin/questionnaires/{questionnaire_id}")
     detail_payload = detail_response.get_json()["questionnaire"]
     assert detail_response.status_code == 200
+    assert detail_payload["answer_display_mode"] == "all_in_one"
     assert len(detail_payload["questions"]) == 3
     assert detail_payload["questions"][0]["options"][0]["tag_codes"] == ["budget_low"]
 
     blocked_public_response = client.get(f"/api/h5/questionnaires/{slug}")
     assert blocked_public_response.status_code == 403
     assert blocked_public_response.get_json() == {"ok": False, "error": "please_open_in_wechat"}
+
+    update_payload = _build_questionnaire_payload(
+        slug=slug,
+        answer_display_mode="one_by_one",
+    )
+    update_response = client.put(f"/api/admin/questionnaires/{questionnaire_id}", json=update_payload)
+    assert update_response.status_code == 200
+    assert update_response.get_json()["questionnaire"]["answer_display_mode"] == "one_by_one"
+
+    public_response = client.get(
+        f"/api/h5/questionnaires/{slug}",
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+    assert public_response.status_code == 200
+    public_payload = public_response.get_json()["questionnaire"]
+    assert public_payload["answer_display_mode"] == "one_by_one"
+
+    invalid_response = client.put(
+        f"/api/admin/questionnaires/{questionnaire_id}",
+        json=_build_questionnaire_payload(slug=slug, answer_display_mode="auto_next_enabled"),
+    )
+    assert invalid_response.status_code == 400
+    assert invalid_response.get_json()["error"] == "答题展示方式不正确"
 
     public_response = client.get(f"/api/h5/questionnaires/{slug}", headers=WECHAT_BROWSER_HEADERS)
     public_payload = public_response.get_json()["questionnaire"]

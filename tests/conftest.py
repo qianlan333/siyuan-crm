@@ -90,9 +90,12 @@ _TABLES_TO_TRUNCATE = [
     "automation_workflow_node_transition",
     "automation_workflow_node",
     "automation_workflow_goal",
+    "automation_operation_templates",
     "automation_workflow",
     "automation_event",
     "automation_member",
+    "wecom_customer_acquisition_links",
+    "automation_program_config_block",
     "automation_program",
     "automation_channel",
     "automation_sop_progress",
@@ -147,6 +150,10 @@ _TABLES_TO_TRUNCATE = [
     "questionnaire_questions",
     "questionnaire_score_rules",
     "questionnaires",
+    "wechat_pay_order_export_jobs",
+    "wechat_pay_refunds",
+    "wechat_pay_order_events",
+    "wechat_pay_orders",
     # — admin / auth
     "admin_users",
     # admin_wecom_directory_member 不在 PG schema 中（WeCom 目录走 admin_users）
@@ -322,26 +329,27 @@ def _ensure_schema_once():
         return
     schema_path = _ROOT / "wecom_ability_service" / "schema_postgres.sql"
     if schema_path.exists():
+        from wecom_ability_service.db.migrations.schema_runner import (
+            run_schema_with_forward_fk_retries,
+        )
+
         conn = psycopg.connect(url)
-        statements = [s.strip() for s in schema_path.read_text(encoding="utf-8").split(";") if s.strip()]
-        pending = statements
-        for _ in range(4):
-            if not pending:
-                break
-            cursor = conn.cursor()
-            next_pending: list[str] = []
-            for stmt in pending:
+        try:
+            def _execute_schema_statement(stmt: str) -> None:
+                cursor = conn.cursor()
                 try:
                     cursor.execute(stmt)
-                    conn.commit()
-                except Exception:
-                    conn.rollback()
-                    next_pending.append(stmt)
-            cursor.close()
-            if len(next_pending) == len(pending):
-                break
-            pending = next_pending
-        conn.close()
+                finally:
+                    cursor.close()
+
+            run_schema_with_forward_fk_retries(
+                schema_path.read_text(encoding="utf-8"),
+                execute=_execute_schema_statement,
+                commit=conn.commit,
+                rollback=conn.rollback,
+            )
+        finally:
+            conn.close()
 
     # 过滤出真存在的表，拼成单条 TRUNCATE。原顺序保留没意义（CASCADE 会自动处理 FK），
     # 但 information_schema 查一次省得每 test 抛 N 个 "relation does not exist"。

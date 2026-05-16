@@ -6,10 +6,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+try:
+    from scripts.script_runtime import REPO_ROOT, ensure_repo_root_on_path
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from script_runtime import REPO_ROOT, ensure_repo_root_on_path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+ROOT = ensure_repo_root_on_path()
+assert ROOT == REPO_ROOT
 
 EXCLUDED_METHODS = {"HEAD", "OPTIONS"}
 

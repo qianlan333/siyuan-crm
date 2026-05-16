@@ -12,8 +12,11 @@
 """
 from __future__ import annotations
 
-import json
 import sys
+
+from script_runtime import ensure_repo_root_on_path, print_json
+
+ensure_repo_root_on_path()
 
 from wecom_ability_service import create_app
 from wecom_ability_service.domains.user_ops.hxc_dashboard_snapshot_service import (
@@ -26,7 +29,7 @@ def main() -> int:
     app = create_app()
     with app.app_context():
         result = refresh_hxc_dashboard_snapshot(trigger_source=trigger_source)
-    print(json.dumps(result, ensure_ascii=False, default=str))
+    print_json(result)
     return 0 if result.get("ok") else 1
 
 

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-import json
 from typing import Any
-
-from flask import current_app
 
 from ...db import get_db
 from ...infra.settings import (
@@ -12,7 +9,6 @@ from ...infra.settings import (
     DEFAULT_DEEPSEEK_REASONER_MODEL,
     DEFAULT_DEEPSEEK_ROUTER_MODEL,
     DEFAULT_DEEPSEEK_TIMEOUT_SECONDS,
-    get_setting,
     mask_value,
     set_settings,
 )
@@ -220,5 +216,4 @@ def test_model_infra_connection() -> dict[str, Any]:
             "error": str(exc),
             "deepseek": _deepseek_settings_payload(),
         }
-
 

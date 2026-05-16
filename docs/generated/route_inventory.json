@@ -1,6 +1,6 @@
 {
   "source": "wecom_ability_service.create_app({'TESTING': True}).url_map.iter_rules()",
-  "route_count": 348,
+  "route_count": 384,
   "routes": [
     {
       "rule": "/<path:filename>",
@@ -17,46 +17,6 @@
     {
       "rule": "/admin",
       "endpoint": "api.admin_console_home",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_console"
-    },
-    {
-      "rule": "/admin/_legacy/class-user-backoffice",
-      "endpoint": "api.admin_console_legacy_class_user_backoffice",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_console"
-    },
-    {
-      "rule": "/admin/_legacy/class-user-management",
-      "endpoint": "api.admin_console_legacy_class_user_management",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_console"
-    },
-    {
-      "rule": "/admin/_legacy/questionnaires",
-      "endpoint": "api.admin_console_legacy_questionnaires",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_console"
-    },
-    {
-      "rule": "/admin/_legacy/user-ops",
-      "endpoint": "api.admin_console_legacy_user_ops",
       "methods": [
         "GET"
       ],
@@ -278,6 +238,18 @@
       "module_hint": "wecom_ability_service.http.automation_conversion"
     },
     {
+      "rule": "/admin/automation-conversion/programs/<int:program_id>/operations/workflows",
+      "endpoint": "api.admin_automation_program_workflows",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "program_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
       "rule": "/admin/automation-conversion/programs/<int:program_id>/operations/workflows/<int:workflow_id>/edit",
       "endpoint": "api.admin_automation_program_workflow_edit",
       "methods": [
@@ -486,14 +458,14 @@
       "module_hint": "wecom_ability_service.http.automation_conversion"
     },
     {
-      "rule": "/admin/class-user-backoffice/ui",
-      "endpoint": "api.admin_class_user_backoffice_ui",
+      "rule": "/admin/broadcast-jobs",
+      "endpoint": "api.admin_console_broadcast_jobs",
       "methods": [
         "GET"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_class_user"
+      "module_hint": "wecom_ability_service.http.admin_jobs"
     },
     {
       "rule": "/admin/class-user-management/ui",
@@ -514,6 +486,46 @@
       "arguments": [],
       "auth_hint": "admin_session",
       "module_hint": "wecom_ability_service.http.admin_operations"
+    },
+    {
+      "rule": "/admin/cloud-orchestrator",
+      "endpoint": "api.admin_cloud_orchestrator_workspace",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/admin/cloud-orchestrator/campaigns",
+      "endpoint": "api.admin_cloud_orchestrator_campaigns_workspace",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/admin/cloud-orchestrator/integration",
+      "endpoint": "api.admin_cloud_orchestrator_integration",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/admin/cloud-orchestrator/observability",
+      "endpoint": "api.admin_cloud_orchestrator_observability",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
     },
     {
       "rule": "/admin/config",
@@ -546,30 +558,30 @@
       "module_hint": "wecom_ability_service.http.admin_config"
     },
     {
-      "rule": "/admin/config/class-term-tags",
-      "endpoint": "api.admin_config_class_term_tags",
+      "rule": "/admin/config/checklist",
+      "endpoint": "api.config_checklist_page",
       "methods": [
         "GET"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/admin/config/class-term-tags/save",
-      "endpoint": "api.admin_config_save_class_term_tag",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
+      "module_hint": "wecom_ability_service.http.setup_wizard"
     },
     {
       "rule": "/admin/config/login-access",
       "endpoint": "api.admin_config_login_access",
       "methods": [
         "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_config"
+    },
+    {
+      "rule": "/admin/config/login-access/directory/refresh",
+      "endpoint": "api.admin_config_refresh_login_access_directory",
+      "methods": [
+        "POST"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
@@ -606,98 +618,14 @@
       "module_hint": "wecom_ability_service.http.admin_config"
     },
     {
-      "rule": "/admin/config/routing",
-      "endpoint": "api.admin_config_routing",
+      "rule": "/admin/config/wecom-tags",
+      "endpoint": "api.admin_config_wecom_tags_redirect",
       "methods": [
         "GET"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
       "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/admin/config/routing/owner-role",
-      "endpoint": "api.admin_config_save_owner_role",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/admin/config/routing/rule",
-      "endpoint": "api.admin_config_save_routing_rule",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/admin/config/signup-tags",
-      "endpoint": "api.admin_config_signup_tags",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/admin/config/signup-tags/save",
-      "endpoint": "api.admin_config_save_signup_tag",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/admin/customer-pulse",
-      "endpoint": "api.admin_customer_pulse_inbox",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/admin/customer-pulse/actions/refresh",
-      "endpoint": "api.admin_customer_pulse_refresh_action",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/admin/customer-pulse/cards/<int:card_id>/actions/execute",
-      "endpoint": "api.admin_customer_pulse_card_execute_action",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/admin/customer-pulse/cards/<int:card_id>/feedback",
-      "endpoint": "api.admin_customer_pulse_card_feedback_action",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
     },
     {
       "rule": "/admin/customers",
@@ -746,14 +674,34 @@
       "module_hint": "wecom_ability_service.http.admin_customers"
     },
     {
-      "rule": "/admin/followup-orchestrator",
-      "endpoint": "api.admin_followup_orchestrator",
+      "rule": "/admin/hxc-dashboard",
+      "endpoint": "api.admin_hxc_dashboard_workspace",
       "methods": [
         "GET"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/admin/hxc-send-config",
+      "endpoint": "api.admin_hxc_send_config_page",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/admin/image-library",
+      "endpoint": "api.admin_image_library_workspace",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
       "rule": "/admin/jobs",
@@ -814,6 +762,16 @@
       "arguments": [],
       "auth_hint": "admin_session",
       "module_hint": "wecom_ability_service.http.admin_mcp"
+    },
+    {
+      "rule": "/admin/miniprogram-library",
+      "endpoint": "api.admin_miniprogram_library_workspace",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
     },
     {
       "rule": "/admin/questionnaires",
@@ -951,16 +909,6 @@
       "module_hint": "wecom_ability_service.http.admin_questionnaires"
     },
     {
-      "rule": "/admin/system",
-      "endpoint": "api.admin_console_system",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_console"
-    },
-    {
       "rule": "/admin/user-ops",
       "endpoint": "api.admin_console_user_ops",
       "methods": [
@@ -991,6 +939,26 @@
       "module_hint": "wecom_ability_service.http.admin_user_ops"
     },
     {
+      "rule": "/admin/wecom-customer-acquisition-links/ui",
+      "endpoint": "api.admin_wecom_customer_acquisition_links_ui",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.wecom_customer_acquisition"
+    },
+    {
+      "rule": "/admin/wecom-tags",
+      "endpoint": "api.admin_wecom_tags_page",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_config"
+    },
+    {
       "rule": "/api/admin/audit/logs",
       "endpoint": "api.api_admin_audit_logs",
       "methods": [
@@ -999,6 +967,46 @@
       "arguments": [],
       "auth_hint": "admin_session",
       "module_hint": "wecom_ability_service.http.admin_audit"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/action-templates",
+      "endpoint": "api.api_admin_automation_conversion_action_templates",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/action-templates",
+      "endpoint": "api.api_admin_automation_conversion_action_templates",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/action-templates/from-workflow",
+      "endpoint": "api.api_admin_automation_conversion_action_template_from_workflow",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/action-templates/generate",
+      "endpoint": "api.api_admin_automation_conversion_action_template_generate",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
     },
     {
       "rule": "/api/admin/automation-conversion/agent-orchestration/pending-publish",
@@ -1459,6 +1467,54 @@
       "module_hint": "wecom_ability_service.http.automation_conversion"
     },
     {
+      "rule": "/api/admin/automation-conversion/programs/<int:program_id>/actions/from-template",
+      "endpoint": "api.api_admin_automation_program_action_from_template",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "program_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-broadcast",
+      "endpoint": "api.api_admin_automation_program_member_segment_broadcast",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "program_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-search",
+      "endpoint": "api.api_admin_automation_program_member_segment_search",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "program_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
+      "rule": "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-search",
+      "endpoint": "api.api_admin_automation_program_member_segment_search",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "program_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.automation_conversion"
+    },
+    {
       "rule": "/api/admin/automation-conversion/reply-monitor/capture",
       "endpoint": "api.api_admin_automation_conversion_reply_monitor_capture",
       "methods": [
@@ -1855,6 +1911,40 @@
       "module_hint": "wecom_ability_service.http.automation_conversion"
     },
     {
+      "rule": "/api/admin/broadcast-jobs",
+      "endpoint": "api.api_admin_broadcast_jobs",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_jobs"
+    },
+    {
+      "rule": "/api/admin/broadcast-jobs/<int:job_id>/approve",
+      "endpoint": "api.api_admin_broadcast_jobs_approve",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "job_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_jobs"
+    },
+    {
+      "rule": "/api/admin/broadcast-jobs/<int:job_id>/cancel",
+      "endpoint": "api.api_admin_broadcast_jobs_cancel",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "job_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_jobs"
+    },
+    {
       "rule": "/api/admin/class-user-management",
       "endpoint": "api.admin_class_user_management_list",
       "methods": [
@@ -1905,6 +1995,315 @@
       "module_hint": "wecom_ability_service.http.admin_class_user"
     },
     {
+      "rule": "/api/admin/cloud-orchestrator/audit",
+      "endpoint": "api.cloud_orchestrator_audit",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns",
+      "endpoint": "api.cloud_orchestrator_list_campaigns",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>",
+      "endpoint": "api.cloud_orchestrator_delete_campaign",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>",
+      "endpoint": "api.cloud_orchestrator_get_campaign",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/approve",
+      "endpoint": "api.cloud_orchestrator_approve_campaign",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/members",
+      "endpoint": "api.cloud_orchestrator_list_campaign_members",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/pause",
+      "endpoint": "api.cloud_orchestrator_pause_campaign",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/reject",
+      "endpoint": "api.cloud_orchestrator_reject_campaign",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/start",
+      "endpoint": "api.cloud_orchestrator_start_campaign",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps",
+      "endpoint": "api.cloud_orchestrator_add_campaign_step",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "campaign_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>",
+      "endpoint": "api.cloud_orchestrator_delete_campaign_step",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "campaign_code",
+        "step_index"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>",
+      "endpoint": "api.cloud_orchestrator_update_campaign_step",
+      "methods": [
+        "PATCH"
+      ],
+      "arguments": [
+        "campaign_code",
+        "step_index"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>",
+      "endpoint": "api.cloud_orchestrator_update_campaign_step",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "campaign_code",
+        "step_index"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/batch-start",
+      "endpoint": "api.cloud_orchestrator_batch_start_campaigns",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/campaigns/run-due",
+      "endpoint": "api.cloud_orchestrator_run_due_campaigns",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/media/upload",
+      "endpoint": "api.cloud_orchestrator_upload_image",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/observability",
+      "endpoint": "api.cloud_orchestrator_observability",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans",
+      "endpoint": "api.cloud_orchestrator_list_plans",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans",
+      "endpoint": "api.cloud_orchestrator_create_plan",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans/<plan_id>",
+      "endpoint": "api.cloud_orchestrator_get_plan",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "plan_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans/<plan_id>/approve",
+      "endpoint": "api.cloud_orchestrator_approve_plan",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "plan_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans/<plan_id>/commit",
+      "endpoint": "api.cloud_orchestrator_commit_plan",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "plan_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans/<plan_id>/reject",
+      "endpoint": "api.cloud_orchestrator_reject_plan",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "plan_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/plans/<plan_id>/simulate",
+      "endpoint": "api.cloud_orchestrator_simulate_plan",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "plan_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/segments",
+      "endpoint": "api.cloud_orchestrator_list_segments",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/segments/<segment_code>",
+      "endpoint": "api.cloud_orchestrator_get_segment",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "segment_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
+      "rule": "/api/admin/cloud-orchestrator/segments/<segment_code>/preview",
+      "endpoint": "api.cloud_orchestrator_preview_segment",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "segment_code"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.cloud_orchestrator_endpoint"
+    },
+    {
       "rule": "/api/admin/config/app-settings",
       "endpoint": "api.api_admin_config_app_settings",
       "methods": [
@@ -1919,26 +2318,6 @@
       "endpoint": "api.api_admin_config_save_app_settings",
       "methods": [
         "PUT"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/config/class-term-tags",
-      "endpoint": "api.api_admin_config_class_term_tags",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/config/class-term-tags",
-      "endpoint": "api.api_admin_config_save_class_term_tag",
-      "methods": [
-        "POST"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
@@ -1995,158 +2374,6 @@
       "module_hint": "wecom_ability_service.http.admin_config"
     },
     {
-      "rule": "/api/admin/config/routing",
-      "endpoint": "api.api_admin_config_routing",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/config/routing/owner-role",
-      "endpoint": "api.api_admin_config_save_owner_role",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/config/routing/rule",
-      "endpoint": "api.api_admin_config_save_routing_rule",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/config/signup-tags",
-      "endpoint": "api.api_admin_config_signup_tags",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/config/signup-tags",
-      "endpoint": "api.api_admin_config_save_signup_tag",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_config"
-    },
-    {
-      "rule": "/api/admin/customer-pulse",
-      "endpoint": "api.admin_customer_pulse_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/actions/refresh",
-      "endpoint": "api.admin_customer_pulse_refresh_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/cards/<int:card_id>",
-      "endpoint": "api.admin_customer_pulse_card_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/cards/<int:card_id>/actions/execute",
-      "endpoint": "api.admin_customer_pulse_card_execute_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/cards/<int:card_id>/actions/preview",
-      "endpoint": "api.admin_customer_pulse_card_preview_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/cards/<int:card_id>/evidence",
-      "endpoint": "api.admin_customer_pulse_card_evidence_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/cards/<int:card_id>/feedback",
-      "endpoint": "api.admin_customer_pulse_card_feedback_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "card_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/executions/<int:execution_id>/undo",
-      "endpoint": "api.admin_customer_pulse_execution_undo_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "execution_id"
-      ],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/admin/customer-pulse/stats",
-      "endpoint": "api.admin_customer_pulse_stats_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
       "rule": "/api/admin/customers/profile",
       "endpoint": "api.admin_customer_profile_api",
       "methods": [
@@ -2159,16 +2386,6 @@
     {
       "rule": "/api/admin/customers/profile/messages",
       "endpoint": "api.admin_customer_profile_messages_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_customers"
-    },
-    {
-      "rule": "/api/admin/customers/profile/pulse",
-      "endpoint": "api.admin_customer_profile_pulse_api",
       "methods": [
         "GET"
       ],
@@ -2237,90 +2454,176 @@
       "module_hint": "wecom_ability_service.http.admin_dashboard"
     },
     {
-      "rule": "/api/admin/followup-orchestrator",
-      "endpoint": "api.api_admin_followup_orchestrator",
+      "rule": "/api/admin/hxc-dashboard/broadcast",
+      "endpoint": "api.admin_hxc_dashboard_broadcast",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/api/admin/hxc-dashboard/refresh",
+      "endpoint": "api.admin_hxc_dashboard_refresh",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/api/admin/hxc-dashboard/refresh-directory",
+      "endpoint": "api.admin_hxc_refresh_directory",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/api/admin/hxc-dashboard/send-config",
+      "endpoint": "api.admin_hxc_send_config_list",
       "methods": [
         "GET"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
     },
     {
-      "rule": "/api/admin/followup-orchestrator/customers/<external_userid>",
-      "endpoint": "api.api_admin_followup_orchestrator_customer",
+      "rule": "/api/admin/hxc-dashboard/send-config",
+      "endpoint": "api.admin_hxc_send_config_upsert",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/api/admin/hxc-dashboard/send-config/<sender_userid>",
+      "endpoint": "api.admin_hxc_send_config_delete",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "sender_userid"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_hxc_dashboard"
+    },
+    {
+      "rule": "/api/admin/image-library",
+      "endpoint": "api.admin_image_library_list",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/image-library/<int:image_id>",
+      "endpoint": "api.admin_image_library_delete",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "image_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/image-library/<int:image_id>",
+      "endpoint": "api.admin_image_library_get",
       "methods": [
         "GET"
       ],
       "arguments": [
-        "external_userid"
+        "image_id"
       ],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
-      "rule": "/api/admin/followup-orchestrator/missions/<mission_key>",
-      "endpoint": "api.api_admin_followup_orchestrator_mission_detail",
+      "rule": "/api/admin/image-library/<int:image_id>",
+      "endpoint": "api.admin_image_library_update",
+      "methods": [
+        "PUT"
+      ],
+      "arguments": [
+        "image_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/image-library/<int:image_id>/references",
+      "endpoint": "api.admin_image_library_references",
       "methods": [
         "GET"
       ],
       "arguments": [
-        "mission_key"
+        "image_id"
       ],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
-      "rule": "/api/admin/followup-orchestrator/missions/<mission_key>/actions/<action_type>",
-      "endpoint": "api.api_admin_followup_orchestrator_mission_action",
+      "rule": "/api/admin/image-library/<int:image_id>/test-resolve",
+      "endpoint": "api.admin_image_library_test_resolve",
       "methods": [
         "POST"
       ],
       "arguments": [
-        "action_type",
-        "mission_key"
+        "image_id"
       ],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
-      "rule": "/api/admin/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/execute",
-      "endpoint": "api.api_admin_followup_orchestrator_mission_item_execute",
+      "rule": "/api/admin/image-library/facets",
+      "endpoint": "api.admin_image_library_facets",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/image-library/from-base64",
+      "endpoint": "api.admin_image_library_create_base64",
       "methods": [
         "POST"
       ],
-      "arguments": [
-        "mission_item_key",
-        "mission_key"
-      ],
+      "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
-      "rule": "/api/admin/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/preview",
-      "endpoint": "api.api_admin_followup_orchestrator_mission_item_preview",
+      "rule": "/api/admin/image-library/from-url",
+      "endpoint": "api.admin_image_library_create_url",
       "methods": [
         "POST"
       ],
-      "arguments": [
-        "mission_item_key",
-        "mission_key"
-      ],
+      "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
-      "rule": "/api/admin/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/undo",
-      "endpoint": "api.api_admin_followup_orchestrator_mission_item_undo",
+      "rule": "/api/admin/image-library/upload",
+      "endpoint": "api.admin_image_library_upload",
       "methods": [
         "POST"
       ],
-      "arguments": [
-        "mission_item_key",
-        "mission_key"
-      ],
+      "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
+      "module_hint": "wecom_ability_service.http.image_library_endpoint"
     },
     {
       "rule": "/api/admin/jobs/archive-sync",
@@ -2497,6 +2800,74 @@
       "arguments": [],
       "auth_hint": "admin_session",
       "module_hint": "wecom_ability_service.http.admin_config"
+    },
+    {
+      "rule": "/api/admin/miniprogram-library",
+      "endpoint": "api.admin_miniprogram_library_list",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/miniprogram-library",
+      "endpoint": "api.admin_miniprogram_library_create",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/miniprogram-library/<int:library_id>",
+      "endpoint": "api.admin_miniprogram_library_delete",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "library_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/miniprogram-library/<int:library_id>",
+      "endpoint": "api.admin_miniprogram_library_get",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "library_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/miniprogram-library/<int:library_id>",
+      "endpoint": "api.admin_miniprogram_library_update",
+      "methods": [
+        "PUT"
+      ],
+      "arguments": [
+        "library_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
+    },
+    {
+      "rule": "/api/admin/miniprogram-library/<int:library_id>/test-resolve",
+      "endpoint": "api.admin_miniprogram_library_test_resolve",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "library_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.miniprogram_library_endpoint"
     },
     {
       "rule": "/api/admin/questionnaires",
@@ -2765,14 +3136,136 @@
       "module_hint": "wecom_ability_service.http.admin_user_ops"
     },
     {
-      "rule": "/api/admin/wecom/tags",
-      "endpoint": "api.admin_list_wecom_tags",
+      "rule": "/api/admin/wecom-customer-acquisition-links",
+      "endpoint": "api.api_list_wecom_customer_acquisition_links",
       "methods": [
         "GET"
       ],
       "arguments": [],
       "auth_hint": "admin_session",
-      "module_hint": "wecom_ability_service.http.admin_questionnaires"
+      "module_hint": "wecom_ability_service.http.wecom_customer_acquisition"
+    },
+    {
+      "rule": "/api/admin/wecom-customer-acquisition-links",
+      "endpoint": "api.api_create_wecom_customer_acquisition_link",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.wecom_customer_acquisition"
+    },
+    {
+      "rule": "/api/admin/wecom-customer-acquisition-links/<int:link_id>/disable",
+      "endpoint": "api.api_disable_wecom_customer_acquisition_link",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "link_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.wecom_customer_acquisition"
+    },
+    {
+      "rule": "/api/admin/wecom-customer-acquisition-links/<int:link_id>/enable",
+      "endpoint": "api.api_enable_wecom_customer_acquisition_link",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [
+        "link_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.wecom_customer_acquisition"
+    },
+    {
+      "rule": "/api/admin/wecom-customer-acquisition-links/preflight",
+      "endpoint": "api.api_wecom_customer_acquisition_preflight",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.wecom_customer_acquisition"
+    },
+    {
+      "rule": "/api/admin/wecom/tag-groups",
+      "endpoint": "api.admin_create_wecom_tag_group",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
+    },
+    {
+      "rule": "/api/admin/wecom/tag-groups/<group_id>",
+      "endpoint": "api.admin_delete_wecom_tag_group",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "group_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
+    },
+    {
+      "rule": "/api/admin/wecom/tag-groups/<group_id>",
+      "endpoint": "api.admin_update_wecom_tag_group",
+      "methods": [
+        "PUT"
+      ],
+      "arguments": [
+        "group_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
+    },
+    {
+      "rule": "/api/admin/wecom/tags",
+      "endpoint": "api.admin_wecom_tag_management_payload",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
+    },
+    {
+      "rule": "/api/admin/wecom/tags",
+      "endpoint": "api.admin_create_wecom_tag",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
+    },
+    {
+      "rule": "/api/admin/wecom/tags/<tag_id>",
+      "endpoint": "api.admin_delete_wecom_tag",
+      "methods": [
+        "DELETE"
+      ],
+      "arguments": [
+        "tag_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
+    },
+    {
+      "rule": "/api/admin/wecom/tags/<tag_id>",
+      "endpoint": "api.admin_update_wecom_tag",
+      "methods": [
+        "PUT"
+      ],
+      "arguments": [
+        "tag_id"
+      ],
+      "auth_hint": "admin_session",
+      "module_hint": "wecom_ability_service.http.admin_wecom_tags"
     },
     {
       "rule": "/api/archive/health",
@@ -3091,152 +3584,6 @@
       "module_hint": "wecom_ability_service.http.automation_conversion"
     },
     {
-      "rule": "/api/internal/customer-pulse/customers/<external_userid>",
-      "endpoint": "api.internal_customer_pulse_customer_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [
-        "external_userid"
-      ],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/internal/customer-pulse/inbox",
-      "endpoint": "api.internal_customer_pulse_inbox_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/internal/customer-pulse/recompute",
-      "endpoint": "api.internal_customer_pulse_recompute_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/internal/customer-pulse/run-due",
-      "endpoint": "api.internal_customer_pulse_run_due_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/internal/customer-pulse/stats",
-      "endpoint": "api.internal_customer_pulse_stats_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_customer_pulse"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/missions/<mission_key>",
-      "endpoint": "api.internal_followup_orchestrator_mission_detail_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [
-        "mission_key"
-      ],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/missions/<mission_key>/actions/<action_type>",
-      "endpoint": "api.internal_followup_orchestrator_mission_action_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "action_type",
-        "mission_key"
-      ],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/execute",
-      "endpoint": "api.internal_followup_orchestrator_mission_item_execute_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "mission_item_key",
-        "mission_key"
-      ],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/preview",
-      "endpoint": "api.internal_followup_orchestrator_mission_item_preview_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "mission_item_key",
-        "mission_key"
-      ],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/undo",
-      "endpoint": "api.internal_followup_orchestrator_mission_item_undo_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [
-        "mission_item_key",
-        "mission_key"
-      ],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/my-missions",
-      "endpoint": "api.internal_followup_orchestrator_my_missions_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/sync",
-      "endpoint": "api.internal_followup_orchestrator_sync_api",
-      "methods": [
-        "POST"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
-      "rule": "/api/internal/followup-orchestrator/team-board",
-      "endpoint": "api.internal_followup_orchestrator_team_board_api",
-      "methods": [
-        "GET"
-      ],
-      "arguments": [],
-      "auth_hint": "api_existing_behavior",
-      "module_hint": "wecom_ability_service.http.admin_followup_orchestrator"
-    },
-    {
       "rule": "/api/internal/user-ops/lead-pool/backfill-owner-class-terms",
       "endpoint": "api.internal_user_ops_backfill_owner_class_terms",
       "methods": [
@@ -3419,6 +3766,26 @@
       "arguments": [],
       "auth_hint": "api_existing_behavior",
       "module_hint": "wecom_ability_service.http.sidebar"
+    },
+    {
+      "rule": "/api/system/compensate",
+      "endpoint": "api.api_compensating_scan",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "api_existing_behavior",
+      "module_hint": "wecom_ability_service.http.system_health"
+    },
+    {
+      "rule": "/api/system/health",
+      "endpoint": "api.system_health",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "api_existing_behavior",
+      "module_hint": "wecom_ability_service.http.system_health"
     },
     {
       "rule": "/api/tags",
@@ -3663,6 +4030,19 @@
       "module_hint": "wecom_ability_service.http.public_questionnaires"
     },
     {
+      "rule": "/s/<slug>/result/<result_token>",
+      "endpoint": "api.questionnaire_h5_assessment_result",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [
+        "result_token",
+        "slug"
+      ],
+      "auth_hint": "public_or_entry",
+      "module_hint": "wecom_ability_service.http.public_questionnaires"
+    },
+    {
       "rule": "/s/<slug>/submitted",
       "endpoint": "api.questionnaire_h5_submitted",
       "methods": [
@@ -3673,6 +4053,26 @@
       ],
       "auth_hint": "public_or_entry",
       "module_hint": "wecom_ability_service.http.public_questionnaires"
+    },
+    {
+      "rule": "/setup/wizard",
+      "endpoint": "api.setup_wizard",
+      "methods": [
+        "GET"
+      ],
+      "arguments": [],
+      "auth_hint": "existing_behavior",
+      "module_hint": "wecom_ability_service.http.setup_wizard"
+    },
+    {
+      "rule": "/setup/wizard/save",
+      "endpoint": "api.setup_wizard_save",
+      "methods": [
+        "POST"
+      ],
+      "arguments": [],
+      "auth_hint": "existing_behavior",
+      "module_hint": "wecom_ability_service.http.setup_wizard"
     },
     {
       "rule": "/sidebar/bind-mobile",

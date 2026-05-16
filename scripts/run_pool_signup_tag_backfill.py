@@ -2,15 +2,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import sys
 from pathlib import Path
 from typing import Any
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+try:
+    from scripts.script_runtime import ensure_repo_root_on_path, print_json
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from script_runtime import ensure_repo_root_on_path, print_json
+
+ensure_repo_root_on_path()
 
 from wecom_ability_service import create_app
 from wecom_ability_service.domains.automation_conversion import repo as automation_repo
@@ -423,10 +424,10 @@ def main() -> int:
                 operator=_text(args.operator),
             )
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+        print_json({"ok": False, "error": str(exc)}, indent=2)
         return 1
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print_json(payload, indent=2)
     return 0 if payload.get("ok") else 1
 
 

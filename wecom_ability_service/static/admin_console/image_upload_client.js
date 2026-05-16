@@ -1,7 +1,7 @@
 (function (window) {
   "use strict";
 
-  var MAX_SOURCE_BYTES = 5 * 1024 * 1024;
+  var MAX_SOURCE_BYTES = 2 * 1024 * 1024;
   var DIRECT_UPLOAD_BYTES = 900 * 1024;
   var MAX_CANVAS_SIDE = 1600;
   var MIN_CANVAS_SIDE = 720;
@@ -123,6 +123,12 @@
     return name.replace(/\.[^.]+$/, "") + ext;
   }
 
+  function isSupportedSourceImage(file) {
+    var type = String(file && file.type || "").toLowerCase();
+    if (type === "image/jpeg" || type === "image/jpg" || type === "image/png") return true;
+    return /\.(jpe?g|png)$/i.test(String(file && file.name || ""));
+  }
+
   async function compressImage(file) {
     var img = await loadImage(file);
     var maxSide = Math.min(
@@ -161,8 +167,11 @@
     if (!String(file.type || "").toLowerCase().startsWith("image/")) {
       throw new Error("只能上传图片文件");
     }
+    if (!isSupportedSourceImage(file)) {
+      throw new Error("只能上传 JPG/PNG 图片");
+    }
     if (file.size > MAX_SOURCE_BYTES) {
-      throw new Error("图片大小不能超过 5MB");
+      throw new Error("图片大小不能超过 2MB");
     }
     if (file.size <= DIRECT_UPLOAD_BYTES) {
       return { file: file, compressed: false, originalSize: file.size, uploadSize: file.size };

@@ -1,12 +1,8 @@
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from flask import current_app
 
 from ...db import get_db
 from . import repo
@@ -20,16 +16,10 @@ from .service import (
     _ROUTER_BLOCKED_DISPATCH_STATUS,
     _ROUTER_PENDING_DISPATCH_STATUS,
     _ROUTER_TERMINAL_DISPATCH_STATUSES,
-    _blocked_phase_label,
     _build_batch_context,
-    _is_within_auto_start_window,
-    _json_loads,
     _load_formatted_batch,
     _normalize_followup_segment,
-    _normalize_int,
     _normalized_text,
-    _pool_stage_key,
-    _router_now,
     _router_quiet_hours_blocked,
     _routing_reason_from_preview,
     _serialize_dispatch_log,
@@ -123,7 +113,8 @@ def _build_disabled_batch_result(
         }
     )
     skipped_customers = [
-        {"external_userid": external_userid, "reason": "automation_disabled"} for external_userid in external_userids
+        _candidate_skip_entry(external_userid, "automation_disabled")
+        for external_userid in external_userids
     ]
     return {
         "scenario_key": scenario_key,
@@ -354,4 +345,3 @@ def list_signup_conversion_batches(
         "source_cursor": _normalized_text(pending_batches.get("next_cursor")),
         "next_cursor": _normalized_text(pending_batches.get("next_cursor")),
     }
-

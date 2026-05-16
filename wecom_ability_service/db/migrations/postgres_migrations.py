@@ -44,6 +44,8 @@ def _run_schema_with_forward_fk_retries(db, script: str, *, max_passes: int = 4)
                 db.execute(stmt)
             return
         pending = next_pending
+    for stmt in pending:
+        db.execute(stmt)
 
 
 def _ensure_postgres_user_ops_page_tables(db) -> None:
@@ -117,6 +119,118 @@ def _ensure_postgres_automation_agent_config_tables(db) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_automation_profile_segment_template_program
         ON automation_profile_segment_template (program_id, enabled, updated_at DESC, id DESC)
+        """
+    )
+
+
+def _ensure_postgres_automation_operation_templates(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_templates (
+            id BIGSERIAL PRIMARY KEY,
+            template_code TEXT NOT NULL UNIQUE,
+            template_name TEXT NOT NULL DEFAULT '',
+            template_source TEXT NOT NULL DEFAULT 'crm_local',
+            category TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            default_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            ui_schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            workflow_blueprint_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            node_blueprints_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            archived_at TIMESTAMPTZ
+        )
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_operation_templates
+        DROP CONSTRAINT IF EXISTS automation_operation_templates_template_source_check
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_operation_templates
+        ADD CONSTRAINT automation_operation_templates_template_source_check
+        CHECK (template_source IN ('builtin', 'crm_local', 'ai_generated'))
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_operation_templates
+        DROP CONSTRAINT IF EXISTS automation_operation_templates_status_check
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_operation_templates
+        ADD CONSTRAINT automation_operation_templates_status_check
+        CHECK (status IN ('active', 'archived'))
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_operation_templates_source
+        ON automation_operation_templates (template_source, status, updated_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_operation_templates_category
+        ON automation_operation_templates (category, status, updated_at DESC, id DESC)
+        """
+    )
+
+
+def _ensure_pending_questionnaire_followup_cadence(db) -> None:
+    db.execute(
+        """
+        UPDATE automation_workflow_node AS node
+        SET day_offset = CASE node.node_code
+            WHEN '催问卷_1' THEN 1
+            WHEN '催问卷_2' THEN 2
+            WHEN '催问卷_3' THEN 3
+            ELSE node.day_offset
+        END,
+            updated_at = CURRENT_TIMESTAMP
+        FROM automation_workflow AS workflow
+        WHERE workflow.id = node.workflow_id
+          AND workflow.workflow_code = '3_次推填问卷'
+          AND node.node_code IN ('催问卷_1', '催问卷_2', '催问卷_3')
+          AND node.target_audience_code = 'pending_questionnaire'
+          AND node.trigger_mode = 'scheduled'
+          AND node.send_time = '09:00'
+          AND node.day_offset <> CASE node.node_code
+              WHEN '催问卷_1' THEN 1
+              WHEN '催问卷_2' THEN 2
+              WHEN '催问卷_3' THEN 3
+              ELSE node.day_offset
+          END
+          AND EXISTS (
+              SELECT 1
+              FROM automation_workflow_node AS legacy_node
+              WHERE legacy_node.workflow_id = workflow.id
+                AND legacy_node.node_code = '催问卷_1'
+                AND legacy_node.day_offset = 2
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM automation_workflow_node AS legacy_node
+              WHERE legacy_node.workflow_id = workflow.id
+                AND legacy_node.node_code = '催问卷_2'
+                AND legacy_node.day_offset = 3
+          )
+          AND EXISTS (
+              SELECT 1
+              FROM automation_workflow_node AS legacy_node
+              WHERE legacy_node.workflow_id = workflow.id
+                AND legacy_node.node_code = '催问卷_3'
+                AND legacy_node.day_offset = 4
+          )
         """
     )
 
@@ -353,6 +467,190 @@ def _ensure_postgres_questionnaire_scrm_apply_log_columns(db) -> None:
         "ADD COLUMN IF NOT EXISTS wecom_response JSONB NOT NULL DEFAULT '{}'::jsonb",
     ):
         db.execute(stmt)
+
+
+def _ensure_postgres_wechat_pay_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_orders (
+            id BIGSERIAL PRIMARY KEY,
+            out_trade_no TEXT NOT NULL UNIQUE,
+            order_source TEXT NOT NULL DEFAULT 'h5_checkout',
+            client_order_ref TEXT NOT NULL DEFAULT '',
+            product_code TEXT NOT NULL,
+            product_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            amount_total INTEGER NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            payer_openid TEXT NOT NULL DEFAULT '',
+            respondent_key TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
+            external_userid TEXT NOT NULL DEFAULT '',
+            userid_snapshot TEXT NOT NULL DEFAULT '',
+            mobile_snapshot TEXT NOT NULL DEFAULT '',
+            payer_name_snapshot TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'created',
+            trade_state TEXT NOT NULL DEFAULT '',
+            transaction_id TEXT NOT NULL DEFAULT '',
+            prepay_id TEXT NOT NULL DEFAULT '',
+            bank_type TEXT NOT NULL DEFAULT '',
+            payer_total INTEGER NOT NULL DEFAULT 0,
+            success_url TEXT NOT NULL DEFAULT '',
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            refunded_amount_total INTEGER NOT NULL DEFAULT 0,
+            refund_status TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            expires_at TIMESTAMPTZ,
+            paid_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    for stmt in (
+        "ALTER TABLE IF EXISTS wechat_pay_orders ADD COLUMN IF NOT EXISTS userid_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders ADD COLUMN IF NOT EXISTS mobile_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders ADD COLUMN IF NOT EXISTS payer_name_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders ADD COLUMN IF NOT EXISTS refunded_amount_total INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE IF EXISTS wechat_pay_orders ADD COLUMN IF NOT EXISTS refund_status TEXT NOT NULL DEFAULT ''",
+        "UPDATE wechat_pay_orders SET product_name = product_code WHERE COALESCE(product_name, '') = ''",
+    ):
+        db.execute(stmt)
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_status_created
+        ON wechat_pay_orders (status, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_payer
+        ON wechat_pay_orders (payer_openid, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_product
+        ON wechat_pay_orders (product_code, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_created
+        ON wechat_pay_orders (created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_product_created
+        ON wechat_pay_orders (product_code, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_external_created
+        ON wechat_pay_orders (external_userid, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_mobile_created
+        ON wechat_pay_orders (mobile_snapshot, created_at DESC, id DESC)
+        WHERE mobile_snapshot <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_wechat_pay_orders_transaction_id
+        ON wechat_pay_orders (transaction_id)
+        WHERE transaction_id <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_order_events (
+            id BIGSERIAL PRIMARY KEY,
+            out_trade_no TEXT NOT NULL REFERENCES wechat_pay_orders(out_trade_no) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            transaction_id TEXT NOT NULL DEFAULT '',
+            trade_state TEXT NOT NULL DEFAULT '',
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_events_order
+        ON wechat_pay_order_events (out_trade_no, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_refunds (
+            id BIGSERIAL PRIMARY KEY,
+            order_id BIGINT NOT NULL REFERENCES wechat_pay_orders(id) ON DELETE CASCADE,
+            out_trade_no TEXT NOT NULL DEFAULT '',
+            transaction_id TEXT NOT NULL DEFAULT '',
+            out_refund_no TEXT UNIQUE NOT NULL,
+            refund_id TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            refund_amount_total INTEGER NOT NULL DEFAULT 0,
+            order_amount_total INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            status TEXT NOT NULL DEFAULT 'requested',
+            requested_by TEXT NOT NULL DEFAULT '',
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_refunds_order
+        ON wechat_pay_refunds (order_id, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_refunds_status
+        ON wechat_pay_refunds (status, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_order_export_jobs (
+            id BIGSERIAL PRIMARY KEY,
+            job_id TEXT UNIQUE NOT NULL,
+            requested_by TEXT NOT NULL DEFAULT '',
+            filters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            scope TEXT NOT NULL DEFAULT 'filtered',
+            file_format TEXT NOT NULL DEFAULT 'xlsx',
+            status TEXT NOT NULL DEFAULT 'queued',
+            exported_count INTEGER NOT NULL DEFAULT 0,
+            file_name TEXT NOT NULL DEFAULT '',
+            file_path TEXT NOT NULL DEFAULT '',
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_export_jobs_status
+        ON wechat_pay_order_export_jobs (status, created_at DESC, id DESC)
+        """
+    )
 
 
 def _ensure_postgres_customer_value_segment_tables(db) -> None:
@@ -756,6 +1054,30 @@ def _ensure_postgres_automation_program_tables(db) -> None:
     )
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS automation_program_config_block (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            block_key TEXT NOT NULL,
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft', 'saved', 'published', 'archived')),
+            version INTEGER NOT NULL DEFAULT 1,
+            copied_from_program_id BIGINT REFERENCES automation_program(id) ON DELETE SET NULL,
+            copied_from_block_id BIGINT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_automation_program_config_block_program_key UNIQUE (program_id, block_key)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_config_block_program
+        ON automation_program_config_block (program_id, block_key)
+        """
+    )
+    db.execute(
+        """
         ALTER TABLE IF EXISTS automation_workflow
         ADD COLUMN IF NOT EXISTS program_id BIGINT REFERENCES automation_program(id) ON DELETE SET NULL
         """
@@ -1045,6 +1367,8 @@ def _init_postgres(db) -> None:
         "ALTER TABLE IF EXISTS questionnaires "
         "ADD COLUMN IF NOT EXISTS assessment_enabled BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE IF EXISTS questionnaires "
+        "ADD COLUMN IF NOT EXISTS answer_display_mode TEXT NOT NULL DEFAULT 'all_in_one'",
+        "ALTER TABLE IF EXISTS questionnaires "
         "ADD COLUMN IF NOT EXISTS assessment_config JSONB NOT NULL DEFAULT '{}'::jsonb",
         "ALTER TABLE IF EXISTS questionnaire_questions "
         "ADD COLUMN IF NOT EXISTS assessment_dimension_key TEXT NOT NULL DEFAULT ''",
@@ -1054,6 +1378,16 @@ def _init_postgres(db) -> None:
         "ADD COLUMN IF NOT EXISTS assessment_result_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb",
         "ALTER TABLE IF EXISTS questionnaire_submissions "
         "ADD COLUMN IF NOT EXISTS result_token TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders "
+        "ADD COLUMN IF NOT EXISTS userid_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders "
+        "ADD COLUMN IF NOT EXISTS mobile_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders "
+        "ADD COLUMN IF NOT EXISTS payer_name_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS wechat_pay_orders "
+        "ADD COLUMN IF NOT EXISTS refunded_amount_total INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE IF EXISTS wechat_pay_orders "
+        "ADD COLUMN IF NOT EXISTS refund_status TEXT NOT NULL DEFAULT ''",
     ):
         db.execute(stmt)
 
@@ -1073,9 +1407,11 @@ def _init_postgres(db) -> None:
     )
     _ensure_postgres_questionnaire_external_push_tables(db)
     _ensure_postgres_questionnaire_scrm_apply_log_columns(db)
+    _ensure_postgres_wechat_pay_tables(db)
     _ensure_postgres_user_ops_page_tables(db)
     _ensure_postgres_miniprogram_library_thumb_image_id(db)
     _ensure_postgres_automation_agent_config_tables(db)
+    _ensure_postgres_automation_operation_templates(db)
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_workflow_node
@@ -1110,6 +1446,7 @@ def _init_postgres(db) -> None:
         ON automation_workflow_node (target_audience_code, trigger_mode, enabled, id ASC)
         """
     )
+    _ensure_pending_questionnaire_followup_cadence(db)
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_workflow_execution
@@ -1142,6 +1479,32 @@ def _init_postgres(db) -> None:
         """
         ALTER TABLE questionnaire_questions
         ADD COLUMN IF NOT EXISTS placeholder_text TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ADD COLUMN IF NOT EXISTS answer_display_mode TEXT NOT NULL DEFAULT 'all_in_one'
+        """
+    )
+    db.execute(
+        """
+        UPDATE questionnaires
+        SET answer_display_mode = 'all_in_one'
+        WHERE COALESCE(answer_display_mode, '') NOT IN ('all_in_one', 'one_by_one')
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        DROP CONSTRAINT IF EXISTS questionnaires_answer_display_mode_check
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ADD CONSTRAINT questionnaires_answer_display_mode_check
+        CHECK (answer_display_mode IN ('all_in_one', 'one_by_one'))
         """
     )
     db.execute(
@@ -1274,6 +1637,166 @@ def _init_postgres(db) -> None:
     )
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS wecom_customer_acquisition_links (
+            id BIGSERIAL PRIMARY KEY,
+            corp_id TEXT NOT NULL DEFAULT '',
+            automation_channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+            program_id BIGINT,
+            workflow_id BIGINT,
+            initial_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'
+                CHECK (initial_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+            link_id TEXT NOT NULL DEFAULT '',
+            link_name TEXT NOT NULL DEFAULT '',
+            link_url TEXT NOT NULL DEFAULT '',
+            customer_channel TEXT NOT NULL DEFAULT '',
+            final_url TEXT NOT NULL DEFAULT '',
+            skip_verify BOOLEAN NOT NULL DEFAULT FALSE,
+            range_user_list JSONB NOT NULL DEFAULT '[]'::jsonb,
+            range_department_list JSONB NOT NULL DEFAULT '[]'::jsonb,
+            priority_option JSONB NOT NULL DEFAULT '{}'::jsonb,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'disabled')),
+            last_sync_at TIMESTAMPTZ,
+            last_event_at TIMESTAMPTZ,
+            last_error TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_wecom_customer_acquisition_links_corp_link UNIQUE (corp_id, link_id),
+            CONSTRAINT uq_wecom_customer_acquisition_links_corp_channel UNIQUE (corp_id, customer_channel)
+        )
+        """
+    )
+    for stmt in (
+        "ALTER TABLE IF EXISTS wecom_customer_acquisition_links "
+        "ADD COLUMN IF NOT EXISTS initial_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'",
+        "CREATE INDEX IF NOT EXISTS idx_wecom_customer_acquisition_links_channel "
+        "ON wecom_customer_acquisition_links (automation_channel_id)",
+        "CREATE INDEX IF NOT EXISTS idx_wecom_customer_acquisition_links_status "
+        "ON wecom_customer_acquisition_links (status, updated_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_wecom_customer_acquisition_links_program "
+        "ON wecom_customer_acquisition_links (program_id, status, updated_at DESC, id DESC)",
+    ):
+        db.execute(stmt)
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_task_group (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            group_name TEXT NOT NULL DEFAULT '',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            archived_at TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_operation_task_group_program
+        ON automation_operation_task_group (program_id, sort_order ASC, id ASC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_task (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            group_id BIGINT REFERENCES automation_operation_task_group(id) ON DELETE SET NULL,
+            task_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft', 'active', 'paused', 'archived')),
+            send_time TEXT NOT NULL DEFAULT '10:00',
+            timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+            target_audience_code TEXT NOT NULL DEFAULT 'operating'
+                CHECK (target_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+            audience_day_offset INTEGER NOT NULL DEFAULT 1,
+            behavior_filter TEXT NOT NULL DEFAULT 'none'
+                CHECK (behavior_filter IN ('none', 'lt_2', 'between_2_9', 'gte_10')),
+            content_mode TEXT NOT NULL DEFAULT 'unified'
+                CHECK (content_mode IN ('unified', 'profile_layered', 'behavior_layered', 'agent')),
+            profile_segment_template_id BIGINT REFERENCES automation_profile_segment_template(id) ON DELETE SET NULL,
+            unified_content_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            segment_contents_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            agent_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            published_at TIMESTAMPTZ
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_program "
+        "ON automation_operation_task (program_id, status, send_time, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_group "
+        "ON automation_operation_task (group_id, status, updated_at DESC, id DESC)",
+    ):
+        db.execute(stmt)
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_task_execution (
+            id BIGSERIAL PRIMARY KEY,
+            execution_id TEXT NOT NULL UNIQUE,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            task_id BIGINT NOT NULL REFERENCES automation_operation_task(id) ON DELETE CASCADE,
+            scheduled_for TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            status TEXT NOT NULL DEFAULT 'running',
+            target_count INTEGER NOT NULL DEFAULT 0,
+            enqueued_count INTEGER NOT NULL DEFAULT 0,
+            sent_count INTEGER NOT NULL DEFAULT 0,
+            failed_count INTEGER NOT NULL DEFAULT 0,
+            summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            finished_at TIMESTAMPTZ
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_operation_task_execution_task
+        ON automation_operation_task_execution (task_id, scheduled_for DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_task_execution_item (
+            id BIGSERIAL PRIMARY KEY,
+            execution_id TEXT NOT NULL REFERENCES automation_operation_task_execution(execution_id) ON DELETE CASCADE,
+            task_id BIGINT NOT NULL REFERENCES automation_operation_task(id) ON DELETE CASCADE,
+            member_id BIGINT NOT NULL REFERENCES automation_member(id) ON DELETE CASCADE,
+            audience_entry_id BIGINT REFERENCES automation_member_audience_entry(id) ON DELETE SET NULL,
+            external_contact_id TEXT NOT NULL DEFAULT '',
+            segment_key TEXT NOT NULL DEFAULT '',
+            rendered_content_text TEXT NOT NULL DEFAULT '',
+            content_snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            send_record_id BIGINT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error_message TEXT NOT NULL DEFAULT '',
+            sent_at TIMESTAMPTZ
+        )
+        """
+    )
+    for stmt in (
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_operation_task_item_entry "
+        "ON automation_operation_task_execution_item (task_id, audience_entry_id) WHERE audience_entry_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_item_execution "
+        "ON automation_operation_task_execution_item (execution_id, status, id ASC)",
+    ):
+        db.execute(stmt)
+    db.execute("ALTER TABLE IF EXISTS broadcast_jobs DROP CONSTRAINT IF EXISTS broadcast_jobs_source_type_check")
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS broadcast_jobs
+        ADD CONSTRAINT broadcast_jobs_source_type_check
+        CHECK (source_type IN ('campaign', 'sop', 'workflow', 'operation_task', 'cloud_plan', 'focus_send', 'deferred', 'manual'))
+        """
+    )
+    db.execute(
+        """
         ALTER TABLE IF EXISTS automation_agent_output
         ADD COLUMN IF NOT EXISTS adopted_by TEXT NOT NULL DEFAULT ''
         """
@@ -1314,36 +1837,4 @@ def _init_postgres(db) -> None:
         ON automation_agent_output (outcome_status, created_at DESC, id DESC)
         """
     )
-    # ----- 0004 / 0005 迁移的字段 ALTER（兼容 init-db 走 schema 路径） -------
-    # 让既有 PG 库通过 init-db 升级时也能拿到 trace_id / scenario_code / review_status
-    # 等新字段；schema_postgres.sql 的 CREATE TABLE IF NOT EXISTS 不会改老表。
-    for stmt in (
-        "ALTER TABLE IF EXISTS automation_agent_config "
-        "ADD COLUMN IF NOT EXISTS scenario_code TEXT NOT NULL DEFAULT 'one_to_one'",
-        "ALTER TABLE IF EXISTS automation_agent_run "
-        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS outbound_tasks "
-        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS automation_touch_delivery_log "
-        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS automation_workflow "
-        "ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'approved'",
-        "ALTER TABLE IF EXISTS automation_workflow "
-        "ADD COLUMN IF NOT EXISTS created_by_agent TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
-        "ADD COLUMN IF NOT EXISTS last_error_text TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
-        "ADD COLUMN IF NOT EXISTS last_error_at TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
-        "ADD COLUMN IF NOT EXISTS retry_count INTEGER NOT NULL DEFAULT 0",
-        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
-        "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
-        "ALTER TABLE IF EXISTS automation_workflow_execution_item "
-        "ADD COLUMN IF NOT EXISTS next_node_id BIGINT",
-        "ALTER TABLE IF EXISTS cloud_broadcast_plans "
-        "ADD COLUMN IF NOT EXISTS segment_id BIGINT",
-        "ALTER TABLE IF EXISTS cloud_broadcast_plans "
-        "ADD COLUMN IF NOT EXISTS campaign_id BIGINT",
-    ):
-        db.execute(stmt)
     db.commit()

@@ -4,7 +4,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ...infra.constants import USER_OPS_LEAD_POOL_ACTIVATION_STATES
 
 
@@ -361,8 +361,6 @@ def _insert_user_ops_lead_pool_member_row(
             payload["last_entry_source"],
         ),
     )
-    if get_db_backend() != "postgres":
-        return int(db.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
     row = db.execute(
         """
         SELECT id

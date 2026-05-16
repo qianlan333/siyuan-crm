@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
 
@@ -271,7 +271,7 @@ class CompleteQuestionnaireOauthCallbackCommand:
                 "openid": openid,
                 "unionid": unionid,
                 "respondent_key": str(session_identity.get("respondent_key") or "").strip(),
-                "oauth_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+                "oauth_at": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
                 "slug": slug,
             },
             "redirect_target": redirect_target,

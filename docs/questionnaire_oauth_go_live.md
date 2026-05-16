@@ -158,11 +158,12 @@ export ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API=1
 提交后执行：
 
 ```bash
-sqlite3 <repo-root>/data.sqlite3 "
+psql "$DATABASE_URL" <<'SQL'
 select id, questionnaire_id, identity_map_id, respondent_key, openid, unionid, external_userid, follow_user_userid, matched_by, total_score, final_tags
 from questionnaire_submissions
 order by id desc
-limit 5;"
+limit 5;
+SQL
 ```
 
 重点看：
@@ -177,11 +178,12 @@ limit 5;"
 如果这次是通过 `unionid` 命中，且历史 `openid` 为空，再查：
 
 ```bash
-sqlite3 <repo-root>/data.sqlite3 "
+psql "$DATABASE_URL" <<'SQL'
 select id, external_userid, unionid, openid, follow_user_userid
 from wecom_external_contact_identity_map
 order by id desc
-limit 20;"
+limit 20;
+SQL
 ```
 
 确认对应记录里的 `openid` 已经被写回。
@@ -191,31 +193,34 @@ limit 20;"
 先查问卷提交结果：
 
 ```bash
-sqlite3 <repo-root>/data.sqlite3 "
+psql "$DATABASE_URL" <<'SQL'
 select id, final_tags, submitted_at
 from questionnaire_submissions
 order by id desc
-limit 5;"
+limit 5;
+SQL
 ```
 
 再查 SCRM 写回审计：
 
 ```bash
-sqlite3 <repo-root>/data.sqlite3 "
+psql "$DATABASE_URL" <<'SQL'
 select submission_id, external_userid, follow_user_userid, final_tags, status, error_message, created_at
 from questionnaire_scrm_apply_logs
 order by id desc
-limit 20;"
+limit 20;
+SQL
 ```
 
 最后查本地标签快照：
 
 ```bash
-sqlite3 <repo-root>/data.sqlite3 "
+psql "$DATABASE_URL" <<'SQL'
 select external_userid, userid, tag_id, created_at
 from contact_tags
 order by id desc
-limit 20;"
+limit 20;
+SQL
 ```
 
 判断规则：

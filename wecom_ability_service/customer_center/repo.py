@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..db import cast_text, get_db, get_db_backend, is_postgres
+from ..db import cast_text, get_db
 
 _OWNER_ROLE_MAP_QUERY_BATCH_SIZE = 5000
 
@@ -645,16 +645,12 @@ def fetch_customer_last_dispatch_at(external_userid: str) -> str:
     normalized_external_userid = str(external_userid or "").strip()
     if not normalized_external_userid:
         return ""
-    # SQLite stores dispatched_at as TEXT (may be ''); Postgres uses TIMESTAMPTZ
-    # (where '' would be an invalid literal), so the empty-string guard is
-    # only emitted in the SQLite branch.
-    extra_filter = "" if is_postgres() else " AND dispatched_at <> ''"
     row = get_db().execute(
         f"""
         SELECT COALESCE({cast_text("MAX(dispatched_at)")}, '') AS last_dispatch_at
         FROM conversion_dispatch_log
         WHERE external_userid = ?
-          AND dispatched_at IS NOT NULL{extra_filter}
+          AND dispatched_at IS NOT NULL
         """,
         (normalized_external_userid,),
     ).fetchone()
@@ -671,14 +667,13 @@ def fetch_customer_last_dispatch_at_map(external_userids: list[str]) -> dict[str
     if not normalized:
         return {}
     placeholders = ",".join(["?"] * len(normalized))
-    extra_filter = "" if is_postgres() else " AND dispatched_at <> ''"
     rows = get_db().execute(
         f"""
         SELECT external_userid,
                COALESCE({cast_text("MAX(dispatched_at)")}, '') AS last_dispatch_at
         FROM conversion_dispatch_log
         WHERE external_userid IN ({placeholders})
-          AND dispatched_at IS NOT NULL{extra_filter}
+          AND dispatched_at IS NOT NULL
         GROUP BY external_userid
         """,
         tuple(normalized),

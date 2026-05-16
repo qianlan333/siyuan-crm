@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from flask import has_app_context
@@ -8,7 +7,6 @@ from flask import has_app_context
 from . import repo
 from .definitions import (
     DEFAULT_DELIVERY_ROUTE_OWNER_USERID,
-    DEFAULT_SALES_ROUTE_OWNER_USERID,
     OWNER_CLASS_TERM_BACKFILL_ENTRY_SOURCE_OVERRIDES,
     ROUTING_REASON_OWNER_ROLE_MISSING,
     ROUTING_REASON_OWNER_ROLE_UNKNOWN,
@@ -23,18 +21,6 @@ ROUTING_TARGET_OPTIONS = (
     "delivery_handle",
     "manual_review",
 )
-
-
-def _slugify(value: str) -> str:
-    return re.sub(r"[^a-z0-9_]+", "_", str(value or "").strip().lower()).strip("_")
-
-
-def _normalize_bool(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _normalize_owner_role_item(row: dict[str, Any]) -> dict[str, Any]:
@@ -107,25 +93,6 @@ def list_owner_role_map(active_only: bool = False) -> list[dict[str, Any]]:
     return [_normalize_owner_role_item(dict(row)) for row in repo.list_owner_role_map(active_only=active_only)]
 
 
-def save_owner_role_map_item(*, userid: str, display_name: str, role: str, active: Any) -> dict[str, Any]:
-    normalized_userid = str(userid or "").strip()
-    normalized_display_name = str(display_name or "").strip()
-    normalized_role = str(role or "").strip().lower()
-    if not normalized_userid:
-        raise ValueError("userid is required")
-    if not normalized_display_name:
-        normalized_display_name = normalized_userid
-    if normalized_role not in OWNER_ROLE_OPTIONS:
-        raise ValueError(f"role must be one of: {', '.join(OWNER_ROLE_OPTIONS)}")
-    repo.upsert_owner_role_map_item(
-        userid=normalized_userid,
-        display_name=normalized_display_name,
-        role=normalized_role,
-        active=_normalize_bool(active),
-    )
-    return get_owner_role(normalized_userid) or {}
-
-
 def list_routing_rules(active_only: bool = False) -> list[dict[str, Any]]:
     if not has_app_context():
         return [_seed_rule_payload(rule_key, value) for rule_key, value in ROUTING_RULES.items()]
@@ -140,56 +107,6 @@ def get_routing_rule(rule_key: str) -> dict[str, Any] | None:
     ensure_routing_rule_config_seed()
     row = repo.get_routing_rule(str(rule_key or "").strip())
     return _normalize_routing_rule_item(dict(row)) if row else None
-
-
-def save_routing_rule_config_item(
-    *,
-    rule_key: str,
-    routing_alias: str,
-    route_owner_userid: str,
-    route_owner_role: str,
-    routing_target: str,
-    fallback_target: str,
-    when_owner_role_sales: str,
-    when_owner_role_delivery: str,
-    active: Any,
-) -> dict[str, Any]:
-    normalized_rule_key = _slugify(rule_key)
-    normalized_alias = _slugify(routing_alias)
-    normalized_owner_role = str(route_owner_role or "").strip().lower()
-    normalized_target = str(routing_target or "").strip()
-    normalized_fallback = str(fallback_target or "").strip()
-    normalized_sales_target = str(when_owner_role_sales or "").strip()
-    normalized_delivery_target = str(when_owner_role_delivery or "").strip()
-
-    if not normalized_rule_key:
-        raise ValueError("rule_key is required")
-    if not normalized_target and not (normalized_sales_target or normalized_delivery_target):
-        raise ValueError("routing_target is required")
-    candidate_targets = [
-        normalized_target,
-        normalized_fallback,
-        normalized_sales_target,
-        normalized_delivery_target,
-    ]
-    invalid_targets = [item for item in candidate_targets if item and item not in ROUTING_TARGET_OPTIONS]
-    if invalid_targets:
-        raise ValueError(f"routing target must be one of: {', '.join(ROUTING_TARGET_OPTIONS)}")
-    if normalized_owner_role and normalized_owner_role not in OWNER_ROLE_OPTIONS:
-        raise ValueError(f"route_owner_role must be one of: {', '.join(OWNER_ROLE_OPTIONS)}")
-
-    repo.upsert_routing_rule(
-        rule_key=normalized_rule_key,
-        routing_alias=normalized_alias,
-        route_owner_userid=str(route_owner_userid or "").strip(),
-        route_owner_role=normalized_owner_role,
-        routing_target=normalized_target,
-        fallback_target=normalized_fallback,
-        when_owner_role_sales=normalized_sales_target,
-        when_owner_role_delivery=normalized_delivery_target,
-        active=_normalize_bool(active),
-    )
-    return get_routing_rule(normalized_rule_key) or {}
 
 
 def build_routing_config(

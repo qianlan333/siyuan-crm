@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from . import repo, workflow_repo, workflow_service
+from . import repo, workflow_service
 from .workflow_definitions import (
     AUDIENCE_CONVERTED,
     AUDIENCE_OPERATING,

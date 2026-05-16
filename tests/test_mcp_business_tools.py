@@ -366,6 +366,41 @@ def test_create_private_message_task_resolves_mobile_then_executes(client, app, 
         assert request_payload["text"]["content"] == "你好，来跟进一下"
 
 
+def test_create_private_message_task_accepts_sender_alias(client, app, monkeypatch):
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", fake_wecom_post)
+    _insert_customer(
+        app,
+        external_userid="wm_private_sender_alias",
+        mobile="13800138009",
+        customer_name="私信指定发送人",
+        owner_userid="sales_owner",
+    )
+
+    response = _mcp_call(
+        client,
+        "create_private_message_task",
+        {
+            "customer_ref": "13800138009",
+            "content": "按指定发送人跟进",
+            "sender": "sales_override",
+            "dry_run": False,
+            "confirm": True,
+        },
+    )
+
+    payload = response.get_json()["result"]["structuredContent"]
+    assert payload["ok"] is True
+    assert payload["userid"] == "sales_override"
+
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT request_payload FROM outbound_tasks WHERE task_type = 'private_message' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        request_payload = (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))
+        assert request_payload["sender"] == "sales_override"
+
+
 def test_create_group_message_task_supports_customer_ref_list(client, app, monkeypatch):
     monkeypatch.setattr("requests.get", fake_wecom_get)
     monkeypatch.setattr("requests.post", fake_wecom_post)
@@ -409,6 +444,48 @@ def test_create_group_message_task_supports_customer_ref_list(client, app, monke
         assert request_payload["external_userid"] == ["wm_group_001", "wm_group_002"]
         assert request_payload["sender"] == ["sales_01"]
         assert request_payload["text"]["content"] == "今晚八点直播提醒"
+
+
+def test_create_group_message_task_accepts_sender_alias_list(client, app, monkeypatch):
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", fake_wecom_post)
+    _insert_customer(
+        app,
+        external_userid="wm_group_sender_alias_001",
+        mobile="13800138011",
+        customer_name="群发指定发送人一",
+        owner_userid="sales_owner",
+    )
+    _insert_customer(
+        app,
+        external_userid="wm_group_sender_alias_002",
+        mobile="13800138012",
+        customer_name="群发指定发送人二",
+        owner_userid="sales_owner",
+    )
+
+    response = _mcp_call(
+        client,
+        "create_group_message_task",
+        {
+            "customer_refs": ["13800138011", "13800138012"],
+            "content": "按指定发送人群发",
+            "sender": ["sales_a", "sales_b"],
+            "dry_run": False,
+            "confirm": True,
+        },
+    )
+
+    payload = response.get_json()["result"]["structuredContent"]
+    assert payload["ok"] is True
+    assert payload["userids"] == ["sales_a", "sales_b"]
+
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT request_payload FROM outbound_tasks WHERE task_type = 'group_message' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        request_payload = (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))
+        assert request_payload["sender"] == ["sales_a", "sales_b"]
 
 
 def test_create_moment_task_supports_customer_ref_list(client, app, monkeypatch):

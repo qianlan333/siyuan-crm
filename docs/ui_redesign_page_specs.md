@@ -43,9 +43,7 @@
 | 页面 | 目标样式 | 关键组件 | 交互变化 | 不改动的业务逻辑 |
 | --- | --- | --- | --- | --- |
 | `/admin/config` | overview cards + quick links | summary cards、配置入口卡 | 首屏从普通列表改成入口总览 | 各子页路由 |
-| `/admin/config/routing` | list + editor aside | owner list、rule list、sticky editor | 统一为后台配置模式 | owner role / routing rule 表单与保存路径 |
-| `/admin/config/signup-tags` | list + editor aside | tags list、summary、editor | 列表和编辑区拆开 | signup tag 提交逻辑 |
-| `/admin/config/class-term-tags` | list + editor aside | mapping list、summary、editor | 列表和编辑区拆开 | class-term tag 提交逻辑 |
+| `/admin/wecom-tags` | two-column management table | group list、tag table、capacity indicator | 集中管理企微客户标签 | 企微 tag_id、mark_tag、标签选择器兼容结构 |
 | `/admin/config/app-settings` | snapshot list + editor aside | masked rows、editable rows、settings form | 阅读和编辑边界更清楚 | setting__* 字段、确认逻辑 |
 | `/admin/config/login-access` | 企微成员授权页 | member list、授权编辑器、登录审计 | 明确表达“企微成员授权”语义 | RBAC、角色字段、保存路径 |
 | `/admin/questionnaires` | 内容管理列表 | 搜索、状态筛选、列表、row actions | 更偏 CMS，而不是 automation 工作台 | 列表加载、启停、复制链接 |

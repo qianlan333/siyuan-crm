@@ -176,6 +176,12 @@
       border: 1px solid rgba(20, 86, 240, 0.08);
       font-size: 15px;
       color: var(--text);
+      cursor: pointer;
+    }
+    label.option.is-selected {
+      border-color: rgba(51, 112, 255, 0.45);
+      background: #eef4ff;
+      box-shadow: 0 0 0 3px rgba(51, 112, 255, 0.08);
     }
     textarea {
       width: 100%;
@@ -212,12 +218,79 @@
       box-shadow: 0 10px 24px rgba(20, 86, 240, 0.18);
     }
     .submit-btn[disabled] { opacity: 0.6; box-shadow: none; }
+    .one-by-one-card { padding: 20px 16px 22px; }
+    .progress-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .progress-count { color: var(--primary); white-space: nowrap; }
+    .progress-track {
+      height: 8px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+    .progress-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
+      transition: width 0.24s ease;
+    }
+    .question-number {
+      margin: 0 0 10px;
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 800;
+    }
+    .one-by-one-actions {
+      position: sticky;
+      bottom: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+      gap: 10px;
+      margin: 12px -16px -22px;
+      padding: 14px 16px 16px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.92), #fff 32%);
+      border-top: 1px solid var(--line);
+    }
+    .nav-btn {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 14px 16px;
+      font: inherit;
+      font-weight: 800;
+      background: #fff;
+      color: var(--text);
+    }
+    .nav-btn.primary {
+      border-color: transparent;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-strong) 100%);
+      color: #fff;
+      box-shadow: 0 10px 24px rgba(20, 86, 240, 0.18);
+    }
+    .nav-btn[disabled] { opacity: 0.48; box-shadow: none; }
+    .one-by-one-tip {
+      margin: 14px 0 0;
+      color: var(--muted);
+      text-align: center;
+      font-size: 13px;
+      line-height: 1.5;
+    }
     .state { margin-top: 16px; color: var(--muted); font-size: 14px; line-height: 1.6; }
     .error { color: #f54a45; }
     @media (max-width: 640px) {
       .page-shell { padding: 18px 14px 40px; }
       .hero-card { padding: 28px 20px; }
       .questionnaire-card { padding: 18px 14px 22px; }
+      .questionnaire-card.one-by-one-card { padding-bottom: 22px; }
       .question { padding: 16px 14px; border-radius: 18px; }
       .hero-actions a, .hero-actions button { width: 100%; }
     }
@@ -262,6 +335,9 @@
         <input type="hidden" name="{{ key }}" value="{{ value }}">
         {% endfor %}
         {% if page_state.initial_questionnaire %}
+        {% if page_state.answer_display_mode == "one_by_one" %}
+        <noscript>
+        {% endif %}
         {% for question in page_state.initial_questionnaire.questions %}
         {% set field_name = 'q_' ~ question.id %}
         <section class="question">
@@ -303,6 +379,9 @@
         </section>
         {% endfor %}
         <button type="submit" class="submit-btn">提交</button>
+        {% if page_state.answer_display_mode == "one_by_one" %}
+        </noscript>
+        {% endif %}
         {% endif %}
       </form>
       <div id="state" class="state{% if page_state.form_error %} error{% endif %}">{{ page_state.form_error or '' }}</div>
@@ -319,6 +398,9 @@
     const stateEl = document.getElementById('state');
     let questionnaire = null;
     let submitInFlight = false;
+    let answersState = {};
+    let currentQuestionIndex = 0;
+    let autoNextTimer = null;
 
     if (pageState.mode !== 'questionnaire') {
       window.pageState = pageState;
@@ -387,9 +469,78 @@
         }
       }
 
+      function normalizeAnswerDisplayMode(value) {
+        return ['all_in_one', 'one_by_one'].includes(value) ? value : 'all_in_one';
+      }
+
+      function getAnswerDisplayMode(data = questionnaire) {
+        return normalizeAnswerDisplayMode((data && data.answer_display_mode) || pageState.answer_display_mode);
+      }
+
+      function getInitialAnswersFromPrefill() {
+        const prefillFields = pageState.prefill_fields || {};
+        const answers = {};
+        if (!questionnaire || !Array.isArray(questionnaire.questions)) return answers;
+        questionnaire.questions.forEach((question) => {
+          const fieldName = `q_${question.id}`;
+          const value = prefillFields[fieldName];
+          if (value === undefined || value === null || value === '' || (Array.isArray(value) && !value.length)) return;
+          if (question.type === 'multi_choice') {
+            answers[question.id] = Array.isArray(value) ? value.map((item) => Number(item)) : [Number(value)];
+            return;
+          }
+          if (question.type === 'single_choice') {
+            answers[question.id] = Number(value);
+            return;
+          }
+          answers[question.id] = String(value);
+        });
+        return answers;
+      }
+
+      function isAnswerCompleted(question, value) {
+        if (question.type === 'multi_choice') return Array.isArray(value) && value.length > 0;
+        if (question.type === 'single_choice') return value !== undefined && value !== null && value !== '';
+        return String(value || '').trim() !== '';
+      }
+
+      function validateCurrentQuestion() {
+        const question = questionnaire.questions[currentQuestionIndex];
+        if (question && question.required && !isAnswerCompleted(question, answersState[question.id])) {
+          setState('请先完成当前题，再进入下一题。', true);
+          return false;
+        }
+        setState('');
+        return true;
+      }
+
+      function firstIncompleteRequiredIndex() {
+        return questionnaire.questions.findIndex((question) => question.required && !isAnswerCompleted(question, answersState[question.id]));
+      }
+
+      function clearAutoNextTimer() {
+        if (autoNextTimer) {
+          clearTimeout(autoNextTimer);
+          autoNextTimer = null;
+        }
+      }
+
       function renderQuestionnaire(data) {
         validateQuestionnaire(data);
         questionnaire = data;
+        if (!Object.keys(answersState).length) {
+          answersState = getInitialAnswersFromPrefill();
+        }
+        if (getAnswerDisplayMode(data) === 'one_by_one') {
+          renderOneByOneQuestion();
+          return;
+        }
+        renderAllInOneQuestionnaire(data);
+      }
+
+      function renderAllInOneQuestionnaire(data) {
+        clearAutoNextTimer();
+        formEl.closest('.questionnaire-card')?.classList.remove('one-by-one-card');
         formEl.innerHTML = '';
 
         data.questions.forEach((question) => {
@@ -411,6 +562,7 @@
             const textarea = document.createElement('textarea');
             textarea.name = `q_${question.id}`;
             textarea.placeholder = question.placeholder_text || '';
+            if (answersState[question.id]) textarea.value = answersState[question.id];
             wrapper.appendChild(textarea);
           } else if (question.type === 'mobile') {
             const input = document.createElement('input');
@@ -420,6 +572,7 @@
             input.autocomplete = 'tel';
             input.placeholder = question.placeholder_text || '请输入手机号';
             input.maxLength = 20;
+            if (answersState[question.id]) input.value = answersState[question.id];
             wrapper.appendChild(input);
           } else {
             const type = question.type === 'single_choice' ? 'radio' : 'checkbox';
@@ -430,6 +583,12 @@
               input.type = type;
               input.name = `q_${question.id}`;
               input.value = String(option.id);
+              if (question.type === 'single_choice' && Number(answersState[question.id]) === Number(option.id)) {
+                input.checked = true;
+              }
+              if (question.type === 'multi_choice' && Array.isArray(answersState[question.id]) && answersState[question.id].map(Number).includes(Number(option.id))) {
+                input.checked = true;
+              }
               const text = document.createElement('span');
               text.textContent = option.option_text;
               label.appendChild(input);
@@ -447,11 +606,164 @@
         formEl.appendChild(submitButton);
       }
 
+      function renderQuestionFields(wrapper, question, options = {}) {
+        if (question.type === 'textarea') {
+          const textarea = document.createElement('textarea');
+          textarea.name = `q_${question.id}`;
+          textarea.placeholder = question.placeholder_text || '';
+          textarea.value = String(answersState[question.id] || '');
+          textarea.addEventListener('input', (event) => {
+            answersState[question.id] = event.target.value;
+            setState('');
+          });
+          wrapper.appendChild(textarea);
+          return;
+        }
+        if (question.type === 'mobile') {
+          const input = document.createElement('input');
+          input.type = 'tel';
+          input.name = `q_${question.id}`;
+          input.inputMode = 'numeric';
+          input.autocomplete = 'tel';
+          input.placeholder = question.placeholder_text || '请输入手机号';
+          input.maxLength = 20;
+          input.value = String(answersState[question.id] || '');
+          input.addEventListener('input', (event) => {
+            answersState[question.id] = event.target.value;
+            setState('');
+          });
+          wrapper.appendChild(input);
+          return;
+        }
+        const type = question.type === 'single_choice' ? 'radio' : 'checkbox';
+        (question.options || []).forEach((option) => {
+          const label = document.createElement('label');
+          label.className = 'option';
+          const input = document.createElement('input');
+          input.type = type;
+          input.name = `q_${question.id}`;
+          input.value = String(option.id);
+          if (question.type === 'single_choice' && Number(answersState[question.id]) === Number(option.id)) {
+            input.checked = true;
+            label.classList.add('is-selected');
+          }
+          if (question.type === 'multi_choice' && Array.isArray(answersState[question.id]) && answersState[question.id].map(Number).includes(Number(option.id))) {
+            input.checked = true;
+            label.classList.add('is-selected');
+          }
+          const text = document.createElement('span');
+          text.textContent = option.option_text;
+          label.appendChild(input);
+          label.appendChild(text);
+          input.addEventListener('change', () => {
+            setState('');
+            if (question.type === 'single_choice') {
+              answersState[question.id] = Number(option.id);
+              renderOneByOneQuestion();
+              if (options.autoAdvance && currentQuestionIndex < questionnaire.questions.length - 1) {
+                clearAutoNextTimer();
+                autoNextTimer = setTimeout(() => {
+                  currentQuestionIndex += 1;
+                  renderOneByOneQuestion();
+                }, 450);
+              }
+              return;
+            }
+            const selected = Array.from(formEl.querySelectorAll(`input[name="q_${question.id}"]:checked`)).map((item) => Number(item.value));
+            answersState[question.id] = selected;
+            renderOneByOneQuestion();
+          });
+          wrapper.appendChild(label);
+        });
+      }
+
+      function renderOneByOneQuestion() {
+        clearAutoNextTimer();
+        formEl.closest('.questionnaire-card')?.classList.add('one-by-one-card');
+        const total = questionnaire.questions.length;
+        currentQuestionIndex = Math.max(0, Math.min(currentQuestionIndex, total - 1));
+        const question = questionnaire.questions[currentQuestionIndex];
+        formEl.innerHTML = '';
+
+        const progress = document.createElement('div');
+        progress.className = 'progress-head';
+        const title = document.createElement('span');
+        title.textContent = questionnaire.title || pageState.title || '';
+        const count = document.createElement('span');
+        count.className = 'progress-count';
+        count.textContent = `第 ${currentQuestionIndex + 1} / ${total} 题`;
+        progress.appendChild(title);
+        progress.appendChild(count);
+        formEl.appendChild(progress);
+
+        const track = document.createElement('div');
+        track.className = 'progress-track';
+        const fill = document.createElement('div');
+        fill.className = 'progress-fill';
+        fill.style.width = `${Math.round(((currentQuestionIndex + 1) / total) * 100)}%`;
+        track.appendChild(fill);
+        formEl.appendChild(track);
+
+        const wrapper = document.createElement('section');
+        wrapper.className = 'question';
+        const number = document.createElement('p');
+        number.className = 'question-number';
+        number.textContent = `第 ${currentQuestionIndex + 1} 题`;
+        wrapper.appendChild(number);
+        const titleEl = document.createElement('h2');
+        titleEl.className = 'question-title';
+        titleEl.textContent = question.title;
+        if (question.required) {
+          const required = document.createElement('span');
+          required.className = 'required';
+          required.textContent = '*';
+          titleEl.appendChild(required);
+        }
+        wrapper.appendChild(titleEl);
+        renderQuestionFields(wrapper, question, { autoAdvance: true });
+        formEl.appendChild(wrapper);
+
+        const tip = document.createElement('p');
+        tip.className = 'one-by-one-tip';
+        tip.textContent = '选择答案后会自动进入下一题。';
+        formEl.appendChild(tip);
+
+        const actions = document.createElement('div');
+        actions.className = 'one-by-one-actions';
+        const prevButton = document.createElement('button');
+        prevButton.type = 'button';
+        prevButton.className = 'nav-btn';
+        prevButton.textContent = '上一题';
+        prevButton.disabled = currentQuestionIndex === 0;
+        prevButton.addEventListener('click', () => {
+          clearAutoNextTimer();
+          currentQuestionIndex = Math.max(0, currentQuestionIndex - 1);
+          setState('');
+          renderOneByOneQuestion();
+        });
+
+        const nextButton = document.createElement('button');
+        nextButton.type = currentQuestionIndex === total - 1 ? 'submit' : 'button';
+        nextButton.className = 'nav-btn primary';
+        nextButton.textContent = currentQuestionIndex === total - 1 ? '提交测评' : '下一题';
+        if (currentQuestionIndex < total - 1) {
+          nextButton.addEventListener('click', () => {
+            clearAutoNextTimer();
+            if (!validateCurrentQuestion()) return;
+            currentQuestionIndex += 1;
+            renderOneByOneQuestion();
+          });
+        }
+        actions.appendChild(prevButton);
+        actions.appendChild(nextButton);
+        formEl.appendChild(actions);
+      }
+
       function hydrateInitialQuestionnaire() {
         if (!pageState.initial_questionnaire) return false;
         validateQuestionnaire(pageState.initial_questionnaire);
         questionnaire = pageState.initial_questionnaire;
-        if (!formEl.querySelector('button[type="submit"]')) {
+        if (getAnswerDisplayMode(questionnaire) === 'one_by_one' || !formEl.querySelector('button[type="submit"]')) {
           renderQuestionnaire(questionnaire);
         }
         return true;
@@ -526,14 +838,24 @@
         event.preventDefault();
         if (!questionnaire || submitInFlight) return;
         const submitButton = formEl.querySelector('button[type="submit"]');
+        if (getAnswerDisplayMode() === 'one_by_one') {
+          const incompleteIndex = firstIncompleteRequiredIndex();
+          if (incompleteIndex >= 0) {
+            currentQuestionIndex = incompleteIndex;
+            renderOneByOneQuestion();
+            setState('还有题目未完成，请补充后再提交。', true);
+            return;
+          }
+        }
         submitInFlight = true;
-        submitButton.disabled = true;
+        if (submitButton) submitButton.disabled = true;
         setState('提交中...');
         try {
+          const answers = getAnswerDisplayMode() === 'one_by_one' ? answersState : collectAnswers();
           const response = await fetch(submitUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ...collectMetaFromQuery(), answers: collectAnswers() }),
+            body: JSON.stringify({ ...collectMetaFromQuery(), answers }),
           });
           const result = await response.json();
           if (result && result.error === 'already_submitted') {
@@ -557,7 +879,7 @@
           setState(normalizedErrorMessage(error, '提交失败，请稍后重试'), true);
         } finally {
           submitInFlight = false;
-          submitButton.disabled = false;
+          if (submitButton) submitButton.disabled = false;
         }
       });
 

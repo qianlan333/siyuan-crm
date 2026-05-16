@@ -234,7 +234,6 @@ def api_admin_jobs_webhook_delivery_retry(delivery_id: int):
     auth_failure = require_internal_api_token()
     if auth_failure is not None:
         return auth_failure
-    payload = _request_payload()
     params = {
         "delivery_id": delivery_id,
         "confirm": _request_confirmed(),

@@ -1,9 +1,5 @@
 """Routing config application skeleton for Wave 2."""
 
-from .commands import (
-    SaveOwnerRoleSettingCommand,
-    SaveRoutingRuleSettingCommand,
-)
 from .dto import (
     GetOwnerRoleMapQueryDTO,
     GetOwnerRoleMapResultDTO,
@@ -15,10 +11,6 @@ from .dto import (
     GetRoutingRuleQueryResultDTO,
     ResolveContactRoutingContextQueryDTO,
     ResolveContactRoutingContextResultDTO,
-    SaveOwnerRoleSettingCommandDTO,
-    SaveOwnerRoleSettingResultDTO,
-    SaveRoutingRuleSettingCommandDTO,
-    SaveRoutingRuleSettingResultDTO,
 )
 from .queries import (
     GetOwnerRoleMapQuery,
@@ -44,10 +36,4 @@ __all__ = [
     "ResolveContactRoutingContextQuery",
     "ResolveContactRoutingContextQueryDTO",
     "ResolveContactRoutingContextResultDTO",
-    "SaveOwnerRoleSettingCommand",
-    "SaveOwnerRoleSettingCommandDTO",
-    "SaveOwnerRoleSettingResultDTO",
-    "SaveRoutingRuleSettingCommand",
-    "SaveRoutingRuleSettingCommandDTO",
-    "SaveRoutingRuleSettingResultDTO",
 ]

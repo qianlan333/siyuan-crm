@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+DEFAULT_WECOM_CORP_TAG_LIMIT = 1000
+
 SIGNUP_TAG_GROUP_NAME = "AI 产品报名情况"
 SIGNUP_TAG_STATUS_DEFINITIONS = [
     {

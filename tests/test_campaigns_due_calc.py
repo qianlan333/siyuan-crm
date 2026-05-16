@@ -20,7 +20,12 @@ from wecom_ability_service.domains.campaigns.service import (
     _compute_first_step_due_iso,
 )
 from wecom_ability_service.domains.campaigns.scheduler import (
+    CAMPAIGN_QUEUE_CONTENT_TYPE,
+    CAMPAIGN_QUEUE_SOURCE_TABLE,
+    CAMPAIGN_QUEUE_SOURCE_TYPE,
+    _campaign_queue_target_summary,
     _due_at_for_step,
+    _dispatch_private_message_payload,
 )
 
 
@@ -133,6 +138,16 @@ def test_due_at_for_step_day_offset():
     assert parsed.hour == 19
 
 
+def test_campaign_queue_contract_constants_and_summary():
+    assert CAMPAIGN_QUEUE_SOURCE_TYPE == "campaign"
+    assert CAMPAIGN_QUEUE_SOURCE_TABLE == "campaign_members"
+    assert CAMPAIGN_QUEUE_CONTENT_TYPE == "private_message"
+    assert _campaign_queue_target_summary(
+        campaign={"campaign_code": "obs_invite"},
+        step={"step_index": 2},
+    ) == "campaign=obs_invite step=2"
+
+
 def test_scheduler_retry_at_is_tz_aware():
     """scheduler 的 budget-rejected retry_at 必须输出 tz-aware ISO。
 
@@ -145,3 +160,35 @@ def test_scheduler_retry_at_is_tz_aware():
     # 确认就是 1 小时后（±60 秒容差）
     delta = parsed - datetime.now(timezone.utc)
     assert timedelta(minutes=59) < delta < timedelta(minutes=61)
+
+
+def test_campaign_private_message_dispatch_payload_uses_single_task(monkeypatch):
+    from wecom_ability_service.domains.marketing_automation import service as marketing_service
+
+    calls = []
+
+    def fake_dispatch(task_type, fn_name, payload):
+        calls.append((task_type, fn_name, payload))
+        return {"task_id": "123"}
+
+    monkeypatch.setattr(marketing_service, "dispatch_wecom_task", fake_dispatch)
+
+    payload = {"sender": "sales_01", "external_userid": ["wm_a", "wm_b"], "text": {"content": "hello"}}
+    result = _dispatch_private_message_payload(request_payload=payload, recipient_count=2)
+
+    assert result == {"ok": True, "task_id": 123, "recipient_count": 2}
+    assert calls == [("private_message", "create_private_message_task", payload)]
+
+
+def test_campaign_private_message_dispatch_payload_normalizes_errors(monkeypatch):
+    from wecom_ability_service.domains.marketing_automation import service as marketing_service
+
+    def fake_dispatch(task_type, fn_name, payload):
+        raise RuntimeError("wecom down")
+
+    monkeypatch.setattr(marketing_service, "dispatch_wecom_task", fake_dispatch)
+
+    result = _dispatch_private_message_payload(request_payload={"external_userid": ["wm_a"]}, recipient_count=1)
+
+    assert result["ok"] is False
+    assert result["reason"] == "dispatch_error:wecom down"

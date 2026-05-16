@@ -19,7 +19,7 @@ def now_utc() -> datetime:
 
 
 def iso(dt: datetime) -> str:
-    """秒级精度的 ISO8601 字符串，给 PG TIMESTAMPTZ / SQLite TEXT 通用写入。"""
+    """秒级精度的 timezone-aware ISO8601 字符串，给 PG TIMESTAMPTZ 写入。"""
     return dt.replace(microsecond=0).isoformat()
 
 
@@ -51,7 +51,7 @@ def row_to_dict(row: Any) -> dict[str, Any]:
 
 
 def to_jsonb_text(payload: Any, *, default: str) -> str:
-    """把 dict/list/str 序列化成 JSON 文本，给 PG JSONB / SQLite TEXT 写入用。
+    """把 dict/list/str 序列化成 JSON 文本，给 PG JSONB 写入用。
 
     ``default`` 必须是有效 JSON 字面量（``'[]'`` 或 ``'{}'``），用于 None / 空串。
     与 ``broadcast_jobs/repo.py:_to_jsonb_text`` 同源（暂未跨域合并）。
@@ -66,9 +66,9 @@ def to_jsonb_text(payload: Any, *, default: str) -> str:
 
 
 def decode_jsonb(value: Any, *, default: Any) -> Any:
-    """从 PG JSONB / SQLite TEXT 读出来的值统一解码。
+    """从 PG JSONB 或历史 JSON 文本读出来的值统一解码。
 
-    PG psycopg 已经把 JSONB 反序列化成 dict/list；SQLite 是字符串。两边都支持。
+    PG psycopg 已经把 JSONB 反序列化成 dict/list；历史 JSON 字符串仍然兼容。
     """
     if value is None or value == "":
         return default

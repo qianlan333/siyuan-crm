@@ -9,29 +9,26 @@ cron 例（每分钟）：
 每次跑：
 1. claim_due_jobs(limit=N) — 原子地把到期 queued 任务标 claimed
 2. 对每个 job：
-   - 解析 content_payload = {fn_name, wecom_payload}
-   - 调 tasks.dispatch_wecom_task(task_type, fn_name, payload) → 真发企微
+   - 按 source_type 路由到对应 handler
+   - handler 负责现场计算收件人、组装企微 payload、真发并写回业务执行明细
    - 成功：mark_sent(job_id, outbound_task_id, sent_count)
    - 失败：mark_failed(job_id, error)（v1 不自动重试，由运营手动 retry）
 3. 输出结构化 summary
 
 环境变量：
 - ``BROADCAST_QUEUE_BATCH_SIZE``  默认 50，单次最多 claim 多少 job
-- ``DATABASE_PATH`` / ``DATABASE_URL`` 同主程序
+- ``DATABASE_URL`` 同主程序
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+from script_runtime import ensure_repo_root_on_path, print_json, read_int_env
+
+ensure_repo_root_on_path()
 
 
 logger = logging.getLogger("broadcast_queue_worker")
@@ -97,13 +94,13 @@ def run(batch_size: int) -> dict[str, Any]:
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    batch_size = int(os.environ.get("BROADCAST_QUEUE_BATCH_SIZE", "50"))
+    batch_size = read_int_env("BROADCAST_QUEUE_BATCH_SIZE", 50)
     from wecom_ability_service import create_app
 
     app = create_app()
     with app.app_context():
         summary = run(batch_size)
-    print(json.dumps(summary, ensure_ascii=False))
+    print_json(summary)
     return 0
 
 

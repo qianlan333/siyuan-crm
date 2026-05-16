@@ -18,12 +18,16 @@ import json
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
+from .payload_helpers import normalize_int_list, normalize_str_list, parse_step_payload
+from .time_helpers import DEFAULT_TIMEZONE, campaign_step_due_iso
 
 
 logger = logging.getLogger(__name__)
+CAMPAIGN_QUEUE_SOURCE_TYPE = "campaign"
+CAMPAIGN_QUEUE_SOURCE_TABLE = "campaign_members"
+CAMPAIGN_QUEUE_CONTENT_TYPE = "private_message"
 _OPEN_JOB_STATUSES = ["waiting_approval", "queued", "claimed"]
 
 
@@ -37,8 +41,7 @@ def _now_iso() -> str:
 def _empty_ts() -> None:
     """``campaign_members.next_due_at / last_step_sent_at`` 的"未设置"占位值。
 
-    历史上是 PG/SQLite 双语义；2026-05 砍 SQLite 后统一返回 ``None`` (PG NULL)。
-    保留函数名让 N 处 caller 不用改。
+    PG-only 后统一返回 ``None`` (PG NULL)。保留函数名让 N 处 caller 不用改。
     """
     return None
 
@@ -51,21 +54,13 @@ def _due_at_for_step(
     step_timezone: str = "Asia/Shanghai",
 ) -> str:
     """算 step 的 due ISO — 必须输出 tz-aware，防止 PG 二次套时区。"""
-    try:
-        tzinfo = ZoneInfo(step_timezone or "Asia/Shanghai")
-    except Exception:
-        tzinfo = ZoneInfo("Asia/Shanghai")
-    try:
-        base = datetime.fromisoformat((anchor_date or "")[:10])
-    except ValueError:
-        base = datetime.now(tzinfo).replace(hour=0, minute=0, second=0, microsecond=0)
-    try:
-        h, m = (send_time or "09:00").split(":")[:2]
-        base = base.replace(hour=int(h), minute=int(m))
-    except ValueError:
-        pass
-    base = base + timedelta(days=int(day_offset))
-    return base.replace(tzinfo=tzinfo).isoformat()
+    return campaign_step_due_iso(
+        anchor_date=anchor_date,
+        day_offset=day_offset,
+        send_time=send_time,
+        step_timezone=step_timezone or DEFAULT_TIMEZONE,
+        fallback_to_timezone_today=True,
+    )
 
 
 def _has_inbound_since(*, external_userid: str, since_iso: str) -> bool:
@@ -116,13 +111,17 @@ def _campaign_job_source_ids(*, campaign_id: int, campaign_segment_id: int, step
 def _open_campaign_job_exists(*, queue_repo: Any, source_ids: tuple[str, ...]) -> bool:
     return any(
         queue_repo.fetch_job_by_source(
-            source_type="campaign",
-            source_table="campaign_members",
+            source_type=CAMPAIGN_QUEUE_SOURCE_TYPE,
+            source_table=CAMPAIGN_QUEUE_SOURCE_TABLE,
             source_id=str(source_id or ""),
             statuses=_OPEN_JOB_STATUSES,
         )
         for source_id in source_ids
     )
+
+
+def _campaign_queue_target_summary(*, campaign: dict[str, Any], step: dict[str, Any]) -> str:
+    return f"campaign={campaign.get('campaign_code')} step={step.get('step_index')}"
 
 
 def _resolve_automation_member_id(
@@ -272,25 +271,12 @@ def _resolve_step_payload(*, campaign: dict[str, Any], step: dict[str, Any]) -> 
 
     owner_userid = str(campaign.get("owner_userid") or "") or DEFAULT_AUTOMATION_OWNER_USERID
 
-    # PG jsonb 自动反序列化为 dict；SQLite 是字符串
-    raw_payload = step.get("content_payload_json") or "{}"
-    if isinstance(raw_payload, dict):
-        step_payload = raw_payload
-    else:
-        try:
-            step_payload = json.loads(str(raw_payload) or "{}")
-        except (TypeError, ValueError):
-            step_payload = {}
+    step_payload = parse_step_payload(step.get("content_payload_json"))
 
     # 老格式：image_media_ids 直接是企微 media_id（兼容老 step）
-    image_media_ids = [str(x).strip() for x in (step_payload.get("image_media_ids") or []) if str(x).strip()]
+    image_media_ids = normalize_str_list(step_payload.get("image_media_ids"), limit=9)
     # 新格式：image_library_ids 引用图片素材库；发送前 resolve 成有效 media_id
-    image_library_ids: list[int] = []
-    for raw_iid in (step_payload.get("image_library_ids") or []):
-        try:
-            image_library_ids.append(int(raw_iid))
-        except (TypeError, ValueError):
-            continue
+    image_library_ids = normalize_int_list(step_payload.get("image_library_ids"), limit=9)
     if image_library_ids:
         from .. import image_library as _image_library
 
@@ -304,12 +290,7 @@ def _resolve_step_payload(*, campaign: dict[str, Any], step: dict[str, Any]) -> 
                 image_media_ids.append(resolved)
     image_media_ids = image_media_ids[:9]  # 企微单消息最多 9 张
 
-    miniprogram_library_ids: list[int] = []
-    for raw_lid in (step_payload.get("miniprogram_library_ids") or []):
-        try:
-            miniprogram_library_ids.append(int(raw_lid))
-        except (TypeError, ValueError):
-            continue
+    miniprogram_library_ids = normalize_int_list(step_payload.get("miniprogram_library_ids"))
     attachments: list[dict[str, Any]] = []
     if miniprogram_library_ids:
         from .. import miniprogram_library as _miniprogram_library
@@ -345,8 +326,6 @@ def _dispatch_step_batch(
 
     所有 ``members`` 必须是同一 ``(campaign_id, campaign_segment_id, step_index)``，
     调用方负责分组。"""
-    from ..marketing_automation.service import dispatch_wecom_task
-
     if not members:
         return {"ok": False, "reason": "empty_batch"}
 
@@ -361,6 +340,12 @@ def _dispatch_step_batch(
     request_payload = dict(resolved["base_request"])
     request_payload["external_userid"] = externals
 
+    return _dispatch_private_message_payload(request_payload=request_payload, recipient_count=len(externals))
+
+
+def _dispatch_private_message_payload(*, request_payload: dict[str, Any], recipient_count: int) -> dict[str, Any]:
+    from ..marketing_automation.service import dispatch_wecom_task
+
     try:
         wecom_result = dispatch_wecom_task(
             "private_message",
@@ -368,9 +353,9 @@ def _dispatch_step_batch(
             request_payload,
         )
         task_id = int(wecom_result.get("task_id") or 0)
-        return {"ok": True, "task_id": task_id, "recipient_count": len(externals)}
+        return {"ok": True, "task_id": task_id, "recipient_count": int(recipient_count)}
     except Exception as exc:
-        logger.exception("campaign batch dispatch failed (%d recipients): %s", len(externals), exc)
+        logger.exception("campaign batch dispatch failed (%d recipients): %s", int(recipient_count), exc)
         return {"ok": False, "reason": f"dispatch_error:{exc}"}
 
 
@@ -460,16 +445,7 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
         request_payload = dict(resolved["base_request"])
         request_payload["external_userid"] = externals
 
-    from ..marketing_automation.service import dispatch_wecom_task
-
-    try:
-        wecom_result = dispatch_wecom_task(
-            "private_message", "create_private_message_task", request_payload
-        )
-        send_res = {"ok": True, "task_id": int(wecom_result.get("task_id") or 0), "recipient_count": len(members)}
-    except Exception as exc:
-        logger.exception("campaign batch dispatch failed: %s", exc)
-        send_res = {"ok": False, "reason": f"dispatch_error:{exc}"}
+    send_res = _dispatch_private_message_payload(request_payload=request_payload, recipient_count=len(members))
 
     sent_count = 0
     failed_count = 0
@@ -553,13 +529,13 @@ def _pre_enqueue_next_step(
         return
 
     queue_service.enqueue_job(
-        source_type="campaign",
+        source_type=CAMPAIGN_QUEUE_SOURCE_TYPE,
         source_id=source_ids[0],
-        source_table="campaign_members",
+        source_table=CAMPAIGN_QUEUE_SOURCE_TABLE,
         scheduled_for=next_due,
         target_external_userids=externals,
-        target_summary=f"campaign={campaign.get('campaign_code')} step={next_step.get('step_index')}",
-        content_type="private_message",
+        target_summary=_campaign_queue_target_summary(campaign=campaign, step=next_step),
+        content_type=CAMPAIGN_QUEUE_CONTENT_TYPE,
         content_payload={
             "campaign": campaign,
             "step": next_step,
@@ -908,13 +884,13 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
         request_payload = dict(resolved["base_request"])
         request_payload["external_userid"] = externals
         queue_service.enqueue_job(
-            source_type="campaign",
+            source_type=CAMPAIGN_QUEUE_SOURCE_TYPE,
             source_id=source_ids[0],
-            source_table="campaign_members",
+            source_table=CAMPAIGN_QUEUE_SOURCE_TABLE,
             scheduled_for=datetime.now(timezone.utc),
             target_external_userids=externals,
-            target_summary=f"campaign={campaign.get('campaign_code')} step={step.get('step_index')}",
-            content_type="private_message",
+            target_summary=_campaign_queue_target_summary(campaign=campaign, step=step),
+            content_type=CAMPAIGN_QUEUE_CONTENT_TYPE,
             content_payload={
                 "request_payload": request_payload,
                 "campaign": campaign,
@@ -953,7 +929,6 @@ def _pre_enqueue_future_campaign_steps(
     """
     db = get_db()
     cur = db.cursor()
-    not_empty_clause = "cm.next_due_at IS NOT NULL" if get_db_backend() == "postgres" else "cm.next_due_at <> ''"
     where_extra = ""
     args: list[Any] = []
     if campaign_id is not None:
@@ -969,7 +944,7 @@ def _pre_enqueue_future_campaign_steps(
         FROM campaign_members cm
         JOIN campaigns c ON c.id = cm.campaign_id
         WHERE cm.status = 'pending'
-          AND {not_empty_clause}
+          AND cm.next_due_at IS NOT NULL
           AND c.run_status = 'active'
           {where_extra}
         ORDER BY cm.next_due_at ASC
@@ -1036,13 +1011,13 @@ def _pre_enqueue_future_campaign_steps(
         campaign = group["campaign"]
         step = group["step"]
         queue_service.enqueue_job(
-            source_type="campaign",
+            source_type=CAMPAIGN_QUEUE_SOURCE_TYPE,
             source_id=source_id,
-            source_table="campaign_members",
+            source_table=CAMPAIGN_QUEUE_SOURCE_TABLE,
             scheduled_for=group["next_due"],
             target_external_userids=externals,
-            target_summary=f"campaign={campaign.get('campaign_code')} step={step.get('step_index')}",
-            content_type="private_message",
+            target_summary=_campaign_queue_target_summary(campaign=campaign, step=step),
+            content_type=CAMPAIGN_QUEUE_CONTENT_TYPE,
             content_payload={
                 "campaign": campaign,
                 "step": step,

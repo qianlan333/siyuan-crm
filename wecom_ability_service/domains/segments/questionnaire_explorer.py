@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Iterable
+from typing import Any
 
 from ...db import get_db
 
@@ -57,8 +57,7 @@ def list_questionnaires(
         where.append("q.title LIKE ?")
         args.append(f"%{kw}%")
     args.append(int(limit))
-    # PG 上 submitted_at 是 TIMESTAMPTZ，SQLite 是 TEXT —— 用 CAST AS TEXT 跨库通用
-    # 先 CAST 再 COALESCE，避免 timestamp 和 '' 类型不匹配
+    # PG 上 submitted_at 是 TIMESTAMPTZ；先 CAST 再 COALESCE，避免 timestamp 和 '' 类型不匹配。
     cur.execute(
         f"""
         SELECT q.id AS questionnaire_id,
@@ -179,7 +178,7 @@ def inspect_questionnaire(
         counts: dict[int, int] = {}
         for ar in ans_rows:
             raw = ar["selected_option_ids"]
-            # PG JSONB 字段 psycopg3 自动反序列化成 Python list；SQLite 是 TEXT
+            # PG JSONB 字段 psycopg3 自动反序列化成 Python list；保留 JSON 文本兼容以读取历史/测试负载。
             if isinstance(raw, list):
                 ids = raw
             elif isinstance(raw, str):
@@ -252,9 +251,8 @@ def preview_questionnaire_population(
         option_ids = list(f.get("option_ids") or [])
         keywords = list(f.get("option_text_keywords") or [])
         if not option_ids and keywords:
-            ph = ",".join(["?"] * len(keywords))
             cur.execute(
-                f"SELECT id FROM questionnaire_options WHERE question_id = ? AND ("
+                "SELECT id FROM questionnaire_options WHERE question_id = ? AND ("
                 + " OR ".join(["option_text LIKE ?"] * len(keywords))
                 + ")",
                 (question_id, *[f"%{k}%" for k in keywords]),
@@ -281,7 +279,7 @@ def preview_questionnaire_population(
         # 回填 resolved 给前端展示
         ph = ",".join(["?"] * len(option_ids))
         cur.execute(
-            f"SELECT title FROM questionnaire_questions WHERE id = ?",
+            "SELECT title FROM questionnaire_questions WHERE id = ?",
             (question_id,),
         )
         qrow = cur.fetchone()
@@ -363,9 +361,8 @@ def compose_segment_sql_from_questionnaire(
         option_ids = list(f.get("option_ids") or [])
         keywords = list(f.get("option_text_keywords") or [])
         if not option_ids and keywords:
-            ph = ",".join(["?"] * len(keywords))
             cur.execute(
-                f"SELECT id FROM questionnaire_options WHERE question_id = ? AND ("
+                "SELECT id FROM questionnaire_options WHERE question_id = ? AND ("
                 + " OR ".join(["option_text LIKE ?"] * len(keywords))
                 + ")",
                 (question_id, *[f"%{k}%" for k in keywords]),

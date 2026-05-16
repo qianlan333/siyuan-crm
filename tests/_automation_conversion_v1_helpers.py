@@ -25,7 +25,6 @@ import requests
 
 from wecom_ability_service import create_app
 from wecom_ability_service.db import get_db, init_db
-from wecom_ability_service.db.helpers import _sqlite_table_columns
 from wecom_ability_service.domains.automation_conversion import (
     append_agent_output,
     apply_dashboard_signup_tag,
@@ -147,11 +146,8 @@ def _mcp_call(client, name: str, arguments: dict[str, object]):
 
 
 
-def _sqlite_object_names(db, object_type: str) -> set[str]:
-    """PG-only：用 information_schema 替代 SQLite 的 sqlite_master。
-
-    object_type 仅支持 ``'table'`` / ``'index'``（测试里只用到这两种）。
-    """
+def pg_object_names(db, object_type: str) -> set[str]:
+    """Return current-schema table or index names for automation conversion tests."""
     if object_type == "table":
         rows = db.execute(
             """
@@ -852,7 +848,7 @@ __all__ = [
     "_default_program_id",
     "_login_admin_session",
     "_mcp_call",
-    "_sqlite_object_names",
+    "pg_object_names",
     "_seed_contact",
     "_canonical_automation_pool",
     "_seed_automation_member",

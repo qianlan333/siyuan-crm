@@ -10,11 +10,7 @@ import pytest
 from wecom_ability_service import create_app
 from wecom_ability_service.db import get_db, init_db
 from wecom_ability_service.domains.admin_auth import save_admin_user
-from wecom_ability_service.services import (
-    get_routing_config,
-    get_signup_conversion_config,
-    resolve_contact_routing_context,
-)
+from wecom_ability_service.services import get_signup_conversion_config
 
 
 def _asia_shanghai_today() -> datetime.date:
@@ -449,9 +445,7 @@ def _contains_standalone_token(text: str, token: str) -> bool:
 def test_admin_config_pages_render(client):
     expected = {
         "/admin/config": "配置中心",
-        "/admin/config/routing": "渠道 / 分配规则",
-        "/admin/config/signup-tags": "报名标签规则",
-        "/admin/config/class-term-tags": "班期标签规则",
+        "/admin/wecom-tags": "企微标签管理",
         "/admin/automation-conversion": "自动化转化",
         "/admin/config/app-settings": "系统设置",
         "/admin/config/login-access": "登录与权限",
@@ -464,59 +458,46 @@ def test_admin_config_pages_render(client):
         if path.startswith("/admin/config"):
             assert "配置中心" in html
 
+    tags_html = client.get("/admin/wecom-tags").get_data(as_text=True)
+    assert "统一后台配置模式" not in tags_html
+    assert "/admin/config/wecom-tags" not in client.get("/admin/config").get_data(as_text=True)
+
+    legacy_response = client.get("/admin/config/wecom-tags")
+    assert legacy_response.status_code == 302
+    assert legacy_response.headers["Location"].endswith("/admin/wecom-tags")
+
+    overview_html = client.get("/admin/config").get_data(as_text=True)
+    assert "企微标签管理" in overview_html
+    assert "渠道 / 分配规则" not in overview_html
+    assert "报名标签规则" not in overview_html
+    assert "班期标签规则" not in overview_html
+
+
+def test_legacy_config_module_routes_are_removed(client):
+    removed_paths = [
+        "/admin/config/routing",
+        "/admin/config/routing/owner-role",
+        "/admin/config/routing/rule",
+        "/admin/config/signup-tags",
+        "/admin/config/signup-tags/save",
+        "/admin/config/class-term-tags",
+        "/admin/config/class-term-tags/save",
+        "/api/admin/config/routing",
+        "/api/admin/config/routing/owner-role",
+        "/api/admin/config/routing/rule",
+        "/api/admin/config/signup-tags",
+        "/api/admin/config/class-term-tags",
+    ]
+
+    for path in removed_paths:
+        response = client.post(path) if path.endswith(("owner-role", "rule", "save")) else client.get(path)
+        assert response.status_code == 404
 
 def test_admin_marketing_automation_legacy_route_redirects_to_new_page(client):
     response = client.get("/admin/marketing-automation/ui", query_string={"status": "blocked_quiet_hours"})
 
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/admin/automation-conversion?status=blocked_quiet_hours")
-
-
-def test_admin_config_routing_save_updates_runtime_and_audit(app, client):
-    owner_response = client.post(
-        "/api/admin/config/routing/owner-role",
-        json={
-            "userid": "sales_01",
-            "display_name": "销售一号",
-            "role": "sales",
-            "active": True,
-            "operator": "tester-routing",
-        },
-    )
-    rule_response = client.post(
-        "/api/admin/config/routing/rule",
-        json={
-            "rule_key": "signed_999",
-            "routing_alias": "signed_999",
-            "route_owner_userid": "sales_01",
-            "route_owner_role": "sales",
-            "routing_target": "manual_review",
-            "fallback_target": "manual_review",
-            "active": True,
-            "operator": "tester-routing",
-        },
-    )
-
-    assert owner_response.status_code == 200
-    assert rule_response.status_code == 200
-
-    with app.app_context():
-        payload = get_routing_config()
-        assert payload["routing_rules"]["signed_999"]["routing_target"] == "manual_review"
-        context = resolve_contact_routing_context("sales_01", "sales", "signed_999")
-        assert context["routing_target"] == "manual_review"
-
-        logs = get_db().execute(
-            """
-            SELECT target_type, target_id, operator
-            FROM admin_operation_logs
-            WHERE target_type IN ('owner_role_map', 'routing_rule_config')
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        assert any(row["target_type"] == "owner_role_map" and row["target_id"] == "sales_01" for row in logs)
-        assert any(row["target_type"] == "routing_rule_config" and row["target_id"] == "signed_999" for row in logs)
-        assert all(row["operator"] == "tester-routing" for row in logs)
 
 
 def test_routing_services_wrappers_route_through_application(monkeypatch):
@@ -648,14 +629,14 @@ def test_admin_config_settings_require_confirmation(client):
 def test_admin_config_mcp_tool_settings_control_runtime(client):
     before = _mcp_list_tools(client)
     before_names = [item["name"] for item in before["result"]["tools"]]
-    assert "get_routing_config" in before_names
+    assert "get_owner_role_map" in before_names
 
     save_response = client.post(
         "/api/admin/config/mcp-tools",
         json={
-            "tool_name": "get_routing_config",
+            "tool_name": "get_owner_role_map",
             "tool_group": "config",
-            "display_name": "Get Routing Config",
+            "display_name": "Get Owner Role Map",
             "description_override": "disabled for test",
             "enabled": False,
             "visible_in_console": True,
@@ -669,7 +650,7 @@ def test_admin_config_mcp_tool_settings_control_runtime(client):
 
     after = _mcp_list_tools(client)
     after_names = [item["name"] for item in after["result"]["tools"]]
-    assert "get_routing_config" not in after_names
+    assert "get_owner_role_map" not in after_names
 
     call_response = client.post(
         "/mcp",
@@ -678,25 +659,12 @@ def test_admin_config_mcp_tool_settings_control_runtime(client):
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
-            "params": {"name": "get_routing_config", "arguments": {}},
+            "params": {"name": "get_owner_role_map", "arguments": {}},
         },
     )
     payload = call_response.get_json()
     assert payload["error"]["code"] == -32000
     assert "tool is disabled" in payload["error"]["message"]
-
-
-def test_admin_config_class_term_and_signup_pages_have_seeded_config(client):
-    signup_response = client.get("/api/admin/config/signup-tags")
-    class_term_response = client.get("/api/admin/config/class-term-tags")
-
-    signup_payload = signup_response.get_json()
-    class_term_payload = class_term_response.get_json()
-
-    assert signup_response.status_code == 200
-    assert class_term_response.status_code == 200
-    assert signup_payload["config"]["tag_group_name"] == "AI 产品报名情况"
-    assert len(class_term_payload["config"]["rows"]) >= 1
 
 
 def test_admin_automation_conversion_page_renders_saved_config_and_preview_panel(app, client):

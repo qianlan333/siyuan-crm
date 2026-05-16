@@ -50,11 +50,11 @@ def test_run_automation_sop_posts_to_internal_endpoint(monkeypatch, capsys):
     body = module.run()
 
     assert body == '{"ok": true}'
-    assert captured["url"] == "http://automation.local:5001/api/admin/automation-conversion/jobs/run-due"
+    assert captured["url"] == "http://automation.local:5001/api/admin/automation-conversion/sop/run-due"
     assert captured["timeout"] == 180
     assert captured["headers"]["authorization"] == "Bearer runner-token"
     assert captured["headers"]["content-type"] == "application/json"
-    assert captured["body"] == {"operator": "automation_sop_runner", "jobs": ["conversion_workflow"]}
+    assert captured["body"] == {"operator": "automation_sop_runner", "jobs": ["sop"]}
     assert capsys.readouterr().out.strip() == '{"ok": true}'
 
 
@@ -74,4 +74,4 @@ def test_run_automation_sop_respects_custom_operator_and_omits_missing_token(mon
     module.run()
 
     assert "authorization" not in captured["headers"]
-    assert captured["body"] == {"operator": "manual-check", "jobs": ["conversion_workflow"]}
+    assert captured["body"] == {"operator": "manual-check", "jobs": ["sop"]}

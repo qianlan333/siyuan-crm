@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import json
 import uuid
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 import pytest
@@ -27,7 +25,9 @@ def client(app):
 def _insert_event(app, *, status="pending", retry_count=0, minutes_ago=0):
     with app.app_context():
         db = get_db()
-        created = (datetime.now() - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%d %H:%M:%S")
+        created = (
+            datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=minutes_ago)
+        ).strftime("%Y-%m-%d %H:%M:%S")
         db.execute(
             """
             INSERT INTO wecom_external_contact_event_logs
@@ -73,7 +73,7 @@ def test_system_health_counts_pending_events(client, app):
 def test_system_health_counts_failed_events(client, app):
     with app.app_context():
         db = get_db()
-        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        now = datetime.now(timezone.utc).replace(tzinfo=None).strftime("%Y-%m-%d %H:%M:%S")
         for i in range(3):
             db.execute(
                 """

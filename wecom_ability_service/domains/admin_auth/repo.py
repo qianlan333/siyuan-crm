@@ -1,22 +1,15 @@
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Any
 
-from ...db import get_db, get_db_backend
-
-
-def _db_bool(value: bool) -> bool:
-    return bool(value)
-
-
-def _fetch_inserted_id(cursor) -> int:
-    """PG INSERT ... RETURNING id 后从 cursor.fetchone() 拿。"""
-    row = cursor.fetchone() or {}
-    return int((row or {}).get("id") or 0)
-
-
-def _placeholders(values: Iterable[object]) -> str:
-    return ",".join("?" for _ in values)
+from ...db import get_db
+from ...db.helpers import (
+    fetch_inserted_id as _fetch_inserted_id,
+    fetchall_dicts,
+    fetchone_dict,
+    placeholders as _placeholders,
+)
+from ...infra.helpers import db_bool as _db_bool
 
 
 def count_admin_users() -> int:
@@ -25,7 +18,8 @@ def count_admin_users() -> int:
 
 
 def list_admin_users() -> list[dict[str, Any]]:
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         """
         SELECT
             id,
@@ -44,8 +38,7 @@ def list_admin_users() -> list[dict[str, Any]]:
         FROM admin_users
         ORDER BY admin_level DESC, is_active DESC, login_enabled DESC, display_name ASC, wecom_userid ASC, id ASC
         """
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def list_admin_wecom_directory_members(*, wecom_corpid: str = "") -> list[dict[str, Any]]:
@@ -55,7 +48,8 @@ def list_admin_wecom_directory_members(*, wecom_corpid: str = "") -> list[dict[s
     if normalized_corpid:
         where_sql = "WHERE wecom_corpid = ?"
         params = (normalized_corpid,)
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         f"""
         SELECT
             id,
@@ -75,8 +69,7 @@ def list_admin_wecom_directory_members(*, wecom_corpid: str = "") -> list[dict[s
         ORDER BY is_active DESC, display_name ASC, wecom_userid ASC, id ASC
         """,
         params,
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def get_admin_wecom_directory_member(wecom_userid: str, *, wecom_corpid: str = "") -> dict[str, Any] | None:
@@ -107,7 +100,8 @@ def get_admin_wecom_directory_member(wecom_userid: str, *, wecom_corpid: str = "
         ).fetchone()
         if row:
             return dict(row)
-    row = get_db().execute(
+    row = fetchone_dict(
+        get_db(),
         """
         SELECT
             id,
@@ -128,12 +122,13 @@ def get_admin_wecom_directory_member(wecom_userid: str, *, wecom_corpid: str = "
         LIMIT 1
         """,
         (normalized_userid,),
-    ).fetchone()
-    return dict(row) if row else None
+    )
+    return row
 
 
 def _admin_user_with_roles_where(sql_where: str, params: tuple[Any, ...]) -> dict[str, Any] | None:
-    row = get_db().execute(
+    return fetchone_dict(
+        get_db(),
         f"""
         SELECT
             id,
@@ -153,8 +148,7 @@ def _admin_user_with_roles_where(sql_where: str, params: tuple[Any, ...]) -> dic
         WHERE {sql_where}
         """,
         params,
-    ).fetchone()
-    return dict(row) if row else None
+    )
 
 
 def get_admin_user_by_id(user_id: int) -> dict[str, Any] | None:
@@ -182,7 +176,8 @@ def list_admin_user_roles(admin_user_ids: list[int] | None = None) -> list[dict[
     if admin_user_ids:
         where_sql = f"WHERE admin_user_id IN ({_placeholders(admin_user_ids)})"
         params.extend(int(user_id) for user_id in admin_user_ids)
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         f"""
         SELECT
             id,
@@ -194,8 +189,7 @@ def list_admin_user_roles(admin_user_ids: list[int] | None = None) -> list[dict[
         ORDER BY admin_user_id ASC, role_code ASC, id ASC
         """,
         tuple(params),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def list_active_super_admin_users(*, wecom_corpid: str = "") -> list[dict[str, Any]]:
@@ -206,7 +200,8 @@ def list_active_super_admin_users(*, wecom_corpid: str = "") -> list[dict[str, A
     if normalized_corpid:
         where_sql += " AND wecom_corpid = ?"
         params.append(normalized_corpid)
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         f"""
         SELECT
             id,
@@ -227,8 +222,7 @@ def list_active_super_admin_users(*, wecom_corpid: str = "") -> list[dict[str, A
         ORDER BY id ASC
         """,
         tuple(params),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def upsert_admin_wecom_directory_members(
@@ -430,7 +424,8 @@ def insert_admin_login_audit(
 
 
 def list_admin_login_audit(*, limit: int = 20) -> list[dict[str, Any]]:
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         """
         SELECT
             a.id,
@@ -448,8 +443,7 @@ def list_admin_login_audit(*, limit: int = 20) -> list[dict[str, Any]]:
         LIMIT ?
         """,
         (int(limit),),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def create_admin_sso_state(*, state_token: str, login_kind: str, next_path: str, expires_at: str) -> None:
@@ -475,7 +469,8 @@ def create_admin_sso_state(*, state_token: str, login_kind: str, next_path: str,
 
 
 def get_admin_sso_state(state_token: str) -> dict[str, Any] | None:
-    row = get_db().execute(
+    return fetchone_dict(
+        get_db(),
         """
         SELECT
             state_token,
@@ -487,8 +482,7 @@ def get_admin_sso_state(state_token: str) -> dict[str, Any] | None:
         WHERE state_token = ?
         """,
         (str(state_token or "").strip(),),
-    ).fetchone()
-    return dict(row) if row else None
+    )
 
 
 def delete_admin_sso_state(state_token: str) -> None:

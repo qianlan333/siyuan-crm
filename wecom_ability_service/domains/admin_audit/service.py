@@ -12,10 +12,6 @@ TARGET_ROUTE_MAP = {
     "customer_task_action": lambda target_id: f"/admin/customers/{target_id}?tab=tasks",
     "questionnaire_console_action": lambda target_id: f"/admin/questionnaires/{target_id}",
     "operations_console_action": lambda target_id: "/admin/user-ops",
-    "owner_role_map": lambda target_id: f"/admin/config/routing?edit_owner={target_id}",
-    "routing_rule_config": lambda target_id: f"/admin/config/routing?edit_rule={target_id}",
-    "signup_tag_rule": lambda target_id: f"/admin/config/signup-tags?edit_tag={target_id}",
-    "class_term_tag_mapping": lambda target_id: f"/admin/config/class-term-tags?edit_mapping={target_id}",
     "app_setting": lambda target_id: "/admin/config/app-settings",
     "mcp_tool_setting": lambda target_id: f"/admin/config/mcp-tools?edit_tool={target_id}",
     "mcp_preflight": lambda target_id: "/admin/mcp",
@@ -68,10 +64,6 @@ def _target_type_label(value: Any) -> str:
         "customer_task_action": "客户触达任务",
         "questionnaire_console_action": "问卷中心",
         "operations_console_action": "运营管理",
-        "owner_role_map": "负责人配置",
-        "routing_rule_config": "分配规则",
-        "signup_tag_rule": "报名标签规则",
-        "class_term_tag_mapping": "班期标签规则",
         "app_setting": "系统设置",
         "mcp_tool_setting": "AI 工具设置",
         "mcp_preflight": "AI 工具环境检查",
@@ -252,5 +244,4 @@ def build_admin_audit_payload(args: Any) -> dict[str, Any]:
         "target_type_options": [{"value": item, "label": _target_type_label(item)} for item in repo.list_distinct_values("target_type")],
         "shareable_href": _build_href("/admin/audit", filters),
     }
-
 

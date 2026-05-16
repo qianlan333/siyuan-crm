@@ -385,15 +385,7 @@ def test_customers_list_uses_database_pagination_for_common_filters(client, app,
     assert len(payload["customers"]) == 5
 
 
-def test_customer_list_scope_sql_casts_timestamp_sort_columns_for_postgres(monkeypatch):
-    # _customer_list_scope_sql now routes its dialect choice through the
-    # shared db.dialect helper, so the patch needs to land on the helper's
-    # backend probe rather than the repo's local re-export only.
-    from wecom_ability_service.db import dialect as db_dialect
-
-    monkeypatch.setattr(customer_repo, "get_db_backend", lambda: "postgres")
-    monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "postgres")
-
+def test_customer_list_scope_sql_casts_timestamp_sort_columns_for_postgres():
     sql = customer_repo._customer_list_scope_sql()
 
     assert "(class_status.updated_at)::timestamp::text" in sql

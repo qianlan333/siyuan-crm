@@ -4,7 +4,23 @@ import logging
 import uuid
 from typing import Any
 
-from . import service as _legacy
+from ...wecom_client import WeComClientError
+from ..outbound_webhook.service import EVENT_OPENCLAW_FOCUS_MESSAGE, send_outbound_webhook
+from ..user_ops import page_service as user_ops_page_service
+from . import service as service_seams
+from .service import (
+    DEFAULT_AUTOMATION_OWNER_USERID,
+    DEFAULT_SCENARIO_KEY,
+    POOL_SILENT,
+    _build_openclaw_focus_message_webhook_payload,
+    _build_pool_send_plan,
+    _FOCUS_POOL_KEYS,
+    _normalized_text,
+    _pool_label,
+    _POOL_SENDABLE_POOL_KEYS,
+    _validate_send_owner_userid,
+    get_openclaw_customer_marketing_profile,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -26,27 +42,27 @@ def send_pool_private_message(
 ) -> dict[str, Any]:
     """Internal automation message-dispatch owner for pool private-message sends."""
 
-    normalized_owner_userid, owner_role = _legacy._validate_send_owner_userid(owner_userid)
-    normalized_pool_key = _legacy._normalized_text(pool_key)
-    if normalized_pool_key not in _legacy._POOL_SENDABLE_POOL_KEYS:
-        if normalized_pool_key == _legacy.POOL_SILENT:
+    normalized_owner_userid, owner_role = _validate_send_owner_userid(owner_userid)
+    normalized_pool_key = _normalized_text(pool_key)
+    if normalized_pool_key not in _POOL_SENDABLE_POOL_KEYS:
+        if normalized_pool_key == POOL_SILENT:
             raise ValueError("silent pool is record-only and does not support batch send")
         raise ValueError("pool_key is invalid")
     effective_trace_id = (trace_id or "").strip() or f"manual-{uuid.uuid4().hex}"
 
     payload = {
-        "content": _legacy._normalized_text(content),
+        "content": _normalized_text(content),
         "images": list(images or []),
         "image_media_ids": list(image_media_ids or []),
         "attachments": list(attachments or []),
     }
-    task_payload, content_preview, image_count = _legacy.user_ops_page_service._build_private_message_payload(payload)
-    plan = _legacy._build_pool_send_plan(owner_userid=normalized_owner_userid, pool_key=normalized_pool_key)
+    task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(payload)
+    plan = _build_pool_send_plan(owner_userid=normalized_owner_userid, pool_key=normalized_pool_key)
     result = {
         "pool_key": normalized_pool_key,
-        "pool_label": _legacy._pool_label(normalized_pool_key),
+        "pool_label": _pool_label(normalized_pool_key),
         "owner_userid": normalized_owner_userid,
-        "owner_display_name": _legacy._normalized_text(owner_role.get("display_name")) or normalized_owner_userid,
+        "owner_display_name": _normalized_text(owner_role.get("display_name")) or normalized_owner_userid,
         "matched_count": int(plan["matched_count"]),
         "sendable_count": int(plan["eligible_count"]),
         "skipped_count": int(plan["skipped_count"]),
@@ -72,7 +88,7 @@ def send_pool_private_message(
     eligible_items = list(plan["eligible_items"])
     grouped_targets: dict[str, list[dict[str, Any]]] = {}
     for item in eligible_items:
-        grouped_targets.setdefault(_legacy._normalized_text(item.get("owner_userid")), []).append(item)
+        grouped_targets.setdefault(_normalized_text(item.get("owner_userid")), []).append(item)
 
     for sender_userid, items in sorted(grouped_targets.items()):
         if not sender_userid:
@@ -81,25 +97,25 @@ def send_pool_private_message(
         request_payload = {
             "sender": sender_userid,
             "external_userid": [
-                _legacy._normalized_text(item.get("external_userid"))
+                _normalized_text(item.get("external_userid"))
                 for item in items
-                if _legacy._normalized_text(item.get("external_userid"))
+                if _normalized_text(item.get("external_userid"))
             ],
             **task_payload,
         }
         try:
             # Keep the monkeypatch seam on marketing_automation.service.dispatch_wecom_task.
-            wecom_result = _legacy.dispatch_wecom_task("private_message", "create_private_message_task", request_payload)
+            wecom_result = service_seams.dispatch_wecom_task("private_message", "create_private_message_task", request_payload)
             outbound_task_ids.append(int(wecom_result["task_id"]))
-            task_results.append(_legacy.user_ops_page_service._build_sender_success_result(sender_userid, items, wecom_result))
-        except (_legacy.WeComClientError, AttributeError) as exc:
-            task_results.append(_legacy.user_ops_page_service._build_sender_failure_result(sender_userid, items, exc))
+            task_results.append(user_ops_page_service._build_sender_success_result(sender_userid, items, wecom_result))
+        except (WeComClientError, AttributeError) as exc:
+            task_results.append(user_ops_page_service._build_sender_failure_result(sender_userid, items, exc))
 
     sent_count = sum(
-        int(item.get("target_count") or 0) for item in task_results if _legacy._normalized_text(item.get("status")) != "failed"
+        int(item.get("target_count") or 0) for item in task_results if _normalized_text(item.get("status")) != "failed"
     )
-    status = _legacy.user_ops_page_service._derive_record_status(task_results, eligible_count=int(plan["eligible_count"]))
-    record_id = _legacy.user_ops_page_service._insert_send_record(
+    status = user_ops_page_service._derive_record_status(task_results, eligible_count=int(plan["eligible_count"]))
+    record_id = user_ops_page_service._insert_send_record(
         outbound_task_ids=outbound_task_ids,
         task_results=task_results,
         selected_count=int(plan["matched_count"]),
@@ -114,10 +130,10 @@ def send_pool_private_message(
         filter_snapshot={
             "selection_mode": "marketing_pool",
             "pool_key": normalized_pool_key,
-            "pool_label": _legacy._pool_label(normalized_pool_key),
+            "pool_label": _pool_label(normalized_pool_key),
             "owner_userid": normalized_owner_userid,
         },
-        operator=_legacy._normalized_text(operator) or "openclaw_pool_send",
+        operator=_normalized_text(operator) or "openclaw_pool_send",
         status=status,
     )
     # 频次预算消耗记录：按 sender 分组、对成功的 group 里的每个 item 写一条
@@ -125,22 +141,22 @@ def send_pool_private_message(
         from .frequency_budget_service import record_consumption
 
         successful_senders = {
-            _legacy._normalized_text(item.get("sender_userid"))
+            _normalized_text(item.get("sender_userid"))
             for item in task_results
-            if _legacy._normalized_text(item.get("status")) != "failed"
+            if _normalized_text(item.get("status")) != "failed"
         }
         for sender_userid, items in grouped_targets.items():
             if sender_userid not in successful_senders:
                 continue
             for item in items:
-                external_userid = _legacy._normalized_text(item.get("external_userid"))
+                external_userid = _normalized_text(item.get("external_userid"))
                 if not external_userid:
                     continue
                 record_consumption(
                     member_id=int(item.get("automation_member_id") or 0) or None,
                     external_contact_id=external_userid,
                     channels=("wecom_private",),
-                    program_codes=(_legacy.DEFAULT_SCENARIO_KEY,),
+                    program_codes=(DEFAULT_SCENARIO_KEY,),
                     pool_keys=(normalized_pool_key,),
                     source_kind=source_kind,
                     source_id=str(source_id or record_id or ""),
@@ -169,27 +185,27 @@ def trigger_openclaw_focus_message_webhook(
 ) -> dict[str, Any]:
     """Internal automation message-dispatch owner for focus-webhook triggering."""
 
-    normalized_external_userid = _legacy._normalized_text(external_userid)
+    normalized_external_userid = _normalized_text(external_userid)
     if not normalized_external_userid:
         return {"ok": False, "sent": False, "reason": "missing_external_userid"}
-    marketing_profile = _legacy.get_openclaw_customer_marketing_profile(
+    marketing_profile = get_openclaw_customer_marketing_profile(
         external_userid=normalized_external_userid,
         recent_message_limit=max(1, min(int(recent_message_limit), 20)),
     )
     marketing_state = dict(marketing_profile.get("marketing_state") or {})
     owner_userid = (
-        _legacy._normalized_text((marketing_profile.get("owner") or {}).get("owner_userid"))
-        or _legacy.DEFAULT_AUTOMATION_OWNER_USERID
+        _normalized_text((marketing_profile.get("owner") or {}).get("owner_userid"))
+        or DEFAULT_AUTOMATION_OWNER_USERID
     )
-    pool_key = _legacy._normalized_text(marketing_state.get("pool_key"))
-    if pool_key not in _legacy._FOCUS_POOL_KEYS:
+    pool_key = _normalized_text(marketing_state.get("pool_key"))
+    if pool_key not in _FOCUS_POOL_KEYS:
         return {"ok": False, "sent": False, "reason": "pool_not_focus_followup", "pool_key": pool_key}
-    payload = _legacy._build_openclaw_focus_message_webhook_payload(
+    payload = _build_openclaw_focus_message_webhook_payload(
         external_userid=normalized_external_userid,
         recent_message_limit=recent_message_limit,
     )
-    delivery_result = _legacy.send_outbound_webhook(
-        event_type=_legacy.EVENT_OPENCLAW_FOCUS_MESSAGE,
+    delivery_result = send_outbound_webhook(
+        event_type=EVENT_OPENCLAW_FOCUS_MESSAGE,
         payload=payload,
         source_key="external_userid",
         source_id=normalized_external_userid,
@@ -202,8 +218,8 @@ def trigger_openclaw_focus_message_webhook(
         "pool_key": pool_key,
         "owner_userid": owner_userid,
         "status_code": delivery.get("response_status_code"),
-        "reason": _legacy._normalized_text(delivery_result.get("reason")),
-        "error": _legacy._normalized_text(delivery_result.get("reason")),
+        "reason": _normalized_text(delivery_result.get("reason")),
+        "error": _normalized_text(delivery_result.get("reason")),
         "delivery": delivery,
         "payload": payload,
     }
@@ -214,15 +230,15 @@ def process_inbound_messages_for_openclaw(messages: list[dict[str, Any]]) -> dic
 
     latest_by_external_userid: dict[str, dict[str, Any]] = {}
     for item in messages:
-        normalized_external_userid = _legacy._normalized_text(item.get("external_userid"))
+        normalized_external_userid = _normalized_text(item.get("external_userid"))
         if not normalized_external_userid:
             continue
-        if _legacy._normalized_text(item.get("chat_type")) != "private":
+        if _normalized_text(item.get("chat_type")) != "private":
             continue
-        if _legacy._normalized_text(item.get("sender")) != normalized_external_userid:
+        if _normalized_text(item.get("sender")) != normalized_external_userid:
             continue
         previous = latest_by_external_userid.get(normalized_external_userid)
-        if previous and _legacy._normalized_text(previous.get("send_time")) >= _legacy._normalized_text(item.get("send_time")):
+        if previous and _normalized_text(previous.get("send_time")) >= _normalized_text(item.get("send_time")):
             continue
         latest_by_external_userid[normalized_external_userid] = dict(item)
     automation_scope_userids: set[str] = set()
@@ -230,9 +246,9 @@ def process_inbound_messages_for_openclaw(messages: list[dict[str, Any]]) -> dic
         from ..automation_conversion import repo as automation_repo
 
         automation_scope_userids = {
-            _legacy._normalized_text(item)
+            _normalized_text(item)
             for item in automation_repo.list_active_automation_external_contact_ids(sorted(latest_by_external_userid.keys()))
-            if _legacy._normalized_text(item)
+            if _normalized_text(item)
         }
     results = [
         trigger_openclaw_focus_message_webhook(external_userid=external_userid)

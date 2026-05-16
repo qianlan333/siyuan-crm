@@ -34,7 +34,6 @@ from ..domains.admin_auth import (
     resolve_admin_user_from_wecom_identity,
     touch_admin_user_login,
 )
-from ..domains.admin_config import repo as admin_config_repo
 from ..infra.internal_auth_runtime import require_internal_api_token_compat
 from ..infra.settings import get_setting
 from ..wecom_client import WeComClientError
@@ -45,11 +44,16 @@ ADMIN_AUTH_EXEMPT_PATHS = {
     "/auth/wecom/start",
     "/auth/wecom/callback",
 }
-ADMIN_API_CONFIG_PREFIX = "/api/admin/config"
+ADMIN_API_MODULE_PREFIXES = (
+    ("/api/admin/config", "config"),
+    ("/api/admin/marketing-automation", "config"),
+    ("/api/admin/wechat-pay", "wechat_pay_transactions"),
+)
 ADMIN_ROUTE_MODULE_PREFIXES = (
     ("/admin/automation-conversion", "automation_conversion"),
     ("/admin/customers", "customers"),
     ("/admin/questionnaires", "questionnaires"),
+    ("/admin/wechat-pay", "wechat_pay_transactions"),
     ("/admin/config", "config"),
     ("/admin/api-docs", "api_docs"),
     ("/admin/mcp", "api_docs"),
@@ -104,6 +108,14 @@ def _module_for_admin_path(path: str) -> str:
     return ""
 
 
+def _module_for_admin_api_path(path: str) -> str:
+    normalized_path = _normalized_text(path)
+    for prefix, module_key in ADMIN_API_MODULE_PREFIXES:
+        if normalized_path == prefix or normalized_path.startswith(prefix + "/"):
+            return module_key
+    return ""
+
+
 def _is_sunset_admin_path(path: str) -> bool:
     normalized_path = _normalized_text(path)
     return any(normalized_path == prefix or normalized_path.startswith(prefix + "/") for prefix in ADMIN_SUNSET_PAGE_PREFIXES)
@@ -138,18 +150,20 @@ def validate_admin_console_action_token() -> str:
 
 
 def _record_sunset_access(path: str, *, action_type: str = "sunset_route_access") -> None:
+    from ..domains.admin_audit import record_audit
+
     operator = current_admin_operator() if current_admin_session_user() else "anonymous"
-    admin_config_repo.insert_admin_operation_log(
+    record_audit(
         operator=operator,
         action_type=action_type,
         target_type="sunset_route",
         target_id=_normalized_text(path),
-        before_json={
+        before={
             "path": _normalized_text(path),
             "method": request.method,
             "operator": operator,
         },
-        after_json={
+        after={
             "referrer": _normalized_text(request.referrer),
             "remote_addr": _normalized_text(request.headers.get("X-Forwarded-For")) or _normalized_text(request.remote_addr),
             "user_agent": _normalized_text(request.user_agent.string),
@@ -426,10 +440,11 @@ def register_admin_request_guards(app) -> None:
         if path in ADMIN_AUTH_EXEMPT_PATHS:
             return None
 
-        if path.startswith(ADMIN_API_CONFIG_PREFIX):
+        api_module_key = _module_for_admin_api_path(path)
+        if api_module_key:
             if not current_admin_session_user():
                 return jsonify({"ok": False, "error": "admin login required"}), 401
-            if not _can_access_admin_module("config", write=_request_is_admin_write()):
+            if not _can_access_admin_module(api_module_key, write=_request_is_admin_write()):
                 return jsonify({"ok": False, "error": "permission denied"}), 403
             return None
 

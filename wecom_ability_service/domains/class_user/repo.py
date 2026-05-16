@@ -2,11 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...db import get_db, get_db_backend
-
-
-def _db_bool(value: bool) -> bool:
-    return bool(value)
+from ...db import get_db
+from ...infra.helpers import db_bool
 
 
 def list_signup_scope_external_userids(corp_id: str) -> list[str]:
@@ -77,7 +74,7 @@ def list_class_user_live_base_rows(corp_id: str) -> list[dict[str, Any]]:
             corp_id,
             corp_id,
             corp_id,
-            _db_bool(True),
+            db_bool(True),
         ),
     ).fetchall()
     return [dict(row) for row in rows]
@@ -448,5 +445,5 @@ def list_contact_tag_signup_rows():
           ON p.id = bindings.person_id
         ORDER BY ct.created_at DESC, ct.id DESC
         """,
-        (_db_bool(True),),
+        (db_bool(True),),
     ).fetchall()

@@ -19,12 +19,9 @@ from ..application.identity_contact.queries import (
     ListIdentityExternalUseridsForCorpQuery,
     ResolveExternalContactIdentityQuery,
 )
-from ..archive_adapter import ArchiveAdapterClient
-from ..domains.archive.service import create_sync_run, finish_sync_run
 from ..domains.contacts.repo import count_contacts, list_contacts as list_contacts_from_db, upsert_contacts
 from ..domains.contacts.service import (
     contact_description_state,
-    normalize_contact_record,
     sync_contact_detail_with_description_fix as _sync_contact_detail_with_description_fix,
     target_contact_description,
     update_contact_description_snapshot,
@@ -43,9 +40,7 @@ from .common import (
     _corp_id,
     _default_owner_userid,
     _log_wecom_client_error,
-    archive_logger,
     contacts_logger,
-    wecom_logger,
 )
 
 

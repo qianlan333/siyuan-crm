@@ -273,6 +273,7 @@ class UpsertUserOpsHuangxiaocanActivationSourceCommand:
         return user_ops_domain_service.upsert_user_ops_huangxiaocan_activation_source(
             mobile=str(dto.mobile or "").strip(),
             activation_state=str(dto.activation_state or "").strip(),
+            activation_remark=str(dto.activation_remark or "").strip(),
             import_batch_id=dto.import_batch_id,
             created_by=str(dto.created_by or "").strip(),
             is_active=bool(dto.is_active),

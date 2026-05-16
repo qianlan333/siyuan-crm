@@ -25,16 +25,12 @@ def app(tmp_path):
 # -------- dialect ----------------------------------------------------------
 
 
-def test_cast_text_emits_postgres_cast_only_under_postgres(monkeypatch):
-    monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "postgres")
+def test_cast_text_emits_postgres_timestamp_cast():
     # PG-only: cast_text 使用 ::timestamp::text 确保 TIMESTAMPTZ 输出不带时区
     assert db_dialect.cast_text("ts.updated_at") == "(ts.updated_at)::timestamp::text"
-    assert db_dialect.is_postgres() is True
-    assert db_dialect.is_sqlite() is False
 
 
-def test_coalesce_text_chains_casts(monkeypatch):
-    monkeypatch.setattr(db_dialect, "get_db_backend", lambda: "postgres")
+def test_coalesce_text_chains_casts():
     assert (
         db_dialect.coalesce_text("a", "b", default="''")
         == "COALESCE((a)::timestamp::text, (b)::timestamp::text, '')"

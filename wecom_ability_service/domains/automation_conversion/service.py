@@ -8,16 +8,9 @@ from flask import current_app
 
 from ...db import get_db
 from ...infra.settings import (
-    DEFAULT_DEEPSEEK_BASE_URL,
-    DEFAULT_DEEPSEEK_EXECUTION_MODEL,
-    DEFAULT_DEEPSEEK_REASONER_MODEL,
-    DEFAULT_DEEPSEEK_ROUTER_MODEL,
-    DEFAULT_DEEPSEEK_TIMEOUT_SECONDS,
     get_setting,
-    mask_value,
-    set_settings,
 )
-from ...infra.wecom_runtime import get_app_runtime_client, get_contact_runtime_client
+from ...infra.wecom_runtime import get_app_runtime_client, get_contact_runtime_client  # noqa: F401 - service_seams monkeypatch path
 from ...wecom_client import WeComClientError
 from ..automation_state.renderer import business_pool_label
 from ..automation_state.state_defs import (
@@ -26,23 +19,12 @@ from ..automation_state.state_defs import (
 )
 from ..marketing_automation.service import get_signup_conversion_config, save_signup_conversion_config
 from ..outbound_webhook.service import EVENT_OPENCLAW_FOCUS_MESSAGE, send_outbound_webhook
-from ..questionnaire.service import get_questionnaire_detail, list_available_wecom_tags, list_questionnaires
-from ..tags import repo as tags_repo
-from ..tasks.service import dispatch_wecom_task
-from ..user_ops import page_service as user_ops_page_service
-from .agents import (
-    AGENT_PROMPT_DEFINITION_MAP,
-    AGENT_PROMPT_ORDER,
-    CHILD_AGENT_CONFIG_MAP,
-    DeepSeekClientError,
-    call_deepseek_agent,
-    default_agent_prompt_payloads,
-    get_deepseek_runtime_config,
-    test_deepseek_connection,
-)
-from .message_activity_client import get_message_activity_db_status, query_message_activity_counts
+from ..questionnaire.service import get_questionnaire_detail, list_questionnaires
+from ..tasks.service import dispatch_wecom_task  # noqa: F401 - legacy monkeypatch seam
+from .message_activity_client import query_message_activity_counts  # noqa: F401 - legacy monkeypatch seam
 from . import local_projection
 from . import repo
+from .private_message_dispatch import _dispatch_private_message_batch  # noqa: F401
 from .provider import load_channel_provider
 
 DEFAULT_OWNER_STAFF_ID = "HuangYouCan"
@@ -112,6 +94,7 @@ DECISION_SOURCE_SYSTEM = "system"
 
 SOURCE_TYPE_MANUAL = "manual"
 SOURCE_TYPE_QRCODE = "qrcode"
+SOURCE_TYPE_WECOM_CUSTOMER_ACQUISITION = "wecom_customer_acquisition"
 SOURCE_TYPE_IMPORT = "import"
 SOURCE_TYPE_QUESTIONNAIRE = "questionnaire"
 SOURCE_TYPE_SYSTEM = "system"
@@ -658,6 +641,8 @@ def _member_payload_from_context(
         "updated_at": _normalized_text(existing_row.get("updated_at")),
         "last_ai_push_at": _normalized_text(existing_row.get("last_ai_push_at")),
         "ai_cooldown_until": _normalized_text(existing_row.get("ai_cooldown_until")),
+        "current_audience_code": _normalized_text(existing_row.get("current_audience_code")),
+        "current_audience_entered_at": _normalized_text(existing_row.get("current_audience_entered_at")),
     }
     return base_payload
 
@@ -1423,94 +1408,6 @@ def get_stage_detail_payload(*, route_key: str, keyword: str = "", limit: int = 
     }
 
 
-def _dispatch_private_message_batch(
-    *,
-    target_items: list[dict[str, Any]],
-    content: str,
-    image_media_ids: list[str] | None = None,
-    images: list[dict[str, Any]] | None = None,
-    miniprogram_library_ids: list[int] | None = None,
-    attachments: list[dict[str, Any]] | None = None,
-    operator_id: str,
-    filter_snapshot: dict[str, Any],
-) -> dict[str, Any]:
-    normalized_content = _normalized_text(content)
-    normalized_image_media_ids = _normalize_manual_send_image_media_ids(image_media_ids)
-    payload_for_build: dict[str, Any] = {
-        "content": normalized_content,
-        "image_media_ids": normalized_image_media_ids,
-        "images": list(images or []),
-    }
-    library_ids = [int(i) for i in (miniprogram_library_ids or []) if i]
-    extra_attachments: list[dict[str, Any]] = list(attachments or [])
-    for lid in library_ids:
-        extra_attachments.append({"msgtype": "miniprogram", "miniprogram": {"library_id": lid}})
-    if extra_attachments:
-        payload_for_build["attachments"] = extra_attachments
-    task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(payload_for_build)
-    outbound_task_ids: list[int] = []
-    task_results: list[dict[str, Any]] = []
-    fail_external_userids: list[str] = []
-    request_payload = {
-        "sender": DEFAULT_OWNER_STAFF_ID,
-        "external_userid": [_normalized_text(item.get("external_userid")) for item in target_items if _normalized_text(item.get("external_userid"))],
-        **task_payload,
-    }
-    try:
-        wecom_result = dispatch_wecom_task("private_message", "create_private_message_task", request_payload)
-        fail_external_userids = [
-            _normalized_text(item)
-            for item in (wecom_result.get("wecom_result") or {}).get("fail_list", [])
-            if _normalized_text(item)
-        ]
-        outbound_task_ids.append(int(wecom_result["task_id"]))
-        task_results.append(user_ops_page_service._build_sender_success_result(DEFAULT_OWNER_STAFF_ID, target_items, wecom_result))
-    except (WeComClientError, AttributeError) as exc:
-        task_results.append(user_ops_page_service._build_sender_failure_result(DEFAULT_OWNER_STAFF_ID, target_items, exc))
-
-    if fail_external_userids:
-        sent_count = max(0, len(target_items) - len(set(fail_external_userids)))
-        if sent_count > 0:
-            status = "partial_failed"
-        else:
-            status = "failed"
-    else:
-        sent_count = sum(int(item.get("target_count") or 0) for item in task_results if _normalized_text(item.get("status")) != "failed")
-        status = user_ops_page_service._derive_record_status(task_results, eligible_count=len(target_items))
-    record_id = user_ops_page_service._insert_send_record(
-        outbound_task_ids=outbound_task_ids,
-        task_results=task_results,
-        selected_count=len(target_items),
-        eligible_count=len(target_items),
-        sent_count=sent_count,
-        skipped_count=0,
-        skipped_reasons={},
-        include_do_not_disturb=False,
-        content_preview=content_preview,
-        image_count=image_count,
-        sender_userids=[DEFAULT_OWNER_STAFF_ID],
-        filter_snapshot=filter_snapshot,
-        operator=_normalized_text(operator_id) or "crm_console",
-        status=status,
-    )
-    return {
-        "ok": status != "failed",
-        "status": status,
-        "record_id": int(record_id),
-        "task_ids": outbound_task_ids,
-        "task_results": task_results,
-        "content_preview": content_preview,
-        "image_count": image_count,
-        "sent_count": sent_count,
-        "fail_external_userids": fail_external_userids,
-        "error": (
-            _normalized_text(task_results[0].get("error_message"))
-            if status == "failed" and task_results
-            else ""
-        ),
-    }
-
-
 def _has_existing_touch_delivery(*, touch_surface: str, rule_key: str, external_contact_id: str) -> bool:
     normalized_surface = _normalized_text(touch_surface)
     normalized_rule_key = _normalized_text(rule_key)
@@ -1536,117 +1433,6 @@ def _has_existing_touch_delivery(*, touch_surface: str, rule_key: str, external_
             external_contact_id=normalized_external_contact_id,
         )
     return False
-
-
-def list_registered_due_jobs() -> list[dict[str, Any]]:
-    return [
-        {
-            "job_code": "sop",
-            "label": "自动化转化 SOP",
-            "frequency_minutes": 15,
-            "description": "轮询未填问卷人群、运营中人群、已转化人群的 SOP day 模板，到点后按自然日批量发送。",
-        },
-        {
-            "job_code": "conversion_workflow",
-            "label": "自动化转化任务流",
-            "frequency_minutes": 15,
-            "description": "轮询启用中的自动化转化任务流节点，到点后按当前大人群和第 N 天执行发送。",
-        }
-    ]
-
-
-def run_registered_due_jobs(
-    *,
-    job_codes: list[str] | None = None,
-    operator_id: str = "",
-    operator_type: str = "system",
-) -> dict[str, Any]:
-    registry = {item["job_code"]: dict(item) for item in list_registered_due_jobs()}
-    selected_job_codes = [
-        _normalized_text(item)
-        for item in (job_codes if job_codes is not None else ["conversion_workflow"])
-        if _normalized_text(item)
-    ]
-    if not selected_job_codes:
-        selected_job_codes = ["conversion_workflow"]
-
-    invalid_job_codes = [item for item in selected_job_codes if item not in registry]
-    if invalid_job_codes:
-        raise ValueError(f"unsupported due jobs: {', '.join(sorted(dict.fromkeys(invalid_job_codes)))}")
-
-    jobs_payload: list[dict[str, Any]] = []
-    executed_job_count = 0
-    failed_job_count = 0
-    total_success_count = 0
-    total_skipped_count = 0
-    total_failed_count = 0
-    batch_ids: list[int] = []
-
-    for job_code in selected_job_codes:
-        definition = registry[job_code]
-        try:
-            if job_code == "sop":
-                payload = run_due_sop(
-                    operator_id=operator_id or "automation_conversion_due_runner",
-                    operator_type=operator_type,
-                )
-            elif job_code == "conversion_workflow":
-                from .workflow_runtime import run_due_conversion_workflows
-
-                payload = run_due_conversion_workflows(
-                    operator_id=operator_id or "automation_conversion_due_runner",
-                    operator_type=operator_type,
-                )
-            else:
-                raise ValueError(f"unsupported due job runner: {job_code}")
-        except Exception as exc:
-            failed_job_count += 1
-            jobs_payload.append(
-                {
-                    **definition,
-                    "ok": False,
-                    "error": str(exc),
-                }
-            )
-            continue
-
-        executed_job_count += 1
-        payload_success_count = int(payload.get("total_success_count") or 0)
-        payload_skipped_count = int(payload.get("total_skipped_count") or 0)
-        payload_failed_count = int(payload.get("total_failed_count") or 0)
-        if not payload_success_count and not payload_skipped_count and not payload_failed_count:
-            for execution_result in payload.get("executions") or []:
-                execution_row = dict((execution_result or {}).get("execution") or {})
-                payload_success_count += int(execution_row.get("success_count") or 0)
-                payload_skipped_count += int(execution_row.get("skipped_count") or 0)
-                payload_failed_count += int(execution_row.get("failed_count") or 0)
-        total_success_count += payload_success_count
-        total_skipped_count += payload_skipped_count
-        total_failed_count += payload_failed_count
-        batch_ids.extend(int(item) for item in (payload.get("batch_ids") or []) if int(item or 0))
-        jobs_payload.append(
-            {
-                **definition,
-                "ok": bool(payload.get("ok")),
-                "result": payload,
-            }
-        )
-
-    return {
-        "ok": failed_job_count == 0,
-        "operator_type": _normalized_text(operator_type) or "system",
-        "operator_id": _normalized_text(operator_id) or "automation_conversion_due_runner",
-        "requested_job_codes": selected_job_codes,
-        "executed_job_count": executed_job_count,
-        "failed_job_count": failed_job_count,
-        "total_success_count": total_success_count,
-        "total_skipped_count": total_skipped_count,
-        "total_failed_count": total_failed_count,
-        "batch_ids": list(dict.fromkeys(batch_ids)),
-        "jobs": jobs_payload,
-    }
-
-
 
 
 def _event_payloads(member_id: int, limit: int = 10) -> list[dict[str, Any]]:
@@ -1784,9 +1570,10 @@ def handle_qrcode_enter_from_callback(
 
 
 # === Re-exports for backward compatibility (modules split off) ===
-# These imports are at the end to avoid circular imports with sub-services
+# These imports are at the end to avoid circular imports with sub-services.
+# F401 is intentionally suppressed here because this module is a legacy facade.
 
-from .sop_service import (  # noqa: E402
+from .sop_service import (  # noqa: E402,F401
     _upsert_sop_progress_entry,
     _validate_sop_pool_key,
     delete_sop_v1_template_day,
@@ -1800,7 +1587,7 @@ from .sop_service import (  # noqa: E402
     save_sop_v1_pool_config,
     save_sop_v1_template,
 )
-from .reply_monitor_service import (  # noqa: E402
+from .reply_monitor_service import (  # noqa: E402,F401
     _dispatch_reply_monitor_queue_item,
     _reply_monitor_status_payload,
     _serialize_reply_monitor_queue_item,
@@ -1809,7 +1596,7 @@ from .reply_monitor_service import (  # noqa: E402
     run_router_test_dispatch,
     save_reply_monitor_enabled,
 )
-from .focus_send_service import (  # noqa: E402
+from .focus_send_service import (  # noqa: E402,F401
     _focus_batch_detail_payload,
     _focus_batch_item_status_label,
     _focus_batch_status_label,
@@ -1821,7 +1608,7 @@ from .focus_send_service import (  # noqa: E402
     get_focus_send_batches_payload,
     run_due_focus_send_batches,
 )
-from .channel_service import (  # noqa: E402
+from .channel_service import (  # noqa: E402,F401
     _channel_status_is_generated,
     _default_channel_field_statuses,
     _effective_channel_entry_tag_payload,
@@ -1830,7 +1617,7 @@ from .channel_service import (  # noqa: E402
     get_default_channel_settings_payload,
     save_default_channel_settings,
 )
-from .model_infra_service import (  # noqa: E402
+from .model_infra_service import (  # noqa: E402,F401
     _deepseek_settings_payload,
     _serialize_agent_llm_call_log,
     _serialize_agent_prompt_row,
@@ -1840,7 +1627,7 @@ from .model_infra_service import (  # noqa: E402
     save_model_infra_settings,
     test_model_infra_connection,
 )
-from .message_activity_service import (  # noqa: E402
+from .message_activity_service import (  # noqa: E402,F401
     _message_activity_item_status_label,
     _message_activity_pool,
     _message_activity_sync_run_status_label,
@@ -1849,7 +1636,11 @@ from .message_activity_service import (  # noqa: E402
     _serialize_message_activity_sync_run,
     run_message_activity_sync,
 )
-from .manual_send_service import (  # noqa: E402
+from .due_jobs_service import (  # noqa: E402,F401
+    list_registered_due_jobs,
+    run_registered_due_jobs,
+)
+from .manual_send_service import (  # noqa: E402,F401
     _finalize_stage_manual_touch_deliveries,
     _manual_send_allowed_route_keys,
     _manual_send_stage_definition,

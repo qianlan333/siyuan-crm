@@ -236,7 +236,7 @@ TOOL_DEFS = [
     },
     {
         "name": "send_pool_private_message",
-        "description": "Send one private-message batch directly to one CRM pool. Supports text, images, attachments, or mixed combinations; CRM filters the pool, sends, and writes send records.",
+        "description": "Send one private-message batch directly to one CRM pool. Supports text, JPG/PNG images (<=2MB), attachments (<=9 total), or mixed combinations; CRM filters the pool, sends, and writes send records.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -309,24 +309,6 @@ TOOL_DEFS = [
             "properties": {
                 "active_only": {"type": "boolean"},
             },
-        },
-    },
-    {
-        "name": "get_signup_tag_rules",
-        "description": "Read signup tag rules used for pre/post-signup routing validation.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "active_only": {"type": "boolean"},
-            },
-        },
-    },
-    {
-        "name": "get_routing_config",
-        "description": "Read both owner role map and signup tag rules in one call.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {},
         },
     },
     {

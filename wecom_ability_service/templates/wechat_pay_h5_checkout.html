@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>{{ page_state.product.name }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f6f3ed;
+      --ink: #18201d;
+      --muted: #69736d;
+      --line: #ddd6ca;
+      --panel: #fffdf8;
+      --accent: #0f8f67;
+      --accent-strong: #076345;
+      --gold: #c68a2a;
+      --danger: #b42318;
+      --shadow: 0 18px 48px rgba(24, 32, 29, 0.12);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        linear-gradient(180deg, rgba(255,255,255,0.72), rgba(255,255,255,0) 38%),
+        var(--paper);
+      color: var(--ink);
+      font-family: "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif;
+    }
+    .checkout-shell {
+      width: min(100%, 560px);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 22px 16px 42px;
+      display: flex;
+      align-items: center;
+    }
+    .checkout-panel {
+      width: 100%;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .product-head {
+      padding: 24px 22px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #fffaf0;
+    }
+    .kicker {
+      margin: 0 0 10px;
+      color: var(--accent-strong);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    h1 {
+      margin: 0;
+      font-size: 25px;
+      line-height: 1.22;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .description {
+      margin: 12px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.75;
+    }
+    .pay-body { padding: 22px; }
+    .amount-row {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .amount-label {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .amount {
+      color: var(--ink);
+      font-size: 34px;
+      line-height: 1;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .amount small {
+      margin-right: 2px;
+      font-size: 18px;
+      font-weight: 800;
+    }
+    .state-line {
+      min-height: 22px;
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .state-line.error { color: var(--danger); }
+    .state-line.success { color: var(--accent-strong); }
+    .actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    button,
+    a.button-link {
+      width: 100%;
+      min-height: 50px;
+      border: 0;
+      border-radius: 6px;
+      background: var(--accent);
+      color: #fff;
+      font: inherit;
+      font-size: 16px;
+      font-weight: 800;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 8px 20px rgba(15, 143, 103, 0.24);
+    }
+    button:active,
+    a.button-link:active { transform: translateY(1px); }
+    button[disabled] {
+      opacity: 0.55;
+      box-shadow: none;
+    }
+    .meta-strip {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 14px 22px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12px;
+      background: #fbf7ef;
+    }
+    .meta-strip span:last-child {
+      color: var(--gold);
+      font-weight: 800;
+      white-space: nowrap;
+    }
+    @media (max-width: 420px) {
+      .checkout-shell { align-items: stretch; padding: 14px 12px 28px; }
+      .checkout-panel { margin-top: 18px; }
+      .product-head,
+      .pay-body { padding-left: 18px; padding-right: 18px; }
+      h1 { font-size: 23px; }
+      .amount { font-size: 31px; }
+      .meta-strip { padding-left: 18px; padding-right: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="checkout-shell">
+    <section class="checkout-panel">
+      <header class="product-head">
+        <p class="kicker">微信支付</p>
+        <h1>{{ page_state.product.name }}</h1>
+        <p class="description">{{ page_state.product.description }}</p>
+      </header>
+
+      <div class="pay-body">
+        <div class="amount-row">
+          <div class="amount-label">应付金额</div>
+          <div class="amount"><small>¥</small>{{ "%.2f"|format((page_state.product.amount_total or 0) / 100) }}</div>
+        </div>
+        <div id="payState" class="state-line">
+          {% if not page_state.enabled %}
+            当前支付暂未启用。
+          {% elif not page_state.identity_ready %}
+            需要先完成微信授权。
+          {% else %}
+            已就绪。
+          {% endif %}
+        </div>
+        <div class="actions">
+          {% if not page_state.identity_ready %}
+            <a class="button-link" href="{{ page_state.oauth_start_url }}">微信授权</a>
+          {% else %}
+            <button id="payButton" type="button" {% if not page_state.enabled %}disabled{% endif %}>确认支付</button>
+          {% endif %}
+        </div>
+      </div>
+
+      <footer class="meta-strip">
+        <span>虚拟商品</span>
+        <span>即时开通</span>
+      </footer>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const state = {{ page_state|tojson }};
+      const payButton = document.getElementById("payButton");
+      const stateLine = document.getElementById("payState");
+      let activeOrderNo = "";
+
+      function setState(message, type) {
+        if (!stateLine) return;
+        stateLine.textContent = message;
+        stateLine.classList.remove("error", "success");
+        if (type) stateLine.classList.add(type);
+      }
+
+      function invokeBridge(payParams) {
+        return new Promise((resolve) => {
+          const call = function () {
+            window.WeixinJSBridge.invoke("getBrandWCPayRequest", payParams, function (res) {
+              resolve(res || {});
+            });
+          };
+          if (typeof window.WeixinJSBridge === "undefined") {
+            document.addEventListener("WeixinJSBridgeReady", call, false);
+          } else {
+            call();
+          }
+        });
+      }
+
+      async function confirmStatus(outTradeNo, refresh) {
+        const url = state.status_url_template.replace("{out_trade_no}", encodeURIComponent(outTradeNo)) + (refresh ? "?refresh=1" : "");
+        const response = await fetch(url, { credentials: "same-origin" });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "支付结果确认失败");
+        }
+        return payload.order || {};
+      }
+
+      async function waitForPaid(outTradeNo) {
+        for (let index = 0; index < 8; index += 1) {
+          const order = await confirmStatus(outTradeNo, index === 0);
+          if (order.status === "paid") return order;
+          await new Promise((resolve) => setTimeout(resolve, 900));
+        }
+        return confirmStatus(outTradeNo, true);
+      }
+
+      async function createOrder() {
+        const response = await fetch(state.create_order_url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ product_code: state.product.product_code })
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "下单失败");
+        }
+        return payload;
+      }
+
+      if (payButton) {
+        payButton.addEventListener("click", async function () {
+          payButton.disabled = true;
+          setState("正在创建订单...");
+          try {
+            const payload = await createOrder();
+            activeOrderNo = payload.order.out_trade_no;
+            setState("等待微信支付确认...");
+            const payResult = await invokeBridge(payload.pay_params);
+            const message = String(payResult.err_msg || "");
+            if (message.indexOf(":ok") === -1) {
+              throw new Error(message.indexOf(":cancel") !== -1 ? "支付已取消" : "支付未完成");
+            }
+            setState("正在确认支付结果...");
+            const order = await waitForPaid(activeOrderNo);
+            if (order.status !== "paid") {
+              throw new Error("支付结果确认中，请稍后刷新查看");
+            }
+            setState("支付成功", "success");
+            if (order.success_url) {
+              window.location.href = order.success_url;
+            }
+          } catch (err) {
+            setState(err.message || "支付失败，请稍后重试", "error");
+            payButton.disabled = false;
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

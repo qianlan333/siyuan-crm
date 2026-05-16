@@ -1,28 +1,25 @@
 {% set context = program_context or {} %}
 {% if context %}
-{% set status_label = "启用" if context.status == "active" else "草稿" if context.status == "draft" else "暂停" if context.status == "paused" else "归档" if context.status == "archived" else context.status %}
+{% set status_label = "启用" if context.status == "active" else "草稿" if context.status == "draft" else "停用" if context.status == "paused" else "归档" if context.status == "archived" else context.status %}
 {% set status_class = context.status or "draft" %}
-<section class="admin-page-hero admin-page-hero--program">
+{% set compact_context = compact_program_context|default(false) %}
+<section class="admin-page-hero admin-page-hero--program{% if compact_context %} admin-page-hero--program-compact{% endif %}">
+  {% if compact_context %}
+  <div class="admin-page-hero__head">
+    <div>
+      <h2>自动化运营方案</h2>
+    </div>
+  </div>
+  {% else %}
   <div class="admin-page-hero__head">
     <div>
       <div class="admin-eyebrow">自动化运营方案</div>
       <h2>{{ context.program_name }}</h2>
-      <p class="admin-muted">内部编码：{{ context.program_code }} · 状态：{{ status_label }}</p>
-      <p class="admin-page-hero__copy">{{ context.description or "暂无方案说明" }}</p>
     </div>
     <div class="admin-page-hero__meta">
       <span class="admin-chip admin-chip--neutral program-status program-status--{{ status_class }}">{{ status_label }}</span>
-      <span class="admin-chip admin-chip--neutral">{{ context.program_code }}</span>
-    </div>
-  </div>
-
-  <div class="admin-page-hero__footer admin-program-context-footer">
-    <div class="admin-page-hero__copy">当前方案上下文：用于确认方案身份、状态和返回入口。</div>
-    <div class="admin-toolbar admin-program-actions">
-      <a class="admin-button admin-button--secondary" href="{{ context.list_href }}">返回方案列表</a>
-      <a class="admin-button admin-button--primary" href="{{ context.overview_href }}">方案概览</a>
       <details class="admin-inline-editor">
-        <summary class="admin-button admin-button--secondary">编辑方案信息</summary>
+        <summary class="admin-button admin-button--secondary">编辑方案</summary>
         <form method="post" action="{{ context.update_href }}" class="admin-inline-editor__panel admin-form-stack">
           <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
           <input type="hidden" name="next" value="{{ request.path }}">
@@ -30,12 +27,8 @@
             <span>方案名称</span>
             <input type="text" name="program_name" value="{{ context.program_name }}" required>
           </label>
-          <label class="admin-field">
-            <span>说明</span>
-            <textarea name="description" rows="3">{{ context.description }}</textarea>
-          </label>
           <div class="admin-form-actions">
-            <button class="admin-button admin-button--primary" type="submit">保存方案信息</button>
+            <button class="admin-button admin-button--primary" type="submit">保存</button>
           </div>
         </form>
       </details>
@@ -57,13 +50,32 @@
       </form>
       {% endif %}
       {% if context.status != "archived" %}
-      <form method="post" action="{{ context.archive_href }}" class="admin-inline-form">
+      <form method="post" action="{{ context.archive_href }}" class="admin-inline-form" onsubmit="return window.confirm('确认删除这个自动化运营方案吗？');">
         <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
         <input type="hidden" name="next" value="{{ context.list_href }}">
-        <button class="admin-button admin-button--ghost" type="submit">归档</button>
+        <button class="admin-button admin-button--ghost" type="submit">删除</button>
       </form>
       {% endif %}
     </div>
+  </div>
+  {% endif %}
+
+  <div class="admin-page-hero__footer admin-program-context-footer">
+    {% if workspace_tabs %}
+    <nav class="ac-workspace-tabs ac-workspace-tabs--program-hero" aria-label="自动化运营方案导航">
+      {% for item in workspace_tabs %}
+      <a class="ac-workspace-tab{% if item.active %} is-active{% endif %}" href="{{ item.href }}">
+        {% if compact_context %}
+        <strong class="ac-workspace-tab__title">{{ item.label }}</strong>
+        {% else %}
+        <span class="ac-workspace-tab__eyebrow">自动化运营方案</span>
+        <strong class="ac-workspace-tab__title">{{ item.label }}</strong>
+        <span class="ac-workspace-tab__summary">{{ item.summary }}</span>
+        {% endif %}
+      </a>
+      {% endfor %}
+    </nav>
+    {% endif %}
   </div>
 </section>
 {% endif %}

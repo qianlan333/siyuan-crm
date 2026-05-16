@@ -115,6 +115,58 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
             },
         },
     },
+    "wechat_pay_h5": {
+        "label": "微信内H5支付（JSAPI）",
+        "required": False,
+        "fields": {
+            "WECHAT_PAY_ENABLED": {
+                "type": "string",
+                "required": False,
+                "label": "启用微信支付",
+                "default": "false",
+            },
+            "WECHAT_PAY_APP_ID": {
+                "type": "string",
+                "required": False,
+                "label": "支付公众号AppID",
+            },
+            "WECHAT_PAY_MCH_ID": {
+                "type": "string",
+                "required": False,
+                "label": "微信支付商户号",
+            },
+            "WECHAT_PAY_API_V3_KEY": {
+                "type": "secret",
+                "required": False,
+                "label": "APIv3密钥",
+            },
+            "WECHAT_PAY_PRIVATE_KEY_PATH": {
+                "type": "string",
+                "required": False,
+                "label": "商户API证书私钥路径",
+            },
+            "WECHAT_PAY_CERT_SERIAL_NO": {
+                "type": "secret",
+                "required": False,
+                "label": "商户API证书序列号",
+            },
+            "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH": {
+                "type": "string",
+                "required": False,
+                "label": "微信支付平台证书/公钥路径",
+            },
+            "WECHAT_PAY_NOTIFY_URL": {
+                "type": "string",
+                "required": False,
+                "label": "支付通知地址",
+            },
+            "WECHAT_PAY_PRODUCT_CATALOG_JSON": {
+                "type": "string",
+                "required": False,
+                "label": "商品目录JSON",
+            },
+        },
+    },
     "admin_auth": {
         "label": "管理后台认证",
         "required": False,

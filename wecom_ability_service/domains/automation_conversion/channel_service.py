@@ -162,11 +162,33 @@ def _effective_channel_entry_tag_payload(payload: dict[str, Any], existing: dict
     }
 
 
+def _allow_legacy_channel_fallback(program_id: int | None) -> bool:
+    if program_id is None:
+        return True
+    try:
+        from .program_service import get_default_automation_program_id
+
+        return int(program_id) == int(get_default_automation_program_id())
+    except Exception:
+        return False
+
+
 
 def get_default_channel_settings_payload(*, program_id: int | None = None) -> dict[str, Any]:
+    normalized_program_id = int(program_id or 0) or None
+    if normalized_program_id is not None and not _allow_legacy_channel_fallback(normalized_program_id):
+        provider = load_channel_provider()
+        return {
+            "default_channel": repo.get_default_channel(
+                program_id=normalized_program_id,
+                allow_legacy_fallback=False,
+            )
+            or {},
+            "provider_available": bool(provider),
+        }
     from .service import get_settings_payload
 
-    payload = get_settings_payload(program_id=program_id)
+    payload = get_settings_payload(program_id=normalized_program_id)
     return {
         "default_channel": dict(payload.get("default_channel") or {}),
         "provider_available": bool(payload.get("provider_available")),
@@ -175,7 +197,10 @@ def get_default_channel_settings_payload(*, program_id: int | None = None) -> di
 
 def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | None = None) -> dict[str, Any]:
     normalized_program_id = int(program_id or payload.get("program_id") or 0) or None
-    existing = repo.get_default_channel(program_id=normalized_program_id) or {}
+    existing = repo.get_default_channel(
+        program_id=normalized_program_id,
+        allow_legacy_fallback=_allow_legacy_channel_fallback(normalized_program_id),
+    ) or {}
     entry_tag_payload = _effective_channel_entry_tag_payload(payload, existing)
     next_channel_name = _normalized_text(payload.get("channel_name")) or _normalized_text(existing.get("channel_name")) or DEFAULT_CHANNEL_NAME
     next_welcome_message = (
@@ -187,6 +212,11 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
         _normalize_bool(payload.get("auto_accept_friend"))
         if "auto_accept_friend" in payload
         else _normalize_bool(existing.get("auto_accept_friend"))
+    )
+    next_owner_staff_id = (
+        _normalized_text(payload.get("owner_staff_id"))
+        or _normalized_text(existing.get("owner_staff_id"))
+        or DEFAULT_OWNER_STAFF_ID
     )
     current_channel_name = _normalized_text(existing.get("channel_name")) or DEFAULT_CHANNEL_NAME
     current_welcome_message = _normalized_text(existing.get("welcome_message"))
@@ -212,7 +242,7 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
             "entry_tag_id": entry_tag_payload["entry_tag_id"],
             "entry_tag_name": entry_tag_payload["entry_tag_name"],
             "entry_tag_group_name": entry_tag_payload["entry_tag_group_name"],
-            "owner_staff_id": DEFAULT_OWNER_STAFF_ID,
+            "owner_staff_id": next_owner_staff_id,
             "status": (
                 CHANNEL_STATUS_CONFIGURED
                 if channel_settings_changed
@@ -228,7 +258,10 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
 def generate_default_channel_qr(*, operator: str = "", program_id: int | None = None) -> dict[str, Any]:
     provider = load_channel_provider()
     normalized_program_id = int(program_id or 0) or None
-    existing = repo.get_default_channel(program_id=normalized_program_id) or {}
+    existing = repo.get_default_channel(
+        program_id=normalized_program_id,
+        allow_legacy_fallback=_allow_legacy_channel_fallback(normalized_program_id),
+    ) or {}
     if provider is None:
         return {
             "generated": False,
@@ -244,9 +277,10 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
     entry_tag_id = _normalized_text(existing.get("entry_tag_id"))
     entry_tag_name = _normalized_text(existing.get("entry_tag_name"))
     entry_tag_group_name = _normalized_text(existing.get("entry_tag_group_name"))
+    owner_staff_id = _normalized_text(existing.get("owner_staff_id")) or DEFAULT_OWNER_STAFF_ID
     try:
         channel_payload = provider.create_default_channel(
-            owner_staff_id=DEFAULT_OWNER_STAFF_ID,
+            owner_staff_id=owner_staff_id,
             welcome_message=welcome_message,
             auto_accept_friend=auto_accept_friend,
         )
@@ -264,7 +298,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 "entry_tag_id": entry_tag_id,
                 "entry_tag_name": entry_tag_name,
                 "entry_tag_group_name": entry_tag_group_name,
-                "owner_staff_id": DEFAULT_OWNER_STAFF_ID,
+                "owner_staff_id": owner_staff_id,
                 "status": "generation_failed",
             }
         )
@@ -299,7 +333,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 "entry_tag_id": entry_tag_id,
                 "entry_tag_name": entry_tag_name,
                 "entry_tag_group_name": entry_tag_group_name,
-                "owner_staff_id": DEFAULT_OWNER_STAFF_ID,
+                "owner_staff_id": owner_staff_id,
                 "status": "config_incomplete" if "not configured" in str(exc).lower() else "generation_failed",
             }
         )
@@ -337,7 +371,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
             "entry_tag_id": entry_tag_id,
             "entry_tag_name": entry_tag_name,
             "entry_tag_group_name": entry_tag_group_name,
-            "owner_staff_id": DEFAULT_OWNER_STAFF_ID,
+            "owner_staff_id": owner_staff_id,
             "status": _normalized_text(channel_payload.get("status")) or CHANNEL_STATUS_ACTIVE,
         }
     )
@@ -357,6 +391,3 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
             )
         ),
     }
-
-
-

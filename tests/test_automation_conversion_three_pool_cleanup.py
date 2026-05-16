@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from wecom_ability_service.db import get_db
-from wecom_ability_service.db.helpers import _sqlite_table_columns
+from wecom_ability_service.db.helpers import pg_table_columns
 from wecom_ability_service.domains.automation_conversion import (
     get_conversion_dashboard_payload,
     save_sop_v1_pool_config,
@@ -79,7 +79,7 @@ def _seed_member(
 
 def test_automation_member_schema_drops_activation_status_and_normalizes_sop_pool_keys(app):
     with app.app_context():
-        member_columns = _sqlite_table_columns(get_db(), "automation_member")
+        member_columns = pg_table_columns(get_db(), "automation_member")
         assert "activation_status" not in member_columns
 
         # PG: CHECK constraint 里含 pool_key 允许值，用 pg_get_constraintdef 取出

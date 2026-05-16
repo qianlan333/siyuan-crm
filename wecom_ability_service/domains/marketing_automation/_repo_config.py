@@ -11,7 +11,7 @@ from typing import Any
 from ...customer_center.repo import (
     fetch_owner_role_map,
 )
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ._repo_helpers import (  # noqa: F401
     _fetchall_dicts,
     _fetchone_dict,
@@ -70,60 +70,32 @@ def upsert_marketing_automation_config(
         int(do_not_start_after_hour),
         _json_dumps(config_payload),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO marketing_automation_configs (
-                automation_key,
-                automation_name,
-                target_event,
-                channel_type,
-                status,
-                do_not_start_after_hour,
-                config_payload_json,
-                created_at,
-                updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (automation_key) DO UPDATE SET
-                automation_name = EXCLUDED.automation_name,
-                target_event = EXCLUDED.target_event,
-                channel_type = EXCLUDED.channel_type,
-                status = EXCLUDED.status,
-                do_not_start_after_hour = EXCLUDED.do_not_start_after_hour,
-                config_payload_json = EXCLUDED.config_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO marketing_automation_configs (
-                automation_key,
-                automation_name,
-                target_event,
-                channel_type,
-                status,
-                do_not_start_after_hour,
-                config_payload_json,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (automation_key) DO UPDATE SET
-                automation_name = excluded.automation_name,
-                target_event = excluded.target_event,
-                channel_type = excluded.channel_type,
-                status = excluded.status,
-                do_not_start_after_hour = excluded.do_not_start_after_hour,
-                config_payload_json = excluded.config_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO marketing_automation_configs (
+            automation_key,
+            automation_name,
+            target_event,
+            channel_type,
+            status,
+            do_not_start_after_hour,
+            config_payload_json,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (automation_key) DO UPDATE SET
+            automation_name = EXCLUDED.automation_name,
+            target_event = EXCLUDED.target_event,
+            channel_type = EXCLUDED.channel_type,
+            status = EXCLUDED.status,
+            do_not_start_after_hour = EXCLUDED.do_not_start_after_hour,
+            config_payload_json = EXCLUDED.config_payload_json,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        params,
+    ).fetchone()
     return dict(row) if row else {}
 
 
@@ -150,54 +122,29 @@ def replace_marketing_automation_question_rules(
             int(item.get("sort_order") or 0),
             _json_dumps(item.get("rule_payload") or {}),
         )
-        if get_db_backend() == "postgres":
-            db.execute(
-                """
-                INSERT INTO marketing_automation_question_rules (
-                    automation_config_id,
-                    questionnaire_id,
-                    question_id,
-                    rule_code,
-                    rule_name,
-                    answer_match_type,
-                    answer_match_value_json,
-                    score_delta,
-                    segment_hint,
-                    stage_hint,
-                    is_active,
-                    sort_order,
-                    rule_payload_json,
-                    created_at,
-                    updated_at
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, 0, '', '', TRUE, %s, %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                params,
+        db.execute(
+            """
+            INSERT INTO marketing_automation_question_rules (
+                automation_config_id,
+                questionnaire_id,
+                question_id,
+                rule_code,
+                rule_name,
+                answer_match_type,
+                answer_match_value_json,
+                score_delta,
+                segment_hint,
+                stage_hint,
+                is_active,
+                sort_order,
+                rule_payload_json,
+                created_at,
+                updated_at
             )
-        else:
-            db.execute(
-                """
-                INSERT INTO marketing_automation_question_rules (
-                    automation_config_id,
-                    questionnaire_id,
-                    question_id,
-                    rule_code,
-                    rule_name,
-                    answer_match_type,
-                    answer_match_value_json,
-                    score_delta,
-                    segment_hint,
-                    stage_hint,
-                    is_active,
-                    sort_order,
-                    rule_payload_json,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, '', '', 1, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                """,
-                params,
-                )
+            VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, 0, '', '', TRUE, ?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            params,
+        )
 
 
 

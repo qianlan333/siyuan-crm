@@ -7,17 +7,19 @@
 """
 from __future__ import annotations
 
+import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import init_db
 from wecom_ability_service.domains import miniprogram_library
 from wecom_ability_service.domains.tasks.private_message import (
+    MAX_PRIVATE_MESSAGE_ATTACHMENTS,
     SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES,
+    build_private_message_request_payload,
     normalize_private_message_attachments,
 )
+from wecom_ability_service.domains.wecom_media_limits import WECOM_IMAGE_MAX_BYTES
 
 
 @pytest.fixture()
@@ -55,7 +57,38 @@ def test_normalize_miniprogram_attachment_full_payload_pass():
     assert len(result) == 1
     assert result[0]["msgtype"] == "miniprogram"
     assert result[0]["miniprogram"]["appid"] == "wxabc123"
-    assert result[0]["miniprogram"]["thumb_media_id"] == "media-xxx"
+    assert result[0]["miniprogram"]["page"] == "pages/index?from=crm"
+    assert result[0]["miniprogram"]["pic_media_id"] == "media-xxx"
+    assert "pagepath" not in result[0]["miniprogram"]
+    assert "thumb_media_id" not in result[0]["miniprogram"]
+
+
+def test_normalize_miniprogram_attachment_accepts_wecom_template_fields():
+    payload = {
+        "attachments": [
+            {
+                "msgtype": "miniprogram",
+                "miniprogram": {
+                    "appid": "wxabc123",
+                    "page": "pages/index?from=crm",
+                    "title": "体验课卡片",
+                    "pic_media_id": "media-xxx",
+                },
+            }
+        ]
+    }
+    result = normalize_private_message_attachments(payload)
+    assert result == [
+        {
+            "msgtype": "miniprogram",
+            "miniprogram": {
+                "appid": "wxabc123",
+                "page": "pages/index?from=crm",
+                "title": "体验课卡片",
+                "pic_media_id": "media-xxx",
+            },
+        }
+    ]
 
 
 @pytest.mark.parametrize(
@@ -73,6 +106,53 @@ def test_normalize_miniprogram_missing_required_field(missing_field):
     payload = {"attachments": [{"msgtype": "miniprogram", "miniprogram": base}]}
     with pytest.raises(ValueError):
         normalize_private_message_attachments(payload)
+
+
+def test_normalize_attachments_rejects_more_than_wecom_limit():
+    payload = {
+        "attachments": [
+            {"msgtype": "file", "file": {"media_id": f"file-{idx}"}}
+            for idx in range(MAX_PRIVATE_MESSAGE_ATTACHMENTS + 1)
+        ]
+    }
+    with pytest.raises(ValueError, match="at most 9 attachments"):
+        normalize_private_message_attachments(payload)
+
+
+def test_build_private_message_rejects_total_attachments_over_wecom_limit():
+    payload = {
+        "content": "hello",
+        "attachments": [
+            {"msgtype": "file", "file": {"media_id": f"file-{idx}"}}
+            for idx in range(MAX_PRIVATE_MESSAGE_ATTACHMENTS - 1)
+        ],
+        "image_media_ids": ["image-a", "image-b"],
+    }
+    with pytest.raises(ValueError, match="at most 9 attachments"):
+        build_private_message_request_payload(payload)
+
+
+def test_build_private_message_rejects_binary_image_over_wecom_limit_before_upload():
+    oversized_png = b"\x89PNG\r\n\x1a\n" + (b"0" * WECOM_IMAGE_MAX_BYTES)
+    called = []
+    payload = {
+        "content": "hello",
+        "images": [
+            {
+                "file_name": "too-large.png",
+                "mime_type": "image/png",
+                "data_base64": base64.b64encode(oversized_png).decode("ascii"),
+            }
+        ],
+    }
+
+    def _upload(*args):
+        called.append(args)
+        return "should-not-upload"
+
+    with pytest.raises(ValueError, match="max 2MB"):
+        build_private_message_request_payload(payload, upload_image=_upload)
+    assert called == []
 
 
 def test_miniprogram_library_create_and_get(app):

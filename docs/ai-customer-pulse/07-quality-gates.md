@@ -97,7 +97,7 @@
 
 - `compileall`：`wecom_ability_service/`、`tests/`、`scripts/`
 - Flask app create/import smoke
-- SQLite `init_db()` smoke
+- PostgreSQL app create/import smoke
 - `GET /admin/customer-pulse`
 - `GET /api/admin/customer-pulse`
 - `GET /api/admin/customer-pulse/stats`
@@ -147,7 +147,7 @@
 - 全仓 lint / typecheck / build 仍未统一纳入；本次只对 `customer_pulse` 及直接依赖路径设门
 - `customer_pulse/service.py`、`customer_pulse/repo.py` 还没有进入 `mypy` 硬门禁
 - 浏览器级前端 e2e 还没有独立 runner；当前以 Flask test client 的集成流作为最小 e2e
-- PostgreSQL 真机性能基线尚未单独建立；当前 perf test 基于 SQLite
+- PostgreSQL 真机性能基线尚未单独建立；早期 perf test 曾使用 SQLite，本仓当前应优先补 PG baseline
 
 ## 推荐使用方式
 

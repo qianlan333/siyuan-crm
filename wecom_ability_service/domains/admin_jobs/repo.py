@@ -1,30 +1,18 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ...db import get_db
+from ...db.helpers import fetchall_dicts, fetchone_dict
+from ...infra.json_utils import safe_json_loads as _json_loads
 
 
 def _fetchall_dict(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    return [dict(row) for row in get_db().execute(sql, params).fetchall()]
+    return fetchall_dicts(get_db(), sql, params)
 
 
 def _fetchone_dict(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-    row = get_db().execute(sql, params).fetchone()
-    return dict(row) if row else None
-
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = str(value or "").strip()
-    if not text:
-        return default
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
+    return fetchone_dict(get_db(), sql, params)
 
 
 def list_sync_runs(*, status: str = "", limit: int = 20) -> list[dict[str, Any]]:

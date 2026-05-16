@@ -35,6 +35,7 @@ from ..domains.callbacks.service import (
     get_external_contact_event_log,
     mark_external_contact_event_processing,
 )
+from ..domains.automation_conversion.customer_acquisition_service import handle_customer_acquisition_event
 from ..domains.contacts.repo import upsert_contacts
 from ..domains.group_chats.repo import get_group_chat_by_chat_id, upsert_group_chats
 from ..domains.group_chats.service import normalize_group_chat_record
@@ -292,15 +293,37 @@ def _process_external_contact_event(event_log_id: int) -> dict:
     event_log = get_external_contact_event_log(event_log_id) or event_log
     retry_limit = _contact_sync_retry_limit()
     corp_id = event_log.get("corp_id", "")
+    event_type = (event_log.get("event_type") or "").lower()
     external_userid = event_log.get("external_userid", "")
     user_id = event_log.get("user_id", "")
     change_type = (event_log.get("change_type") or "").lower()
     from .. import routes as routes_compat
 
-    client = routes_compat._contact_client()
     scheduled_auto_assign_job: dict[str, object] | None = None
 
     try:
+        if event_type == "customer_acquisition":
+            customer_acquisition_result = handle_customer_acquisition_event(
+                corp_id=corp_id,
+                event_data=event_log.get("payload_json") or {},
+                event_log_id=event_log_id,
+            )
+            finish_external_contact_event_log(event_log_id, status="success")
+            callback_logger.info(
+                "stage=customer_acquisition_callback errcode=0 errmsg=success handled=%s reason=%s owner_userid=%s external_userid=%s",
+                customer_acquisition_result.get("handled"),
+                customer_acquisition_result.get("reason", ""),
+                user_id,
+                external_userid,
+            )
+            return {
+                "ok": True,
+                "status": "success",
+                "event_log_id": event_log_id,
+                "customer_acquisition": customer_acquisition_result,
+            }
+
+        client = routes_compat._contact_client()
         if change_type in {"add_external_contact", "add_half_external_contact", "edit_external_contact"}:
             detail = client.get_contact(external_userid)
             normalized_contact, _ = _sync_contact_detail_with_description_fix(

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ...db import get_db
+from ...infra.json_utils import safe_json_loads as _json_loads
 
 ALLOWED_SORT_COLUMNS = {
     "created_at": "created_at",
@@ -13,18 +13,6 @@ ALLOWED_SORT_COLUMNS = {
     "target_id": "target_id",
     "id": "id",
 }
-
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = str(value or "").strip()
-    if not text:
-        return default
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
 
 
 def list_admin_operation_logs(

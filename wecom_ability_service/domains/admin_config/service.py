@@ -1,40 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from flask import current_app
 
-from ...application.routing_config.commands import (
-    SaveOwnerRoleSettingCommand,
-    SaveRoutingRuleSettingCommand,
-)
-from ...application.routing_config.dto import (
-    GetOwnerRoleMapQueryDTO,
-    GetOwnerRoleQueryDTO,
-    GetRoutingRuleConfigQueryDTO,
-    GetRoutingRuleQueryDTO,
-    SaveOwnerRoleSettingCommandDTO,
-    SaveRoutingRuleSettingCommandDTO,
-)
-from ...application.routing_config.queries import (
-    GetOwnerRoleMapQuery,
-    GetOwnerRoleQuery,
-    GetRoutingRuleConfigQuery,
-    GetRoutingRuleQuery,
-)
-from ...infra.constants import USER_OPS_CLASS_TERM_TAG_GROUP_NAME
 from ...infra.settings import get_setting, mask_value
 from ..admin_auth import count_admin_users
-from ..tags import service as tags_service
-from ..user_ops import ensure_class_term_tag_mapping_seed
 from . import repo
 
-TARGET_OWNER_ROLE_MAP = "owner_role_map"
-TARGET_ROUTING_RULE_CONFIG = "routing_rule_config"
-TARGET_SIGNUP_TAG_RULE = "signup_tag_rule"
-TARGET_CLASS_TERM_TAG_MAPPING = "class_term_tag_mapping"
 TARGET_APP_SETTING = "app_setting"
 TARGET_MCP_TOOL_SETTING = "mcp_tool_setting"
 
@@ -198,6 +174,13 @@ APP_SETTING_DEFINITIONS = (
         "description": "会话存档相关请求的超时时间（秒）。",
     },
     {
+        "key": "WECOM_CORP_TAG_LIMIT",
+        "label": "企微客户标签上限",
+        "mode": "editable",
+        "input_type": "number",
+        "description": "企微标签管理页面使用的容量提示上限；未配置时默认 1000。",
+    },
+    {
         "key": "WECHAT_MP_APP_ID",
         "label": "微信公众号 App ID",
         "mode": "editable",
@@ -210,6 +193,90 @@ APP_SETTING_DEFINITIONS = (
         "mode": "editable",
         "input_type": "text",
         "description": "微信授权时使用的范围设置。",
+    },
+    {
+        "key": "WECHAT_PAY_ENABLED",
+        "label": "微信支付已启用",
+        "mode": "editable",
+        "input_type": "text",
+        "description": "填写 true / false 或 1 / 0。开启后微信内 H5 JSAPI 支付接口才允许下单。",
+    },
+    {
+        "key": "WECHAT_PAY_APP_ID",
+        "label": "微信支付 AppID",
+        "mode": "editable",
+        "input_type": "text",
+        "description": "JSAPI 支付使用的公众号 AppID；为空时复用 WECHAT_MP_APP_ID。",
+    },
+    {
+        "key": "WECHAT_PAY_MCH_ID",
+        "label": "微信支付商户号",
+        "mode": "editable",
+        "input_type": "text",
+        "description": "微信支付商户平台分配的商户号 mchid。",
+    },
+    {
+        "key": "WECHAT_PAY_PRIVATE_KEY_PATH",
+        "label": "微信支付商户私钥路径",
+        "mode": "editable",
+        "input_type": "text",
+        "description": "APIv3 请求签名使用的商户 API 证书私钥 PEM 文件路径。",
+    },
+    {
+        "key": "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH",
+        "label": "微信支付平台证书/公钥路径",
+        "mode": "editable",
+        "input_type": "text",
+        "description": "支付通知验签使用的微信支付平台证书 PEM 或平台公钥 PEM 文件路径。",
+    },
+    {
+        "key": "WECHAT_PAY_PLATFORM_CERT_SERIAL_NO",
+        "label": "微信支付平台证书序列号",
+        "mode": "editable",
+        "input_type": "text",
+        "description": "支付通知请求头 Wechatpay-Serial 的期望序列号；为空时只用证书/公钥验签。",
+    },
+    {
+        "key": "WECHAT_PAY_NOTIFY_URL",
+        "label": "微信支付通知地址",
+        "mode": "editable",
+        "input_type": "url",
+        "description": "微信支付异步通知 URL，例如 https://www.youcangogogo.com/api/h5/wechat-pay/notify。",
+    },
+    {
+        "key": "WECHAT_PAY_API_BASE",
+        "label": "微信支付 API Base",
+        "mode": "editable",
+        "input_type": "url",
+        "description": "默认 https://api.mch.weixin.qq.com。",
+    },
+    {
+        "key": "WECHAT_PAY_TIMEOUT_SECONDS",
+        "label": "微信支付请求超时",
+        "mode": "editable",
+        "input_type": "number",
+        "description": "调用微信支付 API 的超时时间（秒）。",
+    },
+    {
+        "key": "WECHAT_PAY_PRODUCT_CATALOG_JSON",
+        "label": "微信支付商品目录",
+        "mode": "editable",
+        "input_type": "textarea",
+        "description": "服务端商品白名单 JSON；每个商品需配置 product_code、name、description、amount_total。",
+    },
+    {
+        "key": "WECHAT_PAY_API_V3_KEY",
+        "label": "微信支付 APIv3 密钥",
+        "mode": "masked",
+        "input_type": "password",
+        "description": "32 字节 APIv3 密钥，用于回调报文解密。页面不会显示完整内容；留空表示保持原值。",
+    },
+    {
+        "key": "WECHAT_PAY_CERT_SERIAL_NO",
+        "label": "微信支付商户证书序列号",
+        "mode": "masked",
+        "input_type": "password",
+        "description": "商户 API 证书序列号，用于请求签名 Authorization。页面不会显示完整内容；留空表示保持原值。",
     },
     {
         "key": "WECOM_SECRET",
@@ -554,9 +621,6 @@ def _recent_audit_entries(target_type: str, limit: int = 8) -> list[dict[str, An
 def config_tabs(active_key: str) -> list[dict[str, Any]]:
     items = [
         {"key": "overview", "label": "概览", "href": "/admin/config"},
-        {"key": "routing", "label": "渠道 / 分配规则", "href": "/admin/config/routing"},
-        {"key": "signup_tags", "label": "报名标签规则", "href": "/admin/config/signup-tags"},
-        {"key": "class_term_tags", "label": "班期标签规则", "href": "/admin/config/class-term-tags"},
         {"key": "app_settings", "label": "系统设置", "href": "/admin/config/app-settings"},
         {"key": "login_access", "label": "登录与权限", "href": "/admin/config/login-access"},
         {"key": "checklist", "label": "配置检查清单", "href": "/admin/config/checklist"},
@@ -565,32 +629,9 @@ def config_tabs(active_key: str) -> list[dict[str, Any]]:
 
 
 def build_config_home_payload() -> dict[str, Any]:
-    ensure_class_term_tag_mapping_seed()
-    routing_payload = GetRoutingRuleConfigQuery()(GetRoutingRuleConfigQueryDTO(active_only=False))
-    routing_rows = [dict(item) for item in (routing_payload.get("routing_rules") or {}).values()]
-    signup_rules = tags_service.get_signup_tag_rules_config()
-    class_term_rows = repo.list_class_term_tag_mappings(active_only=False)
     app_rows = list_admin_app_settings(query="", scope="")
     return {
         "cards": [
-            {
-                "label": "渠道 / 分配规则",
-                "value": len(routing_rows),
-                "description": "维护负责人、渠道分流与业务分配规则",
-                "href": "/admin/config/routing",
-            },
-            {
-                "label": "报名标签规则",
-                "value": len(signup_rules.get("items") or []),
-                "description": f"待补齐 {len(signup_rules.get('status_definitions') or []) - len(signup_rules.get('items') or [])} 项",
-                "href": "/admin/config/signup-tags",
-            },
-            {
-                "label": "班期标签规则",
-                "value": len(class_term_rows),
-                "description": USER_OPS_CLASS_TERM_TAG_GROUP_NAME,
-                "href": "/admin/config/class-term-tags",
-            },
             {
                 "label": "系统设置",
                 "value": len(app_rows["rows"]),
@@ -768,245 +809,6 @@ def automation_conversion_recent_activity(*, filter_value: str = "", limit: int 
     }
 
 
-def list_owner_routing_settings(*, query: str, active_only: bool) -> dict[str, Any]:
-    owner_rows = [
-        dict(item)
-        for item in GetOwnerRoleMapQuery()(
-            GetOwnerRoleMapQueryDTO(active_only=bool(active_only))
-        )
-    ]
-    owner_rows = [row for row in owner_rows if _filter_text_match(row, ["userid", "display_name", "role"], query)]
-    owner_rows = _apply_audit_meta(owner_rows, target_type=TARGET_OWNER_ROLE_MAP, id_field="userid")
-
-    routing_payload = GetRoutingRuleConfigQuery()(
-        GetRoutingRuleConfigQueryDTO(active_only=bool(active_only))
-    )
-    routing_rows = [dict(item) for item in (routing_payload.get("routing_rules") or {}).values()]
-    routing_rows = [
-        row
-        for row in routing_rows
-        if _filter_text_match(
-            row,
-            [
-                "rule_key",
-                "routing_alias",
-                "route_owner_userid",
-                "route_owner_role",
-                "routing_target",
-                "fallback_target",
-                "when_owner_role_sales",
-                "when_owner_role_delivery",
-            ],
-            query,
-        )
-    ]
-    routing_rows = _apply_audit_meta(routing_rows, target_type=TARGET_ROUTING_RULE_CONFIG, id_field="rule_key")
-
-    return {
-        "owner_rows": owner_rows,
-        "routing_rows": routing_rows,
-        "summary_cards": [
-            {"label": "负责人条目", "value": len(owner_rows), "description": "当前已维护的负责人角色数量"},
-            {
-                "label": "启用负责人",
-                "value": sum(1 for row in owner_rows if bool(row.get("active"))),
-                "description": "当前启用中的负责人数量",
-            },
-            {"label": "分配规则", "value": len(routing_rows), "description": "当前已维护的分配规则数量"},
-            {
-                "label": "启用规则",
-                "value": sum(1 for row in routing_rows if bool(row.get("active"))),
-                "description": "当前启用中的分配规则数量",
-            },
-        ],
-        "audit_entries": _recent_audit_entries(TARGET_ROUTING_RULE_CONFIG, limit=8)
-        + _recent_audit_entries(TARGET_OWNER_ROLE_MAP, limit=8),
-        "role_options": list(routing_payload.get("owner_role_options") or []),
-        "routing_target_options": list(routing_payload.get("routing_target_options") or []),
-    }
-
-
-def save_owner_role_setting(payload: dict[str, Any], *, operator: str) -> dict[str, Any]:
-    userid = _normalized_text(payload.get("userid"))
-    before = GetOwnerRoleQuery()(GetOwnerRoleQueryDTO(userid=userid))
-    saved = SaveOwnerRoleSettingCommand()(
-        SaveOwnerRoleSettingCommandDTO(
-            userid=userid,
-            display_name=_normalized_text(payload.get("display_name")),
-            role=_normalized_text(payload.get("role")),
-            active=payload.get("active"),
-        )
-    )
-    _audit_log(
-        operator=operator,
-        action_type="update" if before else "create",
-        target_type=TARGET_OWNER_ROLE_MAP,
-        target_id=userid,
-        before=before,
-        after=saved,
-    )
-    return saved
-
-
-def save_routing_rule_setting(payload: dict[str, Any], *, operator: str) -> dict[str, Any]:
-    rule_key = _normalized_text(payload.get("rule_key"))
-    before = GetRoutingRuleQuery()(GetRoutingRuleQueryDTO(rule_key=rule_key))
-    saved = SaveRoutingRuleSettingCommand()(
-        SaveRoutingRuleSettingCommandDTO(
-            rule_key=rule_key,
-            routing_alias=_normalized_text(payload.get("routing_alias")),
-            route_owner_userid=_normalized_text(payload.get("route_owner_userid")),
-            route_owner_role=_normalized_text(payload.get("route_owner_role")),
-            routing_target=_normalized_text(payload.get("routing_target")),
-            fallback_target=_normalized_text(payload.get("fallback_target")),
-            when_owner_role_sales=_normalized_text(payload.get("when_owner_role_sales")),
-            when_owner_role_delivery=_normalized_text(payload.get("when_owner_role_delivery")),
-            active=payload.get("active"),
-        )
-    )
-    _audit_log(
-        operator=operator,
-        action_type="update" if before else "create",
-        target_type=TARGET_ROUTING_RULE_CONFIG,
-        target_id=saved.get("rule_key", rule_key),
-        before=before,
-        after=saved,
-    )
-    return saved
-
-
-def list_signup_tag_settings(*, query: str, active_only: bool) -> dict[str, Any]:
-    config = tags_service.get_signup_tag_rules_config()
-    rows = [dict(item) for item in config.get("items") or []]
-    if not active_only:
-        rows = tags_service.repo.list_signup_tag_rules(active_only=False)  # type: ignore[attr-defined]
-    rows = [dict(item) for item in rows if _filter_text_match(item, ["tag_id", "tag_name", "signup_status"], query)]
-    rows = _apply_audit_meta(rows, target_type=TARGET_SIGNUP_TAG_RULE, id_field="tag_id")
-    configured_statuses = {row["signup_status"] for row in rows if _normalized_text(row.get("signup_status"))}
-    definitions = config.get("status_definitions") or []
-    missing_statuses = [
-        item["signup_status"]
-        for item in definitions
-        if item["signup_status"] not in configured_statuses
-    ]
-    return {
-        "rows": rows,
-        "definitions": definitions,
-        "tag_group_name": config.get("tag_group_name", ""),
-        "missing_statuses": missing_statuses,
-        "bootstrap_initialized": not missing_statuses,
-        "summary_cards": [
-            {"label": "状态定义", "value": len(definitions), "description": "当前可用的业务状态数量"},
-            {"label": "已配置规则", "value": len(rows), "description": "当前已维护的标签规则数量"},
-            {"label": "待补齐状态", "value": len(missing_statuses), "description": "还没有对应标签规则的状态"},
-        ],
-        "audit_entries": _recent_audit_entries(TARGET_SIGNUP_TAG_RULE, limit=8),
-    }
-
-
-def save_signup_tag_setting(payload: dict[str, Any], *, operator: str) -> dict[str, Any]:
-    tag_id = _normalized_text(payload.get("tag_id"))
-    before = next(
-        (
-            dict(item)
-            for item in tags_service.repo.list_signup_tag_rules(active_only=False)  # type: ignore[attr-defined]
-            if _normalized_text(item.get("tag_id")) == tag_id
-        ),
-        None,
-    )
-    saved = tags_service.save_signup_tag_rule_config(
-        tag_id=tag_id,
-        tag_name=_normalized_text(payload.get("tag_name")),
-        signup_status=_normalized_text(payload.get("signup_status")),
-        active=payload.get("active"),
-    )
-    _audit_log(
-        operator=operator,
-        action_type="update" if before else "create",
-        target_type=TARGET_SIGNUP_TAG_RULE,
-        target_id=tag_id,
-        before=before,
-        after=saved,
-    )
-    return saved
-
-
-def _normalize_class_term_row(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": int(row.get("id") or 0),
-        "strategy_id": _normalized_text(row.get("strategy_id")),
-        "group_id": _normalized_text(row.get("group_id")),
-        "tag_id": _normalized_text(row.get("tag_id")),
-        "tag_group_name": _normalized_text(row.get("tag_group_name")),
-        "tag_name": _normalized_text(row.get("tag_name")),
-        "class_term_no": int(row.get("class_term_no") or 0),
-        "class_term_label": _normalized_text(row.get("class_term_label")),
-        "is_active": bool(row.get("is_active")),
-        "created_at": _normalized_text(row.get("created_at")),
-        "updated_at": _normalized_text(row.get("updated_at")),
-    }
-
-
-def list_class_term_tag_mappings(*, query: str, active_only: bool) -> dict[str, Any]:
-    ensure_class_term_tag_mapping_seed()
-    rows = [_normalize_class_term_row(item) for item in repo.list_class_term_tag_mappings(active_only=active_only)]
-    rows = [
-        row
-        for row in rows
-        if _filter_text_match(
-            row,
-            ["class_term_label", "class_term_no", "tag_group_name", "tag_name", "tag_id", "group_id", "strategy_id"],
-            query,
-        )
-    ]
-    rows = _apply_audit_meta(rows, target_type=TARGET_CLASS_TERM_TAG_MAPPING, id_field="id")
-    tag_id_configured = sum(1 for row in rows if row.get("tag_id"))
-    return {
-        "rows": rows,
-        "summary_cards": [
-            {"label": "规则数量", "value": len(rows), "description": "当前已维护的班期标签规则数量"},
-            {"label": "启用规则", "value": sum(1 for row in rows if row["is_active"]), "description": "当前启用中的规则数量"},
-            {"label": "已完成标签对齐", "value": tag_id_configured, "description": "已经补齐标签编号的规则数量"},
-            {"label": "待补齐标签编号", "value": max(len(rows) - tag_id_configured, 0), "description": "仍需补齐标签编号的规则数量"},
-        ],
-        "bootstrap_group_name": USER_OPS_CLASS_TERM_TAG_GROUP_NAME,
-        "audit_entries": _recent_audit_entries(TARGET_CLASS_TERM_TAG_MAPPING, limit=8),
-    }
-
-
-def save_class_term_tag_mapping(payload: dict[str, Any], *, operator: str) -> dict[str, Any]:
-    mapping_id_text = _normalized_text(payload.get("mapping_id"))
-    mapping_id = int(mapping_id_text) if mapping_id_text else None
-    class_term_no = _normalize_int(payload.get("class_term_no"), field_name="class_term_no", minimum=1)
-    tag_group_name = _normalized_text(payload.get("tag_group_name")) or USER_OPS_CLASS_TERM_TAG_GROUP_NAME
-    tag_name = _normalized_text(payload.get("tag_name"))
-    class_term_label = _normalized_text(payload.get("class_term_label")) or f"{class_term_no}期"
-    if not tag_name:
-        raise ValueError("标签名称不能为空")
-    before = repo.get_class_term_tag_mapping(mapping_id) if mapping_id else None
-    saved_id = repo.upsert_class_term_tag_mapping(
-        mapping_id=mapping_id,
-        strategy_id=_normalized_text(payload.get("strategy_id")),
-        group_id=_normalized_text(payload.get("group_id")),
-        tag_id=_normalized_text(payload.get("tag_id")),
-        tag_group_name=tag_group_name,
-        tag_name=tag_name,
-        class_term_no=class_term_no,
-        class_term_label=class_term_label,
-        is_active=_normalize_bool(payload.get("is_active")),
-    )
-    saved = repo.get_class_term_tag_mapping(saved_id) or {}
-    _audit_log(
-        operator=operator,
-        action_type="update" if before else "create",
-        target_type=TARGET_CLASS_TERM_TAG_MAPPING,
-        target_id=str(saved_id),
-        before=before,
-        after=saved,
-    )
-    return _normalize_class_term_row(saved)
-
-
 def _setting_value_source(key: str) -> tuple[str, str]:
     stored = get_setting(key)
     if stored is not None:
@@ -1032,6 +834,7 @@ def _validate_known_setting(key: str, value: str) -> str:
         "DEEPSEEK_TIMEOUT_SECONDS",
         "OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TIMEOUT_SECONDS",
         "LAOHUANG_CHAT_TIMEOUT_SECONDS",
+        "WECHAT_PAY_TIMEOUT_SECONDS",
         "OUTBOUND_WEBHOOK_RETRY_MAX_ATTEMPTS",
         "OUTBOUND_WEBHOOK_RETRY_INTERVAL_SECONDS",
         "QUESTIONNAIRE_SUBMIT_WEBHOOK_TIMEOUT_SECONDS",
@@ -1041,6 +844,7 @@ def _validate_known_setting(key: str, value: str) -> str:
         "OUTBOUND_WEBHOOK_RETRY_ENABLED",
         "DEEPSEEK_ENABLED",
         "LAOHUANG_CHAT_ENABLED",
+        "WECHAT_PAY_ENABLED",
     }:
         return "true" if normalized.lower() in {"1", "true", "yes", "y", "on"} else "false"
     if key == "LAOHUANG_CHAT_SEND_CHANNEL":
@@ -1053,8 +857,15 @@ def _validate_known_setting(key: str, value: str) -> str:
         "OPENCLAW_WEBHOOK_URL",
         "LAOHUANG_CHAT_WEBHOOK_URL",
         "QUESTIONNAIRE_SUBMIT_WEBHOOK_URL",
+        "WECHAT_PAY_NOTIFY_URL",
+        "WECHAT_PAY_API_BASE",
     } and normalized and not normalized.startswith(("http://", "https://")):
         raise ValueError(f"{key} 必须以 http:// 或 https:// 开头")
+    if key == "WECHAT_PAY_PRODUCT_CATALOG_JSON" and normalized:
+        try:
+            json.loads(normalized)
+        except ValueError as exc:
+            raise ValueError("WECHAT_PAY_PRODUCT_CATALOG_JSON 必须是合法 JSON") from exc
     return normalized
 
 
@@ -1148,7 +959,7 @@ def _default_tool_group(tool_name: str) -> str:
         return "tasks"
     if "message_batch" in tool_name:
         return "ops"
-    if tool_name in {"get_owner_role_map", "get_signup_tag_rules", "get_routing_config"}:
+    if tool_name == "get_owner_role_map":
         return "config"
     if tool_name.startswith("get_") or tool_name.startswith("resolve_") or tool_name.startswith("search_"):
         return "crm"
@@ -1188,8 +999,6 @@ def _default_display_name(tool_name: str) -> str:
         "create_moment_task": "创建朋友圈任务",
         "record_conversion_feedback": "记录转化反馈",
         "get_owner_role_map": "查看负责人角色",
-        "get_signup_tag_rules": "查看报名标签规则",
-        "get_routing_config": "查看分配规则",
         "get_pending_message_batches": "查看待确认消息批次",
         "get_message_batch": "查看消息批次详情",
         "ack_message_batch": "确认消息批次",
@@ -1223,8 +1032,6 @@ def _default_tool_description(tool_name: str, fallback: str = "") -> str:
         "create_moment_task": "创建朋友圈触达任务。",
         "record_conversion_feedback": "记录转化反馈；当 feedback_type 为 mark_enrolled/unmark_enrolled 时同步统一转化真相。",
         "get_owner_role_map": "查看负责人角色配置。",
-        "get_signup_tag_rules": "查看报名标签规则。",
-        "get_routing_config": "查看当前分配规则。",
         "get_pending_message_batches": "查看待确认的消息批次。",
         "get_message_batch": "查看单个消息批次详情。",
         "ack_message_batch": "确认消息批次已处理。",

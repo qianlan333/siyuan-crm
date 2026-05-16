@@ -253,7 +253,8 @@
     }
 
     function workflowEditUrl(workflowId) {
-      return withId(entryUrls.workflow_edit_base, workflowId);
+      const base = entryUrls.action_orchestration || entryUrls.list || '';
+      return base ? `${base}?workflow_id=${encodeURIComponent(String(workflowId))}` : withId(entryUrls.workflow_edit_base, workflowId);
     }
 
     function renderTable() {

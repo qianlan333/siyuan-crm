@@ -57,19 +57,17 @@ from ...application.questionnaire.queries import (
 )
 from ...application.routing_config.dto import (
     GetOwnerRoleQueryDTO,
-    GetRoutingRuleConfigQueryDTO,
     ResolveContactRoutingContextQueryDTO,
 )
 from ...application.routing_config.queries import (
     GetOwnerRoleQuery,
-    GetRoutingRuleConfigQuery,
     ResolveContactRoutingContextQuery,
 )
 from ...domains.archive.service import extract_roomid_from_raw_payload, format_message_row
 from ...domains.group_chats.repo import get_group_chat_map
-from ...domains.tags.service import get_signup_status_definition, get_signup_tag_rules_config
+from ...domains.tags.service import get_signup_status_definition
+from ...infra.json_utils import safe_json_loads as _json_loads
 from ...infra.settings import get_setting
-from ..admin_config.service import mcp_tool_enabled
 from ..questionnaire import build_questionnaire_preflight_payload
 from ..tags.service import mark_customer_tags, unmark_customer_tags
 from ..tasks.service import dispatch_wecom_task
@@ -84,11 +82,6 @@ def count_external_contact_identity_maps() -> int:
 
 def get_owner_role(userid: str):
     return GetOwnerRoleQuery()(GetOwnerRoleQueryDTO(userid=str(userid or "").strip()))
-
-def get_routing_config():
-    return GetRoutingRuleConfigQuery()(
-        GetRoutingRuleConfigQueryDTO(active_only=True, signup_tag_rules=get_signup_tag_rules_config())
-    )
 
 def resolve_contact_routing_context(owner_userid: str, owner_role: str, signup_status: str):
     definition = get_signup_status_definition(signup_status)
@@ -181,18 +174,6 @@ def _ui_status_label(value: Any) -> str:
     }
     normalized = _normalized_text(value).lower()
     return mapping.get(normalized, _normalized_text(value) or "-")
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = _normalized_text(value)
-    if not text:
-        return default
-    try:
-        parsed = json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
-    return parsed
 
 def _json_pretty(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True)
@@ -721,7 +702,6 @@ def build_operations_payload(args: Any) -> dict[str, Any]:
         "import_batches": import_batches,
         "recent_audit": recent_audit,
         "mcp_auth_configured": bool(_normalized_text(get_setting("MCP_BEARER_TOKEN"))),
-        "mcp_get_routing_enabled": mcp_tool_enabled("get_routing_config"),
     }
 
 def execute_operations_action(
@@ -837,4 +817,3 @@ def execute_operations_action(
         return payload
 
     raise ValueError("不支持的运营操作")
-

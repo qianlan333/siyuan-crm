@@ -39,17 +39,14 @@ cron 每天 N 点跑一次，无人值守地：
 """
 from __future__ import annotations
 
-import json
 import logging
 import os
 import sys
-from pathlib import Path
 from typing import Any
 
-# 让脚本在没安装 wecom_ability_service 包的环境下也能拿到 domain 模块
-_REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(_REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT))
+from script_runtime import ensure_repo_root_on_path, print_json
+
+ensure_repo_root_on_path()
 
 from wecom_ability_service.domains.cloud_orchestrator import (  # noqa: E402
     external_agent,
@@ -134,7 +131,7 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     summary = run()
-    print(json.dumps(summary, ensure_ascii=False, default=str))
+    print_json(summary)
     return int(summary.get("exit_code", 0))
 
 

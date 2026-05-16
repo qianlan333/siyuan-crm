@@ -163,11 +163,10 @@ def _claim_due_events(limit: int) -> list[OutboxEvent]:
 
     claimed: list[OutboxEvent] = []
     for row in rows:
-        # Best-effort claim — without a SELECT FOR UPDATE on SQLite, a
-        # second scanner racing in parallel could pick the same row. The
-        # per-event idempotency_key + ``status`` transition give us a
-        # belt-and-braces guard, but operators should run at most one
-        # scanner per process for now.
+        # Best-effort claim: without a row-level lock, a second scanner racing
+        # in parallel could pick the same row. The per-event idempotency_key +
+        # ``status`` transition guard against duplicate side effects, but
+        # operators should run at most one scanner per process for now.
         update_cursor = db.execute(
             """
             UPDATE outbound_event_outbox

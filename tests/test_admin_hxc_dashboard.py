@@ -229,6 +229,20 @@ def test_send_config_upsert_updates_existing(client, app):
     assert configs[0]["priority"] == 20
 
 
+def test_send_config_upsert_coerces_request_fields(client, app):
+    resp = client.post(
+        "/api/admin/hxc-dashboard/send-config",
+        json={"sender_userid": "bob", "display_name": "Bob", "priority": "bad", "is_active": "false"},
+    )
+    assert resp.status_code == 200
+
+    configs = client.get("/api/admin/hxc-dashboard/send-config").get_json()
+    assert len(configs) == 1
+    assert configs[0]["sender_userid"] == "bob"
+    assert configs[0]["priority"] == 100
+    assert configs[0]["is_active"] is False
+
+
 def test_send_config_upsert_rejects_empty_userid(client):
     resp = client.post(
         "/api/admin/hxc-dashboard/send-config",
@@ -377,6 +391,34 @@ def test_broadcast_dispatches_grouped_by_sender(client, app, monkeypatch):
     for d in dispatched:
         assert d["task_type"] == "private_message"
         assert d["payload"]["text"]["content"] == "测试消息"
+
+
+def test_broadcast_accepts_single_external_userid_string(client, app, monkeypatch):
+    with app.app_context():
+        from wecom_ability_service.db import get_db
+        db = get_db()
+        _seed_send_config(db, "alice", "Alice", priority=1)
+        _seed_follow_users(db, [("ext1", "alice")])
+
+    dispatched = []
+
+    def mock_dispatch(task_type, action, payload):
+        dispatched.append(payload)
+        return {"task_id": "mock"}
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
+        mock_dispatch,
+    )
+
+    resp = client.post(
+        "/api/admin/hxc-dashboard/broadcast",
+        json={"external_userids": "ext1", "content": "hello"},
+    )
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["total_sent"] == 1
+    assert dispatched[0]["external_userid"] == ["ext1"]
 
 
 def test_broadcast_priority_overrides_owner(client, app, monkeypatch):

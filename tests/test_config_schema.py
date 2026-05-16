@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.infra.config_schema import (
     CONFIG_SCHEMA,
     build_config_checklist,
@@ -46,6 +47,15 @@ def client(app):
         session["admin_session_login_type"] = "wecom_qr"
         session["admin_session_display_name"] = "Root Admin"
     return c
+
+
+def _setup_action_token(client) -> str:
+    response = client.get("/setup/wizard")
+    html = response.get_data(as_text=True)
+    match = re.search(r'name="admin_action_token" value="([^"]+)"', html)
+    assert response.status_code == 200
+    assert match
+    return match.group(1)
 
 
 def test_config_schema_has_required_groups():
@@ -116,6 +126,17 @@ def test_setup_wizard_page_renders(client):
     assert "企业ID" in html
 
 
+def test_setup_wizard_requires_admin_login(app):
+    anonymous = app.test_client()
+    resp = anonymous.get("/setup/wizard")
+    save_resp = anonymous.post("/setup/wizard/save", data={})
+
+    assert resp.status_code == 302
+    assert "/login" in resp.headers["Location"]
+    assert save_resp.status_code == 302
+    assert "/login" in save_resp.headers["Location"]
+
+
 def test_config_checklist_page_renders(client):
     resp = client.get("/admin/config/checklist")
     assert resp.status_code == 200
@@ -124,7 +145,9 @@ def test_config_checklist_page_renders(client):
 
 
 def test_setup_wizard_save_persists_settings(client, app):
+    action_token = _setup_action_token(client)
     resp = client.post("/setup/wizard/save", data={
+        "admin_action_token": action_token,
         "setting__WECOM_CORP_ID": "ww-new-corp",
         "setting__WECOM_SECRET": "new-secret",
         "setting__WECOM_AGENT_ID": "2000",
@@ -142,6 +165,16 @@ def test_setup_wizard_save_persists_settings(client, app):
         from wecom_ability_service.infra.settings import get_setting
         assert get_setting("WECOM_CORP_ID") == "ww-new-corp"
         assert get_setting("WECOM_AGENT_ID") == "2000"
+        audit = get_db().execute(
+            """
+            SELECT operator
+            FROM admin_operation_logs
+            WHERE target_type = 'app_setting' AND target_id = 'WECOM_CORP_ID'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        assert audit["operator"] == "test-operator"
 
 
 def test_setup_wizard_save_skips_empty_secrets(client, app):
@@ -149,7 +182,9 @@ def test_setup_wizard_save_skips_empty_secrets(client, app):
         from wecom_ability_service.infra.settings import set_settings
         set_settings({"WECOM_SECRET": "original-secret"})
 
+    action_token = _setup_action_token(client)
     resp = client.post("/setup/wizard/save", data={
+        "admin_action_token": action_token,
         "setting__WECOM_CORP_ID": "ww-test",
         "setting__WECOM_SECRET": "",
         "setting__WECOM_AGENT_ID": "1000",

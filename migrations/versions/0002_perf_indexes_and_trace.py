@@ -16,7 +16,7 @@ Adds:
   migration).
 
 All DDL uses ``IF NOT EXISTS`` so re-running on a database already initialised
-from ``schema.sql`` is a no-op.
+from the PostgreSQL schema bootstrap is a no-op.
 """
 from __future__ import annotations
 
@@ -28,11 +28,6 @@ branch_labels: str | None = None
 depends_on: str | None = None
 
 
-def _is_postgres() -> bool:
-    bind = op.get_bind()
-    return bind.dialect.name == "postgresql"
-
-
 def upgrade() -> None:
     op.execute(
         """
@@ -41,82 +36,43 @@ def upgrade() -> None:
         """
     )
 
-    if _is_postgres():
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS automation_execution_trace (
-                id BIGSERIAL PRIMARY KEY,
-                workflow_id TEXT NOT NULL,
-                workflow_node_id TEXT,
-                external_userid TEXT,
-                member_id BIGINT,
-                decision_point TEXT NOT NULL,
-                decision_outcome TEXT NOT NULL,
-                reason TEXT,
-                request_id TEXT,
-                job_id TEXT,
-                parent_request_id TEXT,
-                payload_json TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_execution_trace (
+            id BIGSERIAL PRIMARY KEY,
+            workflow_id TEXT NOT NULL,
+            workflow_node_id TEXT,
+            external_userid TEXT,
+            member_id BIGINT,
+            decision_point TEXT NOT NULL,
+            decision_outcome TEXT NOT NULL,
+            reason TEXT,
+            request_id TEXT,
+            job_id TEXT,
+            parent_request_id TEXT,
+            payload_json TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS outbound_event_outbox (
-                id BIGSERIAL PRIMARY KEY,
-                event_type TEXT NOT NULL,
-                target_name TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                idempotency_key TEXT,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempt_count INTEGER NOT NULL DEFAULT 0,
-                next_attempt_at TIMESTAMPTZ,
-                last_error TEXT,
-                request_id TEXT,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
+        """
+    )
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS outbound_event_outbox (
+            id BIGSERIAL PRIMARY KEY,
+            event_type TEXT NOT NULL,
+            target_name TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            idempotency_key TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at TIMESTAMPTZ,
+            last_error TEXT,
+            request_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    else:
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS automation_execution_trace (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                workflow_id TEXT NOT NULL,
-                workflow_node_id TEXT,
-                external_userid TEXT,
-                member_id INTEGER,
-                decision_point TEXT NOT NULL,
-                decision_outcome TEXT NOT NULL,
-                reason TEXT,
-                request_id TEXT,
-                job_id TEXT,
-                parent_request_id TEXT,
-                payload_json TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS outbound_event_outbox (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_type TEXT NOT NULL,
-                target_name TEXT NOT NULL,
-                payload_json TEXT NOT NULL,
-                idempotency_key TEXT,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempt_count INTEGER NOT NULL DEFAULT 0,
-                next_attempt_at TEXT,
-                last_error TEXT,
-                request_id TEXT,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+        """
+    )
 
     op.execute(
         """

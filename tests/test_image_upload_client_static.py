@@ -27,7 +27,9 @@ def test_image_upload_client_compresses_before_post():
     assert "canvas.toBlob" in source
     assert "image/jpeg" in source
     assert "compressed: true" in source
-    assert "图片大小不能超过 5MB" in source
+    assert "MAX_SOURCE_BYTES = 2 * 1024 * 1024" in source
+    assert "只能上传 JPG/PNG 图片" in source
+    assert "图片大小不能超过 2MB" in source
 
 
 def test_image_picker_uses_shared_upload_client():

@@ -129,6 +129,17 @@ def _handle_workflow(job: dict[str, Any]) -> dict[str, Any]:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# operation_task handler — 单任务模型真发 + 回写执行明细
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@register("operation_task")
+def _handle_operation_task(job: dict[str, Any]) -> dict[str, Any]:
+    from ..automation_conversion.operation_task_service import run_operation_task_broadcast_job
+
+    return run_operation_task_broadcast_job(job)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # cloud_plan handler (same as campaign — after confirm it's a wecom dispatch)
 # ═══════════════════════════════════════════════════════════════════════════════
 

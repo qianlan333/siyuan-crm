@@ -9,7 +9,6 @@ import requests
 from flask import current_app
 
 from ...infra.settings import DEFAULT_OPENCLAW_WEBHOOK_URL, get_setting
-from . import repo
 
 
 outbound_webhook_logger = logging.getLogger("outbound_webhook")

@@ -78,14 +78,12 @@ def create_app(test_config: dict | None = None) -> Flask:
     explicit_debug_session_api = os.getenv("ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API", "").strip()
     openclaw_webhook_url = os.getenv("OPENCLAW_WEBHOOK_URL", DEFAULT_OPENCLAW_WEBHOOK_URL)
 
-    default_db_path = Path(app.root_path).parent / "data.sqlite3"
     app.config.from_mapping(
         DEBUG=os.getenv("FLASK_ENV", "").lower() == "development",
         SECRET_KEY=os.getenv("SECRET_KEY", DEFAULT_SECRET_KEY),
         APP_HOST=os.getenv("APP_HOST", "127.0.0.1"),
         APP_PORT=os.getenv("APP_PORT", "5000"),
         DATABASE_URL=os.getenv("DATABASE_URL", ""),
-        DATABASE_PATH=os.getenv("DATABASE_PATH", str(default_db_path)),
         RELEASE_SHA=os.getenv("RELEASE_SHA", ""),
         WECOM_CORP_ID=os.getenv("WECOM_CORP_ID", ""),
         WECOM_CONTACT_SECRET=os.getenv("WECOM_CONTACT_SECRET", ""),
@@ -109,16 +107,28 @@ def create_app(test_config: dict | None = None) -> Flask:
         WECHAT_MP_APP_ID=os.getenv("WECHAT_MP_APP_ID", ""),
         WECHAT_MP_APP_SECRET=os.getenv("WECHAT_MP_APP_SECRET", ""),
         WECHAT_MP_OAUTH_SCOPE=os.getenv("WECHAT_MP_OAUTH_SCOPE", "snsapi_base"),
+        WECHAT_PAY_ENABLED=os.getenv("WECHAT_PAY_ENABLED", "false"),
+        WECHAT_PAY_APP_ID=os.getenv("WECHAT_PAY_APP_ID", ""),
+        WECHAT_PAY_MCH_ID=os.getenv("WECHAT_PAY_MCH_ID", ""),
+        WECHAT_PAY_API_V3_KEY=os.getenv("WECHAT_PAY_API_V3_KEY", ""),
+        WECHAT_PAY_PRIVATE_KEY_PATH=os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH", ""),
+        WECHAT_PAY_CERT_SERIAL_NO=os.getenv("WECHAT_PAY_CERT_SERIAL_NO", ""),
+        WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH=os.getenv("WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH", ""),
+        WECHAT_PAY_PLATFORM_CERT_SERIAL_NO=os.getenv("WECHAT_PAY_PLATFORM_CERT_SERIAL_NO", ""),
+        WECHAT_PAY_NOTIFY_URL=os.getenv("WECHAT_PAY_NOTIFY_URL", ""),
+        WECHAT_PAY_API_BASE=os.getenv("WECHAT_PAY_API_BASE", "https://api.mch.weixin.qq.com"),
+        WECHAT_PAY_TIMEOUT_SECONDS=int(os.getenv("WECHAT_PAY_TIMEOUT_SECONDS", "10")),
+        WECHAT_PAY_PRODUCT_CATALOG_JSON=os.getenv("WECHAT_PAY_PRODUCT_CATALOG_JSON", ""),
         ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API=(
             explicit_debug_session_api.lower() in {"1", "true", "yes"} if explicit_debug_session_api else None
         ),
         WECOM_ARCHIVE_TIMEOUT=int(os.getenv("WECOM_ARCHIVE_TIMEOUT", "15")),
         WECOM_SYNC_BATCH_SIZE=int(os.getenv("WECOM_SYNC_BATCH_SIZE", "100")),
         WECOM_SYNC_RETRY_LIMIT=int(os.getenv("WECOM_SYNC_RETRY_LIMIT", "3")),
+        WECOM_CORP_TAG_LIMIT=int(os.getenv("WECOM_CORP_TAG_LIMIT", "1000")),
         AUTOMATION_CONVERSION_CHANNEL_PROVIDER=os.getenv("AUTOMATION_CONVERSION_CHANNEL_PROVIDER", "wecom_contact_way"),
         MCP_BEARER_TOKEN=os.getenv("MCP_BEARER_TOKEN", ""),
         ACCESS_TOKEN_CACHE_SECONDS=int(os.getenv("ACCESS_TOKEN_CACHE_SECONDS", "7000")),
-        SQLITE_BUSY_TIMEOUT_MS=int(os.getenv("SQLITE_BUSY_TIMEOUT_MS", "5000")),
         SIDEBAR_THIRD_PARTY_API_URL=os.getenv("SIDEBAR_THIRD_PARTY_API_URL", ""),
         SIDEBAR_THIRD_PARTY_API_TOKEN=os.getenv("SIDEBAR_THIRD_PARTY_API_TOKEN", ""),
         SIDEBAR_THIRD_PARTY_TIMEOUT_SECONDS=int(os.getenv("SIDEBAR_THIRD_PARTY_TIMEOUT_SECONDS", "10")),

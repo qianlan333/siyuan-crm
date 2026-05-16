@@ -5,7 +5,6 @@
 ``WHERE ts <> ''`` 等）的 PR 会让对应 test 在 CI 的 PG job 上挂掉。
 
 本地跑：
-- SQLite（默认，秒级）：``pytest tests/integration/``
 - PG：``DATABASE_URL=postgresql://test:test@localhost:5432/test pytest tests/integration/``
 """
 from __future__ import annotations
@@ -803,7 +802,7 @@ def test_campaign_multi_step_not_blocked_by_own_daily_budget(app):
         side_effect=_fake_dispatch,
     ):
         # 预排期 job 已存在，直接由 worker 消费（不需要再 process_due_campaign_members）
-        r2 = worker.run(batch_size=10)
+        worker.run(batch_size=10)
 
     assert dispatched[0]["text"]["content"] == "step 1", f"wrong step dispatched: {dispatched}"
 
@@ -1044,7 +1043,7 @@ def test_start_campaign_rejects_active_external_conflict(app):
 
 
 # ----------------------------------------------------------------------------
-# image_library / miniprogram_library — PG/SQLite 跨库
+# image_library / miniprogram_library — PG-only library smoke
 # ----------------------------------------------------------------------------
 
 def test_pg_image_library_crud_smoke(app):

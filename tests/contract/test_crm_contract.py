@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 from datetime import datetime as real_datetime
-from pathlib import Path
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.marketing_automation import service as marketing_automation_service
 
 
@@ -153,7 +151,15 @@ def app(tmp_path):
 
 @pytest.fixture()
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["admin_session_user_id"] = 0
+        session["admin_session_wecom_userid"] = ""
+        session["admin_session_role_list"] = ["super_admin"]
+        session["admin_session_login_type"] = "break_glass"
+        session["admin_session_display_name"] = "test-admin"
+        session["admin_session_break_glass_username"] = "test-admin"
+    return client
 
 
 def test_contract_health_and_ops(client):

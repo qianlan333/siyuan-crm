@@ -6,7 +6,6 @@ from typing import Any, Iterable
 
 from flask import current_app
 
-from ..admin_config import repo as admin_config_repo
 from ...infra.settings import get_setting
 from ...wecom_client import WeComClient
 from . import repo
@@ -23,6 +22,8 @@ MODULE_LABELS = {
     "automation_conversion": "自动化运营",
     "customers": "客户",
     "questionnaires": "问卷",
+    "wechat_pay_transactions": "交易管理",
+    "wecom_tags": "企微标签管理",
     "miniprogram_library": "素材库",
     "config": "配置",
     "api_docs": "API 文档",
@@ -30,11 +31,11 @@ MODULE_LABELS = {
 }
 
 ROLE_MODULE_ACCESS = {
-    "super_admin": {"automation_conversion", "customers", "questionnaires", "miniprogram_library", "config", "api_docs", "sunset"},
+    "super_admin": {"automation_conversion", "customers", "questionnaires", "wechat_pay_transactions", "wecom_tags", "miniprogram_library", "config", "api_docs", "sunset"},
     "automation_admin": {"automation_conversion", "customers", "miniprogram_library", "api_docs", "sunset"},
     "questionnaire_admin": {"questionnaires", "api_docs", "sunset"},
-    "config_admin": {"config", "api_docs", "sunset"},
-    "viewer": {"automation_conversion", "customers", "questionnaires", "miniprogram_library", "config", "api_docs", "sunset"},
+    "config_admin": {"wechat_pay_transactions", "wecom_tags", "config", "api_docs", "sunset"},
+    "viewer": {"automation_conversion", "customers", "questionnaires", "wechat_pay_transactions", "wecom_tags", "miniprogram_library", "config", "api_docs", "sunset"},
 }
 
 READ_ONLY_ROLES = {"viewer"}
@@ -147,6 +148,27 @@ def _normalized_int(value: Any, *, default: int = 0) -> int:
         return int(value)
     except (TypeError, ValueError):
         return default
+
+
+def _record_audit(
+    *,
+    operator: str,
+    action_type: str,
+    target_type: str,
+    target_id: str,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+) -> None:
+    from ..admin_audit import record_audit
+
+    record_audit(
+        operator=_normalized_text(operator) or "crm_console",
+        action_type=_normalized_text(action_type),
+        target_type=_normalized_text(target_type),
+        target_id=_normalized_text(target_id),
+        before=before or {},
+        after=after or {},
+    )
 
 
 def _directory_root_department_id() -> int:
@@ -397,13 +419,13 @@ def sync_admin_wecom_directory_members(*, operator: str = "crm_console") -> dict
         members=members,
         synced_at=synced_at,
     )
-    admin_config_repo.insert_admin_operation_log(
+    _record_audit(
         operator=_normalized_text(operator) or "crm_console",
         action_type="sync_admin_wecom_directory",
         target_type="admin_wecom_directory_members",
         target_id=_normalized_text(client.corp_id),
-        before_json={"department_id": department_id},
-        after_json={
+        before={"department_id": department_id},
+        after={
             "synced_count": synced_count,
             "skipped_count": skipped_count,
             "department_id": department_id,
@@ -550,13 +572,13 @@ def save_admin_user(
         )
         repo.replace_admin_user_roles(admin_user_id=int(user_id), role_codes=role_codes)
         saved = get_admin_user_by_id(int(user_id))
-        admin_config_repo.insert_admin_operation_log(
+        _record_audit(
             operator=normalized_operator,
             action_type="update_admin_user",
             target_type="admin_user",
             target_id=wecom_userid,
-            before_json={"user": existing or {}, "demoted_super_admins": demoted_super_admins},
-            after_json={"user": saved or {}},
+            before={"user": existing or {}, "demoted_super_admins": demoted_super_admins},
+            after={"user": saved or {}},
         )
         if not saved:
             raise ValueError("保存授权成员失败")
@@ -582,13 +604,13 @@ def save_admin_user(
         )
     repo.replace_admin_user_roles(admin_user_id=created_id, role_codes=role_codes)
     saved = get_admin_user_by_id(created_id)
-    admin_config_repo.insert_admin_operation_log(
+    _record_audit(
         operator=normalized_operator,
         action_type="create_admin_user",
         target_type="admin_user",
         target_id=wecom_userid,
-        before_json={"demoted_super_admins": demoted_super_admins},
-        after_json={"user": saved or {}},
+        before={"demoted_super_admins": demoted_super_admins},
+        after={"user": saved or {}},
     )
     if not saved:
         raise ValueError("创建授权成员失败")

@@ -133,6 +133,13 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         persistence_modules=("repo.py",),
         notes="Questionnaire definition, submission, export; preflight stays domain-local.",
     ),
+    "wechat_pay": DomainLayoutSpec(
+        name="wechat_pay",
+        mode="simple",
+        service_module="service.py",
+        persistence_modules=("repo.py",),
+        notes="WeChat Pay JSAPI order creation, status sync, and payment notification handling.",
+    ),
     "routing_config": DomainLayoutSpec(
         name="routing_config",
         mode="simple",

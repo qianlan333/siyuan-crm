@@ -113,7 +113,7 @@ _TOOL_SPECS: list[dict[str, Any]] = [
         "description": (
             "上传新图片（base64 编码字节）并一次性写入语义元数据。AI 自助上传场景常用："
             "Skill 拿到图 → vision 分析 → 直接带 description/tags/category 入库，避免后续打标往返。"
-            "图片大小限制 5MB；mime_type 必须是 image/*。"
+            "图片大小限制 2MB；mime_type 必须是 image/jpeg 或 image/png。"
         ),
         "input_schema": {
             "type": "object",

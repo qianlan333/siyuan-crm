@@ -19,9 +19,11 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone, timedelta
 from typing import Any, Iterable, Sequence
 
 from ...db import get_db
+from ...db.helpers import fetchall_dicts, fetchone_dict, placeholders
 
 
 logger = logging.getLogger(__name__)
@@ -65,6 +67,10 @@ _RETIRED_BUDGET_CODES: tuple[str, ...] = (
 )
 
 
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def ensure_default_budgets() -> None:
     """启动期把默认预算写进库（已存在则不覆盖运营修改的值）。
 
@@ -82,11 +88,12 @@ def ensure_default_budgets() -> None:
     cursor = db.cursor()
     for spec in _DEFAULT_BUDGETS:
         try:
-            cursor.execute(
+            row = fetchone_dict(
+                db,
                 "SELECT id FROM automation_frequency_budget WHERE budget_code = ?",
                 (spec["budget_code"],),
             )
-            if cursor.fetchone():
+            if row:
                 continue
             cursor.execute(
                 """
@@ -102,7 +109,7 @@ def ensure_default_budgets() -> None:
                     spec["window_seconds"],
                     spec["max_count"],
                     spec["description"],
-                    True,  # PG: BOOLEAN; SQLite: 1（自动当 truthy）
+                    True,
                 ),
             )
         except Exception as exc:  # pragma: no cover - defensive
@@ -143,17 +150,15 @@ def list_active_budgets(
     - global 永远生效
     - channel/program/pool 在调用方提供的 scope_key 集合里时生效
     """
-    db = get_db()
-    cur = db.cursor()
-    cur.execute(
+    rows = fetchall_dicts(
+        get_db(),
         """
         SELECT id, budget_code, scope, scope_key, window_seconds, max_count, description
         FROM automation_frequency_budget
         WHERE enabled
         ORDER BY id ASC
-        """
+        """,
     )
-    rows = cur.fetchall() or []
     channel_set = {str(c) for c in channels if c}
     program_set = {str(p) for p in program_codes if p}
     pool_set = {str(k) for k in pool_keys if k}
@@ -162,13 +167,13 @@ def list_active_budgets(
         scope = (row["scope"] or "").lower()
         scope_key = row["scope_key"] or ""
         if scope == "global":
-            out.append(dict(row))
+            out.append(row)
         elif scope == "channel" and (not scope_key or scope_key in channel_set):
-            out.append(dict(row))
+            out.append(row)
         elif scope == "program" and scope_key in program_set:
-            out.append(dict(row))
+            out.append(row)
         elif scope == "pool" and scope_key in pool_set:
-            out.append(dict(row))
+            out.append(row)
     return out
 
 
@@ -182,21 +187,19 @@ def _count_consumption(
     exclude_source_ids: Sequence[str] = (),
 ) -> int:
     db = get_db()
-    cur = db.cursor()
-    from datetime import datetime, timedelta
 
-    cutoff_iso = (datetime.utcnow() - timedelta(seconds=int(window_seconds))).isoformat()
+    cutoff_iso = (_utc_now_naive() - timedelta(seconds=int(window_seconds))).isoformat()
 
     # 同 campaign 续推排除：不计入同来源的历史消耗
     exclude_clause = ""
     exclude_params: tuple = ()
     if exclude_source_kind and exclude_source_ids:
-        placeholders = ", ".join("?" for _ in exclude_source_ids)
-        exclude_clause = f" AND NOT (source_kind = ? AND source_id IN ({placeholders}))"
+        exclude_clause = f" AND NOT (source_kind = ? AND source_id IN ({placeholders(exclude_source_ids)}))"
         exclude_params = (exclude_source_kind, *exclude_source_ids)
 
     if member_id and int(member_id) > 0:
-        cur.execute(
+        row = fetchone_dict(
+            db,
             f"""
             SELECT COUNT(*) AS c FROM automation_frequency_consumption
             WHERE budget_id = ?
@@ -205,11 +208,11 @@ def _count_consumption(
             """,
             (int(budget_id), int(member_id), cutoff_iso, *exclude_params),
         )
-        row = cur.fetchone()
         if row:
             return int(row["c"] or 0)
     if external_contact_id:
-        cur.execute(
+        row = fetchone_dict(
+            db,
             f"""
             SELECT COUNT(*) AS c FROM automation_frequency_consumption
             WHERE budget_id = ?
@@ -218,7 +221,6 @@ def _count_consumption(
             """,
             (int(budget_id), external_contact_id, cutoff_iso, *exclude_params),
         )
-        row = cur.fetchone()
         if row:
             return int(row["c"] or 0)
     return 0
@@ -329,9 +331,7 @@ def cleanup_expired_consumption(*, batch_size: int = 5000) -> int:
     一条记录对哪个 budget 还有效，取决于该 budget 的 window_seconds；只要超过
     所有 enabled budget 中最大的 window，就可以删。这里取一个保守的 90 天硬上限。
     """
-    from datetime import datetime, timedelta
-
-    cutoff_iso = (datetime.utcnow() - timedelta(days=90)).isoformat()
+    cutoff_iso = (_utc_now_naive() - timedelta(days=90)).isoformat()
     db = get_db()
     cur = db.cursor()
     cur.execute(

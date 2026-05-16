@@ -9,16 +9,34 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...db import cast_text, get_db, is_postgres
+from ...db import cast_text, get_db
 from ._repo_helpers import (
     _db_bool,
     _fetchall_dicts,
     _fetchone_dict,
-    _json_dumps,
-    _json_loads,
     _normalized_text,
-    _row_bool,
 )
+
+_VALID_AUDIENCE_CODES = ("pending_questionnaire", "operating", "converted")
+_AUDIENCE_CODE_ALIASES = {
+    "new_user": "pending_questionnaire",
+    "inactive_normal": "operating",
+    "inactive_focus": "operating",
+    "active_normal": "operating",
+    "active_focus": "operating",
+    "silent": "operating",
+    "won": "converted",
+}
+
+
+def _normalize_audience_code(value: Any, *, fallback_pool: Any = "") -> str:
+    normalized = _normalized_text(value)
+    if normalized in _VALID_AUDIENCE_CODES:
+        return normalized
+    normalized_pool = _normalized_text(fallback_pool)
+    if normalized_pool in _VALID_AUDIENCE_CODES:
+        return normalized_pool
+    return _AUDIENCE_CODE_ALIASES.get(normalized_pool, "pending_questionnaire")
 
 
 def lookup_person_id_by_external_contact_id(external_contact_id: str) -> int | None:
@@ -177,6 +195,8 @@ def insert_member(payload: dict[str, Any]) -> dict[str, Any]:
         _normalized_text(payload.get("joined_at")),
         _normalized_text(payload.get("last_ai_push_at")),
         _normalized_text(payload.get("ai_cooldown_until")),
+        _normalize_audience_code(payload.get("current_audience_code"), fallback_pool=payload.get("current_pool")),
+        _normalized_text(payload.get("current_audience_entered_at")),
     )
     row = db.execute(
         """
@@ -196,10 +216,12 @@ def insert_member(payload: dict[str, Any]) -> dict[str, Any]:
             joined_at,
             last_ai_push_at,
             ai_cooldown_until,
+            current_audience_code,
+            current_audience_entered_at,
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         """,
         params,
@@ -225,6 +247,8 @@ def update_member(member_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         _normalized_text(payload.get("joined_at")),
         _normalized_text(payload.get("last_ai_push_at")),
         _normalized_text(payload.get("ai_cooldown_until")),
+        _normalize_audience_code(payload.get("current_audience_code"), fallback_pool=payload.get("current_pool")),
+        _normalized_text(payload.get("current_audience_entered_at")),
         int(member_id),
     )
     row = db.execute(
@@ -245,6 +269,8 @@ def update_member(member_id: int, payload: dict[str, Any]) -> dict[str, Any]:
             joined_at = ?,
             last_ai_push_at = ?,
             ai_cooldown_until = ?,
+            current_audience_code = ?,
+            current_audience_entered_at = ?,
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
         RETURNING *
@@ -378,9 +404,6 @@ def list_stage_members_for_manual_send(*, current_pool: str) -> list[dict[str, A
         """,
         (normalized_pool,),
     )
-
-
-_VALID_AUDIENCE_CODES = ("pending_questionnaire", "operating", "converted")
 
 
 def _normalize_segment_keys(values: list[str] | None) -> list[str]:

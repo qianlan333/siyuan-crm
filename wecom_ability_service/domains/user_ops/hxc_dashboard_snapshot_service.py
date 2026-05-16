@@ -31,6 +31,7 @@ from ..automation_conversion.message_activity_client import (
     _db_config,
     get_message_activity_db_status,
 )
+from .phone_helpers import phone_match_key
 
 
 # ── 漏斗状态枚举 (DB 用英文; UI 层翻译成中文) ──
@@ -181,9 +182,7 @@ def _funnel_state(user_hit: bool, member_hit: bool) -> str:
 
 
 def _phone_match_key(phone: str) -> str:
-    if not phone or len(phone) < 7:
-        return ""
-    return f"{phone[:3]}_{phone[-4:]}"
+    return phone_match_key(phone)
 
 
 def _to_float(value: Any) -> float | None:
@@ -192,6 +191,35 @@ def _to_float(value: Any) -> float | None:
     if isinstance(value, Decimal):
         return float(value)
     return float(value)
+
+
+def _hxc_sort_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _hxc_user_row_sort_key(row: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        _hxc_sort_text(row.get("last_login_at")),
+        _hxc_sort_text(row.get("last_msg_at")),
+        _hxc_sort_text(row.get("hxc_registered_at")),
+        str(row.get("hxc_user_id") or ""),
+    )
+
+
+def _select_hxc_user_rows(rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    users_by_phone: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        phone = row.get("phone")
+        if not phone:
+            continue
+        existing = users_by_phone.get(phone)
+        if existing is None or _hxc_user_row_sort_key(row) > _hxc_user_row_sort_key(existing):
+            users_by_phone[phone] = row
+    return users_by_phone
 
 
 def _connect_hxc():
@@ -220,9 +248,7 @@ def _fetch_hxc_index() -> dict[str, dict[str, Any]]:
     try:
         with connection.cursor() as cursor:
             cursor.execute(_HXC_USERS_SQL)
-            users_by_phone: dict[str, dict[str, Any]] = {
-                row["phone"]: row for row in cursor.fetchall() if row.get("phone")
-            }
+            users_by_phone = _select_hxc_user_rows(list(cursor.fetchall()))
             cursor.execute(_HXC_MB_SQL)
             mb_by_phone: dict[str, dict[str, Any]] = {}
             for row in cursor.fetchall():

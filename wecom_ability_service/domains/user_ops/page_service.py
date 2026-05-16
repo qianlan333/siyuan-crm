@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from typing import Any
 
 from ...db import get_db
+from ...db.helpers import fetchall_dicts, fetchone_dict
 from ...infra.helpers import db_bool, stringify_db_timestamp
+from ...infra.json_utils import json_dumps as _json_dumps, safe_json_loads as _json_loads
 from .. import miniprogram_library
 from ..tasks.private_message import (
     count_private_message_images,
@@ -70,28 +71,43 @@ def _normalize_status(
     return normalized if normalized in allowed else default
 
 
+def _legacy_bool_filter_status(
+    value: Any,
+    *,
+    true_status: str,
+    false_status: str,
+    default: str = "all",
+) -> str:
+    normalized = _normalize_str(value).lower()
+    if normalized in {"1", "true", "yes"}:
+        return true_status
+    if normalized in {"0", "false", "no"}:
+        return false_status
+    return default
+
+
 def _normalize_filter_payload(filters: dict[str, Any] | None = None, **kwargs: Any) -> dict[str, str]:
     payload = dict(filters or {})
     payload.update({key: value for key, value in kwargs.items() if value is not None})
 
     wecom_status = _normalize_status(payload.get("wecom_status"), allowed={"all", "added", "not_added"})
     if wecom_status == "all":
-        legacy_wecom = _normalize_str(payload.get("is_wecom_added")).lower()
-        if legacy_wecom in {"1", "true", "yes"}:
-            wecom_status = "added"
-        elif legacy_wecom in {"0", "false", "no"}:
-            wecom_status = "not_added"
+        wecom_status = _legacy_bool_filter_status(
+            payload.get("is_wecom_added"),
+            true_status="added",
+            false_status="not_added",
+        )
 
     mobile_binding_status = _normalize_status(
         payload.get("mobile_binding_status"),
         allowed={"all", "bound", "unbound"},
     )
     if mobile_binding_status == "all":
-        legacy_mobile_bound = _normalize_str(payload.get("is_mobile_bound")).lower()
-        if legacy_mobile_bound in {"1", "true", "yes"}:
-            mobile_binding_status = "bound"
-        elif legacy_mobile_bound in {"0", "false", "no"}:
-            mobile_binding_status = "unbound"
+        mobile_binding_status = _legacy_bool_filter_status(
+            payload.get("is_mobile_bound"),
+            true_status="bound",
+            false_status="unbound",
+        )
 
     activation_bucket = _normalize_status(
         payload.get("activation_bucket"),
@@ -114,21 +130,6 @@ def _normalize_filter_payload(filters: dict[str, Any] | None = None, **kwargs: A
         "mobile": _normalize_str(payload.get("mobile")),
         "owner_userid": _normalize_str(payload.get("owner_userid")),
     }
-
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (list, dict)):
-        return value
-    if value in (None, ""):
-        return default
-    try:
-        return json.loads(str(value))
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
-
-
-def _json_dumps(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False)
 
 
 def _decode_json_list(value: Any) -> list[Any]:
@@ -242,8 +243,7 @@ def _query_base_rows(
         params.extend([like_value, like_value, like_value, like_value, like_value])
 
     sql += " ORDER BY current.updated_at DESC, current.id DESC"
-    rows = get_db().execute(sql, tuple(params)).fetchall()
-    return [dict(row) for row in rows]
+    return fetchall_dicts(get_db(), sql, tuple(params))
 
 
 def _auto_dnd_reasons(row: dict[str, Any]) -> list[dict[str, str]]:
@@ -251,6 +251,49 @@ def _auto_dnd_reasons(row: dict[str, Any]) -> list[dict[str, str]]:
     if signup_status in AUTO_DND_SIGNUP_STATUSES:
         return [dict(PAID_COURSE_DND_REASON)]
     return []
+
+
+def _serialize_manual_dnd_reason(row: dict[str, Any]) -> dict[str, str]:
+    return {
+        "source_type": _normalize_str(row.get("source_type")),
+        "reason_code": _normalize_str(row.get("reason_code")),
+        "reason_text": _normalize_str(row.get("reason_text")),
+    }
+
+
+def _index_manual_dnd_rows(
+    dnd_rows: list[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], dict[str, list[dict[str, Any]]]]:
+    rows_by_external: dict[str, list[dict[str, Any]]] = {}
+    rows_by_mobile: dict[str, list[dict[str, Any]]] = {}
+    for row in dnd_rows:
+        external_userid = _normalize_str(row.get("external_userid"))
+        mobile = _normalize_str(row.get("mobile"))
+        if external_userid:
+            rows_by_external.setdefault(external_userid, []).append(row)
+        if mobile:
+            rows_by_mobile.setdefault(mobile, []).append(row)
+    return rows_by_external, rows_by_mobile
+
+
+def _manual_dnd_reasons_for_identity(
+    *,
+    external_userid: str,
+    mobile: str,
+    rows_by_external: dict[str, list[dict[str, Any]]],
+    rows_by_mobile: dict[str, list[dict[str, Any]]],
+) -> list[dict[str, str]]:
+    candidate_rows = list(rows_by_external.get(external_userid, [])) + list(rows_by_mobile.get(mobile, []))
+    reasons: list[dict[str, str]] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    for row in candidate_rows:
+        reason = _serialize_manual_dnd_reason(row)
+        dedupe_key = (reason["source_type"], reason["reason_code"], reason["reason_text"])
+        if dedupe_key in seen_keys:
+            continue
+        seen_keys.add(dedupe_key)
+        reasons.append(reason)
+    return reasons
 
 
 def _derive_activation_bucket(row: dict[str, Any]) -> str:
@@ -291,36 +334,17 @@ def _collect_manual_dnd_reasons(rows: list[dict[str, Any]]) -> dict[int, list[di
     sql += f" AND ({' OR '.join(clauses)})"
 
     rows_by_id: dict[int, list[dict[str, str]]] = {}
-    dnd_rows = get_db().execute(sql, tuple(params)).fetchall()
+    dnd_rows = [dict(row) for row in get_db().execute(sql, tuple(params)).fetchall()]
+    rows_by_external, rows_by_mobile = _index_manual_dnd_rows(dnd_rows)
     for item in rows:
         external_userid = _normalize_str(item.get("external_userid"))
         mobile = _normalize_str(item.get("mobile"))
-        reasons: list[dict[str, str]] = []
-        seen_keys: set[tuple[str, str, str]] = set()
-        for dnd_row in dnd_rows:
-            dnd_external_userid = _normalize_str(dnd_row.get("external_userid"))
-            dnd_mobile = _normalize_str(dnd_row.get("mobile"))
-            if external_userid and dnd_external_userid == external_userid:
-                pass
-            elif mobile and dnd_mobile == mobile:
-                pass
-            else:
-                continue
-            dedupe_key = (
-                _normalize_str(dnd_row.get("source_type")),
-                _normalize_str(dnd_row.get("reason_code")),
-                _normalize_str(dnd_row.get("reason_text")),
-            )
-            if dedupe_key in seen_keys:
-                continue
-            seen_keys.add(dedupe_key)
-            reasons.append(
-                {
-                    "source_type": _normalize_str(dnd_row.get("source_type")),
-                    "reason_code": _normalize_str(dnd_row.get("reason_code")),
-                    "reason_text": _normalize_str(dnd_row.get("reason_text")),
-                }
-            )
+        reasons = _manual_dnd_reasons_for_identity(
+            external_userid=external_userid,
+            mobile=mobile,
+            rows_by_external=rows_by_external,
+            rows_by_mobile=rows_by_mobile,
+        )
         rows_by_id[int(item["id"])] = reasons
     return rows_by_id
 
@@ -520,7 +544,8 @@ def _resolve_pool_target(*, external_userid: str = "", mobile: str = "") -> dict
     normalized_external_userid = _normalize_str(external_userid)
     normalized_mobile = _normalize_str(mobile)
     if normalized_external_userid:
-        row = get_db().execute(
+        return fetchone_dict(
+            get_db(),
             """
             SELECT id, external_userid, mobile
             FROM user_ops_pool_current
@@ -528,10 +553,10 @@ def _resolve_pool_target(*, external_userid: str = "", mobile: str = "") -> dict
             LIMIT 1
             """,
             (normalized_external_userid,),
-        ).fetchone()
-        return dict(row) if row else None
+        )
     if normalized_mobile:
-        row = get_db().execute(
+        return fetchone_dict(
+            get_db(),
             """
             SELECT id, external_userid, mobile
             FROM user_ops_pool_current
@@ -539,8 +564,7 @@ def _resolve_pool_target(*, external_userid: str = "", mobile: str = "") -> dict
             LIMIT 1
             """,
             (normalized_mobile,),
-        ).fetchone()
-        return dict(row) if row else None
+        )
     return None
 
 
@@ -862,6 +886,10 @@ def _normalize_task_result_item(item: dict[str, Any], owner_display_names: dict[
         "error_message": _normalize_str(item.get("error_message")),
         "error_stage": _normalize_str(item.get("error_stage")),
         "error_category": _normalize_str(item.get("error_category")),
+        "fallback_without_miniprogram": bool(item.get("fallback_without_miniprogram")),
+        "fallback_reason": _normalize_str(item.get("fallback_reason")),
+        "fallback_error_message": _normalize_str(item.get("fallback_error_message")),
+        "fallback_removed_attachment_count": int(item.get("fallback_removed_attachment_count") or 0),
     }
 
 
@@ -881,7 +909,8 @@ def _fetch_outbound_task_rows(task_ids: list[int]) -> list[dict[str, Any]]:
     normalized_task_ids = [int(task_id) for task_id in task_ids if int(task_id) > 0]
     if not normalized_task_ids:
         return []
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         f"""
         SELECT id, task_type, request_payload, response_payload, wecom_task_id, status, created_at
         FROM outbound_tasks
@@ -889,8 +918,7 @@ def _fetch_outbound_task_rows(task_ids: list[int]) -> list[dict[str, Any]]:
         ORDER BY id ASC
         """,
         tuple(normalized_task_ids),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def _task_result_from_outbound_task_row(row: dict[str, Any], owner_display_names: dict[str, str]) -> dict[str, Any]:
@@ -926,7 +954,8 @@ def _sender_userids_from_task_results(task_results: list[dict[str, Any]]) -> lis
 
 
 def _load_send_record_row(record_id: int) -> dict[str, Any] | None:
-    row = get_db().execute(
+    return fetchone_dict(
+        get_db(),
         """
         SELECT
             id,
@@ -952,8 +981,7 @@ def _load_send_record_row(record_id: int) -> dict[str, Any] | None:
         LIMIT 1
         """,
         (int(record_id),),
-    ).fetchone()
-    return dict(row) if row else None
+    )
 
 
 def _hydrate_task_results(row: dict[str, Any]) -> list[dict[str, Any]]:

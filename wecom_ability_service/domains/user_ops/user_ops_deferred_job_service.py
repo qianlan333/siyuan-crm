@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from typing import Any, Callable
 
 from ...db import get_db
+from ...db.helpers import fetchall_dicts, fetchone_dict
 from ...infra.constants import (
     USER_OPS_DEFERRED_JOB_TYPE_VERIFY_CLASS_TERM_TAG_AND_UPSERT_LEAD_POOL,
 )
@@ -93,7 +94,8 @@ def schedule_user_ops_auto_assign_class_term_job(
 def _list_due_user_ops_deferred_jobs(limit: int, now_at: str) -> list[dict[str, Any]]:
     """Internal only: load pending deferred jobs due for execution."""
 
-    rows = get_db().execute(
+    return fetchall_dicts(
+        get_db(),
         """
         SELECT
             id, job_type, external_userid, owner_userid, run_after, status,
@@ -110,14 +112,14 @@ def _list_due_user_ops_deferred_jobs(limit: int, now_at: str) -> list[dict[str, 
             now_at,
             max(int(limit or 0), 1),
         ),
-    ).fetchall()
-    return [dict(row) for row in rows]
+    )
 
 
 def _get_user_ops_deferred_job(job_id: int) -> dict[str, Any] | None:
     """Internal only: fetch a single deferred job row."""
 
-    row = get_db().execute(
+    return fetchone_dict(
+        get_db(),
         """
         SELECT
             id, job_type, external_userid, owner_userid, run_after, status,
@@ -127,8 +129,7 @@ def _get_user_ops_deferred_job(job_id: int) -> dict[str, Any] | None:
         LIMIT 1
         """,
         (int(job_id),),
-    ).fetchone()
-    return dict(row) if row else None
+    )
 
 
 def _mark_user_ops_deferred_job_running(job_id: int) -> dict[str, Any] | None:

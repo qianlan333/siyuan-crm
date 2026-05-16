@@ -11,16 +11,13 @@ can ``from ._repo_helpers import *`` and pick them all up.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
+from ...infra.helpers import db_bool as _db_bool
+from ...infra.json_utils import json_dumps, safe_json_loads
 
 _AUTOMATION_SOP_POOL_LOCK_NAMESPACE = 41017
-
-
-def _db_bool(value: bool) -> bool:
-    return bool(value)
 
 
 def _normalized_text(value: Any) -> str:
@@ -28,19 +25,11 @@ def _normalized_text(value: Any) -> str:
 
 
 def _json_dumps(value: Any) -> str:
-    return json.dumps({} if value is None else value, ensure_ascii=False)
+    return json_dumps(value, none_as_empty_object=True)
 
 
 def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = _normalized_text(value)
-    if not text:
-        return default
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
+    return safe_json_loads(value, default=default)
 
 
 def _row_bool(value: Any) -> bool:

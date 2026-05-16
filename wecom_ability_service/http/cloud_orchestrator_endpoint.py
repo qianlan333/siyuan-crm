@@ -12,7 +12,6 @@ CRM 不做 LLM 调用；外部 Agent（Claude Code）通过 MCP HTTP 连。
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from flask import Response, jsonify, render_template, request
 
@@ -135,12 +134,13 @@ def cloud_orchestrator_audit() -> Response:
 
 def cloud_orchestrator_observability() -> Response:
     """监控数据汇总：plan 漏斗 / 审计错误 / Cloud 调用延迟分位。"""
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     from ..db import get_db
 
-    cutoff_7d = (datetime.utcnow() - timedelta(days=7)).isoformat()
-    cutoff_1d = (datetime.utcnow() - timedelta(days=1)).isoformat()
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    cutoff_7d = (now - timedelta(days=7)).isoformat()
+    cutoff_1d = (now - timedelta(days=1)).isoformat()
 
     db = get_db()
     cur = db.cursor()
@@ -384,8 +384,9 @@ def cloud_orchestrator_upload_image() -> Response:
     """运营本地选图 → 上传到企微素材库 → 返回 media_id 给前端写进 step。
 
     复用已有 ``WeComClient._upload_private_message_image``，避免重写一遍企微 API。
-    限制 5MB / 仅图片类型，防止滥用接口。
+    限制为企微临时素材图片规则（5B~2MB / JPG、PNG），防止到企微才失败。
     """
+    from ..domains.wecom_media_limits import validate_wecom_image_upload
     from ..wecom_client import WeComClient, WeComClientError
 
     file = request.files.get("image")
@@ -397,8 +398,14 @@ def cloud_orchestrator_upload_image() -> Response:
     file_bytes = file.read()
     if not file_bytes:
         return jsonify({"ok": False, "error": "empty file"}), 400
-    if len(file_bytes) > 5 * 1024 * 1024:
-        return jsonify({"ok": False, "error": "file too large (max 5MB)"}), 400
+    try:
+        content_type = validate_wecom_image_upload(
+            file_bytes,
+            file_name=file.filename,
+            mime_type=content_type,
+        )
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
     try:
         client = WeComClient.from_app()
         media_id = client._upload_private_message_image(

@@ -2,6 +2,8 @@
 
 这份地图只解释“当前仓库每个主要目录负责什么”，方便后续把 `AI Customer Pulse` 挂到现有结构里，而不是另起一套平行实现。
 
+> 2026-05 note: this early Pulse map predates the PG-only cleanup. Current AI-CRM runtime requires PostgreSQL; any SQLite references in older acceptance notes are historical local-test context.
+
 ## 1. 顶层目录
 
 | 目录 / 文件 | 职责 |
@@ -26,8 +28,8 @@
 | `wecom_ability_service/__init__.py` | 创建 Flask app，装载 config、db、logging、observability、routes、MCP |
 | `wecom_ability_service/routes.py` | 主蓝图注册入口 |
 | `wecom_ability_service/http/__init__.py` | HTTP 模块注册说明与装配 |
-| `wecom_ability_service/db.py` | SQLite/Postgres 初始化与连接 |
-| `wecom_ability_service/schema.sql` | SQLite schema |
+| `wecom_ability_service/db.py` | PostgreSQL 初始化与连接 |
+| `wecom_ability_service/schema.sql` | 历史 SQLite schema 归档，不作为当前 runtime source |
 | `wecom_ability_service/schema_postgres.sql` | Postgres schema |
 | `wecom_ability_service/services.py` | 兼容 facade，承接旧 import，不应继续承载新业务核心逻辑 |
 | `wecom_ability_service/mcp_adapter.py` | MCP HTTP 入口、工具注册、权限 scope、OpenClaw 读写适配 |

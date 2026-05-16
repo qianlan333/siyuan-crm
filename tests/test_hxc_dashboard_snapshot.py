@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 from wecom_ability_service.domains.user_ops import hxc_dashboard_snapshot_service as svc
+from wecom_ability_service.domains.user_ops.phone_helpers import mask_mobile, phone_match_key
 
 
 # ── 纯函数 (无 DB 依赖) ──
@@ -42,10 +43,47 @@ def test_phone_match_key_too_short():
     assert svc._phone_match_key(None) == ""  # type: ignore[arg-type]
 
 
+def test_user_ops_phone_helpers_normalize_digits():
+    assert phone_match_key("+86 139-1234-5678") == "861_5678"
+    assert mask_mobile("139 1234 5678") == "139****5678"
+    assert mask_mobile("123") == "123"
+
+
 def test_to_float_handles_decimal():
     assert svc._to_float(Decimal("3.14")) == 3.14
     assert svc._to_float(2) == 2.0
     assert svc._to_float(None) is None
+
+
+def test_select_hxc_user_rows_keeps_latest_active_user_for_duplicate_phone():
+    rows = [
+        {
+            "phone": "13912345678",
+            "hxc_user_id": "old",
+            "last_login_at": dt.datetime(2026, 5, 1, 10, 0),
+            "last_msg_at": dt.datetime(2026, 5, 10, 10, 0),
+            "hxc_registered_at": dt.datetime(2026, 4, 1, 10, 0),
+        },
+        {
+            "phone": "13912345678",
+            "hxc_user_id": "latest-login",
+            "last_login_at": dt.datetime(2026, 5, 12, 10, 0),
+            "last_msg_at": dt.datetime(2026, 5, 2, 10, 0),
+            "hxc_registered_at": dt.datetime(2026, 3, 1, 10, 0),
+        },
+        {
+            "phone": "13800138000",
+            "hxc_user_id": "other",
+            "last_login_at": None,
+            "last_msg_at": dt.datetime(2026, 5, 9, 10, 0),
+            "hxc_registered_at": dt.datetime(2026, 3, 1, 10, 0),
+        },
+    ]
+
+    selected = svc._select_hxc_user_rows(rows)
+
+    assert selected["13912345678"]["hxc_user_id"] == "latest-login"
+    assert selected["13800138000"]["hxc_user_id"] == "other"
 
 
 def test_qids_sql_list_inlines_constants():

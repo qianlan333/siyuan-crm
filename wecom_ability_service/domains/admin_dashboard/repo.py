@@ -15,7 +15,6 @@ from ..contacts.repo import count_contacts, get_last_contacts_sync_time
 from ..group_chats.repo import count_group_chats
 from ..identity.service import count_external_contact_identity_maps
 from ..questionnaire import build_questionnaire_preflight_payload, list_questionnaires
-from ..user_ops.service import get_user_ops_deferred_job_counts, get_user_ops_overview
 
 
 def detect_environment(config: Mapping[str, Any]) -> dict[str, str]:
@@ -128,6 +127,12 @@ def count_class_users_current() -> int:
 
 
 @cached(ttl=60)
+def count_user_ops_lead_pool_current() -> int:
+    row = get_db().execute("SELECT COUNT(*) AS total FROM user_ops_lead_pool_current").fetchone()
+    return int(row["total"] or 0) if row else 0
+
+
+@cached(ttl=60)
 def get_questionnaire_overview() -> dict[str, Any]:
     questionnaires = list_questionnaires()
     latest_submission = max(
@@ -143,7 +148,6 @@ def get_questionnaire_overview() -> dict[str, Any]:
 
 
 def get_business_summary_counts() -> dict[str, Any]:
-    user_ops_overview = get_user_ops_overview()
     questionnaire_overview = get_questionnaire_overview()
     return {
         "archived_messages_total": count_archived_messages(),
@@ -153,7 +157,7 @@ def get_business_summary_counts() -> dict[str, Any]:
         "questionnaire_total": questionnaire_overview["questionnaire_total"],
         "questionnaire_total_submissions": questionnaire_overview["total_submissions"],
         "questionnaire_latest_submission": questionnaire_overview["latest_submission"],
-        "user_ops_lead_pool_total": int(user_ops_overview.get("lead_pool_total_count") or 0),
+        "user_ops_lead_pool_total": count_user_ops_lead_pool_current(),
         "class_user_current_total": count_class_users_current(),
     }
 

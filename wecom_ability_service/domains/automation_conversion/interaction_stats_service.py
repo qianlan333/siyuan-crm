@@ -10,13 +10,17 @@ N+1 + 大 prompt 问题。
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from ...db import get_db
 
 
 logger = logging.getLogger(__name__)
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 def _parse_iso(value: str) -> datetime | None:
@@ -83,7 +87,8 @@ def query_member_interaction_stats(
             if int(d["member_id"]) not in seen_ids:
                 rows.append(d)
     # 回填回复数 / 沉默天数 / cooldown active
-    cutoff_iso = (datetime.utcnow() - timedelta(days=int(lookback_days))).isoformat()
+    now = _utc_now_naive()
+    cutoff_iso = (now - timedelta(days=int(lookback_days))).isoformat()
     out: list[dict[str, Any]] = []
     for row in rows:
         member_id = int(row.get("member_id") or 0)
@@ -116,10 +121,10 @@ def query_member_interaction_stats(
         silent_days: int | None = None
         if last_out_dt:
             base = last_in_dt if (last_in_dt and last_in_dt > last_out_dt) else last_out_dt
-            delta = datetime.utcnow() - base
+            delta = now - base
             silent_days = max(0, delta.days)
         cooldown_until_dt = _parse_iso(str(row.get("ai_cooldown_until") or ""))
-        cooldown_active = bool(cooldown_until_dt and cooldown_until_dt > datetime.utcnow())
+        cooldown_active = bool(cooldown_until_dt and cooldown_until_dt > now)
         out.append(
             {
                 "member_id": member_id,
@@ -265,7 +270,7 @@ def query_recent_touch_outcomes(
             sent_count = int(row["sent_count"] or sent_count)
             skip_count = int(row["skipped_count"] or skip_count)
 
-    cutoff_iso = (datetime.utcnow() - timedelta(hours=int(lookback_hours))).isoformat()
+    cutoff_iso = (_utc_now_naive() - timedelta(hours=int(lookback_hours))).isoformat()
     if target_trace_id:
         cur.execute(
             """
@@ -346,7 +351,7 @@ def scan_silent_for_revival(
     )
     raw = cur.fetchall() or []
     out: list[dict[str, Any]] = []
-    now = datetime.utcnow()
+    now = _utc_now_naive()
     for row in raw:
         last_out = _parse_iso(str(row["last_outbound_at"] or ""))
         last_in = _parse_iso(str(row["last_inbound_at"] or ""))

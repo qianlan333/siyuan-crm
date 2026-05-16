@@ -39,24 +39,16 @@ branch_labels: str | None = None
 depends_on: str | None = None
 
 
-def _is_postgres() -> bool:
-    bind = op.get_bind()
-    return bind.dialect.name == "postgresql"
-
-
 def _has_column(table: str, column: str) -> bool:
     bind = op.get_bind()
-    if _is_postgres():
-        row = bind.execute(
-            text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = :t AND column_name = :c"
-            ),
-            {"t": table, "c": column},
-        ).first()
-        return bool(row)
-    rows = bind.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    return any(r[1] == column for r in rows)
+    row = bind.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).first()
+    return bool(row)
 
 
 def _add_column(table: str, column_def: str, column_name: str) -> None:
@@ -70,15 +62,15 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS automation_workflow_goal (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            workflow_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            workflow_id BIGINT NOT NULL,
             goal_code TEXT NOT NULL,
             goal_label TEXT NOT NULL DEFAULT '',
             success_event_action TEXT NOT NULL DEFAULT '',
             weight INTEGER NOT NULL DEFAULT 100,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -98,16 +90,16 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS automation_workflow_node_transition (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            from_node_id INTEGER NOT NULL,
-            to_node_id INTEGER,
+            id BIGSERIAL PRIMARY KEY,
+            from_node_id BIGINT NOT NULL,
+            to_node_id BIGINT,
             condition_kind TEXT NOT NULL DEFAULT 'reply_received',
-            condition_payload_json TEXT NOT NULL DEFAULT '{}',
+            condition_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             action TEXT NOT NULL DEFAULT 'goto_node',
             priority INTEGER NOT NULL DEFAULT 0,
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -122,16 +114,16 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS automation_frequency_budget (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             budget_code TEXT NOT NULL UNIQUE,
             scope TEXT NOT NULL DEFAULT 'global',
             scope_key TEXT NOT NULL DEFAULT '',
             window_seconds INTEGER NOT NULL DEFAULT 604800,
             max_count INTEGER NOT NULL DEFAULT 3,
             description TEXT NOT NULL DEFAULT '',
-            enabled INTEGER NOT NULL DEFAULT 1,
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -145,11 +137,11 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS automation_frequency_consumption (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            budget_id INTEGER NOT NULL,
-            member_id INTEGER,
+            id BIGSERIAL PRIMARY KEY,
+            budget_id BIGINT NOT NULL,
+            member_id BIGINT,
             external_contact_id TEXT NOT NULL DEFAULT '',
-            consumed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            consumed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             source_kind TEXT NOT NULL DEFAULT '',
             source_id TEXT NOT NULL DEFAULT '',
             trace_id TEXT NOT NULL DEFAULT ''
@@ -180,34 +172,34 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS cloud_broadcast_plans (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             plan_id TEXT NOT NULL UNIQUE,
             trace_id TEXT NOT NULL DEFAULT '',
             session_id TEXT NOT NULL DEFAULT '',
             operator TEXT NOT NULL DEFAULT '',
             intent TEXT NOT NULL DEFAULT '',
-            selection_json TEXT NOT NULL DEFAULT '{}',
+            selection_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             content_strategy TEXT NOT NULL DEFAULT 'profile_layered',
             content_template TEXT NOT NULL DEFAULT '',
-            personalization_json TEXT NOT NULL DEFAULT '[]',
+            personalization_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             max_recipients INTEGER NOT NULL DEFAULT 0,
             candidate_count INTEGER NOT NULL DEFAULT 0,
             skipped_count INTEGER NOT NULL DEFAULT 0,
-            explanation_json TEXT NOT NULL DEFAULT '{}',
-            variants_json TEXT NOT NULL DEFAULT '[]',
-            copy_workorder_run_ids TEXT NOT NULL DEFAULT '[]',
-            requires_manual_copy INTEGER NOT NULL DEFAULT 0,
-            simulate_summary_json TEXT NOT NULL DEFAULT '{}',
+            explanation_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            variants_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            copy_workorder_run_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            requires_manual_copy BOOLEAN NOT NULL DEFAULT FALSE,
+            simulate_summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             commit_batch_id TEXT NOT NULL DEFAULT '',
-            commit_send_record_id INTEGER,
-            committed_at TEXT NOT NULL DEFAULT '',
+            commit_send_record_id BIGINT,
+            committed_at TIMESTAMPTZ,
             committed_by TEXT NOT NULL DEFAULT '',
             approval_token_hash TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'draft',
             error_message TEXT NOT NULL DEFAULT '',
-            expires_at TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            expires_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -235,21 +227,21 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS cloud_agent_audit_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             session_id TEXT NOT NULL DEFAULT '',
             trace_id TEXT NOT NULL DEFAULT '',
             operator TEXT NOT NULL DEFAULT '',
             tool_name TEXT NOT NULL DEFAULT '',
             arguments_hash TEXT NOT NULL DEFAULT '',
-            arguments_json TEXT NOT NULL DEFAULT '{}',
+            arguments_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             result_summary TEXT NOT NULL DEFAULT '',
             latency_ms INTEGER NOT NULL DEFAULT 0,
             status TEXT NOT NULL DEFAULT 'success',
             error_message TEXT NOT NULL DEFAULT '',
-            requires_token INTEGER NOT NULL DEFAULT 0,
-            token_verified INTEGER NOT NULL DEFAULT 0,
-            full_payload_json TEXT NOT NULL DEFAULT '{}',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            requires_token BOOLEAN NOT NULL DEFAULT FALSE,
+            token_verified BOOLEAN NOT NULL DEFAULT FALSE,
+            full_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -277,16 +269,16 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS cloud_approval_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             token_hash TEXT NOT NULL UNIQUE,
             plan_id TEXT NOT NULL DEFAULT '',
             operator TEXT NOT NULL DEFAULT '',
             scope TEXT NOT NULL DEFAULT 'commit_broadcast_plan',
-            issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            expires_at TEXT NOT NULL DEFAULT '',
-            consumed_at TEXT NOT NULL DEFAULT '',
+            issued_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMPTZ,
+            consumed_at TIMESTAMPTZ,
             consumed_by TEXT NOT NULL DEFAULT '',
-            metadata_json TEXT NOT NULL DEFAULT '{}'
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
         )
         """
     )
@@ -362,7 +354,7 @@ def upgrade() -> None:
     )
     _add_column(
         "automation_workflow_execution_item",
-        "next_node_id INTEGER",
+        "next_node_id BIGINT",
         "next_node_id",
     )
 
@@ -407,94 +399,49 @@ def upgrade() -> None:
     # ----- 互动聚合视图 -------------------------------------------------------
 
     op.execute("DROP VIEW IF EXISTS automation_member_interaction_stats")
-    if _is_postgres():
-        op.execute(
-            """
-            CREATE VIEW automation_member_interaction_stats AS
-            SELECT
-                m.id AS member_id,
-                m.external_contact_id,
-                m.phone,
-                m.current_pool,
-                m.current_audience_code,
-                m.profile_segment_key,
-                m.behavior_tier_key,
-                m.last_ai_push_at,
-                m.ai_cooldown_until,
-                (
-                    SELECT MAX(sent_at) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                ) AS last_outbound_at,
-                (
-                    SELECT COUNT(*) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                ) AS outbound_count_total,
-                (
-                    SELECT COUNT(*) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                      AND d.sent_at >= (NOW() - INTERVAL '7 days')::text
-                ) AS outbound_count_7d,
-                (
-                    SELECT COUNT(*) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                      AND d.sent_at >= (NOW() - INTERVAL '30 days')::text
-                ) AS outbound_count_30d,
-                (
-                    SELECT MAX(pushed_at) FROM automation_ai_push_log p
-                    WHERE p.member_id = m.id
-                ) AS last_ai_push_log_at,
-                (
-                    SELECT COUNT(*) FROM automation_ai_push_log p
-                    WHERE p.member_id = m.id
-                      AND p.pushed_at >= (NOW() - INTERVAL '30 days')::text
-                ) AS ai_push_count_30d
-            FROM automation_member m
-            """
-        )
-    else:
-        op.execute(
-            """
-            CREATE VIEW automation_member_interaction_stats AS
-            SELECT
-                m.id AS member_id,
-                m.external_contact_id,
-                m.phone,
-                m.current_pool,
-                m.current_audience_code,
-                m.profile_segment_key,
-                m.behavior_tier_key,
-                m.last_ai_push_at,
-                m.ai_cooldown_until,
-                (
-                    SELECT MAX(sent_at) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                ) AS last_outbound_at,
-                (
-                    SELECT COUNT(*) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                ) AS outbound_count_total,
-                (
-                    SELECT COUNT(*) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                      AND d.sent_at >= datetime('now', '-7 days')
-                ) AS outbound_count_7d,
-                (
-                    SELECT COUNT(*) FROM automation_touch_delivery_log d
-                    WHERE d.member_id = m.id AND d.status = 'sent'
-                      AND d.sent_at >= datetime('now', '-30 days')
-                ) AS outbound_count_30d,
-                (
-                    SELECT MAX(pushed_at) FROM automation_ai_push_log p
-                    WHERE p.member_id = m.id
-                ) AS last_ai_push_log_at,
-                (
-                    SELECT COUNT(*) FROM automation_ai_push_log p
-                    WHERE p.member_id = m.id
-                      AND p.pushed_at >= datetime('now', '-30 days')
-                ) AS ai_push_count_30d
-            FROM automation_member m
-            """
-        )
+    op.execute(
+        """
+        CREATE VIEW automation_member_interaction_stats AS
+        SELECT
+            m.id AS member_id,
+            m.external_contact_id,
+            m.phone,
+            m.current_pool,
+            m.current_audience_code,
+            m.profile_segment_key,
+            m.behavior_tier_key,
+            m.last_ai_push_at,
+            m.ai_cooldown_until,
+            (
+                SELECT MAX(sent_at) FROM automation_touch_delivery_log d
+                WHERE d.member_id = m.id AND d.status = 'sent'
+            ) AS last_outbound_at,
+            (
+                SELECT COUNT(*) FROM automation_touch_delivery_log d
+                WHERE d.member_id = m.id AND d.status = 'sent'
+            ) AS outbound_count_total,
+            (
+                SELECT COUNT(*) FROM automation_touch_delivery_log d
+                WHERE d.member_id = m.id AND d.status = 'sent'
+                  AND d.sent_at >= to_char(NOW() - INTERVAL '7 days', 'YYYY-MM-DD"T"HH24:MI:SS')
+            ) AS outbound_count_7d,
+            (
+                SELECT COUNT(*) FROM automation_touch_delivery_log d
+                WHERE d.member_id = m.id AND d.status = 'sent'
+                  AND d.sent_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD"T"HH24:MI:SS')
+            ) AS outbound_count_30d,
+            (
+                SELECT MAX(pushed_at) FROM automation_ai_push_log p
+                WHERE p.member_id = m.id
+            ) AS last_ai_push_log_at,
+            (
+                SELECT COUNT(*) FROM automation_ai_push_log p
+                WHERE p.member_id = m.id
+                  AND p.pushed_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD"T"HH24:MI:SS')
+            ) AS ai_push_count_30d
+        FROM automation_member m
+        """
+    )
 
 
 def downgrade() -> None:
@@ -515,18 +462,17 @@ def downgrade() -> None:
     op.execute("DROP TABLE IF EXISTS automation_workflow_node_transition")
     op.execute("DROP TABLE IF EXISTS automation_workflow_goal")
 
-    if _is_postgres():
-        for table, column in (
-            ("automation_workflow_execution_item", "next_node_id"),
-            ("automation_workflow_execution_item", "trace_id"),
-            ("automation_workflow_execution_item", "retry_count"),
-            ("automation_workflow_execution_item", "last_error_at"),
-            ("automation_workflow_execution_item", "last_error_text"),
-            ("automation_workflow", "created_by_agent"),
-            ("automation_workflow", "review_status"),
-            ("automation_touch_delivery_log", "trace_id"),
-            ("outbound_tasks", "trace_id"),
-            ("automation_agent_run", "trace_id"),
-            ("automation_agent_config", "scenario_code"),
-        ):
-            op.execute(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}")
+    for table, column in (
+        ("automation_workflow_execution_item", "next_node_id"),
+        ("automation_workflow_execution_item", "trace_id"),
+        ("automation_workflow_execution_item", "retry_count"),
+        ("automation_workflow_execution_item", "last_error_at"),
+        ("automation_workflow_execution_item", "last_error_text"),
+        ("automation_workflow", "created_by_agent"),
+        ("automation_workflow", "review_status"),
+        ("automation_touch_delivery_log", "trace_id"),
+        ("outbound_tasks", "trace_id"),
+        ("automation_agent_run", "trace_id"),
+        ("automation_agent_config", "scenario_code"),
+    ):
+        op.execute(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}")

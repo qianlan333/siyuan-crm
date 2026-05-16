@@ -14,6 +14,8 @@ ADMIN_NAV_ITEMS = (
     {"key": "customers", "label": "客户", "endpoint": "api.admin_console_customers"},
     {"key": "user_ops_funnel", "label": "激活漏斗", "endpoint": "api.admin_hxc_dashboard_workspace"},
     {"key": "questionnaires", "label": "问卷", "endpoint": "api.admin_console_questionnaires"},
+    {"key": "wechat_pay_transactions", "label": "交易管理", "endpoint": "api.admin_wechat_pay_transactions_page"},
+    {"key": "wecom_tags", "label": "企微标签管理", "endpoint": "api.admin_wecom_tags_page"},
     {"key": "image_library", "label": "图片素材库", "endpoint": "api.admin_image_library_workspace"},
     {"key": "miniprogram_library", "label": "小程序素材库", "endpoint": "api.admin_miniprogram_library_workspace"},
     {"key": "jobs", "label": "同步任务", "endpoint": "api.admin_console_jobs"},

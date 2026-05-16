@@ -60,12 +60,12 @@
 | 验收项 | 操作步骤 | 预期结果 |
 | --- | --- | --- |
 | 配置入口 | 登录后访问 `/admin/config` | 页面正常渲染 |
-| 配置 tabs | 查看 `/admin/config` 的配置导航 | 只包含“概览、渠道 / 分配规则、报名标签规则、班期标签规则、系统设置、登录与权限” |
+| 配置 tabs | 查看 `/admin/config` 的配置导航 | 只包含“概览、系统设置、登录与权限、配置检查清单” |
 | 移除 MCP 工具配置 | 检查 `/admin/config` 页面源码或文本 | 不出现 `mcp_tools`、`/admin/config/mcp-tools`、“AI 工具设置” |
 | MCP 工具配置兼容入口 | 访问 `/admin/config/mcp-tools` | 返回 `302`，跳转到 `/admin/api-docs` |
 | 登录与权限页 | 访问 `/admin/config/login-access` | 页面管理企微成员授权、角色分配、启停状态和登录审计 |
 | 配置角色访问 | 使用 `config_admin` 登录访问 `/admin/config` | 返回 `200` |
-| viewer 写操作 | 使用 `viewer` 提交配置写操作 | 返回 `403` |
+| viewer 写操作 | 使用 `viewer` 提交仍存在的配置写操作 | 返回 `403` |
 
 ## 7. API 文档
 

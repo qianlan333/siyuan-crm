@@ -2,12 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from flask import current_app
-
 from ...db import get_db
 from . import repo
 from .service import (
-    DEFAULT_AUTOMATION_OWNER_USERID,
     DEFAULT_CHANNEL_TYPE,
     DEFAULT_ENROLLED_SIGNUP_STATUS,
     DEFAULT_SCENARIO_KEY,
@@ -18,35 +15,23 @@ from .service import (
     POOL_INACTIVE_FOCUS,
     POOL_INACTIVE_NORMAL,
     POOL_SILENT,
-    POOL_STAGE,
     _ACTIONABLE_POOL_STAGE_KEYS,
-    _POOL_LABELS,
-    _POOL_SENDABLE_POOL_KEYS,
     _ROUTER_BLOCKED_DISPATCH_STATUS,
     _ROUTER_PENDING_DISPATCH_STATUS,
-    _ROUTER_TERMINAL_DISPATCH_STATUSES,
     _apply_class_user_status_change,
-    _build_pool_send_plan,
     _clear_class_user_status_current,
     _followup_segment_label,
-    _get_active_owner_role,
     _get_class_user_status_current,
     _get_class_user_status_definition,
     _is_signup_success,
     _json_loads,
-    _normalize_bool,
     _normalize_followup_segment,
     _normalize_int,
     _normalized_text,
-    _pool_label,
     _pool_stage_key,
-    _resolve_manual_followup_segment,
-    _serialize_current_customer_marketing_state,
-    _validate_send_owner_userid,
     evaluate_customer_marketing_state,
     preview_signup_conversion_customer,
 )
-from ..user_ops import page_service as user_ops_page_service
 
 
 def _iso_now() -> str:
@@ -436,5 +421,4 @@ def set_manual_followup_segment(
         "operator": normalized_operator,
         "source": normalized_source,
     }
-
 

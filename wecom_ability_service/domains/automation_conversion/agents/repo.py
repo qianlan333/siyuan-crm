@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ....db import cast_text, get_db, is_postgres
+from ....db import get_db
 from .._repo_helpers import (
     _db_bool,
     _fetchall_dicts,

@@ -6,17 +6,7 @@
 
 ## 跑
 
-### 默认（SQLite，秒级）
-
-不用配任何环境变量：
-
-```bash
-pytest tests/integration/
-```
-
-测试会用临时 SQLite 文件，每个 test 独立 fixture，session 后自动删。这种模式只验证业务逻辑，**不验 PG 兼容性**。
-
-### PG 模式（这才是回归保险）
+### PG 模式
 
 需要本地有 PG 16+：
 
@@ -33,7 +23,7 @@ DATABASE_URL=postgresql://test:test@localhost:5432/test pytest tests/integration
 docker stop pg-test
 ```
 
-`tests/integration/conftest.py` 的 `app` fixture 看到 `DATABASE_URL` 非空就走 PG 模式：每个 test 跑前 `TRUNCATE` 关键表（FK 反向顺序），保证隔离。
+`tests/integration/conftest.py` 的 `app` fixture 复用顶层 `tests.conftest.build_pg_test_app`；没配 `DATABASE_URL` 时整组 integration test 会 skip。每个 test 跑前由共享 fixture `TRUNCATE` 关键表，保证隔离。
 
 CI 上 GitHub Actions 用 service container 起 postgres:16，自动设 `DATABASE_URL`，每个 PR 必跑。
 
@@ -45,8 +35,8 @@ CI 上 GitHub Actions 用 service container 起 postgres:16，自动设 `DATABAS
 | `test_pg_bug_184_185_token_timezone_aware_storage` | #185 | `expires_at` 真按 UTC 存（不被 server tz 倒推） |
 | `test_pg_bug_202_frequency_budget_select_with_bool` | #202 | `WHERE enabled` 不抛 `boolean = integer` |
 | `test_pg_bug_192_200_206_scheduler_full_cycle_batch` | #192 / #200 / #206 | 启动 + 调度 + batch dispatch（N 人 1 个 task） |
-| `test_pg_bug_200_register_member_reply_clears_next_due` | #200 | `register_member_reply` 把 next_due_at 清空（PG NULL / SQLite ''） |
-| `test_pg_image_library_crud_smoke` | image_library | CRUD 跨库 |
+| `test_pg_bug_200_register_member_reply_clears_next_due` | #200 | `register_member_reply` 把 next_due_at 清空（PG NULL） |
+| `test_pg_image_library_crud_smoke` | image_library | CRUD |
 
 ## 怎么加新的 smoke
 
@@ -75,10 +65,10 @@ def test_pg_my_new_path(app):
 - `psycopg.errors.UndefinedFunction: operator does not exist: boolean = integer` → 又一处 `WHERE bool_col = 1`
 - `psycopg.errors.DatatypeMismatch: column "x" is of type boolean but expression is of type smallint` → 又一处 INSERT `1 if x else 0` 给 BOOLEAN 字段
 
-修法跟前 6 个 PR 同款：grep 全文找同类写法，统一改用 `_empty_ts() / WHERE col / bool(x)` 这些跨库 helper / 写法。
+修法跟前 6 个 PR 同款：grep 全文找同类写法，统一改用 `_empty_ts() / WHERE col / bool(x)` 这些 PG-safe helper / 写法。
 
 ## 路线（后续可做）
 
 - [ ] 把更多关键路径加进来：reply_monitor 异步 → register_member_reply、CSV 导出、observability 报表 SQL 等
 - [ ] 加性能 budget 类断言（process_due_campaign_members 100 人不超过 1s 之类）
-- [ ] 跑现有非 integration 的全量测试也对 PG 兼容（要逐个迁移，工作量大）
+- [ ] 继续把更多普通单测迁到共享 PG fixture，减少旧 SQLite 形状的测试脚手架

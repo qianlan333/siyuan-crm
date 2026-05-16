@@ -28,24 +28,16 @@ branch_labels: str | None = None
 depends_on: str | None = None
 
 
-def _is_postgres() -> bool:
-    bind = op.get_bind()
-    return bind.dialect.name == "postgresql"
-
-
 def _has_column(table: str, column: str) -> bool:
     bind = op.get_bind()
-    if _is_postgres():
-        row = bind.execute(
-            text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = :t AND column_name = :c"
-            ),
-            {"t": table, "c": column},
-        ).first()
-        return bool(row)
-    rows = bind.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    return any(r[1] == column for r in rows)
+    row = bind.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).first()
+    return bool(row)
 
 
 def _add_column(table: str, column_def: str, column_name: str) -> None:
@@ -54,46 +46,25 @@ def _add_column(table: str, column_def: str, column_name: str) -> None:
 
 
 def upgrade() -> None:
-    if _is_postgres():
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS image_library (
-                id BIGSERIAL PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT '',
-                file_name TEXT NOT NULL DEFAULT '',
-                source TEXT NOT NULL DEFAULT 'upload',
-                source_url TEXT NOT NULL DEFAULT '',
-                data_base64 TEXT NOT NULL DEFAULT '',
-                mime_type TEXT NOT NULL DEFAULT 'image/png',
-                file_size INTEGER NOT NULL DEFAULT 0,
-                thumb_media_id TEXT NOT NULL DEFAULT '',
-                thumb_media_id_expires_at TIMESTAMPTZ,
-                enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS image_library (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            file_name TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'upload',
+            source_url TEXT NOT NULL DEFAULT '',
+            data_base64 TEXT NOT NULL DEFAULT '',
+            mime_type TEXT NOT NULL DEFAULT 'image/png',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            thumb_media_id TEXT NOT NULL DEFAULT '',
+            thumb_media_id_expires_at TIMESTAMPTZ,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    else:
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS image_library (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL DEFAULT '',
-                file_name TEXT NOT NULL DEFAULT '',
-                source TEXT NOT NULL DEFAULT 'upload',
-                source_url TEXT NOT NULL DEFAULT '',
-                data_base64 TEXT NOT NULL DEFAULT '',
-                mime_type TEXT NOT NULL DEFAULT 'image/png',
-                file_size INTEGER NOT NULL DEFAULT 0,
-                thumb_media_id TEXT NOT NULL DEFAULT '',
-                thumb_media_id_expires_at TEXT NOT NULL DEFAULT '',
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+        """
+    )
     op.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_image_library_enabled
@@ -102,10 +73,7 @@ def upgrade() -> None:
     )
 
     # miniprogram_library 加 thumb_image_id 关联（不强制 FK 避免删除连环约束）
-    if _is_postgres():
-        _add_column("miniprogram_library", "thumb_image_id BIGINT", "thumb_image_id")
-    else:
-        _add_column("miniprogram_library", "thumb_image_id INTEGER", "thumb_image_id")
+    _add_column("miniprogram_library", "thumb_image_id BIGINT", "thumb_image_id")
 
 
 def downgrade() -> None:

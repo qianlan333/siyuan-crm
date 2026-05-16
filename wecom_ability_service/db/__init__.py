@@ -9,8 +9,6 @@ from .connection import (  # noqa: F401
 from .dialect import (  # noqa: F401
     cast_text,
     coalesce_text,
-    is_postgres,
-    is_sqlite,
     nonempty,
     upsert_clause,
 )

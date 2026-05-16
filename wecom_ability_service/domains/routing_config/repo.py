@@ -1,12 +1,7 @@
 from __future__ import annotations
 
-from typing import Any
-
-from ...db import get_db, get_db_backend
-
-
-def _db_bool(value: bool) -> bool:
-    return bool(value)
+from ...db import get_db
+from ...infra.helpers import db_bool
 
 
 def get_owner_role(userid: str):
@@ -28,30 +23,9 @@ def list_owner_role_map(active_only: bool = False):
     params: list[object] = []
     if active_only:
         sql += " WHERE active = ?"
-        params.append(_db_bool(True))
+        params.append(db_bool(True))
     sql += " ORDER BY active DESC, display_name ASC, userid ASC"
     return get_db().execute(sql, tuple(params)).fetchall()
-
-
-def upsert_owner_role_map_item(*, userid: str, display_name: str, role: str, active: bool) -> None:
-    get_db().execute(
-        """
-        INSERT INTO owner_role_map (userid, display_name, role, active, updated_at)
-        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(userid) DO UPDATE SET
-            display_name = excluded.display_name,
-            role = excluded.role,
-            active = excluded.active,
-            updated_at = CURRENT_TIMESTAMP
-        """,
-        (
-            str(userid or "").strip(),
-            str(display_name or "").strip(),
-            str(role or "").strip(),
-            _db_bool(active),
-        ),
-    )
-    get_db().commit()
 
 
 def get_routing_rule(rule_key: str):
@@ -93,7 +67,7 @@ def list_routing_rules(active_only: bool = False):
     params: list[object] = []
     if active_only:
         sql += " WHERE active = ?"
-        params.append(_db_bool(True))
+        params.append(db_bool(True))
     sql += " ORDER BY active DESC, rule_key ASC"
     return get_db().execute(sql, tuple(params)).fetchall()
 
@@ -145,7 +119,7 @@ def upsert_routing_rule(
             str(fallback_target or "").strip(),
             str(when_owner_role_sales or "").strip(),
             str(when_owner_role_delivery or "").strip(),
-            _db_bool(active),
+            db_bool(active),
         ),
     )
     get_db().commit()

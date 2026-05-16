@@ -188,7 +188,7 @@
       <div class="img-picker-root">
         <div class="img-picker-selected" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;"></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-          <input type="file" accept="image/*" class="img-picker-upload-file" style="font-size:12px;" ${mode === 'multiple' ? 'multiple' : ''}>
+          <input type="file" accept="image/png,image/jpeg" class="img-picker-upload-file" style="font-size:12px;" ${mode === 'multiple' ? 'multiple' : ''}>
           <button type="button" class="img-picker-pick admin-button admin-button--ghost" style="font-size:12px;padding:4px 12px;">从素材库选</button>
           <span class="img-picker-status" style="color:#888;font-size:12px;"></span>
         </div>

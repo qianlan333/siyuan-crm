@@ -32,9 +32,9 @@
 **建议**：让旧的 `member_segment_search_service.search_members` 实现转发到 `segments_service.run_query`（用动态 SQL），最终把旧的 query builder 删掉。
 **节省**：约 200 行 query builder 代码。
 
-### 4. PG/SQLite 两套 schema 维护成本
-**现状**：`schema.sql` + `schema_postgres.sql` 是 2500+ 行的双胞胎。每次加表都要写两遍。
-**建议**：用 alembic 的 `target_metadata` + SQLAlchemy ORM 模型作为单一事实源，自动生成两边。这是大重构（影响范围广），单独做。
+### 4. 历史 schema 双轨残留说明
+**现状**：仓库已经进入 PG-only 运行形态，`schema.sql` 相关引用只应视为历史/归档上下文，不再作为新增表或新增字段的事实源。
+**建议**：后续 schema 变更只走 PostgreSQL schema/migration 路径；不要重新引入 SQLite/PG 双 schema 维护。
 
 ### 5. 概览页 4 个 JS 文件可以合并
 **现状**：`automation_overview_core.js / renderers.js / actions.js / automation_overview.js` 4 个文件，原意分层但现在边界很模糊。

@@ -21,25 +21,15 @@ from ..application.questionnaire.queries import (
     ExportQuestionnaireSubmissionsQuery,
     GetLatestQuestionnaireSubmitDebugQuery,
     GetQuestionnaireDetailQuery,
-    ListAvailableWeComTagsQuery,
     ListQuestionnairesQuery,
 )
-from ..wecom_client import WeComClientError
-from .common import _build_excel_xml, _deprecated_admin_redirect, _wecom_error_response
+from .common import _build_excel_xml, _deprecated_admin_redirect
 from .questionnaire_support import _attach_questionnaire_links
 
 
 def admin_list_questionnaires():
     questionnaires = ListQuestionnairesQuery()()
     return jsonify({"ok": True, "questionnaires": [_attach_questionnaire_links(item) for item in questionnaires]})
-
-
-def admin_list_wecom_tags():
-    try:
-        return jsonify({"items": ListAvailableWeComTagsQuery()()})
-    except WeComClientError as exc:
-        return _wecom_error_response(exc)
-
 
 
 def admin_questionnaires_preflight():
@@ -151,7 +141,6 @@ def admin_export_questionnaire(questionnaire_id: int):
 
 def register_routes(bp):
     bp.route('/api/admin/questionnaires', methods=['GET'])(admin_list_questionnaires)
-    bp.route('/api/admin/wecom/tags', methods=['GET'])(admin_list_wecom_tags)
     bp.route('/api/admin/questionnaires/preflight', methods=['GET'])(admin_questionnaires_preflight)
     bp.route('/admin/questionnaires/ui', methods=['GET'])(admin_questionnaires_ui)
     bp.route('/api/admin/questionnaires', methods=['POST'])(admin_create_questionnaire)

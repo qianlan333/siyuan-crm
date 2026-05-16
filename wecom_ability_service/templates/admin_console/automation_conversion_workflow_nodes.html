@@ -653,12 +653,10 @@
 
       try {
         const miniprogramIds = JSON.parse(elements.nodeForm.elements.miniprogram_library_ids?.value || '[]');
-        if (Array.isArray(miniprogramIds) && miniprogramIds.length) {
-          payload.standard_content_payload = Object.assign({},
-            payload.standard_content_payload || {},
-            { miniprogram_library_ids: miniprogramIds.map(Number).filter(Boolean) }
-          );
-        }
+        payload.standard_content_payload = Object.assign({},
+          payload.standard_content_payload || {},
+          { miniprogram_library_ids: Array.isArray(miniprogramIds) ? miniprogramIds.map(Number).filter(Boolean) : [] }
+        );
       } catch { /* ignore malformed */ }
 
       validateNodePayload(payload, triggerMode, contentMode);

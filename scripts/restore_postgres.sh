@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -z "${DATABASE_URL:-}" ]]; then
-  echo "DATABASE_URL is required"
-  exit 1
-fi
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/_postgres_env.sh"
+require_database_url
 
 BACKUP_FILE="${1:-}"
 if [[ -z "${BACKUP_FILE}" || ! -f "${BACKUP_FILE}" ]]; then

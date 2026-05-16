@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from ...db import get_db
@@ -35,6 +35,10 @@ SCENARIO_ONE_TO_ONE = "one_to_one"
 SCENARIO_BULK_ACTIVATION = "bulk_activation"
 SCENARIO_SILENT_WAKE = "silent_wake"
 SCENARIO_JOURNEY_STEP = "journey_step"
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 VALID_SCENARIO_CODES = (
     SCENARIO_ONE_TO_ONE,
@@ -399,7 +403,7 @@ def ensure_default_bulk_agent_config() -> None:
                 task,
                 role,
                 task,
-                datetime.utcnow().isoformat(),
+                _utc_now_naive().isoformat(),
             ),
         )
     db.commit()

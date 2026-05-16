@@ -51,6 +51,8 @@ sudo journalctl -u openclaw-wecom-postgres.service -n 100 --no-pager
 ## 发布口径
 
 当前生产发布仍是手工同步，但源码基线统一来自 GitHub `main`。
+GitHub Actions 里 `main` push 只跑关键路径 smoke，避免每个小 PR 合并后
+都等待全量 PG 回归；完整 `full-test` 保留在 nightly 和手动触发。
 
 推荐顺序：
 

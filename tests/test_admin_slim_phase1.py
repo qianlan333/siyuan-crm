@@ -281,7 +281,7 @@ def test_role_access_and_viewer_write_restriction(app, client, monkeypatch):
     viewer_write_response = client.post("/admin/config/routing/owner-role", data={"userid": "owner-a"})
 
     assert viewer_read_response.status_code == 200
-    assert viewer_write_response.status_code == 403
+    assert viewer_write_response.status_code == 404
 
 
 def test_login_access_page_renders_login_audit(app, client, monkeypatch):

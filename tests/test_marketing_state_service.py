@@ -288,7 +288,6 @@ def test_repo_upsert_customer_marketing_state_current_nulls_blank_postgres_times
             captured["params"] = params
             return _FakeCursor()
 
-    monkeypatch.setattr(marketing_repo, "get_db_backend", lambda: "postgres")
     monkeypatch.setattr(marketing_repo, "get_db", lambda: _FakeDb())
     monkeypatch.setattr(
         marketing_repo,
@@ -322,6 +321,7 @@ def test_repo_upsert_customer_marketing_state_current_nulls_blank_postgres_times
 
     assert captured["params"][17] == "2026-04-04 10:03:00"
     assert captured["params"][18] is None
+    assert "?::jsonb" in str(captured["sql"])
 
 
 def _seed_activation_source(app, *, mobile: str, updated_at: str):

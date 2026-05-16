@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from ...db import get_db
+from ...db.helpers import fetchall_dicts, placeholders
 
 _logger = logging.getLogger(__name__)
 
@@ -63,29 +64,28 @@ def build_send_config_page_data() -> dict[str, Any]:
 # ── 发送人白名单 CRUD ──────────────────────────────────────────────
 
 def list_send_configs() -> list[dict[str, Any]]:
-    db = get_db()
-    rows = db.execute(
+    return fetchall_dicts(
+        get_db(),
         """
         SELECT id, sender_userid, display_name, priority, is_active,
                created_at, updated_at
         FROM user_ops_hxc_send_config
         ORDER BY priority ASC, sender_userid ASC
-        """
-    ).fetchall()
-    return [dict(r) for r in rows]
+        """,
+    )
 
 
 def get_active_senders() -> dict[str, dict[str, Any]]:
-    db = get_db()
-    rows = db.execute(
+    rows = fetchall_dicts(
+        get_db(),
         """
         SELECT sender_userid, display_name, priority
         FROM user_ops_hxc_send_config
         WHERE is_active = TRUE
         ORDER BY priority ASC
-        """
-    ).fetchall()
-    return {r["sender_userid"]: dict(r) for r in rows}
+        """,
+    )
+    return {r["sender_userid"]: r for r in rows}
 
 
 def upsert_send_config(
@@ -164,17 +164,22 @@ def _match_sender_for_targets(
     查 wecom_external_contact_follow_users 拿到每个外部联系人的全部好友
     (不只是 owner)，在白名单中找优先级最高的 active sender 作为发送人。
     """
+    unique_external_userids = [euid for euid in dict.fromkeys(external_userids) if euid]
+    if not unique_external_userids:
+        return {}, 0
+
     db = get_db()
-    placeholders = ", ".join(["?"] * len(external_userids))
-    rows = db.execute(
+    external_placeholders = placeholders(unique_external_userids)
+    rows = fetchall_dicts(
+        db,
         f"""
         SELECT external_userid, user_id
         FROM wecom_external_contact_follow_users
-        WHERE external_userid IN ({placeholders})
+        WHERE external_userid IN ({external_placeholders})
           AND relation_status = 'active'
         """,
-        tuple(external_userids),
-    ).fetchall()
+        tuple(unique_external_userids),
+    )
 
     euid_friends: dict[str, set[str]] = {}
     for row in rows:

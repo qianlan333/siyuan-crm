@@ -4,8 +4,7 @@ import json
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 
 
 @pytest.fixture()
@@ -146,3 +145,30 @@ def test_admin_config_app_settings_api_requires_confirmation(client):
     assert response.status_code == 400
     assert payload["ok"] is False
     assert payload["error"] == "confirm is required before saving app settings"
+
+
+def test_legacy_marketing_automation_admin_api_requires_login(app):
+    client = app.test_client()
+
+    response = client.get("/api/admin/marketing-automation/config")
+    payload = response.get_json()
+
+    assert response.status_code == 401
+    assert payload == {"ok": False, "error": "admin login required"}
+
+
+def test_legacy_marketing_automation_admin_api_uses_config_write_rbac(app):
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["admin_session_user_id"] = 0
+        sess["admin_session_wecom_userid"] = ""
+        sess["admin_session_role_list"] = ["viewer"]
+        sess["admin_session_login_type"] = "break_glass"
+        sess["admin_session_display_name"] = "readonly-admin"
+        sess["admin_session_break_glass_username"] = "readonly-admin"
+
+    response = client.put("/api/admin/marketing-automation/config", json={"enabled": True})
+    payload = response.get_json()
+
+    assert response.status_code == 403
+    assert payload == {"ok": False, "error": "permission denied"}

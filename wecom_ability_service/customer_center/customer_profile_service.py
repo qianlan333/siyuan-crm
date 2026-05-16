@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..db import get_db, get_db_backend
+from ..db import get_db
 from ..services import (
     get_class_user_status_current,
     get_contact_binding_status,

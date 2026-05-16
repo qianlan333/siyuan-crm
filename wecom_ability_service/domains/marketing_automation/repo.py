@@ -13,14 +13,16 @@ from ...customer_center.repo import (
     fetch_owner_role_map,
     fetch_tag_map,
 )
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ._repo_helpers import (  # noqa: F401  shared helpers — 阶段 5.2
     _db_bool,
     _fetchall_dicts,
     _fetchone_dict,
     _json_dumps,
     _normalized_text,
+    _normalized_text_list,
     _nullable_timestamp_text,
+    _placeholders,
 )
 from ._repo_config import (  # noqa: F401  marketing_automation config + owner_role + question_rules — 阶段 5.4
     get_marketing_automation_config,
@@ -66,13 +68,12 @@ def list_user_ops_lead_pool_rows_for_marketing_state(
     external_userids: list[str] | None = None,
     mobile: str = "",
 ) -> list[dict[str, Any]]:
-    normalized_external_userids = [_normalized_text(item) for item in external_userids or [] if _normalized_text(item)]
+    normalized_external_userids = _normalized_text_list(external_userids)
     normalized_mobile = _normalized_text(mobile)
     filters: list[str] = []
     params: list[Any] = []
     if normalized_external_userids:
-        placeholders = ",".join("?" for _ in normalized_external_userids)
-        filters.append(f"external_userid IN ({placeholders})")
+        filters.append(f"external_userid IN ({_placeholders(normalized_external_userids)})")
         params.extend(normalized_external_userids)
     if normalized_mobile:
         filters.append("mobile = ?")
@@ -102,13 +103,12 @@ def get_explicit_trial_opening_fact(
     external_userids: list[str] | None = None,
     mobile: str = "",
 ) -> dict[str, Any] | None:
-    normalized_external_userids = [_normalized_text(item) for item in external_userids or [] if _normalized_text(item)]
+    normalized_external_userids = _normalized_text_list(external_userids)
     normalized_mobile = _normalized_text(mobile)
     filters: list[str] = []
     params: list[Any] = []
     if normalized_external_userids:
-        placeholders = ",".join("?" for _ in normalized_external_userids)
-        filters.append(f"external_userid IN ({placeholders})")
+        filters.append(f"external_userid IN ({_placeholders(normalized_external_userids)})")
         params.extend(normalized_external_userids)
     if normalized_mobile:
         filters.append("mobile = ?")
@@ -298,50 +298,27 @@ def upsert_activation_webhook_source(
         normalized_signal_at,
         normalized_signal_at,
     )
-    if get_db_backend() == "postgres":
-        db.execute(
-            """
-            INSERT INTO user_ops_huangxiaocan_activation_source (
-                mobile,
-                activation_state,
-                import_batch_id,
-                created_by,
-                is_active,
-                created_at,
-                updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ON CONFLICT (mobile) DO UPDATE SET
-                activation_state = EXCLUDED.activation_state,
-                import_batch_id = EXCLUDED.import_batch_id,
-                created_by = EXCLUDED.created_by,
-                is_active = EXCLUDED.is_active,
-                updated_at = EXCLUDED.updated_at
-            """,
-            params,
+    db.execute(
+        """
+        INSERT INTO user_ops_huangxiaocan_activation_source (
+            mobile,
+            activation_state,
+            import_batch_id,
+            created_by,
+            is_active,
+            created_at,
+            updated_at
         )
-    else:
-        db.execute(
-            """
-            INSERT INTO user_ops_huangxiaocan_activation_source (
-                mobile,
-                activation_state,
-                import_batch_id,
-                created_by,
-                is_active,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (mobile) DO UPDATE SET
-                activation_state = excluded.activation_state,
-                import_batch_id = excluded.import_batch_id,
-                created_by = excluded.created_by,
-                is_active = excluded.is_active,
-                updated_at = excluded.updated_at
-            """,
-            params,
-        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (mobile) DO UPDATE SET
+            activation_state = EXCLUDED.activation_state,
+            import_batch_id = EXCLUDED.import_batch_id,
+            created_by = EXCLUDED.created_by,
+            is_active = EXCLUDED.is_active,
+            updated_at = EXCLUDED.updated_at
+        """,
+        params,
+    )
     db.execute(
         """
         UPDATE user_ops_pool_current
@@ -441,8 +418,10 @@ def upsert_customer_marketing_state_current(
     target = existing_rows[0] if existing_rows else None
     duplicate_ids = [int(row["id"]) for row in existing_rows[1:]]
     if duplicate_ids:
-        placeholders = ",".join("?" for _ in duplicate_ids)
-        db.execute(f"DELETE FROM customer_marketing_state_current WHERE id IN ({placeholders})", tuple(duplicate_ids))
+        db.execute(
+            f"DELETE FROM customer_marketing_state_current WHERE id IN ({_placeholders(duplicate_ids)})",
+            tuple(duplicate_ids),
+        )
     params = (
         int(person_id) if person_id is not None else None,
         _normalized_text(external_userid),
@@ -468,137 +447,70 @@ def upsert_customer_marketing_state_current(
     )
     if target:
         row_id = int(target["id"])
-        if get_db_backend() == "postgres":
-            row = db.execute(
-                """
-                UPDATE customer_marketing_state_current
-                SET
-                    person_id = ?,
-                    external_userid = ?,
-                    automation_key = ?,
-                    main_stage = ?,
-                    sub_stage = ?,
-                    activated = ?,
-                    converted = ?,
-                    eligible_for_conversion = ?,
-                    lifecycle_status = ?,
-                    last_activation_at = ?,
-                    last_conversion_marked_at = ?,
-                    last_message_at = ?,
-                    last_batch_id = ?,
-                    last_batch_status = ?,
-                    last_batch_window_start = ?,
-                    last_batch_window_end = ?,
-                    last_trigger_message_at = ?,
-                    entered_at = ?,
-                    exited_at = ?,
-                    exit_reason = ?,
-                    state_payload_json = ?::jsonb,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                RETURNING *
-                """,
-                params + (row_id,),
-            ).fetchone()
-        else:
-            row = db.execute(
-                """
-                UPDATE customer_marketing_state_current
-                SET
-                    person_id = ?,
-                    external_userid = ?,
-                    automation_key = ?,
-                    main_stage = ?,
-                    sub_stage = ?,
-                    activated = ?,
-                    converted = ?,
-                    eligible_for_conversion = ?,
-                    lifecycle_status = ?,
-                    last_activation_at = ?,
-                    last_conversion_marked_at = ?,
-                    last_message_at = ?,
-                    last_batch_id = ?,
-                    last_batch_status = ?,
-                    last_batch_window_start = ?,
-                    last_batch_window_end = ?,
-                    last_trigger_message_at = ?,
-                    entered_at = ?,
-                    exited_at = ?,
-                    exit_reason = ?,
-                    state_payload_json = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?
-                RETURNING *
-                """,
-                params + (row_id,),
-            ).fetchone()
+        row = db.execute(
+            """
+            UPDATE customer_marketing_state_current
+            SET
+                person_id = ?,
+                external_userid = ?,
+                automation_key = ?,
+                main_stage = ?,
+                sub_stage = ?,
+                activated = ?,
+                converted = ?,
+                eligible_for_conversion = ?,
+                lifecycle_status = ?,
+                last_activation_at = ?,
+                last_conversion_marked_at = ?,
+                last_message_at = ?,
+                last_batch_id = ?,
+                last_batch_status = ?,
+                last_batch_window_start = ?,
+                last_batch_window_end = ?,
+                last_trigger_message_at = ?,
+                entered_at = ?,
+                exited_at = ?,
+                exit_reason = ?,
+                state_payload_json = ?::jsonb,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            RETURNING *
+            """,
+            params + (row_id,),
+        ).fetchone()
     else:
-        if get_db_backend() == "postgres":
-            row = db.execute(
-                """
-                INSERT INTO customer_marketing_state_current (
-                    person_id,
-                    external_userid,
-                    automation_key,
-                    main_stage,
-                    sub_stage,
-                    activated,
-                    converted,
-                    eligible_for_conversion,
-                    lifecycle_status,
-                    last_activation_at,
-                    last_conversion_marked_at,
-                    last_message_at,
-                    last_batch_id,
-                    last_batch_status,
-                    last_batch_window_start,
-                    last_batch_window_end,
-                    last_trigger_message_at,
-                    entered_at,
-                    exited_at,
-                    exit_reason,
-                    state_payload_json,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                RETURNING *
-                """,
-                params,
-            ).fetchone()
-        else:
-            row = db.execute(
-                """
-                INSERT INTO customer_marketing_state_current (
-                    person_id,
-                    external_userid,
-                    automation_key,
-                    main_stage,
-                    sub_stage,
-                    activated,
-                    converted,
-                    eligible_for_conversion,
-                    lifecycle_status,
-                    last_activation_at,
-                    last_conversion_marked_at,
-                    last_message_at,
-                    last_batch_id,
-                    last_batch_status,
-                    last_batch_window_start,
-                    last_batch_window_end,
-                    last_trigger_message_at,
-                    entered_at,
-                    exited_at,
-                    exit_reason,
-                    state_payload_json,
-                    created_at,
-                    updated_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                RETURNING *
-                """,
-                params,
-            ).fetchone()
+        row = db.execute(
+            """
+            INSERT INTO customer_marketing_state_current (
+                person_id,
+                external_userid,
+                automation_key,
+                main_stage,
+                sub_stage,
+                activated,
+                converted,
+                eligible_for_conversion,
+                lifecycle_status,
+                last_activation_at,
+                last_conversion_marked_at,
+                last_message_at,
+                last_batch_id,
+                last_batch_status,
+                last_batch_window_start,
+                last_batch_window_end,
+                last_trigger_message_at,
+                entered_at,
+                exited_at,
+                exit_reason,
+                state_payload_json,
+                created_at,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            RETURNING *
+            """,
+            params,
+        ).fetchone()
     return dict(row) if row else {}
 
 
@@ -640,62 +552,33 @@ def insert_customer_marketing_state_history(
         _normalized_text(change_reason),
         _json_dumps(state_payload),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO customer_marketing_state_history (
-                person_id,
-                external_userid,
-                automation_key,
-                main_stage,
-                sub_stage,
-                activated,
-                converted,
-                eligible_for_conversion,
-                batch_id,
-                lifecycle_status,
-                exit_reason,
-                last_activation_at,
-                last_conversion_marked_at,
-                last_message_at,
-                change_reason,
-                state_payload_json,
-                recorded_at,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO customer_marketing_state_history (
-                person_id,
-                external_userid,
-                automation_key,
-                main_stage,
-                sub_stage,
-                activated,
-                converted,
-                eligible_for_conversion,
-                batch_id,
-                lifecycle_status,
-                exit_reason,
-                last_activation_at,
-                last_conversion_marked_at,
-                last_message_at,
-                change_reason,
-                state_payload_json,
-                recorded_at,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO customer_marketing_state_history (
+            person_id,
+            external_userid,
+            automation_key,
+            main_stage,
+            sub_stage,
+            activated,
+            converted,
+            eligible_for_conversion,
+            batch_id,
+            lifecycle_status,
+            exit_reason,
+            last_activation_at,
+            last_conversion_marked_at,
+            last_message_at,
+            change_reason,
+            state_payload_json,
+            recorded_at,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING *
+        """,
+        params,
+    ).fetchone()
     return dict(row) if row else {}
 
 
@@ -774,86 +657,45 @@ def upsert_marketing_state_current(
         exit_reason,
         _json_dumps(source_payload),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO marketing_state_current (
-                scenario_key,
-                external_userid,
-                marketing_phase,
-                phase_label,
-                phase_reason,
-                lifecycle_status,
-                last_batch_id,
-                last_batch_status,
-                last_batch_window_start,
-                last_batch_window_end,
-                last_trigger_message_at,
-                entered_at,
-                exited_at,
-                exit_reason,
-                source_payload_json
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NULLIF(%s, '')::timestamptz, NULLIF(%s, '')::timestamptz, %s, %s::jsonb)
-            ON CONFLICT (scenario_key, external_userid) DO UPDATE SET
-                marketing_phase = EXCLUDED.marketing_phase,
-                phase_label = EXCLUDED.phase_label,
-                phase_reason = EXCLUDED.phase_reason,
-                lifecycle_status = EXCLUDED.lifecycle_status,
-                last_batch_id = EXCLUDED.last_batch_id,
-                last_batch_status = EXCLUDED.last_batch_status,
-                last_batch_window_start = EXCLUDED.last_batch_window_start,
-                last_batch_window_end = EXCLUDED.last_batch_window_end,
-                last_trigger_message_at = EXCLUDED.last_trigger_message_at,
-                entered_at = EXCLUDED.entered_at,
-                exited_at = EXCLUDED.exited_at,
-                exit_reason = EXCLUDED.exit_reason,
-                source_payload_json = EXCLUDED.source_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO marketing_state_current (
-                scenario_key,
-                external_userid,
-                marketing_phase,
-                phase_label,
-                phase_reason,
-                lifecycle_status,
-                last_batch_id,
-                last_batch_status,
-                last_batch_window_start,
-                last_batch_window_end,
-                last_trigger_message_at,
-                entered_at,
-                exited_at,
-                exit_reason,
-                source_payload_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (scenario_key, external_userid) DO UPDATE SET
-                marketing_phase = excluded.marketing_phase,
-                phase_label = excluded.phase_label,
-                phase_reason = excluded.phase_reason,
-                lifecycle_status = excluded.lifecycle_status,
-                last_batch_id = excluded.last_batch_id,
-                last_batch_status = excluded.last_batch_status,
-                last_batch_window_start = excluded.last_batch_window_start,
-                last_batch_window_end = excluded.last_batch_window_end,
-                last_trigger_message_at = excluded.last_trigger_message_at,
-                entered_at = excluded.entered_at,
-                exited_at = excluded.exited_at,
-                exit_reason = excluded.exit_reason,
-                source_payload_json = excluded.source_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO marketing_state_current (
+            scenario_key,
+            external_userid,
+            marketing_phase,
+            phase_label,
+            phase_reason,
+            lifecycle_status,
+            last_batch_id,
+            last_batch_status,
+            last_batch_window_start,
+            last_batch_window_end,
+            last_trigger_message_at,
+            entered_at,
+            exited_at,
+            exit_reason,
+            source_payload_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, '')::timestamptz, NULLIF(?, '')::timestamptz, ?, ?::jsonb)
+        ON CONFLICT (scenario_key, external_userid) DO UPDATE SET
+            marketing_phase = EXCLUDED.marketing_phase,
+            phase_label = EXCLUDED.phase_label,
+            phase_reason = EXCLUDED.phase_reason,
+            lifecycle_status = EXCLUDED.lifecycle_status,
+            last_batch_id = EXCLUDED.last_batch_id,
+            last_batch_status = EXCLUDED.last_batch_status,
+            last_batch_window_start = EXCLUDED.last_batch_window_start,
+            last_batch_window_end = EXCLUDED.last_batch_window_end,
+            last_trigger_message_at = EXCLUDED.last_trigger_message_at,
+            entered_at = EXCLUDED.entered_at,
+            exited_at = EXCLUDED.exited_at,
+            exit_reason = EXCLUDED.exit_reason,
+            source_payload_json = EXCLUDED.source_payload_json,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        params,
+    ).fetchone()
     db.commit()
     return dict(row) if row else {}
 

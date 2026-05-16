@@ -12,8 +12,6 @@ from .service import (
     list_owner_role_map,
     list_routing_rules,
     resolve_contact_routing_context,
-    save_owner_role_map_item,
-    save_routing_rule_config_item,
 )
 
 __all__ = [
@@ -29,6 +27,4 @@ __all__ = [
     "list_owner_role_map",
     "list_routing_rules",
     "resolve_contact_routing_context",
-    "save_owner_role_map_item",
-    "save_routing_rule_config_item",
 ]

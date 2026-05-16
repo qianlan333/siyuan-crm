@@ -13,7 +13,7 @@ import requests
 
 from wecom_ability_service import create_app
 from wecom_ability_service.db import get_db, init_db
-from wecom_ability_service.db.helpers import _sqlite_table_columns
+from wecom_ability_service.db.helpers import pg_table_columns
 from wecom_ability_service.domains.automation_conversion import (
     append_agent_output,
     apply_dashboard_signup_tag,
@@ -111,7 +111,54 @@ def client(app):
 
 def test_init_db_adds_workflow_node_trigger_mode_column(app):
     with app.app_context():
-        assert "trigger_mode" in _sqlite_table_columns(get_db(), "automation_workflow_node")
+        assert "trigger_mode" in pg_table_columns(get_db(), "automation_workflow_node")
+
+
+def test_init_db_adjusts_pending_questionnaire_followup_legacy_cadence(app):
+    from wecom_ability_service.db.migrations.postgres_migrations import (
+        _ensure_pending_questionnaire_followup_cadence,
+    )
+
+    workflow_bundle = _create_test_workflow(app, workflow_name="3_次推填问卷", status="active")
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+    with app.app_context():
+        for node_code, day_offset in (
+            ("催问卷_1", 2),
+            ("催问卷_2", 3),
+            ("催问卷_3", 4),
+        ):
+            create_conversion_workflow_node(
+                workflow_id,
+                {
+                    "node_code": node_code,
+                    "node_name": node_code,
+                    "target_audience_code": "pending_questionnaire",
+                    "trigger_mode": "scheduled",
+                    "day_offset": day_offset,
+                    "send_time": "09:00",
+                    "content_mode": "standard_direct",
+                    "standard_content_text": f"{node_code} 内容",
+                    "enabled": True,
+                },
+                operator_id="tester",
+            )
+
+        _ensure_pending_questionnaire_followup_cadence(get_db())
+        rows = get_db().execute(
+            """
+            SELECT node_code, day_offset
+            FROM automation_workflow_node
+            WHERE workflow_id = ?
+            ORDER BY node_code ASC
+            """,
+            (workflow_id,),
+        ).fetchall()
+
+    assert {row["node_code"]: row["day_offset"] for row in rows} == {
+        "催问卷_1": 1,
+        "催问卷_2": 2,
+        "催问卷_3": 3,
+    }
 
 
 def test_create_workflow_supports_split_recipient_filter_and_content_segmentation(app):
@@ -277,6 +324,78 @@ def test_run_due_conversion_workflows_filters_recipients_by_behavior_and_keeps_p
     assert enqueued is not None
 
 
+def test_run_due_conversion_workflows_uses_materialized_behavior_tier_without_live_usage_query(app, monkeypatch):
+    _seed_contact(
+        app,
+        external_userid="wm_materialized_behavior_001",
+        mobile="13800002223",
+        owner_userid="sales_01",
+        customer_name="已物化行为分层客户",
+    )
+    _seed_automation_member(
+        app,
+        external_contact_id="wm_materialized_behavior_001",
+        phone="13800002223",
+        owner_staff_id="sales_01",
+        current_pool="inactive_normal",
+        activation_status="inactive",
+        questionnaire_status="pending",
+        questionnaire_follow_type="unknown",
+        decision_source="system",
+        joined_at="2026-04-08 10:00:00",
+    )
+    with app.app_context():
+        get_db().execute(
+            """
+            UPDATE automation_member
+            SET behavior_tier_key = 'lt_2',
+                segment_refreshed_at = '2026-04-08 10:05:00'
+            WHERE external_contact_id = 'wm_materialized_behavior_001'
+            """
+        )
+        get_db().commit()
+    workflow_bundle = _create_test_workflow(
+        app,
+        workflow_name="物化行为分层优先",
+        recipient_filter_basis="behavior",
+        recipient_behavior_tier_keys=["lt_2"],
+        status="active",
+    )
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+    with app.app_context():
+        create_conversion_workflow_node(
+            workflow_id,
+            {
+                "node_name": "物化行为分层节点",
+                "target_audience_code": "pending_questionnaire",
+                "trigger_mode": "audience_entered",
+                "content_mode": "standard_direct",
+                "standard_content_text": "命中物化行为分层",
+                "enabled": True,
+            },
+            operator_id="tester",
+        )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.workflow_runtime.query_message_activity_counts",
+        lambda: (_ for _ in ()).throw(AssertionError("live usage query should not be called")),
+    )
+
+    with app.app_context():
+        result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        item_rows = get_db().execute(
+            """
+            SELECT external_contact_id, status
+            FROM automation_workflow_execution_item
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    assert result["ok"] is True
+    assert len(item_rows) == 1
+    assert item_rows[0]["external_contact_id"] == "wm_materialized_behavior_001"
+    assert item_rows[0]["status"] == "pending"
+
+
 def test_run_due_conversion_workflows_sends_pending_questionnaire_day1_day2_day3_in_sequence(app, monkeypatch):
     _seed_contact(app, external_userid="wm_pending_sequence_001", mobile="13800005551", owner_userid="sales_01", customer_name="问卷待填写序列客户")
     _seed_automation_member(
@@ -342,6 +461,124 @@ def test_run_due_conversion_workflows_sends_pending_questionnaire_day1_day2_day3
     # _pre_enqueue_future_workflow_nodes creates additional pre-scheduled
     # broadcast_jobs for tomorrow's nodes on each run, so total >= 3
     assert enqueue_count >= 3
+
+
+def test_run_due_conversion_workflows_sends_pending_questionnaire_first_morning_after_night_entry(app, monkeypatch):
+    _seed_contact(app, external_userid="wm_pending_night_entry_001", mobile="13800005554", owner_userid="sales_01", customer_name="夜间进入待填问卷客户")
+    _seed_automation_member(
+        app,
+        external_contact_id="wm_pending_night_entry_001",
+        phone="13800005554",
+        owner_staff_id="sales_01",
+        current_pool="pending_questionnaire",
+        activation_status="inactive",
+        questionnaire_status="pending",
+        questionnaire_follow_type="unknown",
+        decision_source="system",
+        joined_at="2026-05-14 21:31:39",
+    )
+    workflow_bundle = _create_test_workflow(app, workflow_name="夜间进入问卷提醒", status="active")
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+
+    with app.app_context():
+        create_conversion_workflow_node(
+            workflow_id,
+            {
+                "node_name": "问卷提醒 Day 1",
+                "target_audience_code": "pending_questionnaire",
+                "trigger_mode": "scheduled",
+                "day_offset": 1,
+                "send_time": "09:00",
+                "content_mode": "standard_direct",
+                "standard_content_text": "次日上午提醒填写问卷",
+                "enabled": True,
+            },
+            operator_id="tester",
+        )
+
+    _mock_workflow_runtime_now(monkeypatch, "2026-05-15 09:05:00")
+
+    with app.app_context():
+        result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        item_rows = get_db().execute(
+            """
+            SELECT external_contact_id, status
+            FROM automation_workflow_execution_item
+            ORDER BY id ASC
+            """
+        ).fetchall()
+
+    assert result["ok"] is True
+    assert len(item_rows) == 1
+    assert item_rows[0]["external_contact_id"] == "wm_pending_night_entry_001"
+    assert item_rows[0]["status"] == "pending"
+
+
+def test_run_due_conversion_workflows_recomputes_zero_candidate_day_offset_execution_after_cadence_fix(app, monkeypatch):
+    _seed_contact(app, external_userid="wm_pending_recompute_001", mobile="13800005555", owner_userid="sales_01", customer_name="配置修正补算客户")
+    _seed_automation_member(
+        app,
+        external_contact_id="wm_pending_recompute_001",
+        phone="13800005555",
+        owner_staff_id="sales_01",
+        current_pool="pending_questionnaire",
+        activation_status="inactive",
+        questionnaire_status="pending",
+        questionnaire_follow_type="unknown",
+        decision_source="system",
+        joined_at="2026-05-14 21:31:39",
+    )
+    workflow_bundle = _create_test_workflow(app, workflow_name="问卷提醒补算", status="active")
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+
+    with app.app_context():
+        node_bundle = create_conversion_workflow_node(
+            workflow_id,
+            {
+                "node_name": "问卷提醒 Day 1",
+                "target_audience_code": "pending_questionnaire",
+                "trigger_mode": "scheduled",
+                "day_offset": 2,
+                "send_time": "09:00",
+                "content_mode": "standard_direct",
+                "standard_content_text": "第一条提醒填写问卷",
+                "enabled": True,
+            },
+            operator_id="tester",
+        )
+        node_id = int((node_bundle.get("node") or {}).get("id") or 0)
+
+    _mock_workflow_runtime_now(monkeypatch, "2026-05-15 09:05:00")
+
+    with app.app_context():
+        first = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        first_items = get_db().execute("SELECT COUNT(*) AS total FROM automation_workflow_execution_item").fetchone()["total"]
+        first_execution = get_db().execute(
+            "SELECT summary_json FROM automation_workflow_execution WHERE workflow_id = ? AND node_id = ? LIMIT 1",
+            (workflow_id, node_id),
+        ).fetchone()
+        get_db().execute(
+            "UPDATE automation_workflow_node SET day_offset = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (node_id,),
+        )
+        get_db().commit()
+
+    _mock_workflow_runtime_now(monkeypatch, "2026-05-15 13:05:00")
+
+    with app.app_context():
+        second = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        item_rows = get_db().execute(
+            "SELECT external_contact_id, status FROM automation_workflow_execution_item ORDER BY id ASC"
+        ).fetchall()
+
+    first_summary = first_execution["summary_json"] if isinstance(first_execution["summary_json"], (dict, list)) else json.loads(first_execution["summary_json"])
+    assert first["ok"] is True
+    assert first_items == 0
+    assert "day_offset_not_due" in first_summary["zero_hit_reasons"]
+    assert second["ok"] is True
+    assert len(item_rows) == 1
+    assert item_rows[0]["external_contact_id"] == "wm_pending_recompute_001"
+    assert item_rows[0]["status"] == "pending"
 
 
 def test_run_due_conversion_workflows_supports_operating_audience_scheduled_node_with_timezone_entered_at(app, monkeypatch):
@@ -2428,6 +2665,73 @@ def test_workflow_node_api_supports_operating_immediate_personalized_single_with
     ]
 
 
+def test_workflow_node_api_updates_miniprogram_payload_on_inherited_personalized_single_node(app, client):
+    _seed_test_agent_config(app, agent_code="questionnaire_followup_agent", display_name="问卷提交 agent")
+    workflow_bundle = _create_test_workflow(
+        app,
+        workflow_name="问卷提交小程序卡片",
+        audiences=["operating"],
+        status="active",
+        generation_mode="personalized_single",
+        agent_bindings=[
+            {
+                "binding_scope": "personalized",
+                "segment_key": "",
+                "agent_code": "questionnaire_followup_agent",
+            }
+        ],
+    )
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+
+    create_response = client.post(
+        f"/api/admin/automation-conversion/workflows/{workflow_id}/nodes",
+        json={
+            "node_name": "问卷提交后进入运营中立即发送",
+            "target_audience_code": "operating",
+            "trigger_mode": "audience_entered",
+            "enabled": True,
+            "operator": "tester-node-api",
+        },
+    )
+    assert create_response.status_code == 201
+    node_id = int((create_response.get_json().get("node") or {}).get("id") or 0)
+
+    update_response = client.put(
+        f"/api/admin/automation-conversion/workflow-nodes/{node_id}",
+        json={
+            "node_name": "问卷提交后进入运营中立即发送",
+            "target_audience_code": "operating",
+            "trigger_mode": "audience_entered",
+            "standard_content_payload": {"miniprogram_library_ids": [321]},
+            "enabled": True,
+            "operator": "tester-node-api",
+        },
+    )
+    payload = update_response.get_json()
+
+    assert update_response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["node"]["content_mode"] == "personalized_single"
+    assert payload["node"]["agent_bindings"] == []
+    assert payload["node"]["standard_content_payload"]["miniprogram_library_ids"] == [321]
+
+    clear_response = client.put(
+        f"/api/admin/automation-conversion/workflow-nodes/{node_id}",
+        json={
+            "node_name": "问卷提交后进入运营中立即发送",
+            "target_audience_code": "operating",
+            "trigger_mode": "audience_entered",
+            "standard_content_payload": {"miniprogram_library_ids": []},
+            "enabled": True,
+            "operator": "tester-node-api",
+        },
+    )
+    cleared_payload = clear_response.get_json()
+
+    assert clear_response.status_code == 200
+    assert cleared_payload["node"]["standard_content_payload"]["miniprogram_library_ids"] == []
+
+
 def test_workflow_node_api_rejects_immediate_trigger_with_day_offset_and_send_time(app, client):
     _seed_test_agent_config(app, agent_code="questionnaire_followup_agent", display_name="问卷提交 agent")
     workflow_bundle = _create_test_workflow(
@@ -2814,6 +3118,313 @@ def test_run_due_conversion_workflows_manual_layered_does_not_fallback_to_standa
     assert snapshot["standard_content_text"] == ""
     assert snapshot["fallback_reason"] == "segment_not_matched"
     assert snapshot["content_source"] == ""
+
+
+def test_run_workflow_execution_batches_same_sender_and_content(app, monkeypatch):
+    _seed_contact(app, external_userid="wm_workflow_batch_001", mobile="13800004451", owner_userid="sales_01", customer_name="批量任务流客户1")
+    _seed_contact(app, external_userid="wm_workflow_batch_002", mobile="13800004452", owner_userid="sales_01", customer_name="批量任务流客户2")
+    for external_userid, phone in [
+        ("wm_workflow_batch_001", "13800004451"),
+        ("wm_workflow_batch_002", "13800004452"),
+    ]:
+        _seed_automation_member(
+            app,
+            external_contact_id=external_userid,
+            phone=phone,
+            owner_staff_id="sales_01",
+            current_pool="inactive_normal",
+            activation_status="inactive",
+            questionnaire_status="pending",
+            questionnaire_follow_type="unknown",
+            decision_source="system",
+            joined_at="2026-04-08 08:00:00",
+        )
+    workflow_bundle = _create_test_workflow(app, workflow_name="同内容批量任务流", generation_mode="manual_layered")
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+    with app.app_context():
+        create_conversion_workflow_node(
+            workflow_id,
+            {
+                "node_name": "同内容定时节点",
+                "target_audience_code": "pending_questionnaire",
+                "trigger_mode": "scheduled",
+                "day_offset": 1,
+                "send_time": "09:00",
+                "content_mode": "standard_direct",
+                "standard_content_text": "同一条任务流内容",
+                "enabled": True,
+            },
+            operator_id="tester",
+        )
+    dispatch_calls: list[dict[str, object]] = []
+
+    def _fake_dispatch(task_type, fn_name, payload):
+        dispatch_calls.append({"task_type": task_type, "fn_name": fn_name, "payload": payload})
+        return {"task_id": 2001, "wecom_result": {"msgid": "msg-2001", "fail_list": []}}
+
+    _mock_workflow_runtime_now(monkeypatch, "2026-04-08 09:05:00")
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
+        _fake_dispatch,
+    )
+
+    with app.app_context():
+        due_result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        execution = get_db().execute(
+            """
+            SELECT execution_id, workflow_id, node_id
+            FROM automation_workflow_execution
+            WHERE status = 'running'
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        run_result = run_workflow_execution(
+            execution_data={
+                "execution_id": execution["execution_id"],
+                "workflow_id": execution["workflow_id"],
+                "node_id": execution["node_id"],
+            }
+        )
+        item_rows = get_db().execute(
+            """
+            SELECT external_contact_id, status, send_record_id
+            FROM automation_workflow_execution_item
+            ORDER BY external_contact_id ASC
+            """
+        ).fetchall()
+
+    assert due_result["ok"] is True
+    assert run_result == {"ok": True, "sent_count": 2, "failed_count": 0}
+    assert len(dispatch_calls) == 1
+    assert dispatch_calls[0]["payload"]["sender"] == "sales_01"
+    assert dispatch_calls[0]["payload"]["external_userid"] == [
+        "wm_workflow_batch_001",
+        "wm_workflow_batch_002",
+    ]
+    assert [row["status"] for row in item_rows] == ["sent", "sent"]
+    assert len({row["send_record_id"] for row in item_rows}) == 1
+
+
+def test_run_workflow_execution_keeps_personalized_single_as_one_member_per_send(app, monkeypatch):
+    _seed_test_agent_config(app, agent_code="personalized_same_agent", display_name="同文案个性化 Agent")
+    _seed_contact(app, external_userid="wm_workflow_personalized_001", mobile="13800004461", owner_userid="sales_01", customer_name="个性化客户1")
+    _seed_contact(app, external_userid="wm_workflow_personalized_002", mobile="13800004462", owner_userid="sales_01", customer_name="个性化客户2")
+    for external_userid, phone in [
+        ("wm_workflow_personalized_001", "13800004461"),
+        ("wm_workflow_personalized_002", "13800004462"),
+    ]:
+        _seed_automation_member(
+            app,
+            external_contact_id=external_userid,
+            phone=phone,
+            owner_staff_id="sales_01",
+            current_pool="inactive_normal",
+            activation_status="inactive",
+            questionnaire_status="pending",
+            questionnaire_follow_type="unknown",
+            decision_source="system",
+            joined_at="2026-04-08 08:00:00",
+        )
+    workflow_bundle = _create_test_workflow(
+        app,
+        workflow_name="个性化一人一发任务流",
+        generation_mode="personalized_single",
+        agent_bindings=[
+            {
+                "binding_scope": "personalized",
+                "segment_key": "",
+                "agent_code": "personalized_same_agent",
+            }
+        ],
+    )
+    workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
+    with app.app_context():
+        create_conversion_workflow_node(
+            workflow_id,
+            {
+                "node_name": "同文案个性化节点",
+                "target_audience_code": "pending_questionnaire",
+                "trigger_mode": "scheduled",
+                "day_offset": 1,
+                "send_time": "09:00",
+                "content_mode": "personalized_single",
+                "standard_content_text": "个性化回退内容",
+                "agent_bindings": [
+                    {
+                        "binding_scope": "personalized",
+                        "segment_key": "",
+                        "agent_code": "personalized_same_agent",
+                    }
+                ],
+                "enabled": True,
+            },
+            operator_id="tester",
+        )
+    dispatch_calls: list[dict[str, object]] = []
+
+    def _fake_deepseek_agent(**kwargs):
+        return {
+            "request_id": kwargs.get("request_id"),
+            "run_id": f"run-{kwargs.get('external_contact_id')}",
+            "parsed_output": {"draft_reply": "这是一条看起来相同但必须一人一发的话术"},
+        }
+
+    def _fake_dispatch(task_type, fn_name, payload):
+        dispatch_calls.append({"task_type": task_type, "fn_name": fn_name, "payload": payload})
+        return {"task_id": 3000 + len(dispatch_calls), "wecom_result": {"msgid": f"msg-{len(dispatch_calls)}", "fail_list": []}}
+
+    _mock_workflow_runtime_now(monkeypatch, "2026-04-08 09:05:00")
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.admin_console.customer_profile_service.get_customer_profile_tags_payload",
+        lambda *, external_userid: {"tags": []},
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.workflow_runtime.call_deepseek_agent",
+        _fake_deepseek_agent,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
+        _fake_dispatch,
+    )
+
+    with app.app_context():
+        due_result = run_due_conversion_workflows(operator_id="workflow-runner", operator_type="system")
+        execution = get_db().execute(
+            """
+            SELECT execution_id, workflow_id, node_id
+            FROM automation_workflow_execution
+            WHERE status = 'running'
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        run_result = run_workflow_execution(
+            execution_data={
+                "execution_id": execution["execution_id"],
+                "workflow_id": execution["workflow_id"],
+                "node_id": execution["node_id"],
+            }
+        )
+        item_rows = get_db().execute(
+            """
+            SELECT external_contact_id, status, send_record_id
+            FROM automation_workflow_execution_item
+            ORDER BY external_contact_id ASC
+            """
+        ).fetchall()
+
+    assert due_result["ok"] is True
+    assert run_result == {"ok": True, "sent_count": 2, "failed_count": 0}
+    assert len(dispatch_calls) == 2
+    assert [call["payload"]["external_userid"] for call in dispatch_calls] == [
+        ["wm_workflow_personalized_001"],
+        ["wm_workflow_personalized_002"],
+    ]
+    assert [row["status"] for row in item_rows] == ["sent", "sent"]
+    assert len({row["send_record_id"] for row in item_rows}) == 2
+
+
+def test_private_message_batch_marks_all_targets_failed_when_dispatch_raises(app, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion.service import _dispatch_private_message_batch
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
+        lambda task_type, fn_name, payload: (_ for _ in ()).throw(RuntimeError("wecom api unavailable")),
+    )
+
+    with app.app_context():
+        result = _dispatch_private_message_batch(
+            target_items=[
+                {"external_userid": "wm_dispatch_fail_001"},
+                {"external_userid": "wm_dispatch_fail_002"},
+            ],
+            sender_userid="sales_01",
+            content="失败测试文案",
+            operator_id="tester",
+            filter_snapshot={"selection_mode": "unit_test"},
+        )
+        row = get_db().execute(
+            "SELECT status, selected_count, sent_count FROM user_ops_send_records ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    assert result["ok"] is False
+    assert result["status"] == "failed"
+    assert result["sent_count"] == 0
+    assert set(result["fail_external_userids"]) == {"wm_dispatch_fail_001", "wm_dispatch_fail_002"}
+    assert "wecom api unavailable" in result["error_message"]
+    assert dict(row) == {"status": "failed", "selected_count": 2, "sent_count": 0}
+
+
+def test_private_message_batch_falls_back_to_text_when_miniprogram_rejected(app, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion.service import _dispatch_private_message_batch
+    from wecom_ability_service.wecom_client import WeComClientError
+
+    dispatch_payloads = []
+
+    def fake_dispatch(task_type, fn_name, payload):
+        dispatch_payloads.append(dict(payload))
+        if len(dispatch_payloads) == 1:
+            raise WeComClientError(
+                "WeCom API failed: miniprogram not matched",
+                stage="/cgi-bin/externalcontact/add_msg_template",
+                category="wecom_api",
+                payload={"errcode": 90208, "errmsg": "miniprogram not matched", "fail_list": []},
+            )
+        return {
+            "task_id": 123,
+            "wecom_result": {
+                "errcode": 0,
+                "errmsg": "ok",
+                "fail_list": [],
+                "msgid": "msg-fallback-001",
+            },
+        }
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
+        fake_dispatch,
+    )
+
+    with app.app_context():
+        result = _dispatch_private_message_batch(
+            target_items=[{"external_userid": "wm_miniprogram_fallback_001"}],
+            sender_userid="sales_01",
+            content="小程序异常时仍要发出的文本",
+            attachments=[
+                {
+                    "msgtype": "miniprogram",
+                    "miniprogram": {
+                        "appid": "wx-bad",
+                        "page": "pages/home/home",
+                        "title": "卡片",
+                        "pic_media_id": "media-1",
+                    },
+                }
+            ],
+            operator_id="tester",
+            filter_snapshot={"selection_mode": "unit_test", "miniprogram_library_ids": [1]},
+        )
+        row = get_db().execute(
+            "SELECT status, selected_count, sent_count, outbound_task_ids_json, task_results_json "
+            "FROM user_ops_send_records ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+
+    assert result["ok"] is True
+    assert result["status"] == "sent"
+    assert result["task_ids"] == [123]
+    assert result["fail_external_userids"] == []
+    assert len(dispatch_payloads) == 2
+    assert dispatch_payloads[0]["attachments"][0]["msgtype"] == "miniprogram"
+    assert "attachments" not in dispatch_payloads[1]
+    stored = dict(row)
+    assert stored["status"] == "sent"
+    assert stored["sent_count"] == 1
+    assert stored["outbound_task_ids_json"] == [123]
+    assert stored["task_results_json"][0]["fallback_without_miniprogram"] is True
+    assert stored["task_results_json"][0]["fallback_removed_attachment_count"] == 1
+
+
 def test_send_conversion_execution_item_via_bazhuayu_posts_signed_webhook_payload(app, monkeypatch):
     _seed_contact(app, external_userid="wm_bazhuayu_send_001", mobile="13800002222", owner_userid="sales_01", customer_name="八爪鱼发送客户")
     _seed_automation_member(
@@ -2850,7 +3461,7 @@ def test_send_conversion_execution_item_via_bazhuayu_posts_signed_webhook_payloa
 
     _mock_workflow_runtime_usage_counts(monkeypatch, usage_by_phone={"13800002222": 1})
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: {"task_id": 1001, "wecom_result": {"msgid": "msg-1001"}},
     )
 
@@ -2963,7 +3574,7 @@ def test_execution_item_send_via_bazhuayu_api_accepts_admin_action_token_and_ret
 
     _mock_workflow_runtime_usage_counts(monkeypatch, usage_by_phone={"13800003333": 1})
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.workflow_runtime.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: {"task_id": 1002, "wecom_result": {"msgid": "msg-1002"}},
     )
 
@@ -3326,10 +3937,10 @@ def _patch_live_context(
 def test_init_db_creates_automation_conversion_tables_and_indexes(app):
     with app.app_context():
         db = get_db()
-        table_names = _sqlite_object_names(db, "table")
-        index_names = _sqlite_object_names(db, "index")
-        channel_columns = _sqlite_table_columns(db, "automation_channel")
-        agent_output_columns = _sqlite_table_columns(db, "automation_agent_output")
+        table_names = pg_object_names(db, "table")
+        index_names = pg_object_names(db, "index")
+        channel_columns = pg_table_columns(db, "automation_channel")
+        agent_output_columns = pg_table_columns(db, "automation_agent_output")
 
         assert {
             "automation_channel",
@@ -7681,6 +8292,24 @@ def test_focus_send_batch_can_be_created_for_inactive_focus_stage(app, client):
     assert payload["batch"]["remaining_count"] == 1
     assert payload["items"][0]["status"] == "pending"
 
+    with app.app_context():
+        job_row = get_db().execute(
+            """
+            SELECT source_type, source_id, source_table, status, content_payload
+            FROM broadcast_jobs
+            WHERE source_type = 'focus_send'
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    assert job_row is not None
+    job = dict(job_row)
+    job_payload = job["content_payload"] if isinstance(job["content_payload"], (dict, list)) else json.loads(job["content_payload"])
+    assert job["source_id"] == str(payload["batch"]["id"])
+    assert job["source_table"] == "automation_focus_send_batch"
+    assert job["status"] == "queued"
+    assert job_payload == {"handler": "focus_send", "batch_id": payload["batch"]["id"]}
+
     detail = client.get(f"/api/admin/automation-conversion/focus-send-batches/{payload['batch']['id']}")
     detail_payload = detail.get_json()
     assert detail.status_code == 200
@@ -7713,6 +8342,44 @@ def test_focus_send_batch_can_be_created_for_active_focus_stage(app, client):
     assert payload["batch"]["stage_key"] == "active-focus"
     assert payload["batch"]["total_count"] == 1
     assert payload["items"][0]["status"] == "pending"
+
+
+def test_focus_send_batch_run_due_skips_batch_with_open_broadcast_job(app, client, monkeypatch):
+    app.config["AUTOMATION_INTERNAL_API_TOKEN"] = "focus-token"
+    _seed_contact(app, external_userid="wm_focus_queue_001", mobile="13800009303", owner_userid="sales_focus", customer_name="重点队列客户")
+    _seed_automation_member(
+        app,
+        external_contact_id="wm_focus_queue_001",
+        phone="13800009303",
+        owner_staff_id="sales_focus",
+        current_pool="active_focus",
+        follow_type="focus",
+        activation_status="active",
+        questionnaire_status="submitted",
+        questionnaire_follow_type="focus",
+    )
+    push_calls: list[str] = []
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.service.push_openclaw",
+        lambda **payload: push_calls.append(str(payload.get("external_contact_id") or "")) or {"accepted": True},
+    )
+
+    created = client.post(
+        "/api/admin/automation-conversion/stage/active-focus/focus-send-batches",
+        json={"operator": "tester"},
+    ).get_json()
+    batch_id = created["batch"]["id"]
+    run_result = client.post(
+        "/api/admin/automation-conversion/focus-send-batches/run-due",
+        headers={"Authorization": "Bearer focus-token"},
+    ).get_json()
+    detail = client.get(f"/api/admin/automation-conversion/focus-send-batches/{batch_id}").get_json()
+
+    assert run_result["processed_count"] == 0
+    assert run_result["batches"][0]["queue_status"] == "already_queued"
+    assert run_result["batches"][0]["queue_job"]["status"] == "queued"
+    assert push_calls == []
+    assert detail["items"][0]["status"] == "pending"
 
 
 def test_focus_send_batch_runner_only_advances_due_items_and_updates_next_run_at(app, client, monkeypatch):
@@ -7764,6 +8431,12 @@ def test_focus_send_batch_runner_only_advances_due_items_and_updates_next_run_at
         json={"operator": "tester"},
     ).get_json()
     batch_id = created["batch"]["id"]
+    with app.app_context():
+        get_db().execute(
+            "UPDATE broadcast_jobs SET status = 'cancelled' WHERE source_type = 'focus_send' AND source_id = ?",
+            (str(batch_id),),
+        )
+        get_db().commit()
 
     first = client.post(
         "/api/admin/automation-conversion/focus-send-batches/run-due",
@@ -7843,6 +8516,12 @@ def test_focus_send_batch_runner_item_failure_does_not_block_batch(app, client, 
         json={"operator": "tester"},
     ).get_json()
     batch_id = created["batch"]["id"]
+    with app.app_context():
+        get_db().execute(
+            "UPDATE broadcast_jobs SET status = 'cancelled' WHERE source_type = 'focus_send' AND source_id = ?",
+            (str(batch_id),),
+        )
+        get_db().commit()
 
     first = client.post(
         "/api/admin/automation-conversion/focus-send-batches/run-due",
@@ -7893,6 +8572,12 @@ def test_focus_send_batch_does_not_requeue_already_sent_member(app, client, monk
         "/api/admin/automation-conversion/stage/active-focus/focus-send-batches",
         json={"operator": "tester"},
     ).get_json()
+    with app.app_context():
+        get_db().execute(
+            "UPDATE broadcast_jobs SET status = 'cancelled' WHERE source_type = 'focus_send' AND source_id = ?",
+            (str(first_created["batch"]["id"]),),
+        )
+        get_db().commit()
     first_run = client.post(
         "/api/admin/automation-conversion/focus-send-batches/run-due",
         headers={"Authorization": "Bearer focus-token"},
@@ -8051,7 +8736,7 @@ def test_manual_send_new_user_stage_uses_single_sender_without_owner_buckets(app
         dispatched_payloads.append({"task_type": task_type, "fn_name": fn_name, "payload": dict(payload)})
         return {"task_id": 701, "wecom_result": {"msgid": "msg-701"}}
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task", fake_dispatch)
+    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task", fake_dispatch)
 
     response = client.post(
         "/api/admin/automation-conversion/stage/new-user/manual-send",
@@ -8113,7 +8798,7 @@ def test_manual_send_skips_already_touched_member_on_repeat(app, client, monkeyp
         dispatched_payloads.append(dict(payload))
         return {"task_id": 706, "wecom_result": {"msgid": "msg-706"}}
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task", fake_dispatch)
+    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task", fake_dispatch)
 
     first_response = client.post(
         "/api/admin/automation-conversion/stage/new-user/manual-send",
@@ -8200,7 +8885,7 @@ def test_manual_send_respects_historical_send_records_before_touch_log(app, clie
         get_db().commit()
     dispatched_payloads: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: dispatched_payloads.append(dict(payload)) or {"task_id": 709, "wecom_result": {"msgid": "msg-709"}},
     )
 
@@ -8249,7 +8934,7 @@ def test_manual_send_operating_stage_uses_current_audience_not_pool_status(app, 
         db.commit()
     dispatched_payloads: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: dispatched_payloads.append(dict(payload)) or {"task_id": 707, "wecom_result": {"msgid": "msg-707"}},
     )
 
@@ -8290,7 +8975,7 @@ def test_manual_send_operating_stage_includes_legacy_pool_aliases(app, client, m
         db.commit()
     dispatched_payloads: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: dispatched_payloads.append(dict(payload)) or {"task_id": 710, "wecom_result": {"msgid": "msg-710"}},
     )
 
@@ -8337,7 +9022,7 @@ def test_manual_send_operating_stage_treats_legacy_terminal_pool_as_audience_met
     ]
     dispatched_payloads: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: dispatched_payloads.append(dict(payload)) or {"task_id": 711, "wecom_result": {"msgid": "msg-711"}},
     )
 
@@ -8415,7 +9100,7 @@ def test_manual_send_silent_stage_can_send(app, client, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: {"task_id": 702, "wecom_result": {"msgid": "msg-702"}},
     )
 
@@ -8450,7 +9135,7 @@ def test_manual_send_won_stage_can_send(app, client, monkeypatch):
     )
 
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: {"task_id": 703, "wecom_result": {"msgid": "msg-703"}},
     )
 
@@ -8498,7 +9183,7 @@ def test_manual_send_skips_members_missing_external_userid(app, client, monkeypa
         dispatched_payloads.append(dict(payload))
         return {"task_id": 704, "wecom_result": {"msgid": "msg-704"}}
 
-    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task", fake_dispatch)
+    monkeypatch.setattr("wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task", fake_dispatch)
 
     response = client.post(
         "/api/admin/automation-conversion/stage/active-normal/manual-send",
@@ -8544,7 +9229,7 @@ def test_admin_stage_send_page_shows_manual_send_summary(app, client, monkeypatc
         decision_source="system",
     )
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: captured_payloads.append(dict(payload)) or {"task_id": 705, "wecom_result": {"msgid": "msg-705"}},
     )
     captured_payloads: list[dict[str, object]] = []
@@ -8598,7 +9283,7 @@ def test_admin_stage_send_program_route_returns_json_for_ajax_submit(app, client
     )
     captured_payloads: list[dict[str, object]] = []
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: captured_payloads.append(dict(payload)) or {"task_id": 706, "wecom_result": {"msgid": "msg-706"}},
     )
     program_id = _default_program_id(app)
@@ -10162,7 +10847,7 @@ def test_manual_send_does_not_change_sop_anchor_or_progress(app, client, monkeyp
         joined_at="2026-04-08 08:00:00",
     )
     monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
         lambda task_type, fn_name, payload: {"task_id": 900, "wecom_result": {"msgid": "msg-900"}},
     )
 
@@ -10479,6 +11164,37 @@ def test_due_jobs_api_runs_registered_conversion_workflow_job(app, client, monke
     # Sending is deferred to broadcast_jobs; total_success_count is 0
     assert payload["jobs"][0]["result"]["total_success_count"] == 0
     assert payload["total_success_count"] == 0
+
+
+def test_due_jobs_api_defaults_to_all_registered_jobs(app, client, monkeypatch):
+    app.config["AUTOMATION_INTERNAL_API_TOKEN"] = "runner-token"
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.sop_service.run_due_sop",
+        lambda **kwargs: {"ok": True, "total_success_count": 0, "batch_ids": [11]},
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.workflow_runtime.run_due_conversion_workflows",
+        lambda **kwargs: {"ok": True, "total_success_count": 2, "batch_ids": [22]},
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.operation_task_service.run_due_operation_tasks",
+        lambda **kwargs: {"ok": True, "enqueued_count": 3, "failed_count": 0, "results": []},
+    )
+
+    response = client.post(
+        "/api/admin/automation-conversion/jobs/run-due",
+        json={"operator": "due-runner"},
+        headers={"Authorization": "Bearer runner-token"},
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert payload["requested_job_codes"] == ["sop", "conversion_workflow", "operation_task"]
+    assert [item["job_code"] for item in payload["jobs"]] == ["sop", "conversion_workflow", "operation_task"]
+    assert payload["executed_job_count"] == 3
+    assert payload["total_success_count"] == 5
+    assert payload["batch_ids"] == [11, 22]
 
 
 def test_due_jobs_api_rejects_invalid_internal_token_for_conversion_workflow_job(app, client):

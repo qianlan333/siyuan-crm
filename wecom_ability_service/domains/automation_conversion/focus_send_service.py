@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from flask import current_app
-
 from ...db import get_db
 from . import local_projection
 from . import repo
@@ -18,6 +16,11 @@ from .service import (
     _serialize_member,
 )
 
+FOCUS_SEND_QUEUE_SOURCE_TYPE = "focus_send"
+FOCUS_SEND_QUEUE_SOURCE_TABLE = "automation_focus_send_batch"
+FOCUS_SEND_QUEUE_HANDLER = "focus_send"
+FOCUS_SEND_OPEN_QUEUE_STATUSES = ("waiting_approval", "queued", "claimed")
+
 
 def push_openclaw(*args: Any, **kwargs: Any) -> dict[str, Any]:
     """Lazy proxy to service.push_openclaw so monkeypatch on service.push_openclaw propagates here."""
@@ -30,6 +33,21 @@ def _iso_now() -> str:
     """Lazy proxy to service._iso_now so monkeypatch on service._iso_now propagates here."""
     from . import service as _svc
     return _svc._iso_now()
+
+
+def _focus_send_queue_payload(batch_id: int) -> dict[str, int | str]:
+    return {"handler": FOCUS_SEND_QUEUE_HANDLER, "batch_id": int(batch_id)}
+
+
+def _fetch_open_focus_send_queue_job(batch_id: int) -> dict[str, Any] | None:
+    from ..broadcast_jobs import repo as queue_repo
+
+    return queue_repo.fetch_job_by_source(
+        source_type=FOCUS_SEND_QUEUE_SOURCE_TYPE,
+        source_id=str(int(batch_id)),
+        source_table=FOCUS_SEND_QUEUE_SOURCE_TABLE,
+        statuses=list(FOCUS_SEND_OPEN_QUEUE_STATUSES),
+    )
 
 
 def get_focus_send_batches_payload(*, limit: int = 20) -> dict[str, Any]:
@@ -258,9 +276,9 @@ def create_focus_send_batch(
     if items:
         from ..broadcast_jobs import service as queue_service
         queue_service.enqueue_job(
-            source_type="focus_send",
+            source_type=FOCUS_SEND_QUEUE_SOURCE_TYPE,
             source_id=str(batch.get("id") or ""),
-            source_table="automation_focus_send_batch",
+            source_table=FOCUS_SEND_QUEUE_SOURCE_TABLE,
             scheduled_for=now_text,
             target_external_userids=[
                 _normalized_text(it.get("external_contact_id"))
@@ -268,7 +286,7 @@ def create_focus_send_batch(
             ],
             target_summary=f"{pool_key} 池 {len(items)} 人",
             content_type="openclaw_push",
-            content_payload={"handler": "focus_send", "batch_id": int(batch.get("id") or 0)},
+            content_payload=_focus_send_queue_payload(int(batch.get("id") or 0)),
             content_summary=f"focus_send/{_normalized_text(route_key)}",
             created_by=_normalized_text(operator_id) or "crm_console",
         )
@@ -320,6 +338,54 @@ def _update_focus_batch_counters(
     return _serialize_focus_send_batch(saved)
 
 
+def _dispatch_focus_send_batch_item(
+    *,
+    batch_id: int,
+    item: dict[str, Any],
+    operator_id: str,
+    now_text: str,
+) -> dict[str, Any]:
+    serialized_item = _serialize_focus_send_batch_item(item)
+    external_contact_id = _normalized_text(serialized_item.get("external_contact_id"))
+    push_result = push_openclaw(
+        external_contact_id=external_contact_id,
+        operator_id=_normalized_text(operator_id),
+    )
+    accepted = bool(push_result.get("accepted"))
+    item_status = "sent" if accepted else "failed"
+    failure_detail = "" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status")))
+    repo.update_focus_send_batch_item(
+        int(serialized_item.get("id") or 0),
+        {
+            **serialized_item,
+            "status": item_status,
+            "detail": failure_detail,
+            "result_payload": dict(push_result or {}),
+            "updated_at": now_text,
+            "started_at": _normalized_text(serialized_item.get("started_at")) or now_text,
+            "finished_at": now_text,
+        },
+    )
+    repo.update_touch_delivery_log_status_by_source(
+        touch_surface=TOUCH_SURFACE_FOCUS_SEND,
+        source_batch_id=int(batch_id),
+        source_item_id=int(serialized_item.get("id") or 0),
+        external_contact_id=external_contact_id,
+        status=item_status,
+        detail=failure_detail,
+        metadata=dict(push_result or {}),
+        sent_at=now_text if accepted else "",
+        updated_at=now_text,
+    )
+    return {
+        "accepted": accepted,
+        "item_status": item_status,
+        "external_contact_id": external_contact_id,
+        "push_result": push_result,
+        "item": serialized_item,
+    }
+
+
 def run_due_focus_send_batches(
     *,
     operator_id: str = "",
@@ -330,9 +396,24 @@ def run_due_focus_send_batches(
     now_dt = _parse_timestamp(now_text) or datetime.now()
     processed_count = 0
     batches_payload: list[dict[str, Any]] = []
+
     for row in repo.list_due_focus_send_batches(due_at=now_text, limit=max(1, int(limit))):
         batch = _serialize_focus_send_batch(row)
-        item = repo.claim_next_focus_send_batch_item(batch_id=int(batch.get("id") or 0), started_at=now_text)
+        batch_id = int(batch.get("id") or 0)
+        existing_job = _fetch_open_focus_send_queue_job(batch_id)
+        if existing_job:
+            batches_payload.append(
+                {
+                    **_focus_batch_detail_payload(batch, item_limit=12),
+                    "queue_status": "already_queued",
+                    "queue_job": {
+                        "id": int(existing_job.get("id") or 0),
+                        "status": _normalized_text(existing_job.get("status")),
+                    },
+                }
+            )
+            continue
+        item = repo.claim_next_focus_send_batch_item(batch_id=batch_id, started_at=now_text)
         if not item:
             finalized = _update_focus_batch_counters(
                 batch,
@@ -343,37 +424,13 @@ def run_due_focus_send_batches(
             )
             batches_payload.append(_focus_batch_detail_payload(finalized, item_limit=12))
             continue
-        serialized_item = _serialize_focus_send_batch_item(item)
-        external_contact_id = _normalized_text(serialized_item.get("external_contact_id"))
-        push_result = push_openclaw(
-            external_contact_id=external_contact_id,
+        item_result = _dispatch_focus_send_batch_item(
+            batch_id=batch_id,
+            item=item,
             operator_id=_normalized_text(operator_id) or "focus_send_runner",
+            now_text=now_text,
         )
-        accepted = bool(push_result.get("accepted"))
-        item_status = "sent" if accepted else "failed"
-        repo.update_focus_send_batch_item(
-            int(serialized_item.get("id") or 0),
-            {
-                **serialized_item,
-                "status": item_status,
-                "detail": "" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status"))),
-                "result_payload": dict(push_result or {}),
-                "updated_at": now_text,
-                "started_at": _normalized_text(serialized_item.get("started_at")) or now_text,
-                "finished_at": now_text,
-            },
-        )
-        repo.update_touch_delivery_log_status_by_source(
-            touch_surface=TOUCH_SURFACE_FOCUS_SEND,
-            source_batch_id=int(batch.get("id") or 0),
-            source_item_id=int(serialized_item.get("id") or 0),
-            external_contact_id=external_contact_id,
-            status=item_status,
-            detail="" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status"))),
-            metadata=dict(push_result or {}),
-            sent_at=now_text if accepted else "",
-            updated_at=now_text,
-        )
+        accepted = bool(item_result.get("accepted"))
         processed_count += 1
         refreshed_batch = _update_focus_batch_counters(
             batch,
@@ -416,38 +473,13 @@ def run_focus_send_job(*, batch_id: int) -> dict[str, Any]:
         item = repo.claim_next_focus_send_batch_item(batch_id=int(batch_id), started_at=now_text)
         if not item:
             break
-        serialized_item = _serialize_focus_send_batch_item(item)
-        external_contact_id = _normalized_text(serialized_item.get("external_contact_id"))
-        push_result = push_openclaw(
-            external_contact_id=external_contact_id,
+        item_result = _dispatch_focus_send_batch_item(
+            batch_id=int(batch_id),
+            item=item,
             operator_id="broadcast_worker",
+            now_text=now_text,
         )
-        accepted = bool(push_result.get("accepted"))
-        item_status = "sent" if accepted else "failed"
-        repo.update_focus_send_batch_item(
-            int(serialized_item.get("id") or 0),
-            {
-                **serialized_item,
-                "status": item_status,
-                "detail": "" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status"))),
-                "result_payload": dict(push_result or {}),
-                "updated_at": now_text,
-                "started_at": _normalized_text(serialized_item.get("started_at")) or now_text,
-                "finished_at": now_text,
-            },
-        )
-        repo.update_touch_delivery_log_status_by_source(
-            touch_surface=TOUCH_SURFACE_FOCUS_SEND,
-            source_batch_id=int(batch_id),
-            source_item_id=int(serialized_item.get("id") or 0),
-            external_contact_id=external_contact_id,
-            status=item_status,
-            detail="" if accepted else (_normalized_text(push_result.get("error")) or _normalized_text(push_result.get("status"))),
-            metadata=dict(push_result or {}),
-            sent_at=now_text if accepted else "",
-            updated_at=now_text,
-        )
-        if accepted:
+        if bool(item_result.get("accepted")):
             sent_count += 1
         else:
             failed_count += 1
@@ -462,4 +494,3 @@ def run_focus_send_job(*, batch_id: int) -> dict[str, Any]:
     )
     get_db().commit()
     return {"ok": True, "sent_count": sent_count, "failed_count": failed_count}
-

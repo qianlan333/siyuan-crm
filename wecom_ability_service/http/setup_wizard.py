@@ -1,9 +1,16 @@
 from __future__ import annotations
 
-from flask import current_app, redirect, render_template, request, url_for
+from flask import current_app, render_template, request, url_for
 
+from ..domains.admin_config import save_admin_app_settings
 from ..infra.config_schema import CONFIG_SCHEMA, build_config_checklist, validate_config
-from ..infra.settings import get_setting, mask_value, set_settings, SENSITIVE_KEYS
+from ..infra.settings import get_setting, mask_value, SENSITIVE_KEYS
+from .internal_auth import (
+    current_admin_operator,
+    ensure_admin_console_action_token,
+    require_admin_roles,
+    validate_admin_console_action_token,
+)
 
 
 def _current_setting_values() -> dict[str, str]:
@@ -26,24 +33,45 @@ def _masked_setting_values() -> dict[str, str]:
     return {k: mask_value(k, v) for k, v in raw.items()}
 
 
-def setup_wizard():
-    schema_groups = [
+def _schema_groups() -> list[dict[str, object]]:
+    return [
         {"label": group["label"], "required": group.get("required", False), "fields": group["fields"]}
         for group in CONFIG_SCHEMA.values()
     ]
+
+
+def _render_setup_wizard(*, validation_errors: list[dict[str, str]] | None = None, save_success: bool = False):
     return render_template(
         "admin_console/setup_wizard.html",
-        schema_groups=schema_groups,
+        schema_groups=_schema_groups(),
         current_values=_masked_setting_values(),
-        validation_errors=[],
-        save_success=False,
-        admin_action_token="",
+        validation_errors=validation_errors or [],
+        save_success=save_success,
+        admin_action_token=ensure_admin_console_action_token(),
     )
 
 
+@require_admin_roles("config_admin")
+def setup_wizard():
+    return _render_setup_wizard()
+
+
+@require_admin_roles("config_admin")
 def setup_wizard_save():
+    token_error = validate_admin_console_action_token()
+    if token_error:
+        return _render_setup_wizard(
+            validation_errors=[
+                {
+                    "group": "后台安全",
+                    "field": "动作令牌",
+                    "key": "admin_action_token",
+                    "error": token_error,
+                }
+            ]
+        )
     form = request.form
-    operator = form.get("operator", "").strip() or "unknown"
+    operator = form.get("operator", "").strip() or current_admin_operator()
 
     settings_to_save: dict[str, str] = {}
     for key in form:
@@ -60,34 +88,12 @@ def setup_wizard_save():
     errors = validate_config(merged)
 
     if errors:
-        schema_groups = [
-            {"label": group["label"], "required": group.get("required", False), "fields": group["fields"]}
-            for group in CONFIG_SCHEMA.values()
-        ]
-        return render_template(
-            "admin_console/setup_wizard.html",
-            schema_groups=schema_groups,
-            current_values=_masked_setting_values(),
-            validation_errors=errors,
-            save_success=False,
-            admin_action_token="",
-        )
+        return _render_setup_wizard(validation_errors=errors)
 
     if settings_to_save:
-        set_settings(settings_to_save)
+        save_admin_app_settings(settings_to_save, operator=operator)
 
-    schema_groups = [
-        {"label": group["label"], "required": group.get("required", False), "fields": group["fields"]}
-        for group in CONFIG_SCHEMA.values()
-    ]
-    return render_template(
-        "admin_console/setup_wizard.html",
-        schema_groups=schema_groups,
-        current_values=_masked_setting_values(),
-        validation_errors=[],
-        save_success=True,
-        admin_action_token="",
-    )
+    return _render_setup_wizard(save_success=True)
 
 
 def config_checklist_page():

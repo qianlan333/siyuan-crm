@@ -1,29 +1,36 @@
 from __future__ import annotations
 
-import json
-import os
 import urllib.request
 
+from scripts import internal_http
+from scripts.script_runtime import emit_json, read_app_host, read_app_port, read_internal_api_token
 
-def main() -> None:
-    host = os.getenv("APP_HOST", "127.0.0.1")
-    port = os.getenv("APP_PORT", "5000")
-    token = os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()
+
+DEFAULT_PATH = "/api/admin/automation-conversion/message-activity-sync/run"
+
+
+def run() -> str:
+    host = read_app_host()
+    port = read_app_port()
+    token = read_internal_api_token()
     payload = {
         "trigger_source": "scheduled",
         "operator": "cron_message_activity_sync",
     }
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(
-        f"http://{host}:{port}/api/admin/automation-conversion/message-activity-sync/run",
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
+    response_payload = internal_http.post_json(
+        host=host,
+        port=port,
+        token=token,
+        path=DEFAULT_PATH,
+        payload=payload,
+        timeout_seconds=180,
+        urlopen=urllib.request.urlopen,
     )
-    with urllib.request.urlopen(request, timeout=180) as response:
-        print(response.read().decode("utf-8"))
+    return emit_json(response_payload)
+
+
+def main() -> None:
+    run()
 
 
 if __name__ == "__main__":

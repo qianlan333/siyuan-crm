@@ -8,9 +8,8 @@ from zipfile import ZipFile
 
 import pytest
 
-from wecom_ability_service import create_app
 from wecom_ability_service import wecom_client as wecom_client_module
-from wecom_ability_service.db import get_db, init_db
+from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.routing_config import (
     DEFAULT_DELIVERY_ROUTE_OWNER_USERID,
     DEFAULT_SALES_ROUTE_OWNER_USERID,
@@ -2759,7 +2758,7 @@ def test_import_activation_status_from_pasted_text_updates_pool(client, app):
     )
     response = client.post(
         "/api/admin/user-ops/import-activation-status",
-        json={"pasted_text": "13800138020,已激活"},
+        json={"pasted_text": "13800138020,已激活,黄小灿回访确认"},
     )
     payload = response.get_json()
 
@@ -2783,10 +2782,21 @@ def test_import_activation_status_from_pasted_text_updates_pool(client, app):
             """,
             ("13800138020",),
         ).fetchone()
+        history_row = get_db().execute(
+            """
+            SELECT remark
+            FROM user_ops_lead_pool_history
+            WHERE mobile = ? AND action_type = 'lead_pool_activation_patch'
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            ("13800138020",),
+        ).fetchone()
 
     assert payload["matched_member_count"] == 1
     assert source_row["activation_state"] == "activated"
     assert lead_row["huangxiaocan_activation_state"] == "activated"
+    assert history_row["remark"] == "黄小灿回访确认"
 
 
 def test_import_activation_status_from_excel_updates_pool(client, app):
@@ -3875,6 +3885,7 @@ def test_owner_backfill_apply_pins_target_owner_and_audits_owner_mismatch(app, u
     assert sample["target_owner_userid"] == "ZhaoYanFang"
     assert sample["resolved_owner_userid"] == "ZhaoJingZi"
     assert sample["final_owner_userid"] == "ZhaoYanFang"
+    assert mismatch_sample["resolved_owner_userid"] == "ZhaoJingZi"
     assert current["owner_userid"] == "ZhaoYanFang"
     assert current["class_term_no"] == 1
 

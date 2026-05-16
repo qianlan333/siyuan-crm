@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from ...customer_center.repo import (
@@ -12,32 +11,21 @@ from ...customer_center.repo import (
     fetch_owner_role_map,
     list_scope_external_userids,
 )
-from ...db import get_db, get_db_backend
+from ...db import get_db
+from ...db.helpers import fetchall_dicts, fetchone_dict
+from ...infra.json_utils import safe_json_loads as _json_loads
 
 
 def _fetchall_dict(sql: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-    return [dict(row) for row in get_db().execute(sql, params).fetchall()]
+    return fetchall_dicts(get_db(), sql, params)
 
 
 def _fetchone_dict(sql: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-    row = get_db().execute(sql, params).fetchone()
-    return dict(row) if row else None
+    return fetchone_dict(get_db(), sql, params)
 
 
 def _normalized_text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = _normalized_text(value)
-    if not text:
-        return default
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
 
 
 def _dedupe_strings(values: list[str]) -> list[str]:
@@ -98,56 +86,30 @@ def _find_external_userid_by_mobile(mobile: str) -> str:
     normalized_mobile = _normalized_text(mobile)
     if not normalized_mobile:
         return ""
-    if get_db_backend() == "postgres":
-        sql = """
-        SELECT external_userid
-        FROM (
-            SELECT b.external_userid, COALESCE(b.updated_at::text, b.created_at::text, '') AS ordering_value
-            FROM external_contact_bindings b
-            INNER JOIN people p ON p.id = b.person_id
-            WHERE p.mobile = ?
+    sql = """
+    SELECT external_userid
+    FROM (
+        SELECT b.external_userid, COALESCE(b.updated_at::text, b.created_at::text, '') AS ordering_value
+        FROM external_contact_bindings b
+        INNER JOIN people p ON p.id = b.person_id
+        WHERE p.mobile = ?
 
-            UNION ALL
+        UNION ALL
 
-            SELECT external_userid, COALESCE(updated_at::text, created_at::text, '') AS ordering_value
-            FROM class_user_status_current
-            WHERE mobile_snapshot = ?
+        SELECT external_userid, COALESCE(updated_at::text, created_at::text, '') AS ordering_value
+        FROM class_user_status_current
+        WHERE mobile_snapshot = ?
 
-            UNION ALL
+        UNION ALL
 
-            SELECT external_userid, COALESCE(submitted_at::text, '') AS ordering_value
-            FROM questionnaire_submissions
-            WHERE mobile_snapshot = ? AND external_userid IS NOT NULL AND external_userid <> ''
-        ) candidates
-        WHERE external_userid IS NOT NULL AND external_userid <> ''
-        ORDER BY ordering_value DESC, external_userid ASC
-        LIMIT 1
-        """
-    else:
-        sql = """
-        SELECT external_userid
-        FROM (
-            SELECT b.external_userid, COALESCE(b.updated_at::text, b.created_at::text, '') AS ordering_value
-            FROM external_contact_bindings b
-            INNER JOIN people p ON p.id = b.person_id
-            WHERE p.mobile = ?
-
-            UNION ALL
-
-            SELECT external_userid, COALESCE(updated_at::text, created_at::text, '') AS ordering_value
-            FROM class_user_status_current
-            WHERE mobile_snapshot = ?
-
-            UNION ALL
-
-            SELECT external_userid, COALESCE(submitted_at::text, \'\') AS ordering_value
-            FROM questionnaire_submissions
-            WHERE mobile_snapshot = ? AND external_userid IS NOT NULL AND external_userid <> ''
-        ) candidates
-        WHERE external_userid IS NOT NULL AND external_userid <> ''
-        ORDER BY ordering_value DESC, external_userid ASC
-        LIMIT 1
-        """
+        SELECT external_userid, COALESCE(submitted_at::text, '') AS ordering_value
+        FROM questionnaire_submissions
+        WHERE mobile_snapshot = ? AND external_userid IS NOT NULL AND external_userid <> ''
+    ) candidates
+    WHERE external_userid IS NOT NULL AND external_userid <> ''
+    ORDER BY ordering_value DESC, external_userid ASC
+    LIMIT 1
+    """
     row = _fetchone_dict(
         sql,
         (normalized_mobile, normalized_mobile, normalized_mobile),

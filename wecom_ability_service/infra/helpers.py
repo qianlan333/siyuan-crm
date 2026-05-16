@@ -7,9 +7,7 @@ from typing import Any
 def db_bool(value: bool) -> bool:
     """传给 PG BOOLEAN 字段的值。
 
-    历史上需要 ``bool`` (PG) / ``int`` (SQLite) 双语义，2026-05 砍 SQLite 后统一
-    返回 Python bool。callers 不需要改 — 行为兼容（True/False 在 SQLite TEXT 也
-    能写入，虽然现在用不上了）。
+    历史上调用方需要自己处理跨库布尔值；2026-05 统一 PG 后这里固定返回 Python bool。
     """
     return bool(value)
 

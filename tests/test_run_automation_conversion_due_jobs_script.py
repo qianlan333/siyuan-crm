@@ -33,13 +33,20 @@ class _FakeResponse:
 
 def test_run_automation_conversion_due_jobs_posts_registered_endpoint(monkeypatch, capsys):
     module = _load_script_module()
-    captured: dict[str, object] = {}
+    captured: list[dict[str, object]] = []
 
     def fake_urlopen(request, timeout):
-        captured["url"] = request.full_url
-        captured["timeout"] = timeout
-        captured["headers"] = {key.lower(): value for key, value in request.header_items()}
-        captured["body"] = json.loads(request.data.decode("utf-8"))
+        body = json.loads(request.data.decode("utf-8"))
+        captured.append(
+            {
+                "url": request.full_url,
+                "timeout": timeout,
+                "headers": {key.lower(): value for key, value in request.header_items()},
+                "body": body,
+            }
+        )
+        if body.get("jobs") == ["sop"]:
+            return _FakeResponse(b'{"ok": true, "created_batch_count": 1, "batch_ids": [5]}')
         return _FakeResponse(b'{"ok": true, "total_success_count": 7, "batch_ids": [9]}')
 
     monkeypatch.setenv("APP_HOST", "automation.local")
@@ -49,26 +56,41 @@ def test_run_automation_conversion_due_jobs_posts_registered_endpoint(monkeypatc
 
     body = module.run()
 
-    assert captured["url"] == "http://automation.local:5001/api/admin/automation-conversion/jobs/run-due"
-    assert captured["timeout"] == 180
-    assert captured["headers"]["authorization"] == "Bearer runner-token"
-    assert captured["body"] == {"operator": "automation_conversion_due_runner", "jobs": ["conversion_workflow"]}
+    assert [item["url"] for item in captured] == [
+        "http://automation.local:5001/api/admin/automation-conversion/jobs/run-due",
+        "http://automation.local:5001/api/admin/automation-conversion/jobs/run-due",
+    ]
+    assert [item["timeout"] for item in captured] == [180, 180]
+    assert [item["headers"]["authorization"] for item in captured] == [
+        "Bearer runner-token",
+        "Bearer runner-token",
+    ]
+    assert [item["body"] for item in captured] == [
+        {"operator": "automation_conversion_due_runner", "jobs": ["sop"]},
+        {"operator": "automation_conversion_due_runner", "jobs": ["conversion_workflow"]},
+    ]
     assert json.loads(body) == {
         "ok": True,
-        "requested_job_codes": ["conversion_workflow"],
-        "executed_job_count": 1,
+        "requested_job_codes": ["sop", "conversion_workflow"],
+        "executed_job_count": 2,
         "failed_job_count": 0,
         "total_success_count": 7,
         "total_skipped_count": 0,
         "total_failed_count": 0,
-        "batch_ids": [9],
+        "batch_ids": [5, 9],
         "jobs": [
+            {
+                "job_code": "sop",
+                "label": "自动化转化 SOP",
+                "ok": True,
+                "result": {"ok": True, "created_batch_count": 1, "batch_ids": [5]},
+            },
             {
                 "job_code": "conversion_workflow",
                 "label": "自动化转化任务流",
                 "ok": True,
                 "result": {"ok": True, "total_success_count": 7, "batch_ids": [9]},
-            }
+            },
         ],
     }
     assert json.loads(capsys.readouterr().out.strip())["total_success_count"] == 7

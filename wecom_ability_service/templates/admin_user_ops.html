@@ -753,7 +753,7 @@
                 <button id="pick-batch-images-btn" class="btn soft" type="button">添加图片</button>
               </div>
             </div>
-            <input id="batch-image-input" class="image-input-hidden" type="file" accept="image/*" multiple>
+            <input id="batch-image-input" class="image-input-hidden" type="file" accept="image/png,image/jpeg" multiple>
             <div id="batch-image-list" class="image-thumb-list">
               <div class="table-empty">暂未添加图片</div>
             </div>
@@ -831,7 +831,13 @@
       huangxiaocan_not_activated_count: { wecom_status: 'all', mobile_binding_status: 'all', activation_bucket: 'not_activated' },
     };
     const MAX_BATCH_IMAGES = 3;
-    const MAX_BATCH_IMAGE_SIZE_BYTES = 5 * 1024 * 1024;
+    const MAX_BATCH_IMAGE_SIZE_BYTES = 2 * 1024 * 1024;
+
+    function isSupportedWeComImage(file) {
+      const type = String(file && file.type || '').toLowerCase();
+      if (type === 'image/jpeg' || type === 'image/jpg' || type === 'image/png') return true;
+      return /\.(jpe?g|png)$/i.test(String(file && file.name || ''));
+    }
 
     const state = {
       activeCardKey: 'lead_pool_total_count',
@@ -1629,9 +1635,15 @@
           els.batchSendStatus.className = 'status-line error';
           return;
         }
+        const unsupportedFile = files.find((file) => !isSupportedWeComImage(file));
+        if (unsupportedFile) {
+          els.batchSendStatus.textContent = '只能选择 JPG/PNG 图片';
+          els.batchSendStatus.className = 'status-line error';
+          return;
+        }
         const oversizedFile = files.find((file) => Number(file.size || 0) > MAX_BATCH_IMAGE_SIZE_BYTES);
         if (oversizedFile) {
-          els.batchSendStatus.textContent = '图片大小不能超过 5MB';
+          els.batchSendStatus.textContent = '图片大小不能超过 2MB';
           els.batchSendStatus.className = 'status-line error';
           return;
         }

@@ -67,8 +67,8 @@ AI-CRM/
   - 客户时间线聚合读逻辑
 - [`wecom_ability_service/mcp_adapter.py`](../wecom_ability_service/mcp_adapter.py)
   - MCP 工具入口
-- [`wecom_ability_service/db.py`](../wecom_ability_service/db.py)
-  - SQLite / PostgreSQL 适配与初始化
+- [`wecom_ability_service/db/`](../wecom_ability_service/db)
+  - PostgreSQL 连接、schema 初始化与迁移补齐
 
 ## `openclaw_service/`
 

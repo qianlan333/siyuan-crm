@@ -11,13 +11,12 @@ import json
 import logging
 import re
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 from ...db import get_db
 from .sql_sandbox import (
     SqlSandboxError,
-    fetch_member_ids,
     run_segment_query,
     validate_segment_sql,
 )
@@ -37,7 +36,7 @@ def _normalize_code(code: str) -> str:
 
 
 def _now_iso() -> str:
-    return datetime.utcnow().isoformat()
+    return datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
 
 
 def list_segments(

@@ -10,6 +10,7 @@ from .service import (
     DEFAULT_SCENARIO_KEY,
     DEFAULT_TOP_THRESHOLD,
     VALUE_SEGMENT_SCORING_VERSION,
+    _HIGH_INTENT_TAG_KEYWORDS,
     _VALUE_SEGMENT_LABELS,
     _json_loads,
     _normalize_int,
@@ -411,6 +412,5 @@ def _persist_value_segment(base: dict[str, Any], *, scenario_key: str, config: d
     row["is_core"] = _normalized_text(row.get("value_segment")) in {"core", "top"}
     row["is_top"] = _normalized_text(row.get("value_segment")) == "top"
     return row
-
 
 

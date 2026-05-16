@@ -8,11 +8,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ._repo_helpers import (  # noqa: F401
     _fetchone_dict,
     _json_dumps,
     _normalized_text,
+    _normalized_text_list,
+    _placeholders,
 )
 
 
@@ -22,13 +24,12 @@ def get_latest_questionnaire_submission_for_value_segment(
     external_userids: list[str] | None = None,
     mobile_snapshot: str = "",
 ) -> dict[str, Any] | None:
-    normalized_external_userids = [_normalized_text(item) for item in external_userids or [] if _normalized_text(item)]
+    normalized_external_userids = _normalized_text_list(external_userids)
     normalized_mobile = _normalized_text(mobile_snapshot)
     filters: list[str] = []
     params: list[Any] = [int(questionnaire_id)]
     if normalized_external_userids:
-        placeholders = ",".join("?" for _ in normalized_external_userids)
-        filters.append(f"external_userid IN ({placeholders})")
+        filters.append(f"external_userid IN ({_placeholders(normalized_external_userids)})")
         params.extend(normalized_external_userids)
     if normalized_mobile:
         filters.append("mobile_snapshot = ?")
@@ -85,76 +86,40 @@ def upsert_customer_value_segment_current(
         _json_dumps(source_payload),
         _normalized_text(evaluated_at),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO customer_value_segment_current (
-                external_userid,
-                segment,
-                segment_rank,
-                score,
-                scoring_version,
-                computed_reason,
-                submission_id,
-                matched_question_ids_json,
-                source_payload_json,
-                evaluated_at,
-                computed_at,
-                created_at,
-                updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::timestamptz, %s::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (external_userid) DO UPDATE SET
-                segment = EXCLUDED.segment,
-                segment_rank = EXCLUDED.segment_rank,
-                score = EXCLUDED.score,
-                scoring_version = EXCLUDED.scoring_version,
-                computed_reason = EXCLUDED.computed_reason,
-                submission_id = EXCLUDED.submission_id,
-                matched_question_ids_json = EXCLUDED.matched_question_ids_json,
-                source_payload_json = EXCLUDED.source_payload_json,
-                evaluated_at = EXCLUDED.evaluated_at,
-                computed_at = EXCLUDED.computed_at,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params + (_normalized_text(evaluated_at),),
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO customer_value_segment_current (
-                external_userid,
-                segment,
-                segment_rank,
-                score,
-                scoring_version,
-                computed_reason,
-                submission_id,
-                matched_question_ids_json,
-                source_payload_json,
-                evaluated_at,
-                computed_at,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (external_userid) DO UPDATE SET
-                segment = excluded.segment,
-                segment_rank = excluded.segment_rank,
-                score = excluded.score,
-                scoring_version = excluded.scoring_version,
-                computed_reason = excluded.computed_reason,
-                submission_id = excluded.submission_id,
-                matched_question_ids_json = excluded.matched_question_ids_json,
-                source_payload_json = excluded.source_payload_json,
-                evaluated_at = excluded.evaluated_at,
-                computed_at = excluded.computed_at,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params + (_normalized_text(evaluated_at),),
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO customer_value_segment_current (
+            external_userid,
+            segment,
+            segment_rank,
+            score,
+            scoring_version,
+            computed_reason,
+            submission_id,
+            matched_question_ids_json,
+            source_payload_json,
+            evaluated_at,
+            computed_at,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::timestamptz, ?::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (external_userid) DO UPDATE SET
+            segment = EXCLUDED.segment,
+            segment_rank = EXCLUDED.segment_rank,
+            score = EXCLUDED.score,
+            scoring_version = EXCLUDED.scoring_version,
+            computed_reason = EXCLUDED.computed_reason,
+            submission_id = EXCLUDED.submission_id,
+            matched_question_ids_json = EXCLUDED.matched_question_ids_json,
+            source_payload_json = EXCLUDED.source_payload_json,
+            evaluated_at = EXCLUDED.evaluated_at,
+            computed_at = EXCLUDED.computed_at,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        params + (_normalized_text(evaluated_at),),
+    ).fetchone()
     return dict(row) if row else {}
 
 
@@ -184,50 +149,27 @@ def insert_customer_value_segment_history(
         _json_dumps(source_payload),
         _normalized_text(evaluated_at),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO customer_value_segment_history (
-                external_userid,
-                segment,
-                segment_rank,
-                score,
-                scoring_version,
-                change_reason,
-                submission_id,
-                matched_question_ids_json,
-                source_payload_json,
-                evaluated_at,
-                recorded_at,
-                created_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::timestamptz, %s::timestamptz, CURRENT_TIMESTAMP)
-            RETURNING *
-            """,
-            params + (_normalized_text(evaluated_at),),
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO customer_value_segment_history (
-                external_userid,
-                segment,
-                segment_rank,
-                score,
-                scoring_version,
-                change_reason,
-                submission_id,
-                matched_question_ids_json,
-                source_payload_json,
-                evaluated_at,
-                recorded_at,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            RETURNING *
-            """,
-            params + (_normalized_text(evaluated_at),),
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO customer_value_segment_history (
+            external_userid,
+            segment,
+            segment_rank,
+            score,
+            scoring_version,
+            change_reason,
+            submission_id,
+            matched_question_ids_json,
+            source_payload_json,
+            evaluated_at,
+            recorded_at,
+            created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?::timestamptz, ?::timestamptz, CURRENT_TIMESTAMP)
+        RETURNING *
+        """,
+        params + (_normalized_text(evaluated_at),),
+    ).fetchone()
     return dict(row) if row else {}
 
 
@@ -274,54 +216,29 @@ def upsert_marketing_value_segment_current(
         _json_dumps(score_breakdown),
         _json_dumps(source_payload),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO marketing_value_segment_current (
-                scenario_key,
-                external_userid,
-                value_segment,
-                segment_label,
-                score,
-                score_breakdown_json,
-                source_payload_json
-            )
-            VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb)
-            ON CONFLICT (scenario_key, external_userid) DO UPDATE SET
-                value_segment = EXCLUDED.value_segment,
-                segment_label = EXCLUDED.segment_label,
-                score = EXCLUDED.score,
-                score_breakdown_json = EXCLUDED.score_breakdown_json,
-                source_payload_json = EXCLUDED.source_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO marketing_value_segment_current (
-                scenario_key,
-                external_userid,
-                value_segment,
-                segment_label,
-                score,
-                score_breakdown_json,
-                source_payload_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (scenario_key, external_userid) DO UPDATE SET
-                value_segment = excluded.value_segment,
-                segment_label = excluded.segment_label,
-                score = excluded.score,
-                score_breakdown_json = excluded.score_breakdown_json,
-                source_payload_json = excluded.source_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO marketing_value_segment_current (
+            scenario_key,
+            external_userid,
+            value_segment,
+            segment_label,
+            score,
+            score_breakdown_json,
+            source_payload_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+        ON CONFLICT (scenario_key, external_userid) DO UPDATE SET
+            value_segment = EXCLUDED.value_segment,
+            segment_label = EXCLUDED.segment_label,
+            score = EXCLUDED.score,
+            score_breakdown_json = EXCLUDED.score_breakdown_json,
+            source_payload_json = EXCLUDED.source_payload_json,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        params,
+    ).fetchone()
     db.commit()
     return dict(row) if row else {}
 

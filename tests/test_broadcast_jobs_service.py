@@ -11,26 +11,15 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import init_db
 from wecom_ability_service.domains.broadcast_jobs import service as queue_service
 
 
 @pytest.fixture()
 def app(tmp_path):
-    db_path = tmp_path / "test.sqlite3"
-    app = create_app(
-        {
-            "TESTING": True,
-            "DATABASE_PATH": str(db_path),
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-        }
-    )
-    with app.app_context():
-        init_db()
-    yield app
+    from tests.conftest import build_pg_test_app
+
+    with build_pg_test_app(tmp_path) as app:
+        yield app
 
 
 def _enqueue(
@@ -81,6 +70,28 @@ def test_enqueue_rejects_empty_targets(app):
     with app.app_context():
         with pytest.raises(ValueError, match="target_external_userids"):
             _enqueue(target_users=())
+
+
+def test_enqueue_allows_empty_targets_when_handler_resolves_later(app):
+    with app.app_context():
+        job_id = queue_service.enqueue_job(
+            source_type="workflow",
+            source_id="pre-scheduled-workflow-1",
+            source_table="automation_workflow_executions",
+            scheduled_for=datetime.now(timezone.utc),
+            target_external_userids=[],
+            target_summary="workflow node=1 — ~12 人",
+            content_type="private_message",
+            content_payload={"workflow_id": 1, "node_id": 1, "pre_scheduled": True},
+            content_summary="明日任务流",
+            allow_empty_targets=True,
+        )
+        job = queue_service.get_job(job_id)
+
+    assert job is not None
+    assert job["target_count"] == 0
+    assert job["target_external_userids"] == []
+    assert job["target_summary"] == "workflow node=1 — ~12 人"
 
 
 def test_enqueue_rejects_invalid_source_type(app):

@@ -165,6 +165,165 @@ def get_workflow_row_by_code(workflow_code: str) -> dict[str, Any] | None:
     return _serialize_workflow_row(row) if row else None
 
 
+def _serialize_operation_template_row(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return {}
+    return {
+        "id": int(row.get("id") or 0),
+        "template_code": _normalized_text(row.get("template_code")),
+        "template_name": _normalized_text(row.get("template_name")),
+        "template_source": _normalized_text(row.get("template_source")) or "crm_local",
+        "category": _normalized_text(row.get("category")),
+        "description": _normalized_text(row.get("description")),
+        "status": _normalized_text(row.get("status")) or "active",
+        "default_config": _json_loads(row.get("default_config_json"), default={}),
+        "ui_schema": _json_loads(row.get("ui_schema_json"), default={}),
+        "workflow_blueprint": _json_loads(row.get("workflow_blueprint_json"), default={}),
+        "node_blueprints": _json_loads(row.get("node_blueprints_json"), default=[]),
+        "created_by": _normalized_text(row.get("created_by")),
+        "updated_by": _normalized_text(row.get("updated_by")),
+        "created_at": _normalized_text(row.get("created_at")),
+        "updated_at": _normalized_text(row.get("updated_at")),
+        "archived_at": _normalized_text(row.get("archived_at")),
+    }
+
+
+def list_operation_template_rows(
+    *,
+    template_source: str = "",
+    category: str = "",
+    keyword: str = "",
+    include_archived: bool = False,
+) -> list[dict[str, Any]]:
+    sql = """
+        SELECT *
+        FROM automation_operation_templates
+        WHERE 1 = 1
+    """
+    params: list[Any] = []
+    if not include_archived:
+        sql += " AND status <> ?"
+        params.append("archived")
+    if _normalized_text(template_source):
+        sql += " AND template_source = ?"
+        params.append(_normalized_text(template_source))
+    if _normalized_text(category):
+        sql += " AND category = ?"
+        params.append(_normalized_text(category))
+    normalized_keyword = _normalized_text(keyword)
+    if normalized_keyword:
+        sql += " AND (template_name ILIKE ? OR description ILIKE ? OR category ILIKE ?)"
+        like_keyword = f"%{normalized_keyword}%"
+        params.extend([like_keyword, like_keyword, like_keyword])
+    sql += " ORDER BY updated_at DESC, id DESC"
+    return [_serialize_operation_template_row(row) for row in _fetchall_dicts(sql, tuple(params))]
+
+
+def get_operation_template_row(template_id: int) -> dict[str, Any] | None:
+    row = _fetchone_dict(
+        """
+        SELECT *
+        FROM automation_operation_templates
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (int(template_id),),
+    )
+    return _serialize_operation_template_row(row) if row else None
+
+
+def get_operation_template_row_by_code(template_code: str) -> dict[str, Any] | None:
+    row = _fetchone_dict(
+        """
+        SELECT *
+        FROM automation_operation_templates
+        WHERE template_code = ?
+        LIMIT 1
+        """,
+        (_normalized_text(template_code),),
+    )
+    return _serialize_operation_template_row(row) if row else None
+
+
+def insert_operation_template_row(payload: dict[str, Any]) -> dict[str, Any]:
+    row = get_db().execute(
+        """
+        INSERT INTO automation_operation_templates (
+            template_code,
+            template_name,
+            template_source,
+            category,
+            description,
+            status,
+            default_config_json,
+            ui_schema_json,
+            workflow_blueprint_json,
+            node_blueprints_json,
+            created_by,
+            updated_by,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        RETURNING *
+        """,
+        (
+            _normalized_text(payload.get("template_code")),
+            _normalized_text(payload.get("template_name")),
+            _normalized_text(payload.get("template_source")) or "crm_local",
+            _normalized_text(payload.get("category")),
+            _normalized_text(payload.get("description")),
+            _normalized_text(payload.get("status")) or "active",
+            json.dumps(payload.get("default_config_json") or payload.get("default_config") or {}, ensure_ascii=False),
+            json.dumps(payload.get("ui_schema_json") or payload.get("ui_schema") or {}, ensure_ascii=False),
+            json.dumps(payload.get("workflow_blueprint_json") or payload.get("workflow_blueprint") or {}, ensure_ascii=False),
+            json.dumps(payload.get("node_blueprints_json") or payload.get("node_blueprints") or [], ensure_ascii=False),
+            _normalized_text(payload.get("created_by")),
+            _normalized_text(payload.get("updated_by")),
+        ),
+    ).fetchone()
+    return _serialize_operation_template_row(dict(row) if row else {})
+
+
+def update_operation_template_row(template_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+    row = get_db().execute(
+        """
+        UPDATE automation_operation_templates
+        SET template_code = ?,
+            template_name = ?,
+            template_source = ?,
+            category = ?,
+            description = ?,
+            status = ?,
+            default_config_json = ?,
+            ui_schema_json = ?,
+            workflow_blueprint_json = ?,
+            node_blueprints_json = ?,
+            updated_by = ?,
+            updated_at = CURRENT_TIMESTAMP,
+            archived_at = CASE WHEN ? = 'archived' AND archived_at IS NULL THEN CURRENT_TIMESTAMP ELSE archived_at END
+        WHERE id = ?
+        RETURNING *
+        """,
+        (
+            _normalized_text(payload.get("template_code")),
+            _normalized_text(payload.get("template_name")),
+            _normalized_text(payload.get("template_source")) or "crm_local",
+            _normalized_text(payload.get("category")),
+            _normalized_text(payload.get("description")),
+            _normalized_text(payload.get("status")) or "active",
+            json.dumps(payload.get("default_config_json") or payload.get("default_config") or {}, ensure_ascii=False),
+            json.dumps(payload.get("ui_schema_json") or payload.get("ui_schema") or {}, ensure_ascii=False),
+            json.dumps(payload.get("workflow_blueprint_json") or payload.get("workflow_blueprint") or {}, ensure_ascii=False),
+            json.dumps(payload.get("node_blueprints_json") or payload.get("node_blueprints") or [], ensure_ascii=False),
+            _normalized_text(payload.get("updated_by")),
+            _normalized_text(payload.get("status")) or "active",
+            int(template_id),
+        ),
+    ).fetchone()
+    return _serialize_operation_template_row(dict(row) if row else {})
+
+
 def insert_workflow_row(payload: dict[str, Any]) -> dict[str, Any]:
     row = get_db().execute(
         """

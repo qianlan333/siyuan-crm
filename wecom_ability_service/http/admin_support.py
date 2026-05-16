@@ -36,10 +36,10 @@ from ..application.identity_contact.dto import (
 from ..application.identity_contact.queries import (
     GetPrimaryFollowUserUseridQuery,
 )
+from ..application.questionnaire.queries import ListAvailableWeComTagsQuery
 from ..domains.contacts.repo import upsert_contacts
 from ..domains.contacts.service import normalize_contact_record
 from ..domains.marketing_automation.service import mark_enrolled, unmark_enrolled
-from ..domains.questionnaire.service import list_available_wecom_tags
 from ..domains.tags.repo import (
     list_signup_tag_rules,
     remove_tag_snapshot,
@@ -194,10 +194,13 @@ def _normalize_jssdk_url(value: str) -> str:
     return normalized.split("#", 1)[0]
 
 
+def _list_available_wecom_tags() -> list[dict[str, object]]:
+    return ListAvailableWeComTagsQuery()()
+
 
 def _signup_tag_bootstrap_payload() -> dict[str, object]:
     definitions = get_signup_status_definitions()
-    tag_items = list_available_wecom_tags()
+    tag_items = _list_available_wecom_tags()
     target_group_name = "AI 产品报名情况"
     existing_by_name = {
         str(item.get("tag_name") or "").strip(): item
@@ -221,7 +224,7 @@ def _signup_tag_bootstrap_payload() -> dict[str, object]:
             }
         client.create_tag(payload)
         created_names = [item["tag_name"] for item in missing_definitions] if existing_by_name else [item["tag_name"] for item in definitions]
-        tag_items = list_available_wecom_tags()
+        tag_items = _list_available_wecom_tags()
         existing_by_name = {
             str(item.get("tag_name") or "").strip(): item
             for item in tag_items

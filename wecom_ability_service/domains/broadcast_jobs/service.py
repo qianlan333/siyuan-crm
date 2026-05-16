@@ -6,13 +6,13 @@ from typing import Any
 from . import repo
 
 
-def _ensure_target_users(target_external_userids: list[str]) -> list[str]:
+def _ensure_target_users(target_external_userids: list[str], *, allow_empty_targets: bool = False) -> list[str]:
     cleaned: list[str] = []
     for uid in target_external_userids or []:
         text = str(uid or "").strip()
         if text:
             cleaned.append(text)
-    if not cleaned:
+    if not cleaned and not bool(allow_empty_targets):
         raise ValueError("target_external_userids is empty")
     return cleaned
 
@@ -33,8 +33,9 @@ def enqueue_job(
     requires_approval: bool = False,
     trace_id: str = "",
     created_by: str = "",
+    allow_empty_targets: bool = False,
 ) -> int:
-    targets = _ensure_target_users(target_external_userids)
+    targets = _ensure_target_users(target_external_userids, allow_empty_targets=allow_empty_targets)
     status = "waiting_approval" if requires_approval else "queued"
     return repo.insert_job(
         source_type=source_type,

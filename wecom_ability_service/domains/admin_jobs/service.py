@@ -25,7 +25,6 @@ from ...http.sync_jobs import run_archive_health_check, run_manual_archive_sync
 from ...infra.settings import get_setting
 from ...services import get_message_batch
 from ...wecom_callback import get_callback_config
-from ..admin_config import repo as admin_config_repo
 from ..archive.service import ack_message_batch, get_last_sync_run
 from . import repo
 

@@ -123,3 +123,11 @@ def test_services_questionnaire_symbols_route_through_application_wrappers():
     ]
     for fragment in forbidden_fragments:
         assert fragment not in source, f"services.py must not regress to direct questionnaire legacy delegation: {fragment}"
+
+
+def test_admin_support_questionnaire_tag_lookup_uses_application_query():
+    admin_support_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "http" / "admin_support.py"
+    source = admin_support_path.read_text(encoding="utf-8")
+
+    assert "ListAvailableWeComTagsQuery" in source
+    assert "from ..domains.questionnaire.service import list_available_wecom_tags" not in source

@@ -2,16 +2,12 @@
 
 Source: `wecom_ability_service.create_app({'TESTING': True}).url_map.iter_rules()`
 
-Route rows: `348`
+Route rows: `384`
 
 | Rule | Methods | Endpoint | Arguments | Auth hint | Module hint |
 | --- | --- | --- | --- | --- | --- |
 | `/<path:filename>` | `GET` | `api.serve_root_verification_file` | `filename` | `public_or_entry` | `wecom_ability_service.http.ops` |
 | `/admin` | `GET` | `api.admin_console_home` | `` | `admin_session` | `wecom_ability_service.http.admin_console` |
-| `/admin/_legacy/class-user-backoffice` | `GET` | `api.admin_console_legacy_class_user_backoffice` | `` | `admin_session` | `wecom_ability_service.http.admin_console` |
-| `/admin/_legacy/class-user-management` | `GET` | `api.admin_console_legacy_class_user_management` | `` | `admin_session` | `wecom_ability_service.http.admin_console` |
-| `/admin/_legacy/questionnaires` | `GET` | `api.admin_console_legacy_questionnaires` | `` | `admin_session` | `wecom_ability_service.http.admin_console` |
-| `/admin/_legacy/user-ops` | `GET` | `api.admin_console_legacy_user_ops` | `` | `admin_session` | `wecom_ability_service.http.admin_console` |
 | `/admin/api-docs` | `GET` | `api.admin_console_api_docs` | `` | `admin_session` | `wecom_ability_service.http.admin_api_docs` |
 | `/admin/audit` | `GET` | `api.admin_audit_logs` | `` | `admin_session` | `wecom_ability_service.http.admin_audit` |
 | `/admin/automation-conversion` | `GET` | `api.admin_automation_conversion` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
@@ -31,6 +27,7 @@ Route rows: `348`
 | `/admin/automation-conversion/programs/<int:program_id>/member-ops` | `GET` | `api.admin_automation_program_member_ops` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/programs/<int:program_id>/member-ops/stage/<stage_key>/send` | `POST` | `api.admin_automation_program_member_ops_stage_send` | `program_id, stage_key` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/programs/<int:program_id>/operations` | `GET` | `api.admin_automation_program_operations` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/admin/automation-conversion/programs/<int:program_id>/operations/workflows` | `GET` | `api.admin_automation_program_workflows` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/programs/<int:program_id>/operations/workflows/<int:workflow_id>/edit` | `GET` | `api.admin_automation_program_workflow_edit` | `program_id, workflow_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/programs/<int:program_id>/operations/workflows/<int:workflow_id>/nodes` | `GET` | `api.admin_automation_program_workflow_nodes` | `program_id, workflow_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/programs/<int:program_id>/operations/workflows/new` | `GET` | `api.admin_automation_program_workflow_new` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
@@ -50,38 +47,37 @@ Route rows: `348`
 | `/admin/automation-conversion/shared/agents` | `GET` | `api.admin_automation_conversion_shared_agents` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/shared/model-infra` | `GET` | `api.admin_automation_conversion_shared_model_infra` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/admin/automation-conversion/shared/profile-segments` | `GET` | `api.admin_automation_conversion_shared_profile_segments` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
-| `/admin/class-user-backoffice/ui` | `GET` | `api.admin_class_user_backoffice_ui` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
+| `/admin/broadcast-jobs` | `GET` | `api.admin_console_broadcast_jobs` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
 | `/admin/class-user-management/ui` | `GET` | `api.admin_class_user_management_ui` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
 | `/admin/class-users` | `GET` | `api.admin_console_class_users` | `` | `admin_session` | `wecom_ability_service.http.admin_operations` |
+| `/admin/cloud-orchestrator` | `GET` | `api.admin_cloud_orchestrator_workspace` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/admin/cloud-orchestrator/campaigns` | `GET` | `api.admin_cloud_orchestrator_campaigns_workspace` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/admin/cloud-orchestrator/integration` | `GET` | `api.admin_cloud_orchestrator_integration` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/admin/cloud-orchestrator/observability` | `GET` | `api.admin_cloud_orchestrator_observability` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
 | `/admin/config` | `GET` | `api.admin_config_home` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/config/app-settings` | `GET` | `api.admin_config_app_settings` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/config/app-settings/save` | `POST` | `api.admin_config_save_app_settings` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/class-term-tags` | `GET` | `api.admin_config_class_term_tags` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/class-term-tags/save` | `POST` | `api.admin_config_save_class_term_tag` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
+| `/admin/config/checklist` | `GET` | `api.config_checklist_page` | `` | `admin_session` | `wecom_ability_service.http.setup_wizard` |
 | `/admin/config/login-access` | `GET` | `api.admin_config_login_access` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
+| `/admin/config/login-access/directory/refresh` | `POST` | `api.admin_config_refresh_login_access_directory` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/config/login-access/save` | `POST` | `api.admin_config_save_login_access` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/config/mcp-tools` | `GET` | `api.admin_config_mcp_tools` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/config/mcp-tools/save` | `POST` | `api.admin_config_save_mcp_tool` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/routing` | `GET` | `api.admin_config_routing` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/routing/owner-role` | `POST` | `api.admin_config_save_owner_role` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/routing/rule` | `POST` | `api.admin_config_save_routing_rule` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/signup-tags` | `GET` | `api.admin_config_signup_tags` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/config/signup-tags/save` | `POST` | `api.admin_config_save_signup_tag` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/admin/customer-pulse` | `GET` | `api.admin_customer_pulse_inbox` | `` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/admin/customer-pulse/actions/refresh` | `POST` | `api.admin_customer_pulse_refresh_action` | `` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/admin/customer-pulse/cards/<int:card_id>/actions/execute` | `POST` | `api.admin_customer_pulse_card_execute_action` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/admin/customer-pulse/cards/<int:card_id>/feedback` | `POST` | `api.admin_customer_pulse_card_feedback_action` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
+| `/admin/config/wecom-tags` | `GET` | `api.admin_config_wecom_tags_redirect` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/customers` | `GET` | `api.admin_console_customers` | `` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/admin/customers/<external_userid>` | `GET` | `api.admin_console_customer_detail` | `external_userid` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/admin/customers/<external_userid>/tags` | `POST` | `api.admin_console_customer_tag_action` | `external_userid` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/admin/customers/<external_userid>/tasks` | `POST` | `api.admin_console_customer_task_action` | `external_userid` | `admin_session` | `wecom_ability_service.http.admin_customers` |
-| `/admin/followup-orchestrator` | `GET` | `api.admin_followup_orchestrator` | `` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
+| `/admin/hxc-dashboard` | `GET` | `api.admin_hxc_dashboard_workspace` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/admin/hxc-send-config` | `GET` | `api.admin_hxc_send_config_page` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/admin/image-library` | `GET` | `api.admin_image_library_workspace` | `` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
 | `/admin/jobs` | `GET` | `api.admin_console_jobs` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
 | `/admin/jobs/actions` | `POST` | `api.admin_console_jobs_action` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
 | `/admin/marketing-automation/ui` | `GET` | `api.admin_marketing_automation_ui` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/admin/mcp` | `GET` | `api.admin_console_mcp` | `` | `admin_session` | `wecom_ability_service.http.admin_mcp` |
 | `/admin/mcp/preflight` | `POST` | `api.admin_console_mcp` | `` | `admin_session` | `wecom_ability_service.http.admin_mcp` |
 | `/admin/mcp/sample-call` | `POST` | `api.admin_console_mcp` | `` | `admin_session` | `wecom_ability_service.http.admin_mcp` |
+| `/admin/miniprogram-library` | `GET` | `api.admin_miniprogram_library_workspace` | `` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
 | `/admin/questionnaires` | `GET` | `api.admin_console_questionnaires` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaire_console` |
 | `/admin/questionnaires/<int:questionnaire_id>` | `GET` | `api.admin_console_questionnaire_detail` | `questionnaire_id` | `admin_session` | `wecom_ability_service.http.admin_questionnaire_console` |
 | `/admin/questionnaires/<int:questionnaire_id>/external-push-logs` | `GET` | `api.admin_console_questionnaire_external_push_logs` | `questionnaire_id` | `admin_session` | `wecom_ability_service.http.admin_questionnaire_console` |
@@ -94,11 +90,16 @@ Route rows: `348`
 | `/admin/questionnaires/external-push-logs/retry-batch` | `POST` | `api.admin_console_global_questionnaire_external_push_logs_retry_batch` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaire_console` |
 | `/admin/questionnaires/new` | `GET` | `api.admin_console_questionnaire_new` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaire_console` |
 | `/admin/questionnaires/ui` | `GET` | `api.admin_questionnaires_ui` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaires` |
-| `/admin/system` | `GET` | `api.admin_console_system` | `` | `admin_session` | `wecom_ability_service.http.admin_console` |
 | `/admin/user-ops` | `GET` | `api.admin_console_user_ops` | `` | `admin_session` | `wecom_ability_service.http.admin_operations` |
 | `/admin/user-ops/actions` | `POST` | `api.admin_console_operations_action` | `` | `admin_session` | `wecom_ability_service.http.admin_operations` |
 | `/admin/user-ops/ui` | `GET` | `api.admin_user_ops_ui` | `` | `admin_session` | `wecom_ability_service.http.admin_user_ops` |
+| `/admin/wecom-customer-acquisition-links/ui` | `GET` | `api.admin_wecom_customer_acquisition_links_ui` | `` | `admin_session` | `wecom_ability_service.http.wecom_customer_acquisition` |
+| `/admin/wecom-tags` | `GET` | `api.admin_wecom_tags_page` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/audit/logs` | `GET` | `api.api_admin_audit_logs` | `` | `admin_session` | `wecom_ability_service.http.admin_audit` |
+| `/api/admin/automation-conversion/action-templates` | `GET` | `api.api_admin_automation_conversion_action_templates` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/action-templates` | `POST` | `api.api_admin_automation_conversion_action_templates` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/action-templates/from-workflow` | `POST` | `api.api_admin_automation_conversion_action_template_from_workflow` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/action-templates/generate` | `POST` | `api.api_admin_automation_conversion_action_template_generate` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/agent-orchestration/pending-publish` | `GET` | `api.api_admin_automation_conversion_pending_publish` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/agent-outputs` | `GET` | `api.api_admin_automation_conversion_agent_outputs` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/agent-outputs/<output_id>` | `GET` | `api.api_admin_automation_conversion_agent_output_detail` | `output_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
@@ -142,6 +143,10 @@ Route rows: `348`
 | `/api/admin/automation-conversion/profile-segment-templates/<int:template_id>` | `PUT` | `api.api_admin_automation_conversion_profile_segment_template_update` | `template_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/profile-segment-templates/catalog` | `GET` | `api.api_admin_automation_conversion_profile_segment_catalog` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/profile-segment-templates/options` | `GET` | `api.api_admin_automation_conversion_profile_segment_template_options` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/programs/<int:program_id>/actions/from-template` | `POST` | `api.api_admin_automation_program_action_from_template` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/programs/<int:program_id>/members/segment-broadcast` | `POST` | `api.api_admin_automation_program_member_segment_broadcast` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/programs/<int:program_id>/members/segment-search` | `GET` | `api.api_admin_automation_program_member_segment_search` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/automation-conversion/programs/<int:program_id>/members/segment-search` | `POST` | `api.api_admin_automation_program_member_segment_search` | `program_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/reply-monitor/capture` | `POST` | `api.api_admin_automation_conversion_reply_monitor_capture` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/reply-monitor/run-due` | `POST` | `api.api_admin_automation_conversion_reply_monitor_run_due` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/review-outputs` | `GET` | `api.api_admin_automation_conversion_review_outputs` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
@@ -177,50 +182,72 @@ Route rows: `348`
 | `/api/admin/automation-conversion/workflows/<int:workflow_id>/pause` | `POST` | `api.api_admin_automation_conversion_workflow_pause` | `workflow_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/workflows/<int:workflow_id>/summary` | `GET` | `api.api_admin_automation_conversion_workflow_summary` | `workflow_id` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
 | `/api/admin/automation-conversion/workflows/registry` | `GET` | `api.api_admin_automation_conversion_workflow_registry` | `` | `admin_session` | `wecom_ability_service.http.automation_conversion` |
+| `/api/admin/broadcast-jobs` | `GET` | `api.api_admin_broadcast_jobs` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
+| `/api/admin/broadcast-jobs/<int:job_id>/approve` | `POST` | `api.api_admin_broadcast_jobs_approve` | `job_id` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
+| `/api/admin/broadcast-jobs/<int:job_id>/cancel` | `POST` | `api.api_admin_broadcast_jobs_cancel` | `job_id` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
 | `/api/admin/class-user-management` | `GET` | `api.admin_class_user_management_list` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
 | `/api/admin/class-user-management/bootstrap` | `POST` | `api.admin_class_user_management_bootstrap` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
 | `/api/admin/class-user-management/export` | `GET` | `api.admin_class_user_management_export` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
 | `/api/admin/class-user-management/history` | `GET` | `api.admin_class_user_management_history` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
 | `/api/admin/class-user-management/migrate` | `POST` | `api.admin_class_user_management_migrate` | `` | `admin_session` | `wecom_ability_service.http.admin_class_user` |
+| `/api/admin/cloud-orchestrator/audit` | `GET` | `api.cloud_orchestrator_audit` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns` | `GET` | `api.cloud_orchestrator_list_campaigns` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>` | `DELETE` | `api.cloud_orchestrator_delete_campaign` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>` | `GET` | `api.cloud_orchestrator_get_campaign` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/approve` | `POST` | `api.cloud_orchestrator_approve_campaign` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/members` | `GET` | `api.cloud_orchestrator_list_campaign_members` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/pause` | `POST` | `api.cloud_orchestrator_pause_campaign` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/reject` | `POST` | `api.cloud_orchestrator_reject_campaign` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/start` | `POST` | `api.cloud_orchestrator_start_campaign` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps` | `POST` | `api.cloud_orchestrator_add_campaign_step` | `campaign_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>` | `DELETE` | `api.cloud_orchestrator_delete_campaign_step` | `campaign_code, step_index` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>` | `PATCH` | `api.cloud_orchestrator_update_campaign_step` | `campaign_code, step_index` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>` | `POST` | `api.cloud_orchestrator_update_campaign_step` | `campaign_code, step_index` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/batch-start` | `POST` | `api.cloud_orchestrator_batch_start_campaigns` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/campaigns/run-due` | `POST` | `api.cloud_orchestrator_run_due_campaigns` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/media/upload` | `POST` | `api.cloud_orchestrator_upload_image` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/observability` | `GET` | `api.cloud_orchestrator_observability` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans` | `GET` | `api.cloud_orchestrator_list_plans` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans` | `POST` | `api.cloud_orchestrator_create_plan` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans/<plan_id>` | `GET` | `api.cloud_orchestrator_get_plan` | `plan_id` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans/<plan_id>/approve` | `POST` | `api.cloud_orchestrator_approve_plan` | `plan_id` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans/<plan_id>/commit` | `POST` | `api.cloud_orchestrator_commit_plan` | `plan_id` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans/<plan_id>/reject` | `POST` | `api.cloud_orchestrator_reject_plan` | `plan_id` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/plans/<plan_id>/simulate` | `POST` | `api.cloud_orchestrator_simulate_plan` | `plan_id` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/segments` | `GET` | `api.cloud_orchestrator_list_segments` | `` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/segments/<segment_code>` | `GET` | `api.cloud_orchestrator_get_segment` | `segment_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
+| `/api/admin/cloud-orchestrator/segments/<segment_code>/preview` | `GET` | `api.cloud_orchestrator_preview_segment` | `segment_code` | `admin_session` | `wecom_ability_service.http.cloud_orchestrator_endpoint` |
 | `/api/admin/config/app-settings` | `GET` | `api.api_admin_config_app_settings` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/config/app-settings` | `PUT` | `api.api_admin_config_save_app_settings` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/class-term-tags` | `GET` | `api.api_admin_config_class_term_tags` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/class-term-tags` | `POST` | `api.api_admin_config_save_class_term_tag` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/config/marketing-automation/signup-conversion` | `GET` | `api.api_admin_config_signup_conversion` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/config/marketing-automation/signup-conversion` | `PUT` | `api.api_admin_config_save_signup_conversion` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/config/mcp-tools` | `GET` | `api.api_admin_config_mcp_tools` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/config/mcp-tools` | `POST` | `api.api_admin_config_save_mcp_tool` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/config/overview` | `GET` | `api.api_admin_config_overview` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/routing` | `GET` | `api.api_admin_config_routing` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/routing/owner-role` | `POST` | `api.api_admin_config_save_owner_role` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/routing/rule` | `POST` | `api.api_admin_config_save_routing_rule` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/signup-tags` | `GET` | `api.api_admin_config_signup_tags` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/config/signup-tags` | `POST` | `api.api_admin_config_save_signup_tag` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
-| `/api/admin/customer-pulse` | `GET` | `api.admin_customer_pulse_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/actions/refresh` | `POST` | `api.admin_customer_pulse_refresh_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/cards/<int:card_id>` | `GET` | `api.admin_customer_pulse_card_api` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/cards/<int:card_id>/actions/execute` | `POST` | `api.admin_customer_pulse_card_execute_api` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/cards/<int:card_id>/actions/preview` | `POST` | `api.admin_customer_pulse_card_preview_api` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/cards/<int:card_id>/evidence` | `GET` | `api.admin_customer_pulse_card_evidence_api` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/cards/<int:card_id>/feedback` | `POST` | `api.admin_customer_pulse_card_feedback_api` | `card_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/executions/<int:execution_id>/undo` | `POST` | `api.admin_customer_pulse_execution_undo_api` | `execution_id` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/admin/customer-pulse/stats` | `GET` | `api.admin_customer_pulse_stats_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customer_pulse` |
 | `/api/admin/customers/profile` | `GET` | `api.admin_customer_profile_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/api/admin/customers/profile/messages` | `GET` | `api.admin_customer_profile_messages_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customers` |
-| `/api/admin/customers/profile/pulse` | `GET` | `api.admin_customer_profile_pulse_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/api/admin/customers/profile/questionnaire-answers` | `GET` | `api.admin_customer_profile_questionnaire_answers_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/api/admin/customers/profile/tags` | `GET` | `api.admin_customer_profile_tags_api` | `` | `admin_session` | `wecom_ability_service.http.admin_customers` |
 | `/api/admin/dashboard/shell-context` | `GET` | `api.admin_dashboard_shell_context` | `` | `admin_session` | `wecom_ability_service.http.admin_dashboard` |
 | `/api/admin/dashboard/summary` | `GET` | `api.admin_dashboard_summary` | `` | `admin_session` | `wecom_ability_service.http.admin_dashboard` |
 | `/api/admin/dashboard/system-status` | `GET` | `api.admin_dashboard_system_status` | `` | `admin_session` | `wecom_ability_service.http.admin_dashboard` |
 | `/api/admin/dashboard/todos` | `GET` | `api.admin_dashboard_todos` | `` | `admin_session` | `wecom_ability_service.http.admin_dashboard` |
-| `/api/admin/followup-orchestrator` | `GET` | `api.api_admin_followup_orchestrator` | `` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/admin/followup-orchestrator/customers/<external_userid>` | `GET` | `api.api_admin_followup_orchestrator_customer` | `external_userid` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/admin/followup-orchestrator/missions/<mission_key>` | `GET` | `api.api_admin_followup_orchestrator_mission_detail` | `mission_key` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/admin/followup-orchestrator/missions/<mission_key>/actions/<action_type>` | `POST` | `api.api_admin_followup_orchestrator_mission_action` | `action_type, mission_key` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/admin/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/execute` | `POST` | `api.api_admin_followup_orchestrator_mission_item_execute` | `mission_item_key, mission_key` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/admin/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/preview` | `POST` | `api.api_admin_followup_orchestrator_mission_item_preview` | `mission_item_key, mission_key` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/admin/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/undo` | `POST` | `api.api_admin_followup_orchestrator_mission_item_undo` | `mission_item_key, mission_key` | `admin_session` | `wecom_ability_service.http.admin_followup_orchestrator` |
+| `/api/admin/hxc-dashboard/broadcast` | `POST` | `api.admin_hxc_dashboard_broadcast` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/api/admin/hxc-dashboard/refresh` | `POST` | `api.admin_hxc_dashboard_refresh` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/api/admin/hxc-dashboard/refresh-directory` | `POST` | `api.admin_hxc_refresh_directory` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/api/admin/hxc-dashboard/send-config` | `GET` | `api.admin_hxc_send_config_list` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/api/admin/hxc-dashboard/send-config` | `POST` | `api.admin_hxc_send_config_upsert` | `` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/api/admin/hxc-dashboard/send-config/<sender_userid>` | `DELETE` | `api.admin_hxc_send_config_delete` | `sender_userid` | `admin_session` | `wecom_ability_service.http.admin_hxc_dashboard` |
+| `/api/admin/image-library` | `GET` | `api.admin_image_library_list` | `` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/<int:image_id>` | `DELETE` | `api.admin_image_library_delete` | `image_id` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/<int:image_id>` | `GET` | `api.admin_image_library_get` | `image_id` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/<int:image_id>` | `PUT` | `api.admin_image_library_update` | `image_id` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/<int:image_id>/references` | `GET` | `api.admin_image_library_references` | `image_id` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/<int:image_id>/test-resolve` | `POST` | `api.admin_image_library_test_resolve` | `image_id` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/facets` | `GET` | `api.admin_image_library_facets` | `` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/from-base64` | `POST` | `api.admin_image_library_create_base64` | `` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/from-url` | `POST` | `api.admin_image_library_create_url` | `` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
+| `/api/admin/image-library/upload` | `POST` | `api.admin_image_library_upload` | `` | `admin_session` | `wecom_ability_service.http.image_library_endpoint` |
 | `/api/admin/jobs/archive-sync` | `GET` | `api.api_admin_jobs_archive_sync` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
 | `/api/admin/jobs/archive-sync/run` | `POST` | `api.api_admin_jobs_archive_sync_run` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
 | `/api/admin/jobs/callbacks` | `GET` | `api.api_admin_jobs_callbacks` | `` | `admin_session` | `wecom_ability_service.http.admin_jobs` |
@@ -238,6 +265,12 @@ Route rows: `348`
 | `/api/admin/marketing-automation/config/preview` | `POST` | `api.api_admin_marketing_automation_preview` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/marketing-automation/dispatch-history` | `GET` | `api.api_admin_marketing_automation_dispatch_history` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
 | `/api/admin/marketing-automation/recompute` | `POST` | `api.api_admin_marketing_automation_recompute` | `` | `admin_session` | `wecom_ability_service.http.admin_config` |
+| `/api/admin/miniprogram-library` | `GET` | `api.admin_miniprogram_library_list` | `` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
+| `/api/admin/miniprogram-library` | `POST` | `api.admin_miniprogram_library_create` | `` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
+| `/api/admin/miniprogram-library/<int:library_id>` | `DELETE` | `api.admin_miniprogram_library_delete` | `library_id` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
+| `/api/admin/miniprogram-library/<int:library_id>` | `GET` | `api.admin_miniprogram_library_get` | `library_id` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
+| `/api/admin/miniprogram-library/<int:library_id>` | `PUT` | `api.admin_miniprogram_library_update` | `library_id` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
+| `/api/admin/miniprogram-library/<int:library_id>/test-resolve` | `POST` | `api.admin_miniprogram_library_test_resolve` | `library_id` | `admin_session` | `wecom_ability_service.http.miniprogram_library_endpoint` |
 | `/api/admin/questionnaires` | `GET` | `api.admin_list_questionnaires` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaires` |
 | `/api/admin/questionnaires` | `POST` | `api.admin_create_questionnaire` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaires` |
 | `/api/admin/questionnaires/<int:questionnaire_id>` | `DELETE` | `api.admin_delete_questionnaire` | `questionnaire_id` | `admin_session` | `wecom_ability_service.http.admin_questionnaires` |
@@ -263,7 +296,18 @@ Route rows: `348`
 | `/api/admin/user-ops/send-records` | `GET` | `api.admin_user_ops_send_records` | `` | `admin_session` | `wecom_ability_service.http.admin_user_ops` |
 | `/api/admin/user-ops/send-records/<int:record_id>` | `GET` | `api.admin_user_ops_send_record_detail` | `record_id` | `admin_session` | `wecom_ability_service.http.admin_user_ops` |
 | `/api/admin/user-ops/send-records/<int:record_id>/refresh` | `POST` | `api.admin_user_ops_send_record_refresh` | `record_id` | `admin_session` | `wecom_ability_service.http.admin_user_ops` |
-| `/api/admin/wecom/tags` | `GET` | `api.admin_list_wecom_tags` | `` | `admin_session` | `wecom_ability_service.http.admin_questionnaires` |
+| `/api/admin/wecom-customer-acquisition-links` | `GET` | `api.api_list_wecom_customer_acquisition_links` | `` | `admin_session` | `wecom_ability_service.http.wecom_customer_acquisition` |
+| `/api/admin/wecom-customer-acquisition-links` | `POST` | `api.api_create_wecom_customer_acquisition_link` | `` | `admin_session` | `wecom_ability_service.http.wecom_customer_acquisition` |
+| `/api/admin/wecom-customer-acquisition-links/<int:link_id>/disable` | `POST` | `api.api_disable_wecom_customer_acquisition_link` | `link_id` | `admin_session` | `wecom_ability_service.http.wecom_customer_acquisition` |
+| `/api/admin/wecom-customer-acquisition-links/<int:link_id>/enable` | `POST` | `api.api_enable_wecom_customer_acquisition_link` | `link_id` | `admin_session` | `wecom_ability_service.http.wecom_customer_acquisition` |
+| `/api/admin/wecom-customer-acquisition-links/preflight` | `GET` | `api.api_wecom_customer_acquisition_preflight` | `` | `admin_session` | `wecom_ability_service.http.wecom_customer_acquisition` |
+| `/api/admin/wecom/tag-groups` | `POST` | `api.admin_create_wecom_tag_group` | `` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
+| `/api/admin/wecom/tag-groups/<group_id>` | `DELETE` | `api.admin_delete_wecom_tag_group` | `group_id` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
+| `/api/admin/wecom/tag-groups/<group_id>` | `PUT` | `api.admin_update_wecom_tag_group` | `group_id` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
+| `/api/admin/wecom/tags` | `GET` | `api.admin_wecom_tag_management_payload` | `` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
+| `/api/admin/wecom/tags` | `POST` | `api.admin_create_wecom_tag` | `` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
+| `/api/admin/wecom/tags/<tag_id>` | `DELETE` | `api.admin_delete_wecom_tag` | `tag_id` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
+| `/api/admin/wecom/tags/<tag_id>` | `PUT` | `api.admin_update_wecom_tag` | `tag_id` | `admin_session` | `wecom_ability_service.http.admin_wecom_tags` |
 | `/api/archive/health` | `GET` | `api.archive_health` | `` | `api_existing_behavior` | `wecom_ability_service.http.archive` |
 | `/api/archive/sync` | `POST` | `api.archive_sync` | `` | `api_existing_behavior` | `wecom_ability_service.http.archive` |
 | `/api/contacts` | `GET` | `api.list_contacts` | `` | `api_existing_behavior` | `wecom_ability_service.http.contacts` |
@@ -294,19 +338,6 @@ Route rows: `348`
 | `/api/internal/automation-conversion/laohuang-chat-results` | `POST` | `api.api_internal_automation_conversion_laohuang_chat_results` | `` | `api_existing_behavior` | `wecom_ability_service.http.automation_conversion` |
 | `/api/internal/automation-conversion/lobster-results` | `POST` | `api.api_internal_automation_conversion_lobster_results` | `` | `api_existing_behavior` | `wecom_ability_service.http.automation_conversion` |
 | `/api/internal/automation-conversion/router-test-dispatch` | `POST` | `api.api_internal_automation_conversion_router_test_dispatch` | `` | `api_existing_behavior` | `wecom_ability_service.http.automation_conversion` |
-| `/api/internal/customer-pulse/customers/<external_userid>` | `GET` | `api.internal_customer_pulse_customer_api` | `external_userid` | `api_existing_behavior` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/internal/customer-pulse/inbox` | `GET` | `api.internal_customer_pulse_inbox_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/internal/customer-pulse/recompute` | `POST` | `api.internal_customer_pulse_recompute_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/internal/customer-pulse/run-due` | `POST` | `api.internal_customer_pulse_run_due_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/internal/customer-pulse/stats` | `GET` | `api.internal_customer_pulse_stats_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_customer_pulse` |
-| `/api/internal/followup-orchestrator/missions/<mission_key>` | `GET` | `api.internal_followup_orchestrator_mission_detail_api` | `mission_key` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/missions/<mission_key>/actions/<action_type>` | `POST` | `api.internal_followup_orchestrator_mission_action_api` | `action_type, mission_key` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/execute` | `POST` | `api.internal_followup_orchestrator_mission_item_execute_api` | `mission_item_key, mission_key` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/preview` | `POST` | `api.internal_followup_orchestrator_mission_item_preview_api` | `mission_item_key, mission_key` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/missions/<mission_key>/items/<mission_item_key>/actions/undo` | `POST` | `api.internal_followup_orchestrator_mission_item_undo_api` | `mission_item_key, mission_key` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/my-missions` | `GET` | `api.internal_followup_orchestrator_my_missions_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/sync` | `POST` | `api.internal_followup_orchestrator_sync_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
-| `/api/internal/followup-orchestrator/team-board` | `GET` | `api.internal_followup_orchestrator_team_board_api` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_followup_orchestrator` |
 | `/api/internal/user-ops/lead-pool/backfill-owner-class-terms` | `POST` | `api.internal_user_ops_backfill_owner_class_terms` | `` | `api_existing_behavior` | `wecom_ability_service.http.admin_user_ops` |
 | `/api/messages/<external_userid>` | `GET` | `api.list_messages` | `external_userid` | `api_existing_behavior` | `wecom_ability_service.http.archive` |
 | `/api/messages/<external_userid>/recent` | `GET` | `api.list_recent_messages` | `external_userid` | `api_existing_behavior` | `wecom_ability_service.http.archive` |
@@ -325,6 +356,8 @@ Route rows: `348`
 | `/api/sidebar/marketing-status/unmark-enrolled` | `POST` | `api.sidebar_marketing_status_unmark_enrolled` | `` | `api_existing_behavior` | `wecom_ability_service.http.sidebar` |
 | `/api/sidebar/signup-tags/mark` | `POST` | `api.sidebar_signup_tag_mark` | `` | `api_existing_behavior` | `wecom_ability_service.http.sidebar` |
 | `/api/sidebar/signup-tags/status` | `GET` | `api.sidebar_signup_tag_status` | `` | `api_existing_behavior` | `wecom_ability_service.http.sidebar` |
+| `/api/system/compensate` | `POST` | `api.api_compensating_scan` | `` | `api_existing_behavior` | `wecom_ability_service.http.system_health` |
+| `/api/system/health` | `GET` | `api.system_health` | `` | `api_existing_behavior` | `wecom_ability_service.http.system_health` |
 | `/api/tags` | `GET` | `api.list_tags` | `` | `api_existing_behavior` | `wecom_ability_service.http.tags` |
 | `/api/tags` | `POST` | `api.create_tag` | `` | `api_existing_behavior` | `wecom_ability_service.http.tags` |
 | `/api/tags/mark` | `POST` | `api.mark_tag` | `` | `api_existing_behavior` | `wecom_ability_service.http.tags` |
@@ -349,7 +382,10 @@ Route rows: `348`
 | `/mcp` | `GET` | `mcp.streamable_http_mcp` | `` | `mcp_bearer` | `wecom_ability_service.mcp_adapter` |
 | `/mcp` | `POST` | `mcp.streamable_http_mcp` | `` | `mcp_bearer` | `wecom_ability_service.mcp_adapter` |
 | `/s/<slug>` | `GET` | `api.questionnaire_h5_page` | `slug` | `public_or_entry` | `wecom_ability_service.http.public_questionnaires` |
+| `/s/<slug>/result/<result_token>` | `GET` | `api.questionnaire_h5_assessment_result` | `result_token, slug` | `public_or_entry` | `wecom_ability_service.http.public_questionnaires` |
 | `/s/<slug>/submitted` | `GET` | `api.questionnaire_h5_submitted` | `slug` | `public_or_entry` | `wecom_ability_service.http.public_questionnaires` |
+| `/setup/wizard` | `GET` | `api.setup_wizard` | `` | `existing_behavior` | `wecom_ability_service.http.setup_wizard` |
+| `/setup/wizard/save` | `POST` | `api.setup_wizard_save` | `` | `existing_behavior` | `wecom_ability_service.http.setup_wizard` |
 | `/sidebar/bind-mobile` | `GET` | `api.sidebar_bind_mobile_page` | `` | `existing_behavior` | `wecom_ability_service.http.sidebar` |
 | `/static/<path:filename>` | `GET` | `static` | `filename` | `public_or_entry` | `flask.app` |
 | `/wecom/external-contact/callback` | `GET` | `api.receive_external_contact_callback` | `` | `wecom_callback_signature` | `wecom_ability_service.http.callbacks` |

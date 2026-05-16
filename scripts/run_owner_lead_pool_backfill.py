@@ -2,17 +2,14 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
-from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
+from script_runtime import ensure_repo_root_on_path, print_json
+
+ensure_repo_root_on_path()
 
 from wecom_ability_service import create_app
 from wecom_ability_service.services import backfill_owner_class_terms_into_lead_pool
-from wecom_ability_service.wecom_client import WeComClientError
 
 
 def main() -> int:
@@ -43,10 +40,10 @@ def main() -> int:
                 max_candidates=args.max_candidates,
             )
     except Exception as exc:
-        print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False, indent=2))
+        print_json({"ok": False, "error": str(exc)}, indent=2)
         return 1
 
-    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    print_json(payload, indent=2)
     return 0
 
 

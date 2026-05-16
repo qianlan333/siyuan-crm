@@ -25,21 +25,24 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ..segments.service import get_segment, increment_usage
 from ..segments.sql_sandbox import fetch_member_rows
+from .payload_helpers import normalize_int_list, normalize_str_list, parse_step_payload
+from .time_helpers import DEFAULT_SEND_TIME as _DEFAULT_SEND_TIME
+from .time_helpers import DEFAULT_TIMEZONE as _DEFAULT_TIMEZONE
+from .time_helpers import campaign_step_due_iso
 
 
 logger = logging.getLogger(__name__)
 
 
 _VALID_ANCHOR_MODES = ("campaign_start_date", "member_joined_at")
-_DEFAULT_SEND_TIME = "09:00"
-_DEFAULT_TIMEZONE = "Asia/Shanghai"
+_EDITABLE_REVIEW_STATUSES = ("draft", "pending_review")
+_EDITABLE_RUN_STATUSES = ("draft", "paused")
 
 
 def _now_iso() -> str:
@@ -113,21 +116,21 @@ def _compute_first_step_due_iso(
     TIMESTAMPTZ 字段会按 server timezone（Asia/Shanghai）解读 naive 字符串，
     跨 UTC↔本地的写入会错位 8 小时，cron 立即扫到一个"已过期"的 due。
     """
-    try:
-        tzinfo = ZoneInfo(step_timezone or _DEFAULT_TIMEZONE)
-    except (ZoneInfoNotFoundError, ValueError):
-        tzinfo = ZoneInfo(_DEFAULT_TIMEZONE)
-    try:
-        base = datetime.fromisoformat((anchor_date or "")[:10])
-    except ValueError:
-        base = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    try:
-        hour_str, minute_str = (send_time or _DEFAULT_SEND_TIME).split(":")[:2]
-        base = base.replace(hour=int(hour_str), minute=int(minute_str))
-    except ValueError:
-        pass
-    base = base + timedelta(days=int(day_offset or 0))
-    return base.replace(tzinfo=tzinfo).isoformat()
+    return campaign_step_due_iso(
+        anchor_date=anchor_date,
+        day_offset=day_offset,
+        send_time=send_time,
+        step_timezone=step_timezone,
+    )
+
+
+def _ensure_campaign_editable(camp: dict[str, Any]) -> None:
+    review_status = camp.get("review_status")
+    if review_status not in _EDITABLE_REVIEW_STATUSES:
+        raise PermissionError(f"campaign review_status={review_status} not editable")
+    run_status = camp.get("run_status")
+    if run_status not in _EDITABLE_RUN_STATUSES:
+        raise PermissionError(f"campaign run_status={run_status} not editable")
 
 
 # ---------- 创建 / 编辑 -----------------------------------------------------
@@ -155,7 +158,7 @@ def create_campaign_draft(
         raise ValueError(f"campaign_code already exists: {code}")
     effective_anchor = (anchor_date or "").strip()
     if not effective_anchor and anchor_mode == "campaign_start_date":
-        effective_anchor = datetime.utcnow().date().isoformat()
+        effective_anchor = datetime.now(timezone.utc).date().isoformat()
     cur.execute(
         """
         INSERT INTO campaigns
@@ -238,7 +241,7 @@ def add_step_to_campaign(
 ) -> dict[str, Any]:
     db = get_db()
     cur = db.cursor()
-    # 用 ON CONFLICT 兼容 PG/SQLite（SQLite 3.24+），代替 SQLite-only 的 INSERT OR REPLACE
+    # PG-only upsert; keep this explicit and avoid legacy replace semantics.
     cur.execute(
         """
         INSERT INTO campaign_steps
@@ -464,7 +467,7 @@ def start_campaign(
     # 给所有 campaign_member 计算 anchor_date + 第一步 next_due_at
     anchor_mode = str(camp.get("anchor_mode") or "campaign_start_date")
     if anchor_mode == "campaign_start_date":
-        anchor_date = str(camp.get("anchor_date") or "") or datetime.utcnow().date().isoformat()
+        anchor_date = str(camp.get("anchor_date") or "") or datetime.now(timezone.utc).date().isoformat()
         cur.execute(
             "UPDATE campaign_members SET anchor_date = ?, joined_at = ? WHERE campaign_id = ?",
             (anchor_date, started_at, int(campaign_id)),
@@ -578,8 +581,9 @@ def delete_campaign(*, campaign_id: int) -> dict[str, Any]:
     db = get_db()
     cur = db.cursor()
     cid = int(campaign_id)
-    # broadcast_jobs.source_id 是 "{campaign_id}:{step_index}" 形式（见 scheduler.py），
-    # 用 LIKE '{cid}:%' 精确匹配；不能用 source_id = str(cid) 因为格式不一样
+    # broadcast_jobs.source_id 是 "{campaign_id}:{campaign_segment_id}:{step_index}"
+    # 形式（见 scheduler.py）。旧队列里可能还有 "{campaign_id}:{step_index}"，
+    # 两者都用 LIKE '{cid}:%' 精确匹配；不能用 source_id = str(cid)。
     cur.execute(
         "DELETE FROM broadcast_jobs WHERE source_type = 'campaign' AND source_id LIKE ?",
         (f"{cid}:%",),
@@ -724,10 +728,7 @@ def update_campaign_step(
     camp = get_campaign(campaign_id=campaign_id)
     if not camp:
         raise LookupError("campaign not found")
-    if camp.get("review_status") not in ("draft", "pending_review"):
-        raise PermissionError(f"campaign review_status={camp.get('review_status')} not editable")
-    if camp.get("run_status") not in ("draft", "paused"):
-        raise PermissionError(f"campaign run_status={camp.get('run_status')} not editable")
+    _ensure_campaign_editable(camp)
 
     db = get_db()
     cur = db.cursor()
@@ -740,17 +741,8 @@ def update_campaign_step(
     if not existing:
         raise LookupError(f"step {step_index} not found in campaign {campaign_id}")
 
-    # PG: jsonb 自动反序列化为 dict；SQLite: 是字符串。统一处理
-    raw_payload = existing.get("content_payload_json") if isinstance(existing, dict) else None
-    if isinstance(raw_payload, dict):
-        payload = dict(raw_payload)
-    elif isinstance(raw_payload, str):
-        try:
-            payload = json.loads(raw_payload or "{}")
-        except (TypeError, ValueError):
-            payload = {}
-    else:
-        payload = {}
+    # PG jsonb is already a dict; legacy JSON text is still accepted defensively.
+    payload = parse_step_payload(dict(existing).get("content_payload_json"))
 
     sets: list[str] = []
     args: list[Any] = []
@@ -768,26 +760,13 @@ def update_campaign_step(
         args.append(bool(stop_on_reply))
     payload_dirty = False
     if image_library_ids is not None:
-        cleaned_lib_ids: list[int] = []
-        for raw in image_library_ids:
-            try:
-                cleaned_lib_ids.append(int(raw))
-            except (TypeError, ValueError):
-                continue
-        payload["image_library_ids"] = cleaned_lib_ids[:9]
+        payload["image_library_ids"] = normalize_int_list(image_library_ids, limit=9)
         payload_dirty = True
     if image_media_ids is not None:
-        cleaned = [str(x).strip() for x in image_media_ids if str(x).strip()]
-        payload["image_media_ids"] = cleaned[:9]  # 老格式兼容
+        payload["image_media_ids"] = normalize_str_list(image_media_ids, limit=9)  # 老格式兼容
         payload_dirty = True
     if miniprogram_library_ids is not None:
-        cleaned_ids: list[int] = []
-        for raw in miniprogram_library_ids:
-            try:
-                cleaned_ids.append(int(raw))
-            except (TypeError, ValueError):
-                continue
-        payload["miniprogram_library_ids"] = cleaned_ids
+        payload["miniprogram_library_ids"] = normalize_int_list(miniprogram_library_ids)
         payload_dirty = True
     if payload_dirty:
         sets.append("content_payload_json = ?")
@@ -813,12 +792,23 @@ def delete_campaign_step(*, campaign_id: int, step_index: int) -> dict[str, Any]
     camp = get_campaign(campaign_id=campaign_id)
     if not camp:
         raise LookupError("campaign not found")
-    if camp.get("review_status") not in ("draft", "pending_review"):
-        raise PermissionError(f"campaign review_status={camp.get('review_status')} not editable")
-    if camp.get("run_status") not in ("draft", "paused"):
-        raise PermissionError(f"campaign run_status={camp.get('run_status')} not editable")
+    _ensure_campaign_editable(camp)
     db = get_db()
     cur = db.cursor()
+    cur.execute(
+        "SELECT COUNT(*) AS cnt FROM campaign_steps WHERE campaign_id = ?",
+        (int(campaign_id),),
+    )
+    count_row = cur.fetchone() or {}
+    step_count = int(count_row.get("cnt") if isinstance(count_row, dict) else count_row[0] or 0)
+    cur.execute(
+        "SELECT id FROM campaign_steps WHERE campaign_id = ? AND step_index = ? LIMIT 1",
+        (int(campaign_id), int(step_index)),
+    )
+    if not cur.fetchone():
+        raise LookupError(f"step {step_index} not found in campaign {campaign_id}")
+    if step_count <= 1:
+        raise PermissionError("cannot delete last campaign step")
     cur.execute(
         "DELETE FROM campaign_steps WHERE campaign_id = ? AND step_index = ?",
         (int(campaign_id), int(step_index)),
@@ -840,10 +830,7 @@ def append_campaign_step(
     camp = get_campaign(campaign_id=campaign_id)
     if not camp:
         raise LookupError("campaign not found")
-    if camp.get("review_status") not in ("draft", "pending_review"):
-        raise PermissionError(f"campaign review_status={camp.get('review_status')} not editable")
-    if camp.get("run_status") not in ("draft", "paused"):
-        raise PermissionError(f"campaign run_status={camp.get('run_status')} not editable")
+    _ensure_campaign_editable(camp)
     db = get_db()
     cur = db.cursor()
     cur.execute(
@@ -945,14 +932,7 @@ def assemble_campaign_overview(*, campaign_id: int) -> dict[str, Any]:
         steps = []
         for r in (cur.fetchall() or []):
             sd = dict(r)
-            raw = sd.get("content_payload_json")
-            if isinstance(raw, str):
-                try:
-                    sd["content_payload_json"] = json.loads(raw or "{}")
-                except (TypeError, ValueError):
-                    sd["content_payload_json"] = {}
-            elif raw is None:
-                sd["content_payload_json"] = {}
+            sd["content_payload_json"] = parse_step_payload(sd.get("content_payload_json"))
             steps.append(sd)
         d = dict(row)
         d["steps"] = steps

@@ -1,10 +1,122 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Callable
+from zoneinfo import ZoneInfo
 
-from ...infra.constants import SIGNUP_TAG_GROUP_NAME, SIGNUP_TAG_STATUS_DEFINITIONS
+from flask import current_app
+
+from ...infra.constants import DEFAULT_WECOM_CORP_TAG_LIMIT, SIGNUP_TAG_GROUP_NAME, SIGNUP_TAG_STATUS_DEFINITIONS
+from ...infra.settings import get_setting
 from ...wecom_client import WeComClient
 from . import repo
+
+
+def _normalized_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _synced_at_text() -> str:
+    return datetime.now(ZoneInfo("Asia/Shanghai")).replace(microsecond=0).isoformat()
+
+
+def wecom_corp_tag_limit(payload: dict[str, Any] | None = None) -> int:
+    raw_payload = payload or {}
+    for key in ("tag_limit", "corp_tag_limit", "limit"):
+        value = raw_payload.get(key)
+        if value not in (None, ""):
+            try:
+                return max(1, int(value))
+            except (TypeError, ValueError):
+                break
+    configured = get_setting("WECOM_CORP_TAG_LIMIT")
+    if configured not in (None, ""):
+        try:
+            return max(1, int(configured or DEFAULT_WECOM_CORP_TAG_LIMIT))
+        except (TypeError, ValueError):
+            return DEFAULT_WECOM_CORP_TAG_LIMIT
+    try:
+        return max(1, int(current_app.config.get("WECOM_CORP_TAG_LIMIT", DEFAULT_WECOM_CORP_TAG_LIMIT)))
+    except (TypeError, ValueError):
+        return DEFAULT_WECOM_CORP_TAG_LIMIT
+
+
+def build_wecom_tag_catalog(payload: dict[str, Any]) -> dict[str, Any]:
+    synced_at = _synced_at_text()
+    usage_counts: dict[str, int] = {}
+    raw_groups = list(payload.get("tag_group") or [])
+    tag_ids = [
+        _normalized_text((tag or {}).get("id") or (tag or {}).get("tag_id"))
+        for group in raw_groups
+        for tag in ((group or {}).get("tag") or [])
+    ]
+    if tag_ids:
+        usage_counts = repo.count_contact_tag_usage_by_tag_ids(tag_ids)
+
+    groups_by_key: dict[str, dict[str, Any]] = {}
+    for group in raw_groups:
+        group_id = _normalized_text((group or {}).get("group_id") or (group or {}).get("id"))
+        group_name = _normalized_text((group or {}).get("group_name") or (group or {}).get("name")) or "未命名标签组"
+        group_key = group_id or f"group-name:{group_name}"
+        if group_key not in groups_by_key:
+            groups_by_key[group_key] = {
+                "group_key": group_key,
+                "group_id": group_id,
+                "group_name": group_name,
+                "missing_group_id": not bool(group_id),
+                "tag_count": 0,
+                "tags": [],
+            }
+        for tag in (group or {}).get("tag") or []:
+            tag_id = _normalized_text((tag or {}).get("id") or (tag or {}).get("tag_id"))
+            tag_name = _normalized_text((tag or {}).get("name") or (tag or {}).get("tag_name")) or "未命名标签"
+            if not tag_id and not tag_name:
+                continue
+            groups_by_key[group_key]["tags"].append(
+                {
+                    "tag_id": tag_id,
+                    "tag_name": tag_name,
+                    "group_id": group_id,
+                    "group_name": group_name,
+                    "usage_count": usage_counts.get(tag_id, 0) if tag_id else 0,
+                    "synced_at": synced_at,
+                    "missing_tag_id": not bool(tag_id),
+                }
+            )
+
+    groups = sorted(
+        groups_by_key.values(),
+        key=lambda item: (_normalized_text(item.get("group_name")), _normalized_text(item.get("group_id"))),
+    )
+    for group in groups:
+        group["tags"] = sorted(
+            group["tags"],
+            key=lambda item: (_normalized_text(item.get("tag_name")), _normalized_text(item.get("tag_id"))),
+        )
+        group["tag_count"] = len(group["tags"])
+
+    items = sorted(
+        [
+            {
+                "tag_id": tag["tag_id"],
+                "tag_name": tag["tag_name"],
+                "group_name": tag["group_name"],
+                "group_id": tag["group_id"],
+            }
+            for group in groups
+            for tag in group["tags"]
+            if tag["tag_id"] and tag["tag_name"]
+        ],
+        key=lambda item: ((item.get("group_name") or ""), (item.get("tag_name") or ""), item["tag_id"]),
+    )
+    total_tags = len(items)
+    return {
+        "items": items,
+        "groups": groups,
+        "total_tags": total_tags,
+        "tag_limit": wecom_corp_tag_limit(payload),
+        "synced_at": synced_at,
+    }
 
 
 def signup_tag_group_name() -> str:
@@ -242,9 +354,77 @@ def list_wecom_tags(payload: dict[str, Any] | None = None) -> dict[str, Any]:
     return client.list_tags(payload or {})
 
 
+def list_wecom_tag_catalog(payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    return build_wecom_tag_catalog(list_wecom_tags(payload or {}))
+
+
 def create_wecom_tag(payload: dict[str, Any]) -> dict[str, Any]:
     client = WeComClient.from_app()
     return client.create_tag(payload)
+
+
+def create_wecom_tag_group(*, group_name: str, first_tag_name: str) -> dict[str, Any]:
+    normalized_group_name = _normalized_text(group_name)
+    normalized_first_tag_name = _normalized_text(first_tag_name)
+    if not normalized_group_name:
+        raise ValueError("标签组名称不能为空")
+    if not normalized_first_tag_name:
+        raise ValueError("第一个标签名称不能为空")
+    return create_wecom_tag({"group_name": normalized_group_name, "tag": [{"name": normalized_first_tag_name}]})
+
+
+def create_wecom_tag_in_group(*, group_id: str, group_name: str = "", tag_name: str) -> dict[str, Any]:
+    normalized_group_id = _normalized_text(group_id)
+    normalized_group_name = _normalized_text(group_name)
+    normalized_tag_name = _normalized_text(tag_name)
+    if not normalized_tag_name:
+        raise ValueError("标签名称不能为空")
+    if not normalized_group_id and not normalized_group_name:
+        raise ValueError("必须选择标签组")
+    payload: dict[str, Any] = {"tag": [{"name": normalized_tag_name}]}
+    if normalized_group_id:
+        payload["group_id"] = normalized_group_id
+    else:
+        payload["group_name"] = normalized_group_name
+    return create_wecom_tag(payload)
+
+
+def update_wecom_tag_group(*, group_id: str, group_name: str) -> dict[str, Any]:
+    normalized_group_id = _normalized_text(group_id)
+    normalized_group_name = _normalized_text(group_name)
+    if not normalized_group_id:
+        raise ValueError("当前标签组缺少 group_id，无法执行该操作，请先同步企微标签。")
+    if not normalized_group_name:
+        raise ValueError("标签组名称不能为空")
+    client = WeComClient.from_app()
+    return client.update_tag_group({"id": normalized_group_id, "name": normalized_group_name})
+
+
+def delete_wecom_tag_group(*, group_id: str) -> dict[str, Any]:
+    normalized_group_id = _normalized_text(group_id)
+    if not normalized_group_id:
+        raise ValueError("当前标签组缺少 group_id，无法执行该操作，请先同步企微标签。")
+    client = WeComClient.from_app()
+    return client.delete_tag_group({"group_id": [normalized_group_id]})
+
+
+def update_wecom_tag(*, tag_id: str, tag_name: str) -> dict[str, Any]:
+    normalized_tag_id = _normalized_text(tag_id)
+    normalized_tag_name = _normalized_text(tag_name)
+    if not normalized_tag_id:
+        raise ValueError("当前标签缺少 tag_id，无法执行该操作，请先同步企微标签。")
+    if not normalized_tag_name:
+        raise ValueError("标签名称不能为空")
+    client = WeComClient.from_app()
+    return client.update_tag({"id": normalized_tag_id, "name": normalized_tag_name})
+
+
+def delete_wecom_tag(*, tag_id: str) -> dict[str, Any]:
+    normalized_tag_id = _normalized_text(tag_id)
+    if not normalized_tag_id:
+        raise ValueError("当前标签缺少 tag_id，无法执行该操作，请先同步企微标签。")
+    client = WeComClient.from_app()
+    return client.delete_tag({"tag_id": [normalized_tag_id]})
 
 
 def mark_customer_tags(payload: dict[str, Any]) -> dict[str, Any]:

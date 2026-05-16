@@ -2905,6 +2905,10 @@
       };
     }
 
+    function normalizeAnswerDisplayMode(value) {
+      return ['all_in_one', 'one_by_one'].includes(value) ? value : 'all_in_one';
+    }
+
     function blankQuestionnaire() {
       const defaultPreset = editorConfig.defaultAssessment ? buildSiyuanIpAssessmentPreset() : null;
       const defaultAssessmentConfig = defaultPreset ? defaultPreset.assessment_config : {};
@@ -2916,6 +2920,7 @@
         title: defaultPreset ? defaultPreset.title : '',
         description: defaultPreset ? defaultPreset.description : '',
         redirect_url: '',
+        answer_display_mode: 'all_in_one',
         assessment_enabled: Boolean(editorConfig.defaultAssessment),
         assessment_config: defaultAssessmentConfig,
         assessment_builder: defaultAssessmentBuilder,
@@ -2965,6 +2970,7 @@
         title: questionnaire.title || '',
         description: questionnaire.description || '',
         redirect_url: questionnaire.redirect_url || '',
+        answer_display_mode: normalizeAnswerDisplayMode(questionnaire.answer_display_mode),
         assessment_enabled: hasSource ? Boolean(questionnaire.assessment_enabled) : draft.assessment_enabled,
         assessment_config: assessmentConfig,
         assessment_builder: assessmentBuilder,
@@ -3078,6 +3084,7 @@
         title: state.questionnaire.title,
         description: state.questionnaire.description,
         redirect_url: state.questionnaire.redirect_url,
+        answer_display_mode: normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode),
         assessment_enabled: Boolean(state.questionnaire.assessment_enabled),
         assessment_config: state.questionnaire.assessment_enabled
           ? buildSerializableAssessmentConfig()
@@ -3603,6 +3610,12 @@
           <label class="field">提交后跳转地址
             <input id="field-redirect-url" type="text" value="${escapeHtml(state.questionnaire.redirect_url)}" placeholder="可选，提交后跳转的地址">
           </label>
+          <label class="field">答题展示方式
+            <select id="field-answer-display-mode">
+              <option value="all_in_one" ${normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode) === 'all_in_one' ? 'selected' : ''}>整页答题</option>
+              <option value="one_by_one" ${normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode) === 'one_by_one' ? 'selected' : ''}>一题一页</option>
+            </select>
+          </label>
           <div class="field-grid compact">
             <label class="field">分享标识
               <input id="field-slug" type="text" value="${escapeHtml(state.questionnaire.slug)}">
@@ -3676,6 +3689,10 @@
       });
       inspectorBodyEl.querySelector('#field-redirect-url').addEventListener('input', (event) => {
         state.questionnaire.redirect_url = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-answer-display-mode').addEventListener('change', (event) => {
+        state.questionnaire.answer_display_mode = normalizeAnswerDisplayMode(event.target.value);
         updateDraftIndicator();
       });
       inspectorBodyEl.querySelector('#field-assessment-enabled').addEventListener('change', (event) => {
@@ -4629,6 +4646,12 @@
               <label class="field">提交后动作 / 跳转地址
                 <input id="v2-basic-redirect" type="text" value="${escapeHtml(state.questionnaire.redirect_url)}" placeholder="为空时提交后展示测评结果页">
               </label>
+              <label class="field">答题展示方式
+                <select id="v2-basic-answer-display-mode">
+                  <option value="all_in_one" ${normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode) === 'all_in_one' ? 'selected' : ''}>整页答题</option>
+                  <option value="one_by_one" ${normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode) === 'one_by_one' ? 'selected' : ''}>一题一页</option>
+                </select>
+              </label>
             </div>
           </div>
         </div>
@@ -4655,6 +4678,10 @@
       });
       phoneStage.querySelector('#v2-basic-redirect').addEventListener('input', (event) => {
         state.questionnaire.redirect_url = event.target.value;
+        updateDraftIndicator();
+      });
+      phoneStage.querySelector('#v2-basic-answer-display-mode').addEventListener('change', (event) => {
+        state.questionnaire.answer_display_mode = normalizeAnswerDisplayMode(event.target.value);
         updateDraftIndicator();
       });
       setInspectorContent(
@@ -5422,7 +5449,7 @@
           </label>
           <button type="button" class="btn ghost" id="v2-save-draft" style="width:100%;margin-top:8px;">保存草稿</button>
         </section>
-        <section class="config-group"><div class="helper-note">如果 Q01 有 4 个选项，这里会完整显示 4 个；高度不够时手机内部滚动。</div></section>`,
+        <section class="config-group"><div class="helper-note">题目选项会在手机预览里完整显示；高度不够时手机内部滚动。</div></section>`,
       );
       inspectorBodyEl.querySelector('#v2-preview-mode').addEventListener('change', (event) => {
         state.assessmentPreviewMode = event.target.value;
@@ -5448,7 +5475,7 @@
         </div>
         ${questions.map((question, index) => `
           <div class="h5-question-v2">
-            <div class="question-meta-row"><span>Q${String(index + 1).padStart(2, '0')} / ${escapeHtml(formatAssessmentDimensionName(question.assessment_dimension_key) || '未分组维度')}</span><span>${escapeHtml(formatQuestionType(question.type))}</span></div>
+            <div class="question-meta-row"><span>第 ${index + 1} 题</span><span>${escapeHtml(formatQuestionType(question.type))}</span></div>
             <strong>${escapeHtml(question.title || '题目标题')}</strong>
             ${['textarea', 'mobile'].includes(question.type)
               ? `<div class="h5-option-v2"><span>${escapeHtml(question.placeholder_text || '开放输入')}</span></div>`

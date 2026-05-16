@@ -23,24 +23,16 @@ branch_labels: str | None = None
 depends_on: str | None = None
 
 
-def _is_postgres() -> bool:
-    bind = op.get_bind()
-    return bind.dialect.name == "postgresql"
-
-
 def _has_column(table: str, column: str) -> bool:
     bind = op.get_bind()
-    if _is_postgres():
-        row = bind.execute(
-            text(
-                "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = :t AND column_name = :c"
-            ),
-            {"t": table, "c": column},
-        ).first()
-        return bool(row)
-    rows = bind.execute(text(f"PRAGMA table_info({table})")).fetchall()
-    return any(r[1] == column for r in rows)
+    row = bind.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :t AND column_name = :c"
+        ),
+        {"t": table, "c": column},
+    ).first()
+    return bool(row)
 
 
 def _add_column(table: str, column_def: str, column_name: str) -> None:
@@ -49,44 +41,24 @@ def _add_column(table: str, column_def: str, column_name: str) -> None:
 
 
 def upgrade() -> None:
-    if _is_postgres():
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS miniprogram_library (
-                id BIGSERIAL PRIMARY KEY,
-                name TEXT NOT NULL DEFAULT '',
-                appid TEXT NOT NULL,
-                pagepath TEXT NOT NULL DEFAULT '',
-                title TEXT NOT NULL DEFAULT '',
-                thumb_image_url TEXT NOT NULL DEFAULT '',
-                thumb_image_base64 TEXT NOT NULL DEFAULT '',
-                thumb_media_id TEXT NOT NULL DEFAULT '',
-                thumb_media_id_expires_at TIMESTAMPTZ,
-                enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
+    op.execute(
+        """
+        CREATE TABLE IF NOT EXISTS miniprogram_library (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            appid TEXT NOT NULL,
+            pagepath TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            thumb_image_url TEXT NOT NULL DEFAULT '',
+            thumb_image_base64 TEXT NOT NULL DEFAULT '',
+            thumb_media_id TEXT NOT NULL DEFAULT '',
+            thumb_media_id_expires_at TIMESTAMPTZ,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
-    else:
-        op.execute(
-            """
-            CREATE TABLE IF NOT EXISTS miniprogram_library (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL DEFAULT '',
-                appid TEXT NOT NULL,
-                pagepath TEXT NOT NULL DEFAULT '',
-                title TEXT NOT NULL DEFAULT '',
-                thumb_image_url TEXT NOT NULL DEFAULT '',
-                thumb_image_base64 TEXT NOT NULL DEFAULT '',
-                thumb_media_id TEXT NOT NULL DEFAULT '',
-                thumb_media_id_expires_at TEXT NOT NULL DEFAULT '',
-                enabled INTEGER NOT NULL DEFAULT 1,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
+        """
+    )
 
     op.execute(
         """
@@ -101,28 +73,16 @@ def upgrade() -> None:
         """
     )
 
-    if _is_postgres():
-        _add_column(
-            "cloud_broadcast_plans",
-            "attachments_json JSONB NOT NULL DEFAULT '[]'::jsonb",
-            "attachments_json",
-        )
-        _add_column(
-            "automation_sop_template",
-            "miniprograms_json JSONB NOT NULL DEFAULT '[]'::jsonb",
-            "miniprograms_json",
-        )
-    else:
-        _add_column(
-            "cloud_broadcast_plans",
-            "attachments_json TEXT NOT NULL DEFAULT '[]'",
-            "attachments_json",
-        )
-        _add_column(
-            "automation_sop_template",
-            "miniprograms_json TEXT NOT NULL DEFAULT '[]'",
-            "miniprograms_json",
-        )
+    _add_column(
+        "cloud_broadcast_plans",
+        "attachments_json JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "attachments_json",
+    )
+    _add_column(
+        "automation_sop_template",
+        "miniprograms_json JSONB NOT NULL DEFAULT '[]'::jsonb",
+        "miniprograms_json",
+    )
 
 
 def downgrade() -> None:

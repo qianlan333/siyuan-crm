@@ -27,7 +27,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ...db import get_db
@@ -47,6 +47,10 @@ ACTION_GOTO_NODE = "goto_node"
 ACTION_MARK_SILENT = "mark_silent"
 ACTION_ESCALATE_HUMAN = "escalate_human"
 ACTION_EXIT_WORKFLOW = "exit_workflow"
+
+
+def _utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 @dataclass(frozen=True)
@@ -142,7 +146,7 @@ def _evaluate_condition(
             cutoff = datetime.fromisoformat(last_out.replace("Z", "+00:00"))
         except ValueError:
             return False, f"invalid_last_outbound:{last_out}"
-        if (datetime.utcnow() - cutoff.replace(tzinfo=None)) >= timedelta(days=days):
+        if (_utc_now_naive() - cutoff.replace(tzinfo=None)) >= timedelta(days=days):
             return True, f"silence_for_{days}_days"
         return False, f"within_{days}_days"
     if condition_kind == CONDITION_BUDGET_EXHAUSTED:
@@ -369,7 +373,7 @@ def cache_ai_decision(
     payload["ai_decision_cached"] = {
         "matched": bool(matched),
         "reason": reason or "",
-        "decided_at": datetime.utcnow().isoformat(),
+        "decided_at": _utc_now_naive().isoformat(),
     }
     cur.execute(
         "UPDATE automation_workflow_node_transition SET condition_payload_json = ?, "

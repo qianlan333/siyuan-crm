@@ -1,3 +1,4 @@
+{% if not program_context %}
 <nav class="ac-workspace-tabs" aria-label="自动化转化工作面导航">
   {% for item in workspace_tabs %}
   <a class="ac-workspace-tab{% if item.active %} is-active{% endif %}" href="{{ item.href }}">
@@ -7,3 +8,4 @@
   </a>
   {% endfor %}
 </nav>
+{% endif %}

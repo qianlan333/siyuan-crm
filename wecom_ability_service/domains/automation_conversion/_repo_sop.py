@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...db import cast_text, get_db, get_db_backend, is_postgres
+from ...db import get_db
 from ._repo_helpers import (
     _AUTOMATION_SOP_POOL_LOCK_NAMESPACE,
     _db_bool,
@@ -425,7 +425,7 @@ def list_sop_batches(*, pool_key: str = "", limit: int = 50) -> list[dict[str, A
 
 def try_acquire_sop_pool_run_lock(*, pool_key: str) -> bool:
     normalized_pool_key = _normalized_text(pool_key)
-    if not normalized_pool_key or get_db_backend() != "postgres":
+    if not normalized_pool_key:
         return True
     row = get_db().execute(
         """

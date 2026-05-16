@@ -1,0 +1,506 @@
+{% set workspace = operations_workspace or {} %}
+<style>
+  .op-task-workspace { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; min-width: 0; }
+  .op-task-card, .op-task-panel { border: 1px solid rgba(15,23,42,.08); border-radius: 16px; background: #fff; min-width: 0; }
+  .op-task-panel { display: grid; gap: 16px; padding: 16px; }
+  .op-task-card__head { display: grid; gap: 12px; padding: 16px; border-bottom: 1px solid rgba(15,23,42,.06); }
+  .op-task-card__head h2, .op-task-section h3 { margin: 0; color: #1f2329; }
+  .op-task-sidebar { display: grid; gap: 12px; padding: 16px; max-height: calc(100vh - 220px); overflow: auto; }
+  .op-task-tools { display: grid; gap: 10px; }
+  .op-task-tools__row, .op-task-actions, .op-task-segment-assets { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .op-task-button { border: 1px solid rgba(15,23,42,.12); border-radius: 10px; background: #f8fafc; color: #1f2329; padding: 9px 12px; font-weight: 800; cursor: pointer; }
+  .op-task-button.is-primary { border-color: #2563eb; background: #2563eb; color: #fff; }
+  .op-task-button.is-soft { border-color: rgba(37,99,235,.18); background: #eef4ff; color: #1456f0; }
+  .op-task-button:disabled { opacity: .6; cursor: wait; }
+  .op-task-list { display: grid; gap: 10px; }
+  .op-task-group { display: grid; gap: 8px; }
+  .op-task-group__title { color: #667085; font-size: 13px; font-weight: 900; }
+  .op-task-item { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(15,23,42,.08); border-radius: 14px; background: #fff; text-align: left; }
+  .op-task-item.is-active { border-color: rgba(37,99,235,.42); background: #f7fbff; box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+  .op-task-item__top { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; }
+  .op-task-item strong { color: #1f2329; }
+  .op-task-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 9px; background: #f2f4f7; color: #344054; font-size: 12px; font-weight: 800; white-space: nowrap; }
+  .op-task-badge.is-active { background: #ecfdf3; color: #067647; }
+  .op-task-badge.is-draft { background: #eef4ff; color: #1456f0; }
+  .op-task-section { display: grid; gap: 14px; padding: 16px; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; background: #fff; min-width: 0; }
+  .op-task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .op-task-grid--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .op-task-field { display: grid; gap: 6px; min-width: 0; }
+  .op-task-field > span { color: #667085; font-size: 13px; font-weight: 900; }
+  .op-task-field input, .op-task-field select, .op-task-field textarea { width: 100%; padding: 11px 12px; border: 1px solid rgba(15,23,42,.12); border-radius: 10px; background: #fff; }
+  .op-task-field textarea { min-height: 110px; resize: vertical; }
+  .op-task-mode-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+  .op-task-mode { display: grid; place-items: center; min-height: 64px; padding: 12px; border: 1px solid rgba(15,23,42,.10); border-radius: 14px; background: #fff; font-weight: 900; cursor: pointer; text-align: center; }
+  .op-task-mode.is-active { border-color: rgba(37,99,235,.42); background: #eef4ff; color: #1456f0; }
+  .op-task-preview { display: inline-flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: #f8fbff; color: #344054; font-weight: 800; }
+  .op-task-segments { display: grid; gap: 12px; }
+  .op-task-segment { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(15,23,42,.08); border-radius: 14px; background: #f9fafb; }
+  .op-task-empty { display: grid; place-items: center; min-height: 320px; color: #667085; border: 1px dashed rgba(15,23,42,.16); border-radius: 16px; background: #fff; }
+  .op-task-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 5px 9px; background: #eef4ff; color: #1456f0; font-size: 12px; font-weight: 800; }
+  .op-task-feedback { display: none; padding: 12px 14px; border-radius: 12px; background: #fef2f2; color: #991b1b; font-weight: 700; }
+  .op-task-feedback.is-success { background: #ecfdf3; color: #166534; }
+  @media (max-width: 960px) {
+    .op-task-workspace, .op-task-grid, .op-task-grid--three, .op-task-mode-grid { grid-template-columns: 1fr; }
+    .op-task-sidebar { max-height: none; }
+  }
+</style>
+
+<section class="op-task-workspace" data-operation-task-root data-api-urls='{{ (workspace.api_urls or {})|tojson }}'>
+  <aside class="op-task-card">
+    <div class="op-task-card__head">
+      <h2>运营任务</h2>
+      <div class="op-task-tools">
+        <select class="op-task-field" data-group-filter aria-label="分组筛选"></select>
+        <input class="op-task-field" data-task-search placeholder="搜索任务标题" aria-label="搜索任务标题">
+        <div class="op-task-tools__row">
+          <button class="op-task-button is-primary" type="button" data-create-task>新增任务</button>
+          <button class="op-task-button is-soft" type="button" data-create-group>新增分组</button>
+        </div>
+      </div>
+      <div class="op-task-feedback" data-task-list-feedback></div>
+    </div>
+    <div class="op-task-sidebar">
+      <div class="op-task-list" data-task-list></div>
+    </div>
+  </aside>
+
+  <div class="op-task-panel" data-task-editor>
+    <div class="op-task-feedback" data-task-feedback></div>
+    <div class="op-task-empty" data-task-empty>还没有运营任务</div>
+    <div class="op-task-panel" data-task-form hidden>
+      <section class="op-task-section">
+        <h3>任务基础信息</h3>
+        <div class="op-task-grid">
+          <label class="op-task-field"><span>任务名称</span><input data-field="task_name"></label>
+          <label class="op-task-field"><span>所属分组</span><select data-field="group_id"></select></label>
+          <label class="op-task-field"><span>状态</span><select data-field="status"><option value="draft">草稿</option><option value="active">启用</option><option value="paused">停用</option></select></label>
+          <label class="op-task-field" style="grid-column: 1 / -1;"><span>任务说明</span><textarea data-field="description"></textarea></label>
+        </div>
+      </section>
+
+      <section class="op-task-section">
+        <h3>触发与对象</h3>
+        <div class="op-task-grid op-task-grid--three">
+          <label class="op-task-field"><span>每天触发时间</span><input data-field="send_time" type="time"></label>
+          <label class="op-task-field"><span>目标人群</span><select data-field="target_audience_code"><option value="pending_questionnaire">待填问卷</option><option value="operating">运营中</option><option value="converted">已转化</option></select></label>
+          <label class="op-task-field"><span>进入人群第 N 天</span><input data-field="audience_day_offset" type="number" min="1" step="1"></label>
+          <label class="op-task-field" style="grid-column: 1 / -1;"><span>行为过滤</span><select data-field="behavior_filter"><option value="none">不过滤</option><option value="lt_2">消息少于 2 次</option><option value="between_2_9">消息 2-9 次</option><option value="gte_10">消息大于等于 10 次</option></select></label>
+        </div>
+        <div class="op-task-actions">
+          <div class="op-task-preview">命中人数：<strong data-preview-total>-</strong></div>
+          <button class="op-task-button is-soft" type="button" data-preview-audience>刷新人群预览</button>
+        </div>
+      </section>
+
+      <section class="op-task-section">
+        <h3>发送策略</h3>
+        <div class="op-task-mode-grid" data-content-modes>
+          <button class="op-task-mode" type="button" data-mode="unified">统一内容</button>
+          <button class="op-task-mode" type="button" data-mode="profile_layered">按画像分层群发</button>
+          <button class="op-task-mode" type="button" data-mode="behavior_layered">按消息数分层群发</button>
+          <button class="op-task-mode" type="button" data-mode="agent">Agent 改写 / 个性化</button>
+        </div>
+        <label class="op-task-field" data-profile-template-field hidden><span>画像模板</span><select data-field="profile_segment_template_id"></select></label>
+      </section>
+
+      <section class="op-task-section">
+        <h3>分层话术</h3>
+        <div class="op-task-segments" data-segment-editor></div>
+      </section>
+    </div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const root = document.querySelector("[data-operation-task-root]");
+  if (!root) return;
+  const apiUrls = JSON.parse(root.dataset.apiUrls || "{}");
+  const withId = (url, id) => String(url || "").replace(/\/0(?=\/|$)/, `/${encodeURIComponent(String(id || 0))}`);
+  const state = { groups: [], tasks: [], currentTask: null, profileTemplates: [], profileSegments: [], agents: [], preview: {} };
+  const labels = {
+    status: { draft: "草稿", active: "启用", paused: "停用", archived: "归档" },
+    behavior: { lt_2: "消息少于 2", between_2_9: "消息 2 ~ 9", gte_10: "消息大于等于 10" },
+  };
+  const behaviorSegments = [
+    { segment_key: "lt_2", segment_name: "消息少于 2" },
+    { segment_key: "between_2_9", segment_name: "消息 2 ~ 9" },
+    { segment_key: "gte_10", segment_name: "消息大于等于 10" },
+  ];
+  const dom = {
+    groupFilter: root.querySelector("[data-group-filter]"),
+    taskSearch: root.querySelector("[data-task-search]"),
+    groupSelect: root.querySelector("[data-field='group_id']"),
+    list: root.querySelector("[data-task-list]"),
+    form: root.querySelector("[data-task-form]"),
+    empty: root.querySelector("[data-task-empty]"),
+    feedback: root.querySelector("[data-task-feedback]"),
+    listFeedback: root.querySelector("[data-task-list-feedback]"),
+    previewTotal: root.querySelector("[data-preview-total]"),
+    segments: root.querySelector("[data-segment-editor]"),
+    profileField: root.querySelector("[data-profile-template-field]"),
+  };
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+  const showFeedback = (target, message, ok = false) => {
+    if (!target) return;
+    target.textContent = message;
+    target.classList.toggle("is-success", ok);
+    target.style.display = "block";
+  };
+  const clearFeedback = () => [dom.feedback, dom.listFeedback].forEach((item) => { if (item) item.style.display = "none"; });
+  const requestJson = async (url, options = {}) => {
+    const response = await fetch(url, { headers: { Accept: "application/json", "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.error || "操作失败，请稍后重试");
+    return data;
+  };
+  const currentId = () => Number((state.currentTask || {}).id || 0);
+  const getField = (name) => root.querySelector(`[data-field="${name}"]`);
+  const setValue = (name, value) => { const field = getField(name); if (field) field.value = value ?? ""; };
+  const getValue = (name) => getField(name)?.value ?? "";
+
+  function groupName(id) {
+    const group = state.groups.find((item) => Number(item.id) === Number(id));
+    return group ? group.group_name : "未分组";
+  }
+
+  function syncGroupControls() {
+    const options = [`<option value="">全部分组</option>`, `<option value="0">未分组</option>`].concat(state.groups.map((group) => `<option value="${group.id}">${escapeHtml(group.group_name)}</option>`)).join("");
+    if (dom.groupFilter) dom.groupFilter.innerHTML = options;
+    if (dom.groupSelect) dom.groupSelect.innerHTML = [`<option value="">未分组</option>`].concat(state.groups.map((group) => `<option value="${group.id}">${escapeHtml(group.group_name)}</option>`)).join("");
+  }
+
+  function filteredTasks() {
+    const groupValue = dom.groupFilter?.value ?? "";
+    const keyword = String(dom.taskSearch?.value || "").trim().toLowerCase();
+    return state.tasks.filter((task) => {
+      if (groupValue === "0" && task.group_id) return false;
+      if (groupValue && groupValue !== "0" && Number(task.group_id || 0) !== Number(groupValue)) return false;
+      if (keyword && !String(task.task_name || "").toLowerCase().includes(keyword)) return false;
+      return true;
+    });
+  }
+
+  function renderList() {
+    if (!dom.list) return;
+    const tasks = filteredTasks();
+    if (!tasks.length) {
+      dom.list.innerHTML = `<div class="op-task-empty">暂无任务</div>`;
+      return;
+    }
+    const grouped = new Map();
+    tasks.forEach((task) => {
+      const key = task.group_id ? String(task.group_id) : "0";
+      if (!grouped.has(key)) grouped.set(key, []);
+      grouped.get(key).push(task);
+    });
+    dom.list.innerHTML = [...grouped.entries()].map(([key, items]) => `
+      <section class="op-task-group">
+        <div class="op-task-group__title">${escapeHtml(key === "0" ? "未分组" : groupName(key))}</div>
+        ${items.map((task) => {
+          const active = Number(task.id) === currentId();
+          const status = String(task.status || "draft");
+          return `<article class="op-task-item${active ? " is-active" : ""}" data-task-id="${task.id}">
+            <div class="op-task-item__top"><strong>${escapeHtml(task.task_name || "未命名任务")}</strong><span class="op-task-badge is-${escapeHtml(status)}">${escapeHtml(labels.status[status] || status)}</span></div>
+            <div class="op-task-actions">
+              <button class="op-task-button is-soft" type="button" data-task-action="edit">编辑</button>
+              <button class="op-task-button" type="button" data-task-action="${status === "active" ? "pause" : "activate"}">${status === "active" ? "停用" : "启用"}</button>
+              <button class="op-task-button" type="button" data-task-action="copy">复制</button>
+              <button class="op-task-button" type="button" data-task-action="delete">删除</button>
+            </div>
+          </article>`;
+        }).join("")}
+      </section>
+    `).join("");
+  }
+
+  function setCurrentTask(task) {
+    state.currentTask = task ? { ...task } : null;
+    dom.empty.hidden = Boolean(task);
+    dom.form.hidden = !task;
+    if (!task) {
+      renderList();
+      return;
+    }
+    setValue("task_name", task.task_name || "");
+    setValue("group_id", task.group_id || "");
+    setValue("status", task.status || "draft");
+    setValue("description", task.description || "");
+    setValue("send_time", task.send_time || "10:00");
+    setValue("target_audience_code", task.target_audience_code || "operating");
+    setValue("audience_day_offset", task.audience_day_offset || 1);
+    setValue("behavior_filter", task.behavior_filter || "none");
+    setValue("profile_segment_template_id", task.profile_segment_template_id || "");
+    setMode(task.content_mode || "unified", false);
+    if (String(task.content_mode || "") === "profile_layered" && task.profile_segment_template_id) {
+      loadProfileSegments(task.profile_segment_template_id).then(renderSegments).catch(() => {});
+    }
+    renderList();
+  }
+
+  async function loadProfileTemplates() {
+    if (!apiUrls.profile_segment_templates_options) return;
+    const data = await requestJson(apiUrls.profile_segment_templates_options);
+    state.profileTemplates = data.items || data.templates || [];
+    const select = getField("profile_segment_template_id");
+    if (select) select.innerHTML = `<option value="">请选择画像模板</option>` + state.profileTemplates.map((item) => `<option value="${item.id}">${escapeHtml(item.template_name || item.name || item.template_code || item.id)}</option>`).join("");
+  }
+
+  async function loadAgents() {
+    if (!apiUrls.agents_options) return;
+    const data = await requestJson(apiUrls.agents_options);
+    state.agents = data.items || data.agents || data.options || [];
+  }
+
+  async function loadProfileSegments(templateId) {
+    state.profileSegments = [];
+    if (!templateId || !apiUrls.profile_segment_template_detail_base) return [];
+    const data = await requestJson(withId(apiUrls.profile_segment_template_detail_base, templateId));
+    const bundle = data.template_bundle || data.bundle || data;
+    const segments = bundle.segments || bundle.profile_segments || (bundle.template || {}).segments || [];
+    state.profileSegments = segments.map((item) => ({
+      segment_key: item.segment_key || item.category_key || item.profile_segment_key || item.key || String(item.id || ""),
+      segment_name: item.segment_name || item.category_name || item.profile_segment_name || item.name || item.segment_key || String(item.id || ""),
+    })).filter((item) => item.segment_key);
+    return state.profileSegments;
+  }
+
+  function segmentRowsForMode() {
+    const mode = String(getValue("content_mode") || (state.currentTask || {}).content_mode || "unified");
+    if (mode === "behavior_layered") return behaviorSegments;
+    if (mode === "profile_layered") return state.profileSegments;
+    return [{ segment_key: mode === "agent" ? "agent" : "unified", segment_name: mode === "agent" ? "Agent 改写 / 个性化" : "统一内容" }];
+  }
+
+  function segmentContent(key) {
+    const task = state.currentTask || {};
+    if (String(task.content_mode || "unified") === "unified" && key === "unified") return task.unified_content_json || {};
+    if (String(task.content_mode || "") === "agent" && key === "agent") return task.agent_config_json || {};
+    return (task.segment_contents_json || []).find((item) => String(item.segment_key) === String(key)) || {};
+  }
+
+  function renderSegments() {
+    const mode = String((state.currentTask || {}).content_mode || "unified");
+    const rows = segmentRowsForMode();
+    dom.profileField.hidden = mode !== "profile_layered";
+    dom.segments.innerHTML = rows.map((row) => {
+      const content = segmentContent(row.segment_key);
+      const count = (state.preview.segment_counts || {})[row.segment_key];
+      const text = mode === "agent" ? (content.requirement || content.fallback_content || "") : (content.content_text || "");
+      return `<article class="op-task-segment" data-segment-key="${escapeHtml(row.segment_key)}" data-segment-name="${escapeHtml(row.segment_name)}">
+        <div class="op-task-item__top"><strong>${escapeHtml(row.segment_name)}</strong>${count === undefined ? "" : `<span class="op-task-chip">${Number(count)} 人</span>`}</div>
+        ${mode === "agent" ? `<label class="op-task-field"><span>Agent</span><select data-agent-code><option value="">请选择 Agent</option>${state.agents.map((agent) => {
+          const code = agent.agent_code || agent.code || agent.value || "";
+          const name = agent.agent_name || agent.name || agent.label || code;
+          return `<option value="${escapeHtml(code)}" ${String(content.agent_code || "") === String(code) ? "selected" : ""}>${escapeHtml(name)}</option>`;
+        }).join("")}</select></label>` : ""}
+        <label class="op-task-field"><span>${mode === "agent" ? "生成要求" : "话术"}</span><textarea data-segment-text>${escapeHtml(text)}</textarea></label>
+        <div class="op-task-segment-assets">
+          <button class="op-task-button is-soft" type="button" data-bind-asset="image">绑定图片</button>
+          <button class="op-task-button is-soft" type="button" data-bind-asset="miniprogram">绑定小程序</button>
+          <span data-asset-list>${assetChips(content)}</span>
+        </div>
+      </article>`;
+    }).join("");
+  }
+
+  function assetChips(content) {
+    const images = (content.image_library_ids || []).map((id) => `<span class="op-task-chip" data-image-id="${id}">图片 ${id}</span>`);
+    const minis = (content.miniprogram_library_ids || []).map((id) => `<span class="op-task-chip" data-miniprogram-id="${id}">小程序 ${id}</span>`);
+    return images.concat(minis).join("");
+  }
+
+  function setMode(mode, updateTask = true) {
+    if (updateTask && state.currentTask) state.currentTask.content_mode = mode;
+    if (getField("content_mode")) setValue("content_mode", mode);
+    root.querySelectorAll("[data-mode]").forEach((button) => button.classList.toggle("is-active", button.dataset.mode === mode));
+    renderSegments();
+  }
+
+  function collectAssets(segment) {
+    return {
+      image_library_ids: [...segment.querySelectorAll("[data-image-id]")].map((item) => Number(item.dataset.imageId)).filter(Boolean),
+      miniprogram_library_ids: [...segment.querySelectorAll("[data-miniprogram-id]")].map((item) => Number(item.dataset.miniprogramId)).filter(Boolean),
+    };
+  }
+
+  function collectPayload(statusOverride = "") {
+    const mode = String((state.currentTask || {}).content_mode || "unified");
+    const payload = {
+      group_id: Number(getValue("group_id")) || null,
+      task_name: String(getValue("task_name") || "").trim(),
+      description: String(getValue("description") || "").trim(),
+      status: statusOverride || getValue("status") || "draft",
+      send_time: getValue("send_time") || "10:00",
+      timezone: "Asia/Shanghai",
+      target_audience_code: getValue("target_audience_code") || "operating",
+      audience_day_offset: Number(getValue("audience_day_offset") || 1),
+      behavior_filter: getValue("behavior_filter") || "none",
+      content_mode: mode,
+      profile_segment_template_id: Number(getValue("profile_segment_template_id")) || null,
+      unified_content_json: {},
+      segment_contents_json: [],
+      agent_config_json: {},
+    };
+    const segmentCards = [...root.querySelectorAll("[data-segment-key]")];
+    if (mode === "unified") {
+      const segment = segmentCards[0];
+      payload.unified_content_json = { content_text: segment?.querySelector("[data-segment-text]")?.value || "", ...collectAssets(segment || document.createElement("div")) };
+    } else if (mode === "agent") {
+      const segment = segmentCards[0];
+      payload.agent_config_json = { agent_code: segment?.querySelector("[data-agent-code]")?.value || "", requirement: segment?.querySelector("[data-segment-text]")?.value || "", ...collectAssets(segment || document.createElement("div")) };
+    } else {
+      payload.segment_contents_json = segmentCards.map((segment) => ({
+        segment_key: segment.dataset.segmentKey || "",
+        segment_name: segment.dataset.segmentName || "",
+        content_text: segment.querySelector("[data-segment-text]")?.value || "",
+        ...collectAssets(segment),
+      }));
+    }
+    if (!payload.task_name) throw new Error("任务名称不能为空");
+    return payload;
+  }
+
+  async function saveTask(statusOverride = "", silent = false) {
+    if (!state.currentTask) throw new Error("请先选择一个运营任务");
+    const payload = collectPayload(statusOverride);
+    const data = await requestJson(withId(apiUrls.task_base, currentId()), { method: "PUT", body: JSON.stringify(payload) });
+    const task = data.task;
+    const index = state.tasks.findIndex((item) => Number(item.id) === Number(task.id));
+    if (index >= 0) state.tasks[index] = task;
+    setCurrentTask(task);
+    if (!silent) showFeedback(dom.feedback, statusOverride === "active" ? "已保存并发布" : "草稿已保存", true);
+    return task;
+  }
+
+  async function loadTasks() {
+    const data = await requestJson(apiUrls.tasks);
+    state.groups = data.groups || [];
+    state.tasks = data.tasks || [];
+    syncGroupControls();
+    const selected = state.currentTask ? state.tasks.find((item) => Number(item.id) === currentId()) : state.tasks[0];
+    setCurrentTask(selected || null);
+  }
+
+  async function createTask() {
+    const defaultGroup = dom.groupFilter?.value && dom.groupFilter.value !== "0" ? Number(dom.groupFilter.value) : null;
+    const data = await requestJson(apiUrls.tasks, {
+      method: "POST",
+      body: JSON.stringify({
+        task_name: "新运营任务",
+        group_id: defaultGroup,
+        status: "draft",
+        send_time: "10:00",
+        target_audience_code: "operating",
+        audience_day_offset: 1,
+        behavior_filter: "none",
+        content_mode: "unified",
+        unified_content_json: { content_text: "" },
+      }),
+    });
+    state.tasks.unshift(data.task);
+    setCurrentTask(data.task);
+    showFeedback(dom.listFeedback, "已新增运营任务", true);
+  }
+
+  async function createGroup() {
+    const name = String(window.prompt("请输入分组名称", "") || "").trim();
+    if (!name) return;
+    const data = await requestJson(apiUrls.task_groups, { method: "POST", body: JSON.stringify({ group_name: name }) });
+    state.groups.push(data.group);
+    syncGroupControls();
+    showFeedback(dom.listFeedback, "已新增分组", true);
+  }
+
+  async function previewAudience() {
+    if (!state.currentTask) return;
+    const data = await requestJson(withId(apiUrls.task_preview_base, currentId()), { method: "POST", body: JSON.stringify(collectPayload()) });
+    state.preview = data.preview || {};
+    dom.previewTotal.textContent = String(state.preview.target_count ?? 0);
+    renderSegments();
+  }
+
+  root.addEventListener("click", async (event) => {
+    const modeButton = event.target.closest("[data-mode]");
+    if (modeButton) setMode(modeButton.dataset.mode || "unified");
+    const asset = event.target.closest("[data-bind-asset]");
+    if (asset) {
+      const id = Number(window.prompt(asset.dataset.bindAsset === "image" ? "请输入图片素材编号" : "请输入小程序素材编号", "") || 0);
+      if (!id) return;
+      const list = asset.closest("[data-segment-key]")?.querySelector("[data-asset-list]");
+      if (list) list.insertAdjacentHTML("beforeend", asset.dataset.bindAsset === "image" ? `<span class="op-task-chip" data-image-id="${id}">图片 ${id}</span>` : `<span class="op-task-chip" data-miniprogram-id="${id}">小程序 ${id}</span>`);
+    }
+    if (event.target.closest("[data-create-task]")) await createTask().catch((error) => showFeedback(dom.listFeedback, error.message || "新增失败"));
+    if (event.target.closest("[data-create-group]")) await createGroup().catch((error) => showFeedback(dom.listFeedback, error.message || "新增失败"));
+    if (event.target.closest("[data-preview-audience]")) await previewAudience().catch((error) => showFeedback(dom.feedback, error.message || "预览失败"));
+    const actionButton = event.target.closest("[data-task-action]");
+    if (actionButton) {
+      const card = actionButton.closest("[data-task-id]");
+      const taskId = Number(card?.dataset.taskId || 0);
+      const action = actionButton.dataset.taskAction;
+      try {
+        actionButton.disabled = true;
+        if (action === "edit") setCurrentTask(state.tasks.find((item) => Number(item.id) === taskId));
+        if (action === "copy") {
+          const data = await requestJson(withId(apiUrls.task_copy_base, taskId), { method: "POST", body: "{}" });
+          state.tasks.unshift(data.task);
+          setCurrentTask(data.task);
+          showFeedback(dom.listFeedback, "已复制运营任务", true);
+        }
+        if (action === "activate" || action === "pause") {
+          const data = await requestJson(withId(action === "activate" ? apiUrls.task_activate_base : apiUrls.task_pause_base, taskId), { method: "POST", body: "{}" });
+          const index = state.tasks.findIndex((item) => Number(item.id) === taskId);
+          if (index >= 0) state.tasks[index] = data.task;
+          if (currentId() === taskId) setCurrentTask(data.task);
+          else renderList();
+          showFeedback(dom.listFeedback, action === "activate" ? "已启用运营任务" : "已停用运营任务", true);
+        }
+        if (action === "delete") {
+          if (!window.confirm("确认删除这个运营任务吗？删除后不可恢复。")) return;
+          await requestJson(withId(apiUrls.task_base, taskId), { method: "DELETE" });
+          state.tasks = state.tasks.filter((item) => Number(item.id) !== taskId);
+          setCurrentTask(currentId() === taskId ? (state.tasks[0] || null) : state.currentTask);
+          showFeedback(dom.listFeedback, "已删除运营任务", true);
+        }
+      } catch (error) {
+        showFeedback(dom.listFeedback, error.message || "操作失败");
+      } finally {
+        actionButton.disabled = false;
+      }
+    }
+  });
+  root.addEventListener("input", (event) => {
+    if (event.target === dom.taskSearch) renderList();
+  });
+  dom.groupFilter?.addEventListener("change", renderList);
+  getField("profile_segment_template_id")?.addEventListener("change", async (event) => {
+    await loadProfileSegments(event.target.value);
+    renderSegments();
+  });
+  root.querySelectorAll("[data-field]").forEach((field) => {
+    field.addEventListener("input", () => {
+      if (!state.currentTask) return;
+      state.currentTask[field.dataset.field] = field.value;
+    });
+    field.addEventListener("change", () => {
+      if (!state.currentTask) return;
+      state.currentTask[field.dataset.field] = field.value;
+    });
+  });
+
+  window.__automationOperationSaveDraft = async () => saveTask("draft", true);
+  window.__automationOperationPublish = async () => saveTask("active", true);
+
+  (async () => {
+    try {
+      await loadProfileTemplates();
+      await loadAgents();
+      await loadTasks();
+      if ((state.currentTask || {}).profile_segment_template_id) await loadProfileSegments(state.currentTask.profile_segment_template_id);
+      renderSegments();
+    } catch (error) {
+      showFeedback(dom.feedback, error.message || "运营任务加载失败");
+    }
+  })();
+})();
+</script>

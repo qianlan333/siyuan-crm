@@ -45,6 +45,17 @@ def test_constructor_rejects_empty_recipients():
         _minimal_task(recipients=[])
 
 
+def test_constructor_allows_empty_recipients_for_handler_resolved_jobs():
+    task = _minimal_task(
+        source_kind="workflow",
+        recipients=[],
+        allow_empty_recipients=True,
+        content={"workflow_id": 1, "node_id": 1, "pre_scheduled": True},
+    )
+    assert task.recipients == []
+    assert task.allow_empty_recipients is True
+
+
 def test_constructor_strips_recipient_whitespace_and_blanks():
     task = _minimal_task(recipients=["  wm_a  ", "", "wm_b", "   "])
     assert task.recipients == ["wm_a", "wm_b"]
@@ -89,6 +100,7 @@ def test_to_enqueue_kwargs_field_mapping():
     assert kwargs["scheduled_for"] == "2026-05-11 09:00:00+00:00"
     assert kwargs["priority"] == 50
     assert kwargs["requires_approval"] is True
+    assert kwargs["allow_empty_targets"] is False
     assert kwargs["batch_key"] == "batch-7"
     assert kwargs["trace_id"] == "trace-abc"
     assert kwargs["created_by"] == "cron-test"
@@ -100,6 +112,24 @@ def test_to_enqueue_kwargs_field_mapping():
 def test_to_enqueue_kwargs_omits_sender_userid_when_blank():
     kwargs = _minimal_task().to_enqueue_kwargs()
     assert "_sender_userid" not in kwargs["content_payload"]
+
+
+def test_to_enqueue_kwargs_maps_empty_recipient_override():
+    task = SendTask(
+        source_kind="workflow",
+        source_id="pre-scheduled-workflow-1",
+        source_table="automation_workflow_executions",
+        recipients=[],
+        content={"workflow_id": 1, "node_id": 1, "pre_scheduled": True},
+        allow_empty_recipients=True,
+        target_summary="workflow node=1",
+        content_type="private_message",
+    )
+
+    kwargs = task.to_enqueue_kwargs()
+
+    assert kwargs["target_external_userids"] == []
+    assert kwargs["allow_empty_targets"] is True
 
 
 def test_round_trip_from_broadcast_job_preserves_fields():
@@ -140,6 +170,19 @@ def test_round_trip_from_broadcast_job_preserves_fields():
     }
     revived = SendTask.from_broadcast_job(fake_row)
     assert revived == original
+
+
+def test_from_broadcast_job_allows_empty_target_rows():
+    row = {
+        "source_type": "workflow",
+        "source_id": "pre-scheduled-workflow-1",
+        "source_table": "automation_workflow_executions",
+        "target_external_userids": [],
+        "content_payload": {"workflow_id": 1, "node_id": 1, "pre_scheduled": True},
+    }
+    task = SendTask.from_broadcast_job(row)
+    assert task.recipients == []
+    assert task.allow_empty_recipients is True
 
 
 def test_from_broadcast_job_handles_missing_fields():

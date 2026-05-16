@@ -111,6 +111,13 @@ from .workflow_service import (
     update_conversion_workflow_node,
     delete_conversion_workflow_node,
 )
+from .action_template_service import (
+    create_action_from_template,
+    create_action_template,
+    create_action_template_from_workflow,
+    generate_action_template,
+    list_action_templates,
+)
 from .workflow_runtime import (
     run_due_conversion_workflows,
     sync_all_conversion_member_audiences,
@@ -206,6 +213,9 @@ __all__ = [
     "crm_get_member_snapshot",
     "crm_get_member_stage",
     "copy_automation_program",
+    "create_action_from_template",
+    "create_action_template",
+    "create_action_template_from_workflow",
     "create_agent_config",
     "create_agent_config_draft_via_mcp",
     "delete_agent_config",
@@ -226,6 +236,7 @@ __all__ = [
     "get_automation_program",
     "ensure_sop_v1_defaults",
     "generate_default_channel_qr",
+    "generate_action_template",
     "get_default_channel_settings_payload",
     "get_default_automation_program",
     "get_default_automation_program_id",
@@ -260,6 +271,7 @@ __all__ = [
     "handle_agent_router_callback",
     "handle_laohuang_chat_result_callback",
     "list_recent_laohuang_review_outputs",
+    "list_action_templates",
     "list_agent_configs",
     "list_automation_programs",
     "list_pending_agent_prompt_publish_requests",

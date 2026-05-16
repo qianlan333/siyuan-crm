@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ._repo_helpers import (  # noqa: F401
     _fetchall_dicts,
     _fetchone_dict,
@@ -52,78 +52,41 @@ def upsert_conversion_dispatch_log(
         _normalized_text(dispatched_at),
         _normalized_text(acked_at),
     )
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            INSERT INTO conversion_dispatch_log (
-                automation_key,
-                batch_id,
-                external_userid,
-                dispatch_status,
-                dispatch_channel,
-                dispatch_payload_json,
-                dispatch_note,
-                dispatched_at,
-                acked_at,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, NULLIF(?, '')::timestamptz, NULLIF(?, '')::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (batch_id, external_userid) DO UPDATE SET
-                automation_key = EXCLUDED.automation_key,
-                dispatch_status = EXCLUDED.dispatch_status,
-                dispatch_channel = EXCLUDED.dispatch_channel,
-                dispatch_payload_json = EXCLUDED.dispatch_payload_json,
-                dispatch_note = EXCLUDED.dispatch_note,
-                dispatched_at = CASE
-                    WHEN EXCLUDED.dispatched_at IS NOT NULL THEN EXCLUDED.dispatched_at
-                    ELSE conversion_dispatch_log.dispatched_at
-                END,
-                acked_at = CASE
-                    WHEN EXCLUDED.acked_at IS NOT NULL THEN EXCLUDED.acked_at
-                    ELSE conversion_dispatch_log.acked_at
-                END,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            INSERT INTO conversion_dispatch_log (
-                automation_key,
-                batch_id,
-                external_userid,
-                dispatch_status,
-                dispatch_channel,
-                dispatch_payload_json,
-                dispatch_note,
-                dispatched_at,
-                acked_at,
-                created_at,
-                updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (batch_id, external_userid) DO UPDATE SET
-                automation_key = excluded.automation_key,
-                dispatch_status = excluded.dispatch_status,
-                dispatch_channel = excluded.dispatch_channel,
-                dispatch_payload_json = excluded.dispatch_payload_json,
-                dispatch_note = excluded.dispatch_note,
-                dispatched_at = CASE
-                    WHEN excluded.dispatched_at IS NOT NULL THEN excluded.dispatched_at
-                    ELSE conversion_dispatch_log.dispatched_at
-                END,
-                acked_at = CASE
-                    WHEN excluded.acked_at IS NOT NULL THEN excluded.acked_at
-                    ELSE conversion_dispatch_log.acked_at
-                END,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            params,
-        ).fetchone()
+    row = db.execute(
+        """
+        INSERT INTO conversion_dispatch_log (
+            automation_key,
+            batch_id,
+            external_userid,
+            dispatch_status,
+            dispatch_channel,
+            dispatch_payload_json,
+            dispatch_note,
+            dispatched_at,
+            acked_at,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, NULLIF(?, '')::timestamptz, NULLIF(?, '')::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (batch_id, external_userid) DO UPDATE SET
+            automation_key = EXCLUDED.automation_key,
+            dispatch_status = EXCLUDED.dispatch_status,
+            dispatch_channel = EXCLUDED.dispatch_channel,
+            dispatch_payload_json = EXCLUDED.dispatch_payload_json,
+            dispatch_note = EXCLUDED.dispatch_note,
+            dispatched_at = CASE
+                WHEN EXCLUDED.dispatched_at IS NOT NULL THEN EXCLUDED.dispatched_at
+                ELSE conversion_dispatch_log.dispatched_at
+            END,
+            acked_at = CASE
+                WHEN EXCLUDED.acked_at IS NOT NULL THEN EXCLUDED.acked_at
+                ELSE conversion_dispatch_log.acked_at
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        params,
+    ).fetchone()
     return dict(row) if row else {}
 
 

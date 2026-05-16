@@ -45,4 +45,20 @@ def build_questionnaire_preflight_payload(
         payload["identity_map_available"] = False
         payload["identity_map_error"] = str(exc)
 
+    try:
+        from ..automation_conversion.customer_acquisition_service import build_customer_acquisition_preflight_payload
+
+        payload.update(build_customer_acquisition_preflight_payload(config))
+    except Exception as exc:
+        payload.update(
+            {
+                "wecom_customer_acquisition_enabled": False,
+                "wecom_customer_acquisition_configured": False,
+                "wecom_customer_acquisition_secret_present": False,
+                "wecom_customer_acquisition_mapping_table_ok": False,
+                "wecom_customer_acquisition_callback_handler_ok": False,
+                "wecom_customer_acquisition_mapping_table_error": str(exc),
+            }
+        )
+
     return payload

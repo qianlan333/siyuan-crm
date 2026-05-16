@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -10,6 +9,7 @@ import requests
 from flask import current_app
 
 from ...db import get_db
+from ...infra.json_utils import safe_json_loads as _json_loads
 from ...application.class_user.commands import (
     ApplyClassUserStatusChangeCommand,
     ClearClassUserStatusCurrentCommand,
@@ -25,7 +25,6 @@ from ...application.class_user.queries import (
     GetClassUserStatusDefinitionQuery,
 )
 from ...infra.settings import get_setting
-from ...wecom_client import WeComClientError
 from ..automation_state.calculator import (
     calculate_marketing_state as _calculate_marketing_state,
     resolve_pool_key_for_customer as _shared_resolve_pool_key_for_customer,
@@ -49,11 +48,16 @@ from ..automation_state.state_defs import (
 from ..archive import repo as archive_repo
 from ..archive.service import extract_roomid_from_raw_payload, format_message_row, get_recent_messages_by_user
 from ..group_chats.repo import get_group_chat_map
-from ..outbound_webhook.service import EVENT_OPENCLAW_FOCUS_MESSAGE, send_outbound_webhook
 from ..questionnaire.service import get_questionnaire_detail
-from ..tasks.service import dispatch_wecom_task
-from ..user_ops import page_service as user_ops_page_service
+from ..tasks.service import dispatch_wecom_task  # noqa: F401 - legacy campaign dispatch monkeypatch seam
 from .presenter import business_marketing_display
+from ._repo_helpers import (
+    _normalize_bool,
+    _normalize_int,
+    _normalized_json_text_list,
+    _normalized_text,
+    _nullable_timestamp_text,
+)
 from . import repo
 
 DEFAULT_SCENARIO_KEY = "signup_conversion_v1"
@@ -188,70 +192,11 @@ automation_webhook_logger = logging.getLogger("automation_webhook")
 logger = logging.getLogger(__name__)
 
 
-def _normalized_text(value: Any) -> str:
-    return str(value or "").strip()
-
-
-def _nullable_timestamp_text(value: Any) -> str | None:
-    normalized = _normalized_text(value)
-    return normalized or None
-
-
 def _get_active_owner_role(userid: str) -> dict[str, Any]:
     owner_role = dict(repo.get_owner_role_item(_normalized_text(userid)) or {})
     if not owner_role or not bool(owner_role.get("active")):
         return {}
     return owner_role
-
-
-def _json_loads(value: Any, *, default: Any) -> Any:
-    if isinstance(value, (dict, list)):
-        return value
-    text = _normalized_text(value)
-    if not text:
-        return default
-    try:
-        return json.loads(text)
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return default
-
-
-def _normalize_bool(value: Any, *, default: bool = False) -> bool:
-    if value in (None, ""):
-        return default
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, (int, float)):
-        return bool(value)
-    return _normalized_text(value).lower() in {"1", "true", "yes", "y", "on"}
-
-
-def _normalize_int(
-    value: Any,
-    field_name: str,
-    *,
-    default: int | None = None,
-    minimum: int | None = None,
-    maximum: int | None = None,
-    allow_none: bool = False,
-) -> int | None:
-    if value in (None, ""):
-        if allow_none:
-            return None
-        if default is not None:
-            return int(default)
-        raise ValueError(f"{field_name} is required")
-    if isinstance(value, bool):
-        raise ValueError(f"{field_name} must be an integer")
-    try:
-        normalized = int(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be an integer") from exc
-    if minimum is not None and normalized < minimum:
-        raise ValueError(f"{field_name} must be >= {minimum}")
-    if maximum is not None and normalized > maximum:
-        raise ValueError(f"{field_name} must be <= {maximum}")
-    return normalized
 
 
 def _normalize_option_id_list(value: Any) -> list[int]:
@@ -1369,21 +1314,6 @@ def _is_signup_success(signup_status: str) -> bool:
     return any(normalized.startswith(prefix) for prefix in _EXIT_SIGNUP_PREFIXES)
 
 
-def _normalize_text_list(value: Any) -> list[str]:
-    raw_items = value if isinstance(value, list) else _json_loads(value, default=[])
-    if not isinstance(raw_items, list):
-        return []
-    result: list[str] = []
-    seen: set[str] = set()
-    for item in raw_items:
-        text = _normalized_text(item)
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        result.append(text)
-    return result
-
-
 def _latest_timestamp(*values: Any) -> str:
     candidates = [_normalized_text(value) for value in values if _normalized_text(value)]
     return max(candidates) if candidates else ""
@@ -1399,7 +1329,7 @@ def _serialize_current_customer_marketing_state(row: dict[str, Any] | None) -> d
     resolved_external_userid = _normalized_text(payload.get("resolved_external_userid"))
     if not resolved_external_userid:
         resolved_external_userid = stored_external_userid
-    bound_external_userids = _normalize_text_list(payload.get("bound_external_userids"))
+    bound_external_userids = _normalized_json_text_list(payload.get("bound_external_userids"))
     if not bound_external_userids and resolved_external_userid:
         bound_external_userids = [resolved_external_userid]
     person_id = _normalize_int(
@@ -1457,7 +1387,7 @@ def _customer_marketing_state_snapshot(row: dict[str, Any]) -> dict[str, Any]:
         "person_id": _normalize_int(row.get("person_id"), "person_id", allow_none=True),
         "storage_external_userid": _normalized_text(row.get("storage_external_userid")),
         "external_userid": _normalized_text(row.get("external_userid")),
-        "bound_external_userids": _normalize_text_list(row.get("bound_external_userids")),
+        "bound_external_userids": _normalized_json_text_list(row.get("bound_external_userids")),
         "main_stage": _normalized_text(row.get("main_stage")),
         "sub_stage": _normalized_text(row.get("sub_stage")),
         "activated": bool(row.get("activated")),
@@ -1704,8 +1634,6 @@ def evaluate_customer_marketing_state(
     followup_segment = _normalized_text(calculated_state.get("current_segment")) or FOLLOWUP_SEGMENT_UNKNOWN
     followup_segment_source = _normalized_text(calculated_state.get("current_segment_source")) or "awaiting_questionnaire"
     base_pool_key = _normalized_text(calculated_state.get("base_pool_key"))
-    base_stage_key = _normalized_text(calculated_state.get("base_stage_key"))
-    base_reference_at = _normalized_text(calculated_state.get("base_reference_at"))
     base_entered_at = _normalized_text(calculated_state.get("base_entered_at"))
     final_pool_key = _normalized_text(calculated_state.get("pool_key"))
     main_stage = _normalized_text(calculated_state.get("main_stage"))
@@ -1721,7 +1649,7 @@ def evaluate_customer_marketing_state(
         "person_id": target.get("person_id"),
         "mobile": _normalized_text(target.get("mobile")),
         "resolved_external_userid": _normalized_text(target.get("external_userid")),
-        "bound_external_userids": sorted(_normalize_text_list(target.get("external_userids") or [])),
+        "bound_external_userids": sorted(_normalized_json_text_list(target.get("external_userids") or [])),
         "activated_signal_source": _normalized_text((activation_signal or {}).get("signal_source")),
         "activated_signal_external_userid": _normalized_text((activation_signal or {}).get("external_userid")),
         "converted_external_userid": _normalized_text((converted_signal or {}).get("external_userid")),
@@ -2066,8 +1994,8 @@ def get_customer_marketing_profile(
             "marketing_phase": marketing_phase,
             "phase_label": (
                 _blocked_phase_label(
-                    int((batch_context or {}).get("day_start_hour") or config.get("day_start_hour") or DEFAULT_DAY_START_HOUR),
-                    int((batch_context or {}).get("quiet_hour_start") or config.get("quiet_hour_start") or DEFAULT_QUIET_HOUR_START),
+                    int((batch_context or {}).get("day_start_hour") or DEFAULT_DAY_START_HOUR),
+                    int((batch_context or {}).get("quiet_hour_start") or DEFAULT_QUIET_HOUR_START),
                 )
                 if marketing_phase == "blocked_after_2300"
                 else _PHASE_LABELS.get(marketing_phase, marketing_phase)
@@ -2650,7 +2578,7 @@ def ack_conversion_batch(
 
 
 # === Re-exports for backward compatibility (modules split off) ===
-from .value_segment_service import (  # noqa: E402
+from .value_segment_service import (  # noqa: E402,F401
     _compute_submission_hit_result,
     _compute_value_segment,
     _dedupe_tag_names,
@@ -2662,7 +2590,7 @@ from .value_segment_service import (  # noqa: E402
     _value_segment_config_ready,
     evaluate_customer_value_segment,
 )
-from .enrollment_service import (  # noqa: E402
+from .enrollment_service import (  # noqa: E402,F401
     _build_class_user_snapshot_for_conversion,
     _cancel_dispatches_for_pool_change,
     _cancel_pending_conversion_dispatches,
@@ -2674,7 +2602,7 @@ from .enrollment_service import (  # noqa: E402
     set_manual_followup_segment,
     unmark_enrolled,
 )
-from .router_dispatch_service import (  # noqa: E402
+from .router_dispatch_service import (  # noqa: E402,F401
     _build_disabled_batch_result,
     _candidate_preview_segment,
     _candidate_preview_stage,

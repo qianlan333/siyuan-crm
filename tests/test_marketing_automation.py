@@ -13,6 +13,11 @@ from wecom_ability_service.services import (
     insert_archived_messages,
     upsert_customer_trial_opening_fact,
 )
+from wecom_ability_service.domains.marketing_automation._repo_helpers import (
+    _normalize_bool,
+    _normalize_int,
+    _normalized_json_text_list,
+)
 
 
 class _WebhookResponse:
@@ -24,6 +29,19 @@ class _WebhookResponse:
 def _test_image_data_url(label: str = "img") -> str:
     encoded = base64.b64encode(f"fake-image-{label}".encode("utf-8")).decode("ascii")
     return f"data:image/png;base64,{encoded}"
+
+
+def test_marketing_normalizers_are_shared_package_helpers():
+    assert _normalize_bool("", default=True) is True
+    assert _normalize_bool("yes") is True
+    assert _normalize_bool("off") is False
+    assert _normalize_int("", "limit", default=3) == 3
+    assert _normalize_int("5", "limit", minimum=1, maximum=9) == 5
+    with pytest.raises(ValueError, match="limit must be <= 9"):
+        _normalize_int(10, "limit", maximum=9)
+    assert _normalized_json_text_list('[" wm_a ", "", null, "wm_b"]') == ["wm_a", "wm_b"]
+    assert _normalized_json_text_list([" wm_c ", "", None]) == ["wm_c"]
+    assert _normalized_json_text_list("not-json") == []
 
 
 @pytest.fixture()
@@ -41,7 +59,15 @@ def app(tmp_path):
 
 @pytest.fixture()
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    with client.session_transaction() as session:
+        session["admin_session_user_id"] = 0
+        session["admin_session_wecom_userid"] = ""
+        session["admin_session_role_list"] = ["super_admin"]
+        session["admin_session_login_type"] = "break_glass"
+        session["admin_session_display_name"] = "test-admin"
+        session["admin_session_break_glass_username"] = "test-admin"
+    return client
 
 
 def _seed_customer(

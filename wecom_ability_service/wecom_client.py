@@ -10,6 +10,7 @@ import requests
 from flask import current_app
 
 from .domains.tasks.private_message import build_private_message_request_payload
+from .domains.wecom_media_limits import validate_wecom_image_upload
 from .infra.circuit_breaker import CircuitBreaker
 from .infra.error_codes import classify_wecom_errcode, WECOM_CIRCUIT_OPEN, WECOM_NETWORK_ERROR
 from .infra.settings import get_setting, set_settings
@@ -257,6 +258,18 @@ class WeComClient:
     def create_tag(self, payload: dict) -> dict:
         return self.post("/cgi-bin/externalcontact/add_corp_tag", payload)
 
+    def update_tag(self, payload: dict) -> dict:
+        return self.post("/cgi-bin/externalcontact/edit_corp_tag", payload)
+
+    def delete_tag(self, payload: dict) -> dict:
+        return self.post("/cgi-bin/externalcontact/del_corp_tag", payload)
+
+    def update_tag_group(self, payload: dict) -> dict:
+        return self.update_tag(payload)
+
+    def delete_tag_group(self, payload: dict) -> dict:
+        return self.delete_tag(payload)
+
     def mark_tag(self, payload: dict) -> dict:
         return self.post("/cgi-bin/externalcontact/mark_tag", payload)
 
@@ -337,6 +350,11 @@ class WeComClient:
         return self.post("/cgi-bin/externalcontact/groupchat/get", {"chat_id": chat_id, "need_name": need_name})
 
     def _upload_private_message_image(self, file_name: str, file_bytes: bytes, content_type: str) -> str:
+        content_type = validate_wecom_image_upload(
+            file_bytes,
+            file_name=file_name,
+            mime_type=content_type,
+        )
         access_token = self._get_access_token()
         try:
             response = requests.post(

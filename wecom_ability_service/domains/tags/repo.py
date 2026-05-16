@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ...db import get_db, get_db_backend
+from ...db import get_db
+from ...db.helpers import fetchall_dicts
 
 
 def get_contact_tag_snapshots(external_userid: str) -> list[dict[str, Any]]:
@@ -115,6 +116,24 @@ def list_contact_tag_ids_for_user(external_userid: str, userid: str) -> list[str
         (str(external_userid or "").strip(), str(userid or "").strip()),
     ).fetchall()
     return [str(row.get("tag_id") or "").strip() for row in rows if str(row.get("tag_id") or "").strip()]
+
+
+def count_contact_tag_usage_by_tag_ids(tag_ids: list[str]) -> dict[str, int]:
+    normalized_tag_ids = sorted({str(item or "").strip() for item in tag_ids if str(item or "").strip()})
+    if not normalized_tag_ids:
+        return {}
+    placeholders = ",".join("?" for _ in normalized_tag_ids)
+    rows = fetchall_dicts(
+        get_db(),
+        f"""
+        SELECT tag_id, COUNT(*) AS usage_count
+        FROM contact_tags
+        WHERE tag_id IN ({placeholders})
+        GROUP BY tag_id
+        """,
+        tuple(normalized_tag_ids),
+    )
+    return {str(row.get("tag_id") or "").strip(): int(row.get("usage_count") or 0) for row in rows}
 
 
 def remove_all_tag_snapshots_for_other_users(external_userid: str, keep_userids: list[str]) -> None:

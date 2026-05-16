@@ -35,35 +35,30 @@ branch_labels: str | None = None
 depends_on: str | None = None
 
 
-def _is_postgres() -> bool:
-    bind = op.get_bind()
-    return bind.dialect.name == "postgresql"
-
-
 def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS segments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             segment_code TEXT NOT NULL UNIQUE,
             display_name TEXT NOT NULL DEFAULT '',
             description TEXT NOT NULL DEFAULT '',
             source_type TEXT NOT NULL DEFAULT 'ai_generated',
             sql_query TEXT NOT NULL DEFAULT '',
-            sql_params_json TEXT NOT NULL DEFAULT '{}',
-            sql_dialect TEXT NOT NULL DEFAULT 'sqlite',
+            sql_params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            sql_dialect TEXT NOT NULL DEFAULT 'postgres',
             status TEXT NOT NULL DEFAULT 'draft',
             version INTEGER NOT NULL DEFAULT 1,
             created_by_agent TEXT NOT NULL DEFAULT '',
             created_by_session TEXT NOT NULL DEFAULT '',
             cached_headcount INTEGER NOT NULL DEFAULT 0,
-            cached_sample_json TEXT NOT NULL DEFAULT '[]',
-            last_refreshed_at TEXT NOT NULL DEFAULT '',
+            cached_sample_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            last_refreshed_at TIMESTAMPTZ,
             last_refresh_error TEXT NOT NULL DEFAULT '',
             usage_count INTEGER NOT NULL DEFAULT 0,
-            tags_json TEXT NOT NULL DEFAULT '[]',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            tags_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -83,11 +78,11 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS segment_member_snapshots (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            segment_id INTEGER NOT NULL,
-            member_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            segment_id BIGINT NOT NULL,
+            member_id BIGINT NOT NULL,
             external_contact_id TEXT NOT NULL DEFAULT '',
-            captured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            captured_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -109,7 +104,7 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS campaigns (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id BIGSERIAL PRIMARY KEY,
             campaign_code TEXT NOT NULL UNIQUE,
             display_name TEXT NOT NULL DEFAULT '',
             intent TEXT NOT NULL DEFAULT '',
@@ -123,15 +118,15 @@ def upgrade() -> None:
             owner_userid TEXT NOT NULL DEFAULT '',
             approval_token_hash TEXT NOT NULL DEFAULT '',
             approved_by TEXT NOT NULL DEFAULT '',
-            approved_at TEXT NOT NULL DEFAULT '',
-            started_at TEXT NOT NULL DEFAULT '',
-            finished_at TEXT NOT NULL DEFAULT '',
-            paused_at TEXT NOT NULL DEFAULT '',
+            approved_at TIMESTAMPTZ,
+            started_at TIMESTAMPTZ,
+            finished_at TIMESTAMPTZ,
+            paused_at TIMESTAMPTZ,
             paused_reason TEXT NOT NULL DEFAULT '',
-            metadata_json TEXT NOT NULL DEFAULT '{}',
-            stats_json TEXT NOT NULL DEFAULT '{}',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            stats_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -157,13 +152,13 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS campaign_segments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            campaign_id INTEGER NOT NULL,
-            segment_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            campaign_id BIGINT NOT NULL,
+            segment_id BIGINT NOT NULL,
             segment_code TEXT NOT NULL DEFAULT '',
             priority INTEGER NOT NULL DEFAULT 100,
             label TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -183,20 +178,20 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS campaign_steps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            campaign_id INTEGER NOT NULL,
-            campaign_segment_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            campaign_id BIGINT NOT NULL,
+            campaign_segment_id BIGINT NOT NULL,
             step_index INTEGER NOT NULL DEFAULT 0,
             day_offset INTEGER NOT NULL DEFAULT 0,
             send_time TEXT NOT NULL DEFAULT '09:00',
             timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
             content_text TEXT NOT NULL DEFAULT '',
-            content_payload_json TEXT NOT NULL DEFAULT '{}',
-            stop_on_reply INTEGER NOT NULL DEFAULT 1,
+            content_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            stop_on_reply BOOLEAN NOT NULL DEFAULT TRUE,
             skip_if_recently_touched_days INTEGER NOT NULL DEFAULT 0,
             agent_run_id TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -217,24 +212,24 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS campaign_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            campaign_id INTEGER NOT NULL,
-            campaign_segment_id INTEGER NOT NULL,
-            segment_id INTEGER NOT NULL,
-            member_id INTEGER NOT NULL,
+            id BIGSERIAL PRIMARY KEY,
+            campaign_id BIGINT NOT NULL,
+            campaign_segment_id BIGINT NOT NULL,
+            segment_id BIGINT NOT NULL,
+            member_id BIGINT NOT NULL,
             external_contact_id TEXT NOT NULL DEFAULT '',
-            joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             anchor_date TEXT NOT NULL DEFAULT '',
             current_step_index INTEGER NOT NULL DEFAULT -1,
-            next_due_at TEXT NOT NULL DEFAULT '',
+            next_due_at TIMESTAMPTZ,
             status TEXT NOT NULL DEFAULT 'pending',
             stop_reason TEXT NOT NULL DEFAULT '',
-            last_step_sent_at TEXT NOT NULL DEFAULT '',
+            last_step_sent_at TIMESTAMPTZ,
             last_error_text TEXT NOT NULL DEFAULT '',
             retry_count INTEGER NOT NULL DEFAULT 0,
             trace_id TEXT NOT NULL DEFAULT '',
-            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
     )
@@ -271,26 +266,8 @@ def upgrade() -> None:
     )
 
     # 给 cloud_broadcast_plans 加 segment_id（选用） + campaign_id 关联
-    bind = op.get_bind()
-    if _is_postgres():
-        for col_def in (
-            "segment_id BIGINT",
-            "campaign_id BIGINT",
-        ):
-            try:
-                op.execute(f"ALTER TABLE cloud_broadcast_plans ADD COLUMN IF NOT EXISTS {col_def}")
-            except Exception:
-                pass
-    else:
-        from sqlalchemy import text
-
-        for col_name, col_def in (
-            ("segment_id", "segment_id INTEGER"),
-            ("campaign_id", "campaign_id INTEGER"),
-        ):
-            rows = bind.execute(text("PRAGMA table_info(cloud_broadcast_plans)")).fetchall()
-            if not any(r[1] == col_name for r in rows):
-                op.execute(f"ALTER TABLE cloud_broadcast_plans ADD COLUMN {col_def}")
+    op.execute("ALTER TABLE cloud_broadcast_plans ADD COLUMN IF NOT EXISTS segment_id BIGINT")
+    op.execute("ALTER TABLE cloud_broadcast_plans ADD COLUMN IF NOT EXISTS campaign_id BIGINT")
 
 
 def downgrade() -> None:

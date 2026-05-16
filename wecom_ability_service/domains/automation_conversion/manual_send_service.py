@@ -10,11 +10,11 @@ from .service import (
     DEFAULT_OWNER_STAFF_ID,
     TOUCH_PROGRAM_SIGNUP_CONVERSION,
     TOUCH_SURFACE_STAGE_MANUAL_SEND,
-    _dispatch_private_message_batch,
     _has_existing_touch_delivery,
     _normalized_text,
     _serialize_member,
 )
+from .private_message_dispatch import _dispatch_private_message_batch, _normalize_private_message_image_media_ids
 
 
 
@@ -34,12 +34,7 @@ def _manual_send_stage_definition(route_key: str) -> dict[str, Any]:
 
 
 def _normalize_manual_send_image_media_ids(image_media_ids: list[str] | None = None) -> list[str]:
-    normalized_image_media_ids: list[str] = []
-    for media_id in list(image_media_ids or []):
-        normalized_media_id = _normalized_text(media_id)
-        if normalized_media_id:
-            normalized_image_media_ids.append(normalized_media_id)
-    return normalized_image_media_ids
+    return _normalize_private_message_image_media_ids(image_media_ids)
 
 
 def _stage_manual_send_targets(
@@ -269,7 +264,6 @@ def _finalize_stage_manual_touch_deliveries(target_items: list[dict[str, Any]], 
             updated_at=now_text,
         )
     get_db().commit()
-
 
 
 

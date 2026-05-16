@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+from typing import Any
+
 from flask import jsonify, request, url_for
 
 from ..domains.user_ops.hxc_dashboard_snapshot_service import refresh_hxc_dashboard_snapshot
@@ -22,6 +24,54 @@ from ..domains.user_ops.hxc_send_config_service import (
     upsert_send_config,
 )
 from .admin_console import _breadcrumb_items, _render_admin_template
+from .common import _coerce_request_bool
+
+
+def _json_body() -> dict[str, Any]:
+    payload = request.get_json(silent=True) or {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _string_field(payload: dict[str, Any], field: str) -> str:
+    return str(payload.get(field) or "").strip()
+
+
+def _int_field(payload: dict[str, Any], field: str, *, default: int) -> int:
+    try:
+        return int(payload.get(field, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _optional_int_field(payload: dict[str, Any], field: str) -> int | None:
+    value = payload.get(field)
+    if value in (None, ""):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _string_list_field(payload: dict[str, Any], field: str) -> list[str]:
+    value = payload.get(field)
+    if value is None:
+        return []
+    values = value if isinstance(value, list | tuple | set) else [value]
+    return [item for item in (str(raw or "").strip() for raw in values) if item]
+
+
+def _int_list_field(payload: dict[str, Any], field: str, *, limit: int) -> list[int]:
+    values = payload.get(field) or []
+    if not isinstance(values, list | tuple | set):
+        values = [values]
+    result: list[int] = []
+    for raw in list(values)[:limit]:
+        try:
+            result.append(int(raw))
+        except (TypeError, ValueError):
+            pass
+    return result
 
 
 def admin_hxc_dashboard_workspace():
@@ -69,7 +119,7 @@ def admin_hxc_refresh_directory():
 
 
 def admin_hxc_dashboard_refresh():
-    trigger_source = (request.json or {}).get("trigger_source") or "admin"
+    trigger_source = _string_field(_json_body(), "trigger_source") or "admin"
     result = refresh_hxc_dashboard_snapshot(trigger_source=str(trigger_source))
     status_code = 200 if result.get("ok") else 500
     return jsonify(result), status_code
@@ -82,15 +132,15 @@ def admin_hxc_send_config_list():
 
 
 def admin_hxc_send_config_upsert():
-    body = request.json or {}
-    sender_userid = (body.get("sender_userid") or "").strip()
+    body = _json_body()
+    sender_userid = _string_field(body, "sender_userid")
     if not sender_userid:
         return jsonify({"ok": False, "error": "sender_userid required"}), 400
     result = upsert_send_config(
         sender_userid=sender_userid,
-        display_name=(body.get("display_name") or "").strip(),
-        priority=int(body.get("priority", 100)),
-        is_active=bool(body.get("is_active", True)),
+        display_name=_string_field(body, "display_name"),
+        priority=_int_field(body, "priority", default=100),
+        is_active=_coerce_request_bool(body.get("is_active", True), default=True),
     )
     return jsonify(result)
 
@@ -103,36 +153,22 @@ def admin_hxc_send_config_delete(sender_userid):
 # ── 一键群发 ──
 
 def admin_hxc_dashboard_broadcast():
-    body = request.json or {}
-    external_userids = body.get("external_userids") or []
-    content = (body.get("content") or "").strip()
-    image_library_ids = body.get("image_library_ids") or []
-    miniprogram_library_id = body.get("miniprogram_library_id")
+    body = _json_body()
+    external_userids = _string_list_field(body, "external_userids")
+    content = _string_field(body, "content")
+    image_library_ids = _int_list_field(body, "image_library_ids", limit=3)
+    miniprogram_library_id = _optional_int_field(body, "miniprogram_library_id")
 
     if not external_userids:
         return jsonify({"ok": False, "error": "no targets"}), 400
     if not content and not image_library_ids and not miniprogram_library_id:
         return jsonify({"ok": False, "error": "empty content"}), 400
 
-    safe_image_ids = []
-    for raw in image_library_ids[:3]:
-        try:
-            safe_image_ids.append(int(raw))
-        except (TypeError, ValueError):
-            pass
-
-    safe_mp_id = None
-    if miniprogram_library_id:
-        try:
-            safe_mp_id = int(miniprogram_library_id)
-        except (TypeError, ValueError):
-            pass
-
     result = broadcast_to_filtered_users(
         external_userids=external_userids,
         content=content,
-        image_library_ids=safe_image_ids or None,
-        miniprogram_library_id=safe_mp_id,
+        image_library_ids=image_library_ids or None,
+        miniprogram_library_id=miniprogram_library_id,
         operator_id="admin",
     )
     status_code = 200 if result.get("ok") else 400

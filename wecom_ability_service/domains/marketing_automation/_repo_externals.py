@@ -13,12 +13,14 @@ from ...customer_center.repo import (
     fetch_class_status_map,
     fetch_last_message_map,
 )
-from ...db import get_db, get_db_backend
+from ...db import get_db
 from ._repo_helpers import (  # noqa: F401
     _db_bool,
     _fetchall_dicts,
     _fetchone_dict,
     _normalized_text,
+    _normalized_text_list,
+    _placeholders,
 )
 
 
@@ -131,7 +133,7 @@ def has_live_external_userid(external_userid: str) -> bool:
 
 
 def list_class_status_rows(external_userids: list[str]) -> list[dict[str, Any]]:
-    normalized_external_userids = [_normalized_text(item) for item in external_userids if _normalized_text(item)]
+    normalized_external_userids = _normalized_text_list(external_userids)
     if not normalized_external_userids:
         return []
     result = fetch_class_status_map(normalized_external_userids)
@@ -160,7 +162,7 @@ def get_huangxiaocan_activation_source_by_mobile(mobile: str) -> dict[str, Any] 
 
 
 def get_latest_message_at_for_external_userids(external_userids: list[str]) -> str:
-    normalized_external_userids = [_normalized_text(item) for item in external_userids if _normalized_text(item)]
+    normalized_external_userids = _normalized_text_list(external_userids)
     if not normalized_external_userids:
         return ""
     message_map = fetch_last_message_map(normalized_external_userids)
@@ -206,15 +208,15 @@ def list_active_do_not_disturb_rows(
     external_userids: list[str] | None = None,
     mobiles: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    normalized_external_userids = [_normalized_text(item) for item in (external_userids or []) if _normalized_text(item)]
-    normalized_mobiles = [_normalized_text(item) for item in (mobiles or []) if _normalized_text(item)]
+    normalized_external_userids = _normalized_text_list(external_userids)
+    normalized_mobiles = _normalized_text_list(mobiles)
     filters: list[str] = []
     params: list[Any] = [_db_bool(True)]
     if normalized_external_userids:
-        filters.append(f"external_userid IN ({', '.join(['?'] * len(normalized_external_userids))})")
+        filters.append(f"external_userid IN ({_placeholders(normalized_external_userids)})")
         params.extend(normalized_external_userids)
     if normalized_mobiles:
-        filters.append(f"mobile IN ({', '.join(['?'] * len(normalized_mobiles))})")
+        filters.append(f"mobile IN ({_placeholders(normalized_mobiles)})")
         params.extend(normalized_mobiles)
     if not filters:
         return []
@@ -290,56 +292,34 @@ def get_latest_class_user_restore_status(external_userid: str) -> dict[str, Any]
 
 
 def get_questionnaire_signal(external_userid: str) -> dict[str, Any]:
-    if get_db_backend() == "postgres":
-        row = _fetchone_dict(
-            """
-            SELECT COUNT(*) AS submission_count, COALESCE(MAX(submitted_at)::text, '') AS last_submitted_at
-            FROM questionnaire_submissions
-            WHERE external_userid = ?
-            """,
-            (external_userid,),
-        )
-    else:
-        row = _fetchone_dict(
-            """
-            SELECT COUNT(*) AS submission_count, COALESCE(MAX(submitted_at)::text, '') AS last_submitted_at
-            FROM questionnaire_submissions
-            WHERE external_userid = ?
-            """,
-            (external_userid,),
-        )
+    row = _fetchone_dict(
+        """
+        SELECT COUNT(*) AS submission_count, COALESCE(MAX(submitted_at)::text, '') AS last_submitted_at
+        FROM questionnaire_submissions
+        WHERE external_userid = ?
+        """,
+        (external_userid,),
+    )
     return row or {"submission_count": 0, "last_submitted_at": ""}
 
 
 def get_customer_inbound_message_signal(external_userid: str) -> dict[str, Any]:
     db = get_db()
-    if get_db_backend() == "postgres":
-        row = db.execute(
-            """
-            SELECT
-                COALESCE(MAX(send_time), '') AS last_customer_text_at,
-                SUM(
-                    CASE
-                        WHEN send_time >= TO_CHAR(NOW() - INTERVAL '72 hours', 'YYYY-MM-DD HH24:MI:SS') THEN 1
-                        ELSE 0
-                    END
-                ) AS customer_text_72h_count
-            FROM archived_messages
-            WHERE external_userid = %s AND sender = %s AND msgtype = 'text'
-            """,
-            (external_userid, external_userid),
-        ).fetchone()
-    else:
-        row = db.execute(
-            """
-            SELECT
-                COALESCE(MAX(send_time), '') AS last_customer_text_at,
-                SUM(CASE WHEN send_time >= (NOW() - INTERVAL '72 hours')::text THEN 1 ELSE 0 END) AS customer_text_72h_count
-            FROM archived_messages
-            WHERE external_userid = ? AND sender = ? AND msgtype = 'text'
-            """,
-            (external_userid, external_userid),
-        ).fetchone()
+    row = db.execute(
+        """
+        SELECT
+            COALESCE(MAX(send_time), '') AS last_customer_text_at,
+            SUM(
+                CASE
+                    WHEN send_time >= TO_CHAR(NOW() - INTERVAL '72 hours', 'YYYY-MM-DD HH24:MI:SS') THEN 1
+                    ELSE 0
+                END
+            ) AS customer_text_72h_count
+        FROM archived_messages
+        WHERE external_userid = ? AND sender = ? AND msgtype = 'text'
+        """,
+        (external_userid, external_userid),
+    ).fetchone()
     return dict(row) if row else {"last_customer_text_at": "", "customer_text_72h_count": 0}
 
 

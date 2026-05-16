@@ -185,15 +185,21 @@ def current_admin_user() -> dict[str, Any] | None:
         if not username:
             logout_admin_session()
             return None
+        roles = [
+            _normalized_text(role_code)
+            for role_code in list(session.get(ADMIN_SESSION_ROLE_LIST_KEY) or [])
+            if _normalized_text(role_code)
+        ] or ["super_admin"]
+        is_super_admin = "super_admin" in roles
         user = {
             "id": 0,
             "wecom_userid": "",
             "display_name": username,
-            "roles": ["super_admin"],
-            "role_labels": [ROLE_LABELS["super_admin"]],
+            "roles": roles,
+            "role_labels": [ROLE_LABELS.get(role_code, role_code) for role_code in roles],
             "is_active": True,
             "login_enabled": True,
-            "admin_level": "super_admin",
+            "admin_level": "super_admin" if is_super_admin else "admin",
             "auth_source": "break_glass",
             "login_type": "break_glass",
         }

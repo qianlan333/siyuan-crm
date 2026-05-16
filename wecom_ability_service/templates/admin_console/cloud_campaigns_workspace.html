@@ -481,7 +481,7 @@
         for (const step of steps) {
           const dayLabel = step.day_offset === 0 ? 'D+0（首日）' : `D+${step.day_offset}`;
           const stopChip = step.stop_on_reply ? '<span class="step-stop">回复后停止</span>' : '';
-          // step.content_payload_json 可能是 dict（PG）或 string（SQLite），后端 assemble_campaign_overview 没解
+          // step.content_payload_json 可能已经是 object，也可能仍是后端序列化字符串
           let payload = {};
           try {
             const raw = step.content_payload_json;

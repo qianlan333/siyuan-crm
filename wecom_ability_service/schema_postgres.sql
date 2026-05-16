@@ -979,6 +979,7 @@ CREATE TABLE IF NOT EXISTS questionnaires (
     description TEXT NOT NULL DEFAULT '',
     is_disabled BOOLEAN NOT NULL DEFAULT FALSE,
     redirect_url TEXT NOT NULL DEFAULT '',
+    answer_display_mode TEXT NOT NULL DEFAULT 'all_in_one' CHECK (answer_display_mode IN ('all_in_one', 'one_by_one')),
     assessment_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     assessment_config JSONB NOT NULL DEFAULT '{}'::jsonb,
     external_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1183,6 +1184,43 @@ ON automation_channel (program_id, updated_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_automation_channel_scene
 ON automation_channel (scene_value);
+
+CREATE TABLE IF NOT EXISTS wecom_customer_acquisition_links (
+    id BIGSERIAL PRIMARY KEY,
+    corp_id TEXT NOT NULL DEFAULT '',
+    automation_channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+    program_id BIGINT,
+    workflow_id BIGINT,
+    initial_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'
+        CHECK (initial_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+    link_id TEXT NOT NULL DEFAULT '',
+    link_name TEXT NOT NULL DEFAULT '',
+    link_url TEXT NOT NULL DEFAULT '',
+    customer_channel TEXT NOT NULL DEFAULT '',
+    final_url TEXT NOT NULL DEFAULT '',
+    skip_verify BOOLEAN NOT NULL DEFAULT FALSE,
+    range_user_list JSONB NOT NULL DEFAULT '[]'::jsonb,
+    range_department_list JSONB NOT NULL DEFAULT '[]'::jsonb,
+    priority_option JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'disabled')),
+    last_sync_at TIMESTAMPTZ,
+    last_event_at TIMESTAMPTZ,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_wecom_customer_acquisition_links_corp_link UNIQUE (corp_id, link_id),
+    CONSTRAINT uq_wecom_customer_acquisition_links_corp_channel UNIQUE (corp_id, customer_channel)
+);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_customer_acquisition_links_channel
+ON wecom_customer_acquisition_links (automation_channel_id);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_customer_acquisition_links_status
+ON wecom_customer_acquisition_links (status, updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_customer_acquisition_links_program
+ON wecom_customer_acquisition_links (program_id, status, updated_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS automation_member (
     id BIGSERIAL PRIMARY KEY,
@@ -1734,6 +1772,24 @@ CREATE TABLE IF NOT EXISTS automation_program (
 CREATE INDEX IF NOT EXISTS idx_automation_program_status
 ON automation_program (status, updated_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS automation_program_config_block (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    block_key TEXT NOT NULL,
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'saved', 'published', 'archived')),
+    version INTEGER NOT NULL DEFAULT 1,
+    copied_from_program_id BIGINT REFERENCES automation_program(id) ON DELETE SET NULL,
+    copied_from_block_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_program_config_block_program_key UNIQUE (program_id, block_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_config_block_program
+ON automation_program_config_block (program_id, block_key);
+
 CREATE TABLE IF NOT EXISTS automation_workflow (
     id BIGSERIAL PRIMARY KEY,
     program_id BIGINT REFERENCES automation_program(id) ON DELETE SET NULL,
@@ -1769,6 +1825,33 @@ ON automation_workflow (enabled, updated_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_automation_workflow_review
 ON automation_workflow (review_status, status, updated_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS automation_operation_templates (
+    id BIGSERIAL PRIMARY KEY,
+    template_code TEXT NOT NULL UNIQUE,
+    template_name TEXT NOT NULL DEFAULT '',
+    template_source TEXT NOT NULL DEFAULT 'crm_local'
+        CHECK (template_source IN ('builtin', 'crm_local', 'ai_generated')),
+    category TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'archived')),
+    default_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ui_schema_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    workflow_blueprint_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    node_blueprints_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    archived_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_templates_source
+ON automation_operation_templates (template_source, status, updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_templates_category
+ON automation_operation_templates (category, status, updated_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS automation_workflow_audience (
     id BIGSERIAL PRIMARY KEY,
@@ -1952,6 +2035,97 @@ ON automation_workflow_execution_item (member_id, created_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_automation_workflow_execution_item_send_record
 ON automation_workflow_execution_item (send_record_id, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS automation_operation_task_group (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    group_name TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    archived_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_task_group_program
+ON automation_operation_task_group (program_id, sort_order ASC, id ASC);
+
+CREATE TABLE IF NOT EXISTS automation_operation_task (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    group_id BIGINT REFERENCES automation_operation_task_group(id) ON DELETE SET NULL,
+    task_name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'active', 'paused', 'archived')),
+    send_time TEXT NOT NULL DEFAULT '10:00',
+    timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+    target_audience_code TEXT NOT NULL DEFAULT 'operating'
+        CHECK (target_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+    audience_day_offset INTEGER NOT NULL DEFAULT 1,
+    behavior_filter TEXT NOT NULL DEFAULT 'none'
+        CHECK (behavior_filter IN ('none', 'lt_2', 'between_2_9', 'gte_10')),
+    content_mode TEXT NOT NULL DEFAULT 'unified'
+        CHECK (content_mode IN ('unified', 'profile_layered', 'behavior_layered', 'agent')),
+    profile_segment_template_id BIGINT REFERENCES automation_profile_segment_template(id) ON DELETE SET NULL,
+    unified_content_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    segment_contents_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    agent_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    published_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_task_program
+ON automation_operation_task (program_id, status, send_time, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_task_group
+ON automation_operation_task (group_id, status, updated_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS automation_operation_task_execution (
+    id BIGSERIAL PRIMARY KEY,
+    execution_id TEXT NOT NULL UNIQUE,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    task_id BIGINT NOT NULL REFERENCES automation_operation_task(id) ON DELETE CASCADE,
+    scheduled_for TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'running',
+    target_count INTEGER NOT NULL DEFAULT 0,
+    enqueued_count INTEGER NOT NULL DEFAULT 0,
+    sent_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    summary_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_task_execution_task
+ON automation_operation_task_execution (task_id, scheduled_for DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS automation_operation_task_execution_item (
+    id BIGSERIAL PRIMARY KEY,
+    execution_id TEXT NOT NULL REFERENCES automation_operation_task_execution(execution_id) ON DELETE CASCADE,
+    task_id BIGINT NOT NULL REFERENCES automation_operation_task(id) ON DELETE CASCADE,
+    member_id BIGINT NOT NULL REFERENCES automation_member(id) ON DELETE CASCADE,
+    audience_entry_id BIGINT REFERENCES automation_member_audience_entry(id) ON DELETE SET NULL,
+    external_contact_id TEXT NOT NULL DEFAULT '',
+    segment_key TEXT NOT NULL DEFAULT '',
+    rendered_content_text TEXT NOT NULL DEFAULT '',
+    content_snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    send_record_id BIGINT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error_message TEXT NOT NULL DEFAULT '',
+    sent_at TIMESTAMPTZ
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_operation_task_item_entry
+ON automation_operation_task_execution_item (task_id, audience_entry_id)
+WHERE audience_entry_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_automation_operation_task_item_execution
+ON automation_operation_task_execution_item (execution_id, status, id ASC);
 
 CREATE TABLE IF NOT EXISTS automation_focus_send_batch (
     id BIGSERIAL PRIMARY KEY,
@@ -2601,7 +2775,7 @@ ON campaign_members (trace_id, id DESC);
 CREATE TABLE IF NOT EXISTS broadcast_jobs (
     id BIGSERIAL PRIMARY KEY,
     source_type TEXT NOT NULL DEFAULT ''
-        CHECK (source_type IN ('campaign', 'sop', 'workflow', 'cloud_plan', 'focus_send', 'deferred', 'manual')),
+        CHECK (source_type IN ('campaign', 'sop', 'workflow', 'operation_task', 'cloud_plan', 'focus_send', 'deferred', 'manual')),
     source_id TEXT NOT NULL DEFAULT '',
     source_table TEXT NOT NULL DEFAULT '',
     scheduled_for TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2743,3 +2917,130 @@ CREATE TABLE IF NOT EXISTS user_ops_hxc_send_config (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS wechat_pay_orders (
+    id BIGSERIAL PRIMARY KEY,
+    out_trade_no TEXT NOT NULL UNIQUE,
+    order_source TEXT NOT NULL DEFAULT 'h5_checkout',
+    client_order_ref TEXT NOT NULL DEFAULT '',
+    product_code TEXT NOT NULL,
+    product_name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    amount_total INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    payer_openid TEXT NOT NULL DEFAULT '',
+    respondent_key TEXT NOT NULL DEFAULT '',
+    unionid TEXT NOT NULL DEFAULT '',
+    external_userid TEXT NOT NULL DEFAULT '',
+    userid_snapshot TEXT NOT NULL DEFAULT '',
+    mobile_snapshot TEXT NOT NULL DEFAULT '',
+    payer_name_snapshot TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'created',
+    trade_state TEXT NOT NULL DEFAULT '',
+    transaction_id TEXT NOT NULL DEFAULT '',
+    prepay_id TEXT NOT NULL DEFAULT '',
+    bank_type TEXT NOT NULL DEFAULT '',
+    payer_total INTEGER NOT NULL DEFAULT 0,
+    success_url TEXT NOT NULL DEFAULT '',
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    refunded_amount_total INTEGER NOT NULL DEFAULT 0,
+    refund_status TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    expires_at TIMESTAMPTZ,
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_status_created
+ON wechat_pay_orders (status, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_payer
+ON wechat_pay_orders (payer_openid, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_product
+ON wechat_pay_orders (product_code, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_created
+ON wechat_pay_orders (created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_product_created
+ON wechat_pay_orders (product_code, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_external_created
+ON wechat_pay_orders (external_userid, created_at DESC, id DESC);
+
+ALTER TABLE IF EXISTS wechat_pay_orders
+ADD COLUMN IF NOT EXISTS mobile_snapshot TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_mobile_created
+ON wechat_pay_orders (mobile_snapshot, created_at DESC, id DESC)
+WHERE mobile_snapshot <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wechat_pay_orders_transaction_id
+ON wechat_pay_orders (transaction_id)
+WHERE transaction_id <> '';
+
+CREATE TABLE IF NOT EXISTS wechat_pay_order_events (
+    id BIGSERIAL PRIMARY KEY,
+    out_trade_no TEXT NOT NULL REFERENCES wechat_pay_orders(out_trade_no) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    transaction_id TEXT NOT NULL DEFAULT '',
+    trade_state TEXT NOT NULL DEFAULT '',
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_events_order
+ON wechat_pay_order_events (out_trade_no, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS wechat_pay_refunds (
+    id BIGSERIAL PRIMARY KEY,
+    order_id BIGINT NOT NULL REFERENCES wechat_pay_orders(id) ON DELETE CASCADE,
+    out_trade_no TEXT NOT NULL DEFAULT '',
+    transaction_id TEXT NOT NULL DEFAULT '',
+    out_refund_no TEXT UNIQUE NOT NULL,
+    refund_id TEXT NOT NULL DEFAULT '',
+    reason TEXT NOT NULL DEFAULT '',
+    refund_amount_total INTEGER NOT NULL DEFAULT 0,
+    order_amount_total INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    status TEXT NOT NULL DEFAULT 'requested',
+    requested_by TEXT NOT NULL DEFAULT '',
+    request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_refunds_order
+ON wechat_pay_refunds (order_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_refunds_status
+ON wechat_pay_refunds (status, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS wechat_pay_order_export_jobs (
+    id BIGSERIAL PRIMARY KEY,
+    job_id TEXT UNIQUE NOT NULL,
+    requested_by TEXT NOT NULL DEFAULT '',
+    filters_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    scope TEXT NOT NULL DEFAULT 'filtered',
+    file_format TEXT NOT NULL DEFAULT 'xlsx',
+    status TEXT NOT NULL DEFAULT 'queued',
+    exported_count INTEGER NOT NULL DEFAULT 0,
+    file_name TEXT NOT NULL DEFAULT '',
+    file_path TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_export_jobs_status
+ON wechat_pay_order_export_jobs (status, created_at DESC, id DESC);

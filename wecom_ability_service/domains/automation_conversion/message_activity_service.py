@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta
 from typing import Any
 
 from flask import current_app
@@ -158,7 +156,7 @@ def _message_activity_sync_status_payload() -> dict[str, Any]:
 
 
 # --- Reply monitor functions moved to reply_monitor_service.py ---
-from .reply_monitor_service import (  # noqa: E402
+from .reply_monitor_service import (  # noqa: E402,F401
     _dispatch_reply_monitor_queue_item,
     _reply_monitor_status_payload,
     _serialize_reply_monitor_queue_item,
@@ -173,7 +171,7 @@ from .reply_monitor_service import (  # noqa: E402
 
 
 # --- Channel functions moved to channel_service.py ---
-from .channel_service import (  # noqa: E402
+from .channel_service import (  # noqa: E402,F401
     _channel_status_is_generated,
     _default_channel_field_statuses,
     _effective_channel_entry_tag_payload,
@@ -471,6 +469,4 @@ def run_message_activity_sync(
             "error": str(exc),
             "run": _serialize_message_activity_sync_run(failed_run_row),
         }
-
-
 

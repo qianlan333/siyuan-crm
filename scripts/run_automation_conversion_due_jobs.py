@@ -1,34 +1,27 @@
 from __future__ import annotations
 
-import json
 import os
-import time
-import urllib.error
 import urllib.request
+
+from scripts import internal_http
+from scripts.script_runtime import emit_json, read_app_host, read_app_port, read_int_env, read_internal_api_token
 
 
 DEFAULT_OPERATOR = "automation_conversion_due_runner"
 DEFAULT_RETRY_COUNT = 6
 DEFAULT_RETRY_INTERVAL_SECONDS = 10
 JOB_DEFINITIONS = {
+    "sop": {
+        "label": "自动化转化 SOP",
+        "path": "/api/admin/automation-conversion/jobs/run-due",
+        "payload": {"jobs": ["sop"]},
+    },
     "conversion_workflow": {
         "label": "自动化转化任务流",
         "path": "/api/admin/automation-conversion/jobs/run-due",
         "payload": {"jobs": ["conversion_workflow"]},
     }
 }
-
-
-def build_request(*, host: str, port: str, token: str, operator: str, path: str, payload: dict[str, object] | None = None) -> urllib.request.Request:
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return urllib.request.Request(
-        f"http://{host}:{port}{path}",
-        data=json.dumps({"operator": operator, **dict(payload or {})}).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
 
 
 def _post_json(
@@ -42,33 +35,28 @@ def _post_json(
     retry_count: int,
     retry_interval_seconds: int,
 ) -> dict[str, object]:
-    request = build_request(host=host, port=port, token=token, operator=operator, path=path, payload=payload)
-    attempts = max(1, int(retry_count))
-    last_error: Exception | None = None
-    for attempt in range(1, attempts + 1):
-        try:
-            with urllib.request.urlopen(request, timeout=180) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            print(body)
-            raise
-        except urllib.error.URLError as exc:
-            last_error = exc
-            if attempt >= attempts:
-                raise
-            time.sleep(max(0, int(retry_interval_seconds)))
-    assert last_error is not None
-    raise last_error
+    return internal_http.post_json(
+        host=host,
+        port=port,
+        token=token,
+        path=path,
+        payload={"operator": operator, **dict(payload or {})},
+        retry_count=retry_count,
+        retry_interval_seconds=retry_interval_seconds,
+        urlopen=urllib.request.urlopen,
+    )
 
 
 def run(*, jobs: list[str] | None = None) -> str:
-    host = os.getenv("APP_HOST", "127.0.0.1").strip() or "127.0.0.1"
-    port = os.getenv("APP_PORT", "5000").strip() or "5000"
-    token = os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()
+    host = read_app_host()
+    port = read_app_port()
+    token = read_internal_api_token()
     operator = os.getenv("AUTOMATION_CONVERSION_DUE_OPERATOR", DEFAULT_OPERATOR).strip() or DEFAULT_OPERATOR
-    retry_count = int((os.getenv("AUTOMATION_CONVERSION_DUE_RETRY_COUNT") or DEFAULT_RETRY_COUNT))
-    retry_interval_seconds = int((os.getenv("AUTOMATION_CONVERSION_DUE_RETRY_INTERVAL_SECONDS") or DEFAULT_RETRY_INTERVAL_SECONDS))
+    retry_count = read_int_env("AUTOMATION_CONVERSION_DUE_RETRY_COUNT", DEFAULT_RETRY_COUNT)
+    retry_interval_seconds = read_int_env(
+        "AUTOMATION_CONVERSION_DUE_RETRY_INTERVAL_SECONDS",
+        DEFAULT_RETRY_INTERVAL_SECONDS,
+    )
 
     selected_jobs = jobs or list(JOB_DEFINITIONS.keys())
     invalid_jobs = [job_code for job_code in selected_jobs if job_code not in JOB_DEFINITIONS]
@@ -131,9 +119,7 @@ def run(*, jobs: list[str] | None = None) -> str:
         "batch_ids": sorted(dict.fromkeys(batch_ids)),
         "jobs": jobs_payload,
     }
-    body = json.dumps(response_payload, ensure_ascii=False)
-    print(body)
-    return body
+    return emit_json(response_payload)
 
 
 def main() -> None:

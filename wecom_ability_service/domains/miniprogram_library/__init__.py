@@ -30,6 +30,7 @@ from ..media_library._utils import (
     parse_iso as _parse_iso,
     row_to_dict as _row_to_dict,
 )
+from ..wecom_media_limits import validate_wecom_image_upload
 
 _logger = logging.getLogger(__name__)
 
@@ -112,6 +113,15 @@ def _validate_create_payload(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("thumb_image_id 必须是整数") from exc
     if not thumb_image_id and not thumb_image_url and not thumb_image_base64:
         raise ValueError("缩略图必须提供 thumb_image_id（推荐）/ thumb_image_url / thumb_image_base64 之一")
+    if not thumb_image_id and thumb_image_base64:
+        file_bytes, content_type, file_name = _decode_thumb_bytes(
+            {"thumb_image_base64": thumb_image_base64, "thumb_image_url": ""}
+        )
+        validate_wecom_image_upload(
+            file_bytes,
+            file_name=file_name,
+            mime_type=content_type,
+        )
     return {
         "name": name,
         "appid": appid,
@@ -143,7 +153,7 @@ def create_miniprogram(payload: dict[str, Any]) -> dict[str, Any]:
             fields["thumb_image_url"],
             fields["thumb_image_base64"],
             fields["thumb_image_id"] or None,
-            bool(enabled),  # PG BOOLEAN / SQLite truthy
+            bool(enabled),
         ),
     )
     db.commit()
@@ -177,7 +187,7 @@ def update_miniprogram(library_id: int, payload: dict[str, Any]) -> dict[str, An
         value = payload[key]
         if key == "enabled":
             set_clauses.append("enabled = ?")
-            params.append(bool(value))  # PG BOOLEAN / SQLite truthy
+            params.append(bool(value))
             continue
         if key == "thumb_image_id":
             try:
@@ -300,6 +310,11 @@ def resolve_thumb_media_id(
         return cached_id
 
     file_bytes, content_type, file_name = _decode_thumb_bytes(record)
+    content_type = validate_wecom_image_upload(
+        file_bytes,
+        file_name=file_name,
+        mime_type=content_type,
+    )
     uploader = upload_image
     if uploader is None:
         client = WeComClient.from_app()

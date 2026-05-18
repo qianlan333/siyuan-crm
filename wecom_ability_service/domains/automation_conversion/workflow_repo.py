@@ -757,27 +757,84 @@ def get_current_member_audience_entry_row(member_id: int) -> dict[str, Any] | No
     return _serialize_member_audience_entry_row(row) if row else None
 
 
-def get_current_member_audience_counts() -> dict[str, int]:
+def _program_member_filter_sql(
+    *,
+    member_alias: str = "m",
+    program_id: int | None = None,
+    include_unscoped: bool = False,
+) -> tuple[str, tuple[Any, ...]]:
+    if program_id is None:
+        return "", ()
+    alias = _normalized_text(member_alias) or "m"
+    source_expr = f"{alias}.source_channel_id"
+    if include_unscoped:
+        return (
+            f"""
+            AND (
+                {source_expr} IS NULL
+                OR {source_expr} IN (
+                    SELECT id FROM automation_channel WHERE program_id = ?
+                )
+            )
+            """,
+            (int(program_id),),
+        )
+    return (
+        f"""
+        AND {source_expr} IN (
+            SELECT id FROM automation_channel WHERE program_id = ?
+        )
+        """,
+        (int(program_id),),
+    )
+
+
+def get_current_member_audience_counts(
+    *, program_id: int | None = None, include_unscoped: bool = False
+) -> dict[str, int]:
     counts: dict[str, int] = {}
+    program_filter_sql, program_filter_params = _program_member_filter_sql(
+        member_alias="automation_member",
+        program_id=program_id,
+        include_unscoped=include_unscoped,
+    )
     for row in _fetchall_dicts(
-        """
+        f"""
         SELECT current_audience_code, COUNT(*) AS total
         FROM automation_member
+        WHERE 1 = 1
+        {program_filter_sql}
         GROUP BY current_audience_code
-        """
+        """,
+        program_filter_params,
     ):
         counts[_normalized_text(row.get("current_audience_code"))] = int(row.get("total") or 0)
     return counts
 
 
-def get_current_audience_member_counts() -> dict[str, int]:
-    return get_current_member_audience_counts()
+def get_current_audience_member_counts(
+    *, program_id: int | None = None, include_unscoped: bool = False
+) -> dict[str, int]:
+    return get_current_member_audience_counts(
+        program_id=program_id,
+        include_unscoped=include_unscoped,
+    )
 
 
-def list_current_member_audience_rows(audience_code: str) -> list[dict[str, Any]]:
+def list_current_member_audience_rows(
+    audience_code: str,
+    *,
+    program_id: int | None = None,
+    include_unscoped: bool = False,
+) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
+    program_filter_sql, program_filter_params = _program_member_filter_sql(
+        member_alias="m",
+        program_id=program_id,
+        include_unscoped=include_unscoped,
+    )
     for row in _fetchall_dicts(
-        """
+        f"""
         SELECT
             e.*,
             m.id AS member_row_id,
@@ -809,9 +866,10 @@ def list_current_member_audience_rows(audience_code: str) -> list[dict[str, Any]
         LEFT JOIN contacts c ON c.external_userid = m.external_contact_id AND m.external_contact_id <> ''
         WHERE e.audience_code = ?
           AND e.is_current = ?
+          {program_filter_sql}
         ORDER BY e.entered_at ASC, e.id ASC
         """,
-        (_normalized_text(audience_code), True),
+        (_normalized_text(audience_code), True, *program_filter_params),
     ):
         items.append(
             {

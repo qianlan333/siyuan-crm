@@ -748,7 +748,10 @@ def admin_automation_program_overview_signup_tag_apply(program_id: int):
             return jsonify({"ok": False, "error": action_token_error}), 400
         return _redirect_to_program("api.admin_automation_program_overview", program_id=program_id)
     try:
-        result = apply_dashboard_signup_tag(operator_id=_operator_from_request())
+        result = apply_dashboard_signup_tag(
+            operator_id=_operator_from_request(),
+            program_id=program_id,
+        )
     except ValueError as exc:
         if _wants_json_response():
             return jsonify({"ok": False, "error": str(exc)}), 400
@@ -938,6 +941,11 @@ def api_admin_automation_program_member_segment_broadcast(program_id: int):
     content = str(payload.get("content") or request.values.get("content") or "").strip()
     images = list(payload.get("images") or [])
     try:
+        try:
+            from ..domains.automation_conversion import workflow_service as _ws
+            _ws._build_dashboard_audience_member_details(program_id=int(program_id or 0) or None)
+        except Exception:
+            pass
         broadcast_targets = member_segment_search_service.list_broadcast_targets(
             pool_keys=pool_keys,
             profile_keys=profile_keys,

@@ -427,6 +427,8 @@ def _build_segment_filter_sql(
     order_by: str = "",
     limit: int | None = None,
     offset: int | None = None,
+    program_id: int | None = None,
+    include_unscoped: bool = False,
 ) -> tuple[str, tuple[Any, ...]]:
     pools = [p for p in _normalize_segment_keys(pool_keys) if p in _VALID_AUDIENCE_CODES]
     profiles = _normalize_segment_keys(profile_keys)
@@ -456,6 +458,23 @@ def _build_segment_filter_sql(
             "(m.phone LIKE ? OR m.external_contact_id LIKE ? OR COALESCE(c.customer_name, '') LIKE ?)"
         )
         params.extend([like_value, like_value, like_value])
+    if program_id is not None:
+        if include_unscoped:
+            where_parts.append(
+                """(
+                    m.source_channel_id IS NULL
+                    OR m.source_channel_id IN (
+                        SELECT id FROM automation_channel WHERE program_id = ?
+                    )
+                )"""
+            )
+        else:
+            where_parts.append(
+                """m.source_channel_id IN (
+                    SELECT id FROM automation_channel WHERE program_id = ?
+                )"""
+            )
+        params.append(int(program_id))
     where_sql = " AND ".join(where_parts)
     sql = f"""
         {select_clause}
@@ -484,6 +503,8 @@ def list_members_by_segment_filter(
     keyword: str = "",
     offset: int = 0,
     limit: int = 50,
+    program_id: int | None = None,
+    include_unscoped: bool = False,
 ) -> list[dict[str, Any]]:
     sql, params = _build_segment_filter_sql(
         pool_keys=list(pool_keys or []),
@@ -494,6 +515,8 @@ def list_members_by_segment_filter(
         order_by="m.updated_at DESC, m.id DESC",
         limit=limit,
         offset=offset,
+        program_id=program_id,
+        include_unscoped=include_unscoped,
     )
     return _fetchall_dicts(sql, params)
 
@@ -504,6 +527,8 @@ def count_members_by_segment_filter(
     profile_keys: list[str] | None = None,
     behavior_keys: list[str] | None = None,
     keyword: str = "",
+    program_id: int | None = None,
+    include_unscoped: bool = False,
 ) -> int:
     sql, params = _build_segment_filter_sql(
         pool_keys=list(pool_keys or []),
@@ -511,38 +536,79 @@ def count_members_by_segment_filter(
         behavior_keys=list(behavior_keys or []),
         keyword=keyword,
         select_clause="SELECT COUNT(*) AS total",
+        program_id=program_id,
+        include_unscoped=include_unscoped,
     )
     row = _fetchone_dict(sql, params) or {}
     return int(row.get("total") or 0)
 
 
-def aggregate_member_segment_dimensions() -> dict[str, list[dict[str, Any]]]:
-    """Counts per pool / profile / behavior, used by the chip filter UI."""
-    pool_rows = _fetchall_dicts(
+def _program_member_where_clause(
+    *, program_id: int | None = None, include_unscoped: bool = False
+) -> tuple[str, tuple[Any, ...]]:
+    if program_id is None:
+        return "", ()
+    if include_unscoped:
+        return (
+            """
+              AND (
+                source_channel_id IS NULL
+                OR source_channel_id IN (
+                    SELECT id FROM automation_channel WHERE program_id = ?
+                )
+              )
+            """,
+            (int(program_id),),
+        )
+    return (
         """
+          AND source_channel_id IN (
+              SELECT id FROM automation_channel WHERE program_id = ?
+          )
+        """,
+        (int(program_id),),
+    )
+
+
+def aggregate_member_segment_dimensions(
+    *, program_id: int | None = None, include_unscoped: bool = False
+) -> dict[str, list[dict[str, Any]]]:
+    """Counts per pool / profile / behavior, used by the chip filter UI."""
+    program_filter_sql, program_filter_params = _program_member_where_clause(
+        program_id=program_id,
+        include_unscoped=include_unscoped,
+    )
+    pool_rows = _fetchall_dicts(
+        f"""
         SELECT current_audience_code AS key, COUNT(*) AS total
         FROM automation_member
         WHERE current_audience_code IN ('pending_questionnaire', 'operating', 'converted')
+        {program_filter_sql}
         GROUP BY current_audience_code
-        """
+        """,
+        program_filter_params,
     )
     profile_rows = _fetchall_dicts(
-        """
+        f"""
         SELECT profile_segment_key AS key, COUNT(*) AS total
         FROM automation_member
         WHERE current_audience_code IN ('pending_questionnaire', 'operating', 'converted')
+        {program_filter_sql}
         GROUP BY profile_segment_key
         ORDER BY total DESC
-        """
+        """,
+        program_filter_params,
     )
     behavior_rows = _fetchall_dicts(
-        """
+        f"""
         SELECT behavior_tier_key AS key, COUNT(*) AS total
         FROM automation_member
         WHERE current_audience_code IN ('pending_questionnaire', 'operating', 'converted')
+        {program_filter_sql}
         GROUP BY behavior_tier_key
         ORDER BY total DESC
-        """
+        """,
+        program_filter_params,
     )
 
     def _normalize(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:

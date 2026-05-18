@@ -6,6 +6,7 @@ Extracted from repo.py. External callers keep using
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from ...customer_center.repo import (
@@ -22,6 +23,12 @@ from ._repo_helpers import (  # noqa: F401
     _normalized_text_list,
     _placeholders,
 )
+
+
+def _local_timestamp_text(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return (value + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+    return value
 
 
 def list_external_userids_by_person(person_id: int) -> list[str]:
@@ -144,7 +151,7 @@ def get_huangxiaocan_activation_source_by_mobile(mobile: str) -> dict[str, Any] 
     normalized_mobile = _normalized_text(mobile)
     if not normalized_mobile:
         return None
-    return _fetchone_dict(
+    row = _fetchone_dict(
         """
         SELECT
             mobile,
@@ -159,6 +166,13 @@ def get_huangxiaocan_activation_source_by_mobile(mobile: str) -> dict[str, Any] 
         """,
         (normalized_mobile,),
     )
+    if not row:
+        return None
+    return {
+        **row,
+        "created_at": _local_timestamp_text(row.get("created_at")),
+        "updated_at": _local_timestamp_text(row.get("updated_at")),
+    }
 
 
 def get_latest_message_at_for_external_userids(external_userids: list[str]) -> str:

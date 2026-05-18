@@ -159,6 +159,8 @@ _TABLES_TO_TRUNCATE = [
     # admin_wecom_directory_member 不在 PG schema 中（WeCom 目录走 admin_users）
     "owner_role_map",
     "routing_rule_config",
+    "wechat_pay_order_events",
+    "wechat_pay_orders",
     "app_settings",
     "mcp_tool_settings",
     # — contacts / identity
@@ -252,7 +254,7 @@ class _AppContextManager:
         sdk_lib.write_text("fake-so", encoding="utf-8")
 
         from wecom_ability_service import create_app
-        from wecom_ability_service.db import init_db
+        from wecom_ability_service.db import close_db, init_db
 
         config = {
             "TESTING": True,
@@ -278,6 +280,8 @@ class _AppContextManager:
         # session 级 ``_ensure_schema_once`` 已经建好 schema；这里只跑 init_db 做
         # ALTER 补丁 + seed。autouse ``_truncate_before_each_test`` 已经清完表。
         init_db()
+        close_db()
+        _truncate_cached_tables_once()
         return self._app
 
     def __exit__(self, *args):
@@ -307,6 +311,64 @@ def _close_truncate_conn() -> None:
             conn.close()
         except Exception:
             pass
+
+
+def _terminate_idle_test_transactions(url: str) -> None:
+    parsed = urlparse(url)
+    database_name = parsed.path.lstrip("/")
+    if not database_name:
+        return
+    maintenance_url = urlunparse(parsed._replace(path="/postgres"))
+    try:
+        import psycopg
+    except ImportError:  # pragma: no cover
+        return
+    conn = psycopg.connect(maintenance_url, autocommit=True)
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(
+                """
+                SELECT pg_terminate_backend(pid)
+                FROM pg_stat_activity
+                WHERE datname = %s
+                  AND pid <> pg_backend_pid()
+                  AND state = 'idle in transaction'
+                """,
+                (database_name,),
+            )
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
+def _truncate_cached_tables_once() -> None:
+    url = _truncate_state.get("url") or os.environ.get("DATABASE_URL", "").strip()
+    sql = _truncate_state.get("tables_sql", "")
+    if not url or not sql:
+        return
+    try:
+        import psycopg
+    except ImportError:  # pragma: no cover
+        return
+    for attempt in range(2):
+        conn = psycopg.connect(url, autocommit=True)
+        try:
+            cur = conn.cursor()
+            try:
+                cur.execute("SET lock_timeout = '5s'")
+                cur.execute(sql)
+                return
+            except Exception:
+                if attempt == 0:
+                    _terminate_idle_test_transactions(url)
+                    continue
+                raise
+            finally:
+                cur.close()
+        finally:
+            conn.close()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -406,12 +468,30 @@ def _truncate_before_each_test():
     try:
         cur.execute(sql)
     except Exception:
-        # 断连 / 死锁 / 表被外部 drop 等异常：弃旧连接，下次 test 重建
+        # 断连 / 死锁 / 上个 test 遗留 idle transaction：弃旧连接，清 blocker 后重试。
         try:
             conn.close()
         except Exception:
             pass
         _truncate_state["conn"] = None
+        _terminate_idle_test_transactions(url)
+        retry_conn = psycopg.connect(url, autocommit=True)
+        retry_cur = retry_conn.cursor()
+        try:
+            retry_cur.execute("SET lock_timeout = '5s'")
+            retry_cur.execute(sql)
+            _truncate_state["conn"] = retry_conn
+        except Exception:
+            try:
+                retry_conn.close()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                retry_cur.close()
+            except Exception:
+                pass
     finally:
         try:
             cur.close()
@@ -432,7 +512,7 @@ def app(tmp_path) -> Iterator[Any]:
     sdk_lib.write_text("fake-so", encoding="utf-8")
 
     from wecom_ability_service import create_app
-    from wecom_ability_service.db import init_db
+    from wecom_ability_service.db import close_db, init_db
 
     app = create_app(
         test_config={
@@ -459,6 +539,8 @@ def app(tmp_path) -> Iterator[Any]:
         # fixture 清掉，必须每 test 重 seed。_init_postgres 的 ALTER 是 IF NOT EXISTS
         # 幂等，再跑一次也只是成本（暂未优化掉）。
         init_db()
+        close_db()
+        _truncate_cached_tables_once()
         yield app
 
 

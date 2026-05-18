@@ -95,5 +95,10 @@ def count_contacts() -> int:
 
 
 def get_last_contacts_sync_time() -> str:
-    row = get_db().execute("SELECT MAX(updated_at) AS updated_at FROM contacts").fetchone()
+    row = get_db().execute(
+        """
+        SELECT to_char(MAX(updated_at) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS') AS updated_at
+        FROM contacts
+        """
+    ).fetchone()
     return row["updated_at"] if row and row["updated_at"] else ""

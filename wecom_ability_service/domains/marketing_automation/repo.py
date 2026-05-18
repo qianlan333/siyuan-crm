@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from ...customer_center.repo import (
@@ -24,6 +24,24 @@ from ._repo_helpers import (  # noqa: F401  shared helpers — 阶段 5.2
     _nullable_timestamp_text,
     _placeholders,
 )
+
+
+_LOCAL_TIMESTAMP_FIELDS = {"entered_at", "exited_at"}
+
+
+def _local_timestamp_text(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return (value + timedelta(hours=8)).strftime("%Y-%m-%d %H:%M:%S")
+    return value
+
+
+def _with_local_timestamp_fields(row: dict[str, Any]) -> dict[str, Any]:
+    if not row:
+        return row
+    normalized = dict(row)
+    for field in _LOCAL_TIMESTAMP_FIELDS:
+        normalized[field] = _local_timestamp_text(normalized.get(field))
+    return normalized
 from ._repo_config import (  # noqa: F401  marketing_automation config + owner_role + question_rules — 阶段 5.4
     get_marketing_automation_config,
     get_owner_role_item,
@@ -371,7 +389,7 @@ def _list_customer_marketing_state_current_candidates(
         params.append(normalized_person_id)
     else:
         sql += " ORDER BY updated_at DESC, id DESC"
-    return _fetchall_dicts(sql, tuple(params))
+    return [_with_local_timestamp_fields(row) for row in _fetchall_dicts(sql, tuple(params))]
 
 
 def get_customer_marketing_state_current(
@@ -511,7 +529,7 @@ def upsert_customer_marketing_state_current(
             """,
             params,
         ).fetchone()
-    return dict(row) if row else {}
+    return _with_local_timestamp_fields(dict(row)) if row else {}
 
 
 def insert_customer_marketing_state_history(
@@ -579,7 +597,7 @@ def insert_customer_marketing_state_history(
         """,
         params,
     ).fetchone()
-    return dict(row) if row else {}
+    return _with_local_timestamp_fields(dict(row)) if row else {}
 
 
 def count_customer_marketing_state_history(

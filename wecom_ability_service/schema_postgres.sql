@@ -502,6 +502,62 @@ CREATE TABLE IF NOT EXISTS app_settings (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS wechat_pay_orders (
+    id BIGSERIAL PRIMARY KEY,
+    out_trade_no TEXT NOT NULL UNIQUE,
+    order_source TEXT NOT NULL DEFAULT 'h5_checkout',
+    client_order_ref TEXT NOT NULL DEFAULT '',
+    product_code TEXT NOT NULL DEFAULT '',
+    product_name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    amount_total INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    payer_openid TEXT NOT NULL DEFAULT '',
+    respondent_key TEXT NOT NULL DEFAULT '',
+    unionid TEXT NOT NULL DEFAULT '',
+    external_userid TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'created',
+    trade_state TEXT NOT NULL DEFAULT '',
+    transaction_id TEXT NOT NULL DEFAULT '',
+    bank_type TEXT NOT NULL DEFAULT '',
+    payer_total INTEGER NOT NULL DEFAULT 0,
+    prepay_id TEXT NOT NULL DEFAULT '',
+    success_url TEXT NOT NULL DEFAULT '',
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_error TEXT NOT NULL DEFAULT '',
+    expires_at TIMESTAMPTZ,
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_openid
+ON wechat_pay_orders (payer_openid, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_status
+ON wechat_pay_orders (status, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_product
+ON wechat_pay_orders (product_code, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS wechat_pay_order_events (
+    id BIGSERIAL PRIMARY KEY,
+    out_trade_no TEXT NOT NULL REFERENCES wechat_pay_orders(out_trade_no) ON DELETE CASCADE,
+    event_type TEXT NOT NULL DEFAULT '',
+    transaction_id TEXT NOT NULL DEFAULT '',
+    trade_state TEXT NOT NULL DEFAULT '',
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_events_order
+ON wechat_pay_order_events (out_trade_no, created_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS routing_rule_config (
     rule_key TEXT PRIMARY KEY,
     routing_alias TEXT NOT NULL DEFAULT '',

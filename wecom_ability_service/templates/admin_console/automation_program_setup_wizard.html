@@ -79,6 +79,13 @@
   'publish': {'prev': 'operations'}
 } %}
 <section class="setup-shell" data-setup-root data-urls='{{ urls|tojson }}' data-program-id="{{ program.id or '' }}">
+  <header class="setup-card">
+    <div>
+      <h2>配置向导</h2>
+      <p class="setup-muted">{{ program.program_name or "自动化运营方案" }} · {{ status_label }}</p>
+    </div>
+  </header>
+
   {% if workspace_tabs %}
   <nav class="ac-workspace-tabs ac-workspace-tabs--program-hero" aria-label="自动化运营方案导航">
     {% for item in workspace_tabs %}

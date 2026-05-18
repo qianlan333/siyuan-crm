@@ -2708,6 +2708,61 @@ def test_wecom_event_group_dismiss_updates_status(client, app, monkeypatch):
         assert row["status"] == "dismissed"
 
 
+def test_wecom_event_external_contact_logs_and_processes_event(client, app, monkeypatch):
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", fake_wecom_post)
+
+    token = "callback-token"
+    aes_key = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
+    corp_id = "ww-test"
+    plain_xml = (
+        "<xml>"
+        "<Event>change_external_contact</Event>"
+        "<ChangeType>add_external_contact</ChangeType>"
+        "<ExternalUserID>wm_ext_001</ExternalUserID>"
+        "<UserID>sales_01</UserID>"
+        "<CreateTime>1774000100</CreateTime>"
+        "</xml>"
+    )
+    encrypted = encrypt_message(plain_xml, aes_key, corp_id)
+    timestamp = "1774000100"
+    nonce = "nonce-ec-api-001"
+    signature = compute_signature(token, timestamp, nonce, encrypted)
+    body = f"<xml><Encrypt>{encrypted}</Encrypt></xml>"
+
+    response = client.post(
+        f"/api/wecom/events?msg_signature={signature}&timestamp={timestamp}&nonce={nonce}",
+        data=body,
+        content_type="application/xml",
+    )
+    assert response.status_code == 200
+
+    with app.app_context():
+        event_log = get_db().execute(
+            """
+            SELECT change_type, external_userid, user_id, process_status, retry_count
+            FROM wecom_external_contact_event_logs
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        assert event_log["change_type"] == "add_external_contact"
+        assert event_log["external_userid"] == "wm_ext_001"
+        assert event_log["user_id"] == "sales_01"
+        assert event_log["process_status"] == "success"
+        identity = resolve_external_contact_identity("ww-test", external_userid="wm_ext_001")
+        assert identity["follow_user_userid"] == "sales_01"
+        relation = get_db().execute(
+            """
+            SELECT relation_status
+            FROM wecom_external_contact_follow_users
+            WHERE corp_id = ? AND external_userid = ? AND user_id = ?
+            """,
+            ("ww-test", "wm_ext_001", "sales_01"),
+        ).fetchone()
+        assert relation["relation_status"] == "active"
+
+
 def test_external_contact_full_sync_and_identity_bind(client, app, monkeypatch):
     monkeypatch.setattr("requests.get", fake_wecom_get)
     monkeypatch.setattr("requests.post", fake_wecom_post)

@@ -18,7 +18,7 @@ from ...wecom_client import WeComClientError
 from ..tags import repo as tags_repo
 from ..tags import service as tags_service
 from ..user_ops import page_service as user_ops_page_service
-from . import program_service, repo as orchestration_repo, workflow_repo
+from . import program_repo, program_service, repo as orchestration_repo, workflow_repo
 from .message_activity_client import get_message_activity_db_status, query_message_activity_counts
 from .workflow_definitions import (
     AGENT_BINDING_SCOPE_BEHAVIOR_TIER,
@@ -102,6 +102,8 @@ _BAZHUAYU_DEFAULT_WEBHOOK_URL = "https://api-rpa.bazhuayu.com/api/v1/bots/webhoo
 _BAZHUAYU_DEFAULT_SIGNING_SECRET = "mPwS+MOxF0O9dyED6z5LlA=="
 _BAZHUAYU_DEFAULT_TIMEOUT_SECONDS = 15
 _OVERVIEW_SIGNUP_TAG_NAME = "报名引流品"
+_SETUP_SEGMENTATION_BLOCK_KEY = "questionnaire_segmentation"
+_SETUP_OPTION_CATEGORY_MODE = "single_question_option_category"
 
 
 def _normalized_text(value: Any) -> str:
@@ -2037,6 +2039,222 @@ def _latest_enabled_profile_segment_template_bundle(*, program_id: int | None = 
     }
 
 
+def _program_setup_segmentation_payload(*, program_id: int | None = None) -> dict[str, Any]:
+    effective_program_id = _effective_program_id(program_id)
+    block = program_repo.get_config_block_row(effective_program_id, _SETUP_SEGMENTATION_BLOCK_KEY)
+    payload = dict((block or {}).get("payload_json") or {})
+    return payload
+
+
+def _setup_normal_question_categories(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    strategies = dict(payload.get("strategies") or {})
+    normal = dict(strategies.get("normal_question_rules") or {})
+    if _normalized_text(payload.get("default_strategy")) != "normal_question_rules":
+        return []
+    if not bool(normal.get("enabled", True)):
+        return []
+    if _normalized_text(normal.get("mode")) not in {"", _SETUP_OPTION_CATEGORY_MODE}:
+        return []
+    categories: list[dict[str, Any]] = []
+    for index, category in enumerate(list(normal.get("categories") or []), start=1):
+        option_ids: list[int] = []
+        for option_id in list(category.get("option_ids") or []):
+            try:
+                normalized_option_id = int(option_id)
+            except (TypeError, ValueError):
+                continue
+            if normalized_option_id > 0:
+                option_ids.append(normalized_option_id)
+        category_key = _normalized_text(category.get("category_key")) or f"category_{index}"
+        category_name = _normalized_text(category.get("category_name")) or f"分类 {index}"
+        if not option_ids or not category_key:
+            continue
+        categories.append(
+            {
+                "id": None,
+                "category_key": category_key,
+                "category_name": category_name,
+                "description": _normalized_text(category.get("description")),
+                "sort_order": index,
+                "enabled": True,
+                "option_ids": option_ids,
+            }
+        )
+    return categories
+
+
+def _setup_option_category_profile_bundle(
+    *, program_id: int | None = None, payload: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    setup_payload = dict(payload or _program_setup_segmentation_payload(program_id=program_id) or {})
+    strategies = dict(setup_payload.get("strategies") or {})
+    normal = dict(strategies.get("normal_question_rules") or {})
+    questionnaire_id = int(setup_payload.get("questionnaire_id") or 0)
+    question_id = int(normal.get("segmentation_question_id") or 0)
+    categories = _setup_normal_question_categories(setup_payload)
+    if not questionnaire_id or not question_id or not categories:
+        return {
+            "template": {},
+            "questionnaire": {},
+            "segmentation_question": {},
+            "question_options": [],
+            "categories": [],
+            "validity": {
+                "is_valid": False,
+                "status": "empty",
+                "reason_codes": ["setup_option_category_empty"],
+                "reason_messages": ["当前方案尚未配置普通问卷选项分类。"],
+                "enabled_category_count": 0,
+                "mapping_count": 0,
+            },
+            "selection": {
+                "strategy": "setup_option_category",
+                "status": "empty",
+                "invalid_enabled_templates": [],
+            },
+            "supports_standard_fallback": True,
+        }
+    questionnaire = workflow_repo.get_questionnaire_row(questionnaire_id) or {}
+    question = workflow_repo.get_questionnaire_question_row(questionnaire_id, question_id) or {}
+    question_options = workflow_repo.list_questionnaire_option_rows(question_id)
+    mapping_count = sum(len(category.get("option_ids") or []) for category in categories)
+    return {
+        "template": {
+            "id": None,
+            "program_id": _effective_program_id(program_id),
+            "template_code": "setup_question_option_category",
+            "template_name": "普通问卷选项分类",
+            "questionnaire_id": questionnaire_id,
+            "segmentation_question_id": question_id,
+            "enabled": True,
+        },
+        "questionnaire": questionnaire,
+        "segmentation_question": question,
+        "question_options": question_options,
+        "categories": categories,
+        "validity": {
+            "is_valid": True,
+            "status": "valid",
+            "reason_codes": [],
+            "reason_messages": [],
+            "enabled_category_count": len(categories),
+            "mapping_count": mapping_count,
+        },
+        "selection": {
+            "strategy": "setup_option_category",
+            "status": "selected",
+            "invalid_enabled_templates": [],
+        },
+        "supports_standard_fallback": True,
+    }
+
+
+def _active_profile_segment_template_bundle(*, program_id: int | None = None) -> dict[str, Any]:
+    setup_payload = _program_setup_segmentation_payload(program_id=program_id)
+    setup_bundle = _setup_option_category_profile_bundle(program_id=program_id, payload=setup_payload)
+    if bool((setup_bundle.get("validity") or {}).get("is_valid")):
+        return setup_bundle
+    return _latest_enabled_profile_segment_template_bundle(program_id=program_id)
+
+
+def profile_segment_label_map_for_program(*, program_id: int | None = None) -> dict[str, str]:
+    payload = _program_setup_segmentation_payload(program_id=program_id)
+    label_map: dict[str, str] = {}
+    for category in _setup_normal_question_categories(payload):
+        key = _normalized_text(category.get("category_key"))
+        if key:
+            label_map[key] = _normalized_text(category.get("category_name")) or key
+    strategies = dict(payload.get("strategies") or {})
+    score_segments = dict(strategies.get("score_segments") or {})
+    for item in list(score_segments.get("ranges") or []):
+        key = _normalized_text(item.get("segment_key"))
+        if key:
+            label_map[key] = _normalized_text(item.get("segment_name")) or key
+    for category in (_latest_enabled_profile_segment_template_bundle(program_id=program_id).get("categories") or []):
+        if not bool(category.get("enabled")):
+            continue
+        key = _normalized_text(category.get("category_key"))
+        if key and key not in label_map:
+            label_map[key] = _normalized_text(category.get("category_name")) or key
+    return label_map
+
+
+def _resolve_score_segment_for_member(
+    *,
+    member: dict[str, Any],
+    setup_segmentation_payload: dict[str, Any],
+) -> dict[str, Any]:
+    if _normalized_text(setup_segmentation_payload.get("default_strategy")) != "score_segments":
+        return {
+            "matched": False,
+            "segment_key": "",
+            "segment_label": "",
+            "reason": "score_segments_not_selected",
+            "submission_id": None,
+            "total_score": None,
+        }
+    strategies = dict(setup_segmentation_payload.get("strategies") or {})
+    score_segments = dict(strategies.get("score_segments") or {})
+    if not bool(score_segments.get("enabled")):
+        return {
+            "matched": False,
+            "segment_key": "",
+            "segment_label": "",
+            "reason": "score_segments_disabled",
+            "submission_id": None,
+            "total_score": None,
+        }
+    questionnaire_id = int(setup_segmentation_payload.get("questionnaire_id") or 0)
+    if not questionnaire_id:
+        return {
+            "matched": False,
+            "segment_key": "",
+            "segment_label": "",
+            "reason": "questionnaire_missing",
+            "submission_id": None,
+            "total_score": None,
+        }
+    submission = workflow_repo.get_latest_questionnaire_submission_row(
+        questionnaire_id=questionnaire_id,
+        external_contact_ids=[_normalized_text(member.get("external_contact_id"))],
+        phone=_normalized_text(member.get("phone")),
+    )
+    if not submission:
+        return {
+            "matched": False,
+            "segment_key": "",
+            "segment_label": "",
+            "reason": "questionnaire_submission_missing",
+            "submission_id": None,
+            "total_score": None,
+        }
+    total_score = float(submission.get("total_score") or 0)
+    for item in list(score_segments.get("ranges") or []):
+        try:
+            min_score = float(item.get("min_score"))
+            max_score = float(item.get("max_score"))
+        except (TypeError, ValueError):
+            continue
+        if min_score <= total_score <= max_score:
+            key = _normalized_text(item.get("segment_key"))
+            return {
+                "matched": bool(key),
+                "segment_key": key,
+                "segment_label": _normalized_text(item.get("segment_name")) or key,
+                "reason": "",
+                "submission_id": int(submission.get("id") or 0) or None,
+                "total_score": total_score,
+            }
+    return {
+        "matched": False,
+        "segment_key": "",
+        "segment_label": "",
+        "reason": "score_segment_not_matched",
+        "submission_id": int(submission.get("id") or 0) or None,
+        "total_score": total_score,
+    }
+
+
 def _resolve_profile_segment_for_member(
     *,
     member: dict[str, Any],
@@ -2143,6 +2361,7 @@ def _build_dashboard_member_detail_item(
     *,
     message_activity_counts_by_match_key: dict[str, int],
     profile_segment_template_bundle: dict[str, Any],
+    setup_segmentation_payload: dict[str, Any],
     audience_meta_map: dict[str, dict[str, str]],
 ) -> dict[str, Any]:
     from .service import resolve_member_questionnaire_truth
@@ -2164,10 +2383,16 @@ def _build_dashboard_member_detail_item(
     )
     message_count = int(message_activity.get("message_count") or 0)
     behavior_tier = _behavior_tier_for_count(message_count) if bool(message_activity.get("available")) else {}
-    profile_segment = _resolve_profile_segment_for_member(
-        member=member,
-        profile_segment_template_bundle=profile_segment_template_bundle,
-    )
+    if _normalized_text(setup_segmentation_payload.get("default_strategy")) == "score_segments":
+        profile_segment = _resolve_score_segment_for_member(
+            member=member,
+            setup_segmentation_payload=setup_segmentation_payload,
+        )
+    else:
+        profile_segment = _resolve_profile_segment_for_member(
+            member=member,
+            profile_segment_template_bundle=profile_segment_template_bundle,
+        )
     payload = {
         "member_id": int(member.get("id") or 0) or None,
         "external_contact_id": external_contact_id,
@@ -2218,13 +2443,21 @@ def _maybe_persist_member_segment_keys(
 def _build_dashboard_audience_member_details(*, program_id: int | None = None) -> dict[str, Any]:
     audience_definitions = list_supported_conversion_audiences()
     audience_meta_map = _conversion_audience_meta_map()
+    effective_program_id = _effective_program_id(program_id)
+    default_program_id = program_service.get_default_automation_program_id()
+    include_unscoped = effective_program_id == default_program_id
     rows_by_audience: dict[str, list[dict[str, Any]]] = {}
     for definition in audience_definitions:
         audience_code = _normalized_text(definition.get("audience_code"))
-        rows = workflow_repo.list_current_member_audience_rows(audience_code)
+        rows = workflow_repo.list_current_member_audience_rows(
+            audience_code,
+            program_id=effective_program_id,
+            include_unscoped=include_unscoped,
+        )
         rows_by_audience[audience_code] = rows
     message_activity_counts_by_match_key = _message_activity_count_map_by_phone_match_key()
-    profile_segment_template_bundle = _latest_enabled_profile_segment_template_bundle(program_id=program_id)
+    setup_segmentation_payload = _program_setup_segmentation_payload(program_id=effective_program_id)
+    profile_segment_template_bundle = _active_profile_segment_template_bundle(program_id=effective_program_id)
     groups: list[dict[str, Any]] = []
     total = 0
     refreshed_at_value = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -2237,6 +2470,7 @@ def _build_dashboard_audience_member_details(*, program_id: int | None = None) -
                 row,
                 message_activity_counts_by_match_key=message_activity_counts_by_match_key,
                 profile_segment_template_bundle=profile_segment_template_bundle,
+                setup_segmentation_payload=setup_segmentation_payload,
                 audience_meta_map=audience_meta_map,
             )
             items.append(item)
@@ -2280,7 +2514,10 @@ def _build_dashboard_audience_member_details(*, program_id: int | None = None) -
     }
 
 
-def apply_dashboard_signup_tag(*, operator_id: str = "") -> dict[str, Any]:
+def apply_dashboard_signup_tag(*, operator_id: str = "", program_id: int | None = None) -> dict[str, Any]:
+    effective_program_id = _effective_program_id(program_id)
+    default_program_id = program_service.get_default_automation_program_id()
+    include_unscoped = effective_program_id == default_program_id
     signup_rules = list(tags_service.get_signup_tag_rules_config().get("items") or [])
     target_rule = next(
         (
@@ -2306,7 +2543,11 @@ def apply_dashboard_signup_tag(*, operator_id: str = "") -> dict[str, Any]:
     seen_pairs: set[tuple[str, str]] = set()
     for definition in list_supported_conversion_audiences():
         audience_code = _normalized_text(definition.get("audience_code"))
-        for row in workflow_repo.list_current_member_audience_rows(audience_code):
+        for row in workflow_repo.list_current_member_audience_rows(
+            audience_code,
+            program_id=effective_program_id,
+            include_unscoped=include_unscoped,
+        ):
             member = dict(row.get("member") or {})
             external_contact_id = _normalized_text(member.get("external_contact_id"))
             owner_staff_id = _normalized_text(member.get("owner_staff_id"))
@@ -2398,7 +2639,11 @@ def apply_dashboard_signup_tag(*, operator_id: str = "") -> dict[str, Any]:
 
 def get_conversion_dashboard_payload(*, program_id: int | None = None) -> dict[str, Any]:
     effective_program_id = _effective_program_id(program_id)
-    audience_counts = workflow_repo.get_current_audience_member_counts()
+    default_program_id = program_service.get_default_automation_program_id()
+    audience_counts = workflow_repo.get_current_audience_member_counts(
+        program_id=effective_program_id,
+        include_unscoped=effective_program_id == default_program_id,
+    )
     workflow_execution_summary = [
         _build_workflow_execution_summary_item(item)
         for item in workflow_repo.list_workflow_execution_summary_rows(program_id=effective_program_id)

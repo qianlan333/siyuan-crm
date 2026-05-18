@@ -68,18 +68,20 @@ def _resolve_storage_keys(keys: list[str]) -> list[str]:
 
 
 def _profile_segment_label_map(*, program_id: int | None = None) -> dict[str, str]:
-    bundle = workflow_service._latest_enabled_profile_segment_template_bundle(
-        program_id=program_id
+    return workflow_service.profile_segment_label_map_for_program(program_id=program_id)
+
+
+def _program_scope_options(*, program_id: int | None = None) -> dict[str, Any]:
+    effective_program_id = (
+        workflow_service._effective_program_id(program_id) if program_id is not None else None
     )
-    label_map: dict[str, str] = {}
-    for category in bundle.get("categories") or []:
-        if not bool(category.get("enabled")):
-            continue
-        key = _normalized_text(category.get("category_key"))
-        name = _normalized_text(category.get("category_name")) or key
-        if key:
-            label_map[key] = name
-    return label_map
+    if effective_program_id is None:
+        return {"program_id": None, "include_unscoped": False}
+    default_program_id = workflow_service.program_service.get_default_automation_program_id()
+    return {
+        "program_id": effective_program_id,
+        "include_unscoped": effective_program_id == default_program_id,
+    }
 
 
 def _behavior_tier_label_map() -> dict[str, str]:
@@ -102,7 +104,7 @@ def get_dimension_metadata(*, program_id: int | None = None) -> dict[str, Any]:
     audience_labels = _audience_label_map()
     profile_labels = _profile_segment_label_map(program_id=program_id)
     behavior_labels = _behavior_tier_label_map()
-    aggregates = repo.aggregate_member_segment_dimensions()
+    aggregates = repo.aggregate_member_segment_dimensions(**_program_scope_options(program_id=program_id))
 
     pool_count_by_key: dict[str, int] = {
         item["key"]: item["total"] for item in aggregates.get("pools") or []
@@ -224,12 +226,14 @@ def search_members(
         keyword=keyword,
         offset=offset,
         limit=page_size,
+        **_program_scope_options(program_id=program_id),
     )
     total = repo.count_members_by_segment_filter(
         pool_keys=storage_pools,
         profile_keys=storage_profiles,
         behavior_keys=storage_behaviors,
         keyword=keyword,
+        **_program_scope_options(program_id=program_id),
     )
 
     audience_labels = _audience_label_map()
@@ -278,6 +282,7 @@ def list_broadcast_targets(
         keyword=keyword,
         offset=0,
         limit=10_000,
+        **_program_scope_options(program_id=program_id),
     )
     audience_labels = _audience_label_map()
     profile_labels = _profile_segment_label_map(program_id=program_id)

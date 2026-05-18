@@ -4,7 +4,7 @@ import re
 from typing import Any
 
 from ...db import get_db
-from . import program_repo, repo
+from . import program_repo, repo, workflow_repo
 from .channel_service import save_default_channel_settings
 from .customer_acquisition_service import create_customer_acquisition_link, list_customer_acquisition_links
 from .operation_task_service import list_operation_tasks
@@ -75,6 +75,7 @@ QUESTIONNAIRE_CONDITION_LABELS = {
 
 QUESTION_OPTION_CATEGORY_MODE = "single_question_option_category"
 QUESTION_CHOICE_TYPES = {"single_choice", "multi_choice"}
+SETUP_PROFILE_TEMPLATE_CODE_PREFIX = "setup_normal_option_category"
 
 
 def _program_code(value: Any) -> str:
@@ -707,10 +708,112 @@ def match_score_segment(payload: dict[str, Any], total_score: float) -> dict[str
     return None
 
 
+def _setup_profile_template_code(program_id: int) -> str:
+    return f"{SETUP_PROFILE_TEMPLATE_CODE_PREFIX}_{int(program_id)}"
+
+
+def _setup_profile_template_categories(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    strategies = dict(payload.get("strategies") or {})
+    normal = dict(strategies.get("normal_question_rules") or {})
+    categories: list[dict[str, Any]] = []
+    for index, category in enumerate(list(normal.get("categories") or []), start=1):
+        option_ids = [int(option_id) for option_id in list(category.get("option_ids") or []) if int(option_id or 0)]
+        if not option_ids:
+            continue
+        categories.append(
+            {
+                "category_key": _normalized_text(category.get("category_key")) or _category_key_for_index(index - 1),
+                "category_name": _normalized_text(category.get("category_name")) or f"分类 {index}",
+                "description": _normalized_text(category.get("description")),
+                "sort_order": index,
+                "enabled": True,
+                "option_ids": option_ids,
+            }
+        )
+    return categories
+
+
+def _sync_setup_profile_template_categories(template_id: int, question_id: int, categories: list[dict[str, Any]]) -> None:
+    workflow_repo.delete_profile_segment_option_mapping_rows(int(template_id))
+    workflow_repo.delete_profile_segment_category_rows(int(template_id))
+    for category in categories:
+        saved_category = workflow_repo.insert_profile_segment_category_row(
+            {
+                "template_id": int(template_id),
+                "category_key": category["category_key"],
+                "category_name": category["category_name"],
+                "description": category["description"],
+                "sort_order": category["sort_order"],
+                "enabled": category["enabled"],
+            }
+        )
+        for option_id in category["option_ids"]:
+            workflow_repo.insert_profile_segment_option_mapping_row(
+                {
+                    "template_id": int(template_id),
+                    "category_id": int(saved_category["id"]),
+                    "question_id": int(question_id),
+                    "option_id": int(option_id),
+                }
+            )
+
+
+def _sync_setup_profile_segment_template(program_id: int, payload: dict[str, Any]) -> dict[str, Any] | None:
+    template_code = _setup_profile_template_code(int(program_id))
+    existing = workflow_repo.get_profile_segment_template_row_by_code(template_code)
+    strategies = dict(payload.get("strategies") or {})
+    normal = dict(strategies.get("normal_question_rules") or {})
+    should_enable = (
+        _normalized_text(payload.get("default_strategy")) == "normal_question_rules"
+        and bool(normal.get("enabled", True))
+        and _normalized_text(normal.get("mode")) in {"", QUESTION_OPTION_CATEGORY_MODE}
+    )
+    categories = _setup_profile_template_categories(payload) if should_enable else []
+    questionnaire_id = int(payload.get("questionnaire_id") or 0)
+    question_id = int(normal.get("segmentation_question_id") or 0)
+    if not should_enable or not questionnaire_id or not question_id or not categories:
+        if existing and int(existing.get("program_id") or 0) == int(program_id) and bool(existing.get("enabled")):
+            return workflow_repo.update_profile_segment_template_row(
+                int(existing["id"]),
+                {
+                    **existing,
+                    "program_id": int(program_id),
+                    "enabled": False,
+                    "version": int(existing.get("version") or 1) + 1,
+                    "updated_by": "setup_wizard",
+                },
+            )
+        return existing
+
+    selected_question_title = _normalized_text(normal.get("segmentation_question_title"))
+    template_name = selected_question_title or "普通问卷选项分类"
+    template_payload = {
+        "program_id": int(program_id),
+        "template_code": template_code,
+        "template_name": f"{template_name} · 自然画像",
+        "questionnaire_id": questionnaire_id,
+        "segmentation_question_id": question_id,
+        "description": "由配置向导的普通问卷选项分类自动同步。",
+        "enabled": True,
+        "version": int((existing or {}).get("version") or 0) + 1,
+        "created_by": "setup_wizard",
+        "updated_by": "setup_wizard",
+    }
+    if existing:
+        if int(existing.get("program_id") or 0) not in {0, int(program_id)}:
+            raise ValueError("当前方案画像分层模板编码已被其他方案占用")
+        saved_template = workflow_repo.update_profile_segment_template_row(int(existing["id"]), template_payload)
+    else:
+        saved_template = workflow_repo.insert_profile_segment_template_row(template_payload)
+    _sync_setup_profile_template_categories(int(saved_template["id"]), question_id, categories)
+    return saved_template
+
+
 def save_segmentation(program_id: int, payload: dict[str, Any]) -> dict[str, Any]:
     payload = _normalize_segmentation_payload(dict(payload or {}), program_id=int(program_id))
     validate_option_categories(payload)
     validate_score_ranges(payload)
+    profile_template = _sync_setup_profile_segment_template(int(program_id), payload)
     block = program_repo.upsert_config_block_row(
         int(program_id),
         BLOCK_SEGMENTATION,
@@ -718,7 +821,7 @@ def save_segmentation(program_id: int, payload: dict[str, Any]) -> dict[str, Any
         status="saved",
     )
     get_db().commit()
-    return {"segmentation": block}
+    return {"segmentation": block, "profile_segment_template": profile_template}
 
 
 def save_audience_entry_rule(program_id: int, payload: dict[str, Any]) -> dict[str, Any]:

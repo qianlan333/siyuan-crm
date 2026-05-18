@@ -294,7 +294,10 @@ def list_admin_orders(*, filters: dict[str, Any], limit: int, cursor: str = "") 
     cursor_created_at = _normalized_text(cursor_payload.get("created_at"))
     cursor_id = int(cursor_payload.get("id") or 0)
     if cursor_created_at and cursor_id > 0:
-        clauses.append("(created_at < ?::timestamptz OR (created_at = ?::timestamptz AND id < ?))")
+        clauses.append(
+            "((created_at AT TIME ZONE 'UTC') < ?::timestamp "
+            "OR ((created_at AT TIME ZONE 'UTC') = ?::timestamp AND id < ?))"
+        )
         params.extend([cursor_created_at, cursor_created_at, cursor_id])
     params.append(max(1, int(limit)))
     return _fetchall_dicts(

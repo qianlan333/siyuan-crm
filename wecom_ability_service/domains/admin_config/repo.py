@@ -5,6 +5,7 @@ from typing import Any
 
 from ...db import get_db
 from ...db.helpers import fetch_inserted_id as _fetch_inserted_id, fetchall_dicts, fetchone_dict
+from ...infra.helpers import db_bool as _db_bool
 from ...infra.json_utils import safe_json_loads as _json_loads
 
 

@@ -77,14 +77,15 @@ from ._service_helpers import (  # noqa: F401  helpers — 阶段 7.2
 
 
 def list_questionnaires() -> list[dict[str, Any]]:
+    last_submitted_at_expr = "to_char(MAX(s.submitted_at) AT TIME ZONE 'Asia/Shanghai', 'YYYY-MM-DD HH24:MI:SS')"
     rows = get_db().execute(
-        """
+        f"""
         SELECT q.id, q.slug, q.name, q.title, q.description, q.is_disabled, q.redirect_url,
                q.answer_display_mode,
                q.assessment_enabled, q.assessment_config,
                q.external_push_enabled, q.external_push_url, q.external_push_day, q.external_push_frequency,
                q.external_push_remark, q.external_push_custom_params, q.created_at, q.updated_at,
-               COUNT(s.id) AS submission_count, MAX(s.submitted_at) AS last_submitted_at
+               COUNT(s.id) AS submission_count, {last_submitted_at_expr} AS last_submitted_at
         FROM questionnaires q
         LEFT JOIN questionnaire_submissions s ON s.questionnaire_id = q.id
         GROUP BY q.id, q.slug, q.name, q.title, q.description, q.is_disabled, q.redirect_url,

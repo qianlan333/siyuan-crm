@@ -26,7 +26,7 @@ def test_admin_questionnaire_console_uses_formal_application_external_push_owner
         Path(__file__).resolve().parents[1]
         / "wecom_ability_service"
         / "http"
-        / "admin_questionnaire_console.py"
+        / "admin_questionnaire_push_logs.py"
     ).read_text(encoding="utf-8")
 
     required_fragments = [

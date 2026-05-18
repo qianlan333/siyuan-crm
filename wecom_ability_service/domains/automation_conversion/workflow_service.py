@@ -55,6 +55,11 @@ from .workflow_definitions import (
     list_supported_workflow_statuses,
 )
 
+
+class AutomationConversionDispatchError(requests.RequestException):
+    """External automation-conversion dispatch failed."""
+
+
 _ALLOWED_AUDIENCES = {
     AUDIENCE_PENDING_QUESTIONNAIRE,
     AUDIENCE_OPERATING,
@@ -2852,7 +2857,7 @@ def _send_text_via_bazhuayu(
         )
     except OutboundHttpError as exc:
         original_message = str(exc.cause) if exc.cause else str(exc)
-        raise requests.RequestException(original_message) from exc
+        raise AutomationConversionDispatchError(original_message) from exc
     raw_body = response.text or ""
     try:
         response_payload = response.json() if raw_body else {}
@@ -2865,7 +2870,7 @@ def _send_text_via_bazhuayu(
             message = _normalized_text(response_payload.get("message"))
         else:
             message = raw_body.strip() or f"bazhuayu webhook failed: HTTP {response.status_code}"
-        raise requests.RequestException(message)
+        raise AutomationConversionDispatchError(message)
 
     return {
         "ok": True,

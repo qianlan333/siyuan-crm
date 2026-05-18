@@ -86,6 +86,35 @@ def test_service_layer_layout_doc_exists():
     source = doc_path.read_text(encoding="utf-8")
     assert "Only two domain layout modes are allowed" in source
     assert "`wecom_ability_service/services.py` stays as a thin compatibility facade" in source
+    assert "`admin_api_docs`" in source
+    assert "http_route_consolidation_check.md" in source
+
+
+def test_http_route_consolidation_check_doc_tracks_current_matrix():
+    doc_path = Path(__file__).resolve().parents[1] / "docs" / "architecture" / "http_route_consolidation_check.md"
+    assert doc_path.exists()
+    source = doc_path.read_text(encoding="utf-8")
+
+    required_fragments = [
+        "Registry And Ownership",
+        "Test Matrix",
+        "Remaining Large Files",
+        "tests/test_http_registration_contract.py",
+        "tests/test_route_inventory_contract.py",
+        "scripts/export_flask_routes.py",
+        "admin_questionnaire_console.py",
+    ]
+    for fragment in required_fragments:
+        assert fragment in source
+
+
+def test_admin_api_docs_service_owns_docs_model_without_flask_dependencies():
+    service_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "domains" / "admin_api_docs" / "service.py"
+    source = service_path.read_text(encoding="utf-8")
+
+    assert "def build_api_docs_view_model" in source
+    for forbidden in ("from flask", "import flask", "_render_admin_template", "url_for("):
+        assert forbidden not in source
 
 
 def test_user_ops_application_skeleton_and_runtime_adapter_are_importable(monkeypatch):

@@ -49,6 +49,13 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         persistence_modules=("repo.py",),
         notes="Admin configuration center read models, validation, persistence, and audit.",
     ),
+    "admin_api_docs": DomainLayoutSpec(
+        name="admin_api_docs",
+        mode="simple",
+        service_module="service.py",
+        persistence_modules=("repo.py",),
+        notes="Static API documentation metadata, quick reference, and Markdown export view model.",
+    ),
     "admin_dashboard": DomainLayoutSpec(
         name="admin_dashboard",
         mode="simple",
@@ -167,6 +174,13 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         service_module="service.py",
         persistence_modules=("repo.py",),
         notes="Lead pool, import, activation, deferred jobs, class-term mapping.",
+    ),
+    "wechat_pay": DomainLayoutSpec(
+        name="wechat_pay",
+        mode="simple",
+        service_module="service.py",
+        persistence_modules=("repo.py",),
+        notes="WeChat Pay H5 JSAPI checkout, order lifecycle, and payment notification handling.",
     ),
 }
 

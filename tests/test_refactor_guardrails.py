@@ -181,7 +181,7 @@ def test_background_jobs_and_sidebar_do_not_bypass_user_ops_application_owner():
                 "refresh_user_ops_contact_tags_for_external_userid",
             },
         },
-        "wecom_ability_service/http/sidebar.py": {
+        "wecom_ability_service/http/sidebar_lead_pool.py": {
             "required_fragments": ["application.user_ops"],
             "forbidden_service_symbols": {
                 "get_sidebar_lead_pool_status",
@@ -335,7 +335,7 @@ def test_questionnaire_http_callers_do_not_bypass_application_owner():
             "forbidden_questionnaire_modules": {"domains.questionnaire.service"},
             "forbidden_admin_console_symbols": set(),
         },
-        "wecom_ability_service/http/admin_questionnaire_console.py": {
+        "wecom_ability_service/http/admin_questionnaire_push_logs.py": {
             "required_fragments": ["application.questionnaire"],
             "forbidden_service_symbols": set(),
             "forbidden_questionnaire_modules": {"domains.questionnaire.service"},
@@ -412,7 +412,7 @@ def test_automation_http_callers_do_not_bypass_application_owner():
                 "domains.outbound_webhook.service",
             },
         },
-        "wecom_ability_service/http/admin_config.py": {
+        "wecom_ability_service/http/admin_config_marketing_automation.py": {
             "required_fragments": ["application.automation_engine"],
             "forbidden_service_symbols": {
                 "get_signup_conversion_config",
@@ -482,7 +482,7 @@ def test_automation_background_sidebar_and_admin_jobs_callers_do_not_bypass_appl
                 "domains.tasks.service",
             },
         },
-        "wecom_ability_service/http/sidebar.py": {
+        "wecom_ability_service/http/sidebar_marketing_support.py": {
             "required_fragments": ["application.automation_engine"],
             "forbidden_service_symbols": {
                 "get_customer_marketing_profile",
@@ -548,5 +548,3 @@ def test_automation_background_sidebar_and_admin_jobs_callers_do_not_bypass_appl
         )
         for fragment in config["required_fragments"]:
             assert fragment in source, f"{relative_path} must import the formal automation application owner"
-
-

@@ -37,6 +37,7 @@ from ..domains.callbacks.service import (
 )
 from ..domains.automation_conversion.customer_acquisition_service import handle_customer_acquisition_event
 from ..domains.contacts.repo import upsert_contacts
+from ..domains.automation_conversion.customer_acquisition_service import handle_customer_acquisition_event
 from ..domains.group_chats.repo import get_group_chat_by_chat_id, upsert_group_chats
 from ..domains.group_chats.service import normalize_group_chat_record
 from ..infra.wecom_runtime import get_app_runtime_client

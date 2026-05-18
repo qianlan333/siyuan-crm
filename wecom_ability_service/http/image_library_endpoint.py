@@ -7,12 +7,17 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from flask import Response, jsonify, render_template, request
 
 from ..domains import image_library
 from ..domains.admin_dashboard.service import build_admin_shell_status, list_admin_navigation
+from .image_library_create import (
+    admin_image_library_create_base64,
+    admin_image_library_create_url,
+    admin_image_library_upload,
+)
+from .image_library_support import _json_metadata_kwargs, _parse_bool_arg, _parse_tags_arg
 
 
 logger = logging.getLogger(__name__)
@@ -37,34 +42,6 @@ def admin_image_library_workspace() -> Response:
         ],
         page_actions=[],
     )
-
-
-def _parse_bool_arg(raw: Any, *, default: bool = False) -> bool:
-    if raw is None:
-        return default
-    return str(raw).strip().lower() not in ("0", "false", "no", "")
-
-
-def _parse_tags_arg(raw: Any) -> list[str]:
-    """从 query string / form 解析 tags：支持逗号分隔字符串 或 JSON 数组字符串。
-
-    domain 层 ``_normalize_tags`` 也认这两种，但前置在这里解 JSON 形态可以
-    让多 tag 包含逗号的边缘 case 正确（运营少见，但留口子）。
-    """
-    if raw is None:
-        return []
-    text = str(raw).strip()
-    if not text:
-        return []
-    if text.startswith("["):
-        import json
-        try:
-            parsed = json.loads(text)
-            if isinstance(parsed, list):
-                return [str(s) for s in parsed]
-        except (TypeError, ValueError):
-            pass
-    return [s for s in (p.strip() for p in text.split(",")) if s]
 
 
 def admin_image_library_list() -> Response:
@@ -95,82 +72,6 @@ def admin_image_library_get(image_id: int) -> Response:
     if not item:
         return jsonify({"ok": False, "error": "not_found"}), 404
     return jsonify({"ok": True, "item": item})
-
-
-def _form_metadata_kwargs() -> dict[str, Any]:
-    """从 multipart form 提 description/tags/category/ai_metadata。
-
-    tags 接受逗号分隔或 JSON 数组字符串（``_parse_tags_arg`` 处理）。
-    ai_metadata 接受 JSON object 字符串，解析失败留给 domain 层标准化为 ``{}``。
-    """
-    return {
-        "description": (request.form.get("description") or "").strip(),
-        "tags": _parse_tags_arg(request.form.get("tags")),
-        "category": (request.form.get("category") or "").strip(),
-        "ai_metadata": request.form.get("ai_metadata"),
-    }
-
-
-def _json_metadata_kwargs(body: dict) -> dict[str, Any]:
-    """从 JSON body 提 description/tags/category/ai_metadata，原样透传给 domain 层。"""
-    return {
-        "description": str(body.get("description") or ""),
-        "tags": body.get("tags"),
-        "category": str(body.get("category") or ""),
-        "ai_metadata": body.get("ai_metadata"),
-    }
-
-
-def admin_image_library_upload() -> Response:
-    """multipart 上传：``image`` 文件 + 可选 ``name`` / ``description`` /
-    ``tags`` (csv 或 JSON) / ``category`` / ``ai_metadata`` (JSON)。"""
-    file = request.files.get("image")
-    if not file or not file.filename:
-        return jsonify({"ok": False, "error": "missing image"}), 400
-    file_bytes = file.read()
-    name = (request.form.get("name") or "").strip()
-    try:
-        item = image_library.create_image_from_upload(
-            file_bytes=file_bytes,
-            file_name=file.filename,
-            mime_type=(file.mimetype or "").lower(),
-            name=name,
-            **_form_metadata_kwargs(),
-        )
-        return jsonify({"ok": True, "item": item})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-
-
-def admin_image_library_create_url() -> Response:
-    """JSON body：``{url, name?, description?, tags?, category?, ai_metadata?}``。"""
-    body = request.get_json(silent=True) or {}
-    try:
-        item = image_library.create_image_from_url(
-            url=str(body.get("url") or ""),
-            name=str(body.get("name") or ""),
-            **_json_metadata_kwargs(body),
-        )
-        return jsonify({"ok": True, "item": item})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-
-
-def admin_image_library_create_base64() -> Response:
-    """JSON body：``{data_base64, file_name?, mime_type?, name?, description?,
-    tags?, category?, ai_metadata?}``。"""
-    body = request.get_json(silent=True) or {}
-    try:
-        item = image_library.create_image_from_base64(
-            data_base64=str(body.get("data_base64") or ""),
-            file_name=str(body.get("file_name") or ""),
-            mime_type=str(body.get("mime_type") or "image/png"),
-            name=str(body.get("name") or ""),
-            **_json_metadata_kwargs(body),
-        )
-        return jsonify({"ok": True, "item": item})
-    except ValueError as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
 
 
 def admin_image_library_update(image_id: int) -> Response:

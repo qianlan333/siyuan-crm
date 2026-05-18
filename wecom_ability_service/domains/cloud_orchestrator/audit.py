@@ -11,6 +11,7 @@ import logging
 import time
 import uuid
 from contextlib import contextmanager
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterator
 
 from ...db import get_db
@@ -200,10 +201,82 @@ def list_recent_audit(
     return [dict(row) for row in (cur.fetchall() or [])]
 
 
+def build_observability_payload() -> dict[str, Any]:
+    """Build Cloud Orchestrator observability counters for the admin/API surfaces."""
+
+    cutoff_7d = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
+    cutoff_1d = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
+    db = get_db()
+    cur = db.cursor()
+    funnel: dict[str, int] = {}
+    cur.execute(
+        """
+        SELECT status, COUNT(*) AS c FROM cloud_broadcast_plans
+        WHERE created_at >= ?
+        GROUP BY status
+        """,
+        (cutoff_7d,),
+    )
+    for row in cur.fetchall() or []:
+        funnel[str(row["status"] or "unknown")] = int(row["c"] or 0)
+
+    audit_status: dict[str, int] = {}
+    cur.execute(
+        """
+        SELECT status, COUNT(*) AS c FROM cloud_agent_audit_log
+        WHERE created_at >= ?
+        GROUP BY status
+        """,
+        (cutoff_1d,),
+    )
+    for row in cur.fetchall() or []:
+        audit_status[str(row["status"] or "unknown")] = int(row["c"] or 0)
+
+    cur.execute(
+        """
+        SELECT tool_name, COUNT(*) AS c, AVG(latency_ms) AS avg_ms,
+               SUM(CASE WHEN status='error' THEN 1 ELSE 0 END) AS err_count
+        FROM cloud_agent_audit_log
+        WHERE created_at >= ?
+        GROUP BY tool_name
+        ORDER BY c DESC LIMIT 20
+        """,
+        (cutoff_1d,),
+    )
+    tool_stats = [
+        {
+            "tool": str(row["tool_name"] or ""),
+            "count": int(row["c"] or 0),
+            "avg_latency_ms": int(row["avg_ms"] or 0),
+            "error_count": int(row["err_count"] or 0),
+        }
+        for row in cur.fetchall() or []
+    ]
+
+    cur.execute(
+        """
+        SELECT id, status, latency_ms, tool_name, error_message, trace_id, created_at
+        FROM cloud_agent_audit_log
+        WHERE status = 'error'
+        ORDER BY id DESC LIMIT 10
+        """
+    )
+    recent_errors = [dict(row) for row in (cur.fetchall() or [])]
+
+    return {
+        "plan_funnel_7d": funnel,
+        "audit_status_1d": audit_status,
+        "tool_stats_1d": tool_stats,
+        "recent_errors": recent_errors,
+    }
+
+
 __all__ = [
     "new_trace_id",
     "new_session_id",
     "write_audit",
     "audited_tool_call",
     "list_recent_audit",
+    "build_observability_payload",
 ]

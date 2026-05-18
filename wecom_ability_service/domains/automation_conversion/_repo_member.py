@@ -39,6 +39,10 @@ def _normalize_audience_code(value: Any, *, fallback_pool: Any = "") -> str:
     return _AUDIENCE_CODE_ALIASES.get(normalized_pool, "pending_questionnaire")
 
 
+def _audience_code_from_payload(payload: dict[str, Any]) -> str:
+    return _normalize_audience_code(payload.get("current_audience_code"), fallback_pool=payload.get("current_pool"))
+
+
 def lookup_person_id_by_external_contact_id(external_contact_id: str) -> int | None:
     row = _fetchone_dict(
         """
@@ -195,7 +199,7 @@ def insert_member(payload: dict[str, Any]) -> dict[str, Any]:
         _normalized_text(payload.get("joined_at")),
         _normalized_text(payload.get("last_ai_push_at")),
         _normalized_text(payload.get("ai_cooldown_until")),
-        _normalize_audience_code(payload.get("current_audience_code"), fallback_pool=payload.get("current_pool")),
+        _audience_code_from_payload(payload),
         _normalized_text(payload.get("current_audience_entered_at")),
     )
     row = db.execute(
@@ -247,7 +251,7 @@ def update_member(member_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         _normalized_text(payload.get("joined_at")),
         _normalized_text(payload.get("last_ai_push_at")),
         _normalized_text(payload.get("ai_cooldown_until")),
-        _normalize_audience_code(payload.get("current_audience_code"), fallback_pool=payload.get("current_pool")),
+        _audience_code_from_payload(payload),
         _normalized_text(payload.get("current_audience_entered_at")),
         int(member_id),
     )

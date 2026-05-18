@@ -54,6 +54,49 @@ def _decrypt_callback_event(*, token: str, aes_key: str, corp_id: str, msg_signa
     return event_data
 
 
+def _log_and_dispatch_external_contact_event(
+    routes_compat,
+    *,
+    corp_id: str,
+    event_data: dict[str, str],
+    plain_xml: str,
+) -> dict[str, object]:
+    event_type = (event_data.get("Event") or "").strip()
+    change_type = (event_data.get("ChangeType") or "").strip()
+    external_userid = (event_data.get("ExternalUserID") or "").strip()
+    user_id = (event_data.get("UserID") or "").strip()
+    event_time = int((event_data.get("CreateTime") or "0").strip() or 0)
+    event_key = _build_external_contact_event_key(corp_id, event_data)
+
+    logged = log_external_contact_event(
+        corp_id=corp_id,
+        event_type=event_type,
+        change_type=change_type,
+        external_userid=external_userid,
+        user_id=user_id,
+        event_time=event_time,
+        event_key=event_key,
+        payload_xml=plain_xml,
+        payload_json=event_data,
+    )
+    callback_logger.info(
+        "external contact event received event=%s change_type=%s external_userid=%s user_id=%s duplicate=%s",
+        event_type.lower(),
+        change_type.lower(),
+        external_userid,
+        user_id,
+        logged.get("is_duplicate", False),
+    )
+
+    if not (logged.get("is_duplicate") and logged.get("process_status") == "success"):
+        routes_compat._dispatch_background_task(
+            "external_contact_event",
+            routes_compat._process_external_contact_event,
+            int(logged["id"]),
+        )
+    return logged
+
+
 def handle_external_contact_callback_request():
     from .. import routes as routes_compat
 
@@ -86,39 +129,12 @@ def handle_external_contact_callback_request():
             nonce=nonce,
         )
         plain_xml = event_data.pop("_plain_xml", "")
-        event_type = (event_data.get("Event") or "").strip()
-        change_type = (event_data.get("ChangeType") or "").strip()
-        external_userid = (event_data.get("ExternalUserID") or "").strip()
-        user_id = (event_data.get("UserID") or "").strip()
-        event_time = int((event_data.get("CreateTime") or "0").strip() or 0)
-        event_key = _build_external_contact_event_key(corp_id, event_data)
-
-        logged = log_external_contact_event(
+        _log_and_dispatch_external_contact_event(
+            routes_compat,
             corp_id=corp_id,
-            event_type=event_type,
-            change_type=change_type,
-            external_userid=external_userid,
-            user_id=user_id,
-            event_time=event_time,
-            event_key=event_key,
-            payload_xml=plain_xml,
-            payload_json=event_data,
+            event_data=event_data,
+            plain_xml=plain_xml,
         )
-        callback_logger.info(
-            "external contact event received event=%s change_type=%s external_userid=%s user_id=%s duplicate=%s",
-            event_type.lower(),
-            change_type.lower(),
-            external_userid,
-            user_id,
-            logged.get("is_duplicate", False),
-        )
-
-        if not (logged.get("is_duplicate") and logged.get("process_status") == "success"):
-            routes_compat._dispatch_background_task(
-                "external_contact_event",
-                routes_compat._process_external_contact_event,
-                int(logged["id"]),
-            )
 
         reply_xml = build_encrypted_reply("success", token, aes_key, corp_id, nonce=nonce)
         return Response(reply_xml, mimetype="application/xml")
@@ -158,12 +174,13 @@ def handle_wecom_event_request():
             timestamp=timestamp,
             nonce=nonce,
         )
-        event_data.pop("_plain_xml", None)
+        plain_xml = event_data.pop("_plain_xml", "")
         event_name = (event_data.get("Event") or "").lower()
+        change_type = (event_data.get("ChangeType") or "").lower()
         callback_logger.info(
             "callback event received event=%s change_type=%s",
             event_name,
-            (event_data.get("ChangeType") or "").lower(),
+            change_type,
         )
 
         if event_name == "msgaudit_notify":
@@ -171,7 +188,14 @@ def handle_wecom_event_request():
                 "msgaudit_notify",
                 routes_compat._trigger_incremental_archive_sync,
             )
-        elif event_name == "change_external_chat" or (event_data.get("ChangeType") or "").lower() in {"create", "update", "dismiss"}:
+        elif event_name == "change_external_contact":
+            _log_and_dispatch_external_contact_event(
+                routes_compat,
+                corp_id=corp_id,
+                event_data=event_data,
+                plain_xml=plain_xml,
+            )
+        elif event_name == "change_external_chat" or change_type in {"create", "update", "dismiss"}:
             routes_compat._dispatch_background_task(
                 "change_external_chat",
                 routes_compat._handle_group_chat_change,

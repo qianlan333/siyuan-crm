@@ -138,9 +138,22 @@ def _sync_contacts(*, only_new: bool) -> dict:
     client = get_app_runtime_client()
     owner_userids = _collect_owner_userids(client)
     existing_contacts = {row["external_userid"] for row in list_contacts_from_db(None)}
-    records_by_external: dict[str, dict] = {}
+    seen_external_userids: set[str] = set()
+    record_batch: list[dict] = []
     fetched_count = 0
+    inserted_count = 0
+    updated_count = 0
     description_updated_count = 0
+    batch_size = _contact_sync_batch_size()
+
+    def flush_batch() -> None:
+        nonlocal inserted_count, updated_count
+        if not record_batch:
+            return
+        batch_inserted, batch_updated = upsert_contacts(list(record_batch))
+        inserted_count += batch_inserted
+        updated_count += batch_updated
+        record_batch.clear()
 
     for owner_userid in owner_userids:
         try:
@@ -153,7 +166,7 @@ def _sync_contacts(*, only_new: bool) -> dict:
                 continue
             if only_new and external_userid in existing_contacts:
                 continue
-            if external_userid in records_by_external:
+            if external_userid in seen_external_userids:
                 continue
             detail = client.get_contact(external_userid)
             normalized, updated_description = _sync_contact_detail_with_description_fix(
@@ -166,10 +179,13 @@ def _sync_contacts(*, only_new: bool) -> dict:
             )
             if updated_description:
                 description_updated_count += 1
-            records_by_external[external_userid] = normalized
+            seen_external_userids.add(external_userid)
+            record_batch.append(normalized)
             fetched_count += 1
+            if len(record_batch) >= batch_size:
+                flush_batch()
 
-    inserted_count, updated_count = upsert_contacts(list(records_by_external.values()))
+    flush_batch()
     return {
         "fetched_count": fetched_count,
         "inserted_count": inserted_count,

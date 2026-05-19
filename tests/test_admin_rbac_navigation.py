@@ -20,7 +20,6 @@ def test_new_admin_routes_map_to_specific_rbac_modules_before_admin_fallback():
     assert _module_for_admin_path("/admin/hxc-dashboard") == "user_ops_funnel"
     assert _module_for_admin_path("/admin/image-library") == "image_library"
     assert _module_for_admin_path("/admin/jobs") == "jobs"
-    assert _module_for_admin_api_path("/api/admin/cloud-orchestrator/plans") == "cloud_orchestrator"
     assert _module_for_admin_api_path("/api/admin/hxc-dashboard/refresh") == "user_ops_funnel"
     assert _module_for_admin_api_path("/api/admin/image-library/upload") == "image_library"
     assert _module_for_admin_api_path("/api/admin/jobs/summary") == "jobs"

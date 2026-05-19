@@ -63,6 +63,7 @@ jobs:
             tests/test_campaign_hard_delete.py \
             tests/test_ci_workflow_contract.py \
             tests/test_deploy_workflow_contract.py \
+            tests/test_admin_rbac_navigation.py \
             tests/test_http_registration_contract.py \
             tests/test_refactor_guardrails.py \
             tests/test_service_layer_layout.py \
@@ -125,6 +126,7 @@ jobs:
             tests/test_user_ops_import_parsers.py \
             tests/test_user_ops_page_service_helpers.py \
             tests/test_hxc_dashboard_snapshot.py \
+            tests/test_admin_rbac_navigation.py \
             tests/test_http_registration_contract.py \
             tests/test_refactor_guardrails.py \
             tests/test_service_layer_layout.py \

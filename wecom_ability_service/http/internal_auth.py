@@ -2,15 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from flask import (
-    abort,
-    current_app,
-    jsonify,
-    redirect,
-    render_template,
-    request,
-    url_for,
-)
+from flask import abort, current_app, jsonify, redirect, render_template, request, url_for
 
 from ..domains.admin_auth import (
     admin_role_can_access_module,
@@ -34,7 +26,6 @@ ADMIN_AUTH_EXEMPT_PATHS = {
     "/auth/wecom/callback",
 }
 ADMIN_API_MODULE_PREFIXES = (
-    ("/api/admin/cloud-orchestrator", "cloud_orchestrator"),
     ("/api/admin/config", "config"),
     ("/api/admin/hxc-dashboard", "user_ops_funnel"),
     ("/api/admin/image-library", "image_library"),

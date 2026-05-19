@@ -155,3 +155,15 @@ def test_postgres_init_backfills_miniprogram_thumb_image_id_column():
     assert "ALTER TABLE IF EXISTS miniprogram_library" in source
     assert "ADD COLUMN IF NOT EXISTS thumb_image_id BIGINT" in source
     assert "_ensure_postgres_miniprogram_library_thumb_image_id(db)" in source
+
+
+def test_postgres_init_backfills_hxc_dashboard_v6_columns():
+    db_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "db" / "migrations" / "postgres_migrations.py"
+    source = db_path.read_text(encoding="utf-8")
+
+    assert "_HXC_DASHBOARD_V6_COLUMN_DEFS" in source
+    assert '"hxc_member_level", "TEXT NOT NULL DEFAULT \'\'' in source
+    assert '"active_goals_count", "INTEGER NOT NULL DEFAULT 0"' in source
+    assert '"growth_credit_balance", "INTEGER"' in source
+    assert "ADD COLUMN IF NOT EXISTS {name} {column_type}" in source
+    assert "_ensure_postgres_hxc_dashboard_v6_columns(db)" in source

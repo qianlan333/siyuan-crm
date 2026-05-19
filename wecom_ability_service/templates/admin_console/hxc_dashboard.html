@@ -205,6 +205,26 @@
       <div class="hxc-stat-value">{{ dashboard_summary.funnel.inactive }}</div>
       <div class="hxc-stat-sub">在 CRM 但未开通</div>
     </div>
+    <div class="hxc-stat">
+      <div class="hxc-stat-label">完成测评</div>
+      <div class="hxc-stat-value">{{ dashboard_summary.assessment_completed_count }}</div>
+      <div class="hxc-stat-sub">V6 测评完成用户</div>
+    </div>
+    <div class="hxc-stat">
+      <div class="hxc-stat-label">有成长目标</div>
+      <div class="hxc-stat-value">{{ dashboard_summary.users_with_active_goals }}</div>
+      <div class="hxc-stat-sub">active growth goals</div>
+    </div>
+    <div class="hxc-stat">
+      <div class="hxc-stat-label">有成长路径</div>
+      <div class="hxc-stat-value">{{ dashboard_summary.users_with_active_paths }}</div>
+      <div class="hxc-stat-sub">active growth paths</div>
+    </div>
+    <div class="hxc-stat">
+      <div class="hxc-stat-label">付费订阅档</div>
+      <div class="hxc-stat-value">{{ dashboard_summary.paid_subscription_count }}</div>
+      <div class="hxc-stat-sub">standard / premium</div>
+    </div>
   </div>
 
   <div class="hxc-toolbar">
@@ -468,6 +488,134 @@
       {title:"咨询平均轮次",    field:"consult_avg_turn", width:100, sorter:"number",
         headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
       {title:"最后活跃时间",    field:"last_msg_at", width:150,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      // ── V6 用户状态 / 订阅 ──
+      {title:"V6 onboarding",    field:"hxc_onboard_status", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"V6测评状态",       field:"hxc_assessment_status", width:110,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"成长锁定状态",      field:"hxc_growth_onboard_status", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"首次登录",          field:"hxc_first_login_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"订阅档位",          field:"subscription_tier", width:100,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"订阅到期",          field:"subscription_expires_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"本月额度",          field:"subscription_quota", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"本月已用",          field:"subscription_used", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近激活SKU",       field:"last_activation_sku_code", width:150,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"最近激活时间",      field:"last_activation_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      // ── V6 画像 / 测评 / 诊断 ──
+      {title:"身份阶段",          field:"identity_stage", width:140,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"收入区间",          field:"monthly_income_range", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"业务关注点",        field:"business_focus", width:180, headerFilter:"input"},
+      {title:"AI使用状态",        field:"ai_usage_status", width:180, headerFilter:"input"},
+      {title:"关注主题",          field:"focus_topics", width:220, headerFilter:"input"},
+      {title:"主要痛点",          field:"main_pain_points", width:240, headerFilter:"input"},
+      {title:"AI痛点",            field:"ai_pain_points", width:220, headerFilter:"input"},
+      {title:"核心卡点场景",      field:"core_painful_scenario", width:260, headerFilter:"input"},
+      {title:"人物速写",          field:"persona_sketch", width:280, headerFilter:"input"},
+      {title:"互动模式",          field:"interaction_style", width:180, headerFilter:"input"},
+      {title:"沟通风格",          field:"communication_style", width:180, headerFilter:"input"},
+      {title:"画像置信度",        field:"background_confidence", width:100,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"主线类型",          field:"main_line_type", width:100,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"主线阶段",          field:"main_line_stage", width:110,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"主线分层",          field:"main_line_tier", width:90,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"主线确认时间",      field:"main_line_confirmed_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"主线描述",          field:"main_line_desc", width:240, headerFilter:"input"},
+      {title:"当前主线问题",      field:"main_line_issue", width:240, headerFilter:"input"},
+      {title:"测评次数",          field:"assessment_count", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近测评状态",      field:"latest_assessment_status", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"测评分数",          field:"latest_assessment_score", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"测评阶段",          field:"latest_assessment_phase", width:110,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"测评子类型",        field:"latest_assessment_sub_type", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"测评完成时间",      field:"latest_assessment_completed_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"维度分",            field:"assessment_dimension_scores", width:240, headerFilter:"input"},
+      // ── V6 成长主线 / 行动 / 复盘 ──
+      {title:"活跃目标数",        field:"active_goals_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"活跃路径数",        field:"active_paths_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"当前里程碑",        field:"current_milestone_max", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"进行中任务",        field:"active_tasks_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"完成任务",          field:"completed_tasks_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"打卡次数",          field:"task_checkin_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近打卡",          field:"last_task_checkin_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近打卡心情",      field:"last_task_checkin_mood", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"最近状态分",        field:"last_task_checkin_state_score", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"下次复盘",          field:"next_review_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"上次复盘",          field:"last_reviewed_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"复盘计划状态",      field:"review_schedule_status", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"推荐话题状态",      field:"recommended_topic_status", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"推荐话题生成",      field:"recommended_topic_generated_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"话题卡数量",        field:"topic_summary_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近话题卡",        field:"last_topic_summary_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近话题标题",      field:"last_topic_summary_title", width:220, headerFilter:"input"},
+      // ── V6 角色评分 / 成长额度 ──
+      {title:"主角色",            field:"primary_role", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"商业分",            field:"biz_score", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"心力分",            field:"inner_score", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"信任分",            field:"trust_score", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"信任层级",          field:"trust_tier", width:110,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"清晰度",            field:"clarity_score", width:90, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"角色模式",          field:"role_mode", width:110,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"成长额度余额",      field:"growth_credit_balance", width:110, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"周期授予额度",      field:"growth_credit_period_granted", width:110, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"周期已用额度",      field:"growth_credit_period_used", width:110, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"额度周期结束",      field:"growth_credit_period_ends_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      // ── 外部问卷 / CRM 桥接辅助 ──
+      {title:"外部问卷数",        field:"webhook_questionnaire_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"最近外部问卷",      field:"last_webhook_questionnaire_at", width:140,
+        headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"CRM桥任务数",       field:"crm_chat_job_count", width:100, sorter:"number",
+        headerFilter:rangeNumEditor, headerFilterFunc:rangeNumFilter, headerFilterEmptyCheck:rangeEmpty},
+      {title:"CRM桥最近状态",     field:"last_crm_chat_job_status", width:120,
+        headerFilter:multiSelectEditor, headerFilterFunc:multiSelectFilter, headerFilterEmptyCheck:msEmpty},
+      {title:"CRM桥最近时间",     field:"last_crm_chat_job_at", width:140,
         headerFilter:rangeDateEditor, headerFilterFunc:rangeDateFilter, headerFilterEmptyCheck:rangeEmpty},
     ],
   });

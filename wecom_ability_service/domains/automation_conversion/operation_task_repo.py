@@ -43,6 +43,7 @@ def _task_row(row: Any) -> dict[str, Any]:
         "id": int(item.get("id") or 0),
         "program_id": int(item.get("program_id") or 0),
         "group_id": int(item.get("group_id") or 0) or None,
+        "trigger_type": _text(item.get("trigger_type")) or "scheduled_daily",
         "audience_day_offset": int(item.get("audience_day_offset") or 1),
         "profile_segment_template_id": int(item.get("profile_segment_template_id") or 0) or None,
         "unified_content_json": _json(item.get("unified_content_json"), default={}),
@@ -132,6 +133,16 @@ def update_group(group_id: int, payload: dict[str, Any]) -> dict[str, Any]:
 def archive_group(group_id: int, *, operator_id: str) -> None:
     get_db().execute(
         """
+        UPDATE automation_operation_task
+        SET group_id = NULL,
+            updated_by = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE group_id = ?
+        """,
+        (_text(operator_id), int(group_id)),
+    )
+    get_db().execute(
+        """
         UPDATE automation_operation_task_group
         SET archived_at = CURRENT_TIMESTAMP, updated_by = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -188,12 +199,12 @@ def insert_task(payload: dict[str, Any]) -> dict[str, Any]:
     row = get_db().execute(
         """
         INSERT INTO automation_operation_task (
-            program_id, group_id, task_name, description, status, send_time, timezone,
+            program_id, group_id, task_name, description, status, trigger_type, send_time, timezone,
             target_audience_code, audience_day_offset, behavior_filter, content_mode,
             profile_segment_template_id, unified_content_json, segment_contents_json,
             agent_config_json, created_by, updated_by, created_at, updated_at, published_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?)
         RETURNING *
         """,
         _task_params(payload),
@@ -207,7 +218,7 @@ def update_task(task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         """
         UPDATE automation_operation_task
         SET program_id = ?, group_id = ?, task_name = ?, description = ?, status = ?,
-            send_time = ?, timezone = ?, target_audience_code = ?, audience_day_offset = ?,
+            trigger_type = ?, send_time = ?, timezone = ?, target_audience_code = ?, audience_day_offset = ?,
             behavior_filter = ?, content_mode = ?, profile_segment_template_id = ?,
             unified_content_json = ?, segment_contents_json = ?, agent_config_json = ?,
             updated_by = ?, updated_at = CURRENT_TIMESTAMP,
@@ -215,7 +226,7 @@ def update_task(task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         WHERE id = ?
         RETURNING *
         """,
-        (*params[:15], params[16], _text(payload.get("status")), int(task_id)),
+        (*params[:16], params[17], _text(payload.get("status")), int(task_id)),
     ).fetchone()
     return _task_row(row) if row else {}
 
@@ -228,6 +239,7 @@ def _task_params(payload: dict[str, Any]) -> tuple[Any, ...]:
         _text(payload.get("task_name")),
         _text(payload.get("description")),
         status,
+        _text(payload.get("trigger_type")) or "scheduled_daily",
         _text(payload.get("send_time")) or "10:00",
         _text(payload.get("timezone")) or "Asia/Shanghai",
         _text(payload.get("target_audience_code")) or "operating",

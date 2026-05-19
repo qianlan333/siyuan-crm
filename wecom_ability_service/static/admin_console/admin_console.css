@@ -114,6 +114,24 @@ code {
 .admin-nav {
   display: flex;
   flex-direction: column;
+  gap: 16px;
+}
+
+.admin-nav-section {
+  display: grid;
+  gap: 6px;
+}
+
+.admin-nav-section-title {
+  padding: 0 12px;
+  color: #9aa3af;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.admin-nav-section-list {
+  display: grid;
   gap: 2px;
 }
 
@@ -1769,6 +1787,22 @@ body.admin-shell {
 .admin-nav {
   gap: 6px;
   padding: 14px 10px 18px;
+}
+
+.admin-nav-section {
+  gap: 8px;
+}
+
+.admin-nav-section-title {
+  padding: 10px 12px 2px;
+  color: #a7b0bd;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.admin-nav-section-list {
+  gap: 4px;
 }
 
 .admin-nav-link {

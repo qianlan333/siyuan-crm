@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 from typing import Any
 
@@ -31,7 +32,7 @@ def _decode_cursor(cursor: str) -> dict[str, Any]:
         return {}
     try:
         payload = json.loads(base64.urlsafe_b64decode(text.encode("ascii")).decode("utf-8"))
-    except (TypeError, ValueError):
+    except (binascii.Error, TypeError, ValueError):
         return {}
     return payload if isinstance(payload, dict) else {}
 
@@ -65,7 +66,14 @@ def insert_order(payload: dict[str, Any]) -> dict[str, Any]:
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), ?::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            CAST(? AS jsonb),
+            CAST(? AS jsonb),
+            ?::timestamptz,
+            COALESCE(NULLIF(?, '')::timestamptz, CURRENT_TIMESTAMP),
+            CURRENT_TIMESTAMP
+        )
         RETURNING *
         """,
         (
@@ -89,6 +97,7 @@ def insert_order(payload: dict[str, Any]) -> dict[str, Any]:
             _json(payload.get("metadata") or {}),
             _json(payload.get("request_meta") or {}),
             _normalized_text(payload.get("expires_at")) or None,
+            _normalized_text(payload.get("created_at")),
         ),
     ).fetchone()
     return dict(row) if row else {}
@@ -152,6 +161,47 @@ def get_order(out_trade_no: str) -> dict[str, Any] | None:
     )
 
 
+def get_paid_order_for_product_identity(
+    *,
+    product_code: str,
+    payer_openid: str = "",
+    unionid: str = "",
+    external_userid: str = "",
+) -> dict[str, Any] | None:
+    identity_clauses: list[str] = []
+    params: list[Any] = [_normalized_text(product_code)]
+    openid = _normalized_text(payer_openid)
+    if openid:
+        identity_clauses.append("payer_openid = ?")
+        params.append(openid)
+    normalized_unionid = _normalized_text(unionid)
+    if normalized_unionid:
+        identity_clauses.append("unionid = ?")
+        params.append(normalized_unionid)
+    normalized_external_userid = _normalized_text(external_userid)
+    if normalized_external_userid:
+        identity_clauses.append("external_userid = ?")
+        params.append(normalized_external_userid)
+    if not identity_clauses:
+        return None
+    return _fetchone_dict(
+        f"""
+        SELECT *
+        FROM wechat_pay_orders
+        WHERE product_code = ?
+          AND (status = 'paid' OR trade_state = 'SUCCESS')
+          AND NOT (
+            COALESCE(refund_status, '') = 'full_refunded'
+            OR (amount_total > 0 AND COALESCE(refunded_amount_total, 0) >= amount_total)
+          )
+          AND ({" OR ".join(identity_clauses)})
+        ORDER BY paid_at DESC NULLS LAST, updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        tuple(params),
+    )
+
+
 def update_order_from_transaction(transaction: dict[str, Any]) -> dict[str, Any]:
     out_trade_no = _normalized_text(transaction.get("out_trade_no"))
     trade_state = _normalized_text(transaction.get("trade_state"))
@@ -185,6 +235,53 @@ def update_order_from_transaction(transaction: dict[str, Any]) -> dict[str, Any]
             _normalized_text(transaction.get("success_time")),
             _json(transaction),
             out_trade_no,
+        ),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
+def update_recovered_order_context(
+    out_trade_no: str,
+    *,
+    product_code: str,
+    product_name: str,
+    description: str = "",
+    success_url: str = "",
+    created_at: str = "",
+) -> dict[str, Any]:
+    row = get_db().execute(
+        """
+        UPDATE wechat_pay_orders
+        SET product_code = CASE
+                WHEN COALESCE(product_code, '') IN ('', 'recovered_wechat_pay') THEN ?
+                ELSE product_code
+            END,
+            product_name = CASE
+                WHEN COALESCE(product_name, '') IN ('', 'recovered_wechat_pay', '微信支付恢复订单') THEN ?
+                ELSE product_name
+            END,
+            description = CASE
+                WHEN COALESCE(description, '') IN ('', '微信支付恢复订单') THEN ?
+                ELSE description
+            END,
+            success_url = CASE
+                WHEN COALESCE(success_url, '') = '' THEN ?
+                ELSE success_url
+            END,
+            created_at = COALESCE(NULLIF(?, '')::timestamptz, created_at),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE out_trade_no = ?
+          AND order_source LIKE ?
+        RETURNING *
+        """,
+        (
+            _normalized_text(product_code),
+            _normalized_text(product_name) or _normalized_text(product_code),
+            _normalized_text(description) or _normalized_text(product_name) or _normalized_text(product_code),
+            _normalized_text(success_url),
+            _normalized_text(created_at),
+            _normalized_text(out_trade_no),
+            "recovered_%",
         ),
     ).fetchone()
     return dict(row) if row else {}
@@ -272,18 +369,50 @@ def _order_query_where(filters: dict[str, Any], params: list[Any]) -> list[str]:
     if status == "pending":
         clauses.append(
             "COALESCE(refunded_amount_total, 0) = 0 "
+            "AND COALESCE(refund_status, '') NOT IN ('partial_refunded', 'full_refunded') "
             "AND COALESCE(status, '') NOT IN ('paid') "
             "AND COALESCE(trade_state, '') <> 'SUCCESS'"
         )
     elif status == "paid":
         clauses.append(
             "COALESCE(refunded_amount_total, 0) = 0 "
+            "AND COALESCE(refund_status, '') NOT IN ('partial_refunded', 'full_refunded') "
             "AND (COALESCE(status, '') = 'paid' OR COALESCE(trade_state, '') = 'SUCCESS')"
         )
+        clauses.append(
+            "NOT EXISTS ("
+            "SELECT 1 FROM wechat_pay_refunds r "
+            "WHERE r.order_id = wechat_pay_orders.id "
+            "AND r.status NOT IN ('failed', 'closed', 'CLOSED', 'ABNORMAL', 'SUCCESS')"
+            ")"
+        )
+    elif status == "refund_processing":
+        clauses.append(
+            "EXISTS ("
+            "SELECT 1 FROM wechat_pay_refunds r "
+            "WHERE r.order_id = wechat_pay_orders.id "
+            "AND r.status NOT IN ('failed', 'closed', 'CLOSED', 'ABNORMAL', 'SUCCESS')"
+            ")"
+        )
+        clauses.append("COALESCE(refund_status, '') <> 'full_refunded'")
+        clauses.append("NOT (COALESCE(refunded_amount_total, 0) >= amount_total AND amount_total > 0)")
     elif status == "partial_refunded":
-        clauses.append("COALESCE(refunded_amount_total, 0) > 0 AND COALESCE(refunded_amount_total, 0) < amount_total")
+        clauses.append(
+            "(COALESCE(refund_status, '') = 'partial_refunded' "
+            "OR (COALESCE(refunded_amount_total, 0) > 0 AND COALESCE(refunded_amount_total, 0) < amount_total))"
+        )
+        clauses.append(
+            "NOT EXISTS ("
+            "SELECT 1 FROM wechat_pay_refunds r "
+            "WHERE r.order_id = wechat_pay_orders.id "
+            "AND r.status NOT IN ('failed', 'closed', 'CLOSED', 'ABNORMAL', 'SUCCESS')"
+            ")"
+        )
     elif status == "full_refunded":
-        clauses.append("COALESCE(refunded_amount_total, 0) >= amount_total AND amount_total > 0")
+        clauses.append(
+            "(COALESCE(refund_status, '') = 'full_refunded' "
+            "OR (COALESCE(refunded_amount_total, 0) >= amount_total AND amount_total > 0))"
+        )
     return clauses
 
 
@@ -318,7 +447,13 @@ def list_admin_orders(*, filters: dict[str, Any], limit: int, cursor: str = "") 
             status,
             trade_state,
             refunded_amount_total,
-            refund_status
+            refund_status,
+            (
+                SELECT COALESCE(SUM(r.refund_amount_total), 0)
+                FROM wechat_pay_refunds r
+                WHERE r.order_id = wechat_pay_orders.id
+                  AND r.status NOT IN ('failed', 'closed', 'CLOSED', 'ABNORMAL', 'SUCCESS')
+            ) AS active_refund_amount_total
         FROM wechat_pay_orders
         WHERE {" AND ".join(clauses)}
         ORDER BY created_at DESC, id DESC

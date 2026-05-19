@@ -302,6 +302,17 @@ def _resolve_step_payload(*, campaign: dict[str, Any], step: dict[str, Any]) -> 
                 logger.exception("resolve miniprogram_library_id=%s failed: %s", lid, exc)
                 return {"error": f"miniprogram_resolve_failed:id={lid}:{exc}"}
 
+    attachment_library_ids = normalize_int_list(step_payload.get("attachment_library_ids"), limit=9)
+    if attachment_library_ids:
+        from .. import attachment_library as _attachment_library
+
+        for aid in attachment_library_ids:
+            try:
+                attachments.append(_attachment_library.materialize_file_attachment(aid))
+            except Exception as exc:
+                logger.exception("resolve attachment_library_id=%s failed: %s", aid, exc)
+                return {"error": f"attachment_resolve_failed:id={aid}:{exc}"}
+
     return {
         "base_request": {
             "sender": owner_userid,

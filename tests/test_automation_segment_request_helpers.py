@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from flask import Flask
 
-from wecom_ability_service.http.automation_conversion import (
+from wecom_ability_service.http.automation_conversion_segments import (
     _request_segment_broadcast_keys,
     _request_segment_broadcast_keyword,
     _segment_broadcast_payload,

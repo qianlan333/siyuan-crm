@@ -21,13 +21,20 @@
       </div>
 
       <nav class="admin-nav" aria-label="客户管理后台导航">
-        {% for item in nav_items %}
-        <a
-          class="admin-nav-link{% if item.active %} is-active{% endif %}"
-          href="{{ url_for(item.endpoint) }}"
-        >
-          <span class="admin-nav-label">{{ item.label }}</span>
-        </a>
+        {% for group in nav_items %}
+        <section class="admin-nav-section{% if group.active %} is-active{% endif %}">
+          <div class="admin-nav-section-title">{{ group.title }}</div>
+          <div class="admin-nav-section-list">
+            {% for item in group["items"] %}
+            <a
+              class="admin-nav-link{% if item.active %} is-active{% endif %}"
+              href="{{ url_for(item.endpoint) }}"
+            >
+              <span class="admin-nav-label">{{ item.label }}</span>
+            </a>
+            {% endfor %}
+          </div>
+        </section>
         {% endfor %}
       </nav>
 

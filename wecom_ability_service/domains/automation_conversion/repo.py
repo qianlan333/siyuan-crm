@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from ...db import get_db
@@ -91,6 +92,28 @@ def get_channel_by_id(channel_id: int) -> dict[str, Any] | None:
     )
 
 
+def _normalize_positive_int_list(value: Any, *, max_count: int = 9) -> list[int]:
+    if value in (None, ""):
+        return []
+    raw = value
+    if isinstance(value, str):
+        try:
+            raw = json.loads(value)
+        except (TypeError, ValueError):
+            raw = [part.strip() for part in value.split(",")]
+    if not isinstance(raw, list):
+        raw = [raw]
+    ids: list[int] = []
+    for item in raw:
+        try:
+            item_id = int(item)
+        except (TypeError, ValueError):
+            continue
+        if item_id > 0 and item_id not in ids:
+            ids.append(item_id)
+    return ids[:max_count]
+
+
 def find_channel_by_scene_value(scene_value: str) -> dict[str, Any] | None:
     normalized = _normalized_text(scene_value)
     if not normalized:
@@ -117,6 +140,12 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
     )
     existing = get_default_channel(program_id=program_id, allow_legacy_fallback=False) if is_default_channel_code else None
     db = get_db()
+    raw_attachment_ids = (
+        payload.get("welcome_attachment_library_ids")
+        if "welcome_attachment_library_ids" in payload
+        else (existing or {}).get("welcome_attachment_library_ids")
+    )
+    welcome_attachment_library_ids = json.dumps(_normalize_positive_int_list(raw_attachment_ids), ensure_ascii=False)
     params = (
         program_id,
         channel_code,
@@ -125,6 +154,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
         _normalized_text(payload.get("qr_ticket")),
         _normalized_text(payload.get("scene_value")),
         _normalized_text(payload.get("welcome_message")),
+        welcome_attachment_library_ids,
         _db_bool(bool(payload.get("auto_accept_friend"))),
         _normalized_text(payload.get("entry_tag_id")),
         _normalized_text(payload.get("entry_tag_name")),
@@ -143,6 +173,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
                 qr_ticket = ?,
                 scene_value = ?,
                 welcome_message = ?,
+                welcome_attachment_library_ids = ?,
                 auto_accept_friend = ?,
                 entry_tag_id = ?,
                 entry_tag_name = ?,
@@ -161,6 +192,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
                 _normalized_text(payload.get("qr_ticket")),
                 _normalized_text(payload.get("scene_value")),
                 _normalized_text(payload.get("welcome_message")),
+                welcome_attachment_library_ids,
                 _db_bool(bool(payload.get("auto_accept_friend"))),
                 _normalized_text(payload.get("entry_tag_id")),
                 _normalized_text(payload.get("entry_tag_name")),
@@ -181,6 +213,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             qr_ticket,
             scene_value,
             welcome_message,
+            welcome_attachment_library_ids,
             auto_accept_friend,
             entry_tag_id,
             entry_tag_name,
@@ -190,7 +223,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         """,
         params,

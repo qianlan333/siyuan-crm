@@ -83,6 +83,7 @@
     if (elements.defaultChannelFieldStatuses) {
       elements.defaultChannelFieldStatuses.innerHTML = [
         { key: "welcome_message", label: "欢迎语" },
+        { key: "welcome_attachments", label: "欢迎语附件" },
         { key: "auto_accept_friend", label: "自动通过" },
         { key: "entry_tag", label: "扫码自动打标签" },
       ].map((item) => {
@@ -109,6 +110,12 @@
     if (defaultChannelFields.autoAcceptFriend) defaultChannelFields.autoAcceptFriend.value = channel.auto_accept_friend ? "1" : "0";
     if (defaultChannelFields.entryTagIdManual) defaultChannelFields.entryTagIdManual.value = "";
     if (defaultChannelFields.welcomeMessage) defaultChannelFields.welcomeMessage.value = channel.welcome_message || "";
+    if (defaultChannelFields.welcomeAttachmentIds) {
+      const selectedIds = normalizeIdList(channel.welcome_attachment_library_ids);
+      Array.from(defaultChannelFields.welcomeAttachmentIds.options || []).forEach(function (option) {
+        option.selected = selectedIds.indexOf(Number(option.value)) >= 0;
+      });
+    }
     applyTagSelectionToDefaultChannel(
       normalizeTagId(channel.entry_tag_id)
         ? {
@@ -140,7 +147,38 @@
       auto_accept_friend: String((defaultChannelFields.autoAcceptFriend || {}).value || "0") === "1",
       entry_tag_id: selectedTagId,
       welcome_message: String((defaultChannelFields.welcomeMessage || {}).value || "").trim(),
+      welcome_attachment_library_ids: defaultChannelFields.welcomeAttachmentIds
+        ? Array.from(defaultChannelFields.welcomeAttachmentIds.selectedOptions || []).map(function (option) { return Number(option.value); }).filter(Boolean).slice(0, 9)
+        : [],
     };
+  }
+
+  function normalizeIdList(value) {
+    if (Array.isArray(value)) {
+      return value.map(function (item) { return Number(item); }).filter(Boolean);
+    }
+    if (!value) return [];
+    if (typeof value === "string") {
+      try {
+        const parsed = JSON.parse(value);
+        return normalizeIdList(parsed);
+      } catch (err) {
+        return value.split(",").map(function (item) { return Number(String(item).trim()); }).filter(Boolean);
+      }
+    }
+    return [Number(value)].filter(Boolean);
+  }
+
+  async function loadAttachmentLibraryOptions() {
+    const defaultChannelFields = AutomationAgentConfig.defaultChannelFields();
+    if (!defaultChannelFields.welcomeAttachmentIds) return;
+    const result = await AutomationAgentConfig.requestJson("/api/admin/attachment-library?enabled_only=1&limit=200", { credentials: "same-origin" });
+    const select = defaultChannelFields.welcomeAttachmentIds;
+    select.innerHTML = (result.items || []).map(function (item) {
+      const label = (item.name || item.file_name || ("附件 #" + item.id)) + " · " + Math.round((Number(item.file_size) || 0) / 1024) + "KB";
+      return `<option value="${Number(item.id) || 0}">${escapeHtml(label)}</option>`;
+    }).join("");
+    populateDefaultChannelForm(state.defaultChannel || {});
   }
 
   async function loadDefaultChannelSettings() {
@@ -323,6 +361,7 @@
     const tasks = [];
     if ((elements.defaultChannelForm || elements.defaultChannelGenerateButton) && apiUrls.default_channel_settings) {
       tasks.push(loadDefaultChannelSettings());
+      tasks.push(loadAttachmentLibraryOptions());
       if (AutomationAgentConfig.loadWeComTags && apiUrls.wecom_tags) {
         tasks.push(AutomationAgentConfig.loadWeComTags());
       }

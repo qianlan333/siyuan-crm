@@ -12,14 +12,15 @@ class DomainLayoutSpec:
     mode: DomainLayoutMode
     service_module: str
     persistence_modules: tuple[str, ...]
+    companion_service_modules: tuple[str, ...] = ()
+    allowed_companion_modules: tuple[str, ...] = ()
     notes: str = ""
 
 
 # Service-layer layout contract:
-# - simple: service.py + repo.py
+# - simple: service.py + declared persistence modules
 # - complex: service.py + queries.py + writers.py, optional repo.py aggregator
-# Optional domain-local companion modules such as definitions.py or
-# preflight_service.py are allowed when they do not introduce a third pattern.
+# Domain-local companion services/repos must be explicitly declared here.
 DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
     "admin_jobs": DomainLayoutSpec(
         name="admin_jobs",
@@ -39,7 +40,8 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         name="admin_console",
         mode="simple",
         service_module="service.py",
-        persistence_modules=("repo.py",),
+        persistence_modules=("repo.py", "customer_profile_repo.py"),
+        companion_service_modules=("customer_profile_service.py",),
         notes="Admin console page-level read models, previews, and audited action wrappers.",
     ),
     "admin_config": DomainLayoutSpec(
@@ -74,7 +76,33 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         name="automation_conversion",
         mode="simple",
         service_module="service.py",
-        persistence_modules=("repo.py",),
+        persistence_modules=("repo.py", "program_repo.py", "workflow_repo.py", "operation_task_repo.py"),
+        companion_service_modules=(
+            "action_template_service.py",
+            "channel_service.py",
+            "copy_workorder_service.py",
+            "customer_acquisition_service.py",
+            "due_jobs_service.py",
+            "focus_send_service.py",
+            "interaction_stats_service.py",
+            "laohuang_chat_service.py",
+            "manual_send_service.py",
+            "member_segment_search_service.py",
+            "member_state_service.py",
+            "message_activity_service.py",
+            "model_infra_service.py",
+            "operation_task_service.py",
+            "orchestration_service.py",
+            "program_service.py",
+            "program_setup_service.py",
+            "reply_monitor_service.py",
+            "router_dispatch_service.py",
+            "signup_conversion_service.py",
+            "sop_service.py",
+            "workflow_execution_service.py",
+            "workflow_runtime_service.py",
+            "workflow_service.py",
+        ),
         notes="Automation conversion settings, member pool transitions, and provider-backed QR generation.",
     ),
     "automation_state": DomainLayoutSpec(
@@ -124,6 +152,13 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         mode="simple",
         service_module="service.py",
         persistence_modules=("repo.py",),
+        companion_service_modules=(
+            "enrollment_service.py",
+            "frequency_budget_service.py",
+            "message_dispatch_service.py",
+            "router_dispatch_service.py",
+            "value_segment_service.py",
+        ),
         notes="Signup-conversion automation state, value segments, and pending-batch candidate filtering.",
     ),
     "outbound_webhook": DomainLayoutSpec(
@@ -131,6 +166,7 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         mode="simple",
         service_module="service.py",
         persistence_modules=("repo.py",),
+        companion_service_modules=("message_dispatch_service.py",),
         notes="Outbound webhook delivery records, retries, and admin audit reads.",
     ),
     "questionnaire": DomainLayoutSpec(
@@ -138,14 +174,20 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         mode="simple",
         service_module="service.py",
         persistence_modules=("repo.py",),
+        companion_service_modules=("preflight_service.py",),
         notes="Questionnaire definition, submission, export; preflight stays domain-local.",
     ),
     "wechat_pay": DomainLayoutSpec(
         name="wechat_pay",
         mode="simple",
         service_module="service.py",
-        persistence_modules=("repo.py",),
-        notes="WeChat Pay JSAPI order creation, status sync, and payment notification handling.",
+        companion_service_modules=("product_service.py", "admin_service.py"),
+        persistence_modules=("repo.py", "product_repo.py"),
+        allowed_companion_modules=("exceptions.py", "client.py"),
+        notes=(
+            "WeChat Pay H5/JSAPI checkout, product management, transaction admin, refunds, "
+            "and payment notification handling; admin_service.py owns admin transaction read models."
+        ),
     ),
     "routing_config": DomainLayoutSpec(
         name="routing_config",
@@ -173,14 +215,19 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         mode="simple",
         service_module="service.py",
         persistence_modules=("repo.py",),
+        companion_service_modules=(
+            "hxc_dashboard_snapshot_service.py",
+            "hxc_dashboard_view_service.py",
+            "hxc_send_config_service.py",
+            "page_service.py",
+            "user_ops_class_term_service.py",
+            "user_ops_deferred_job_service.py",
+            "user_ops_import_service.py",
+            "user_ops_pool_core_service.py",
+            "user_ops_sidebar_service.py",
+            "user_ops_tag_refresh_service.py",
+        ),
         notes="Lead pool, import, activation, deferred jobs, class-term mapping.",
-    ),
-    "wechat_pay": DomainLayoutSpec(
-        name="wechat_pay",
-        mode="simple",
-        service_module="service.py",
-        persistence_modules=("repo.py",),
-        notes="WeChat Pay H5 JSAPI checkout, order lifecycle, and payment notification handling.",
     ),
 }
 

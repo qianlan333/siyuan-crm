@@ -654,6 +654,7 @@ def _node_payload_from_blueprint(
     material_payload = dict(node.get("standard_content_payload") or {})
     miniprogram_ids = node.get("miniprogram_library_ids") or material_payload.get("miniprogram_library_ids") or config.get("miniprogram_library_ids") or []
     image_ids = node.get("image_library_ids") or material_payload.get("image_library_ids") or config.get("image_library_ids") or []
+    attachment_ids = node.get("attachment_library_ids") or material_payload.get("attachment_library_ids") or config.get("attachment_library_ids") or []
     normalized_material_payload: dict[str, Any] = {}
     operation_config = material_payload.get("operation_config")
     if isinstance(operation_config, dict):
@@ -670,6 +671,12 @@ def _node_payload_from_blueprint(
             for item in image_ids
             if _normalize_int(item, default=0, minimum=0) > 0
         ]
+    if attachment_ids:
+        normalized_material_payload["attachment_library_ids"] = [
+            _normalize_int(item, default=0, minimum=0)
+            for item in attachment_ids
+            if _normalize_int(item, default=0, minimum=0) > 0
+        ][:9]
     if normalized_material_payload:
         payload["standard_content_payload"] = normalized_material_payload
     return payload

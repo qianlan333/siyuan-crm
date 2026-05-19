@@ -218,7 +218,7 @@ def _update_plan(plan_id: str, fields: dict[str, Any]) -> bool:
 def _normalize_draft_attachments(
     attachments: list[dict[str, Any]] | None,
 ) -> list[dict[str, Any]]:
-    """draft 阶段只允许 miniprogram(library_id) / file(media_id)，不接 AI 自由 appid。"""
+    """draft 阶段只允许 miniprogram(library_id) / file(media_id|library_id)，不接 AI 自由 appid。"""
     if not attachments:
         return []
     if len(attachments) > MAX_PRIVATE_MESSAGE_ATTACHMENTS:
@@ -254,10 +254,20 @@ def _normalize_draft_attachments(
             normalized.append(entry)
         elif msgtype == "file":
             file_payload = item.get("file") or {}
-            media_id = str((file_payload or {}).get("media_id") or "").strip()
-            if not media_id:
-                raise ValueError("file attachments must include media_id")
-            normalized.append({"msgtype": "file", "file": {"media_id": media_id}})
+            if not isinstance(file_payload, dict):
+                raise ValueError("file payload must be object")
+            media_id = str(file_payload.get("media_id") or "").strip()
+            library_id = file_payload.get("library_id") or file_payload.get("attachment_library_id") or item.get("attachment_library_id")
+            if media_id:
+                normalized.append({"msgtype": "file", "file": {"media_id": media_id}})
+                continue
+            if not library_id:
+                raise ValueError("file attachments must include media_id or library_id")
+            try:
+                lib_id_int = int(library_id)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("file library_id 必须是整数") from exc
+            normalized.append({"msgtype": "file", "file": {"library_id": lib_id_int}})
         else:
             raise ValueError(f"unsupported attachment msgtype: {msgtype!r}")
     return normalized
@@ -549,7 +559,10 @@ def execute_committed_plan(*, plan_id: str) -> dict[str, Any]:
     raw_attachments = json.loads(plan.get("attachments_json") or "[]")
     if not isinstance(raw_attachments, list):
         raw_attachments = []
+    from .. import attachment_library as _attachment_library
+
     expanded_attachments = miniprogram_library.expand_attachments_with_library(raw_attachments)
+    expanded_attachments = _attachment_library.expand_attachments_with_library(expanded_attachments)
 
     if not content_template and not expanded_attachments:
         return {"ok": False, "error": "no content_template or variants available"}

@@ -171,6 +171,8 @@
     }
     renderMemberGroups(dashboard);
     computeAdditionalStats(dashboard);
+    AutomationOverview.state.dashboard = dashboard;
+    document.dispatchEvent(new CustomEvent("automation-overview:dashboard-rendered", { detail: { dashboard } }));
   }
 
   AutomationOverview.renderMemberGroups = renderMemberGroups;

@@ -9,10 +9,11 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.x509.oid import NameOID
 
-from wecom_ability_service.db import get_db
+from wecom_ability_service.db import close_db, get_db
 from wecom_ability_service.domains.wechat_pay.client import WeChatPayClient, WeChatPayClientConfig
 from wecom_ability_service.domains.wechat_pay import repo as wechat_pay_repo
 from wecom_ability_service.domains.wechat_pay import service as wechat_pay_service
+from wecom_ability_service.http import wechat_pay as wechat_pay_http
 from wecom_ability_service.infra.settings import mask_value
 
 
@@ -225,6 +226,43 @@ def test_wechat_pay_client_verifies_notify_signature_with_platform_certificate(t
     )
 
 
+def test_wechat_pay_oauth_requests_userinfo_by_default(app, client, tmp_path):
+    _configure_pay(app, tmp_path)
+
+    response = client.get(
+        "/api/h5/wechat-pay/oauth/start?return_url=/pay/assessment_report_v1",
+        headers=_wechat_headers(),
+    )
+
+    assert response.status_code == 302
+    assert "scope=snsapi_userinfo" in response.headers["Location"]
+
+
+def test_wechat_pay_oauth_callback_stores_payer_name(app, client, tmp_path, monkeypatch):
+    _configure_pay(app, tmp_path)
+
+    monkeypatch.setattr(
+        wechat_pay_http,
+        "exchange_wechat_oauth_code",
+        lambda **kwargs: {"openid": "op_test", "access_token": "token"},
+    )
+    monkeypatch.setattr(
+        wechat_pay_http,
+        "fetch_wechat_userinfo",
+        lambda **kwargs: {"openid": "op_test", "unionid": "un_test", "nickname": "微信昵称"},
+    )
+
+    response = client.get("/api/h5/wechat-pay/oauth/callback?code=code", headers=_wechat_headers())
+
+    assert response.status_code == 302
+    with client.session_transaction() as sess:
+        assert sess["wechat_pay_h5_identity"] == {
+            "openid": "op_test",
+            "unionid": "un_test",
+            "payer_name": "微信昵称",
+        }
+
+
 def test_create_jsapi_order_uses_session_openid_and_server_catalog(app, client, tmp_path, monkeypatch):
     _configure_pay(app, tmp_path)
     calls: dict[str, object] = {}
@@ -247,7 +285,7 @@ def test_create_jsapi_order_uses_session_openid_and_server_catalog(app, client, 
 
     monkeypatch.setattr(wechat_pay_service, "_create_wechat_pay_client", lambda: FakeClient())
     with client.session_transaction() as sess:
-        sess["wechat_pay_h5_identity"] = {"openid": "op_test", "unionid": "un_test"}
+        sess["wechat_pay_h5_identity"] = {"openid": "op_test", "unionid": "un_test", "payer_name": "微信昵称"}
 
     response = client.post(
         "/api/h5/wechat-pay/jsapi/orders",
@@ -263,7 +301,9 @@ def test_create_jsapi_order_uses_session_openid_and_server_catalog(app, client, 
     assert payload["pay_params"]["package"] == "prepay_id=wx-prepay-id"
     assert calls["transaction_payload"]["payer"]["openid"] == "op_test"
     assert calls["transaction_payload"]["amount"]["total"] == 9900
+    assert json.loads(calls["transaction_payload"]["attach"])["product_code"] == "assessment_report_v1"
 
+    close_db()
     row = get_db().execute(
         "SELECT * FROM wechat_pay_orders WHERE out_trade_no = ?",
         (payload["order"]["out_trade_no"],),
@@ -271,13 +311,21 @@ def test_create_jsapi_order_uses_session_openid_and_server_catalog(app, client, 
     assert row["status"] == "paying"
     assert row["prepay_id"] == "wx-prepay-id"
     assert row["payer_openid"] == "op_test"
+    assert row["payer_name_snapshot"] == "微信昵称"
+
+    status_response = client.get(
+        f"/api/h5/wechat-pay/orders/{payload['order']['out_trade_no']}",
+        headers=_wechat_headers(),
+    )
+    assert status_response.status_code == 200
+    assert status_response.get_json()["order"]["out_trade_no"] == payload["order"]["out_trade_no"]
 
 
 def test_create_jsapi_order_rejects_unknown_product(app, client, tmp_path, monkeypatch):
     _configure_pay(app, tmp_path)
     monkeypatch.setattr(wechat_pay_service, "_create_wechat_pay_client", lambda: object())
     with client.session_transaction() as sess:
-        sess["wechat_pay_h5_identity"] = {"openid": "op_test"}
+        sess["wechat_pay_h5_identity"] = {"openid": "op_test", "payer_name": "微信昵称"}
 
     response = client.post(
         "/api/h5/wechat-pay/jsapi/orders",
@@ -344,3 +392,134 @@ def test_wechat_pay_notify_marks_order_paid_and_records_event(app, client, tmp_p
         ("WXPTEST0001",),
     ).fetchone()["total"]
     assert event_count == 1
+
+
+def test_wechat_pay_notify_recovers_missing_paid_order(app, client, tmp_path, monkeypatch):
+    _configure_pay(app, tmp_path)
+
+    class FakeClient:
+        def verify_and_decrypt_notification(self, *, body, headers):
+            assert body == '{"id":"notify-id"}'
+            return {
+                "out_trade_no": "WXP_MISSING_NOTIFY",
+                "transaction_id": "420000MISSINGNOTIFY",
+                "trade_state": "SUCCESS",
+                "bank_type": "OTHERS",
+                "description": "AI 测评报告",
+                "success_time": "2026-05-18T19:06:14+08:00",
+                "amount": {"total": 9900, "payer_total": 9900, "currency": "CNY"},
+                "payer": {"openid": "op_missing"},
+            }
+
+    monkeypatch.setattr(wechat_pay_service, "_create_wechat_pay_client", lambda: FakeClient())
+
+    response = client.post(
+        "/api/h5/wechat-pay/notify",
+        data='{"id":"notify-id"}',
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    row = get_db().execute(
+        """
+        SELECT status, trade_state, transaction_id, product_code, product_name, amount_total
+        FROM wechat_pay_orders
+        WHERE out_trade_no = ?
+        """,
+        ("WXP_MISSING_NOTIFY",),
+    ).fetchone()
+    assert dict(row) == {
+        "status": "paid",
+        "trade_state": "SUCCESS",
+        "transaction_id": "420000MISSINGNOTIFY",
+        "product_code": "assessment_report_v1",
+        "product_name": "AI 测评报告",
+        "amount_total": 9900,
+    }
+
+
+def test_wechat_pay_status_refresh_recovers_missing_paid_order(app, client, tmp_path, monkeypatch):
+    _configure_pay(app, tmp_path)
+
+    class FakeClient:
+        def query_order_by_out_trade_no(self, out_trade_no):
+            assert out_trade_no == "WXP_MISSING_QUERY"
+            return {
+                "out_trade_no": "WXP_MISSING_QUERY",
+                "transaction_id": "420000MISSINGQUERY",
+                "trade_state": "SUCCESS",
+                "bank_type": "OTHERS",
+                "description": "AI 测评报告",
+                "success_time": "2026-05-18T19:06:14+08:00",
+                "amount": {"total": 9900, "payer_total": 9900, "currency": "CNY"},
+                "payer": {"openid": "op_missing"},
+            }
+
+    monkeypatch.setattr(wechat_pay_service, "_create_wechat_pay_client", lambda: FakeClient())
+
+    response = client.get(
+        "/api/h5/wechat-pay/orders/WXP_MISSING_QUERY?refresh=1",
+        headers=_wechat_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["order"]["out_trade_no"] == "WXP_MISSING_QUERY"
+    assert payload["order"]["status"] == "paid"
+    row = get_db().execute(
+        "SELECT transaction_id, product_name FROM wechat_pay_orders WHERE out_trade_no = ?",
+        ("WXP_MISSING_QUERY",),
+    ).fetchone()
+    assert dict(row) == {"transaction_id": "420000MISSINGQUERY", "product_name": "AI 测评报告"}
+
+
+def test_wechat_pay_status_refresh_enriches_existing_recovered_order(app, client, tmp_path, monkeypatch):
+    _configure_pay(app, tmp_path)
+    order = wechat_pay_repo.insert_order(
+        {
+            "out_trade_no": "WXP260518110609ABCDEF",
+            "order_source": "recovered_query",
+            "product_code": "recovered_wechat_pay",
+            "product_name": "微信支付恢复订单",
+            "description": "微信支付恢复订单",
+            "amount_total": 9900,
+            "payer_openid": "op_missing",
+            "status": "paid",
+            "metadata": {"recovered": True},
+            "request_meta": {},
+        }
+    )
+
+    class FakeClient:
+        def query_order_by_out_trade_no(self, out_trade_no):
+            assert out_trade_no == order["out_trade_no"]
+            return {
+                "out_trade_no": order["out_trade_no"],
+                "transaction_id": "420000RECOVEREDENRICH",
+                "trade_state": "SUCCESS",
+                "bank_type": "OTHERS",
+                "success_time": "2026-05-18T19:06:14+08:00",
+                "amount": {"total": 9900, "payer_total": 9900, "currency": "CNY"},
+                "payer": {"openid": "op_missing"},
+            }
+
+    monkeypatch.setattr(wechat_pay_service, "_create_wechat_pay_client", lambda: FakeClient())
+
+    response = client.get(
+        f"/api/h5/wechat-pay/orders/{order['out_trade_no']}?refresh=1",
+        headers=_wechat_headers(),
+    )
+
+    assert response.status_code == 200
+    row = get_db().execute(
+        """
+        SELECT product_code, product_name, transaction_id, created_at
+        FROM wechat_pay_orders
+        WHERE out_trade_no = ?
+        """,
+        (order["out_trade_no"],),
+    ).fetchone()
+    assert row["product_code"] == "assessment_report_v1"
+    assert row["product_name"] == "AI 测评报告"
+    assert row["transaction_id"] == "420000RECOVEREDENRICH"
+    assert row["created_at"].strftime("%Y-%m-%d %H:%M:%S") == "2026-05-18 11:06:09"

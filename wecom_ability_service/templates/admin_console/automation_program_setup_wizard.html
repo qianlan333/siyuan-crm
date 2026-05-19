@@ -33,10 +33,44 @@
   .setup-table th { background: #f8fbff; color: #667085; font-size: 12px; }
   .setup-table input, .setup-table select, .setup-table textarea { width: 100%; border: 1px solid rgba(15,23,42,.12); border-radius: 8px; padding: 8px 9px; }
   .setup-result-card, .setup-rule-card { display: grid; gap: 12px; padding: 14px; border: 1px solid rgba(15,23,42,.08); border-radius: 14px; background: #f8fbff; }
+  .setup-audience-line { display: grid; gap: 12px; }
+  .setup-audience-row { display: grid; grid-template-columns: minmax(180px, .7fr) minmax(360px, 1.35fr) minmax(160px, .55fr); gap: 16px; align-items: center; padding: 16px; border: 1px solid rgba(15,23,42,.10); border-radius: 14px; background: #fff; }
+  .setup-audience-row.is-muted { color: #98a2b3; background: #fbfcfe; }
+  .setup-audience-row h3 { margin: 0; font-size: 16px; }
+  .setup-audience-title { display: grid; gap: 8px; align-content: start; }
+  .setup-audience-title p { margin: 0; color: #667085; font-size: 13px; font-weight: 700; }
+  .setup-audience-meta { color: #667085; font-size: 14px; font-weight: 800; }
+  .setup-audience-next { display: grid; gap: 4px; color: #667085; font-size: 13px; font-weight: 800; }
+  .setup-audience-next strong { display: flex; gap: 8px; align-items: center; color: #1f2329; font-size: 16px; }
+  .setup-audience-next strong::before { content: "→"; color: #98a2b3; font-size: 18px; }
+  .setup-segmented { display: inline-flex; width: max-content; overflow: hidden; border: 1px solid rgba(15,23,42,.16); border-radius: 10px; background: #fff; }
+  .setup-segmented button { border: 0; border-right: 1px solid rgba(15,23,42,.12); padding: 8px 12px; background: transparent; color: #667085; font-weight: 800; cursor: pointer; }
+  .setup-segmented button:last-child { border-right: 0; }
+  .setup-segmented button.is-enabled { color: #188038; }
+  .setup-segmented button.is-disabled { color: #b42318; }
+  .setup-choice-field { display: grid; gap: 8px; }
+  .setup-choice-label { color: #667085; font-size: 13px; font-weight: 800; }
+  .setup-choice-box { display: flex; min-height: 44px; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px 8px 12px; border: 1px solid rgba(15,23,42,.12); border-radius: 10px; background: #fff; }
+  .setup-selection-summary { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: #344054; font-size: 14px; font-weight: 800; }
+  .setup-selection-summary.is-empty { color: #98a2b3; font-weight: 700; }
+  .setup-selection-ok { color: #188038; font-weight: 900; }
+  .setup-picker-grid { display: grid; gap: 10px; }
+  .setup-picker-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px 14px; border: 1px solid rgba(15,23,42,.10); border-radius: 12px; background: #fff; }
+  .setup-picker-title { display: grid; gap: 4px; color: #1f2329; font-weight: 900; }
+  .setup-picker-subtitle { color: #667085; font-weight: 700; }
+  .setup-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 24px; background: rgba(15,23,42,.36); }
+  .setup-modal[hidden] { display: none !important; }
+  .setup-modal__panel { width: min(720px, 100%); max-height: min(720px, 86vh); display: grid; gap: 14px; padding: 18px; overflow: auto; border-radius: 16px; background: #fff; box-shadow: 0 24px 70px rgba(15,23,42,.22); }
+  .setup-modal__head { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
+  .setup-modal__head h3 { margin: 0; }
+  .setup-picker-grid[hidden] { display: none !important; }
   .setup-result-row { display: flex; justify-content: space-between; gap: 12px; color: #344054; word-break: break-all; }
   .setup-qrcode-preview { display: grid; place-items: center; min-height: 220px; border: 1px dashed rgba(20,86,240,.22); border-radius: 14px; background: #fff; }
   .setup-qrcode-preview img { width: min(220px, 100%); aspect-ratio: 1; object-fit: contain; border-radius: 10px; }
   .setup-empty-hint { display: grid; place-items: center; min-height: 180px; padding: 18px; border: 1px dashed rgba(15,23,42,.14); border-radius: 14px; background: #fff; color: #667085; text-align: center; }
+  .setup-tag-select-card { grid-column: 1 / -1; display: grid; gap: 10px; }
+  .setup-tag-preview { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-height: 36px; padding: 8px 10px; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; background: #f8fbff; color: #344054; font-weight: 800; }
+  .setup-tag-preview.is-empty { color: #98a2b3; }
   .setup-chip-list { display: flex; gap: 8px; flex-wrap: wrap; }
   .setup-chip { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 6px 10px; background: #eef4ff; color: #1456f0; font-weight: 800; }
   .setup-category-grid { display: grid; grid-template-columns: minmax(260px, .75fr) minmax(0, 1.25fr); gap: 14px; align-items: start; }
@@ -58,7 +92,7 @@
   .setup-footer { position: sticky; bottom: 14px; z-index: 20; display: flex; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid rgba(15,23,42,.08); border-radius: 14px; background: rgba(255,255,255,.94); box-shadow: 0 16px 32px rgba(15,23,42,.10); backdrop-filter: blur(10px); }
   .setup-footer__side { display: flex; gap: 10px; flex-wrap: wrap; }
   @media (max-width: 960px) {
-    .setup-steps, .setup-form-grid, .setup-form-grid--three, .setup-checks, .setup-two-col, .setup-category-grid { grid-template-columns: 1fr; }
+    .setup-steps, .setup-form-grid, .setup-form-grid--three, .setup-checks, .setup-two-col, .setup-category-grid, .setup-audience-row { grid-template-columns: 1fr; }
     .setup-footer { align-items: stretch; flex-direction: column; }
   }
 </style>
@@ -148,6 +182,8 @@
   {% elif current_step == 'entry' %}
   {% set entry = workspace.entry or {} %}
   {% set qrcode = entry.qrcode_channel or {} %}
+  {% set tag_catalog = entry.wecom_tag_catalog or {} %}
+  {% set tag_state = namespace(selected_known=false) %}
   <section class="setup-card">
     <div>
       <h2>入口渠道</h2>
@@ -163,9 +199,45 @@
           <h3>二维码配置</h3>
           <div class="setup-form-grid">
             <label class="setup-field"><span>渠道名称</span><input name="channel_name" value="{{ qrcode.channel_name or '' }}"></label>
-            <label class="setup-field"><span>标签组</span><input name="entry_tag_group_name" value="{{ qrcode.entry_tag_group_name or '' }}"></label>
-            <label class="setup-field"><span>扫码自动标签</span><input name="entry_tag_name" value="{{ qrcode.entry_tag_name or '' }}"><input type="hidden" name="entry_tag_id" value="{{ qrcode.entry_tag_id or '' }}"></label>
             <label class="setup-field"><span>是否免验证</span><select name="auto_accept_friend"><option value="1" {% if qrcode.auto_accept_friend %}selected{% endif %}>是</option><option value="0" {% if not qrcode.auto_accept_friend %}selected{% endif %}>否</option></select></label>
+            <div class="setup-tag-select-card">
+              <label class="setup-field">
+                <span>扫码自动标签</span>
+                <select name="entry_tag_selector" data-entry-tag-select>
+                  <option value="" data-tag-name="" data-group-name="" data-group-id="">不自动打标签</option>
+                  {% for group in tag_catalog.groups or [] %}
+                  <optgroup label="{{ group.group_name }}">
+                    {% for tag in group.tags or [] %}
+                    {% if qrcode.entry_tag_id and qrcode.entry_tag_id == tag.tag_id %}{% set tag_state.selected_known = true %}{% endif %}
+                    <option value="{{ tag.tag_id }}" data-tag-name="{{ tag.tag_name }}" data-group-name="{{ tag.group_name or group.group_name }}" data-group-id="{{ tag.group_id or group.group_id }}" {% if qrcode.entry_tag_id and qrcode.entry_tag_id == tag.tag_id %}selected{% endif %}>{{ tag.tag_name }}</option>
+                    {% endfor %}
+                  </optgroup>
+                  {% endfor %}
+                  {% if qrcode.entry_tag_id and not tag_state.selected_known %}
+                  <optgroup label="已配置标签">
+                    <option value="{{ qrcode.entry_tag_id }}" data-tag-name="{{ qrcode.entry_tag_name or qrcode.entry_tag_id }}" data-group-name="{{ qrcode.entry_tag_group_name or '已配置标签' }}" data-group-id="" selected>{{ qrcode.entry_tag_group_name or '已配置标签' }} / {{ qrcode.entry_tag_name or qrcode.entry_tag_id }}</option>
+                  </optgroup>
+                  {% endif %}
+                </select>
+              </label>
+              <input type="hidden" name="entry_tag_id" value="{{ qrcode.entry_tag_id or '' }}" data-entry-tag-id>
+              <input type="hidden" name="entry_tag_name" value="{{ qrcode.entry_tag_name or '' }}" data-entry-tag-name>
+              <input type="hidden" name="entry_tag_group_name" value="{{ qrcode.entry_tag_group_name or '' }}" data-entry-tag-group-name>
+              <div class="setup-tag-preview{% if not qrcode.entry_tag_id %} is-empty{% endif %}" data-entry-tag-preview>
+                {% if qrcode.entry_tag_id %}
+                已选择：{{ qrcode.entry_tag_group_name or '标签' }} / {{ qrcode.entry_tag_name or qrcode.entry_tag_id }}
+                {% elif tag_catalog.error %}
+                {{ tag_catalog.error }}
+                {% elif not tag_catalog.items %}
+                当前没有可选企微标签，请先到企微标签管理同步或创建标签。
+                {% else %}
+                未选择标签
+                {% endif %}
+              </div>
+              {% if tag_catalog.error or not tag_catalog.items %}
+              <div class="setup-actions" style="justify-content:flex-start;"><a class="setup-button" href="{{ url_for('api.admin_wecom_tags_page') }}" target="_blank" rel="noreferrer">打开企微标签管理</a></div>
+              {% endif %}
+            </div>
             <label class="setup-field" style="grid-column: 1 / -1;"><span>欢迎语</span><textarea name="welcome_message">{{ qrcode.welcome_message or '' }}</textarea></label>
           </div>
           <div class="setup-actions"><button class="setup-button is-primary" type="submit">保存二维码配置</button><button class="setup-button" type="button" data-generate-qrcode>生成 / 重新生成二维码</button></div>
@@ -328,22 +400,179 @@
 
   {% elif current_step == 'entry-rule' %}
   {% set rule = workspace.audience_entry_rule or {} %}
-  {% set cards = rule.normalized_cards or {} %}
-  <section class="setup-card" data-audience-rule-form>
-    <div><h2>入池规则</h2><p class="setup-muted">用事件规则表达入口进入后和问卷提交后的目标人群。</p></div>
-    {% for key in ['channel_enter', 'questionnaire_submitted'] %}
-    {% set card = cards[key] or {} %}
-    <article class="setup-rule-card" data-rule-card="{{ key }}">
-      <h3>{{ card.event_label }}</h3>
-      <div class="setup-form-grid setup-form-grid--three">
-        <label class="setup-field"><span>条件</span><select name="condition_type">{% for value, label in (card.condition_options or {}).items() %}<option value="{{ value }}" {% if value == card.condition_type %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-        <label class="setup-field"><span>目标人群</span><select name="target_audience_code">{% for value, label in (card.target_options or {}).items() %}<option value="{{ value }}" {% if value == card.target_audience_code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
-        <label class="setup-field"><span>启用状态</span><select name="enabled"><option value="1" {% if card.enabled %}selected{% endif %}>启用</option><option value="0" {% if not card.enabled %}selected{% endif %}>停用</option></select></label>
-      </div>
-    </article>
-    {% endfor %}
-    <article class="setup-rule-card"><h3>人工 / 异常规则</h3><div class="setup-chip-list">{% for card in rule.manual_cards or [] %}<span class="setup-chip">{{ card.event_label }} -> {{ card.target_label }}</span>{% endfor %}</div></article>
+  {% set order = rule.order_review or {} %}
+  {% set questionnaire = rule.questionnaire_review or {} %}
+  {% set conversion = rule.conversion_review or {} %}
+  {% set next_steps = rule.next_steps or {} %}
+  {% if rule.picker %}
+  <section class="setup-card" data-audience-picker data-picker="{{ rule.picker }}">
+    <div class="setup-card-head">
+      <div><h2>{{ rule.picker_title }}</h2></div>
+      <a class="setup-button" href="{{ urls.base }}?step=entry-rule">返回入池规则</a>
+    </div>
+    <div class="setup-picker-grid">
+      {% if rule.picker in ['order_product', 'conversion_product'] %}
+        {% for item in rule.available_products or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.name }}</span><span class="setup-picker-subtitle">{{ item.price_text }}</span></div>
+          <button class="setup-button is-primary" type="button" data-pick-audience-item data-picker="{{ rule.picker }}" data-value="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price_text }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择商品。</div>
+        {% endfor %}
+      {% else %}
+        {% for item in rule.available_questionnaires or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.title }}</span><span class="setup-picker-subtitle">{{ item.status }} · {{ item.question_count }} 题</span></div>
+          <button class="setup-button is-primary" type="button" data-pick-audience-item data-picker="{{ rule.picker }}" data-value="{{ item.id }}" data-name="{{ item.title }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择问卷。</div>
+        {% endfor %}
+      {% endif %}
+    </div>
   </section>
+  {% else %}
+  <section class="setup-card" data-audience-rule-form
+    data-order-enabled="{{ '1' if order.enabled else '0' }}"
+    data-questionnaire-enabled="{{ '1' if questionnaire.enabled else '0' }}"
+    data-conversion-enabled="{{ '1' if conversion.enabled else '0' }}"
+    data-order-product-id="{{ order.selected_product_id or '' }}"
+    data-order-product-name="{{ (order.selected_product_snapshot or {}).name or '' }}"
+    data-order-product-price="{{ (order.selected_product_snapshot or {}).price_text or '' }}"
+    data-questionnaire-id="{{ questionnaire.selected_questionnaire_id or '' }}"
+    data-questionnaire-title="{{ (questionnaire.selected_questionnaire_snapshot or {}).title or '' }}"
+    data-conversion-product-id="{{ conversion.selected_product_id or '' }}"
+    data-conversion-product-name="{{ (conversion.selected_product_snapshot or {}).name or '' }}"
+    data-conversion-product-price="{{ (conversion.selected_product_snapshot or {}).price_text or '' }}">
+    <div><h2>入池规则</h2></div>
+    <div class="setup-audience-line">
+      <article class="setup-audience-row" data-audience-row="scan_enter">
+        <div class="setup-audience-title"><h3>扫码进入</h3><p>当前方案入口</p></div>
+        <div class="setup-choice-field">
+          <span class="setup-choice-label">入口来源</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary">当前方案入口</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="scan_enter">{{ next_steps.scan_enter }}</strong></div>
+      </article>
+      <article class="setup-audience-row{% if not order.enabled %} is-muted{% endif %}" data-audience-row="order_review">
+        <div class="setup-audience-title">
+          <h3>订单审核</h3><p>判定是否支付</p>
+          <div class="setup-segmented" data-toggle-group="order_review">
+            <button type="button" data-toggle-value="1" class="{% if order.enabled %}is-enabled{% endif %}">启用</button>
+            <button type="button" data-toggle-value="0" class="{% if not order.enabled %}is-disabled{% endif %}">不启用</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-enabled-area="order_review" {% if not order.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box">
+            <span class="setup-selection-summary{% if not order.selected_product_id %} is-empty{% endif %}" data-selected-summary="order_review">
+              {% if order.selected_product_id %}<span class="setup-selection-ok">已选择</span>{{ (order.selected_product_snapshot or {}).name }} · {{ (order.selected_product_snapshot or {}).price_text }}{% else %}未选择商品{% endif %}
+            </span>
+            <button class="setup-button" type="button" data-open-picker="order_product">去选择商品</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-disabled-area="order_review" {% if order.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary is-empty">未启用时无需选择</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="order_review">{{ next_steps.order_review }}</strong></div>
+      </article>
+      <article class="setup-audience-row{% if not questionnaire.enabled %} is-muted{% endif %}" data-audience-row="questionnaire_review">
+        <div class="setup-audience-title">
+          <h3>问卷审核</h3><p>判定是否填写问卷</p>
+          <div class="setup-segmented" data-toggle-group="questionnaire_review">
+            <button type="button" data-toggle-value="1" class="{% if questionnaire.enabled %}is-enabled{% endif %}">启用</button>
+            <button type="button" data-toggle-value="0" class="{% if not questionnaire.enabled %}is-disabled{% endif %}">不启用</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-enabled-area="questionnaire_review" {% if not questionnaire.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择问卷</span>
+          <div class="setup-choice-box">
+            <span class="setup-selection-summary{% if not questionnaire.selected_questionnaire_id %} is-empty{% endif %}" data-selected-summary="questionnaire_review">
+              {% if questionnaire.selected_questionnaire_id %}<span class="setup-selection-ok">已选择</span>{{ (questionnaire.selected_questionnaire_snapshot or {}).title }}{% else %}未选择问卷{% endif %}
+            </span>
+            <button class="setup-button" type="button" data-open-picker="questionnaire">去选择问卷</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-disabled-area="questionnaire_review" {% if questionnaire.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择问卷</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary is-empty">未启用时无需选择</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="questionnaire_review">{{ next_steps.questionnaire_review }}</strong></div>
+      </article>
+      <article class="setup-audience-row" data-audience-row="operating">
+        <div class="setup-audience-title"><h3>运营中</h3><p>默认必须启用</p></div>
+        <div class="setup-choice-field">
+          <span class="setup-choice-label">状态</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary">进入后开始后续运营</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="operating">{{ next_steps.operating }}</strong></div>
+      </article>
+      <article class="setup-audience-row{% if not conversion.enabled %} is-muted{% endif %}" data-audience-row="conversion_review">
+        <div class="setup-audience-title">
+          <h3>已转化</h3><p>运营后的成交判定</p>
+          <div class="setup-segmented" data-toggle-group="conversion_review">
+            <button type="button" data-toggle-value="1" class="{% if conversion.enabled %}is-enabled{% endif %}">启用</button>
+            <button type="button" data-toggle-value="0" class="{% if not conversion.enabled %}is-disabled{% endif %}">不启用</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-enabled-area="conversion_review" {% if not conversion.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box">
+            <span class="setup-selection-summary{% if not conversion.selected_product_id %} is-empty{% endif %}" data-selected-summary="conversion_review">
+              {% if conversion.selected_product_id %}<span class="setup-selection-ok">已选择</span>{{ (conversion.selected_product_snapshot or {}).name }} · {{ (conversion.selected_product_snapshot or {}).price_text }}{% else %}未选择成交商品{% endif %}
+            </span>
+            <button class="setup-button" type="button" data-open-picker="conversion_product">去选择商品</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-disabled-area="conversion_review" {% if conversion.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary is-empty">未启用时不做成交判定</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="conversion_review">{{ next_steps.conversion_review }}</strong></div>
+      </article>
+    </div>
+  </section>
+  <div class="setup-modal" data-audience-modal hidden>
+    <div class="setup-modal__panel" role="dialog" aria-modal="true" aria-labelledby="audience-picker-title">
+      <div class="setup-modal__head">
+        <h3 id="audience-picker-title" data-picker-title>选择</h3>
+        <button class="setup-button" type="button" data-close-picker>关闭</button>
+      </div>
+      <div class="setup-picker-grid" data-picker-panel="order_product" hidden>
+        {% for item in rule.available_products or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.name }}</span><span class="setup-picker-subtitle">{{ item.price_text }}</span></div>
+          <button class="setup-button is-primary" type="button" data-pick-audience-item data-picker="order_product" data-value="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price_text }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择商品。</div>
+        {% endfor %}
+      </div>
+      <div class="setup-picker-grid" data-picker-panel="questionnaire" hidden>
+        {% for item in rule.available_questionnaires or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.title }}</span><span class="setup-picker-subtitle">{{ item.status }} · {{ item.question_count }} 题</span></div>
+          <button class="setup-button is-primary" type="button" data-pick-audience-item data-picker="questionnaire" data-value="{{ item.id }}" data-name="{{ item.title }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择问卷。</div>
+        {% endfor %}
+      </div>
+      <div class="setup-picker-grid" data-picker-panel="conversion_product" hidden>
+        {% for item in rule.available_products or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.name }}</span><span class="setup-picker-subtitle">{{ item.price_text }}</span></div>
+          <button class="setup-button is-primary" type="button" data-pick-audience-item data-picker="conversion_product" data-value="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price_text }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择商品。</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
 
   {% elif current_step == 'operations' %}
   {% set operations_workspace = workspace.operations_workspace or {} %}
@@ -371,7 +600,10 @@
   {% endif %}
 
   <footer class="setup-footer">
-    {% if current_step == 'operations' %}
+    {% if current_step == 'entry-rule' and (workspace.audience_entry_rule or {}).picker %}
+    <div class="setup-footer__side"></div>
+    <div class="setup-footer__side"><a class="setup-button" href="{{ urls.base }}?step=entry-rule">返回入池规则</a></div>
+    {% elif current_step == 'operations' %}
     <div class="setup-footer__side"></div>
     <div class="setup-footer__side">
       <button class="setup-button" type="button" data-save-current>保存草稿</button>
@@ -396,6 +628,7 @@
   if (!root) return;
   const urls = JSON.parse(root.dataset.urls || "{}");
   const currentStep = "{{ current_step }}";
+  const audienceInitialState = {{ (workspace.audience_entry_rule or {})|tojson }};
   const feedback = root.querySelector("[data-setup-feedback]");
   const showFeedback = (message, ok = false) => {
     if (!feedback) return;
@@ -424,6 +657,26 @@
     payload.auto_accept_friend = String(payload.auto_accept_friend || "") === "1";
     await postJson(urls[form.dataset.endpoint], payload);
   };
+  const entryTagSelect = root.querySelector("[data-entry-tag-select]");
+  const syncEntryTagFields = () => {
+    if (!entryTagSelect) return;
+    const option = entryTagSelect.selectedOptions?.[0];
+    const tagId = entryTagSelect.value || "";
+    const tagName = option?.dataset.tagName || "";
+    const groupName = option?.dataset.groupName || "";
+    const tagIdInput = root.querySelector("[data-entry-tag-id]");
+    const tagNameInput = root.querySelector("[data-entry-tag-name]");
+    const groupNameInput = root.querySelector("[data-entry-tag-group-name]");
+    const preview = root.querySelector("[data-entry-tag-preview]");
+    if (tagIdInput) tagIdInput.value = tagId;
+    if (tagNameInput) tagNameInput.value = tagName;
+    if (groupNameInput) groupNameInput.value = groupName;
+    if (preview) {
+      preview.textContent = tagId ? `已选择：${groupName || "标签"} / ${tagName || tagId}` : "未选择标签";
+      preview.classList.toggle("is-empty", !tagId);
+    }
+  };
+  entryTagSelect?.addEventListener("change", syncEntryTagFields);
   root.querySelectorAll("[data-setup-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -620,16 +873,163 @@
     });
   };
   const saveAudienceRules = async () => {
-    const cards = {};
-    root.querySelectorAll("[data-rule-card]").forEach((card) => {
-      cards[card.dataset.ruleCard] = {
-        condition_type: card.querySelector("[name='condition_type']")?.value || "",
-        target_audience_code: card.querySelector("[name='target_audience_code']")?.value || "",
-        enabled: card.querySelector("[name='enabled']")?.value === "1",
-      };
-    });
-    await postJson(urls.audience_entry_rule, { cards });
+    const form = root.querySelector("[data-audience-rule-form]");
+    if (!form) return;
+    const payload = currentAudiencePayload();
+    if (payload.order_review.enabled && !payload.order_review.selected_product_id) throw new Error("订单审核已启用，请先选择商品");
+    if (payload.questionnaire_review.enabled && !payload.questionnaire_review.selected_questionnaire_id) throw new Error("问卷审核已启用，请先选择问卷");
+    if (payload.conversion_review.enabled && !payload.conversion_review.selected_product_id) throw new Error("已转化判定已启用，请先选择成交商品");
+    await postJson(urls.audience_entry_rule, payload);
   };
+  const audienceBool = (value) => String(value || "") === "1" || value === true;
+  const setAudienceEnabled = (key, enabled) => {
+    const form = root.querySelector("[data-audience-rule-form]");
+    if (!form) return;
+    const value = enabled ? "1" : "0";
+    if (key === "order_review") form.dataset.orderEnabled = value;
+    if (key === "questionnaire_review") form.dataset.questionnaireEnabled = value;
+    if (key === "conversion_review") form.dataset.conversionEnabled = value;
+  };
+  const setAudienceSelection = (key, payload) => {
+    const form = root.querySelector("[data-audience-rule-form]");
+    if (!form) return;
+    const summary = form.querySelector(`[data-selected-summary="${key}"]`);
+    if (key === "order_review") {
+      form.dataset.orderProductId = payload.id || "";
+      form.dataset.orderProductName = payload.name || "";
+      form.dataset.orderProductPrice = payload.price || "";
+      if (summary) summary.innerHTML = `<span class="setup-selection-ok">已选择</span>${escapeHtml(payload.name || "")} · ${escapeHtml(payload.price || "")}`;
+    }
+    if (key === "questionnaire_review") {
+      form.dataset.questionnaireId = payload.id || "";
+      form.dataset.questionnaireTitle = payload.name || "";
+      if (summary) summary.innerHTML = `<span class="setup-selection-ok">已选择</span>${escapeHtml(payload.name || "")}`;
+    }
+    if (key === "conversion_review") {
+      form.dataset.conversionProductId = payload.id || "";
+      form.dataset.conversionProductName = payload.name || "";
+      form.dataset.conversionProductPrice = payload.price || "";
+      if (summary) summary.innerHTML = `<span class="setup-selection-ok">已选择</span>${escapeHtml(payload.name || "")} · ${escapeHtml(payload.price || "")}`;
+    }
+    summary?.classList.remove("is-empty");
+  };
+  const audienceStateFromForm = () => {
+    const form = root.querySelector("[data-audience-rule-form]");
+    const initial = audienceInitialState || {};
+    if (!form) return initial;
+    return {
+      entry_source: "both",
+      order_review: {
+        enabled: audienceBool(form.dataset.orderEnabled),
+        selected_product_id: form.dataset.orderProductId || "",
+        selected_product_snapshot: { name: form.dataset.orderProductName || "", price_text: form.dataset.orderProductPrice || "" },
+      },
+      questionnaire_review: {
+        enabled: audienceBool(form.dataset.questionnaireEnabled),
+        selected_questionnaire_id: Number(form.dataset.questionnaireId || 0) || null,
+        selected_questionnaire_snapshot: { title: form.dataset.questionnaireTitle || "" },
+      },
+      operating: { enabled: true, fixed: true },
+      conversion_review: {
+        enabled: audienceBool(form.dataset.conversionEnabled),
+        selected_product_id: form.dataset.conversionProductId || "",
+        selected_product_snapshot: { name: form.dataset.conversionProductName || "", price_text: form.dataset.conversionProductPrice || "" },
+      },
+    };
+  };
+  const currentAudiencePayload = () => audienceStateFromForm();
+  const updateAudienceNextSteps = () => {
+    const form = root.querySelector("[data-audience-rule-form]");
+    if (!form) return;
+    const orderEnabled = audienceBool(form.dataset.orderEnabled);
+    const questionnaireEnabled = audienceBool(form.dataset.questionnaireEnabled);
+    const conversionEnabled = audienceBool(form.dataset.conversionEnabled);
+    const setNext = (key, value) => {
+      const target = form.querySelector(`[data-next-step="${key}"]`);
+      if (target) target.textContent = value;
+    };
+    setNext("scan_enter", orderEnabled ? "订单审核" : (questionnaireEnabled ? "问卷审核" : "运营中"));
+    setNext("order_review", orderEnabled ? (questionnaireEnabled ? "问卷审核" : "运营中") : "本项已跳过");
+    setNext("questionnaire_review", questionnaireEnabled ? "运营中" : "本项已跳过");
+    setNext("operating", conversionEnabled ? "已转化" : "结束");
+    setNext("conversion_review", conversionEnabled ? "结束" : "本项已关闭");
+    [["order_review", orderEnabled], ["questionnaire_review", questionnaireEnabled], ["conversion_review", conversionEnabled]].forEach(([key, enabled]) => {
+      const row = form.querySelector(`[data-audience-row="${key}"]`);
+      row?.classList.toggle("is-muted", !enabled);
+      const area = form.querySelector(`[data-enabled-area="${key}"]`);
+      if (area) area.style.display = enabled ? "" : "none";
+      const disabledArea = form.querySelector(`[data-disabled-area="${key}"]`);
+      if (disabledArea) disabledArea.style.display = enabled ? "none" : "";
+      form.querySelectorAll(`[data-toggle-group="${key}"] button`).forEach((button) => {
+        button.classList.toggle("is-enabled", enabled && button.dataset.toggleValue === "1");
+        button.classList.toggle("is-disabled", !enabled && button.dataset.toggleValue === "0");
+      });
+    });
+  };
+  root.querySelectorAll("[data-toggle-group]").forEach((group) => {
+    group.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-toggle-value]");
+      if (!button) return;
+      const form = root.querySelector("[data-audience-rule-form]");
+      if (!form) return;
+      const value = button.dataset.toggleValue === "1" ? "1" : "0";
+      const key = group.dataset.toggleGroup;
+      setAudienceEnabled(key, value === "1");
+      updateAudienceNextSteps();
+    });
+  });
+  const pickerModal = root.querySelector("[data-audience-modal]");
+  const pickerTitle = root.querySelector("[data-picker-title]");
+  const pickerTitles = { order_product: "选择订单审核商品", questionnaire: "选择问卷", conversion_product: "选择成交判定商品" };
+  const openPicker = (picker) => {
+    if (!pickerModal) return;
+    if (pickerTitle) pickerTitle.textContent = pickerTitles[picker] || "选择";
+    root.querySelectorAll("[data-picker-panel]").forEach((panel) => {
+      const active = panel.dataset.pickerPanel === picker;
+      panel.hidden = !active;
+      panel.style.display = active ? "" : "none";
+    });
+    pickerModal.hidden = false;
+  };
+  const closePicker = () => {
+    if (pickerModal) pickerModal.hidden = true;
+  };
+  root.querySelectorAll("[data-open-picker]").forEach((button) => {
+    button.addEventListener("click", () => openPicker(button.dataset.openPicker || ""));
+  });
+  root.querySelector("[data-close-picker]")?.addEventListener("click", closePicker);
+  pickerModal?.addEventListener("click", (event) => {
+    if (event.target === pickerModal) closePicker();
+  });
+  root.querySelectorAll("[data-pick-audience-item]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const picker = button.dataset.picker || "";
+      if (picker === "order_product") {
+        setAudienceEnabled("order_review", true);
+        setAudienceSelection("order_review", { id: button.dataset.value || "", name: button.dataset.name || "", price: button.dataset.price || "" });
+      } else if (picker === "questionnaire") {
+        setAudienceEnabled("questionnaire_review", true);
+        setAudienceSelection("questionnaire_review", { id: button.dataset.value || "", name: button.dataset.name || "" });
+      } else if (picker === "conversion_product") {
+        setAudienceEnabled("conversion_review", true);
+        setAudienceSelection("conversion_review", { id: button.dataset.value || "", name: button.dataset.name || "", price: button.dataset.price || "" });
+      }
+      updateAudienceNextSteps();
+      const payload = currentAudiencePayload();
+      payload._allow_incomplete = true;
+      try {
+        await postJson(urls.audience_entry_rule, payload);
+        closePicker();
+        const labels = { order_product: "已选择订单审核商品", questionnaire: "已选择问卷", conversion_product: "已选择成交判定商品" };
+        showFeedback(labels[picker] || "已选择", true);
+      } catch (error) { showFeedback(error.message || "选择失败，请稍后重试"); }
+    });
+  });
+  updateAudienceNextSteps();
+  const selectedFeedback = new URLSearchParams(window.location.search).get("selected");
+  if (selectedFeedback === "questionnaire") showFeedback("已选择问卷", true);
+  if (selectedFeedback === "order_product") showFeedback("已选择订单审核商品", true);
+  if (selectedFeedback === "conversion_product") showFeedback("已选择成交判定商品", true);
   const saveCurrentStep = async () => {
     const target = activeForm();
     if (currentStep === "operations") {
@@ -664,18 +1064,44 @@
     } catch (error) { showFeedback(error.message || "保存失败，请先处理当前页面配置"); }
   });
   root.querySelector("[data-operation-save-publish]")?.addEventListener("click", async () => {
+    const button = root.querySelector("[data-operation-save-publish]");
+    const originalText = button?.textContent || "保存并发布";
     try {
+      if (button) {
+        button.disabled = true;
+        button.textContent = "发布中...";
+      }
       if (typeof window.__automationOperationPublish === "function") {
         await window.__automationOperationPublish();
-        showFeedback("已保存并发布", true);
+        showFeedback("运营任务已保存并启用", true);
+        if (button) button.textContent = "已启用";
       } else {
         throw new Error("运营任务发布能力未加载，请刷新页面后重试");
       }
-    } catch (error) { showFeedback(error.message || "保存并发布失败"); }
+    } catch (error) {
+      if (button) {
+        button.disabled = false;
+        button.textContent = originalText;
+      }
+      showFeedback(error.message || "保存并发布失败");
+    }
   });
   root.querySelectorAll("[data-publish]").forEach((button) => {
     button.addEventListener("click", async () => {
-      try { await postJson(button.dataset.publish === "entry" ? urls.publish_entry : urls.publish_full, {}); showFeedback(button.dataset.publish === "entry" ? "入口已发布" : "完整自动化已发布", true); window.location.reload(); } catch (error) { showFeedback(error.message || "发布失败，请先处理检查项"); }
+      const publishType = button.dataset.publish === "entry" ? "entry" : "full";
+      const originalText = button.textContent;
+      try {
+        button.disabled = true;
+        button.textContent = "发布中...";
+        await postJson(publishType === "entry" ? urls.publish_entry : urls.publish_full, {});
+        const message = publishType === "entry" ? "入口已发布，方案列表会显示「入口已发布」" : "完整自动化已发布，方案列表会显示「完整自动化已发布」";
+        showFeedback(message, true);
+        button.textContent = publishType === "entry" ? "入口已发布" : "完整自动化已发布";
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = originalText;
+        showFeedback(error.message || "发布失败，请先处理检查项");
+      }
     });
   });
 })();

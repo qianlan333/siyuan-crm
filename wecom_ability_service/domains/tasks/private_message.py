@@ -148,8 +148,13 @@ def normalize_private_message_images(payload: dict[str, Any]) -> list[dict[str, 
 
 
 def normalize_private_message_attachments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    from .. import attachment_library
+
     attachments: list[dict[str, Any]] = []
-    for item in _normalize_image_list(payload.get("attachments")):
+    raw_items = _normalize_image_list(payload.get("attachments"))
+    for library_id in attachment_library._normalize_id_list(payload.get("attachment_library_ids"), max_count=MAX_PRIVATE_MESSAGE_ATTACHMENTS):
+        raw_items.append({"msgtype": "file", "file": {"library_id": library_id}})
+    for item in raw_items:
         if not isinstance(item, dict):
             raise ValueError("attachments entries must be objects")
         normalized = deepcopy(item)
@@ -163,8 +168,15 @@ def normalize_private_message_attachments(payload: dict[str, Any]) -> list[dict[
             raise ValueError(f"attachments entries must include a non-empty '{msgtype}' object")
         if msgtype == "file":
             media_id = str(attachment_payload.get("media_id") or "").strip()
+            raw_library_id = attachment_payload.get("library_id") or attachment_payload.get("attachment_library_id") or normalized.get("attachment_library_id")
+            if not media_id and raw_library_id:
+                media_id = attachment_library.resolve_attachment_media_id(int(raw_library_id))
+                attachment_payload["media_id"] = media_id
+                attachment_payload.pop("library_id", None)
+                attachment_payload.pop("attachment_library_id", None)
             if not media_id:
                 raise ValueError("file attachments must include media_id")
+            normalized["file"] = {"media_id": media_id}
         elif msgtype == "miniprogram":
             normalized[msgtype] = _normalize_miniprogram_for_add_msg_template(attachment_payload)
         normalized["msgtype"] = msgtype
@@ -235,6 +247,7 @@ def build_private_message_request_payload(
 
     normalized_payload.pop("images", None)
     normalized_payload.pop("image_media_ids", None)
+    normalized_payload.pop("attachment_library_ids", None)
     normalized_payload.pop("content", None)
 
     if content.strip():

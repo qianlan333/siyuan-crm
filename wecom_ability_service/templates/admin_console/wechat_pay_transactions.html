@@ -180,6 +180,7 @@
   }
   .wxpay-pill--pending { color: #8a5a00; background: #fff4d6; }
   .wxpay-pill--paid { color: #0f7a43; background: #e7f8ee; }
+  .wxpay-pill--refund_processing { color: #9333ea; background: #f3e8ff; }
   .wxpay-pill--partial_refunded { color: #1d4ed8; background: #e7efff; }
   .wxpay-pill--full_refunded { color: #475569; background: #eef2f7; }
   .wxpay-empty {
@@ -316,13 +317,15 @@
             <div class="wxpay-kv__label">付款人 / 客户身份</div>
             <div class="wxpay-kv__value">{{ order.identity }}</div>
             <div class="wxpay-kv__label">商品</div>
-            <div class="wxpay-kv__value">{{ order.product_name }} / {{ order.product_code }}</div>
+            <div class="wxpay-kv__value">{{ order.product_label }}</div>
             <div class="wxpay-kv__label">金额</div>
             <div class="wxpay-kv__value">¥{{ order.amount_yuan }}</div>
             <div class="wxpay-kv__label">状态</div>
             <div class="wxpay-kv__value"><span class="wxpay-pill wxpay-pill--{{ order.status }}">{{ order.status_label }}</span></div>
             <div class="wxpay-kv__label">已退款</div>
             <div class="wxpay-kv__value">¥{{ order.refunded_amount_yuan }}</div>
+            <div class="wxpay-kv__label">退款处理中</div>
+            <div class="wxpay-kv__value">¥{{ order.active_refund_amount_yuan }}</div>
             <div class="wxpay-kv__label">可退款</div>
             <div class="wxpay-kv__value">¥{{ order.refundable_amount_yuan }}</div>
           </div>
@@ -338,10 +341,10 @@
         </div>
         <div class="wxpay-card__body">
           {% if order.can_refund %}
-          <form id="refundForm" data-order-id="{{ order.id }}" data-transaction-id="{{ order.transaction_id }}">
+          <form id="refundForm" data-order-id="{{ order.id }}" data-transaction-id="{{ order.transaction_id }}" data-max-refund-total="{{ order.refundable_amount_total }}">
             <div class="wxpay-field">
               <label for="refundAmount">退款金额</label>
-              <input id="refundAmount" name="refund_amount_yuan" inputmode="decimal" placeholder="例如 99.00" required>
+              <input id="refundAmount" name="refund_amount_yuan" inputmode="decimal" placeholder="最多 {{ order.refundable_amount_yuan }}" required>
             </div>
             <div class="wxpay-field">
               <label for="refundReason">退款原因</label>
@@ -402,7 +405,7 @@
     <div class="wxpay-card__head">
       <div>
         <h2>筛选</h2>
-        <p>默认查看最近 30 天，按订单创建时间倒序；商品使用商品编码精确筛选。</p>
+        <p>默认查看最近 30 天，按订单创建时间倒序；可按商品、手机号、客户身份或微信单号筛选。</p>
       </div>
       <div class="wxpay-actions">
         <button class="wxpay-btn wxpay-btn--primary" id="wxpaySearch" type="button">查询</button>
@@ -414,22 +417,22 @@
       <div class="wxpay-filter-grid">
         <div class="wxpay-field">
           <label for="filterMobile">手机号</label>
-          <input id="filterMobile" value="{{ default_filters.mobile }}" placeholder="mobile_snapshot / mobile">
+          <input id="filterMobile" value="{{ default_filters.mobile }}" placeholder="输入手机号">
         </div>
         <div class="wxpay-field">
-          <label for="filterIdentity">userid / external_userid</label>
-          <input id="filterIdentity" value="{{ default_filters.identity }}" placeholder="精确输入客户身份">
+          <label for="filterIdentity">客户身份</label>
+          <input id="filterIdentity" value="{{ default_filters.identity }}" placeholder="输入客户 ID 或外部联系人 ID">
         </div>
         <div class="wxpay-field">
           <label for="filterTransaction">微信单号</label>
-          <input id="filterTransaction" value="{{ default_filters.transaction_id }}" placeholder="transaction_id">
+          <input id="filterTransaction" value="{{ default_filters.transaction_id }}" placeholder="输入微信支付单号">
         </div>
         <div class="wxpay-field">
           <label for="filterProduct">商品</label>
           <select id="filterProduct">
             <option value="">全部商品</option>
             {% for product in product_options %}
-            <option value="{{ product.product_code }}">{{ product.product_name }} / {{ product.product_code }}</option>
+            <option value="{{ product.product_code }}">{{ product.label }}</option>
             {% endfor %}
           </select>
         </div>
@@ -447,6 +450,7 @@
             <option value="">全部</option>
             <option value="pending">待支付</option>
             <option value="paid">已支付</option>
+            <option value="refund_processing">退款处理中</option>
             <option value="partial_refunded">部分退款</option>
             <option value="full_refunded">全额退款</option>
           </select>
@@ -558,9 +562,19 @@
       const result = document.getElementById("refundResult");
       result.textContent = "正在提交退款申请...";
       const orderId = refundForm.dataset.orderId;
+      const maxRefundTotal = Number(refundForm.dataset.maxRefundTotal || 0);
+      const refundAmountTotal = moneyCents(document.getElementById("refundAmount").value);
+      if (!Number.isFinite(refundAmountTotal) || refundAmountTotal <= 0) {
+        result.textContent = "退款金额必须大于 0";
+        return;
+      }
+      if (maxRefundTotal > 0 && refundAmountTotal > maxRefundTotal) {
+        result.textContent = `退款金额不能超过可退款金额 ¥${(maxRefundTotal / 100).toFixed(2)}`;
+        return;
+      }
       const payload = {
         admin_action_token: adminActionToken,
-        refund_amount_total: moneyCents(document.getElementById("refundAmount").value),
+        refund_amount_total: refundAmountTotal,
         reason: document.getElementById("refundReason").value,
         transaction_id_confirmation: document.getElementById("transactionConfirm").value,
         checked: document.getElementById("refundChecked").checked
@@ -576,7 +590,10 @@
         return;
       }
       const refundLabel = data.refund ? `，微信退款状态：${data.refund.status_label}` : "";
-      result.textContent = `退款申请已提交${refundLabel}，当前订单状态：${data.order.status_label}，已退款 ¥${data.order.refunded_amount_yuan}`;
+      result.textContent = `退款申请已提交${refundLabel}，当前订单状态：${data.order.status_label}，退款处理中 ¥${data.order.active_refund_amount_yuan}，已退款 ¥${data.order.refunded_amount_yuan}，可退款 ¥${data.order.refundable_amount_yuan}`;
+      if (data.order && Number(data.order.refundable_amount_total || 0) <= 0) {
+        refundForm.querySelectorAll("input, select, button").forEach((node) => { node.disabled = true; });
+      }
     });
   }
   {% else %}
@@ -621,8 +638,7 @@
           <div class="wxpay-identity-sub">${escapeHtml(row.mobile || "未记录手机号")} · ${escapeHtml(row.userid || row.external_userid || "-")}</div>
         </td>
         <td>
-          <div class="wxpay-product">${escapeHtml(row.product_name)}</div>
-          <div class="wxpay-identity-sub">${escapeHtml(row.product_code)}</div>
+          <div class="wxpay-product">${escapeHtml(row.product_label || row.product_name)}</div>
         </td>
         <td class="wxpay-money">¥${escapeHtml(row.amount_yuan)}</td>
         <td>${statusPill(row)}</td>
@@ -684,10 +700,10 @@
   const modal = document.getElementById("exportModal");
   const summary = document.getElementById("exportSummary");
   const filterLabels = {
-    created_from: "创建开始", created_to: "创建结束", product_code: "商品编码", status: "状态",
+    created_from: "创建开始", created_to: "创建结束", product_code: "商品", status: "状态",
     mobile: "手机号", identity: "客户身份", transaction_id: "微信单号"
   };
-  const statusLabels = {pending: "待支付", paid: "已支付", partial_refunded: "部分退款", full_refunded: "全额退款"};
+  const statusLabels = {pending: "待支付", paid: "已支付", refund_processing: "退款处理中", partial_refunded: "部分退款", full_refunded: "全额退款"};
   document.getElementById("wxpayExport").addEventListener("click", () => {
     const currentFilters = filters();
     summary.innerHTML = Object.entries(filterLabels).map(([key, label]) => {

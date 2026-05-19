@@ -68,6 +68,7 @@ def _dispatch_private_message_batch(
     images: list[dict[str, Any]] | None = None,
     miniprogram_library_ids: list[int] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    attachment_library_ids: list[int] | None = None,
     operator_id: str,
     filter_snapshot: dict[str, Any],
     sender_userid: str | None = None,
@@ -77,6 +78,7 @@ def _dispatch_private_message_batch(
         "content": _normalized_text(content),
         "image_media_ids": _normalize_private_message_image_media_ids(image_media_ids),
         "images": list(images or []),
+        "attachment_library_ids": [int(i) for i in (attachment_library_ids or []) if i],
     }
     library_ids = [int(i) for i in (miniprogram_library_ids or []) if i]
     extra_attachments: list[dict[str, Any]] = list(attachments or [])

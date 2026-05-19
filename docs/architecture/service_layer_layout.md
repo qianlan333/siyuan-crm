@@ -7,8 +7,10 @@ This document defines the service-layer contract for `wecom_ability_service`.
 Only two domain layout modes are allowed:
 
 1. `simple`
-- `service.py`
-- `repo.py`
+- a primary `service.py`
+- declared persistence modules such as `repo.py`
+- optional declared companion service modules such as `product_service.py` or `admin_service.py`
+- optional declared domain-local support modules such as `client.py` or `exceptions.py`
 
 2. `complex`
 - `service.py`
@@ -16,7 +18,7 @@ Only two domain layout modes are allowed:
 - `writers.py`
 - optional `repo.py` as an aggregation entry
 
-Companion files are allowed only when they stay inside one of those two modes and do not create a third layering style.
+Companion files are allowed only when they are declared in `DOMAIN_LAYOUTS`, stay inside one of those two modes, and do not create a third layering style.
 Examples:
 - `definitions.py` for domain-owned rules
 - `preflight_service.py` for a small domain-local application assembly helper
@@ -24,7 +26,7 @@ Examples:
 ## Direction Of Dependencies
 
 - HTTP controller -> domain `service.py`
-- Domain `service.py` -> same-domain `repo.py` or `queries.py` / `writers.py`
+- Domain service modules -> same-domain persistence modules or declared domain service adapters
 - Domain code -> `infra/*` for shared constants, settings, runtime clients, and low-level helpers
 - `wecom_ability_service/services.py` -> compatibility facade only
 
@@ -110,6 +112,18 @@ External push-log list and retry handlers are isolated in `admin_questionnaire_p
 `wecom_ability_service/http/image_library_endpoint.py` owns the image-library page, listing, details, update, delete, references, and resolve-test APIs.
 Image creation handlers are isolated in `image_library_create.py` so upload/from-url/from-base64 request handling does not inflate the image-library owner.
 
+WeChat Pay HTTP handlers are split by product surface:
+
+- `wechat_pay.py`: H5/JSAPI checkout, public product intro pages, order creation/status, and payment notification callbacks.
+- `admin_wechat_pay.py`: admin transaction list/detail, export, and refund request APIs.
+- `admin_wechat_pay_products.py`: admin product CRUD, product sharing, lead-plan binding, and long-image slice APIs.
+
+WeChat Pay business rules stay in `wecom_ability_service/domains/wechat_pay/*`.
+`service.py` owns checkout, paid re-entry, and payment notification reconciliation.
+`product_service.py` owns product lifecycle, public product page state, long-image slices, sharing QR data, and lead-plan QR binding.
+`admin_service.py` owns admin transaction read models, status labels, export jobs, and refund request orchestration.
+`repo.py` owns order/refund/export persistence, `product_repo.py` owns product and product-slice persistence, and `client.py` is the domain-local WeChat Pay API client.
+
 ## Current Domain Modes
 
 | Domain | Mode | Primary responsibility | Notes |
@@ -126,7 +140,7 @@ Image creation handlers are isolated in `image_library_create.py` so upload/from
 | `tags` | `simple` | tag snapshot, signup tag rules, tag refresh | `service.py + repo.py` |
 | `tasks` | `simple` | outbound task dispatch and persistence | `service.py + repo.py` |
 | `user_ops` | `simple` | lead pool, imports, activation, deferred jobs, class-term mapping | `service.py + repo.py` |
-| `wechat_pay` | `simple` | WeChat Pay H5 JSAPI checkout, order lifecycle, payment notification handling | `service.py + repo.py`; `client.py` stays a domain-local third-party API client |
+| `wechat_pay` | `simple` | WeChat Pay H5/JSAPI checkout, product management, transaction admin, refunds, and payment notification handling | `service.py + product_service.py + admin_service.py + repo.py + product_repo.py`; `client.py` stays a domain-local third-party API client |
 
 ## Shared Infra
 

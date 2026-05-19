@@ -1305,10 +1305,10 @@ def test_admin_wecom_tag_management_crud_payloads(client, monkeypatch):
 
     group_response = client.post(
         "/api/admin/wecom/tag-groups",
-        json={"group_name": "新标签组", "first_tag_name": "首个标签"},
+        json={"group_name": "新标签组", "tag_names": ["首个标签", "第二个标签"]},
     )
     assert group_response.status_code == 200
-    assert state["created"][-1] == {"group_name": "新标签组", "tag": [{"name": "首个标签"}]}
+    assert state["created"][-1] == {"group_name": "新标签组", "tag": [{"name": "首个标签"}, {"name": "第二个标签"}]}
 
     tag_response = client.post(
         "/api/admin/wecom/tags",
@@ -1358,6 +1358,38 @@ def test_admin_wecom_tag_management_blocks_create_when_limit_reached(client, mon
     monkeypatch.setattr("requests.post", fake_full_tag_post)
 
     response = client.post("/api/admin/wecom/tags", json={"group_id": "group-full", "tag_name": "超限标签"})
+    data = response.get_json()
+    assert response.status_code == 400
+    assert data["error"] == "标签数量已达到 1000 上限，不能继续新增标签。"
+
+
+def test_admin_wecom_tag_management_blocks_batch_create_when_over_limit(client, monkeypatch):
+    def fake_almost_full_tag_post(url, params=None, json=None, timeout=None, files=None):
+        if url.endswith("/cgi-bin/externalcontact/get_corp_tag_list"):
+            return FakeResponse(
+                {
+                    "errcode": 0,
+                    "errmsg": "ok",
+                    "tag_group": [
+                        {
+                            "group_id": "group-almost-full",
+                            "group_name": "接近满额标签组",
+                            "tag": [{"id": f"tag-{index}", "name": f"标签{index}"} for index in range(999)],
+                        }
+                    ],
+                }
+            )
+        if url.endswith("/cgi-bin/externalcontact/add_corp_tag"):
+            raise AssertionError("add_corp_tag should not be called when batch create exceeds tag limit")
+        return fake_wecom_post(url, params=params, json=json, timeout=timeout, files=files)
+
+    monkeypatch.setattr("requests.get", fake_wecom_get)
+    monkeypatch.setattr("requests.post", fake_almost_full_tag_post)
+
+    response = client.post(
+        "/api/admin/wecom/tag-groups",
+        json={"group_name": "新增批量组", "tag_names": ["第1000个", "第1001个"]},
+    )
     data = response.get_json()
     assert response.status_code == 400
     assert data["error"] == "标签数量已达到 1000 上限，不能继续新增标签。"

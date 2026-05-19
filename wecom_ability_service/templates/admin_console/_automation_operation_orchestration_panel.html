@@ -26,6 +26,7 @@
   .op-task-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .op-task-grid--three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .op-task-field { display: grid; gap: 6px; min-width: 0; }
+  .op-task-field[hidden] { display: none; }
   .op-task-field > span { color: #667085; font-size: 13px; font-weight: 900; }
   .op-task-field input, .op-task-field select, .op-task-field textarea { width: 100%; padding: 11px 12px; border: 1px solid rgba(15,23,42,.12); border-radius: 10px; background: #fff; }
   .op-task-field textarea { min-height: 110px; resize: vertical; }
@@ -55,6 +56,7 @@
         <div class="op-task-tools__row">
           <button class="op-task-button is-primary" type="button" data-create-task>新增任务</button>
           <button class="op-task-button is-soft" type="button" data-create-group>新增分组</button>
+          <button class="op-task-button" type="button" data-delete-group>删除分组</button>
         </div>
       </div>
       <div class="op-task-feedback" data-task-list-feedback></div>
@@ -66,7 +68,6 @@
 
   <div class="op-task-panel" data-task-editor>
     <div class="op-task-feedback" data-task-feedback></div>
-    <div class="op-task-empty" data-task-empty>还没有运营任务</div>
     <div class="op-task-panel" data-task-form hidden>
       <section class="op-task-section">
         <h3>任务基础信息</h3>
@@ -81,9 +82,10 @@
       <section class="op-task-section">
         <h3>触发与对象</h3>
         <div class="op-task-grid op-task-grid--three">
-          <label class="op-task-field"><span>每天触发时间</span><input data-field="send_time" type="time"></label>
+          <label class="op-task-field"><span>触发方式</span><select data-field="trigger_type"><option value="scheduled_daily">每天固定时间触发</option><option value="audience_entered">进入人群后立即触发</option></select></label>
+          <label class="op-task-field" data-scheduled-trigger-field><span>每天触发时间</span><input data-field="send_time" type="time"></label>
           <label class="op-task-field"><span>目标人群</span><select data-field="target_audience_code"><option value="pending_questionnaire">待填问卷</option><option value="operating">运营中</option><option value="converted">已转化</option></select></label>
-          <label class="op-task-field"><span>进入人群第 N 天</span><input data-field="audience_day_offset" type="number" min="1" step="1"></label>
+          <label class="op-task-field" data-scheduled-trigger-field><span>进入人群第 N 天</span><input data-field="audience_day_offset" type="number" min="1" step="1"></label>
           <label class="op-task-field" style="grid-column: 1 / -1;"><span>行为过滤</span><select data-field="behavior_filter"><option value="none">不过滤</option><option value="lt_2">消息少于 2 次</option><option value="between_2_9">消息 2-9 次</option><option value="gte_10">消息大于等于 10 次</option></select></label>
         </div>
         <div class="op-task-actions">
@@ -116,10 +118,11 @@
   const root = document.querySelector("[data-operation-task-root]");
   if (!root) return;
   const apiUrls = JSON.parse(root.dataset.apiUrls || "{}");
-  const withId = (url, id) => String(url || "").replace(/\/0(?=\/|$)/, `/${encodeURIComponent(String(id || 0))}`);
+  const withId = (url, id) => String(url || "").replace(/\/0(?=\/|\?|$)/, `/${encodeURIComponent(String(id || 0))}`);
   const state = { groups: [], tasks: [], currentTask: null, profileTemplates: [], profileSegments: [], agents: [], preview: {} };
   const labels = {
     status: { draft: "草稿", active: "启用", paused: "停用", archived: "归档" },
+    trigger: { scheduled_daily: "每天固定时间", audience_entered: "进入人群后立即触发" },
     behavior: { lt_2: "消息少于 2", between_2_9: "消息 2 ~ 9", gte_10: "消息大于等于 10" },
   };
   const behaviorSegments = [
@@ -133,7 +136,6 @@
     groupSelect: root.querySelector("[data-field='group_id']"),
     list: root.querySelector("[data-task-list]"),
     form: root.querySelector("[data-task-form]"),
-    empty: root.querySelector("[data-task-empty]"),
     feedback: root.querySelector("[data-task-feedback]"),
     listFeedback: root.querySelector("[data-task-list-feedback]"),
     previewTotal: root.querySelector("[data-preview-total]"),
@@ -216,7 +218,6 @@
 
   function setCurrentTask(task) {
     state.currentTask = task ? { ...task } : null;
-    dom.empty.hidden = Boolean(task);
     dom.form.hidden = !task;
     if (!task) {
       renderList();
@@ -226,16 +227,25 @@
     setValue("group_id", task.group_id || "");
     setValue("status", task.status || "draft");
     setValue("description", task.description || "");
+    setValue("trigger_type", task.trigger_type || "scheduled_daily");
     setValue("send_time", task.send_time || "10:00");
     setValue("target_audience_code", task.target_audience_code || "operating");
     setValue("audience_day_offset", task.audience_day_offset || 1);
     setValue("behavior_filter", task.behavior_filter || "none");
     setValue("profile_segment_template_id", task.profile_segment_template_id || "");
     setMode(task.content_mode || "unified", false);
+    syncTriggerFields();
     if (String(task.content_mode || "") === "profile_layered" && task.profile_segment_template_id) {
       loadProfileSegments(task.profile_segment_template_id).then(renderSegments).catch(() => {});
     }
     renderList();
+  }
+
+  function syncTriggerFields() {
+    const isAudienceEntered = String(getValue("trigger_type") || "scheduled_daily") === "audience_entered";
+    root.querySelectorAll("[data-scheduled-trigger-field]").forEach((field) => {
+      field.hidden = isAudienceEntered;
+    });
   }
 
   async function loadProfileTemplates() {
@@ -298,6 +308,7 @@
         <div class="op-task-segment-assets">
           <button class="op-task-button is-soft" type="button" data-bind-asset="image">绑定图片</button>
           <button class="op-task-button is-soft" type="button" data-bind-asset="miniprogram">绑定小程序</button>
+          <button class="op-task-button is-soft" type="button" data-bind-asset="attachment">绑定附件</button>
           <span data-asset-list>${assetChips(content)}</span>
         </div>
       </article>`;
@@ -307,7 +318,8 @@
   function assetChips(content) {
     const images = (content.image_library_ids || []).map((id) => `<span class="op-task-chip" data-image-id="${id}">图片 ${id}</span>`);
     const minis = (content.miniprogram_library_ids || []).map((id) => `<span class="op-task-chip" data-miniprogram-id="${id}">小程序 ${id}</span>`);
-    return images.concat(minis).join("");
+    const attachments = (content.attachment_library_ids || []).map((id) => `<span class="op-task-chip" data-attachment-id="${id}">附件 ${id}</span>`);
+    return images.concat(minis, attachments).join("");
   }
 
   function setMode(mode, updateTask = true) {
@@ -321,6 +333,7 @@
     return {
       image_library_ids: [...segment.querySelectorAll("[data-image-id]")].map((item) => Number(item.dataset.imageId)).filter(Boolean),
       miniprogram_library_ids: [...segment.querySelectorAll("[data-miniprogram-id]")].map((item) => Number(item.dataset.miniprogramId)).filter(Boolean),
+      attachment_library_ids: [...segment.querySelectorAll("[data-attachment-id]")].map((item) => Number(item.dataset.attachmentId)).filter(Boolean).slice(0, 9),
     };
   }
 
@@ -331,6 +344,7 @@
       task_name: String(getValue("task_name") || "").trim(),
       description: String(getValue("description") || "").trim(),
       status: statusOverride || getValue("status") || "draft",
+      trigger_type: getValue("trigger_type") || "scheduled_daily",
       send_time: getValue("send_time") || "10:00",
       timezone: "Asia/Shanghai",
       target_audience_code: getValue("target_audience_code") || "operating",
@@ -364,7 +378,7 @@
   async function saveTask(statusOverride = "", silent = false) {
     if (!state.currentTask) throw new Error("请先选择一个运营任务");
     const payload = collectPayload(statusOverride);
-    const data = await requestJson(withId(apiUrls.task_base, currentId()), { method: "PUT", body: JSON.stringify(payload) });
+    const data = await requestJson(withId(apiUrls.task_detail_base, currentId()), { method: "PUT", body: JSON.stringify(payload) });
     const task = data.task;
     const index = state.tasks.findIndex((item) => Number(item.id) === Number(task.id));
     if (index >= 0) state.tasks[index] = task;
@@ -390,6 +404,7 @@
         task_name: "新运营任务",
         group_id: defaultGroup,
         status: "draft",
+        trigger_type: "scheduled_daily",
         send_time: "10:00",
         target_audience_code: "operating",
         audience_day_offset: 1,
@@ -412,9 +427,31 @@
     showFeedback(dom.listFeedback, "已新增分组", true);
   }
 
+  async function deleteSelectedGroup() {
+    const groupId = Number(dom.groupFilter?.value || 0);
+    if (!groupId) {
+      showFeedback(dom.listFeedback, "请先在分组筛选里选择要删除的分组");
+      return;
+    }
+    const group = state.groups.find((item) => Number(item.id) === groupId);
+    if (!group) {
+      showFeedback(dom.listFeedback, "分组不存在或已被删除");
+      return;
+    }
+    if (!window.confirm(`确认删除分组「${group.group_name || "未命名分组"}」吗？组内任务会保留，并移动到未分组。`)) return;
+    await requestJson(withId(apiUrls.task_group_detail_base, groupId), { method: "DELETE" });
+    state.groups = state.groups.filter((item) => Number(item.id) !== groupId);
+    state.tasks = state.tasks.map((task) => Number(task.group_id || 0) === groupId ? { ...task, group_id: null, group_name: "" } : task);
+    if (state.currentTask && Number(state.currentTask.group_id || 0) === groupId) state.currentTask = { ...state.currentTask, group_id: null, group_name: "" };
+    syncGroupControls();
+    if (dom.groupFilter) dom.groupFilter.value = "";
+    setCurrentTask(state.currentTask);
+    showFeedback(dom.listFeedback, "已删除分组，组内任务已移动到未分组", true);
+  }
+
   async function previewAudience() {
     if (!state.currentTask) return;
-    const data = await requestJson(withId(apiUrls.task_preview_base, currentId()), { method: "POST", body: JSON.stringify(collectPayload()) });
+    const data = await requestJson(withId(apiUrls.task_preview_audience_base, currentId()), { method: "POST", body: JSON.stringify(collectPayload()) });
     state.preview = data.preview || {};
     dom.previewTotal.textContent = String(state.preview.target_count ?? 0);
     renderSegments();
@@ -425,13 +462,22 @@
     if (modeButton) setMode(modeButton.dataset.mode || "unified");
     const asset = event.target.closest("[data-bind-asset]");
     if (asset) {
-      const id = Number(window.prompt(asset.dataset.bindAsset === "image" ? "请输入图片素材编号" : "请输入小程序素材编号", "") || 0);
+      const labels = { image: "请输入图片素材编号", miniprogram: "请输入小程序素材编号", attachment: "请输入附件素材编号" };
+      const id = Number(window.prompt(labels[asset.dataset.bindAsset] || "请输入素材编号", "") || 0);
       if (!id) return;
       const list = asset.closest("[data-segment-key]")?.querySelector("[data-asset-list]");
-      if (list) list.insertAdjacentHTML("beforeend", asset.dataset.bindAsset === "image" ? `<span class="op-task-chip" data-image-id="${id}">图片 ${id}</span>` : `<span class="op-task-chip" data-miniprogram-id="${id}">小程序 ${id}</span>`);
+      if (list) {
+        const html = asset.dataset.bindAsset === "image"
+          ? `<span class="op-task-chip" data-image-id="${id}">图片 ${id}</span>`
+          : asset.dataset.bindAsset === "miniprogram"
+            ? `<span class="op-task-chip" data-miniprogram-id="${id}">小程序 ${id}</span>`
+            : `<span class="op-task-chip" data-attachment-id="${id}">附件 ${id}</span>`;
+        list.insertAdjacentHTML("beforeend", html);
+      }
     }
     if (event.target.closest("[data-create-task]")) await createTask().catch((error) => showFeedback(dom.listFeedback, error.message || "新增失败"));
     if (event.target.closest("[data-create-group]")) await createGroup().catch((error) => showFeedback(dom.listFeedback, error.message || "新增失败"));
+    if (event.target.closest("[data-delete-group]")) await deleteSelectedGroup().catch((error) => showFeedback(dom.listFeedback, error.message || "删除分组失败"));
     if (event.target.closest("[data-preview-audience]")) await previewAudience().catch((error) => showFeedback(dom.feedback, error.message || "预览失败"));
     const actionButton = event.target.closest("[data-task-action]");
     if (actionButton) {
@@ -457,7 +503,7 @@
         }
         if (action === "delete") {
           if (!window.confirm("确认删除这个运营任务吗？删除后不可恢复。")) return;
-          await requestJson(withId(apiUrls.task_base, taskId), { method: "DELETE" });
+          await requestJson(withId(apiUrls.task_delete_base, taskId), { method: "DELETE" });
           state.tasks = state.tasks.filter((item) => Number(item.id) !== taskId);
           setCurrentTask(currentId() === taskId ? (state.tasks[0] || null) : state.currentTask);
           showFeedback(dom.listFeedback, "已删除运营任务", true);
@@ -481,10 +527,12 @@
     field.addEventListener("input", () => {
       if (!state.currentTask) return;
       state.currentTask[field.dataset.field] = field.value;
+      if (field.dataset.field === "trigger_type") syncTriggerFields();
     });
     field.addEventListener("change", () => {
       if (!state.currentTask) return;
       state.currentTask[field.dataset.field] = field.value;
+      if (field.dataset.field === "trigger_type") syncTriggerFields();
     });
   });
 

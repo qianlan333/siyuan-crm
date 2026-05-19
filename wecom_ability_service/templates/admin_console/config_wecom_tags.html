@@ -86,7 +86,7 @@
     background: rgba(39, 29, 16, 0.38);
   }
   .wecom-tags-modal-card {
-    width: min(560px, 100%);
+    width: min(640px, 100%);
     border: 1px solid var(--line);
     border-radius: var(--radius-lg);
     background: #fff;
@@ -107,6 +107,11 @@
     color: var(--text);
     background: #fff;
   }
+  .wecom-tags-tag-list { display: grid; gap: 10px; }
+  .wecom-tags-tag-list-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 700; }
+  .wecom-tags-tag-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+  .wecom-tags-tag-row .admin-button { min-height: 38px; padding: 8px 10px; }
+  .wecom-tags-add-row { justify-content: flex-start; margin-top: 2px; }
   .wecom-tags-detail { display: grid; gap: 8px; margin-bottom: 14px; }
   .wecom-tags-detail-row { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .wecom-tags-detail-row span { overflow-wrap: anywhere; }
@@ -136,7 +141,6 @@
       <div class="wecom-tags-actions">
         <button class="admin-button admin-button--secondary" type="button" data-action="sync">同步企微标签</button>
         <button class="admin-button admin-button--ghost" type="button" data-action="create-group">新增标签组</button>
-        <button class="admin-button admin-button--primary" type="button" data-action="create-tag">新增标签</button>
       </div>
     </div>
     <div class="wecom-tags-toolbar">
@@ -173,6 +177,7 @@
           <p data-role="current-group-meta">当前组标签列表</p>
         </div>
         <div class="wecom-tags-actions">
+          <button class="admin-button admin-button--primary" type="button" data-action="create-tag">新增标签</button>
           <button class="admin-button admin-button--ghost" type="button" data-action="edit-group">编辑组名</button>
           <button class="admin-button admin-button--ghost" type="button" data-action="delete-group">删除组</button>
         </div>

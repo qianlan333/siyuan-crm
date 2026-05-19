@@ -236,7 +236,7 @@ TOOL_DEFS = [
     },
     {
         "name": "send_pool_private_message",
-        "description": "Send one private-message batch directly to one CRM pool. Supports text, JPG/PNG images (<=2MB), attachments (<=9 total), or mixed combinations; CRM filters the pool, sends, and writes send records.",
+        "description": "Send one private-message batch directly to one CRM pool. Supports text, JPG/PNG images (<=2MB), attachment_library_ids/file attachments (<=9 total), or mixed combinations; CRM filters the pool, sends, and writes send records.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -265,6 +265,7 @@ TOOL_DEFS = [
                     },
                 },
                 "image_media_ids": {"type": "array", "items": {"type": "string"}},
+                "attachment_library_ids": {"type": "array", "items": {"type": "integer"}},
                 "attachments": {
                     "type": "array",
                     "items": {
@@ -274,7 +275,14 @@ TOOL_DEFS = [
                                 "type": "string",
                                 "enum": ["file"],
                             },
-                            "file": {"type": "object"},
+                            "file": {
+                                "type": "object",
+                                "properties": {
+                                    "media_id": {"type": "string"},
+                                    "library_id": {"type": "integer"},
+                                    "attachment_library_id": {"type": "integer"},
+                                },
+                            },
                         },
                         "required": ["msgtype"],
                     },

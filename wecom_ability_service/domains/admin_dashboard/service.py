@@ -8,19 +8,47 @@ from ..admin_auth import admin_role_can_access_module
 from ..admin_jobs import build_jobs_dashboard_groups, build_jobs_runtime_snapshot
 from . import repo
 
-ADMIN_NAV_ITEMS = (
-    {"key": "automation_conversion", "label": "自动化运营", "endpoint": "api.admin_automation_conversion"},
-    {"key": "cloud_orchestrator", "label": "AI 助手", "endpoint": "api.admin_cloud_orchestrator_workspace"},
-    {"key": "customers", "label": "客户", "endpoint": "api.admin_console_customers"},
-    {"key": "user_ops_funnel", "label": "激活漏斗", "endpoint": "api.admin_hxc_dashboard_workspace"},
-    {"key": "questionnaires", "label": "问卷", "endpoint": "api.admin_console_questionnaires"},
-    {"key": "wechat_pay_transactions", "label": "交易管理", "endpoint": "api.admin_wechat_pay_transactions_page"},
-    {"key": "wecom_tags", "label": "企微标签管理", "endpoint": "api.admin_wecom_tags_page"},
-    {"key": "image_library", "label": "图片素材库", "endpoint": "api.admin_image_library_workspace"},
-    {"key": "miniprogram_library", "label": "小程序素材库", "endpoint": "api.admin_miniprogram_library_workspace"},
-    {"key": "jobs", "label": "同步任务", "endpoint": "api.admin_console_jobs"},
-    {"key": "config", "label": "配置", "endpoint": "api.admin_config_home"},
-    {"key": "api_docs", "label": "API 文档", "endpoint": "api.admin_console_api_docs"},
+ADMIN_NAV_GROUPS = (
+    {
+        "title": "运营",
+        "items": (
+            {"key": "automation_conversion", "label": "自动化运营", "endpoint": "api.admin_automation_conversion"},
+            {"key": "cloud_orchestrator", "label": "AI 助手", "endpoint": "api.admin_cloud_orchestrator_workspace"},
+            {"key": "customers", "label": "客户激活 / 客户列表", "endpoint": "api.admin_console_customers"},
+            {"key": "user_ops_funnel", "label": "漏斗 / 数据看板", "endpoint": "api.admin_hxc_dashboard_workspace"},
+            {"key": "questionnaires", "label": "问卷", "endpoint": "api.admin_console_questionnaires"},
+            {"key": "wecom_tags", "label": "企微标签管理", "endpoint": "api.admin_wecom_tags_page"},
+        ),
+    },
+    {
+        "title": "交易",
+        "items": (
+            {"key": "wechat_pay_transactions", "label": "交易管理", "endpoint": "api.admin_wechat_pay_transactions_page"},
+            {"key": "wechat_pay_products", "label": "商品管理", "endpoint": "api.admin_wechat_pay_products_page"},
+        ),
+    },
+    {
+        "title": "素材",
+        "items": (
+            {"key": "image_library", "label": "图片素材库", "endpoint": "api.admin_image_library_workspace"},
+            {"key": "miniprogram_library", "label": "小程序素材库", "endpoint": "api.admin_miniprogram_library_workspace"},
+            {"key": "attachment_library", "label": "附件素材库", "endpoint": "api.admin_attachment_library_workspace"},
+        ),
+    },
+    {
+        "title": "配置及后台",
+        "items": (
+            {"key": "jobs", "label": "同步任务配置 / 同步任务", "endpoint": "api.admin_console_jobs"},
+            {"key": "config", "label": "配置", "endpoint": "api.admin_config_home"},
+            {"key": "api_docs", "label": "API 文档", "endpoint": "api.admin_console_api_docs"},
+        ),
+    },
+)
+
+ADMIN_NAV_ITEMS = tuple(
+    item
+    for group in ADMIN_NAV_GROUPS
+    for item in group["items"]
 )
 
 
@@ -34,13 +62,24 @@ def _current_admin_role_codes() -> list[str]:
 def list_admin_navigation(active_nav: str) -> list[dict[str, Any]]:
     normalized_active_nav = str(active_nav or "").strip() or "automation_conversion"
     role_codes = _current_admin_role_codes()
-    items = []
-    for item in ADMIN_NAV_ITEMS:
-        module_key = str(item["key"] or "").strip()
-        if role_codes and not admin_role_can_access_module(role_codes, module_key):
+    groups = []
+    for group in ADMIN_NAV_GROUPS:
+        visible_items = []
+        for item in group["items"]:
+            module_key = str(item["key"] or "").strip()
+            if role_codes and not admin_role_can_access_module(role_codes, module_key):
+                continue
+            visible_items.append({**item, "active": module_key == normalized_active_nav})
+        if not visible_items:
             continue
-        items.append({**item, "active": module_key == normalized_active_nav})
-    return items
+        groups.append(
+            {
+                "title": group["title"],
+                "active": any(item["active"] for item in visible_items),
+                "items": visible_items,
+            }
+        )
+    return groups
 
 
 def build_admin_shell_status() -> dict[str, Any]:

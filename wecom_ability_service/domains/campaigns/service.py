@@ -714,6 +714,7 @@ def update_campaign_step(
     image_library_ids: list[int] | None = None,
     image_media_ids: list[str] | None = None,
     miniprogram_library_ids: list[int] | None = None,
+    attachment_library_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     """编辑单个 step。只有 review_status in (draft, pending_review) 且 run_status in (draft, paused) 时才允许，
     避免运行中改文案造成混乱。
@@ -767,6 +768,9 @@ def update_campaign_step(
         payload_dirty = True
     if miniprogram_library_ids is not None:
         payload["miniprogram_library_ids"] = normalize_int_list(miniprogram_library_ids)
+        payload_dirty = True
+    if attachment_library_ids is not None:
+        payload["attachment_library_ids"] = normalize_int_list(attachment_library_ids, limit=9)
         payload_dirty = True
     if payload_dirty:
         sets.append("content_payload_json = ?")

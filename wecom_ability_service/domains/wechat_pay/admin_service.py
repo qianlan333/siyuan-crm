@@ -9,18 +9,22 @@ import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from flask import current_app
 
+from ...db import get_db
 from ...infra.json_utils import safe_json_loads
 from ..admin_audit import record_audit
 from . import repo
-from .service import _create_wechat_pay_client, list_products
+from .product_service import list_products
+from .service import _create_wechat_pay_client
 
 
 ADMIN_ORDER_STATUSES = {
     "pending": "待支付",
     "paid": "已支付",
+    "refund_processing": "退款处理中",
     "partial_refunded": "部分退款",
     "full_refunded": "全额退款",
 }
@@ -39,6 +43,7 @@ EXPORT_HEADERS = [
 ]
 EXPORT_MAX_DAYS = 90
 EXPORT_MAX_ROWS = 5000
+ADMIN_DISPLAY_TIMEZONE = ZoneInfo("Asia/Shanghai")
 
 
 class WeChatPayAdminError(ValueError):
@@ -58,7 +63,10 @@ def _normalized_int(value: Any, *, default: int = 0) -> int:
 
 def _dt_text(value: Any) -> str:
     if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d %H:%M:%S")
+        source = value
+        if source.tzinfo is None:
+            source = source.replace(tzinfo=timezone.utc)
+        return source.astimezone(ADMIN_DISPLAY_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
     return _normalized_text(value)
 
 
@@ -83,9 +91,12 @@ def _encode_cursor(row: dict[str, Any]) -> str:
 def _merge_order_status(order: dict[str, Any]) -> str:
     amount_total = _normalized_int(order.get("amount_total"))
     refunded = _normalized_int(order.get("refunded_amount_total"))
+    active_refunding = _normalized_int(order.get("active_refund_amount_total"))
     refund_status = _normalized_text(order.get("refund_status"))
     if refund_status == "full_refunded" or (amount_total > 0 and refunded >= amount_total):
         return "full_refunded"
+    if active_refunding > 0:
+        return "refund_processing"
     if refund_status == "partial_refunded" or refunded > 0:
         return "partial_refunded"
     if _normalized_text(order.get("status")) == "paid" or _normalized_text(order.get("trade_state")) == "SUCCESS":
@@ -106,7 +117,10 @@ def _present_order(order: dict[str, Any], *, include_refund: bool = False) -> di
     status = _merge_order_status(order)
     amount_total = _normalized_int(order.get("amount_total"))
     refunded = max(0, _normalized_int(order.get("refunded_amount_total")))
-    refundable = max(0, amount_total - refunded)
+    active_refunding = max(0, _normalized_int(order.get("active_refund_amount_total")))
+    if not active_refunding and include_refund and int(order.get("id") or 0) > 0:
+        active_refunding = max(0, repo.sum_active_refund_amount(int(order.get("id") or 0)))
+    refundable = max(0, amount_total - refunded - active_refunding)
     product_code = _normalized_text(order.get("product_code"))
     product_name = _normalized_text(order.get("product_name")) or product_code
     presented = {
@@ -121,6 +135,7 @@ def _present_order(order: dict[str, Any], *, include_refund: bool = False) -> di
         "identity": _identity_text(order),
         "product_code": product_code,
         "product_name": product_name,
+        "product_label": product_name,
         "amount_total": amount_total,
         "amount_yuan": _money_text(amount_total),
         "currency": _normalized_text(order.get("currency")) or "CNY",
@@ -133,6 +148,8 @@ def _present_order(order: dict[str, Any], *, include_refund: bool = False) -> di
             {
                 "refunded_amount_total": refunded,
                 "refunded_amount_yuan": _money_text(refunded),
+                "active_refund_amount_total": active_refunding,
+                "active_refund_amount_yuan": _money_text(active_refunding),
                 "refundable_amount_total": refundable,
                 "refundable_amount_yuan": _money_text(refundable),
                 "can_refund": status in {"paid", "partial_refunded"} and refundable > 0,
@@ -142,7 +159,7 @@ def _present_order(order: dict[str, Any], *, include_refund: bool = False) -> di
 
 
 def default_filters() -> dict[str, str]:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(ADMIN_DISPLAY_TIMEZONE)
     start = now - timedelta(days=30)
     return {
         "created_from": start.strftime("%Y-%m-%dT00:00"),
@@ -182,12 +199,14 @@ def list_product_options() -> list[dict[str, Any]]:
         code = _normalized_text(product.get("product_code"))
         if not code:
             continue
-        options[code] = {"product_code": code, "product_name": _normalized_text(product.get("name")) or code}
+        name = _normalized_text(product.get("name")) or code
+        options[code] = {"product_code": code, "product_name": name, "label": name}
     for product in repo.list_products_from_orders():
         code = _normalized_text(product.get("product_code"))
         if not code or code in options:
             continue
-        options[code] = {"product_code": code, "product_name": _normalized_text(product.get("product_name")) or code}
+        name = _normalized_text(product.get("product_name")) or code
+        options[code] = {"product_code": code, "product_name": name, "label": name}
     return list(options.values())
 
 
@@ -314,6 +333,7 @@ def create_refund_request(
             payload={"out_refund_no": out_refund_no, "amount_total": amount_total, "error": str(exc)},
             headers={},
         )
+        get_db().commit()
         raise WeChatPayAdminError(f"微信支付退款申请失败：{exc}") from exc
 
     refund_status = _normalized_text(response_payload.get("status")) or "PROCESSING"
@@ -340,6 +360,7 @@ def create_refund_request(
         },
         headers={},
     )
+    get_db().commit()
     record_audit(
         operator=_normalized_text(operator) or "crm_console",
         action_type="wechat_pay_refund_requested",
@@ -425,15 +446,18 @@ def create_export_job(
             "file_format": normalized_format,
         }
     )
+    get_db().commit()
     try:
         _run_export_job(job_id=job_id, filters=normalized_filters, scope=normalized_scope, file_format=normalized_format, cursor=cursor, limit=limit)
     except Exception as exc:  # pragma: no cover - defensive envelope
         repo.update_export_job(job_id, status="failed", error_message=str(exc)[:500], finished_at=_dt_text(datetime.now(timezone.utc)))
+        get_db().commit()
     return {"job_id": job_id, "status": "queued", "created_at": _dt_text(job.get("created_at"))}
 
 
 def _run_export_job(*, job_id: str, filters: dict[str, str], scope: str, file_format: str, cursor: str, limit: Any) -> None:
     repo.update_export_job(job_id, status="running")
+    get_db().commit()
     export_limit = normalize_limit(limit) if scope == "current_page" else EXPORT_MAX_ROWS
     query_cursor = _normalized_text(cursor) if scope == "current_page" else ""
     payload = list_orders(filters=filters, limit=export_limit if export_limit in ALLOWED_LIMITS else 100, cursor=query_cursor)
@@ -459,6 +483,7 @@ def _run_export_job(*, job_id: str, filters: dict[str, str], scope: str, file_fo
         error_message="",
         finished_at=_dt_text(datetime.now(timezone.utc)),
     )
+    get_db().commit()
 
 
 def _export_row(row: dict[str, Any]) -> list[str]:

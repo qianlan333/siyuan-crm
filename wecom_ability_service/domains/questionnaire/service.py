@@ -2034,6 +2034,7 @@ def submit_questionnaire(slug: str, payload: dict[str, Any], request_meta: dict[
         sync_member_from_questionnaire_submission(
             external_contact_id=str(submission.get("external_userid") or "").strip(),
             phone=str(submission.get("mobile_snapshot") or "").strip(),
+            questionnaire_id=int(questionnaire.get("id") or 0),
             operator_id="questionnaire_submit",
         )
     except Exception:

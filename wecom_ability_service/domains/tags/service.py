@@ -363,14 +363,24 @@ def create_wecom_tag(payload: dict[str, Any]) -> dict[str, Any]:
     return client.create_tag(payload)
 
 
-def create_wecom_tag_group(*, group_name: str, first_tag_name: str) -> dict[str, Any]:
+def create_wecom_tag_group(
+    *,
+    group_name: str,
+    first_tag_name: str = "",
+    tag_names: list[Any] | None = None,
+) -> dict[str, Any]:
     normalized_group_name = _normalized_text(group_name)
-    normalized_first_tag_name = _normalized_text(first_tag_name)
+    normalized_tag_names = [_normalized_text(item) for item in (tag_names or [])]
+    normalized_tag_names = [item for item in normalized_tag_names if item]
+    if not normalized_tag_names:
+        normalized_first_tag_name = _normalized_text(first_tag_name)
+        if normalized_first_tag_name:
+            normalized_tag_names = [normalized_first_tag_name]
     if not normalized_group_name:
         raise ValueError("标签组名称不能为空")
-    if not normalized_first_tag_name:
-        raise ValueError("第一个标签名称不能为空")
-    return create_wecom_tag({"group_name": normalized_group_name, "tag": [{"name": normalized_first_tag_name}]})
+    if not normalized_tag_names:
+        raise ValueError("至少需要添加一个标签")
+    return create_wecom_tag({"group_name": normalized_group_name, "tag": [{"name": item} for item in normalized_tag_names]})
 
 
 def create_wecom_tag_in_group(*, group_id: str, group_name: str = "", tag_name: str) -> dict[str, Any]:

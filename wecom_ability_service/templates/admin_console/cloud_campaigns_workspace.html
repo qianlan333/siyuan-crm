@@ -490,10 +490,12 @@
           } catch { payload = {}; }
           const imageLibraryIds = Array.isArray(payload.image_library_ids) ? payload.image_library_ids : [];
           const legacyMediaIds = Array.isArray(payload.image_media_ids) ? payload.image_media_ids : [];
+          const attachmentLibraryIds = Array.isArray(payload.attachment_library_ids) ? payload.attachment_library_ids : [];
           const totalImages = imageLibraryIds.length + legacyMediaIds.length;
           const imageLine = totalImages
             ? `图片：${totalImages} 张${legacyMediaIds.length ? `（其中 ${legacyMediaIds.length} 张为老版直传 media_id）` : '（来自图片素材库）'}`
             : '图片：未配置';
+          const attachmentLine = attachmentLibraryIds.length ? `附件：${attachmentLibraryIds.length} 个（来自附件素材库）` : '附件：未配置';
           const editBtns = editable
             ? `<button class="cloud-camp-step-edit" data-step-index="${fmt(step.step_index)}">编辑</button>
                <button class="cloud-camp-step-delete" data-step-index="${fmt(step.step_index)}">删除</button>`
@@ -508,6 +510,7 @@
               </div>
               <div class="step-text">${escapeHtml(step.content_text || '')}</div>
               <div class="step-image">${imageLine}</div>
+              <div class="step-image">${attachmentLine}</div>
             </div>
           `;
         }
@@ -703,6 +706,7 @@
     const imageLibraryIds = Array.isArray(payload.image_library_ids) ? payload.image_library_ids : [];
     const legacyMediaIds = Array.isArray(payload.image_media_ids) ? payload.image_media_ids : [];
     const miniprogramLibraryIds = Array.isArray(payload.miniprogram_library_ids) ? payload.miniprogram_library_ids : [];
+    const attachmentLibraryIds = Array.isArray(payload.attachment_library_ids) ? payload.attachment_library_ids : [];
     const originalHtml = rowEl.innerHTML;
     rowEl.innerHTML = `
       <div class="cloud-camp-step-edit-form">
@@ -734,6 +738,15 @@
           <div class="edit-miniprogram-list" style="display:flex;flex-direction:column;gap:6px;margin-top:6px;"></div>
           <input type="hidden" class="edit-miniprogram-ids" value='${JSON.stringify(miniprogramLibraryIds)}'>
         </div>
+        <div class="edit-block">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span>文件附件（从附件素材库选；发送前自动换 media_id）</span>
+            <button type="button" class="admin-button admin-button--ghost edit-add-attachment" style="font-size:12px;">添加附件编号</button>
+            <span class="edit-attachment-summary" style="font-size:12px;color:#888;">已选 ${attachmentLibraryIds.length} 个</span>
+          </div>
+          <div class="edit-attachment-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
+          <input type="hidden" class="edit-attachment-ids" value='${JSON.stringify(attachmentLibraryIds)}'>
+        </div>
         <div class="edit-actions">
           <button class="admin-button admin-button--primary edit-save">保存</button>
           <button class="admin-button admin-button--ghost edit-cancel">取消</button>
@@ -748,6 +761,31 @@
     });
 
     attachMiniprogramPicker(rowEl);
+    const renderAttachmentIds = () => {
+      let ids = [];
+      try { ids = JSON.parse(rowEl.querySelector('.edit-attachment-ids').value || '[]'); } catch {}
+      rowEl.querySelector('.edit-attachment-summary').textContent = `已选 ${ids.length} 个`;
+      rowEl.querySelector('.edit-attachment-list').innerHTML = ids.map((id, idx) =>
+        `<span class="cloud-orch-status-chip draft">附件 ${escapeHtml(String(id))} <button type="button" data-remove-attachment="${idx}" style="border:0;background:transparent;cursor:pointer;">×</button></span>`
+      ).join('');
+      rowEl.querySelectorAll('[data-remove-attachment]').forEach((button) => {
+        button.addEventListener('click', () => {
+          ids.splice(Number(button.dataset.removeAttachment), 1);
+          rowEl.querySelector('.edit-attachment-ids').value = JSON.stringify(ids);
+          renderAttachmentIds();
+        });
+      });
+    };
+    renderAttachmentIds();
+    rowEl.querySelector('.edit-add-attachment').addEventListener('click', () => {
+      const id = Number(window.prompt('请输入附件素材编号', '') || 0);
+      if (!id) return;
+      let ids = [];
+      try { ids = JSON.parse(rowEl.querySelector('.edit-attachment-ids').value || '[]'); } catch {}
+      if (!ids.includes(id)) ids.push(id);
+      rowEl.querySelector('.edit-attachment-ids').value = JSON.stringify(ids.slice(0, 9));
+      renderAttachmentIds();
+    });
     rowEl.querySelector('.edit-cancel').addEventListener('click', () => {
       rowEl.innerHTML = originalHtml;
       rowEl.dataset.editing = '0';
@@ -756,7 +794,9 @@
     });
     rowEl.querySelector('.edit-save').addEventListener('click', async () => {
       let miniprogramIds = [];
+      let attachmentIds = [];
       try { miniprogramIds = JSON.parse(rowEl.querySelector('.edit-miniprogram-ids').value || '[]'); } catch {}
+      try { attachmentIds = JSON.parse(rowEl.querySelector('.edit-attachment-ids').value || '[]'); } catch {}
       const body = {
         content_text: rowEl.querySelector('.edit-content-text').value,
         send_time: rowEl.querySelector('.edit-send-time').value || '10:00',
@@ -766,6 +806,7 @@
         // 显式清空老 image_media_ids，避免新老数据并存导致重复发图
         image_media_ids: [],
         miniprogram_library_ids: miniprogramIds,
+        attachment_library_ids: attachmentIds.map(Number).filter(Boolean).slice(0, 9),
       };
       const resp = await fetch(`/api/admin/cloud-orchestrator/campaigns/${encodeURIComponent(currentCode)}/steps/${encodeURIComponent(step.step_index)}`, {
         method: 'PATCH', headers: {'Content-Type': 'application/json'},

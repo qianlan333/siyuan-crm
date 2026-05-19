@@ -117,6 +117,7 @@ def test_build_snapshot_row_funnel_only_member():
     }
     row = svc._build_snapshot_row(crm, hxc)
     funnel_index = 21  # 见 _INSERT_SQL 字段顺序
+    assert len(row) == len(svc.SNAPSHOT_COLUMNS)
     assert row[0] == "13912345678"
     assert row[funnel_index] == svc.FUNNEL_ONLY_MEMBER
 
@@ -221,9 +222,24 @@ def test_refresh_writes_snapshot_with_mocked_hxc(app, monkeypatch):
                     "hxc_user_id": "uuid-1",
                     "hxc_nickname": "张三",
                     "hxc_member_status": "active",
+                    "hxc_onboard_status": "completed",
+                    "hxc_assessment_status": "completed",
+                    "hxc_growth_onboard_status": "completed",
                     "membership_type": "member",
                     "membership_status": "active",
                     "membership_days_left": 21,
+                    "subscription_tier": "standard",
+                    "active_goals_count": 1,
+                    "active_paths_count": 1,
+                    "active_tasks_count": 2,
+                    "task_checkin_count": 3,
+                    "recommended_topic_status": "delivered",
+                    "topic_summary_count": 2,
+                    "primary_role": "mixed",
+                    "biz_score": 64,
+                    "inner_score": 58,
+                    "trust_score": 72,
+                    "growth_credit_balance": 8,
                     "conv_chat": 5,
                     "msg_user": 30,
                     "hxc_silent_days": 3,
@@ -253,7 +269,11 @@ def test_refresh_writes_snapshot_with_mocked_hxc(app, monkeypatch):
         rows = db.execute(
             """
             SELECT mobile, funnel_state, membership_type, membership_days_left,
-                   msg_user, in_lead_pool, in_people, customer_name
+                   msg_user, in_lead_pool, in_people, customer_name,
+                   subscription_tier, active_goals_count, active_paths_count,
+                   active_tasks_count, task_checkin_count, recommended_topic_status,
+                   topic_summary_count, primary_role, biz_score, trust_score,
+                   growth_credit_balance
             FROM user_ops_hxc_dashboard_snapshot
             ORDER BY mobile
             """
@@ -272,6 +292,17 @@ def test_refresh_writes_snapshot_with_mocked_hxc(app, monkeypatch):
         assert snapshot["13912345678"]["in_people"] is True
         assert snapshot["13912345678"]["customer_name"] == "张三"
         assert snapshot["13912345678"]["msg_user"] == 30
+        assert snapshot["13912345678"]["subscription_tier"] == "standard"
+        assert snapshot["13912345678"]["active_goals_count"] == 1
+        assert snapshot["13912345678"]["active_paths_count"] == 1
+        assert snapshot["13912345678"]["active_tasks_count"] == 2
+        assert snapshot["13912345678"]["task_checkin_count"] == 3
+        assert snapshot["13912345678"]["recommended_topic_status"] == "delivered"
+        assert snapshot["13912345678"]["topic_summary_count"] == 2
+        assert snapshot["13912345678"]["primary_role"] == "mixed"
+        assert snapshot["13912345678"]["biz_score"] == 64
+        assert snapshot["13912345678"]["trust_score"] == 72
+        assert snapshot["13912345678"]["growth_credit_balance"] == 8
 
         # meta 表也应该有一行
         meta = svc.get_latest_snapshot_meta()

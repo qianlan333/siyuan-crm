@@ -36,6 +36,7 @@ def send_pool_private_message(
     images: list[dict[str, Any]] | None = None,
     image_media_ids: list[str] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    attachment_library_ids: list[int] | None = None,
     trace_id: str = "",
     source_kind: str = "manual_pool_send",
     source_id: str = "",
@@ -55,6 +56,7 @@ def send_pool_private_message(
         "images": list(images or []),
         "image_media_ids": list(image_media_ids or []),
         "attachments": list(attachments or []),
+        "attachment_library_ids": list(attachment_library_ids or []),
     }
     task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(payload)
     plan = _build_pool_send_plan(owner_userid=normalized_owner_userid, pool_key=normalized_pool_key)

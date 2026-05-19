@@ -1222,6 +1222,7 @@ CREATE TABLE IF NOT EXISTS automation_channel (
     qr_ticket TEXT NOT NULL DEFAULT '',
     scene_value TEXT NOT NULL DEFAULT '',
     welcome_message TEXT NOT NULL DEFAULT '',
+    welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     auto_accept_friend BOOLEAN NOT NULL DEFAULT FALSE,
     entry_tag_id TEXT NOT NULL DEFAULT '',
     entry_tag_name TEXT NOT NULL DEFAULT '',
@@ -2115,6 +2116,8 @@ CREATE TABLE IF NOT EXISTS automation_operation_task (
     description TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft'
         CHECK (status IN ('draft', 'active', 'paused', 'archived')),
+    trigger_type TEXT NOT NULL DEFAULT 'scheduled_daily'
+        CHECK (trigger_type IN ('scheduled_daily', 'audience_entered')),
     send_time TEXT NOT NULL DEFAULT '10:00',
     timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
     target_audience_code TEXT NOT NULL DEFAULT 'operating'
@@ -2820,6 +2823,28 @@ ON image_library (category) WHERE category <> '';
 CREATE INDEX IF NOT EXISTS idx_image_library_tags_gin
 ON image_library USING GIN (tags);
 
+CREATE TABLE IF NOT EXISTS attachment_library (
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL DEFAULT '',
+    file_name TEXT NOT NULL DEFAULT '',
+    mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+    file_size INTEGER NOT NULL DEFAULT 0,
+    data_base64 TEXT NOT NULL DEFAULT '',
+    media_id TEXT NOT NULL DEFAULT '',
+    media_id_expires_at TIMESTAMPTZ,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    description TEXT NOT NULL DEFAULT '',
+    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_attachment_library_enabled
+ON attachment_library (enabled, updated_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_attachment_library_tags_gin
+ON attachment_library USING GIN (tags);
+
 CREATE INDEX IF NOT EXISTS idx_campaign_members_trace
 ON campaign_members (trace_id, id DESC);
 
@@ -2914,6 +2939,12 @@ CREATE TABLE IF NOT EXISTS user_ops_hxc_dashboard_snapshot (
     hxc_registered_at        TIMESTAMPTZ,
     hxc_last_login_at        TIMESTAMPTZ,
     hxc_silent_days          INTEGER,
+    hxc_member_level         TEXT NOT NULL DEFAULT '',
+    hxc_member_expires_at    TIMESTAMPTZ,
+    hxc_onboard_status       TEXT NOT NULL DEFAULT '',
+    hxc_assessment_status    TEXT NOT NULL DEFAULT '',
+    hxc_growth_onboard_status TEXT NOT NULL DEFAULT '',
+    hxc_first_login_at       TIMESTAMPTZ,
     membership_type          TEXT NOT NULL DEFAULT '',
     membership_status        TEXT NOT NULL DEFAULT '',
     membership_end_at        TIMESTAMPTZ,
@@ -2929,6 +2960,79 @@ CREATE TABLE IF NOT EXISTS user_ops_hxc_dashboard_snapshot (
     consult_completed        INTEGER NOT NULL DEFAULT 0,
     consult_avg_turn         NUMERIC(6, 2),
     last_msg_at              TIMESTAMPTZ,
+    identity_stage           TEXT NOT NULL DEFAULT '',
+    monthly_income_range     TEXT NOT NULL DEFAULT '',
+    business_focus           TEXT NOT NULL DEFAULT '',
+    ai_usage_status          TEXT NOT NULL DEFAULT '',
+    main_pain_points         TEXT NOT NULL DEFAULT '',
+    ai_pain_points           TEXT NOT NULL DEFAULT '',
+    core_painful_scenario    TEXT NOT NULL DEFAULT '',
+    focus_topics             TEXT NOT NULL DEFAULT '',
+    persona_sketch           TEXT NOT NULL DEFAULT '',
+    interaction_style        TEXT NOT NULL DEFAULT '',
+    communication_style      TEXT NOT NULL DEFAULT '',
+    background_confidence    TEXT NOT NULL DEFAULT '',
+    main_line_type           TEXT NOT NULL DEFAULT '',
+    main_line_stage          TEXT NOT NULL DEFAULT '',
+    main_line_tier           TEXT NOT NULL DEFAULT '',
+    main_line_confirmed_at   TIMESTAMPTZ,
+    main_line_desc           TEXT NOT NULL DEFAULT '',
+    main_line_issue          TEXT NOT NULL DEFAULT '',
+    assessment_count         INTEGER NOT NULL DEFAULT 0,
+    latest_assessment_status TEXT NOT NULL DEFAULT '',
+    latest_assessment_score  INTEGER,
+    latest_assessment_phase  TEXT NOT NULL DEFAULT '',
+    latest_assessment_sub_type TEXT NOT NULL DEFAULT '',
+    latest_assessment_completed_at TIMESTAMPTZ,
+    assessment_dimension_scores TEXT NOT NULL DEFAULT '',
+    subscription_tier        TEXT NOT NULL DEFAULT '',
+    subscription_expires_at  TIMESTAMPTZ,
+    subscription_quota       INTEGER,
+    subscription_used        INTEGER,
+    subscription_period_start DATE,
+    last_activation_sku_code TEXT NOT NULL DEFAULT '',
+    last_activation_new_tier TEXT NOT NULL DEFAULT '',
+    last_activation_source   TEXT NOT NULL DEFAULT '',
+    last_activation_at       TIMESTAMPTZ,
+    active_goals_count       INTEGER NOT NULL DEFAULT 0,
+    active_paths_count       INTEGER NOT NULL DEFAULT 0,
+    current_milestone_max    INTEGER,
+    active_tasks_count       INTEGER NOT NULL DEFAULT 0,
+    completed_tasks_count    INTEGER NOT NULL DEFAULT 0,
+    task_checkin_count       INTEGER NOT NULL DEFAULT 0,
+    last_task_checkin_at     TIMESTAMPTZ,
+    last_task_checkin_mood   TEXT NOT NULL DEFAULT '',
+    last_task_checkin_state_score INTEGER,
+    next_review_at           TIMESTAMPTZ,
+    last_reviewed_at         TIMESTAMPTZ,
+    review_schedule_status   TEXT NOT NULL DEFAULT '',
+    last_recent_event_at     TIMESTAMPTZ,
+    last_recent_event_type   TEXT NOT NULL DEFAULT '',
+    recommended_topic_status TEXT NOT NULL DEFAULT '',
+    recommended_topic_generated_at TIMESTAMPTZ,
+    topic_summary_count      INTEGER NOT NULL DEFAULT 0,
+    last_topic_summary_at    TIMESTAMPTZ,
+    last_topic_summary_title TEXT NOT NULL DEFAULT '',
+    primary_role             TEXT NOT NULL DEFAULT '',
+    biz_score                INTEGER,
+    inner_score              INTEGER,
+    trust_score              INTEGER,
+    trust_tier               TEXT NOT NULL DEFAULT '',
+    clarity_score            INTEGER,
+    role_mode                TEXT NOT NULL DEFAULT '',
+    growth_credit_balance    INTEGER,
+    growth_credit_period_granted INTEGER,
+    growth_credit_period_used INTEGER,
+    growth_credit_period_ends_at TIMESTAMPTZ,
+    webhook_questionnaire_count INTEGER NOT NULL DEFAULT 0,
+    last_webhook_questionnaire_at TIMESTAMPTZ,
+    last_webhook_questionnaire_status TEXT NOT NULL DEFAULT '',
+    crm_chat_job_count       INTEGER NOT NULL DEFAULT 0,
+    crm_chat_done_count      INTEGER NOT NULL DEFAULT 0,
+    crm_chat_failed_count    INTEGER NOT NULL DEFAULT 0,
+    last_crm_chat_job_status TEXT NOT NULL DEFAULT '',
+    last_crm_chat_job_at     TIMESTAMPTZ,
+    last_crm_chat_callback_status TEXT NOT NULL DEFAULT '',
     refreshed_at             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -2973,6 +3077,43 @@ CREATE TABLE IF NOT EXISTS user_ops_hxc_send_config (
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS wechat_pay_products (
+    id BIGSERIAL PRIMARY KEY,
+    product_code TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL DEFAULT '',
+    amount_total INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'active', 'disabled')),
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    cta_text TEXT NOT NULL DEFAULT '立即报名',
+    require_mobile BOOLEAN NOT NULL DEFAULT FALSE,
+    lead_program_id BIGINT,
+    lead_channel_id BIGINT,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_wechat_pay_products_code
+ON wechat_pay_products (product_code);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_products_status_updated
+ON wechat_pay_products (status, updated_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS wechat_pay_product_page_slices (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE CASCADE,
+    image_library_id BIGINT NOT NULL REFERENCES image_library(id) ON DELETE RESTRICT,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_pay_product_slices_product_order
+ON wechat_pay_product_page_slices (product_id, sort_order ASC, id ASC);
 
 CREATE TABLE IF NOT EXISTS wechat_pay_orders (
     id BIGSERIAL PRIMARY KEY,

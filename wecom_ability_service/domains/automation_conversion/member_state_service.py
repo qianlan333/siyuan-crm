@@ -9,6 +9,7 @@ from . import service as service_seams
 from . import local_projection, repo
 from .service import (
     DECISION_SOURCE_MANUAL,
+    DECISION_SOURCE_QUESTIONNAIRE,
     DECISION_SOURCE_SYSTEM,
     DEFAULT_OWNER_STAFF_ID,
     FOLLOWUP_FOCUS,
@@ -367,6 +368,7 @@ def sync_member_from_questionnaire_submission(
     *,
     external_contact_id: str = "",
     phone: str = "",
+    questionnaire_id: int | None = None,
     operator_id: str = "system",
 ) -> dict[str, Any]:
     member = _resolve_existing_member(external_contact_id=external_contact_id, phone=phone)
@@ -380,6 +382,27 @@ def sync_member_from_questionnaire_submission(
         operator_id=_normalized_text(operator_id) or "questionnaire",
         persist_event=True,
     )
+    if int(questionnaire_id or 0) > 0 and _normalized_text(saved.get("questionnaire_status")) != QUESTIONNAIRE_SUBMITTED:
+        def mutate(current: dict[str, Any], context: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
+            del context
+            current["questionnaire_status"] = QUESTIONNAIRE_SUBMITTED
+            current["decision_source"] = DECISION_SOURCE_QUESTIONNAIRE
+            current["in_pool"] = True
+            current["joined_at"] = current.get("joined_at") or service_seams._iso_now()
+            if _normalized_text(current.get("current_pool")) != POOL_WON:
+                current["current_pool"] = POOL_OPERATING
+                current["follow_type"] = current.get("follow_type") or FOLLOWUP_NORMAL
+            return current, f"questionnaire_id={int(questionnaire_id or 0)}", False
+
+        saved = _mutate_member(
+            external_contact_id=external_contact_id,
+            phone=phone,
+            action="questionnaire_update",
+            operator_id=_normalized_text(operator_id) or "questionnaire",
+            operator_type="system",
+            include_detail=False,
+            mutate=mutate,
+        )
     after = _serialize_member(saved)
     return {"updated": before != after, "member": after}
 
@@ -474,6 +497,29 @@ def _send_channel_welcome_message(
             )
         if welcome_attachments:
             request_payload["attachments"] = welcome_attachments
+    try:
+        raw_attachment_ids = channel.get("welcome_attachment_library_ids") or []
+        if raw_attachment_ids:
+            from .. import attachment_library as _attachment_library
+
+            welcome_attachments = list(request_payload.get("attachments") or [])
+            for aid in _attachment_library._normalize_id_list(raw_attachment_ids):
+                welcome_attachments.append(_attachment_library.materialize_file_attachment(aid))
+            if len(welcome_attachments) > 9:
+                raise ValueError("welcome message supports at most 9 attachments")
+            if welcome_attachments:
+                request_payload["attachments"] = welcome_attachments
+    except (ValueError, RuntimeError) as exc:
+        _write_event(
+            member_id=int(member["id"]),
+            action="qrcode_welcome_failed",
+            operator_type="system",
+            operator_id=_normalized_text(operator_id) or "wecom_callback",
+            before_snapshot=_member_snapshot(serialized_member),
+            after_snapshot=_member_snapshot(serialized_member),
+            remark=str(exc),
+        )
+        return {"attempted": True, "sent": False, "error": str(exc)}
     try:
         wecom_result = service_seams.get_contact_runtime_client().send_welcome_msg(request_payload)
     except (WeComClientError, AttributeError, ValueError) as exc:

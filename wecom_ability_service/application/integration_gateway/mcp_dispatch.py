@@ -1083,6 +1083,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
                 images=list(arguments.get("images") or []),
                 image_media_ids=list(arguments.get("image_media_ids") or []),
                 attachments=list(arguments.get("attachments") or []),
+                attachment_library_ids=list(arguments.get("attachment_library_ids") or []),
                 confirm=bool(arguments.get("confirm")),
                 operator=str(arguments.get("operator") or "").strip(),
             )

@@ -362,6 +362,11 @@
               <span>欢迎语</span>
               <textarea name="welcome_message" rows="5" placeholder="扫码加好友后的当前方案欢迎语">{{ workspace.page_input.welcome_message or default_channel.welcome_message or '' }}</textarea>
             </label>
+            <label class="admin-field">
+              <span>欢迎语附件</span>
+              <select name="welcome_attachment_library_ids" id="default-channel-attachment-library-ids" multiple size="4"></select>
+              <p class="ac-config-code">从附件素材库选择 PDF / Word / Excel / PPT / TXT / ZIP / RAR；单个 5B-10MB，欢迎语文字和附件合计最多 9 个附件。<a href="/admin/attachment-library" target="_blank" rel="noreferrer">管理附件素材库</a></p>
+            </label>
             <div class="admin-form-actions">
               <button class="admin-button admin-button--primary" type="submit">保存方案入口配置</button>
             </div>

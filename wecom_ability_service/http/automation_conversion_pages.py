@@ -12,7 +12,6 @@ from ._routes_helpers import (
     _default_program_id_or_none,
     _load_program_or_404,
     _operator_from_request,
-    _query_int,
     _query_text,
 )
 from .automation_conversion_form_helpers import (
@@ -21,21 +20,16 @@ from .automation_conversion_form_helpers import (
     _program_form_payload,
 )
 from .automation_conversion_render import (
-    _render_action_orchestration_page,
     _render_agent_config_page,
     _render_auto_reply_page,
     _render_execution_records_page,
-    _render_flow_design_page,
     _render_member_ops_page,
-    _render_operations_page,
     _render_overview_page,
     _render_program_list_page,
     _render_program_setup_page,
     _render_run_center_page,
-    _render_workflow_editor_page,
-    _render_workflow_nodes_page,
 )
-from .internal_auth import current_admin_session_user, validate_admin_console_action_token
+from .internal_auth import validate_admin_console_action_token
 
 
 def admin_automation_conversion():
@@ -112,9 +106,11 @@ def _program_status_action(program_id: int, status: str):
     return _program_action_redirect(url_for("api.admin_automation_conversion"))
 
 
-def _should_redirect_program_edit_entry() -> bool:
-    user = current_admin_session_user() or {}
-    return bool(user) and str(user.get("login_type") or "") != "break_glass"
+def _program_setup_redirect(program_id: int, step: str):
+    return redirect(
+        url_for("api.admin_automation_program_setup", program_id=int(program_id), step=step),
+        code=302,
+    )
 
 
 def admin_automation_conversion_auto_reply():
@@ -128,42 +124,36 @@ def admin_automation_program_overview(program_id: int):
 
 def admin_automation_program_setup(program_id: int):
     program = _load_program_or_404(program_id)
-    return _render_program_setup_page(program=program, step=_query_text("step") or "basic")
+    return _render_program_setup_page(
+        program=program,
+        step=_query_text("step") or "basic",
+        audience_picker=_query_text("audience_picker"),
+    )
 
 
 def admin_automation_program_operations(program_id: int):
-    program = _load_program_or_404(program_id)
-    if _should_redirect_program_edit_entry():
-        return redirect(
-            url_for("api.admin_automation_program_setup", program_id=int(program_id), step="operations"),
-            code=302,
-        )
-    return _render_operations_page(program=program)
+    _load_program_or_404(program_id)
+    return _program_setup_redirect(program_id, "operations")
 
 
 def admin_automation_program_workflows(program_id: int):
-    program = _load_program_or_404(program_id)
-    return _render_operations_page(program=program)
+    _load_program_or_404(program_id)
+    return _program_setup_redirect(program_id, "operations")
 
 
 def admin_automation_program_workflow_new(program_id: int):
-    program = _load_program_or_404(program_id)
-    if _should_redirect_program_edit_entry():
-        return redirect(
-            url_for("api.admin_automation_program_setup", program_id=int(program_id), step="operations"),
-            code=302,
-        )
-    return _render_workflow_editor_page(program=program)
+    _load_program_or_404(program_id)
+    return _program_setup_redirect(program_id, "operations")
 
 
 def admin_automation_program_workflow_edit(program_id: int, workflow_id: int):
-    program = _load_program_or_404(program_id)
-    return _render_workflow_editor_page(workflow_id=workflow_id, program=program)
+    _load_program_or_404(program_id)
+    return _program_setup_redirect(program_id, "operations")
 
 
 def admin_automation_program_workflow_nodes(program_id: int, workflow_id: int):
-    program = _load_program_or_404(program_id)
-    return _render_workflow_nodes_page(workflow_id=workflow_id, program=program)
+    _load_program_or_404(program_id)
+    return _program_setup_redirect(program_id, "operations")
 
 
 def admin_automation_program_executions(program_id: int):
@@ -172,13 +162,8 @@ def admin_automation_program_executions(program_id: int):
 
 
 def admin_automation_program_flow_design(program_id: int):
-    program = _load_program_or_404(program_id)
-    if _should_redirect_program_edit_entry():
-        return redirect(
-            url_for("api.admin_automation_program_setup", program_id=int(program_id), step="segmentation"),
-            code=302,
-        )
-    return _render_flow_design_page(program=program)
+    _load_program_or_404(program_id)
+    return _program_setup_redirect(program_id, "segmentation")
 
 
 def admin_automation_program_member_ops(program_id: int):

@@ -14,6 +14,89 @@ from . import (
 _LEGACY_AUTOMATION_MEMBER_FOLLOWUP_DECISION_COLUMN = "questionnaire" "_result"
 
 
+_HXC_DASHBOARD_V6_COLUMN_DEFS: tuple[tuple[str, str], ...] = (
+    ("hxc_member_level", "TEXT NOT NULL DEFAULT ''"),
+    ("hxc_member_expires_at", "TIMESTAMPTZ"),
+    ("hxc_onboard_status", "TEXT NOT NULL DEFAULT ''"),
+    ("hxc_assessment_status", "TEXT NOT NULL DEFAULT ''"),
+    ("hxc_growth_onboard_status", "TEXT NOT NULL DEFAULT ''"),
+    ("hxc_first_login_at", "TIMESTAMPTZ"),
+    ("identity_stage", "TEXT NOT NULL DEFAULT ''"),
+    ("monthly_income_range", "TEXT NOT NULL DEFAULT ''"),
+    ("business_focus", "TEXT NOT NULL DEFAULT ''"),
+    ("ai_usage_status", "TEXT NOT NULL DEFAULT ''"),
+    ("main_pain_points", "TEXT NOT NULL DEFAULT ''"),
+    ("ai_pain_points", "TEXT NOT NULL DEFAULT ''"),
+    ("core_painful_scenario", "TEXT NOT NULL DEFAULT ''"),
+    ("focus_topics", "TEXT NOT NULL DEFAULT ''"),
+    ("persona_sketch", "TEXT NOT NULL DEFAULT ''"),
+    ("interaction_style", "TEXT NOT NULL DEFAULT ''"),
+    ("communication_style", "TEXT NOT NULL DEFAULT ''"),
+    ("background_confidence", "TEXT NOT NULL DEFAULT ''"),
+    ("main_line_type", "TEXT NOT NULL DEFAULT ''"),
+    ("main_line_stage", "TEXT NOT NULL DEFAULT ''"),
+    ("main_line_tier", "TEXT NOT NULL DEFAULT ''"),
+    ("main_line_confirmed_at", "TIMESTAMPTZ"),
+    ("main_line_desc", "TEXT NOT NULL DEFAULT ''"),
+    ("main_line_issue", "TEXT NOT NULL DEFAULT ''"),
+    ("assessment_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("latest_assessment_status", "TEXT NOT NULL DEFAULT ''"),
+    ("latest_assessment_score", "INTEGER"),
+    ("latest_assessment_phase", "TEXT NOT NULL DEFAULT ''"),
+    ("latest_assessment_sub_type", "TEXT NOT NULL DEFAULT ''"),
+    ("latest_assessment_completed_at", "TIMESTAMPTZ"),
+    ("assessment_dimension_scores", "TEXT NOT NULL DEFAULT ''"),
+    ("subscription_tier", "TEXT NOT NULL DEFAULT ''"),
+    ("subscription_expires_at", "TIMESTAMPTZ"),
+    ("subscription_quota", "INTEGER"),
+    ("subscription_used", "INTEGER"),
+    ("subscription_period_start", "DATE"),
+    ("last_activation_sku_code", "TEXT NOT NULL DEFAULT ''"),
+    ("last_activation_new_tier", "TEXT NOT NULL DEFAULT ''"),
+    ("last_activation_source", "TEXT NOT NULL DEFAULT ''"),
+    ("last_activation_at", "TIMESTAMPTZ"),
+    ("active_goals_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("active_paths_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("current_milestone_max", "INTEGER"),
+    ("active_tasks_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("completed_tasks_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("task_checkin_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_task_checkin_at", "TIMESTAMPTZ"),
+    ("last_task_checkin_mood", "TEXT NOT NULL DEFAULT ''"),
+    ("last_task_checkin_state_score", "INTEGER"),
+    ("next_review_at", "TIMESTAMPTZ"),
+    ("last_reviewed_at", "TIMESTAMPTZ"),
+    ("review_schedule_status", "TEXT NOT NULL DEFAULT ''"),
+    ("last_recent_event_at", "TIMESTAMPTZ"),
+    ("last_recent_event_type", "TEXT NOT NULL DEFAULT ''"),
+    ("recommended_topic_status", "TEXT NOT NULL DEFAULT ''"),
+    ("recommended_topic_generated_at", "TIMESTAMPTZ"),
+    ("topic_summary_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_topic_summary_at", "TIMESTAMPTZ"),
+    ("last_topic_summary_title", "TEXT NOT NULL DEFAULT ''"),
+    ("primary_role", "TEXT NOT NULL DEFAULT ''"),
+    ("biz_score", "INTEGER"),
+    ("inner_score", "INTEGER"),
+    ("trust_score", "INTEGER"),
+    ("trust_tier", "TEXT NOT NULL DEFAULT ''"),
+    ("clarity_score", "INTEGER"),
+    ("role_mode", "TEXT NOT NULL DEFAULT ''"),
+    ("growth_credit_balance", "INTEGER"),
+    ("growth_credit_period_granted", "INTEGER"),
+    ("growth_credit_period_used", "INTEGER"),
+    ("growth_credit_period_ends_at", "TIMESTAMPTZ"),
+    ("webhook_questionnaire_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_webhook_questionnaire_at", "TIMESTAMPTZ"),
+    ("last_webhook_questionnaire_status", "TEXT NOT NULL DEFAULT ''"),
+    ("crm_chat_job_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("crm_chat_done_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("crm_chat_failed_count", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_crm_chat_job_status", "TEXT NOT NULL DEFAULT ''"),
+    ("last_crm_chat_job_at", "TIMESTAMPTZ"),
+    ("last_crm_chat_callback_status", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
 def _run_schema_with_forward_fk_retries(db, script: str, *, max_passes: int = 4) -> None:
     """跑 schema_postgres.sql，对前向 FK 引用容错。
 
@@ -75,11 +158,59 @@ def _ensure_postgres_user_ops_page_tables(db) -> None:
     )
 
 
+def _ensure_postgres_hxc_dashboard_v6_columns(db) -> None:
+    for name, column_type in _HXC_DASHBOARD_V6_COLUMN_DEFS:
+        db.execute(
+            f"ALTER TABLE IF EXISTS user_ops_hxc_dashboard_snapshot "
+            f"ADD COLUMN IF NOT EXISTS {name} {column_type}"
+        )
+
+
 def _ensure_postgres_miniprogram_library_thumb_image_id(db) -> None:
     db.execute(
         """
         ALTER TABLE IF EXISTS miniprogram_library
         ADD COLUMN IF NOT EXISTS thumb_image_id BIGINT
+        """
+    )
+
+
+def _ensure_postgres_attachment_library(db) -> None:
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_channel
+        ADD COLUMN IF NOT EXISTS welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS attachment_library (
+            id BIGSERIAL PRIMARY KEY,
+            name TEXT NOT NULL DEFAULT '',
+            file_name TEXT NOT NULL DEFAULT '',
+            mime_type TEXT NOT NULL DEFAULT 'application/pdf',
+            file_size INTEGER NOT NULL DEFAULT 0,
+            data_base64 TEXT NOT NULL DEFAULT '',
+            media_id TEXT NOT NULL DEFAULT '',
+            media_id_expires_at TIMESTAMPTZ,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            description TEXT NOT NULL DEFAULT '',
+            tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attachment_library_enabled
+        ON attachment_library (enabled, updated_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_attachment_library_tags_gin
+        ON attachment_library USING GIN (tags)
         """
     )
 
@@ -470,6 +601,66 @@ def _ensure_postgres_questionnaire_scrm_apply_log_columns(db) -> None:
 
 
 def _ensure_postgres_wechat_pay_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_products (
+            id BIGSERIAL PRIMARY KEY,
+            product_code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL DEFAULT '',
+            amount_total INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            status TEXT NOT NULL DEFAULT 'draft'
+                CHECK (status IN ('draft', 'active', 'disabled')),
+            enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            cta_text TEXT NOT NULL DEFAULT '立即报名',
+            require_mobile BOOLEAN NOT NULL DEFAULT FALSE,
+            lead_program_id BIGINT,
+            lead_channel_id BIGINT,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    for stmt in (
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS cta_text TEXT NOT NULL DEFAULT '立即报名'",
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS require_mobile BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS lead_program_id BIGINT",
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS lead_channel_id BIGINT",
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+    ):
+        db.execute(stmt)
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_wechat_pay_products_code
+        ON wechat_pay_products (product_code)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_products_status_updated
+        ON wechat_pay_products (status, updated_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_product_page_slices (
+            id BIGSERIAL PRIMARY KEY,
+            product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE CASCADE,
+            image_library_id BIGINT NOT NULL REFERENCES image_library(id) ON DELETE RESTRICT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_product_slices_product_order
+        ON wechat_pay_product_page_slices (product_id, sort_order ASC, id ASC)
+        """
+    )
     db.execute(
         """
         CREATE TABLE IF NOT EXISTS wechat_pay_orders (
@@ -1408,8 +1599,10 @@ def _init_postgres(db) -> None:
     _ensure_postgres_questionnaire_external_push_tables(db)
     _ensure_postgres_questionnaire_scrm_apply_log_columns(db)
     _ensure_postgres_wechat_pay_tables(db)
+    _ensure_postgres_hxc_dashboard_v6_columns(db)
     _ensure_postgres_user_ops_page_tables(db)
     _ensure_postgres_miniprogram_library_thumb_image_id(db)
+    _ensure_postgres_attachment_library(db)
     _ensure_postgres_automation_agent_config_tables(db)
     _ensure_postgres_automation_operation_templates(db)
     db.execute(
@@ -1708,6 +1901,8 @@ def _init_postgres(db) -> None:
             description TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'draft'
                 CHECK (status IN ('draft', 'active', 'paused', 'archived')),
+            trigger_type TEXT NOT NULL DEFAULT 'scheduled_daily'
+                CHECK (trigger_type IN ('scheduled_daily', 'audience_entered')),
             send_time TEXT NOT NULL DEFAULT '10:00',
             timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
             target_audience_code TEXT NOT NULL DEFAULT 'operating'
@@ -1730,6 +1925,8 @@ def _init_postgres(db) -> None:
         """
     )
     for stmt in (
+        "ALTER TABLE IF EXISTS automation_operation_task "
+        "ADD COLUMN IF NOT EXISTS trigger_type TEXT NOT NULL DEFAULT 'scheduled_daily'",
         "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_program "
         "ON automation_operation_task (program_id, status, send_time, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_group "

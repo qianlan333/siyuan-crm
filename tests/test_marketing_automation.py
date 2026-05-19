@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 from datetime import datetime as real_datetime
+from datetime import timedelta, timezone
 
 import pytest
 import requests
@@ -1065,7 +1066,28 @@ def test_send_pool_private_message_mcp_tool_supports_attachments_and_keeps_recor
         }
 
     with app.app_context():
+        from wecom_ability_service.domains import attachment_library
         from wecom_ability_service.domains.marketing_automation import service as marketing_service
+
+        library_item = attachment_library.create_attachment_from_upload(
+            file_bytes=b"%PDF-1.4\n%%EOF\n",
+            file_name="pool-send.pdf",
+            mime_type="application/pdf",
+            name="群发附件",
+        )
+        get_db().execute(
+            """
+            UPDATE attachment_library
+            SET media_id = ?, media_id_expires_at = ?
+            WHERE id = ?
+            """,
+            (
+                "file-media-library-pool",
+                (real_datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+                library_item["id"],
+            ),
+        )
+        get_db().commit()
 
         original_dispatch = marketing_service.dispatch_wecom_task
         marketing_service.dispatch_wecom_task = fake_dispatch
@@ -1076,7 +1098,7 @@ def test_send_pool_private_message_mcp_tool_supports_attachments_and_keeps_recor
                 {
                     "owner_userid": "QianLan",
                     "pool_key": "new_user",
-                    "attachments": [{"msgtype": "file", "file": {"media_id": "file-media-a"}}],
+                    "attachment_library_ids": [library_item["id"]],
                     "confirm": True,
                 },
             ).get_json()["result"]["structuredContent"]
@@ -1114,7 +1136,7 @@ def test_send_pool_private_message_mcp_tool_supports_attachments_and_keeps_recor
         ["wm_pool_send_attachment_sales02"],
     ]
     assert "text" not in dispatched_payloads[0]["payload"]
-    assert dispatched_payloads[0]["payload"]["attachments"] == [{"msgtype": "file", "file": {"media_id": "file-media-a"}}]
+    assert dispatched_payloads[0]["payload"]["attachments"] == [{"msgtype": "file", "file": {"media_id": "file-media-library-pool"}}]
     assert dispatched_payloads[1]["payload"]["text"]["content"] == "文本 + 图片 + 附件一起发"
     assert len(dispatched_payloads[1]["payload"]["images"]) == 1
     assert dispatched_payloads[1]["payload"]["attachments"] == [{"msgtype": "file", "file": {"media_id": "file-media-b"}}]

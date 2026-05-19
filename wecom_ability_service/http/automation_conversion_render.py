@@ -17,12 +17,9 @@ from .automation_conversion_workspaces import (
     _build_execution_records_workspace,
     _build_flow_design_workspace,
     _build_member_ops_workspace,
-    _build_operations_list_workspace,
     _build_overview_workspace,
     _build_program_setup_workspace,
     _build_run_center_workspace,
-    _build_workflow_editor_workspace,
-    _build_workflow_nodes_workspace,
     _overview_notice,
     _program_context,
 )
@@ -49,29 +46,6 @@ def _render_overview_page(*, page_error: str = "", program: dict[str, object] | 
         page_error=page_error,
         show_shell_meta=False,
         admin_action_token=ensure_admin_console_action_token(),
-    )
-
-
-def _render_operations_page(*, page_error: str = "", program: dict[str, object] | None = None):
-    program_id = int((program or {}).get("id") or 0) or None
-    return _render_admin_template(
-        "automation_conversion_operations_workspace.html",
-        active_nav="automation_conversion",
-        page_title="运营编排" if program else "自动化运营",
-        page_summary="当前方案内的任务流、节点和执行入口。" if program else "模块内自动化运营工作面，先统一任务流、节点和执行入口，不再暴露旧运营概念。",
-        breadcrumbs=_breadcrumb_items(
-            ("客户管理后台", url_for("api.admin_console_home")),
-            ("自动化运营方案", url_for("api.admin_automation_conversion")),
-            ((program or {}).get("program_name") or "自动化运营", url_for("api.admin_automation_program_overview", program_id=program_id) if program_id else None),
-            ("运营编排", None),
-        ),
-        workspace_tabs=_automation_program_workspace_tabs(program_id, "operations") if program_id else _automation_conversion_workspace_tabs("operations"),
-        program_context=_program_context(program, active_key="operations") if program else None,
-        operations_workspace=_build_operations_list_workspace(program_id=program_id),
-        admin_action_token=ensure_admin_console_action_token(),
-        page_error=page_error,
-        show_shell_meta=False,
-        show_page_header=False,
     )
 
 
@@ -103,58 +77,6 @@ def _render_action_orchestration_page(
         page_error=page_error,
         show_shell_meta=False,
         show_page_header=False,
-    )
-
-
-def _render_workflow_editor_page(*, workflow_id: int | None = None, page_error: str = "", program: dict[str, object] | None = None):
-    is_new = int(workflow_id or 0) <= 0
-    program_id = int((program or {}).get("id") or 0) or None
-    return _render_admin_template(
-        "automation_conversion_workflow_editor.html",
-        active_nav="automation_conversion",
-        page_title="新建任务流" if is_new else "编辑任务流",
-        page_summary="任务流层只负责适用人群、发给谁、怎么发、生成方式和智能体绑定，不再和节点配置混排。",
-        breadcrumbs=_breadcrumb_items(
-            ("客户管理后台", url_for("api.admin_console_home")),
-            ("自动化运营方案", url_for("api.admin_automation_conversion")),
-            (
-                (program or {}).get("program_name") or "自动化运营",
-                _program_route_or_main("api.admin_automation_program_operations", program_id=program_id),
-            ),
-            ("新建任务流" if is_new else "编辑任务流", None),
-        ),
-        workspace_tabs=_automation_program_workspace_tabs(program_id, "operations") if program_id else _automation_conversion_workspace_tabs("operations"),
-        program_context=_program_context(program, active_key="operations") if program else None,
-        operations_workspace=_build_workflow_editor_workspace(workflow_id=workflow_id, program_id=program_id),
-        admin_action_token=ensure_admin_console_action_token(),
-        page_error=page_error,
-        show_shell_meta=False,
-        show_page_header=False,
-    )
-
-
-def _render_workflow_nodes_page(*, workflow_id: int, page_error: str = "", program: dict[str, object] | None = None):
-    program_id = int((program or {}).get("id") or 0) or None
-    return _render_admin_template(
-        "automation_conversion_workflow_nodes.html",
-        active_nav="automation_conversion",
-        page_title="节点配置",
-        page_summary="节点层只负责节点名称、目标人群、触发方式和节点内容；任务流配置不再与节点编辑混排。",
-        breadcrumbs=_breadcrumb_items(
-            ("客户管理后台", url_for("api.admin_console_home")),
-            ("自动化运营方案", url_for("api.admin_automation_conversion")),
-            (
-                (program or {}).get("program_name") or "自动化运营",
-                _program_route_or_main("api.admin_automation_program_operations", program_id=program_id),
-            ),
-            ("节点配置", None),
-        ),
-        workspace_tabs=_automation_program_workspace_tabs(program_id, "operations") if program_id else _automation_conversion_workspace_tabs("operations"),
-        program_context=_program_context(program, active_key="operations") if program else None,
-        operations_workspace=_build_workflow_nodes_workspace(workflow_id=workflow_id, program_id=program_id),
-        admin_action_token=ensure_admin_console_action_token(),
-        page_error=page_error,
-        page_notice="当前页面只承载节点配置骨架。",
     )
 
 
@@ -263,7 +185,13 @@ def _render_member_ops_page(*, page_error: str = "", program: dict[str, object] 
     )
 
 
-def _render_program_setup_page(*, page_error: str = "", program: dict[str, object] | None = None, step: str = "basic"):
+def _render_program_setup_page(
+    *,
+    page_error: str = "",
+    program: dict[str, object] | None = None,
+    step: str = "basic",
+    audience_picker: str = "",
+):
     program_id = int((program or {}).get("id") or 0)
     workspace_tabs = []
     if program_id:
@@ -284,7 +212,7 @@ def _render_program_setup_page(*, page_error: str = "", program: dict[str, objec
         ),
         workspace_tabs=workspace_tabs,
         program_context=_program_context(program, active_key="setup") if program else None,
-        setup_workspace=_build_program_setup_workspace(program_id, step=step) if program_id else {},
+        setup_workspace=_build_program_setup_workspace(program_id, step=step, audience_picker=audience_picker) if program_id else {},
         admin_action_token=ensure_admin_console_action_token(),
         page_error=page_error,
         show_shell_meta=False,

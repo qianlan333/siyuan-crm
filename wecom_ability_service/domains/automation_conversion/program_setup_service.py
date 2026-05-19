@@ -4,6 +4,8 @@ import re
 from typing import Any
 
 from ...db import get_db
+from ..tags import service as tags_domain_service
+from ..wechat_pay.service import list_products as list_wechat_pay_products
 from . import program_repo, repo, workflow_repo
 from .channel_service import save_default_channel_settings
 from .customer_acquisition_service import create_customer_acquisition_link, list_customer_acquisition_links
@@ -76,6 +78,7 @@ QUESTIONNAIRE_CONDITION_LABELS = {
 QUESTION_OPTION_CATEGORY_MODE = "single_question_option_category"
 QUESTION_CHOICE_TYPES = {"single_choice", "multi_choice"}
 SETUP_PROFILE_TEMPLATE_CODE_PREFIX = "setup_normal_option_category"
+AUDIENCE_REVIEW_STEP_KEYS = {"order_product", "questionnaire", "conversion_product"}
 
 
 def _program_code(value: Any) -> str:
@@ -191,6 +194,54 @@ def _selected_questionnaire(questionnaire_id: int | None, available: list[dict[s
         "status": "停用" if row["is_disabled"] else "启用",
         "question_count": int(row["question_count"] or 0),
     }
+
+
+def _money_text(amount_total: Any, currency: str = "CNY") -> str:
+    try:
+        cents = int(amount_total or 0)
+    except (TypeError, ValueError):
+        cents = 0
+    prefix = "¥" if (_normalized_text(currency) or "CNY").upper() == "CNY" else ""
+    return f"{prefix}{cents / 100:.2f}" if cents else f"{prefix}0.00"
+
+
+def _available_products() -> list[dict[str, Any]]:
+    try:
+        products = list_wechat_pay_products()
+    except Exception:
+        products = []
+    return [
+        {
+            "id": _normalized_text(item.get("product_code") or item.get("id")),
+            "name": _normalized_text(item.get("name") or item.get("title") or item.get("description")),
+            "price_text": _money_text(item.get("amount_total"), _normalized_text(item.get("currency")) or "CNY"),
+        }
+        for item in products
+        if _normalized_text(item.get("product_code") or item.get("id"))
+    ]
+
+
+def _selected_product_snapshot(product_id: Any, provided: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_id = _normalized_text(product_id)
+    provided_snapshot = dict(provided or {})
+    if normalized_id:
+        for item in _available_products():
+            if _normalized_text(item.get("id")) == normalized_id:
+                return {"name": _normalized_text(item.get("name")), "price_text": _normalized_text(item.get("price_text"))}
+    return {
+        "name": _normalized_text(provided_snapshot.get("name")),
+        "price_text": _normalized_text(provided_snapshot.get("price_text")),
+    }
+
+
+def _selected_questionnaire_snapshot(questionnaire_id: Any, available: list[dict[str, Any]] | None = None, provided: dict[str, Any] | None = None) -> dict[str, Any]:
+    normalized_id = int(questionnaire_id or 0)
+    if normalized_id:
+        selected = _selected_questionnaire(normalized_id, list(available or _list_available_questionnaires()))
+        if selected:
+            return {"title": _normalized_text(selected.get("title"))}
+    provided_snapshot = dict(provided or {})
+    return {"title": _normalized_text(provided_snapshot.get("title"))}
 
 
 def _questionnaire_questions(questionnaire_id: int | None) -> list[dict[str, Any]]:
@@ -476,7 +527,160 @@ def _segmentation_view_model(payload: dict[str, Any], *, program_id: int) -> dic
     }
 
 
-def _audience_rule_view_model(payload: dict[str, Any], *, program_id: int) -> dict[str, Any]:
+def _legacy_rules_from_entry_rule(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rules = list((payload or {}).get("rules") or [])
+    if rules:
+        return rules
+    normalized = _normalize_audience_entry_rule_payload(payload, validate=False)
+    order_enabled = bool((normalized.get("order_review") or {}).get("enabled"))
+    questionnaire_enabled = bool((normalized.get("questionnaire_review") or {}).get("enabled"))
+    return [
+        {
+            "event": "channel_enter",
+            "condition_type": "any_entry_channel",
+            "target_audience_code": "pending_questionnaire" if order_enabled or questionnaire_enabled else "operating",
+            "enabled": True,
+        },
+        {
+            "event": "questionnaire_submitted",
+            "condition_type": "questionnaire_id_matched",
+            "target_audience_code": "operating",
+            "enabled": questionnaire_enabled,
+        },
+    ]
+
+
+def _normalize_audience_review_item(
+    item: dict[str, Any],
+    *,
+    enabled_default: bool,
+    product: bool = False,
+    questionnaire: bool = False,
+    available_questionnaires: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    enabled = bool(item.get("enabled", enabled_default))
+    result: dict[str, Any] = {"enabled": enabled}
+    if product:
+        selected_product_id = _normalized_text(item.get("selected_product_id") or item.get("product_id"))
+        result["selected_product_id"] = selected_product_id or None
+        result["selected_product_snapshot"] = _selected_product_snapshot(
+            selected_product_id,
+            item.get("selected_product_snapshot") if isinstance(item.get("selected_product_snapshot"), dict) else {},
+        )
+    if questionnaire:
+        selected_questionnaire_id = int(item.get("selected_questionnaire_id") or item.get("questionnaire_id") or 0) or None
+        result["selected_questionnaire_id"] = selected_questionnaire_id
+        result["selected_questionnaire_snapshot"] = _selected_questionnaire_snapshot(
+            selected_questionnaire_id,
+            available=available_questionnaires,
+            provided=item.get("selected_questionnaire_snapshot") if isinstance(item.get("selected_questionnaire_snapshot"), dict) else {},
+        )
+    return result
+
+
+def _normalize_audience_entry_rule_payload(payload: dict[str, Any], *, validate: bool = True) -> dict[str, Any]:
+    payload = dict(payload or {})
+    available_questionnaires = _list_available_questionnaires()
+    has_v5_review_config = any(
+        key in payload
+        for key in ("entry_source", "order_review", "questionnaire_review", "operating", "conversion_review")
+    )
+    if not has_v5_review_config and (payload.get("cards") or payload.get("rules")):
+        rules = list(payload.get("rules") or [])
+        if payload.get("cards"):
+            cards = dict(payload.get("cards") or {})
+            submit_card = dict(cards.get("questionnaire_submitted") or {})
+            questionnaire_enabled = bool(submit_card.get("enabled", True))
+            selected_questionnaire_id = int(payload.get("selected_questionnaire_id") or 0) or None
+        else:
+            by_event = {str(item.get("event") or ""): dict(item or {}) for item in rules}
+            submit_rule = by_event.get("questionnaire_submitted") or DEFAULT_AUDIENCE_ENTRY_RULES[1]
+            questionnaire_enabled = bool(submit_rule.get("enabled", True))
+            selected_questionnaire_id = int(payload.get("selected_questionnaire_id") or 0) or None
+        normalized = {
+            "entry_source": "both",
+            "order_review": _normalize_audience_review_item({}, enabled_default=False, product=True),
+            "questionnaire_review": _normalize_audience_review_item(
+                {"enabled": questionnaire_enabled, "selected_questionnaire_id": selected_questionnaire_id},
+                enabled_default=questionnaire_enabled,
+                questionnaire=True,
+                available_questionnaires=available_questionnaires,
+            ),
+            "operating": {"enabled": True, "fixed": True},
+            "conversion_review": _normalize_audience_review_item({}, enabled_default=False, product=True),
+            "rules": rules or DEFAULT_AUDIENCE_ENTRY_RULES,
+        }
+    else:
+        normalized = {
+            "entry_source": _normalized_text(payload.get("entry_source")) or "both",
+            "order_review": _normalize_audience_review_item(
+                dict(payload.get("order_review") or {}),
+                enabled_default=False,
+                product=True,
+            ),
+            "questionnaire_review": _normalize_audience_review_item(
+                dict(payload.get("questionnaire_review") or {}),
+                enabled_default=False,
+                questionnaire=True,
+                available_questionnaires=available_questionnaires,
+            ),
+            "operating": {"enabled": True, "fixed": True},
+            "conversion_review": _normalize_audience_review_item(
+                dict(payload.get("conversion_review") or {}),
+                enabled_default=False,
+                product=True,
+            ),
+        }
+    if validate:
+        order_review = dict(normalized.get("order_review") or {})
+        questionnaire_review = dict(normalized.get("questionnaire_review") or {})
+        conversion_review = dict(normalized.get("conversion_review") or {})
+        if order_review.get("enabled") and not _normalized_text(order_review.get("selected_product_id")):
+            raise ValueError("订单审核已启用，请先选择商品")
+        if questionnaire_review.get("enabled") and not int(questionnaire_review.get("selected_questionnaire_id") or 0):
+            raise ValueError("问卷审核已启用，请先选择问卷")
+        if conversion_review.get("enabled") and not _normalized_text(conversion_review.get("selected_product_id")):
+            raise ValueError("已转化判定已启用，请先选择成交商品")
+    return normalized
+
+
+def _audience_next_steps(payload: dict[str, Any]) -> dict[str, str]:
+    order_enabled = bool((payload.get("order_review") or {}).get("enabled"))
+    questionnaire_enabled = bool((payload.get("questionnaire_review") or {}).get("enabled"))
+    conversion_enabled = bool((payload.get("conversion_review") or {}).get("enabled"))
+    scan_next = "订单审核" if order_enabled else ("问卷审核" if questionnaire_enabled else "运营中")
+    return {
+        "scan_enter": scan_next,
+        "order_review": ("问卷审核" if questionnaire_enabled else "运营中") if order_enabled else "本项已跳过",
+        "questionnaire_review": "运营中" if questionnaire_enabled else "本项已跳过",
+        "operating": "已转化" if conversion_enabled else "结束",
+        "conversion_review": "结束" if conversion_enabled else "本项已关闭",
+    }
+
+
+def _audience_rule_view_model(payload: dict[str, Any], *, program_id: int, picker: str = "") -> dict[str, Any]:
+    normalized_payload = _normalize_audience_entry_rule_payload(payload or {}, validate=False)
+    available_questionnaires = _list_available_questionnaires()
+    available_products = _available_products()
+    picker_key = _normalized_text(picker)
+    if picker_key not in AUDIENCE_REVIEW_STEP_KEYS:
+        picker_key = ""
+    return {
+        **normalized_payload,
+        "rules": _legacy_rules_from_entry_rule(normalized_payload),
+        "next_steps": _audience_next_steps(normalized_payload),
+        "available_products": available_products,
+        "available_questionnaires": available_questionnaires,
+        "picker": picker_key,
+        "picker_title": {
+            "order_product": "选择订单审核商品",
+            "questionnaire": "选择问卷审核问卷",
+            "conversion_product": "选择成交判定商品",
+        }.get(picker_key, ""),
+    }
+
+
+def _legacy_audience_rule_view_model(payload: dict[str, Any], *, program_id: int) -> dict[str, Any]:
     rules = list((payload or {}).get("rules") or DEFAULT_AUDIENCE_ENTRY_RULES)
     by_event = {str(item.get("event") or ""): dict(item or {}) for item in rules}
     entry_rule = by_event.get("channel_enter") or DEFAULT_AUDIENCE_ENTRY_RULES[0]
@@ -522,10 +726,64 @@ def _program_entry_payload(program_id: int) -> dict[str, Any]:
         "channels": channels,
         "qrcode_channel": qrcode_channels[0] if qrcode_channels else {},
         "customer_acquisition_links": list_customer_acquisition_links(program_id=int(program_id)),
+        "wecom_tag_catalog": _program_entry_wecom_tag_catalog(),
     }
 
 
-def get_program_setup_payload(program_id: int, *, step: str = "basic") -> dict[str, Any]:
+def _program_entry_wecom_tag_catalog() -> dict[str, Any]:
+    try:
+        catalog = tags_domain_service.list_wecom_tag_catalog()
+    except Exception:
+        return {
+            "items": [],
+            "groups": [],
+            "total_tags": 0,
+            "tag_limit": 1000,
+            "synced_at": "",
+            "error": "企微标签加载失败，请先同步企微标签或检查企微配置。",
+        }
+    groups: list[dict[str, Any]] = []
+    for group in list(catalog.get("groups") or []):
+        tags = [
+            {
+                "tag_id": _normalized_text(tag.get("tag_id")),
+                "tag_name": _normalized_text(tag.get("tag_name")),
+                "group_id": _normalized_text(tag.get("group_id")),
+                "group_name": _normalized_text(tag.get("group_name")),
+            }
+            for tag in list(group.get("tags") or [])
+            if _normalized_text(tag.get("tag_id")) and _normalized_text(tag.get("tag_name"))
+        ]
+        if not tags:
+            continue
+        groups.append(
+            {
+                "group_id": _normalized_text(group.get("group_id")),
+                "group_name": _normalized_text(group.get("group_name")) or "未命名标签组",
+                "tags": tags,
+            }
+        )
+    items = [
+        {
+            "tag_id": _normalized_text(item.get("tag_id")),
+            "tag_name": _normalized_text(item.get("tag_name")),
+            "group_id": _normalized_text(item.get("group_id")),
+            "group_name": _normalized_text(item.get("group_name")),
+        }
+        for item in list(catalog.get("items") or [])
+        if _normalized_text(item.get("tag_id")) and _normalized_text(item.get("tag_name"))
+    ]
+    return {
+        "items": items,
+        "groups": groups,
+        "total_tags": int(catalog.get("total_tags") or len(items)),
+        "tag_limit": int(catalog.get("tag_limit") or 1000),
+        "synced_at": _normalized_text(catalog.get("synced_at")),
+        "error": "",
+    }
+
+
+def get_program_setup_payload(program_id: int, *, step: str = "basic", audience_picker: str = "") -> dict[str, Any]:
     program = get_automation_program(int(program_id))
     blocks = _blocks_by_key(int(program_id))
     segmentation = _payload_from_block(blocks, BLOCK_SEGMENTATION)
@@ -547,7 +805,11 @@ def get_program_setup_payload(program_id: int, *, step: str = "basic") -> dict[s
         "entry_channel": _payload_from_block(blocks, BLOCK_ENTRY_CHANNEL),
         "entry": _program_entry_payload(int(program_id)),
         "segmentation": segmentation_view,
-        "audience_entry_rule": _audience_rule_view_model(audience_payload, program_id=int(program_id)),
+        "audience_entry_rule": _audience_rule_view_model(
+            audience_payload,
+            program_id=int(program_id),
+            picker=audience_picker,
+        ),
         "operations": {"tasks": [dict(item or {}) for item in operations.get("tasks") or []]},
         "publish_state": _payload_from_block(blocks, BLOCK_PUBLISH_STATE),
         "publish_check": build_publish_check(program_id),
@@ -825,28 +1087,16 @@ def save_segmentation(program_id: int, payload: dict[str, Any]) -> dict[str, Any
 
 
 def save_audience_entry_rule(program_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-    if payload.get("cards"):
-        cards = dict(payload.get("cards") or {})
-        rules = []
-        for event, defaults in (
-            ("channel_enter", DEFAULT_AUDIENCE_ENTRY_RULES[0]),
-            ("questionnaire_submitted", DEFAULT_AUDIENCE_ENTRY_RULES[1]),
-        ):
-            card = dict(cards.get(event) or {})
-            rules.append(
-                {
-                    "event": event,
-                    "condition_type": _normalized_text(card.get("condition_type") or defaults.get("condition")) or defaults["condition"],
-                    "target_audience_code": _normalized_text(card.get("target_audience_code")) or defaults["target_audience_code"],
-                    "enabled": bool(card.get("enabled", True)),
-                }
-            )
-    else:
-        rules = list(payload.get("rules") or DEFAULT_AUDIENCE_ENTRY_RULES)
+    payload = dict(payload or {})
+    allow_incomplete = bool(payload.pop("_allow_incomplete", False))
+    is_legacy_payload = bool(payload.get("cards") or payload.get("rules"))
+    normalized = _normalize_audience_entry_rule_payload(payload, validate=not is_legacy_payload and not allow_incomplete)
+    rules = _legacy_rules_from_entry_rule(normalized)
+    normalized["rules"] = rules
     block = program_repo.upsert_config_block_row(
         int(program_id),
         BLOCK_AUDIENCE_ENTRY_RULE,
-        {"rules": rules},
+        normalized,
         status="saved",
     )
     get_db().commit()
@@ -867,6 +1117,157 @@ def _has_segmentation(payload: dict[str, Any]) -> bool:
     return bool(normal.get("enabled") and (normal.get("categories") or normal.get("rules"))) or bool(score.get("enabled") and score.get("ranges"))
 
 
+def _audience_rule_check_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    normalized = _normalize_audience_entry_rule_payload(payload or {}, validate=False)
+    order_review = dict(normalized.get("order_review") or {})
+    questionnaire_review = dict(normalized.get("questionnaire_review") or {})
+    conversion_review = dict(normalized.get("conversion_review") or {})
+    checks = [
+        ("扫码进入必填", True, "请先配置当前方案入口", "entry"),
+        ("运营中不可关闭", bool((normalized.get("operating") or {}).get("enabled", True)), "运营中必须保持启用", "entry-rule"),
+    ]
+    if order_review.get("enabled"):
+        checks.append(("订单审核商品已选择", bool(_normalized_text(order_review.get("selected_product_id"))), "请先选择订单审核商品", "entry-rule"))
+    if questionnaire_review.get("enabled"):
+        checks.append(("问卷审核问卷已选择", bool(int(questionnaire_review.get("selected_questionnaire_id") or 0)), "请先选择问卷审核问卷", "entry-rule"))
+    if conversion_review.get("enabled"):
+        checks.append(("成交判定商品已选择", bool(_normalized_text(conversion_review.get("selected_product_id"))), "请先选择成交判定商品", "entry-rule"))
+    return [
+        {
+            "label": label,
+            "passed": bool(passed),
+            "severity": "pass" if passed else "fail",
+            "message": message if not passed else "已完成",
+            "fix_step": fix_step,
+            "fix_url": f"?step={fix_step}",
+        }
+        for label, passed, message, fix_step in checks
+    ]
+
+
+def _program_id_from_member(member: dict[str, Any]) -> int:
+    source_channel_id = int(member.get("source_channel_id") or 0)
+    if source_channel_id <= 0:
+        return 0
+    row = get_db().execute(
+        "SELECT program_id FROM automation_channel WHERE id = ? LIMIT 1",
+        (source_channel_id,),
+    ).fetchone()
+    if not row:
+        return 0
+    try:
+        return int(row["program_id"] or 0)
+    except (KeyError, TypeError, ValueError):
+        return 0
+
+
+def _member_has_paid_product(member: dict[str, Any], product_id: Any) -> bool:
+    product_code = _normalized_text(product_id)
+    if not product_code:
+        return False
+    external_contact_id = _normalized_text(member.get("external_contact_id"))
+    phone = _normalized_text(member.get("phone"))
+    filters: list[str] = []
+    params: list[Any] = [product_code]
+    if external_contact_id:
+        filters.append("(external_userid = ? OR userid_snapshot = ? OR respondent_key = ?)")
+        params.extend([external_contact_id, external_contact_id, external_contact_id])
+    if phone:
+        filters.append("mobile_snapshot = ?")
+        params.append(phone)
+    if not filters:
+        return False
+    row = get_db().execute(
+        """
+        SELECT id
+        FROM wechat_pay_orders
+        WHERE product_code = ?
+          AND COALESCE(refunded_amount_total, 0) = 0
+          AND (COALESCE(status, '') = 'paid' OR COALESCE(trade_state, '') = 'SUCCESS')
+          AND (
+        """
+        + " OR ".join(filters)
+        + """
+          )
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        tuple(params),
+    ).fetchone()
+    return bool(row)
+
+
+def _member_has_questionnaire_submission(
+    member: dict[str, Any],
+    questionnaire_id: Any,
+    questionnaire_state: dict[str, Any] | None = None,
+) -> bool:
+    normalized_questionnaire_id = int(questionnaire_id or 0)
+    if normalized_questionnaire_id <= 0:
+        return False
+    state = dict(questionnaire_state or {})
+    if (
+        int(state.get("questionnaire_id") or 0) == normalized_questionnaire_id
+        and _normalized_text(state.get("questionnaire_status")) == "submitted"
+    ):
+        return True
+    submission = workflow_repo.get_latest_questionnaire_submission_row(
+        questionnaire_id=normalized_questionnaire_id,
+        external_contact_ids=[_normalized_text(member.get("external_contact_id"))],
+        phone=_normalized_text(member.get("phone")),
+    )
+    return bool(submission)
+
+
+def resolve_member_audience_entry_rule_state(
+    member: dict[str, Any],
+    *,
+    questionnaire_state: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    program_id = _program_id_from_member(member)
+    if program_id <= 0:
+        return None
+    payload = _payload_from_block(_blocks_by_key(program_id), BLOCK_AUDIENCE_ENTRY_RULE)
+    if not payload or not any(key in payload for key in ("order_review", "questionnaire_review", "conversion_review")):
+        return None
+    normalized = _normalize_audience_entry_rule_payload(payload, validate=False)
+    order_review = dict(normalized.get("order_review") or {})
+    questionnaire_review = dict(normalized.get("questionnaire_review") or {})
+    conversion_review = dict(normalized.get("conversion_review") or {})
+
+    if order_review.get("enabled") and not _member_has_paid_product(member, order_review.get("selected_product_id")):
+        return {
+            "program_id": program_id,
+            "audience_code": "pending_questionnaire",
+            "entry_reason": "order_review_pending",
+            "checkpoint": "order_review",
+        }
+    if questionnaire_review.get("enabled") and not _member_has_questionnaire_submission(
+        member,
+        questionnaire_review.get("selected_questionnaire_id"),
+        questionnaire_state=questionnaire_state,
+    ):
+        return {
+            "program_id": program_id,
+            "audience_code": "pending_questionnaire",
+            "entry_reason": "questionnaire_review_pending",
+            "checkpoint": "questionnaire_review",
+        }
+    if conversion_review.get("enabled") and _member_has_paid_product(member, conversion_review.get("selected_product_id")):
+        return {
+            "program_id": program_id,
+            "audience_code": "converted",
+            "entry_reason": "conversion_product_paid",
+            "checkpoint": "conversion_review",
+        }
+    return {
+        "program_id": program_id,
+        "audience_code": "operating",
+        "entry_reason": "audience_entry_rule_passed",
+        "checkpoint": "operating",
+    }
+
+
 def build_publish_check(program_id: int) -> dict[str, Any]:
     program = get_automation_program(int(program_id))
     setup = _blocks_by_key(int(program_id))
@@ -874,17 +1275,21 @@ def build_publish_check(program_id: int) -> dict[str, Any]:
     if not segmentation and _is_default_program(int(program_id)):
         segmentation = _legacy_segmentation_payload()
     active_tasks = list_operation_tasks(program_id=int(program_id), status="active")
+    audience_payload = _payload_from_block(setup, BLOCK_AUDIENCE_ENTRY_RULE)
+    audience_rule_items = _audience_rule_check_items(audience_payload)
+    audience_rule_ok = all(bool(item.get("passed")) for item in audience_rule_items)
     entry_ok = (
         _normalized_text(program.get("status")) != "archived"
         and (_is_default_program(int(program_id)) or bool(setup))
         and _has_entry_channel(int(program_id))
+        and audience_rule_ok
     )
-    audience_rules = list(_payload_from_block(setup, BLOCK_AUDIENCE_ENTRY_RULE).get("rules") or [])
+    audience_rules = list((audience_payload or {}).get("rules") or _legacy_rules_from_entry_rule(audience_payload))
     full_ok = (
         entry_ok
         and bool(segmentation.get("questionnaire_id"))
         and _has_segmentation(segmentation)
-        and bool(audience_rules)
+        and audience_rule_ok
         and bool(active_tasks.get("tasks"))
     )
     def item(label: str, passed: bool, message: str, fix_step: str) -> dict[str, Any]:
@@ -906,6 +1311,7 @@ def build_publish_check(program_id: int) -> dict[str, Any]:
                 item("方案未归档", _normalized_text(program.get("status")) != "archived", "归档方案不能发布入口", "basic"),
                 item("当前方案未读取默认方案配置", _is_default_program(int(program_id)) or bool(setup), "请先保存当前方案配置", "basic"),
                 item("至少有一个当前方案入口", _has_entry_channel(int(program_id)), "请先配置渠道二维码或获客助手入口", "entry"),
+                *audience_rule_items,
             ],
         },
         "full": {
@@ -915,7 +1321,7 @@ def build_publish_check(program_id: int) -> dict[str, Any]:
                 item("入口发布检查通过", entry_ok, "请先完成入口发布检查", "entry"),
                 item("已绑定问卷", bool(segmentation.get("questionnaire_id")), "请选择当前方案使用的问卷", "segmentation"),
                 item("已配置分层策略", _has_segmentation(segmentation), "请配置普通问卷规则或总分分层", "segmentation"),
-                item("入池规则完整", bool(audience_rules), "请保存入池规则", "entry-rule"),
+                item("入池规则完整", bool(audience_rules) and audience_rule_ok, "请保存入池规则", "entry-rule"),
                 item("存在启用中的运营任务", bool(active_tasks.get("tasks")), "请至少启用一个运营任务", "operations"),
             ],
         },

@@ -17,6 +17,7 @@ from ..automation_state.state_defs import (
     FOLLOWUP_SEGMENT_FOCUS as SHARED_FOLLOWUP_SEGMENT_FOCUS,
     FOLLOWUP_SEGMENT_NORMAL as SHARED_FOLLOWUP_SEGMENT_NORMAL,
 )
+from ..attachment_library import _normalize_id_list as _normalize_attachment_ids
 from ..marketing_automation.service import get_signup_conversion_config, save_signup_conversion_config
 from ..outbound_webhook.service import EVENT_OPENCLAW_FOCUS_MESSAGE, send_outbound_webhook
 from ..questionnaire.service import get_questionnaire_detail, list_questionnaires
@@ -66,6 +67,85 @@ CHANNEL_STATUS_ACTIVE = "active"
 def _program_default_channel_code(program_id: int | None = None) -> str:
     normalized_program_id = int(program_id or 0)
     return f"program_{normalized_program_id}_default_qrcode" if normalized_program_id > 0 else DEFAULT_CHANNEL_CODE
+
+
+def _lead_qr_from_channel(channel: dict[str, Any] | None) -> dict[str, Any]:
+    channel = dict(channel or {})
+    qr_url = _normalized_text(channel.get("qr_url"))
+    if not qr_url:
+        return {}
+    return {
+        "channel_id": int(channel.get("id") or 0),
+        "channel_name": _normalized_text(channel.get("channel_name")),
+        "qr_url": qr_url,
+        "status": _normalized_text(channel.get("status")),
+        "owner_staff_id": _normalized_text(channel.get("owner_staff_id")),
+    }
+
+
+def resolve_lead_channel_for_program(
+    program_id: int | None,
+    *,
+    channel_id: int | None = None,
+) -> dict[str, Any] | None:
+    normalized_channel_id = int(channel_id or 0)
+    if normalized_channel_id > 0:
+        channel = repo.get_channel_by_id(normalized_channel_id)
+        if channel and _normalized_text(channel.get("qr_url")):
+            return channel
+    normalized_program_id = int(program_id or 0)
+    if normalized_program_id <= 0:
+        return None
+    channels = repo.list_channels_by_program(normalized_program_id, include_inactive=True)
+    preferred = next(
+        (
+            channel
+            for channel in channels
+            if _normalized_text(channel.get("qr_url"))
+            and _normalized_text(channel.get("status")) in {"active", "configured"}
+        ),
+        None,
+    )
+    if preferred:
+        return preferred
+    fallback = next((channel for channel in channels if _normalized_text(channel.get("qr_url"))), None)
+    if fallback:
+        return fallback
+    return repo.get_default_channel(program_id=normalized_program_id, allow_legacy_fallback=True)
+
+
+def list_product_lead_plan_options() -> list[dict[str, Any]]:
+    from . import program_repo
+
+    options = [
+        {
+            "program_id": 0,
+            "program_name": "不配置引流计划",
+            "status": "",
+            "channel_id": None,
+            "channel_name": "",
+            "qr_url": "",
+            "selectable": True,
+        }
+    ]
+    for program in program_repo.list_program_rows(include_archived=False):
+        status = _normalized_text(program.get("status"))
+        if status not in {"active", "draft", "paused"}:
+            continue
+        qr = _lead_qr_from_channel(resolve_lead_channel_for_program(int(program.get("id") or 0)))
+        options.append(
+            {
+                "program_id": int(program.get("id") or 0),
+                "program_name": _normalized_text(program.get("program_name")) or _normalized_text(program.get("program_code")),
+                "status": status,
+                "channel_id": qr.get("channel_id"),
+                "channel_name": qr.get("channel_name", ""),
+                "qr_url": qr.get("qr_url", ""),
+                "selectable": bool(qr.get("qr_url")),
+            }
+        )
+    return options
+
 
 POOL_WON = local_projection.POOL_WON
 POOL_REMOVED = local_projection.POOL_REMOVED
@@ -702,6 +782,7 @@ def _sync_sop_progress_for_transition_non_blocking(before: dict[str, Any], after
 
 def _persist_member(member: dict[str, Any] | None, payload: dict[str, Any]) -> dict[str, Any]:
     db = get_db()
+    audience_sync_result: dict[str, Any] = {}
     try:
         before = _serialize_member(member or {})
         if member and member.get("id"):
@@ -710,12 +791,35 @@ def _persist_member(member: dict[str, Any] | None, payload: dict[str, Any]) -> d
             saved = repo.insert_member(payload)
         from .workflow_runtime import sync_conversion_member_audience
 
-        sync_conversion_member_audience(saved)
+        audience_sync_result = sync_conversion_member_audience(saved)
         saved = repo.get_member_by_id(int(saved["id"])) or saved
         db.commit()
     except Exception:
         db.rollback()
         raise
+    if bool(audience_sync_result.get("updated")):
+        try:
+            from .operation_task_service import run_audience_entered_operation_tasks
+
+            run_audience_entered_operation_tasks(
+                member_id=int(audience_sync_result.get("member_id") or 0),
+                audience_code=_normalized_text(audience_sync_result.get("audience_code")),
+                audience_entry_id=int(audience_sync_result.get("audience_entry_id") or 0),
+                operator_id="audience_entered",
+            )
+        except Exception:
+            try:
+                get_db().rollback()
+            except Exception:
+                pass
+            try:
+                current_app.logger.exception(
+                    "automation operation task audience-entered trigger failed member_id=%s audience=%s",
+                    audience_sync_result.get("member_id"),
+                    audience_sync_result.get("audience_code"),
+                )
+            except Exception:
+                pass
     _sync_sop_progress_for_transition_non_blocking(before, _serialize_member(saved))
     return repo.get_member_by_id(int(saved["id"])) or saved
 
@@ -797,6 +901,29 @@ def _send_channel_welcome_message(
             )
         if welcome_attachments:
             request_payload["attachments"] = welcome_attachments
+    try:
+        raw_attachment_ids = channel.get("welcome_attachment_library_ids") or []
+        if raw_attachment_ids:
+            from .. import attachment_library as _attachment_library
+
+            welcome_attachments = list(request_payload.get("attachments") or [])
+            for aid in _attachment_library._normalize_id_list(raw_attachment_ids):
+                welcome_attachments.append(_attachment_library.materialize_file_attachment(aid))
+            if len(welcome_attachments) > 9:
+                raise ValueError("welcome message supports at most 9 attachments")
+            if welcome_attachments:
+                request_payload["attachments"] = welcome_attachments
+    except (ValueError, RuntimeError) as exc:
+        _write_event(
+            member_id=int(member["id"]),
+            action="qrcode_welcome_failed",
+            operator_type="system",
+            operator_id=_normalized_text(operator_id) or "wecom_callback",
+            before_snapshot=_member_snapshot(serialized_member),
+            after_snapshot=_member_snapshot(serialized_member),
+            remark=str(exc),
+        )
+        return {"attempted": True, "sent": False, "error": str(exc)}
     try:
         wecom_result = get_contact_runtime_client().send_welcome_msg(request_payload)
     except (WeComClientError, AttributeError, ValueError) as exc:
@@ -969,6 +1096,7 @@ def get_settings_payload(*, program_id: int | None = None) -> dict[str, Any]:
             "qr_ticket": _normalized_text(channel.get("qr_ticket")),
             "scene_value": _normalized_text(channel.get("scene_value")),
             "welcome_message": _normalized_text(channel.get("welcome_message")),
+            "welcome_attachment_library_ids": _normalize_attachment_ids(channel.get("welcome_attachment_library_ids")),
             "auto_accept_friend": _normalize_bool(channel.get("auto_accept_friend")),
             "entry_tag_id": _normalized_text(channel.get("entry_tag_id")),
             "entry_tag_name": _normalized_text(channel.get("entry_tag_name")),
@@ -979,6 +1107,7 @@ def get_settings_payload(*, program_id: int | None = None) -> dict[str, Any]:
                 provider=provider,
                 channel_status=_normalized_text(channel.get("status")) or CHANNEL_STATUS_NOT_GENERATED,
                 welcome_message=_normalized_text(channel.get("welcome_message")),
+                welcome_attachment_library_ids=_normalize_attachment_ids(channel.get("welcome_attachment_library_ids")),
                 auto_accept_friend=_normalize_bool(channel.get("auto_accept_friend")),
                 entry_tag_name=_normalized_text(channel.get("entry_tag_name")),
             ),
@@ -1486,12 +1615,19 @@ def get_debug_payload(*, external_contact_id: str = "", phone: str = "") -> dict
     }
 
 
-def sync_member_from_questionnaire_submission(*, external_contact_id: str = "", phone: str = "", operator_id: str = "system") -> dict[str, Any]:
+def sync_member_from_questionnaire_submission(
+    *,
+    external_contact_id: str = "",
+    phone: str = "",
+    questionnaire_id: int | None = None,
+    operator_id: str = "system",
+) -> dict[str, Any]:
     from . import member_state_service
 
     return member_state_service.sync_member_from_questionnaire_submission(
         external_contact_id=external_contact_id,
         phone=phone,
+        questionnaire_id=questionnaire_id,
         operator_id=operator_id,
     )
 

@@ -22,6 +22,7 @@ def _send_private_message_to_members_batch(
     operator_id: str,
     filter_snapshot: dict[str, Any],
     miniprogram_library_ids: list[int] | None = None,
+    attachment_library_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     runtime = _runtime()
     target_items = [
@@ -37,6 +38,7 @@ def _send_private_message_to_members_batch(
         sender_userid=sender_userid,
         content=runtime._normalized_text(content_text),
         miniprogram_library_ids=list(miniprogram_library_ids or []),
+        attachment_library_ids=list(attachment_library_ids or []),
         operator_id=runtime._normalized_text(operator_id) or "automation_conversion_workflow",
         filter_snapshot=filter_snapshot,
     )
@@ -108,6 +110,7 @@ def _prepare_execution_item_for_send(
 
     node_content_mode = runtime._node_content_mode(node, workflow_bundle)
     miniprogram_library_ids = runtime._node_miniprogram_library_ids(node=node, workflow_bundle=workflow_bundle)
+    attachment_library_ids = runtime._node_attachment_library_ids(node=node, workflow_bundle=workflow_bundle)
     if not runtime._normalized_text(member.get("external_contact_id")):
         updated = workflow_repo.update_workflow_execution_item_row(
             int(execution_item["id"]),
@@ -156,6 +159,7 @@ def _prepare_execution_item_for_send(
         "agent_run_id": rendered.get("agent_run_id"),
         "agent_output_id": rendered.get("agent_output_id"),
         "miniprogram_library_ids": miniprogram_library_ids,
+        "attachment_library_ids": attachment_library_ids,
         "send_isolation_key": str(execution_item.get("id") or "") if node_content_mode == "personalized_single" else "",
         "filter_snapshot": {
             "selection_mode": "automation_conversion_workflow_node",
@@ -163,6 +167,7 @@ def _prepare_execution_item_for_send(
             "node_id": int(execution.get("node_id") or 0),
             "execution_id": runtime._normalized_text(execution.get("execution_id")),
             "miniprogram_library_ids": miniprogram_library_ids,
+            "attachment_library_ids": attachment_library_ids,
         },
     }
 
@@ -175,12 +180,13 @@ def _send_prepared_execution_groups(
     runtime = _runtime()
     sent_count = 0
     failed_count = 0
-    grouped_items: dict[tuple[str, str, tuple[int, ...], str], list[dict[str, Any]]] = {}
+    grouped_items: dict[tuple[str, str, tuple[int, ...], tuple[int, ...], str], list[dict[str, Any]]] = {}
     for prepared in prepared_items:
         key = (
             runtime._normalized_text(prepared.get("sender_userid")),
             runtime._normalized_text(prepared.get("content_text")),
             tuple(int(item) for item in (prepared.get("miniprogram_library_ids") or [])),
+            tuple(int(item) for item in (prepared.get("attachment_library_ids") or [])),
             runtime._normalized_text(prepared.get("send_isolation_key")),
         )
         grouped_items.setdefault(key, []).append(prepared)
@@ -199,6 +205,7 @@ def _send_prepared_execution_groups(
             operator_id=operator_id,
             filter_snapshot=filter_snapshot,
             miniprogram_library_ids=list(first.get("miniprogram_library_ids") or []),
+            attachment_library_ids=list(first.get("attachment_library_ids") or []),
         )
         failed_external_userids = {
             runtime._normalized_text(item)

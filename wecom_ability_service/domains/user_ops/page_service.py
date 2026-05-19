@@ -7,7 +7,7 @@ from ...db import get_db
 from ...db.helpers import fetchall_dicts, fetchone_dict
 from ...infra.helpers import db_bool, stringify_db_timestamp
 from ...infra.json_utils import json_dumps as _json_dumps, safe_json_loads as _json_loads
-from .. import miniprogram_library
+from .. import attachment_library, miniprogram_library
 from ..tasks.private_message import (
     count_private_message_images,
     extract_private_message_text,
@@ -755,11 +755,19 @@ def _summarize_skipped_by_reason(skipped_by_reason: dict[str, int]) -> str:
 
 
 def _build_private_message_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], str, int]:
+    payload = dict(payload)
     raw_attachments = payload.get("attachments")
+    attachment_library_ids = attachment_library._normalize_id_list(payload.get("attachment_library_ids"), max_count=9)
+    if attachment_library_ids:
+        raw_attachments = list(raw_attachments or []) + [
+            {"msgtype": "file", "file": {"library_id": item_id}}
+            for item_id in attachment_library_ids
+        ]
     if isinstance(raw_attachments, list) and raw_attachments:
         expanded = miniprogram_library.expand_attachments_with_library(raw_attachments)
-        payload = dict(payload)
+        expanded = attachment_library.expand_attachments_with_library(expanded)
         payload["attachments"] = expanded
+    payload.pop("attachment_library_ids", None)
     content_preview = extract_private_message_text(payload)
     image_count = count_private_message_images(payload)
     if not has_private_message_body(payload):

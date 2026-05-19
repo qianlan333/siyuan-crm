@@ -36,5 +36,20 @@ def test_main_smoke_keeps_recently_touched_critical_paths():
         "tests/test_user_ops_page_service_helpers.py",
         "tests/test_hxc_dashboard_snapshot.py",
         "tests/test_send_task.py",
+        "tests/test_admin_navigation_groups.py",
+        "tests/test_wechat_pay_products.py",
+        "tests/test_wechat_pay_admin_transactions.py",
     ):
         assert test_path in main_smoke_block
+
+
+def test_pr_smoke_covers_admin_navigation_and_wechat_pay_splits():
+    source = _ci_source()
+    pr_smoke_block = source[source.index("pr-smoke:"):source.index("main-smoke:")]
+
+    for test_path in (
+        "tests/test_admin_navigation_groups.py",
+        "tests/test_wechat_pay_products.py",
+        "tests/test_wechat_pay_admin_transactions.py",
+    ):
+        assert test_path in pr_smoke_block

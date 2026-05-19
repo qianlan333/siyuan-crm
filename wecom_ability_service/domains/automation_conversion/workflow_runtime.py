@@ -383,6 +383,48 @@ def _resolve_member_conversion_audience(member: dict[str, Any]) -> dict[str, Any
     questionnaire_submitted_at = _normalized_text(questionnaire_state.get("submitted_at"))
     current_audience_code = _normalized_text(member.get("current_audience_code"))
     current_audience_entered_at = _normalized_text(member.get("current_audience_entered_at"))
+    from .program_setup_service import resolve_member_audience_entry_rule_state
+
+    entry_rule_state = resolve_member_audience_entry_rule_state(member, questionnaire_state=questionnaire_state)
+    if entry_rule_state:
+        target_code = _normalized_text(entry_rule_state.get("audience_code"))
+        if target_code == AUDIENCE_CONVERTED:
+            entered_at = (
+                current_audience_entered_at
+                if current_audience_code == AUDIENCE_CONVERTED and current_audience_entered_at
+                else _normalized_text(member.get("updated_at")) or _normalized_text(member.get("joined_at")) or _iso_now()
+            )
+        elif target_code == AUDIENCE_OPERATING:
+            entered_at = (
+                current_audience_entered_at
+                if current_audience_code == AUDIENCE_OPERATING and current_audience_entered_at
+                else questionnaire_submitted_at
+                or _normalized_text(member.get("updated_at"))
+                or _normalized_text(member.get("joined_at"))
+                or _iso_now()
+            )
+        else:
+            entered_at = (
+                current_audience_entered_at
+                if current_audience_code == AUDIENCE_PENDING_QUESTIONNAIRE and current_audience_entered_at
+                else _normalized_text(member.get("joined_at"))
+                or _normalized_text(member.get("created_at"))
+                or _normalized_text(member.get("updated_at"))
+                or _iso_now()
+            )
+        snapshot = _current_audience_source_snapshot(member, marketing_state, questionnaire_state=questionnaire_state)
+        snapshot["audience_entry_rule"] = {
+            "program_id": int(entry_rule_state.get("program_id") or 0),
+            "checkpoint": _normalized_text(entry_rule_state.get("checkpoint")),
+            "entry_reason": _normalized_text(entry_rule_state.get("entry_reason")),
+        }
+        return {
+            "audience_code": target_code or AUDIENCE_PENDING_QUESTIONNAIRE,
+            "entered_at": entered_at,
+            "entry_source": "audience_entry_rule",
+            "entry_reason": _normalized_text(entry_rule_state.get("entry_reason")),
+            "source_snapshot_json": snapshot,
+        }
     if (
         _normalized_text(member.get("source_type")) == "wecom_customer_acquisition"
         and current_audience_code in {AUDIENCE_PENDING_QUESTIONNAIRE, AUDIENCE_OPERATING, AUDIENCE_CONVERTED}
@@ -467,8 +509,20 @@ def sync_conversion_member_audience(member: dict[str, Any]) -> dict[str, Any]:
                 audience_code=target_code,
                 entered_at=_normalized_text(current_entry.get("entered_at")) or target_entered_at,
             )
-            return {"updated": True, "member_id": member_id, "audience_code": target_code, "entered_at": _normalized_text(current_entry.get("entered_at")) or target_entered_at}
-        return {"updated": False, "member_id": member_id, "audience_code": target_code, "entered_at": _normalized_text(current_entry.get("entered_at")) or target_entered_at}
+            return {
+                "updated": True,
+                "member_id": member_id,
+                "audience_code": target_code,
+                "entered_at": _normalized_text(current_entry.get("entered_at")) or target_entered_at,
+                "audience_entry_id": int(current_entry.get("id") or 0),
+            }
+        return {
+            "updated": False,
+            "member_id": member_id,
+            "audience_code": target_code,
+            "entered_at": _normalized_text(current_entry.get("entered_at")) or target_entered_at,
+            "audience_entry_id": int(current_entry.get("id") or 0),
+        }
 
     if current_entry:
         workflow_repo.close_current_member_audience_entries(
@@ -478,7 +532,7 @@ def sync_conversion_member_audience(member: dict[str, Any]) -> dict[str, Any]:
             source_snapshot_json=dict(resolved.get("source_snapshot_json") or {}),
         )
 
-    workflow_repo.insert_member_audience_entry_row(
+    inserted_entry = workflow_repo.insert_member_audience_entry_row(
         {
             "member_id": member_id,
             "audience_code": target_code,
@@ -495,7 +549,13 @@ def sync_conversion_member_audience(member: dict[str, Any]) -> dict[str, Any]:
         audience_code=target_code,
         entered_at=target_entered_at,
     )
-    return {"updated": True, "member_id": member_id, "audience_code": target_code, "entered_at": target_entered_at}
+    return {
+        "updated": True,
+        "member_id": member_id,
+        "audience_code": target_code,
+        "entered_at": target_entered_at,
+        "audience_entry_id": int((inserted_entry or {}).get("id") or 0),
+    }
 
 
 def sync_all_conversion_member_audiences() -> dict[str, Any]:
@@ -1005,6 +1065,25 @@ def _node_miniprogram_library_ids(*, node: dict[str, Any], workflow_bundle: dict
         except (TypeError, ValueError):
             continue
     return miniprogram_library_ids
+
+
+def _node_attachment_library_ids(*, node: dict[str, Any], workflow_bundle: dict[str, Any]) -> list[int]:
+    raw_node_attachments = node.get("attachment_library_ids") or []
+    if not raw_node_attachments:
+        scp = node.get("standard_content_payload")
+        if isinstance(scp, dict):
+            raw_node_attachments = scp.get("attachment_library_ids") or []
+    if not raw_node_attachments:
+        raw_node_attachments = workflow_bundle.get("attachment_library_ids") or []
+    attachment_library_ids: list[int] = []
+    for value in raw_node_attachments:
+        try:
+            normalized = int(value)
+        except (TypeError, ValueError):
+            continue
+        if normalized > 0 and normalized not in attachment_library_ids:
+            attachment_library_ids.append(normalized)
+    return attachment_library_ids[:9]
 
 
 def _render_node_content(

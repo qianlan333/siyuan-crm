@@ -11,8 +11,10 @@
      早期版本只查 lead_pool 会让"已加企微但首次入口不在线索池"的 100+ 个客户在
      看板里 customer_name / external_userid 空白.
 2. 从黄小璨 (MySQL) 拉 ``new_version_users`` / ``new_version_memberships`` /
-   ``new_version_consultation_states`` / ``new_version_conversations`` /
-   ``new_version_messages`` 按手机号聚合的指标.
+   ``new_version_user_backgrounds`` / ``new_version_user_diagnoses`` /
+   ``new_version_assessments`` / ``new_version_user_subscriptions`` /
+   ``new_version_conversations`` / ``new_version_messages`` 等表, 按手机号和用户
+   聚合出用户画像、测评、订阅、成长行动、CRM 桥接等全量看板指标.
 3. 在 Python 侧按 mobile merge, 推算 ``funnel_state`` (4 个互斥分类).
 4. ``TRUNCATE`` + 批量 ``INSERT`` 写入 ``user_ops_hxc_dashboard_snapshot``,
    并把本次刷新汇总写入 ``user_ops_hxc_dashboard_meta``.
@@ -124,6 +126,12 @@ SELECT
   u.id AS hxc_user_id,
   u.nickname AS hxc_nickname,
   u.member_status AS hxc_member_status,
+  u.member_level AS hxc_member_level,
+  u.member_expires_at AS hxc_member_expires_at,
+  u.onboard_status AS hxc_onboard_status,
+  u.assessment_status AS hxc_assessment_status,
+  u.growth_onboard_status AS hxc_growth_onboard_status,
+  u.first_login_at AS hxc_first_login_at,
   u.last_login_at,
   u.created_at AS hxc_registered_at,
   CASE WHEN u.last_login_at IS NULL THEN NULL
@@ -141,7 +149,199 @@ WHERE u.is_deleted=0
   AND u.phone IS NOT NULL
   AND TRIM(u.phone) <> ''
   AND (u.nickname IS NULL OR (u.nickname NOT LIKE '%neo%' AND u.nickname NOT LIKE '%Neo%'))
-GROUP BY u.id, u.phone, u.nickname, u.member_status, u.last_login_at, u.created_at
+GROUP BY
+  u.id, u.phone, u.nickname, u.member_status,
+  u.member_level, u.member_expires_at,
+  u.onboard_status, u.assessment_status,
+  u.growth_onboard_status, u.first_login_at,
+  u.last_login_at, u.created_at
+"""
+
+_HXC_PROFILE_SQL = """
+SELECT
+  u.id AS hxc_user_id,
+  ub.identity_stage,
+  ub.monthly_income_range,
+  ub.business_focus,
+  ub.ai_usage_status,
+  CAST(ub.main_pain_points AS CHAR) AS main_pain_points,
+  CAST(ub.ai_pain_points AS CHAR) AS ai_pain_points,
+  ub.core_painful_scenario,
+  CAST(ub.focus_topics AS CHAR) AS focus_topics,
+  ub.persona_sketch,
+  ub.interaction_style,
+  ub.communication_style,
+  ub.confidence AS background_confidence,
+  ud.main_line_type,
+  ud.stage AS main_line_stage,
+  ud.tier AS main_line_tier,
+  ud.confirmed_at AS main_line_confirmed_at,
+  ud.main_line_desc,
+  ud.main_line_issue,
+  COALESCE(ass.assessment_count, 0) AS assessment_count,
+  ass.latest_assessment_status,
+  ass.latest_assessment_score,
+  ass.latest_assessment_phase,
+  ass.latest_assessment_sub_type,
+  ass.latest_assessment_completed_at,
+  ass.assessment_dimension_scores,
+  us.tier AS subscription_tier,
+  us.expires_at AS subscription_expires_at,
+  us.monthly_chat_quota AS subscription_quota,
+  us.current_period_used AS subscription_used,
+  us.current_period_start AS subscription_period_start,
+  act.last_activation_sku_code,
+  act.last_activation_new_tier,
+  act.last_activation_source,
+  act.last_activation_at,
+  COALESCE(goals.active_goals_count, 0) AS active_goals_count,
+  COALESCE(paths.active_paths_count, 0) AS active_paths_count,
+  paths.current_milestone_max,
+  COALESCE(tasks.active_tasks_count, 0) AS active_tasks_count,
+  COALESCE(tasks.completed_tasks_count, 0) AS completed_tasks_count,
+  COALESCE(checkins.task_checkin_count, 0) AS task_checkin_count,
+  checkins.last_task_checkin_at,
+  checkins.last_task_checkin_mood,
+  checkins.last_task_checkin_state_score,
+  reviews.next_review_at,
+  reviews.last_reviewed_at,
+  reviews.review_schedule_status,
+  ev.last_recent_event_at,
+  ev.last_recent_event_type,
+  rec.recommended_topic_status,
+  rec.recommended_topic_generated_at,
+  topics.topic_summary_count,
+  topics.last_topic_summary_at,
+  topics.last_topic_summary_title,
+  roles.primary_role,
+  roles.biz_score,
+  roles.inner_score,
+  roles.trust_score,
+  roles.trust_tier,
+  roles.clarity_score,
+  roles.role_mode,
+  credits.growth_credit_balance,
+  credits.growth_credit_period_granted,
+  credits.growth_credit_period_used,
+  credits.growth_credit_period_ends_at
+FROM new_version_users u
+LEFT JOIN new_version_user_backgrounds ub ON ub.user_id = u.id
+LEFT JOIN new_version_user_diagnoses ud ON ud.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    COUNT(*) AS assessment_count,
+    SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY COALESCE(completed_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS latest_assessment_status,
+    MAX(total_score) AS latest_assessment_score,
+    SUBSTRING_INDEX(GROUP_CONCAT(phase ORDER BY COALESCE(completed_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS latest_assessment_phase,
+    SUBSTRING_INDEX(GROUP_CONCAT(sub_type ORDER BY COALESCE(completed_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS latest_assessment_sub_type,
+    MAX(completed_at) AS latest_assessment_completed_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(CAST(dimension_scores AS CHAR) ORDER BY COALESCE(completed_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS assessment_dimension_scores
+  FROM new_version_assessments
+  GROUP BY user_id
+) ass ON ass.user_id = u.id
+LEFT JOIN new_version_user_subscriptions us ON us.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    SUBSTRING_INDEX(GROUP_CONCAT(sku_code ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_activation_sku_code,
+    SUBSTRING_INDEX(GROUP_CONCAT(new_tier ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_activation_new_tier,
+    SUBSTRING_INDEX(GROUP_CONCAT(source ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_activation_source,
+    MAX(created_at) AS last_activation_at
+  FROM new_version_subscription_activations
+  GROUP BY user_id
+) act ON act.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_goals_count
+  FROM new_version_growth_goals
+  GROUP BY user_id
+) goals ON goals.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_paths_count,
+    MAX(current_milestone) AS current_milestone_max
+  FROM new_version_growth_paths
+  GROUP BY user_id
+) paths ON paths.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    SUM(CASE WHEN status IN ('pending_confirm','active') THEN 1 ELSE 0 END) AS active_tasks_count,
+    SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed_tasks_count
+  FROM new_version_consultation_tasks
+  GROUP BY user_id
+) tasks ON tasks.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    COUNT(*) AS task_checkin_count,
+    MAX(created_at) AS last_task_checkin_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(mood ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_task_checkin_mood,
+    SUBSTRING_INDEX(GROUP_CONCAT(state_score ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_task_checkin_state_score
+  FROM new_version_task_checkins
+  GROUP BY user_id
+) checkins ON checkins.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    MIN(CASE WHEN status='active' THEN next_review_at ELSE NULL END) AS next_review_at,
+    MAX(last_reviewed_at) AS last_reviewed_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY COALESCE(next_review_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS review_schedule_status
+  FROM new_version_review_schedules
+  GROUP BY user_id
+) reviews ON reviews.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    MAX(created_at) AS last_recent_event_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(event_type ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_recent_event_type
+  FROM new_version_user_recent_events
+  GROUP BY user_id
+) ev ON ev.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY generated_at DESC SEPARATOR '||'), '||', 1) AS recommended_topic_status,
+    MAX(generated_at) AS recommended_topic_generated_at
+  FROM new_version_recommended_topics
+  GROUP BY user_id
+) rec ON rec.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    COUNT(*) AS topic_summary_count,
+    MAX(COALESCE(last_updated_at, updated_at, created_at)) AS last_topic_summary_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(title ORDER BY COALESCE(last_updated_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS last_topic_summary_title
+  FROM new_version_topic_summary_cards
+  WHERE deleted_at IS NULL
+  GROUP BY user_id
+) topics ON topics.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    SUBSTRING_INDEX(GROUP_CONCAT(primary_role ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS primary_role,
+    SUBSTRING_INDEX(GROUP_CONCAT(biz_score ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS biz_score,
+    SUBSTRING_INDEX(GROUP_CONCAT(inner_score ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS inner_score,
+    SUBSTRING_INDEX(GROUP_CONCAT(trust_score ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS trust_score,
+    SUBSTRING_INDEX(GROUP_CONCAT(trust_tier ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS trust_tier,
+    SUBSTRING_INDEX(GROUP_CONCAT(clarity_score ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS clarity_score,
+    SUBSTRING_INDEX(GROUP_CONCAT(mode ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS role_mode
+  FROM new_version_session_role_scores
+  GROUP BY user_id
+) roles ON roles.user_id = u.id
+LEFT JOIN (
+  SELECT
+    user_id,
+    balance AS growth_credit_balance,
+    period_granted AS growth_credit_period_granted,
+    period_used AS growth_credit_period_used,
+    period_ends_at AS growth_credit_period_ends_at
+  FROM new_version_growth_credit_accounts
+) credits ON credits.user_id = u.id
+WHERE u.is_deleted=0
 """
 
 _HXC_MB_SQL = """
@@ -170,6 +370,48 @@ WHERE c.is_deleted=0
 GROUP BY c.user_id
 """
 
+_HXC_PHONE_AUX_SQL = """
+SELECT
+  phones.phone,
+  COALESCE(wq.webhook_questionnaire_count, 0) AS webhook_questionnaire_count,
+  wq.last_webhook_questionnaire_at,
+  wq.last_webhook_questionnaire_status,
+  COALESCE(cj.crm_chat_job_count, 0) AS crm_chat_job_count,
+  COALESCE(cj.crm_chat_done_count, 0) AS crm_chat_done_count,
+  COALESCE(cj.crm_chat_failed_count, 0) AS crm_chat_failed_count,
+  cj.last_crm_chat_job_status,
+  cj.last_crm_chat_job_at,
+  cj.last_crm_chat_callback_status
+FROM (
+  SELECT phone FROM new_version_webhook_questionnaires WHERE phone IS NOT NULL AND phone <> ''
+  UNION
+  SELECT phone FROM new_version_crm_chat_jobs WHERE phone IS NOT NULL AND phone <> ''
+) phones
+LEFT JOIN (
+  SELECT
+    phone,
+    COUNT(*) AS webhook_questionnaire_count,
+    MAX(submitted_at) AS last_webhook_questionnaire_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY COALESCE(submitted_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS last_webhook_questionnaire_status
+  FROM new_version_webhook_questionnaires
+  WHERE phone IS NOT NULL AND phone <> ''
+  GROUP BY phone
+) wq ON wq.phone = phones.phone
+LEFT JOIN (
+  SELECT
+    phone,
+    COUNT(*) AS crm_chat_job_count,
+    SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS crm_chat_done_count,
+    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS crm_chat_failed_count,
+    SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY COALESCE(finished_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS last_crm_chat_job_status,
+    MAX(COALESCE(finished_at, updated_at, created_at)) AS last_crm_chat_job_at,
+    SUBSTRING_INDEX(GROUP_CONCAT(callback_status ORDER BY COALESCE(finished_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS last_crm_chat_callback_status
+  FROM new_version_crm_chat_jobs
+  WHERE phone IS NOT NULL AND phone <> ''
+  GROUP BY phone
+) cj ON cj.phone = phones.phone
+"""
+
 
 def _funnel_state(user_hit: bool, member_hit: bool) -> str:
     if member_hit and user_hit:
@@ -191,6 +433,12 @@ def _to_float(value: Any) -> float | None:
     if isinstance(value, Decimal):
         return float(value)
     return float(value)
+
+
+def _to_int(value: Any) -> int | None:
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def _hxc_sort_text(value: Any) -> str:
@@ -249,6 +497,10 @@ def _fetch_hxc_index() -> dict[str, dict[str, Any]]:
         with connection.cursor() as cursor:
             cursor.execute(_HXC_USERS_SQL)
             users_by_phone = _select_hxc_user_rows(list(cursor.fetchall()))
+            cursor.execute(_HXC_PROFILE_SQL)
+            profile_by_uid: dict[str, dict[str, Any]] = {
+                row["hxc_user_id"]: row for row in cursor.fetchall() if row.get("hxc_user_id")
+            }
             cursor.execute(_HXC_MB_SQL)
             mb_by_phone: dict[str, dict[str, Any]] = {}
             for row in cursor.fetchall():
@@ -260,23 +512,83 @@ def _fetch_hxc_index() -> dict[str, dict[str, Any]]:
             consult_by_uid: dict[str, dict[str, Any]] = {
                 row["user_id"]: row for row in cursor.fetchall() if row.get("user_id")
             }
+            cursor.execute(_HXC_PHONE_AUX_SQL)
+            phone_aux_by_phone: dict[str, dict[str, Any]] = {
+                row["phone"]: row for row in cursor.fetchall() if row.get("phone")
+            }
     finally:
         connection.close()
 
     merged: dict[str, dict[str, Any]] = {}
-    for phone in set(users_by_phone) | set(mb_by_phone):
+    for phone in set(users_by_phone) | set(mb_by_phone) | set(phone_aux_by_phone):
         row: dict[str, Any] = {"phone": phone}
         user_row = users_by_phone.get(phone) or {}
         mb_row = mb_by_phone.get(phone) or {}
+        phone_aux_row = phone_aux_by_phone.get(phone) or {}
         row["hxc_user_hit"] = bool(user_row)
         row["hxc_member_hit"] = bool(mb_row)
         row.update(user_row)
         row.update(mb_row)
+        row.update(phone_aux_row)
         hxc_user_id = user_row.get("hxc_user_id")
         if hxc_user_id:
+            row.update(profile_by_uid.get(hxc_user_id) or {})
             row.update(consult_by_uid.get(hxc_user_id) or {})
         merged[phone] = row
     return merged
+
+
+SNAPSHOT_COLUMNS: tuple[str, ...] = (
+    "mobile", "phone_match_key",
+    "in_lead_pool", "in_people", "in_questionnaire",
+    "customer_name", "external_userid", "owner_userid",
+    "is_wecom_added", "is_mobile_bound",
+    "class_term_no", "class_term_label",
+    "first_entry_source", "last_entry_source",
+    "crm_hxc_state", "crm_created_at",
+    "questionnaires", "questionnaire_count", "last_questionnaire_at",
+    "hxc_member_hit", "hxc_user_hit", "funnel_state",
+    "hxc_user_id", "hxc_nickname", "hxc_member_status",
+    "hxc_registered_at", "hxc_last_login_at", "hxc_silent_days",
+    "hxc_member_level", "hxc_member_expires_at",
+    "hxc_onboard_status", "hxc_assessment_status",
+    "hxc_growth_onboard_status", "hxc_first_login_at",
+    "membership_type", "membership_status",
+    "membership_end_at", "membership_days_left", "membership_source",
+    "consultation_used", "consultation_limit",
+    "conv_chat", "conv_consult", "conv_lesson",
+    "msg_user", "msg_ai",
+    "consult_completed", "consult_avg_turn", "last_msg_at",
+    "identity_stage", "monthly_income_range", "business_focus", "ai_usage_status",
+    "main_pain_points", "ai_pain_points", "core_painful_scenario", "focus_topics",
+    "persona_sketch", "interaction_style", "communication_style", "background_confidence",
+    "main_line_type", "main_line_stage", "main_line_tier",
+    "main_line_confirmed_at", "main_line_desc", "main_line_issue",
+    "assessment_count", "latest_assessment_status", "latest_assessment_score",
+    "latest_assessment_phase", "latest_assessment_sub_type",
+    "latest_assessment_completed_at", "assessment_dimension_scores",
+    "subscription_tier", "subscription_expires_at", "subscription_quota",
+    "subscription_used", "subscription_period_start",
+    "last_activation_sku_code", "last_activation_new_tier",
+    "last_activation_source", "last_activation_at",
+    "active_goals_count", "active_paths_count", "current_milestone_max",
+    "active_tasks_count", "completed_tasks_count",
+    "task_checkin_count", "last_task_checkin_at",
+    "last_task_checkin_mood", "last_task_checkin_state_score",
+    "next_review_at", "last_reviewed_at", "review_schedule_status",
+    "last_recent_event_at", "last_recent_event_type",
+    "recommended_topic_status", "recommended_topic_generated_at",
+    "topic_summary_count", "last_topic_summary_at", "last_topic_summary_title",
+    "primary_role", "biz_score", "inner_score", "trust_score",
+    "trust_tier", "clarity_score", "role_mode",
+    "growth_credit_balance", "growth_credit_period_granted",
+    "growth_credit_period_used", "growth_credit_period_ends_at",
+    "webhook_questionnaire_count", "last_webhook_questionnaire_at",
+    "last_webhook_questionnaire_status",
+    "crm_chat_job_count", "crm_chat_done_count", "crm_chat_failed_count",
+    "last_crm_chat_job_status", "last_crm_chat_job_at",
+    "last_crm_chat_callback_status",
+)
 
 
 def _build_snapshot_row(crm_row: dict[str, Any], hxc_row: dict[str, Any]) -> tuple[Any, ...]:
@@ -312,6 +624,12 @@ def _build_snapshot_row(crm_row: dict[str, Any], hxc_row: dict[str, Any]) -> tup
         hxc_row.get("hxc_registered_at"),
         hxc_row.get("last_login_at"),
         hxc_row.get("hxc_silent_days"),
+        hxc_row.get("hxc_member_level") or "",
+        hxc_row.get("hxc_member_expires_at"),
+        hxc_row.get("hxc_onboard_status") or "",
+        hxc_row.get("hxc_assessment_status") or "",
+        hxc_row.get("hxc_growth_onboard_status") or "",
+        hxc_row.get("hxc_first_login_at"),
         hxc_row.get("membership_type") or "",
         hxc_row.get("membership_status") or "",
         hxc_row.get("membership_end_at"),
@@ -327,48 +645,89 @@ def _build_snapshot_row(crm_row: dict[str, Any], hxc_row: dict[str, Any]) -> tup
         int(hxc_row.get("consult_completed") or 0),
         _to_float(hxc_row.get("consult_avg_turn")),
         hxc_row.get("last_msg_at"),
+        hxc_row.get("identity_stage") or "",
+        hxc_row.get("monthly_income_range") or "",
+        hxc_row.get("business_focus") or "",
+        hxc_row.get("ai_usage_status") or "",
+        hxc_row.get("main_pain_points") or "",
+        hxc_row.get("ai_pain_points") or "",
+        hxc_row.get("core_painful_scenario") or "",
+        hxc_row.get("focus_topics") or "",
+        hxc_row.get("persona_sketch") or "",
+        hxc_row.get("interaction_style") or "",
+        hxc_row.get("communication_style") or "",
+        hxc_row.get("background_confidence") or "",
+        hxc_row.get("main_line_type") or "",
+        hxc_row.get("main_line_stage") or "",
+        hxc_row.get("main_line_tier") or "",
+        hxc_row.get("main_line_confirmed_at"),
+        hxc_row.get("main_line_desc") or "",
+        hxc_row.get("main_line_issue") or "",
+        int(hxc_row.get("assessment_count") or 0),
+        hxc_row.get("latest_assessment_status") or "",
+        _to_int(hxc_row.get("latest_assessment_score")),
+        hxc_row.get("latest_assessment_phase") or "",
+        hxc_row.get("latest_assessment_sub_type") or "",
+        hxc_row.get("latest_assessment_completed_at"),
+        hxc_row.get("assessment_dimension_scores") or "",
+        hxc_row.get("subscription_tier") or "",
+        hxc_row.get("subscription_expires_at"),
+        hxc_row.get("subscription_quota"),
+        hxc_row.get("subscription_used"),
+        hxc_row.get("subscription_period_start"),
+        hxc_row.get("last_activation_sku_code") or "",
+        hxc_row.get("last_activation_new_tier") or "",
+        hxc_row.get("last_activation_source") or "",
+        hxc_row.get("last_activation_at"),
+        int(hxc_row.get("active_goals_count") or 0),
+        int(hxc_row.get("active_paths_count") or 0),
+        _to_int(hxc_row.get("current_milestone_max")),
+        int(hxc_row.get("active_tasks_count") or 0),
+        int(hxc_row.get("completed_tasks_count") or 0),
+        int(hxc_row.get("task_checkin_count") or 0),
+        hxc_row.get("last_task_checkin_at"),
+        hxc_row.get("last_task_checkin_mood") or "",
+        _to_int(hxc_row.get("last_task_checkin_state_score")),
+        hxc_row.get("next_review_at"),
+        hxc_row.get("last_reviewed_at"),
+        hxc_row.get("review_schedule_status") or "",
+        hxc_row.get("last_recent_event_at"),
+        hxc_row.get("last_recent_event_type") or "",
+        hxc_row.get("recommended_topic_status") or "",
+        hxc_row.get("recommended_topic_generated_at"),
+        int(hxc_row.get("topic_summary_count") or 0),
+        hxc_row.get("last_topic_summary_at"),
+        hxc_row.get("last_topic_summary_title") or "",
+        hxc_row.get("primary_role") or "",
+        _to_int(hxc_row.get("biz_score")),
+        _to_int(hxc_row.get("inner_score")),
+        _to_int(hxc_row.get("trust_score")),
+        hxc_row.get("trust_tier") or "",
+        _to_int(hxc_row.get("clarity_score")),
+        hxc_row.get("role_mode") or "",
+        hxc_row.get("growth_credit_balance"),
+        hxc_row.get("growth_credit_period_granted"),
+        hxc_row.get("growth_credit_period_used"),
+        hxc_row.get("growth_credit_period_ends_at"),
+        int(hxc_row.get("webhook_questionnaire_count") or 0),
+        hxc_row.get("last_webhook_questionnaire_at"),
+        hxc_row.get("last_webhook_questionnaire_status") or "",
+        int(hxc_row.get("crm_chat_job_count") or 0),
+        int(hxc_row.get("crm_chat_done_count") or 0),
+        int(hxc_row.get("crm_chat_failed_count") or 0),
+        hxc_row.get("last_crm_chat_job_status") or "",
+        hxc_row.get("last_crm_chat_job_at"),
+        hxc_row.get("last_crm_chat_callback_status") or "",
     )
 
 
-_INSERT_SQL = """
-INSERT INTO user_ops_hxc_dashboard_snapshot (
-    mobile, phone_match_key,
-    in_lead_pool, in_people, in_questionnaire,
-    customer_name, external_userid, owner_userid,
-    is_wecom_added, is_mobile_bound,
-    class_term_no, class_term_label,
-    first_entry_source, last_entry_source,
-    crm_hxc_state, crm_created_at,
-    questionnaires, questionnaire_count, last_questionnaire_at,
-    hxc_member_hit, hxc_user_hit, funnel_state,
-    hxc_user_id, hxc_nickname, hxc_member_status,
-    hxc_registered_at, hxc_last_login_at, hxc_silent_days,
-    membership_type, membership_status,
-    membership_end_at, membership_days_left, membership_source,
-    consultation_used, consultation_limit,
-    conv_chat, conv_consult, conv_lesson,
-    msg_user, msg_ai,
-    consult_completed, consult_avg_turn, last_msg_at
-) VALUES (
-    ?, ?,
-    ?, ?, ?,
-    ?, ?, ?,
-    ?, ?,
-    ?, ?,
-    ?, ?,
-    ?, ?,
-    ?, ?, ?,
-    ?, ?, ?,
-    ?, ?, ?,
-    ?, ?, ?,
-    ?, ?,
-    ?, ?, ?,
-    ?, ?,
-    ?, ?, ?,
-    ?, ?,
-    ?, ?, ?
+_INSERT_SQL = (
+    "INSERT INTO user_ops_hxc_dashboard_snapshot ("
+    + ", ".join(SNAPSHOT_COLUMNS)
+    + ") VALUES ("
+    + ", ".join("?" for _ in SNAPSHOT_COLUMNS)
+    + ")"
 )
-"""
 
 
 def refresh_hxc_dashboard_snapshot(

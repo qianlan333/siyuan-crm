@@ -1,0 +1,146 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<style>
+  .al-toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0;padding:12px 14px;background:#fff;border:1px solid #e5e7eb;border-radius:8px}
+  .al-toolbar input[type=search]{min-width:240px;padding:7px 10px;border:1px solid #d1d5db;border-radius:6px}
+  .al-toolbar button,.al-card button{padding:7px 12px;border-radius:6px;border:1px solid #d1d5db;background:#fff;cursor:pointer}
+  .al-toolbar .primary{background:#2c5cdb;color:#fff;border-color:#2c5cdb}
+  .al-limit{font-size:12px;color:#5b626f;line-height:1.6;margin:0 0 12px}
+  .al-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .al-card{background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:14px;display:grid;gap:8px}
+  .al-card.disabled{opacity:.62}
+  .al-title{font-weight:700;color:#111827;word-break:break-word}
+  .al-meta{font-size:12px;color:#5b626f;line-height:1.5}
+  .al-tags{display:flex;flex-wrap:wrap;gap:5px;min-height:20px}
+  .al-tags span{font-size:11px;background:#eef2ff;color:#3730a3;border-radius:999px;padding:2px 8px}
+  .al-actions{display:flex;gap:8px;flex-wrap:wrap}
+  .al-empty{padding:34px;text-align:center;color:#9ca3af;background:#fff;border:1px dashed #d1d5db;border-radius:8px}
+  .al-modal[hidden]{display:none}
+  .al-modal{position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:50;display:grid;place-items:center;padding:20px}
+  .al-modal-card{width:min(520px,100%);background:#fff;border-radius:8px;padding:20px;box-shadow:0 20px 50px rgba(15,23,42,.2)}
+  .al-modal-card h3{margin:0 0 12px}
+  .al-modal-card label{display:block;font-size:12px;color:#5b626f;margin:10px 0 4px}
+  .al-modal-card input,.al-modal-card textarea{width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px}
+  .al-modal-card textarea{min-height:72px;resize:vertical}
+  .al-modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+  .al-modal-actions button{padding:8px 14px;border-radius:6px;border:1px solid #d1d5db;background:#fff;cursor:pointer}
+  .al-modal-actions .primary{background:#2c5cdb;color:#fff;border-color:#2c5cdb}
+  .al-status{font-size:12px;margin-top:8px;min-height:16px}
+  .al-status.error{color:#a02929}.al-status.success{color:#047857}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="admin-shell-stack">
+  <div class="al-toolbar">
+    <button type="button" class="primary" id="al-open-upload">上传附件</button>
+    <input type="search" id="al-search" placeholder="搜索素材名、文件名、说明">
+    <label style="font-size:12px;color:#5b626f;"><input type="checkbox" id="al-enabled-only" checked> 只看启用</label>
+    <button type="button" id="al-refresh">刷新</button>
+  </div>
+  <p class="al-limit">能力限制：欢迎语最多 9 个附件；附件素材通过企微附件资源接口上传，media_id 临时有效 3 天，本系统提前按 2 天缓存刷新；单个文件需大于 5B 且不超过 {{ max_mb }}MB；允许 {{ allowed_extensions }}。</p>
+  <div id="al-grid" class="al-grid"></div>
+</div>
+
+<div class="al-modal" id="al-upload-modal" hidden>
+  <form class="al-modal-card" id="al-upload-form">
+    <h3>上传附件素材</h3>
+    <label>选择文件</label>
+    <input type="file" name="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,application/pdf" required>
+    <label>素材名（留空用文件名）</label>
+    <input type="text" name="name" placeholder="例如：课程介绍 PDF">
+    <label>标签（逗号分隔）</label>
+    <input type="text" name="tags" placeholder="欢迎语,资料包,PDF">
+    <label>说明</label>
+    <textarea name="description" placeholder="给运营看的内部说明"></textarea>
+    <div class="al-status" id="al-upload-status"></div>
+    <div class="al-modal-actions">
+      <button type="button" id="al-upload-cancel">取消</button>
+      <button type="submit" class="primary">上传</button>
+    </div>
+  </form>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+{{ super() }}
+<script>
+(function(){
+  const grid = document.getElementById('al-grid');
+  const search = document.getElementById('al-search');
+  const enabledOnly = document.getElementById('al-enabled-only');
+  const modal = document.getElementById('al-upload-modal');
+  const form = document.getElementById('al-upload-form');
+  const statusEl = document.getElementById('al-upload-status');
+
+  function setStatus(msg, cls){ statusEl.textContent = msg || ''; statusEl.className = 'al-status ' + (cls || ''); }
+  function fmtSize(n){ if(!n) return '0B'; if(n < 1024) return n + 'B'; if(n < 1048576) return Math.round(n/1024) + 'KB'; return (n/1048576).toFixed(1) + 'MB'; }
+  async function requestJson(url, options){
+    const res = await fetch(url, options || {});
+    const data = await res.json().catch(() => ({}));
+    if(!res.ok || data.ok === false) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  }
+  function render(items){
+    if(!items.length){ grid.innerHTML = '<div class="al-empty">还没有附件素材，先上传一个 PDF 或资料文件。</div>'; return; }
+    grid.innerHTML = items.map(item => {
+      const tags = (item.tags || []).slice(0,4).map(t => '<span>' + escapeHtml(t) + '</span>').join('');
+      return `<article class="al-card ${item.enabled ? '' : 'disabled'}">
+        <div class="al-title">${escapeHtml(item.name || item.file_name)}</div>
+        <div class="al-meta">${escapeHtml(item.file_name)}<br>${escapeHtml(item.mime_type)} · ${fmtSize(item.file_size)}<br>${item.media_id ? '已缓存 media_id' : '发送前上传'}</div>
+        <div class="al-tags">${tags}</div>
+        <div class="al-meta">${escapeHtml(item.description || '')}</div>
+        <div class="al-actions">
+          <button type="button" data-resolve="${item.id}">测试上传</button>
+          <button type="button" data-toggle="${item.id}" data-enabled="${item.enabled ? '1' : '0'}">${item.enabled ? '停用' : '启用'}</button>
+        </div>
+      </article>`;
+    }).join('');
+  }
+  function escapeHtml(v){ return String(v || '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
+  async function load(){
+    const params = new URLSearchParams();
+    params.set('enabled_only', enabledOnly.checked ? '1' : '0');
+    if(search.value.trim()) params.set('q', search.value.trim());
+    const data = await requestJson('/api/admin/attachment-library?' + params.toString(), { credentials:'same-origin' });
+    render(data.items || []);
+  }
+  document.getElementById('al-open-upload').addEventListener('click', () => { setStatus(''); form.reset(); modal.hidden = false; });
+  document.getElementById('al-upload-cancel').addEventListener('click', () => { modal.hidden = true; });
+  document.getElementById('al-refresh').addEventListener('click', load);
+  enabledOnly.addEventListener('change', load);
+  search.addEventListener('input', () => { clearTimeout(search._t); search._t = setTimeout(load, 220); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    setStatus('上传中...', '');
+    try {
+      await requestJson('/api/admin/attachment-library/upload', { method:'POST', credentials:'same-origin', body:new FormData(form) });
+      setStatus('已上传', 'success');
+      modal.hidden = true;
+      await load();
+    } catch (err) {
+      setStatus(err.message || String(err), 'error');
+    }
+  });
+  grid.addEventListener('click', async event => {
+    const resolveId = event.target && event.target.getAttribute('data-resolve');
+    const toggleId = event.target && event.target.getAttribute('data-toggle');
+    try {
+      if(resolveId){
+        await requestJson('/api/admin/attachment-library/' + resolveId + '/test-resolve', { method:'POST', credentials:'same-origin' });
+        await load();
+      }
+      if(toggleId){
+        const enabled = event.target.getAttribute('data-enabled') !== '1';
+        await requestJson('/api/admin/attachment-library/' + toggleId, { method:'PUT', credentials:'same-origin', headers:{'Content-Type':'application/json'}, body:JSON.stringify({enabled}) });
+        await load();
+      }
+    } catch (err) {
+      alert(err.message || String(err));
+    }
+  });
+  load().catch(err => { grid.innerHTML = '<div class="al-empty">加载失败：' + escapeHtml(err.message || err) + '</div>'; });
+})();
+</script>
+{% endblock %}

@@ -41,9 +41,24 @@ def _value_error_response(exc: ValueError):
     return jsonify({"ok": False, "error": str(exc)}), 400
 
 
-def _ensure_can_create_tag() -> tuple[bool, str | None]:
+def _tag_names_from_payload(payload: dict[str, Any]) -> list[str]:
+    raw_names = payload.get("tag_names")
+    if isinstance(raw_names, list):
+        names = raw_names
+    elif raw_names not in (None, ""):
+        names = [raw_names]
+    else:
+        names = []
+    if not names and payload.get("first_tag_name") not in (None, ""):
+        names = [payload.get("first_tag_name")]
+    return [str(item or "").strip() for item in names if str(item or "").strip()]
+
+
+def _ensure_can_create_tag(required_count: int = 1) -> tuple[bool, str | None]:
     catalog = tags_service.list_wecom_tag_catalog()
-    if int(catalog.get("total_tags") or 0) >= int(catalog.get("tag_limit") or 0):
+    total = int(catalog.get("total_tags") or 0)
+    limit = int(catalog.get("tag_limit") or 0)
+    if total + max(1, required_count) > limit:
         return False, "标签数量已达到 1000 上限，不能继续新增标签。"
     return True, None
 
@@ -59,12 +74,14 @@ def admin_wecom_tag_management_payload():
 def admin_create_wecom_tag_group():
     payload = _json_payload()
     try:
-        can_create, reason = _ensure_can_create_tag()
+        tag_names = _tag_names_from_payload(payload)
+        can_create, reason = _ensure_can_create_tag(len(tag_names) or 1)
         if not can_create:
             return jsonify({"ok": False, "error": reason}), 400
         result = tags_service.create_wecom_tag_group(
             group_name=payload.get("group_name", ""),
             first_tag_name=payload.get("first_tag_name", ""),
+            tag_names=tag_names,
         )
         return jsonify({"ok": True, "result": result})
     except ValueError as exc:

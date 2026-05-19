@@ -33,14 +33,28 @@ def _seed_snapshot(db, rows):
                 customer_name, external_userid, owner_userid,
                 funnel_state, hxc_member_hit, hxc_user_hit,
                 membership_type, membership_days_left,
-                msg_user, hxc_nickname
+                msg_user, hxc_nickname,
+                latest_assessment_status,
+                subscription_tier,
+                active_goals_count,
+                active_paths_count,
+                task_checkin_count,
+                recommended_topic_status,
+                topic_summary_count,
+                primary_role,
+                growth_credit_balance
             ) VALUES (
                 ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
                 ?, ?, ?,
                 ?, ?,
-                ?, ?
+                ?, ?,
+                ?, ?,
+                ?, ?,
+                ?, ?,
+                ?, ?,
+                ?
             )
             """,
             (
@@ -58,6 +72,15 @@ def _seed_snapshot(db, rows):
                 row.get("membership_days_left"),
                 row.get("msg_user", 0),
                 row.get("hxc_nickname", ""),
+                row.get("latest_assessment_status", ""),
+                row.get("subscription_tier", ""),
+                row.get("active_goals_count", 0),
+                row.get("active_paths_count", 0),
+                row.get("task_checkin_count", 0),
+                row.get("recommended_topic_status", ""),
+                row.get("topic_summary_count", 0),
+                row.get("primary_role", ""),
+                row.get("growth_credit_balance"),
             ),
         )
     db.commit()
@@ -79,6 +102,15 @@ def test_view_service_lists_rows_and_masks_mobile(app):
                 "hxc_user_hit": True,
                 "customer_name": "张三",
                 "msg_user": 30,
+                "latest_assessment_status": "completed",
+                "subscription_tier": "standard",
+                "active_goals_count": 1,
+                "active_paths_count": 1,
+                "task_checkin_count": 2,
+                "recommended_topic_status": "delivered",
+                "topic_summary_count": 1,
+                "primary_role": "mixed",
+                "growth_credit_balance": 9,
             },
             {
                 "mobile": "13800001111",
@@ -97,6 +129,15 @@ def test_view_service_lists_rows_and_masks_mobile(app):
         assert rows[0]["mobile_masked"] == "139****5678"
         assert rows[0]["funnel_label"] == "已激活并打开"
         assert rows[0]["customer_name"] == "张三"
+        assert rows[0]["latest_assessment_status"] == "completed"
+        assert rows[0]["subscription_tier"] == "standard"
+        assert rows[0]["active_goals_count"] == 1
+        assert rows[0]["active_paths_count"] == 1
+        assert rows[0]["task_checkin_count"] == 2
+        assert rows[0]["recommended_topic_status"] == "delivered"
+        assert rows[0]["topic_summary_count"] == 1
+        assert rows[0]["primary_role"] == "mixed"
+        assert rows[0]["growth_credit_balance"] == 9
         assert rows[1]["mobile_masked"] == "138****1111"
         assert rows[1]["funnel_label"] == "仅激活未打开"
         assert rows[1]["membership_type"] == "trial"
@@ -112,9 +153,12 @@ def test_summary_returns_funnel_buckets(app):
     with app.app_context():
         _seed_snapshot(get_db(), [
             {"mobile": "13900000001", "funnel_state": "member_and_user",
-             "hxc_member_hit": True, "hxc_user_hit": True, "membership_type": "member"},
+             "hxc_member_hit": True, "hxc_user_hit": True, "membership_type": "member",
+             "latest_assessment_status": "completed", "subscription_tier": "premium",
+             "active_goals_count": 1, "active_paths_count": 1},
             {"mobile": "13900000002", "funnel_state": "only_member",
-             "hxc_member_hit": True, "membership_type": "trial"},
+             "hxc_member_hit": True, "membership_type": "trial",
+             "latest_assessment_status": "completed", "active_goals_count": 1},
             {"mobile": "13900000003", "funnel_state": "only_member",
              "hxc_member_hit": True, "membership_type": "trial"},
             {"mobile": "13900000004", "funnel_state": "inactive"},
@@ -128,6 +172,10 @@ def test_summary_returns_funnel_buckets(app):
         assert summary["user_hit"] == 1
         assert summary["member_count"] == 1
         assert summary["trial_count"] == 2
+        assert summary["assessment_completed_count"] == 2
+        assert summary["users_with_active_goals"] == 2
+        assert summary["users_with_active_paths"] == 1
+        assert summary["paid_subscription_count"] == 1
 
 
 def test_admin_dashboard_page_renders(client, app):
@@ -151,6 +199,8 @@ def test_admin_dashboard_page_renders(client, app):
     assert "激活漏斗" in body
     # 数据 JSON 嵌入 (tojson ensure_ascii=True 会把中文转 \uXXXX, 只验 ASCII 字段)
     assert "139****5678" in body
+    assert "成长额度余额" in body
+    assert "推荐话题状态" in body
 
 
 def test_admin_dashboard_has_send_config_link(client, app):

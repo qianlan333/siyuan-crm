@@ -126,6 +126,7 @@ def preview_stage_manual_send(
     image_media_ids: list[str] | None = None,
     images: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    attachment_library_ids: list[int] | None = None,
 ) -> dict[str, Any]:
     targets_payload = _stage_manual_send_targets(route_key)
     task_payload, content_preview, image_count = user_ops_page_service._build_private_message_payload(
@@ -134,6 +135,7 @@ def preview_stage_manual_send(
             "image_media_ids": list(image_media_ids or []),
             "images": list(images or []),
             "attachments": list(attachments or []),
+            "attachment_library_ids": list(attachment_library_ids or []),
         }
     )
     return {
@@ -162,6 +164,7 @@ def send_stage_manual_message(
     image_media_ids: list[str] | None = None,
     images: list[dict[str, Any]] | None = None,
     attachments: list[dict[str, Any]] | None = None,
+    attachment_library_ids: list[int] | None = None,
     operator_id: str = "",
 ) -> dict[str, Any]:
     user_ops_page_service._build_private_message_payload(
@@ -170,6 +173,7 @@ def send_stage_manual_message(
             "image_media_ids": list(image_media_ids or []),
             "images": list(images or []),
             "attachments": list(attachments or []),
+            "attachment_library_ids": list(attachment_library_ids or []),
         }
     )
     targets_payload = _stage_manual_send_targets(
@@ -191,6 +195,8 @@ def send_stage_manual_message(
             content=_normalized_text(content),
             image_media_ids=list(image_media_ids or []),
             images=list(images or []),
+            attachments=list(attachments or []),
+            attachment_library_ids=list(attachment_library_ids or []),
             operator_id=_normalized_text(operator_id) or "crm_console",
             filter_snapshot=resolved_snapshot,
         )
@@ -264,6 +270,5 @@ def _finalize_stage_manual_touch_deliveries(target_items: list[dict[str, Any]], 
             updated_at=now_text,
         )
     get_db().commit()
-
 
 

@@ -338,7 +338,7 @@
       <div class="ac-overview-head">
         <div>
           <h2>运行概况</h2>
-          <p class="ac-overview-muted">人群规模、运营进度与任务流执行一览。</p>
+          <p class="ac-overview-muted">人群规模、运营进度与运营任务执行一览。</p>
         </div>
         <div class="ac-overview-status-row">
           <span class="admin-chip admin-chip--neutral" id="overview-last-updated">最近刷新：加载中</span>
@@ -364,7 +364,7 @@
           <strong id="overview-questionnaire-submitted">0</strong>
         </article>
         <article class="ac-overview-stat">
-          <span>启用中的任务流</span>
+          <span>启用中的运营任务</span>
           <strong id="overview-active-workflow-count">0</strong>
         </article>
       </div>
@@ -433,7 +433,7 @@
   <section class="ac-overview-section">
     <div class="ac-overview-head">
       <div>
-        <h3>任务流执行</h3>
+        <h3>运营任务执行</h3>
         <p class="ac-overview-muted">最近执行次数与时间。</p>
       </div>
     </div>
@@ -441,7 +441,7 @@
       <table class="ac-overview-table">
         <thead>
           <tr>
-            <th>任务流</th>
+            <th>运营任务</th>
             <th>执行次数</th>
             <th>最近执行时间</th>
           </tr>
@@ -463,29 +463,18 @@
 (function () {
   function fmt(s) { return s == null ? '' : String(s); }
   function escape(s) { return fmt(s).replace(/[&<>"']/g, ch => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch])); }
-  // 根据 segment_code 前缀 / tags 判定一级类目
-  function classifyCategory(seg) {
-    const code = fmt(seg.segment_code);
-    const tags = (seg.tags || []).map(String);
-    if (seg.source_type !== 'system_default') return 'ai';
-    if (code.startsWith('audience_') || tags.includes('audience')) return 'audience';
-    if (code.startsWith('pool_') || tags.includes('pool')) return 'pool';
-    if (code.startsWith('profile_') || tags.includes('profile')) return 'profile';
-    if (code.startsWith('behavior_') || tags.includes('behavior')) return 'behavior';
-    if (code.startsWith('silent_') || tags.includes('silent')) return 'special';
-    return 'special';
-  }
   function renderCard(seg) {
     const sourceClass = seg.source_type === 'system_default' ? 'seg-source-system' : 'seg-source-ai';
-    const sourceLabel = seg.source_type === 'system_default' ? '系统' : 'AI';
+    const sourceLabel = seg.source_label || (seg.source_type === 'system_default' ? '系统' : 'AI');
     const desc = fmt(seg.description);
+    const usageText = Number.isFinite(Number(seg.usage_count)) ? `<span>引用 ${escape(seg.usage_count || 0)} 次</span>` : '';
     return `<article class="ac-overview-segment-card" title="${escape(desc)}">
       <span class="seg-name">${escape(seg.display_name || seg.segment_code)}</span>
       <span class="seg-count">${seg.cached_headcount || 0}</span>
       ${desc ? `<span class="seg-desc">${escape(desc)}</span>` : ''}
       <span class="seg-meta">
         <span class="${sourceClass}">${sourceLabel}</span>
-        <span>引用 ${seg.usage_count || 0} 次</span>
+        ${usageText}
       </span>
     </article>`;
   }
@@ -496,30 +485,81 @@
       ? items.map(renderCard).join('')
       : `<div class="ac-overview-muted">${emptyHint}</div>`;
   }
-  async function loadSegments() {
+
+  function increment(map, key, label, description) {
+    const normalizedKey = fmt(key || label).trim();
+    const normalizedLabel = fmt(label || key).trim();
+    if (!normalizedKey || !normalizedLabel || normalizedLabel === '-') return;
+    const existing = map.get(normalizedKey) || {
+      segment_code: normalizedKey,
+      display_name: normalizedLabel,
+      description: description || '',
+      cached_headcount: 0,
+      source_type: 'system_default',
+      source_label: '当前方案',
+    };
+    existing.cached_headcount += 1;
+    map.set(normalizedKey, existing);
+  }
+
+  function sortSegments(items) {
+    return items.sort((left, right) => Number(right.cached_headcount || 0) - Number(left.cached_headcount || 0)
+      || fmt(left.display_name).localeCompare(fmt(right.display_name), 'zh-CN'));
+  }
+
+  function segmentsFromDashboard(dashboard) {
+    const groups = (((dashboard || {}).audience_member_details || {}).groups || []);
+    const profileMap = new Map();
+    const behaviorMap = new Map();
+    const poolSegments = [];
+
+    for (const group of groups) {
+      const count = Number(group.count || (group.items || []).length || 0);
+      const label = fmt(group.audience_label || group.audience_code || '未命名池子');
+      poolSegments.push({
+        segment_code: fmt(group.audience_code || label),
+        display_name: `池子 · ${label}`,
+        description: fmt(group.audience_description),
+        cached_headcount: count,
+        source_type: 'system_default',
+        source_label: '当前方案',
+      });
+      for (const item of (group.items || [])) {
+        increment(profileMap, item.profile_segment_key, item.profile_segment_label);
+        increment(behaviorMap, item.behavior_tier_key, item.behavior_segment_label);
+      }
+    }
+
+    return {
+      audience: sortSegments(poolSegments.slice()),
+      pool: sortSegments(poolSegments),
+      profile: sortSegments(Array.from(profileMap.values())),
+      behavior: sortSegments(Array.from(behaviorMap.values())),
+      ai: [],
+      special: [],
+    };
+  }
+
+  function renderProgramSegments(dashboard) {
     const poolHost = document.getElementById('overview-pool-segments');
     if (!poolHost) return;
-    try {
-      const resp = await fetch('/api/admin/cloud-orchestrator/segments?status=active&limit=300');
-      const data = await resp.json();
-      if (!data.ok) return;
-      const buckets = { audience: [], pool: [], profile: [], behavior: [], special: [], ai: [] };
-      for (const seg of (data.segments || [])) {
-        const cat = classifyCategory(seg);
-        buckets[cat].push(seg);
-      }
-      // 默认显示：池子 + AI + 特殊（不重复"上面已经有的"）
-      fillSlot('overview-pool-segments', buckets.pool, '暂无池子分层');
-      fillSlot('overview-ai-segments', buckets.ai, '暂无 AI 创建的子分层（在 Claude Code 里调 propose_segment 创建）');
-      fillSlot('overview-special-segments', buckets.special, '暂无特殊分层');
-      // 折叠态：生命周期 / 自然画像 / 行为画像（上面已经有 chip 展示）
-      fillSlot('overview-audience-segments', buckets.audience, '无');
-      fillSlot('overview-profile-segments', buckets.profile, '无');
-      fillSlot('overview-behavior-segments', buckets.behavior, '无');
-    } catch (e) { /* 容错：不影响概览主流程 */ }
+    const buckets = segmentsFromDashboard(dashboard || {});
+    fillSlot('overview-pool-segments', buckets.pool, '当前方案暂无池子分层');
+    fillSlot('overview-ai-segments', buckets.ai, '当前方案暂无 AI 创建的子分层');
+    fillSlot('overview-special-segments', buckets.special, '当前方案暂无特殊分层');
+    fillSlot('overview-audience-segments', buckets.audience, '当前方案暂无生命周期分层');
+    fillSlot('overview-profile-segments', buckets.profile, '当前方案暂无自然画像分层');
+    fillSlot('overview-behavior-segments', buckets.behavior, '当前方案暂无行为画像分层');
   }
+
+  window.AutomationOverview = window.AutomationOverview || {};
+  window.AutomationOverview.renderProgramSegments = renderProgramSegments;
+
   document.addEventListener('DOMContentLoaded', () => {
-    loadSegments();
+    renderProgramSegments((window.AutomationOverview || {}).state && window.AutomationOverview.state.dashboard);
+    document.addEventListener('automation-overview:dashboard-rendered', (event) => {
+      renderProgramSegments((event.detail || {}).dashboard || {});
+    });
     const btn = document.getElementById('overview-toggle-more-segments');
     const arrow = document.getElementById('overview-more-segments-arrow');
     const drawer = document.getElementById('overview-more-segments');
@@ -530,15 +570,13 @@
         if (arrow) arrow.classList.toggle('is-open', opening);
       });
     }
-    // 让"刷新模块状态"按钮也覆盖到画像分层模块 — 旧 dashboard 刷完会触发
-    // automation_member 字段 backfill，再刷一次 segments 就能拿到新数据
     const refreshBtn = document.getElementById('overview-refresh-button');
     if (refreshBtn) {
       refreshBtn.addEventListener('click', () => {
-        // 给旧 loadDashboard 让出主线程 + backfill 完成的时间
-        setTimeout(loadSegments, 1500);
-        // 兜底再刷一次（某些慢链路）
-        setTimeout(loadSegments, 5000);
+        const overview = window.AutomationOverview || {};
+        if (overview.state && overview.state.dashboard) {
+          renderProgramSegments(overview.state.dashboard);
+        }
       });
     }
   });

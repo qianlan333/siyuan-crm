@@ -317,6 +317,11 @@ def update_program_status_row(program_id: int, *, status: str, operator_id: str)
 
 
 def get_program_summary(program_id: int) -> dict[str, Any]:
+    publish_state_row = get_config_block_row(int(program_id), "publish_state") or {}
+    publish_state = dict(publish_state_row.get("payload_json") or {})
+    full_published = bool(publish_state.get("full_published"))
+    entry_published = bool(publish_state.get("entry_published"))
+    publish_label = "完整自动化已发布" if full_published else "入口已发布" if entry_published else "未发布"
     workflow_count_row = _fetchone_dict(
         """
         SELECT COUNT(*) AS total
@@ -353,4 +358,7 @@ def get_program_summary(program_id: int) -> dict[str, Any]:
         "workflow_count": int(workflow_count_row.get("total") or 0),
         "channel_count": int(channel_count_row.get("total") or 0),
         "latest_execution_at": _normalized_text(execution_row.get("latest_execution_at")),
+        "publish_state": publish_state,
+        "publish_status": "full" if full_published else "entry" if entry_published else "unpublished",
+        "publish_status_label": publish_label,
     }

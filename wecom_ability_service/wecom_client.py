@@ -10,7 +10,7 @@ import requests
 from flask import current_app
 
 from .domains.tasks.private_message import build_private_message_request_payload
-from .domains.wecom_media_limits import validate_wecom_image_upload
+from .domains.wecom_media_limits import validate_wecom_attachment_upload, validate_wecom_image_upload
 from .infra.circuit_breaker import CircuitBreaker
 from .infra.error_codes import classify_wecom_errcode, WECOM_CIRCUIT_OPEN, WECOM_NETWORK_ERROR
 from .infra.settings import get_setting, set_settings
@@ -385,6 +385,55 @@ class WeComClient:
             raise WeComClientError(
                 f"WeCom image upload failed: {result}",
                 stage="/cgi-bin/media/upload",
+                category="wecom_api",
+                payload=result,
+            )
+        return media_id
+
+    def _upload_attachment_file(self, file_name: str, file_bytes: bytes, content_type: str) -> str:
+        content_type = validate_wecom_attachment_upload(
+            file_bytes,
+            file_name=file_name,
+            mime_type=content_type,
+        )
+        access_token = self._get_access_token()
+        try:
+            response = requests.post(
+                f"{self.api_base}/cgi-bin/media/upload_attachment",
+                params={
+                    "access_token": access_token,
+                    "media_type": "file",
+                    "attachment_type": 1,
+                },
+                files={"media": (file_name, file_bytes, content_type)},
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            result = response.json()
+        except requests.RequestException as exc:
+            wecom_logger.exception("wecom attachment upload failed file=%s", file_name)
+            raise WeComClientError(
+                f"WeCom attachment upload failed: {exc}",
+                stage="/cgi-bin/media/upload_attachment",
+                category="wecom_api",
+            ) from exc
+        if result.get("errcode") not in (0, None):
+            wecom_logger.error("wecom attachment upload nonzero payload=%s", result)
+            raise WeComClientError(
+                f"WeCom API failed: {result}",
+                stage="/cgi-bin/media/upload_attachment",
+                category=_classify_error(
+                    result.get("errcode"),
+                    result.get("errmsg", ""),
+                    "/cgi-bin/media/upload_attachment",
+                ),
+                payload=result,
+            )
+        media_id = str(result.get("media_id") or "").strip()
+        if not media_id:
+            raise WeComClientError(
+                f"WeCom attachment upload failed: {result}",
+                stage="/cgi-bin/media/upload_attachment",
                 category="wecom_api",
                 payload=result,
             )

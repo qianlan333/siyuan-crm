@@ -150,6 +150,8 @@ _TABLES_TO_TRUNCATE = [
     "questionnaire_questions",
     "questionnaire_score_rules",
     "questionnaires",
+    "wechat_pay_product_page_slices",
+    "wechat_pay_products",
     "wechat_pay_order_export_jobs",
     "wechat_pay_refunds",
     "wechat_pay_order_events",

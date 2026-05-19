@@ -159,19 +159,6 @@ def _operations_page_entry_urls(*, program_id: int | None = None) -> dict[str, s
     }
 
 
-def _build_operations_list_workspace(*, program_id: int | None = None) -> dict[str, object]:
-    entry_urls = _operations_page_entry_urls(program_id=program_id)
-    return {
-        "page_mode": "list",
-        "api_urls": _operations_page_api_urls(program_id=program_id),
-        "entry_urls": entry_urls,
-        "action_urls": {
-            "workflow_new": entry_urls["workflow_new"],
-            "execution_records": entry_urls["executions"],
-        },
-    }
-
-
 def _build_action_orchestration_workspace(workflow_id: int | None = None, *, program_id: int | None = None) -> dict[str, object]:
     normalized_workflow_id = int(workflow_id or 0) or None
     entry_urls = _operations_page_entry_urls(program_id=program_id)
@@ -185,40 +172,6 @@ def _build_action_orchestration_workspace(workflow_id: int | None = None, *, pro
             "workflow_list": entry_urls["workflow_list"],
             "workflow_edit": entry_urls["workflow_edit_base"].replace("/0/edit", f"/{normalized_workflow_id or 0}/edit"),
             "workflow_nodes": entry_urls["workflow_nodes_base"].replace("/0/nodes", f"/{normalized_workflow_id or 0}/nodes"),
-            "execution_records": entry_urls["executions"],
-        },
-    }
-
-
-def _build_workflow_editor_workspace(workflow_id: int | None = None, *, program_id: int | None = None) -> dict[str, object]:
-    normalized_workflow_id = int(workflow_id or 0) or None
-    page_mode = "workflow_edit" if normalized_workflow_id else "workflow_new"
-    entry_urls = _operations_page_entry_urls(program_id=program_id)
-    return {
-        "page_mode": page_mode,
-        "selected_workflow_id": normalized_workflow_id,
-        "api_urls": _operations_page_api_urls(program_id=program_id),
-        "entry_urls": entry_urls,
-        "action_urls": {
-            "list": entry_urls["list"],
-            "workflow_edit": entry_urls["workflow_edit_base"].replace("/0/edit", f"/{normalized_workflow_id or 0}/edit"),
-            "workflow_nodes": entry_urls["workflow_nodes_base"].replace("/0/nodes", f"/{normalized_workflow_id or 0}/nodes"),
-            "execution_records": entry_urls["executions"],
-        },
-    }
-
-
-def _build_workflow_nodes_workspace(workflow_id: int, *, program_id: int | None = None) -> dict[str, object]:
-    normalized_workflow_id = int(workflow_id or 0) or None
-    entry_urls = _operations_page_entry_urls(program_id=program_id)
-    return {
-        "page_mode": "nodes",
-        "selected_workflow_id": normalized_workflow_id,
-        "api_urls": _operations_page_api_urls(program_id=program_id),
-        "entry_urls": entry_urls,
-        "action_urls": {
-            "list": entry_urls["list"],
-            "workflow_edit": entry_urls["workflow_edit_base"].replace("/0/edit", f"/{normalized_workflow_id or 0}/edit"),
             "execution_records": entry_urls["executions"],
         },
     }
@@ -556,9 +509,9 @@ def _program_context(program: dict[str, object], *, active_key: str = "overview"
     }
 
 
-def _build_program_setup_workspace(program_id: int, *, step: str = "basic") -> dict[str, object]:
+def _build_program_setup_workspace(program_id: int, *, step: str = "basic", audience_picker: str = "") -> dict[str, object]:
     normalized_step = normalize_setup_step(step)
-    payload = get_program_setup_payload(int(program_id), step=normalized_step)
+    payload = get_program_setup_payload(int(program_id), step=normalized_step, audience_picker=audience_picker)
     base_url = url_for("api.admin_automation_program_setup", program_id=int(program_id))
     payload["urls"] = {
         "base": base_url,
@@ -584,12 +537,9 @@ __all__ = [
     "_build_execution_records_workspace",
     "_build_flow_design_workspace",
     "_build_member_ops_workspace",
-    "_build_operations_list_workspace",
     "_build_overview_workspace",
     "_build_program_setup_workspace",
     "_build_run_center_workspace",
-    "_build_workflow_editor_workspace",
-    "_build_workflow_nodes_workspace",
     "_overview_notice",
     "_program_context",
 ]

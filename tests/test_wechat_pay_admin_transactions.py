@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.admin_auth.auth_runtime import (
@@ -12,6 +13,9 @@ from wecom_ability_service.domains.admin_auth.auth_runtime import (
 )
 from wecom_ability_service.domains.wechat_pay import repo as wechat_pay_repo
 from wecom_ability_service.domains.wechat_pay import admin_service as wechat_pay_admin_service
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _login_admin(client, *, token: str = "test-admin-action-token") -> str:
@@ -90,6 +94,42 @@ def test_wechat_pay_admin_backfills_empty_product_name(app):
     assert order["product_name"] == "vip_course"
     payload = wechat_pay_admin_service.list_orders(filters={"product_code": "vip_course"}, limit=20)
     assert payload["items"][0]["product_name"] == "vip_course"
+    assert payload["items"][0]["product_label"] == "vip_course"
+
+
+def test_wechat_pay_admin_transaction_template_hides_internal_filter_copy():
+    source = (REPO_ROOT / "wecom_ability_service/templates/admin_console/wechat_pay_transactions.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "商品编码" not in source
+    assert "mobile_snapshot / mobile" not in source
+    assert "userid / external_userid" not in source
+    assert "placeholder=\"transaction_id\"" not in source
+    assert "row.product_code" not in source
+    assert "{{ product.product_name }} / {{ product.product_code }}" not in source
+
+
+def test_wechat_pay_admin_present_order_uses_operator_product_label():
+    row = {
+        "id": 1,
+        "created_at": "2026-05-18 12:00:00",
+        "transaction_id": "420000DISPLAY",
+        "payer_name_snapshot": "张三",
+        "mobile_snapshot": "13800000000",
+        "userid_snapshot": "zhangsan",
+        "external_userid": "wm_test",
+        "product_code": "assessment_report_v1",
+        "product_name": "AI 测评报告",
+        "amount_total": 9900,
+        "status": "paid",
+        "trade_state": "SUCCESS",
+    }
+
+    presented = wechat_pay_admin_service._present_order(row)
+
+    assert presented["product_label"] == "AI 测评报告"
+    assert presented["product_code"] == "assessment_report_v1"
 
 
 def test_wechat_pay_admin_product_filter(app, client):
@@ -120,6 +160,65 @@ def test_wechat_pay_admin_status_mapping(app):
     assert status_by_tx["4200000003"] == "全额退款"
 
 
+def test_wechat_pay_admin_status_mapping_shows_refund_processing(app):
+    order = _insert_order(
+        out_trade_no="WXP_REFUNDING_STATUS",
+        amount_total=990,
+        status="paid",
+        trade_state="SUCCESS",
+        transaction_id="420000REFUNDINGSTATUS",
+    )
+    wechat_pay_repo.insert_refund_request(
+        {
+            "order_id": order["id"],
+            "out_trade_no": "WXP_REFUNDING_STATUS",
+            "transaction_id": "420000REFUNDINGSTATUS",
+            "out_refund_no": "WXR_REFUNDING_STATUS",
+            "reason": "客户主动申请退款",
+            "refund_amount_total": 990,
+            "order_amount_total": 990,
+            "currency": "CNY",
+            "requested_by": "tester",
+            "request_payload": {},
+        }
+    )
+
+    payload = wechat_pay_admin_service.list_orders(filters={"status": "refund_processing"}, limit=20)
+
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["status"] == "refund_processing"
+    assert payload["items"][0]["status_label"] == "退款处理中"
+
+
+def test_wechat_pay_admin_status_filters_align_with_presented_refund_status():
+    cases = {
+        "pending": [
+            "COALESCE(refund_status, '') NOT IN ('partial_refunded', 'full_refunded')",
+        ],
+        "paid": [
+            "COALESCE(refund_status, '') NOT IN ('partial_refunded', 'full_refunded')",
+            "NOT EXISTS",
+        ],
+        "refund_processing": [
+            "COALESCE(refund_status, '') <> 'full_refunded'",
+            "NOT (COALESCE(refunded_amount_total, 0) >= amount_total AND amount_total > 0)",
+        ],
+        "partial_refunded": [
+            "COALESCE(refund_status, '') = 'partial_refunded'",
+            "NOT EXISTS",
+        ],
+        "full_refunded": [
+            "COALESCE(refund_status, '') = 'full_refunded'",
+        ],
+    }
+
+    for status, expected_fragments in cases.items():
+        clauses = wechat_pay_repo._order_query_where({"status": status}, [])
+        sql = " AND ".join(clauses)
+        for fragment in expected_fragments:
+            assert fragment in sql
+
+
 def test_wechat_pay_admin_cursor_pagination(app, client):
     _login_admin(client)
     base = datetime(2026, 5, 16, 12, 0, 0)
@@ -139,6 +238,18 @@ def test_wechat_pay_admin_cursor_pagination(app, client):
     assert second["ok"] is True
     assert len(second["items"]) == 1
     assert second["has_more"] is False
+
+
+def test_wechat_pay_admin_displays_created_at_in_beijing_time(app):
+    _insert_order(
+        out_trade_no="WXP_TZ_DISPLAY",
+        transaction_id="420000TZDISPLAY",
+        created_at="2026-05-18T11:27:51+00:00",
+    )
+
+    payload = wechat_pay_admin_service.list_orders(filters={"transaction_id": "420000TZDISPLAY"}, limit=20)
+
+    assert payload["items"][0]["created_at"] == "2026-05-18 19:27:51"
 
 
 def test_wechat_pay_admin_export_job_saves_filters_json(app, client):
@@ -251,3 +362,80 @@ def test_wechat_pay_admin_refund_calls_wechat_pay_and_updates_success(app, clien
         "refund_id": "503000000020260516",
         "refund_amount_total": 1000,
     }
+
+
+def test_wechat_pay_admin_refund_processing_counts_as_in_flight_amount(app, client, monkeypatch):
+    token = _login_admin(client)
+    order = _insert_order(
+        out_trade_no="WXP_REFUND_PROCESSING",
+        status="paid",
+        trade_state="SUCCESS",
+        transaction_id="420000PROCESSING",
+        amount_total=990,
+    )
+
+    class FakeClient:
+        def create_refund(self, payload):
+            return {
+                "refund_id": "503000000020260518",
+                "out_refund_no": payload["out_refund_no"],
+                "transaction_id": payload["transaction_id"],
+                "status": "PROCESSING",
+                "amount": {"refund": payload["amount"]["refund"], "total": payload["amount"]["total"], "currency": "CNY"},
+            }
+
+    monkeypatch.setattr(wechat_pay_admin_service, "_create_wechat_pay_client", lambda: FakeClient())
+
+    response = client.post(
+        f"/api/admin/wechat-pay/orders/{order['id']}/refunds",
+        json={
+            "admin_action_token": token,
+            "refund_amount_total": 990,
+            "reason": "客户主动申请退款",
+            "transaction_id_confirmation": "420000PROCESSING",
+            "checked": True,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["refund"]["status"] == "PROCESSING"
+    assert payload["order"]["refunded_amount_total"] == 0
+    assert payload["order"]["active_refund_amount_total"] == 990
+    assert payload["order"]["refundable_amount_total"] == 0
+    assert payload["order"]["can_refund"] is False
+
+
+def test_wechat_pay_admin_refund_rejects_amount_over_order_total(app, client, monkeypatch):
+    token = _login_admin(client)
+    order = _insert_order(
+        out_trade_no="WXP_REFUND_OVER_TOTAL",
+        status="paid",
+        trade_state="SUCCESS",
+        transaction_id="420000OVERTOTAL",
+        amount_total=990,
+    )
+    called = False
+
+    class FakeClient:
+        def create_refund(self, payload):
+            nonlocal called
+            called = True
+            return {"status": "SUCCESS"}
+
+    monkeypatch.setattr(wechat_pay_admin_service, "_create_wechat_pay_client", lambda: FakeClient())
+
+    response = client.post(
+        f"/api/admin/wechat-pay/orders/{order['id']}/refunds",
+        json={
+            "admin_action_token": token,
+            "refund_amount_total": 9900,
+            "reason": "客户主动申请退款",
+            "transaction_id_confirmation": "420000OVERTOTAL",
+            "checked": True,
+        },
+    )
+
+    assert response.status_code == 400
+    assert "累计退款金额不能超过订单金额" in response.get_json()["error"]
+    assert called is False

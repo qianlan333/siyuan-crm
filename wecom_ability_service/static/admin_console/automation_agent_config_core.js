@@ -203,6 +203,7 @@
       entryTagId: defaultChannelForm ? defaultChannelForm.querySelector('[name="entry_tag_id"]') : null,
       entryTagIdManual: defaultChannelForm ? defaultChannelForm.querySelector('[name="entry_tag_id_manual"]') : null,
       welcomeMessage: defaultChannelForm ? defaultChannelForm.querySelector('[name="welcome_message"]') : null,
+      welcomeAttachmentIds: defaultChannelForm ? defaultChannelForm.querySelector('[name="welcome_attachment_library_ids"]') : null,
     };
   }
 

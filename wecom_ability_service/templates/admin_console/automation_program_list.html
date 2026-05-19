@@ -32,6 +32,9 @@
   .program-status--active { color: #00856a; background: #e6faf5; }
   .program-status--paused { color: #4e5969; background: #f5f6f7; }
   .program-status--archived { color: #6b7280; background: #eef0f3; border-color: #d7dbe0; }
+  .program-publish--entry { color: #1456f0; background: #eef4ff; }
+  .program-publish--full { color: #067647; background: #ecfdf3; }
+  .program-publish--unpublished { color: #344054; background: #f5f6f7; }
   .program-row-actions {
     display: flex;
     align-items: center;
@@ -79,14 +82,14 @@
       <p class="admin-card-copy">当前处于启用状态的方案数量。</p>
     </article>
     <article class="admin-card admin-stat-card admin-stat-card--nested">
-      <div class="admin-card-label">累计任务流</div>
+      <div class="admin-card-label">累计运营任务</div>
       <div class="admin-card-value admin-card-value--compact">{{ ns.workflow_total }}</div>
-      <p class="admin-card-copy">跨方案的任务流数量总和。</p>
+      <p class="admin-card-copy">跨方案的运营任务数量总和。</p>
     </article>
     <article class="admin-card admin-stat-card admin-stat-card--nested">
       <div class="admin-card-label">默认方案</div>
       <div class="admin-card-value admin-card-value--compact">{{ default_program.program_name or "未初始化" }}</div>
-      <p class="admin-card-copy">旧入口默认回落到这份方案上下文。</p>
+      <p class="admin-card-copy">未指定方案时使用这份方案上下文。</p>
     </article>
     <article class="admin-card admin-stat-card admin-stat-card--nested">
       <div class="admin-card-label">最近运行时间</div>
@@ -163,11 +166,12 @@
           {% set program = item.program or {} %}
           {% set summary = item.summary or {} %}
           {% set status_label = "启用" if program.status == "active" else "草稿" if program.status == "draft" else "暂停" if program.status == "paused" else "归档" if program.status == "archived" else program.status %}
+          {% set publish_status = summary.publish_status or "unpublished" %}
           <tr id="program-row-{{ program.id }}" class="{% if program.status == 'archived' %}is-archived{% endif %}">
             <td><strong>{{ program.program_name }}</strong></td>
             <td><span class="program-code">{{ program.program_code }}</span></td>
             <td><span class="admin-chip program-status program-status--{{ program.status }}">{{ status_label }}</span></td>
-            <td><span class="admin-chip admin-chip--neutral">未发布</span></td>
+            <td><span class="admin-chip program-publish--{{ publish_status }}">{{ summary.publish_status_label or "未发布" }}</span></td>
             <td>{{ summary.channel_count or 0 }}</td>
             <td>{{ summary.workflow_count or 0 }}</td>
             <td>{{ summary.latest_execution_at or "-" }}</td>

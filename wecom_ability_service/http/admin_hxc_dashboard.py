@@ -83,7 +83,7 @@ def admin_hxc_dashboard_workspace():
         active_nav="user_ops_funnel",
         page_title="用户激活漏斗看板",
         page_summary=(
-            "CRM 三表 (lead_pool / people / 激活问卷) 手机号并集 × 黄小璨用户/会员/会话/消息 "
+            "CRM 三表手机号并集 × 黄小璨用户/会员/订阅/测评/成长目标/路径/任务/复盘/V6 角色评分 "
             "聚合, 每 30 分钟自动刷新. 列头可筛选, 表格右上角可导出 CSV / Excel."
         ),
         breadcrumbs=_breadcrumb_items(

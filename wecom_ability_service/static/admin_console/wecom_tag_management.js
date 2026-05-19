@@ -199,6 +199,7 @@
 
     els.currentGroupName.textContent = group ? normalized(group.group_name) || "未命名标签组" : "标签组";
     els.currentGroupMeta.textContent = group ? `${total} 个标签；每页 ${PAGE_SIZE} 个` : "当前没有标签组";
+    els.createTagButton.disabled = state.busy || !group || state.totalTags >= state.tagLimit;
     els.editGroupButton.disabled = state.busy || !group;
     els.deleteGroupButton.disabled = state.busy || !group;
     els.tagRows.innerHTML = rows.map((tag) => `
@@ -253,6 +254,15 @@
     return `<div class="wecom-tags-actions" style="justify-content:flex-end;margin-top:14px;">${actions}</div>`;
   }
 
+  function createGroupTagRow(value) {
+    return `
+      <div class="wecom-tags-tag-row" data-role="group-tag-row">
+        <input name="tag_names" type="text" value="${escapeHtml(value || "")}" required>
+        <button class="admin-button admin-button--ghost" type="button" data-action="remove-group-tag-row">删除</button>
+      </div>
+    `;
+  }
+
   async function loadTags(successMessage) {
     setFeedback("", "");
     state.busy = true;
@@ -300,7 +310,17 @@
     openModal("新增标签组", `
       <form class="wecom-tags-form" data-form="create-group">
         <label><span>标签组名称</span><input name="group_name" type="text" required></label>
-        <label><span>第一个标签名称</span><input name="first_tag_name" type="text" required></label>
+        <div class="wecom-tags-tag-list">
+          <div class="wecom-tags-tag-list-head">
+            <span>标签</span>
+          </div>
+          <div class="wecom-tags-tag-rows" data-role="group-tag-rows">
+            ${createGroupTagRow("")}
+          </div>
+          <div class="wecom-tags-actions wecom-tags-add-row">
+            <button class="admin-button admin-button--secondary" type="button" data-action="add-group-tag-row">+ 添加标签</button>
+          </div>
+        </div>
         ${modalActions('<button class="admin-button admin-button--ghost" type="button" data-action="close-modal">取消</button><button class="admin-button admin-button--primary" type="submit">保存</button>')}
       </form>
     `);
@@ -382,11 +402,12 @@
     try {
       if (kind === "create-group") {
         const groupName = normalized(formData.get("group_name"));
+        const tagNames = formData.getAll("tag_names").map(normalized).filter(Boolean);
         await requestJson(apiGroups(), {
           method: "POST",
           body: JSON.stringify({
             group_name: groupName,
-            first_tag_name: normalized(formData.get("first_tag_name")),
+            tag_names: tagNames,
           }),
         }, "标签组创建失败，请检查名称是否重复或企微接口权限。");
         closeModal();
@@ -498,6 +519,19 @@
     if (action === "sync") loadTags("企微标签同步成功");
     if (action === "create-group") openCreateGroupModal();
     if (action === "create-tag") openCreateTagModal();
+    if (action === "add-group-tag-row") {
+      const rows = els.modalBody.querySelector('[data-role="group-tag-rows"]');
+      if (rows) {
+        rows.insertAdjacentHTML("beforeend", createGroupTagRow(""));
+        const inputs = rows.querySelectorAll('input[name="tag_names"]');
+        inputs[inputs.length - 1].focus();
+      }
+    }
+    if (action === "remove-group-tag-row") {
+      const rows = els.modalBody.querySelector('[data-role="group-tag-rows"]');
+      const row = target.closest('[data-role="group-tag-row"]');
+      if (rows && row && rows.children.length > 1) row.remove();
+    }
     if (action === "edit-group") openEditGroupModal();
     if (action === "delete-group") deleteCurrentGroup();
     if (action === "close-modal") closeModal();

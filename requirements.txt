@@ -9,3 +9,4 @@ alembic==1.18.4
 anthropic>=0.40.0
 pytest-timeout==2.3.1
 pytest-xdist==3.6.1
+segno==1.6.1

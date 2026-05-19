@@ -177,8 +177,8 @@ _TOOL_SPECS: list[dict[str, Any]] = [
                 "attachments": {
                     "type": "array",
                     "description": (
-                        "可选附件，企微单次最多 9 个：仅支持 miniprogram(library_id) 与 file(media_id)。"
-                        "miniprogram 必须从素材库选 library_id，不允许 AI 自由拼 appid。"
+                        "可选附件，企微单次最多 9 个：仅支持 miniprogram(library_id) 与 file(media_id 或 library_id)。"
+                        "miniprogram / file 建议都从素材库选 library_id，不允许 AI 自由拼 appid。"
                     ),
                     "items": {
                         "type": "object",
@@ -195,8 +195,11 @@ _TOOL_SPECS: list[dict[str, Any]] = [
                             },
                             "file": {
                                 "type": "object",
-                                "properties": {"media_id": {"type": "string"}},
-                                "required": ["media_id"],
+                                "properties": {
+                                    "media_id": {"type": "string"},
+                                    "library_id": {"type": "integer"},
+                                    "attachment_library_id": {"type": "integer"},
+                                },
                             },
                         },
                         "required": ["msgtype"],

@@ -292,7 +292,7 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
 
 
 
-def generate_default_channel_qr(*, operator: str = "", program_id: int | None = None) -> dict[str, Any]:
+def generate_default_channel_qr(*, operator: str = "", program_id: int | None = None, owner_staff_id: str = "") -> dict[str, Any]:
     provider = load_channel_provider()
     normalized_program_id = int(program_id or 0) or None
     existing = repo.get_default_channel(
@@ -315,7 +315,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
     entry_tag_id = _normalized_text(existing.get("entry_tag_id"))
     entry_tag_name = _normalized_text(existing.get("entry_tag_name"))
     entry_tag_group_name = _normalized_text(existing.get("entry_tag_group_name"))
-    owner_staff_id = _normalized_text(existing.get("owner_staff_id")) or DEFAULT_OWNER_STAFF_ID
+    owner_staff_id = _normalized_text(owner_staff_id) or _normalized_text(existing.get("owner_staff_id")) or DEFAULT_OWNER_STAFF_ID
     try:
         channel_payload = provider.create_default_channel(
             owner_staff_id=owner_staff_id,

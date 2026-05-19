@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ page_title }} · 客户管理后台</title>
+  <title>{{ page_title }} · 心流商业客户管理</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='admin_console/admin_console.css') }}">
   {% block head_extra %}{% endblock %}
   <script defer src="{{ url_for('static', filename='admin_console/admin_api_client.js') }}"></script>
@@ -17,10 +17,10 @@
     <aside class="admin-sidebar">
       <div class="admin-brand">
         <div class="admin-brand-mark">CRM</div>
-        <div class="admin-brand-title">客户管理后台</div>
+        <div class="admin-brand-title">心流商业客户管理</div>
       </div>
 
-      <nav class="admin-nav" aria-label="客户管理后台导航">
+      <nav class="admin-nav" aria-label="心流商业客户管理导航">
         {% for group in nav_items %}
         <section class="admin-nav-section{% if group.active %} is-active{% endif %}">
           <div class="admin-nav-section-title">{{ group.title }}</div>

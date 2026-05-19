@@ -1594,7 +1594,7 @@ def test_class_user_management_list_export_and_ui(client, app, monkeypatch):
     shell_response = client.get("/admin/class-users?tab=class-users")
     shell_text = shell_response.get_data(as_text=True)
     assert shell_response.status_code == 200
-    assert "客户管理后台" in shell_text
+    assert "心流商业客户管理" in shell_text
     assert "运营管理" in shell_text
     assert "班级状态" in shell_text
 
@@ -1621,7 +1621,7 @@ def test_admin_questionnaire_management_page_exists(client):
     text = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "客户管理后台" in text
+    assert "心流商业客户管理" in text
     assert "问卷管理" in text
     assert "创建新问卷" in text
     assert "创建测评问卷模板" in text

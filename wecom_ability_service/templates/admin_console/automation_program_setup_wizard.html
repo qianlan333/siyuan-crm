@@ -54,6 +54,9 @@
   .setup-selection-summary { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; color: #344054; font-size: 14px; font-weight: 800; }
   .setup-selection-summary.is-empty { color: #98a2b3; font-weight: 700; }
   .setup-selection-ok { color: #188038; font-weight: 900; }
+  .setup-owner-card { display: flex; gap: 12px; align-items: center; justify-content: space-between; min-height: 48px; padding: 10px 12px; border: 1px solid rgba(15,23,42,.12); border-radius: 10px; background: #fff; }
+  .setup-owner-current { display: grid; gap: 3px; color: #1f2329; font-weight: 900; }
+  .setup-owner-current small { color: #667085; font-weight: 700; }
   .setup-picker-grid { display: grid; gap: 10px; }
   .setup-picker-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 12px 14px; border: 1px solid rgba(15,23,42,.10); border-radius: 12px; background: #fff; }
   .setup-picker-title { display: grid; gap: 4px; color: #1f2329; font-weight: 900; }
@@ -143,6 +146,8 @@
 
   {% if current_step == 'basic' %}
   {% set basic = workspace.basic or {} %}
+  {% set owner = workspace.program_owner or {} %}
+  {% set owner_candidates = workspace.owner_candidates or [] %}
   <section class="setup-card">
     <div>
       <h2>方案身份</h2>
@@ -159,8 +164,48 @@
           {% endfor %}
         </select>
       </label>
+      <div class="setup-field">
+        <span>负责人</span>
+        <div class="setup-owner-card">
+          <div class="setup-owner-current" data-owner-current>
+            {% if owner.owner_staff_id %}
+            <strong>{{ owner.owner_display_name or owner.owner_staff_id }}</strong>
+            <small>{{ owner.owner_staff_id }}</small>
+            {% else %}
+            <strong>未选择负责人</strong>
+            <small>生成入口二维码时会使用该负责人</small>
+            {% endif %}
+          </div>
+          <button class="setup-button" type="button" data-owner-picker-open>{{ "更换负责人" if owner.owner_staff_id else "添加负责人" }}</button>
+        </div>
+        <input type="hidden" name="owner_staff_id" value="{{ owner.owner_staff_id or '' }}" data-owner-staff-id>
+        <input type="hidden" name="owner_display_name" value="{{ owner.owner_display_name or '' }}" data-owner-display-name>
+      </div>
       <label class="setup-field" style="grid-column: 1 / -1;"><span>方案描述</span><textarea name="description">{{ program.description or '' }}</textarea></label>
     </form>
+    <div class="setup-modal" data-owner-picker-modal hidden>
+      <div class="setup-modal__panel">
+        <div class="setup-modal__head">
+          <h3>选择负责人</h3>
+          <button class="setup-button" type="button" data-owner-picker-close>关闭</button>
+        </div>
+        {% if owner_candidates %}
+        <div class="setup-picker-grid">
+          {% for item in owner_candidates %}
+          <div class="setup-picker-row">
+            <div class="setup-picker-title">
+              <span>{{ item.display_name or item.owner_staff_id }}</span>
+              <span class="setup-picker-subtitle">{{ item.position or item.owner_staff_id }}</span>
+            </div>
+            <button class="setup-button is-primary" type="button" data-owner-pick data-owner-staff-id="{{ item.owner_staff_id }}" data-owner-display-name="{{ item.display_name or item.owner_staff_id }}">选择</button>
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div class="setup-empty-hint">还没有可选成员，请先同步企业微信通讯录或创建后台成员。</div>
+        {% endif %}
+      </div>
+    </div>
   </section>
   <section class="setup-card">
     <div>
@@ -182,6 +227,7 @@
   {% elif current_step == 'entry' %}
   {% set entry = workspace.entry or {} %}
   {% set qrcode = entry.qrcode_channel or {} %}
+  {% set owner = workspace.program_owner or {} %}
   {% set tag_catalog = entry.wecom_tag_catalog or {} %}
   {% set tag_state = namespace(selected_known=false) %}
   <section class="setup-card">
@@ -200,6 +246,23 @@
           <div class="setup-form-grid">
             <label class="setup-field"><span>渠道名称</span><input name="channel_name" value="{{ qrcode.channel_name or '' }}"></label>
             <label class="setup-field"><span>是否免验证</span><select name="auto_accept_friend"><option value="1" {% if qrcode.auto_accept_friend %}selected{% endif %}>是</option><option value="0" {% if not qrcode.auto_accept_friend %}selected{% endif %}>否</option></select></label>
+            <div class="setup-field" style="grid-column: 1 / -1;">
+              <span>负责人</span>
+              <div class="setup-owner-card">
+                <div class="setup-owner-current">
+                  {% if owner.owner_staff_id %}
+                  <strong>{{ owner.owner_display_name or owner.owner_staff_id }}</strong>
+                  <small>{{ owner.owner_staff_id }}</small>
+                  {% else %}
+                  <strong>未选择负责人</strong>
+                  <small>请先在基础信息里添加负责人；未选择时会使用系统默认负责人。</small>
+                  {% endif %}
+                </div>
+                <a class="setup-button" href="{{ urls.base }}?step=basic">去基础信息设置</a>
+              </div>
+              <input type="hidden" name="owner_staff_id" value="{{ owner.owner_staff_id or qrcode.owner_staff_id or '' }}" data-entry-owner-staff-id>
+              <input type="hidden" name="owner_display_name" value="{{ owner.owner_display_name or '' }}">
+            </div>
             <div class="setup-tag-select-card">
               <label class="setup-field">
                 <span>扫码自动标签</span>
@@ -652,6 +715,30 @@
       root.querySelectorAll("[data-setup-tab-panel]").forEach((panel) => panel.hidden = panel.dataset.setupTabPanel !== key);
     });
   });
+  const ownerModal = root.querySelector("[data-owner-picker-modal]");
+  const ownerStaffInput = root.querySelector("[data-owner-staff-id]");
+  const ownerDisplayInput = root.querySelector("[data-owner-display-name]");
+  const ownerCurrent = root.querySelector("[data-owner-current]");
+  root.querySelector("[data-owner-picker-open]")?.addEventListener("click", () => {
+    if (ownerModal) ownerModal.hidden = false;
+  });
+  root.querySelector("[data-owner-picker-close]")?.addEventListener("click", () => {
+    if (ownerModal) ownerModal.hidden = true;
+  });
+  ownerModal?.addEventListener("click", (event) => {
+    if (event.target === ownerModal) ownerModal.hidden = true;
+    const pick = event.target.closest("[data-owner-pick]");
+    if (!pick) return;
+    const ownerStaffId = pick.dataset.ownerStaffId || "";
+    const ownerDisplayName = pick.dataset.ownerDisplayName || ownerStaffId;
+    if (ownerStaffInput) ownerStaffInput.value = ownerStaffId;
+    if (ownerDisplayInput) ownerDisplayInput.value = ownerDisplayName;
+    if (ownerCurrent) {
+      ownerCurrent.innerHTML = `<strong>${escapeHtml(ownerDisplayName || "未选择负责人")}</strong><small>${escapeHtml(ownerStaffId || "生成入口二维码时会使用该负责人")}</small>`;
+    }
+    ownerModal.hidden = true;
+    showFeedback(`已选择负责人：${ownerDisplayName || ownerStaffId}`, true);
+  });
   const saveSimpleForm = async (form) => {
     const payload = Object.fromEntries(new FormData(form).entries());
     payload.auto_accept_friend = String(payload.auto_accept_friend || "") === "1";
@@ -696,7 +783,10 @@
       const form = root.querySelector("[data-endpoint='entry_channel']");
       try {
         if (form) await saveSimpleForm(form);
-        await postJson(urls.entry_channel_generate_qr, { program_id: Number(root.dataset.programId || 0) });
+        await postJson(urls.entry_channel_generate_qr, {
+          program_id: Number(root.dataset.programId || 0),
+          owner_staff_id: root.querySelector("[data-entry-owner-staff-id]")?.value || "",
+        });
         showFeedback("二维码已生成", true);
         window.location.reload();
       } catch (error) { showFeedback(error.message || "二维码生成失败，请稍后重试"); }

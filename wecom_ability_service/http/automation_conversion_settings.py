@@ -26,10 +26,11 @@ def save_settings(payload, *, program_id=None):
     return parent_patch("save_settings", _save_settings)(payload, program_id=program_id)
 
 
-def generate_default_channel_qr(*, operator: str, program_id=None):
+def generate_default_channel_qr(*, operator: str, program_id=None, owner_staff_id: str = ""):
     return parent_patch("generate_default_channel_qr", _generate_default_channel_qr)(
         operator=operator,
         program_id=program_id,
+        owner_staff_id=owner_staff_id,
     )
 
 
@@ -67,14 +68,22 @@ def api_admin_automation_conversion_default_channel_generate_qr():
     if action_token_error:
         return jsonify({"ok": False, "error": action_token_error}), 400
     payload = request.get_json(silent=True) or {}
-    result = generate_default_channel_qr(operator=_operator_from_request(), program_id=_payload_program_id(payload))
+    result = generate_default_channel_qr(
+        operator=_operator_from_request(),
+        program_id=_payload_program_id(payload),
+        owner_staff_id=str(payload.get("owner_staff_id") or "").strip(),
+    )
     status_code = int(result.get("status_code") or (200 if result.get("generated") else 400))
     return jsonify({"ok": bool(result.get("generated")), **result}), status_code
 
 
 def api_admin_automation_conversion_settings_default_channel_generate_qr():
     payload = request.get_json(silent=True) or {}
-    result = generate_default_channel_qr(operator=_operator_from_request(), program_id=_payload_program_id(payload))
+    result = generate_default_channel_qr(
+        operator=_operator_from_request(),
+        program_id=_payload_program_id(payload),
+        owner_staff_id=str(payload.get("owner_staff_id") or "").strip(),
+    )
     status_code = int(result.get("status_code") or (200 if result.get("generated") else 400))
     return jsonify({"ok": bool(result.get("generated")), **result}), status_code
 

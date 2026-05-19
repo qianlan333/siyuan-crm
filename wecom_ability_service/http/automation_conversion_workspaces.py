@@ -517,6 +517,7 @@ def _build_program_setup_workspace(program_id: int, *, step: str = "basic", audi
         "base": base_url,
         "basic": url_for("api.api_admin_automation_program_setup_basic", program_id=int(program_id)),
         "entry_channel": url_for("api.api_admin_automation_program_setup_entry_channel", program_id=int(program_id)),
+        "entry_channel_generate_qr": url_for("api.api_admin_automation_conversion_settings_default_channel_generate_qr"),
         "segmentation": url_for("api.api_admin_automation_program_setup_segmentation", program_id=int(program_id)),
         "audience_entry_rule": url_for("api.api_admin_automation_program_setup_audience_entry_rule", program_id=int(program_id)),
         "publish_check": url_for("api.api_admin_automation_program_setup_publish_check", program_id=int(program_id)),

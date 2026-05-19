@@ -443,6 +443,113 @@ def test_setup_entry_channel_uses_wecom_tag_selector(app, client, monkeypatch):
     assert 'type="hidden" name="entry_tag_name"' in html
 
 
+def test_setup_basic_can_select_single_program_owner(app, client, monkeypatch):
+    _login(client, app, monkeypatch)
+    program_id = _default_program_id(app)
+    with app.app_context():
+        get_db().execute(
+            """
+            INSERT INTO admin_users (wecom_userid, wecom_corpid, display_name, is_active)
+            VALUES (?, ?, ?, TRUE)
+            ON CONFLICT (wecom_corpid, wecom_userid)
+            DO UPDATE SET display_name = EXCLUDED.display_name, is_active = TRUE
+            """,
+            ("sales_owner_01", app.config["WECOM_CORP_ID"], "销售负责人 01"),
+        )
+        get_db().commit()
+
+    html = client.get(f"/admin/automation-conversion/programs/{program_id}/setup?step=basic").get_data(as_text=True)
+
+    assert "负责人" in html
+    assert "添加负责人" in html
+    assert "销售负责人 01" in html
+    assert "sales_owner_01" in html
+
+
+def test_setup_basic_owner_flows_to_entry_channel(app, client, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion.program_setup_service import (
+        save_entry_channel,
+        save_setup_basic,
+    )
+
+    _login(client, app, monkeypatch)
+    program_id = _default_program_id(app)
+    with app.app_context():
+        save_setup_basic(
+            program_id,
+            {
+                "program_name": "负责人入口方案",
+                "program_code": "signup_conversion_v1",
+                "status": "active",
+                "owner_staff_id": "sales_owner_02",
+                "owner_display_name": "销售负责人 02",
+            },
+            operator_id="test",
+        )
+        save_entry_channel(program_id, {"channel_name": "负责人二维码", "welcome_message": "欢迎"})
+        row = get_db().execute(
+            "SELECT owner_staff_id FROM automation_channel WHERE program_id = ? ORDER BY id DESC LIMIT 1",
+            (program_id,),
+        ).fetchone()
+        block = get_db().execute(
+            """
+            SELECT payload_json
+            FROM automation_program_config_block
+            WHERE program_id = ? AND block_key = 'basic'
+            """,
+            (program_id,),
+        ).fetchone()
+
+    block_payload = block["payload_json"] if isinstance(block["payload_json"], dict) else json.loads(block["payload_json"])
+    assert row["owner_staff_id"] == "sales_owner_02"
+    assert block_payload["owner_display_name"] == "销售负责人 02"
+
+
+def test_setup_entry_qrcode_generation_uses_program_owner(app, client, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion.program_setup_service import (
+        save_entry_channel,
+        save_setup_basic,
+    )
+
+    captured = {}
+
+    class _FakeRuntimeClient:
+        def create_contact_way(self, payload: dict) -> dict:
+            captured["payload"] = payload
+            return {"config_id": "cfg-owner", "qr_code": "https://wecom.example/qr/cfg-owner"}
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.provider.get_contact_runtime_client",
+        lambda: _FakeRuntimeClient(),
+    )
+    _login(client, app, monkeypatch)
+    program_id = _default_program_id(app)
+    with app.app_context():
+        save_setup_basic(
+            program_id,
+            {
+                "program_name": "负责人生成码方案",
+                "program_code": "signup_conversion_v1",
+                "status": "active",
+                "owner_staff_id": "sales_owner_03",
+                "owner_display_name": "销售负责人 03",
+            },
+            operator_id="test",
+        )
+        save_entry_channel(program_id, {"channel_name": "负责人生成码", "welcome_message": "欢迎"})
+
+    response = client.post(
+        "/api/admin/automation-conversion/settings/default-channel/generate",
+        json={"program_id": program_id},
+    )
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["ok"] is True
+    assert payload["channel"]["owner_staff_id"] == "sales_owner_03"
+    assert captured["payload"]["user"] == ["sales_owner_03"]
+
+
 def test_blank_setup_entry_does_not_show_default_qrcode(app, client, monkeypatch):
     from wecom_ability_service.domains.automation_conversion import repo
     from wecom_ability_service.domains.automation_conversion.program_service import create_automation_program

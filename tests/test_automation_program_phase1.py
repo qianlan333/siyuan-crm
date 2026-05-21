@@ -385,6 +385,37 @@ def test_setup_entry_channel_renders_qrcode_image(app, client, monkeypatch):
     assert "scene-current-program" in html
 
 
+def test_setup_entry_channel_requires_regeneration_for_configured_qrcode(app, client, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion import repo
+
+    _login(client, app, monkeypatch)
+    program_id = _default_program_id(app)
+    stale_qr_url = "https://wework.qpic.cn/wwpic/stale-program-qr.png"
+    with app.app_context():
+        repo.save_channel(
+            {
+                "program_id": program_id,
+                "channel_code": "program_stale_qr_case",
+                "channel_name": "待重新生成二维码",
+                "qr_url": stale_qr_url,
+                "scene_value": "scene-stale-program",
+                "status": "configured",
+                "auto_accept_friend": True,
+            }
+        )
+        get_db().commit()
+
+    html = client.get(f"/admin/automation-conversion/programs/{program_id}/setup?step=entry").get_data(as_text=True)
+
+    assert stale_qr_url not in html
+    assert "二维码配置已变更，请重新生成后再投放。" in html
+    assert "配置已变更，需重新生成" in html
+    assert "保存免验证、负责人、欢迎语或扫码标签后，需要重新生成当前方案二维码。" in html
+    assert "生成二维码" in html
+    assert "复制链接" not in html
+    assert "打开链接" not in html
+
+
 def test_setup_entry_channel_uses_wecom_tag_selector(app, client, monkeypatch):
     from wecom_ability_service.domains.automation_conversion import program_setup_service
 

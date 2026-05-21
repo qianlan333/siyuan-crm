@@ -740,6 +740,7 @@ def handle_qrcode_enter_from_callback(
     phone: str = "",
     payload_json: dict[str, Any] | None = None,
     operator_id: str = "",
+    follow_user_userid: str = "",
     send_welcome_message: bool = False,
 ) -> dict[str, Any]:
     return handle_channel_enter_from_callback(
@@ -747,6 +748,7 @@ def handle_qrcode_enter_from_callback(
         phone=phone,
         payload_json=payload_json,
         operator_id=operator_id,
+        follow_user_userid=follow_user_userid,
         source_type=SOURCE_TYPE_QRCODE,
         event_action="qrcode_enter",
         send_welcome_message=send_welcome_message,

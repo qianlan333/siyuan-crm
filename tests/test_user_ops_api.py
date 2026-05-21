@@ -3254,6 +3254,40 @@ def test_external_contact_event_for_other_owner_also_creates_deferred_job(app, m
         assert row["owner_userid"] == "sales_01"
 
 
+def test_external_contact_event_passes_follow_user_to_qrcode_automation(app, monkeypatch):
+    detail = _build_external_contact_detail(
+        external_userid="wm_auto_assign_qrcode_owner_001",
+        owner_userid="sales_01",
+    )
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr("wecom_ability_service.routes._contact_client", lambda: _FakeCallbackContactClient(detail))
+    monkeypatch.setattr("wecom_ability_service.routes._dispatch_background_task", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "wecom_ability_service.http.background_jobs.handle_qrcode_enter_from_callback",
+        lambda *args, **kwargs: captured.update(kwargs) or {"handled": False, "reason": "test"},
+    )
+
+    with app.app_context():
+        logged = log_external_contact_event(
+            corp_id="ww-test",
+            event_type="change_external_contact",
+            change_type="add_external_contact",
+            external_userid="wm_auto_assign_qrcode_owner_001",
+            user_id="sales_01",
+            event_time=1775000002,
+            event_key="event-auto-assign-qrcode-owner-001",
+            payload_xml="<xml></xml>",
+            payload_json={"ChangeType": "add_external_contact", "State": "scene-qrcode"},
+        )
+        result = _process_external_contact_event(int(logged["id"]))
+
+        assert result["ok"] is True
+        assert captured["external_contact_id"] == "wm_auto_assign_qrcode_owner_001"
+        assert captured["operator_id"] == "sales_01"
+        assert captured["follow_user_userid"] == "sales_01"
+
+
 def test_external_contact_event_marks_failed_when_qrcode_automation_raises(app, monkeypatch):
     detail = _build_external_contact_detail(
         external_userid="wm_auto_assign_qrcode_fail_001",

@@ -90,6 +90,7 @@ class HandleQrcodeEnterFromCallbackCommand:
         phone: str = "",
         payload_json: dict[str, Any] | None = None,
         operator_id: str = "",
+        follow_user_userid: str = "",
         send_welcome_message: bool = False,
     ) -> dict[str, Any]:
         return automation_conversion_domain_service.handle_qrcode_enter_from_callback(
@@ -97,6 +98,7 @@ class HandleQrcodeEnterFromCallbackCommand:
             phone=str(phone or "").strip(),
             payload_json=dict(payload_json or {}),
             operator_id=str(operator_id or "").strip(),
+            follow_user_userid=str(follow_user_userid or "").strip(),
             send_welcome_message=bool(send_welcome_message),
         )
 

@@ -11463,6 +11463,7 @@ def test_qrcode_callback_applies_entry_tag_and_persists_snapshot(app, monkeypatc
             phone="13800004004",
             payload_json={"state": "scene-tag"},
             operator_id="callback-user",
+            follow_user_userid="LinKaiYan",
         )
 
         assert result["handled"] is True
@@ -11470,7 +11471,7 @@ def test_qrcode_callback_applies_entry_tag_and_persists_snapshot(app, monkeypatc
         assert result["entry_tag"]["entry_tag_id"] == "tag-channel-001"
         assert captured["payload"] == {
             "external_userid": "wm_qrcode_tag_001",
-            "follow_user_userid": "HuangYouCan",
+            "follow_user_userid": "LinKaiYan",
             "add_tags": ["tag-channel-001"],
             "remove_tags": [],
         }
@@ -11486,7 +11487,7 @@ def test_qrcode_callback_applies_entry_tag_and_persists_snapshot(app, monkeypatc
         ).fetchone()
         assert dict(snapshot) == {
             "external_userid": "wm_qrcode_tag_001",
-            "userid": "HuangYouCan",
+            "userid": "LinKaiYan",
             "tag_id": "tag-channel-001",
             "tag_name": "渠道报名",
         }

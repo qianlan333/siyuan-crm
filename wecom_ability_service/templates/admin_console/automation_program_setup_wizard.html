@@ -227,6 +227,7 @@
   {% elif current_step == 'entry' %}
   {% set entry = workspace.entry or {} %}
   {% set qrcode = entry.qrcode_channel or {} %}
+  {% set qrcode_active = qrcode.qr_url and qrcode.status == 'active' %}
   {% set owner = workspace.program_owner or {} %}
   {% set tag_catalog = entry.wecom_tag_catalog or {} %}
   {% set tag_state = namespace(selected_known=false) %}
@@ -307,25 +308,29 @@
         </form>
         <aside class="setup-result-card">
           <h3>二维码结果</h3>
-          {% if qrcode.qr_url %}
+          {% if qrcode_active %}
           <div class="setup-qrcode-preview">
             <img src="{{ qrcode.qr_url }}" alt="当前方案渠道二维码" loading="lazy">
           </div>
+          {% elif qrcode.qr_url %}
+          <div class="setup-empty-hint">二维码配置已变更，请重新生成后再投放。</div>
           {% elif qrcode.id %}
           <div class="setup-empty-hint">二维码配置已保存，尚未生成二维码</div>
           {% else %}
           <div class="setup-empty-hint">还没有二维码配置，保存后可生成当前方案二维码</div>
           {% endif %}
-          <div class="setup-result-row"><strong>当前状态</strong><span>{{ "已生成可投放" if qrcode.qr_url else "已保存未生成" if qrcode.id else "未配置" }}</span></div>
-          <div class="setup-result-row"><strong>二维码链接</strong><span>{{ qrcode.qr_url or "-" }}</span></div>
+          <div class="setup-result-row"><strong>当前状态</strong><span>{{ "已生成可投放" if qrcode_active else "配置已变更，需重新生成" if qrcode.qr_url else "已保存未生成" if qrcode.id else "未配置" }}</span></div>
+          <div class="setup-result-row"><strong>二维码链接</strong><span>{{ qrcode.qr_url if qrcode_active else "-" }}</span></div>
           <div class="setup-result-row"><strong>scene_value</strong><span>{{ qrcode.scene_value or "-" }}</span></div>
           <div class="setup-actions">
-            {% if not qrcode.qr_url and qrcode.id %}<button class="setup-button" type="button" data-generate-qrcode>生成二维码</button>{% endif %}
+            {% if (not qrcode_active) and qrcode.id %}<button class="setup-button" type="button" data-generate-qrcode>生成二维码</button>{% endif %}
+            {% if qrcode_active %}
             <button class="setup-button" type="button" data-copy-text="{{ qrcode.qr_url or '' }}">复制链接</button>
-            <a class="setup-button" href="{{ qrcode.qr_url or '#' }}" target="_blank" rel="noreferrer">打开链接</a>
-            {% if qrcode.qr_url %}<a class="setup-button" href="{{ qrcode.qr_url }}" download target="_blank" rel="noreferrer">下载二维码</a>{% endif %}
+            <a class="setup-button" href="{{ qrcode.qr_url }}" target="_blank" rel="noreferrer">打开链接</a>
+            <a class="setup-button" href="{{ qrcode.qr_url }}" download target="_blank" rel="noreferrer">下载二维码</a>
+            {% endif %}
           </div>
-          {% if not qrcode.qr_url and qrcode.id %}<p class="setup-muted">复制方案不会复制二维码票据，请重新生成当前方案二维码。</p>{% endif %}
+          {% if qrcode.id and not qrcode_active %}<p class="setup-muted">保存免验证、负责人、欢迎语或扫码标签后，需要重新生成当前方案二维码。</p>{% endif %}
         </aside>
       </div>
     </div>

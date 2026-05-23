@@ -423,6 +423,9 @@ def _resolve_member_conversion_audience(member: dict[str, Any]) -> dict[str, Any
             "entered_at": entered_at,
             "entry_source": "audience_entry_rule",
             "entry_reason": _normalized_text(entry_rule_state.get("entry_reason")),
+            "stage_code": _normalized_text(entry_rule_state.get("stage_code")),
+            "stage_label": _normalized_text(entry_rule_state.get("stage_label")),
+            "checkpoint": _normalized_text(entry_rule_state.get("checkpoint")),
             "source_snapshot_json": snapshot,
         }
     if (

@@ -22,6 +22,9 @@ from .automation_conversion_form_helpers import (
 from .automation_conversion_render import (
     _render_agent_config_page,
     _render_auto_reply_page,
+    _render_channel_center_page,
+    _render_channel_form_page,
+    _render_entry_channels_page,
     _render_execution_records_page,
     _render_member_ops_page,
     _render_overview_page,
@@ -29,6 +32,7 @@ from .automation_conversion_render import (
     _render_program_setup_page,
     _render_run_center_page,
 )
+from ..domains.automation_conversion.channel_binding_service import get_channel
 from .internal_auth import validate_admin_console_action_token
 
 
@@ -169,6 +173,26 @@ def admin_automation_program_flow_design(program_id: int):
 def admin_automation_program_member_ops(program_id: int):
     program = _load_program_or_404(program_id)
     return _render_member_ops_page(program=program)
+
+
+def admin_automation_program_entry_channels(program_id: int):
+    program = _load_program_or_404(program_id)
+    return _render_entry_channels_page(program=program)
+
+
+def admin_channels_page():
+    return _render_channel_center_page()
+
+
+def admin_channel_new_page():
+    return _render_channel_form_page()
+
+
+def admin_channel_edit_page(channel_id: int):
+    channel = get_channel(int(channel_id))
+    if not channel:
+        return _render_channel_center_page(page_error="channel_not_found")
+    return _render_channel_form_page(channel=channel)
 
 
 def admin_automation_conversion_shared_agents():

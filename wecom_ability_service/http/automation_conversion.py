@@ -59,6 +59,7 @@ from .automation_conversion_pages import (
     admin_automation_program_copy,
     admin_automation_program_create,
     admin_automation_program_executions,
+    admin_automation_program_entry_channels,
     admin_automation_program_flow_design,
     admin_automation_program_member_ops,
     admin_automation_program_new,
@@ -71,6 +72,9 @@ from .automation_conversion_pages import (
     admin_automation_program_workflow_new,
     admin_automation_program_workflow_nodes,
     admin_automation_program_workflows,
+    admin_channel_edit_page,
+    admin_channel_new_page,
+    admin_channels_page,
 )
 from .automation_conversion_agent_page_actions import (
     admin_automation_conversion_agent_orchestration_replay,
@@ -81,6 +85,21 @@ from .automation_conversion_auto_reply_actions import (
     admin_automation_auto_reply_monitor_capture,
     admin_automation_auto_reply_monitor_run_due,
     admin_automation_auto_reply_monitor_toggle,
+)
+from .automation_conversion_channels import (
+    api_admin_channel_bindings,
+    api_admin_channel_contacts,
+    api_admin_channel_detail,
+    api_admin_channel_qrcode_download,
+    api_admin_channel_share_link,
+    api_admin_channel_welcome_materials,
+    api_admin_channels,
+    api_admin_program_admission_attempts,
+    api_admin_program_channel_binding_detail,
+    api_admin_program_channel_binding_member_stage_summary,
+    api_admin_program_channel_bindings,
+    api_admin_program_channel_bindings_import,
+    api_admin_program_member_stage_history,
 )
 from .automation_conversion_page_actions import (
     admin_automation_conversion_generate_default_channel,
@@ -207,6 +226,7 @@ def register_routes(bp):
     bp.route("/admin/automation-conversion/programs/<int:program_id>/operations/workflows/<int:workflow_id>/edit", methods=["GET"])(admin_automation_program_workflow_edit)
     bp.route("/admin/automation-conversion/programs/<int:program_id>/operations/workflows/<int:workflow_id>/nodes", methods=["GET"])(admin_automation_program_workflow_nodes)
     bp.route("/admin/automation-conversion/programs/<int:program_id>/executions", methods=["GET"])(admin_automation_program_executions)
+    bp.route("/admin/automation-conversion/programs/<int:program_id>/entry-channels", methods=["GET"])(admin_automation_program_entry_channels)
     bp.route("/admin/automation-conversion/programs/<int:program_id>/flow-design", methods=["GET"])(admin_automation_program_flow_design)
     bp.route("/admin/automation-conversion/programs/<int:program_id>/member-ops", methods=["GET"])(admin_automation_program_member_ops)
     bp.route("/admin/automation-conversion/programs/<int:program_id>/member-ops/stage/<stage_key>/send", methods=["POST"])(admin_automation_program_member_ops_stage_send)
@@ -221,6 +241,9 @@ def register_routes(bp):
     bp.route("/admin/automation-conversion/shared/agents", methods=["GET"])(admin_automation_conversion_shared_agents)
     bp.route("/admin/automation-conversion/shared/profile-segments", methods=["GET"])(admin_automation_conversion_shared_profile_segments)
     bp.route("/admin/automation-conversion/shared/model-infra", methods=["GET"])(admin_automation_conversion_shared_model_infra)
+    bp.route("/admin/channels", methods=["GET"])(admin_channels_page)
+    bp.route("/admin/channels/new", methods=["GET"])(admin_channel_new_page)
+    bp.route("/admin/channels/<int:channel_id>/edit", methods=["GET"])(admin_channel_edit_page)
     bp.route("/admin/automation-conversion/runtime", methods=["GET"])(admin_automation_conversion_runtime)
     bp.route("/admin/automation-conversion/runtime/sync", methods=["GET"])(admin_automation_conversion_runtime_sync)
     bp.route("/admin/automation-conversion/runtime/router", methods=["GET"])(admin_automation_conversion_runtime_router)
@@ -270,6 +293,19 @@ def register_routes(bp):
     bp.route("/api/admin/automation-conversion/programs/<int:program_id>/publish-entry", methods=["POST"])(api_admin_automation_program_publish_entry)
     bp.route("/api/admin/automation-conversion/programs/<int:program_id>/publish-full", methods=["POST"])(api_admin_automation_program_publish_full)
     bp.route("/api/admin/automation-conversion/programs/<int:program_id>/customer-acquisition-links", methods=["GET", "POST"])(api_admin_automation_program_customer_acquisition_links)
+    bp.route("/api/admin/channels", methods=["GET", "POST"])(api_admin_channels)
+    bp.route("/api/admin/channels/<int:channel_id>", methods=["GET", "PATCH"])(api_admin_channel_detail)
+    bp.route("/api/admin/channels/<int:channel_id>/contacts", methods=["GET"])(api_admin_channel_contacts)
+    bp.route("/api/admin/channels/<int:channel_id>/bindings", methods=["GET"])(api_admin_channel_bindings)
+    bp.route("/api/admin/channels/<int:channel_id>/qrcode/download", methods=["GET"])(api_admin_channel_qrcode_download)
+    bp.route("/api/admin/channels/<int:channel_id>/share-link", methods=["GET"])(api_admin_channel_share_link)
+    bp.route("/api/admin/channel-welcome-materials", methods=["GET"])(api_admin_channel_welcome_materials)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings", methods=["GET", "POST"])(api_admin_program_channel_bindings)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings/<int:binding_id>/member-stage-summary", methods=["GET"])(api_admin_program_channel_binding_member_stage_summary)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings/<int:binding_id>", methods=["PATCH", "DELETE"])(api_admin_program_channel_binding_detail)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings/import", methods=["POST"])(api_admin_program_channel_bindings_import)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/admission-attempts", methods=["GET"])(api_admin_program_admission_attempts)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/members/<int:program_member_id>/stage-history", methods=["GET"])(api_admin_program_member_stage_history)
     bp.route("/api/admin/automation-conversion/task-groups", methods=["GET", "POST"])(api_admin_automation_conversion_task_groups)
     bp.route("/api/admin/automation-conversion/task-groups/<int:group_id>", methods=["PUT"])(api_admin_automation_conversion_task_group_update)
     bp.route("/api/admin/automation-conversion/task-groups/<int:group_id>", methods=["DELETE"])(api_admin_automation_conversion_task_group_delete)

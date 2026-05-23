@@ -767,25 +767,30 @@ def _program_member_filter_sql(
         return "", ()
     alias = _normalized_text(member_alias) or "m"
     source_expr = f"{alias}.source_channel_id"
+    program_channel_sql = """
+        SELECT id FROM automation_channel WHERE program_id = ?
+        UNION
+        SELECT channel_id FROM automation_program_channel_binding WHERE program_id = ?
+    """
     if include_unscoped:
         return (
             f"""
             AND (
                 {source_expr} IS NULL
                 OR {source_expr} IN (
-                    SELECT id FROM automation_channel WHERE program_id = ?
+                    {program_channel_sql}
                 )
             )
             """,
-            (int(program_id),),
+            (int(program_id), int(program_id)),
         )
     return (
         f"""
         AND {source_expr} IN (
-            SELECT id FROM automation_channel WHERE program_id = ?
+            {program_channel_sql}
         )
         """,
-        (int(program_id),),
+        (int(program_id), int(program_id)),
     )
 
 

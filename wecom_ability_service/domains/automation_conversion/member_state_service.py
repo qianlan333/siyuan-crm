@@ -7,6 +7,12 @@ from ...wecom_client import WeComClientError
 from ..tags import repo as tags_repo
 from . import service as service_seams
 from . import local_projection, repo
+from .admission_service import admit_channel_contact_to_program, record_standalone_channel_attempt
+from .channel_binding_service import (
+    ensure_legacy_program_channel_bindings,
+    list_active_bindings_for_channel,
+    upsert_channel_contact,
+)
 from .service import (
     DECISION_SOURCE_MANUAL,
     DECISION_SOURCE_QUESTIONNAIRE,
@@ -614,6 +620,68 @@ def _apply_channel_entry_tag(
     }
 
 
+def _send_channel_welcome_message_for_contact(
+    *,
+    channel: dict[str, Any],
+    payload_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    welcome_message = _normalized_text(channel.get("welcome_message"))
+    welcome_code = _extract_welcome_code(payload_json or {})
+    if not welcome_message:
+        return {"attempted": False, "sent": False, "reason": "not_configured"}
+    if not welcome_code:
+        return {"attempted": True, "sent": False, "error": "missing_welcome_code"}
+    try:
+        result = service_seams.get_contact_runtime_client().send_welcome_msg(
+            {"welcome_code": welcome_code, "text": {"content": welcome_message}}
+        )
+    except (WeComClientError, AttributeError, ValueError) as exc:
+        return {"attempted": True, "sent": False, "error": str(exc)}
+    return {"attempted": True, "sent": True, "welcome_code": welcome_code, "wecom_result": dict(result or {})}
+
+
+def _apply_channel_entry_tag_for_contact(
+    *,
+    external_contact_id: str,
+    owner_staff_id: str,
+    channel: dict[str, Any],
+) -> dict[str, Any]:
+    entry_tag_id = _normalized_text(channel.get("entry_tag_id"))
+    entry_tag_name = _normalized_text(channel.get("entry_tag_name"))
+    entry_tag_group_name = _normalized_text(channel.get("entry_tag_group_name"))
+    if not entry_tag_id:
+        return {"attempted": False, "applied": False, "reason": "not_configured"}
+    if not _normalized_text(external_contact_id):
+        return {"attempted": False, "applied": False, "reason": "missing_external_contact_id"}
+    if not _normalized_text(owner_staff_id):
+        return {"attempted": False, "applied": False, "reason": "missing_owner_staff_id"}
+    try:
+        result = service_seams.get_app_runtime_client().mark_external_contact_tags(
+            external_userid=_normalized_text(external_contact_id),
+            follow_user_userid=_normalized_text(owner_staff_id),
+            add_tags=[entry_tag_id],
+            remove_tags=[],
+        )
+        tags_repo.save_tag_snapshot(_normalized_text(owner_staff_id), _normalized_text(external_contact_id), [entry_tag_id], {entry_tag_id: entry_tag_name})
+    except (WeComClientError, AttributeError, ValueError) as exc:
+        return {
+            "attempted": True,
+            "applied": False,
+            "error": str(exc),
+            "entry_tag_id": entry_tag_id,
+            "entry_tag_name": entry_tag_name,
+            "entry_tag_group_name": entry_tag_group_name,
+        }
+    return {
+        "attempted": True,
+        "applied": True,
+        "entry_tag_id": entry_tag_id,
+        "entry_tag_name": entry_tag_name,
+        "entry_tag_group_name": entry_tag_group_name,
+        "wecom_result": dict(result or {}),
+    }
+
+
 def handle_channel_enter_from_callback(
     *,
     external_contact_id: str,
@@ -639,6 +707,105 @@ def handle_channel_enter_from_callback(
         and _normalized_text(channel.get("status")) != "active"
     ):
         return {"handled": False, "reason": "channel_disabled"}
+    trigger_time = service_seams._iso_now()
+    owner_staff_id = _normalized_text(follow_user_userid) or _normalized_text(channel.get("owner_staff_id")) or DEFAULT_OWNER_STAFF_ID
+    master_customer_id = repo.lookup_person_id_by_external_contact_id(external_contact_id)
+    channel_contact = upsert_channel_contact(
+        channel_id=int(channel["id"]),
+        external_contact_id=external_contact_id,
+        master_customer_id=master_customer_id,
+        owner_staff_id=owner_staff_id,
+        source_payload=payload_json or {},
+        entered_at=trigger_time,
+    )
+    active_bindings = list_active_bindings_for_channel(int(channel["id"]))
+    legacy_binding_report = {}
+    if not active_bindings:
+        legacy_binding_report = ensure_legacy_program_channel_bindings(channel_id=int(channel["id"]))
+        active_bindings = list_active_bindings_for_channel(int(channel["id"]))
+    if not active_bindings:
+        standalone_attempt = record_standalone_channel_attempt(
+            channel_id=int(channel["id"]),
+            external_contact_id=external_contact_id,
+            master_customer_id=master_customer_id,
+            trigger_type=event_action,
+            trigger_payload={**dict(payload_json or {}), "source_type": source_type},
+        )
+        welcome_result = (
+            _send_channel_welcome_message_for_contact(channel=channel, payload_json=payload_json)
+            if send_welcome_message
+            else {"attempted": False, "sent": False, "reason": "disabled"}
+        )
+        entry_tag_result = _apply_channel_entry_tag_for_contact(
+            external_contact_id=external_contact_id,
+            owner_staff_id=owner_staff_id,
+            channel=channel,
+        )
+        return {
+            "handled": True,
+            "mode": "standalone_channel",
+            "reason": "channel_without_active_binding",
+            "channel": {"id": int(channel["id"]), "scene_value": _normalized_text(channel.get("scene_value"))},
+            "channel_contact": channel_contact,
+            "admission_attempt": standalone_attempt,
+            "welcome_message": welcome_result,
+            "entry_tag": entry_tag_result,
+            "program_member_written": False,
+            "legacy_binding_report": legacy_binding_report,
+        }
+    admission_results = [
+        admit_channel_contact_to_program(
+            int(binding["program_id"]),
+            int(channel["id"]),
+            int(binding["id"]),
+            external_contact_id,
+            follow_user_userid=owner_staff_id,
+            trigger_payload={**dict(payload_json or {}), "source_type": source_type},
+            trigger_time=trigger_time,
+            trigger_type=event_action,
+        )
+        for binding in active_bindings
+    ]
+    projected_member = next((item.get("legacy_member") for item in admission_results if item.get("legacy_member")), None)
+    if projected_member:
+        welcome_result = (
+            _send_channel_welcome_message(
+                member=projected_member,
+                channel=channel,
+                payload_json=payload_json,
+                operator_id=operator_id,
+            )
+            if send_welcome_message
+            else {"attempted": False, "sent": False, "reason": "disabled"}
+        )
+        entry_tag_result = _apply_channel_entry_tag(
+            member=projected_member,
+            channel=channel,
+            operator_id=operator_id,
+        )
+        return {
+            "handled": True,
+            "mode": "program_admission",
+            "member": _serialize_member(projected_member),
+            "channel_contact": channel_contact,
+            "admission_results": admission_results,
+            "welcome_message": welcome_result,
+            "entry_tag": entry_tag_result,
+            "legacy_binding_report": legacy_binding_report,
+        }
+    return {
+        "handled": True,
+        "mode": "program_admission",
+        "reason": "no_legacy_projection",
+        "channel_contact": channel_contact,
+        "admission_results": admission_results,
+        "welcome_message": {"attempted": False, "sent": False, "reason": "legacy_member_missing"},
+        "entry_tag": {"attempted": False, "applied": False, "reason": "legacy_member_missing"},
+        "legacy_binding_report": legacy_binding_report,
+    }
+
+    # Legacy single-pool behavior below is intentionally retained as dead fallback for
+    # monkeypatched tests that bypass the new admission path.
     member = _resolve_existing_member(external_contact_id=external_contact_id, phone=phone)
     context = service_seams._build_live_context(external_contact_id, phone)
     before = _serialize_member(

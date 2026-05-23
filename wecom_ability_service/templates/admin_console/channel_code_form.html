@@ -1,0 +1,191 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/channel_admission_pages.css') }}">
+{% endblock %}
+
+{% block content %}
+{% set payload = channel_form_payload or {} %}
+{% set channel = payload.channel or {} %}
+{% set is_link = channel.carrier_type == "link" or channel.channel_type == "wecom_customer_acquisition" %}
+
+<div
+  class="channel-page"
+  data-channel-admission-page="channel-form"
+  data-is-edit="{{ '1' if payload.is_edit else '0' }}"
+  data-api-create="{{ payload.api_urls.channels }}"
+  data-api-detail="{{ payload.api_urls.detail }}"
+  data-admin-token="{{ admin_action_token }}"
+>
+  <script type="application/json" data-channel-bootstrap>{{ payload | tojson }}</script>
+
+  <section class="admin-card channel-section">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>{{ "编辑渠道" if payload.is_edit else "新建渠道" }}</h2>
+        <p>创建后默认独立使用，渠道中心不做运营计划关联。绑定只能在方案内“入口渠道”完成。</p>
+      </div>
+      <div class="channel-actions">
+        <a class="admin-button admin-button--secondary" href="{{ url_for('api.admin_channels_page') }}">返回渠道码中心</a>
+        <button class="admin-button admin-button--primary" type="button" data-save-channel>保存渠道</button>
+      </div>
+    </div>
+
+    <form class="channel-form-grid" data-channel-form>
+      <label class="admin-field">
+        <span>渠道名称</span>
+        <input name="channel_name" value="{{ channel.channel_name or '' }}" required>
+      </label>
+      <label class="admin-field">
+        <span>渠道类型</span>
+        <select name="channel_type" data-channel-type-select>
+          <option value="qrcode" {% if not is_link %}selected{% endif %}>普通二维码</option>
+          <option value="wecom_customer_acquisition" {% if is_link %}selected{% endif %}>企微获客助手链接</option>
+        </select>
+      </label>
+      <label class="admin-field">
+        <span>channel_code</span>
+        <input name="channel_code" value="{{ channel.channel_code or '' }}" placeholder="CH-LIVE-0522">
+      </label>
+      <label class="admin-field">
+        <span>负责人 owner_staff_id</span>
+        <input name="owner_staff_id" value="{{ channel.owner_staff_id or '' }}" placeholder="sales_01">
+      </label>
+      <label class="admin-field">
+        <span>状态</span>
+        <select name="status">
+          <option value="active" {% if channel.status == "active" %}selected{% endif %}>active</option>
+          <option value="inactive" {% if channel.status == "inactive" %}selected{% endif %}>inactive</option>
+          <option value="disabled" {% if channel.status == "disabled" %}selected{% endif %}>disabled</option>
+        </select>
+      </label>
+      <label class="admin-field" data-qrcode-field {% if is_link %}hidden{% endif %}>
+        <span>scene_value</span>
+        <input name="scene_value" value="{{ channel.scene_value or '' }}" placeholder="xhs_0520_trial">
+      </label>
+      <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
+        <span>customer_channel</span>
+        <input name="customer_channel" value="{{ channel.customer_channel or channel.scene_value or '' }}" placeholder="wca_p1001_xxx">
+      </label>
+      <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
+        <span>企微获客助手原始链接 link_url</span>
+        <input name="link_url" value="{{ channel.link_url or '' }}" placeholder="https://work.weixin.qq.com/ca/cawcde...">
+      </label>
+      <label class="admin-field channel-form-wide" data-link-field {% if not is_link %}hidden{% endif %}>
+        <span>最终分享链接 final_url</span>
+        <input name="final_url" value="{{ channel.final_url or channel.share_url or '' }}" placeholder="保存后以后端生成为准">
+      </label>
+      <label class="admin-field channel-form-wide" data-qrcode-field {% if is_link %}hidden{% endif %}>
+        <span>二维码图片地址 qr_url</span>
+        <input name="qr_url" value="{{ channel.qr_url or '' }}" placeholder="保存后可通过下载二维码入口访问">
+      </label>
+    </form>
+  </section>
+
+  <section class="channel-preview-grid">
+    <article class="admin-card channel-section" data-qrcode-section {% if is_link %}hidden{% endif %}>
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>普通二维码预览</h2>
+          <p>普通二维码保存后可使用下载二维码动作。</p>
+        </div>
+      </div>
+      <div class="channel-qr-preview" aria-label="二维码预览"></div>
+      {% if payload.is_edit and not is_link %}
+        <a class="admin-button admin-button--secondary" href="{{ payload.api_urls.qrcode_download }}">下载二维码</a>
+      {% else %}
+        <button class="admin-button admin-button--secondary" type="button" disabled>保存后可下载二维码</button>
+      {% endif %}
+    </article>
+
+    <article class="admin-card channel-section" data-link-section {% if not is_link %}hidden{% endif %}>
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>企微获客助手链接预览</h2>
+          <p>该类型没有二维码下载动作，使用链接分享。</p>
+        </div>
+      </div>
+      <div class="channel-link-preview" data-link-preview>{{ channel.final_url or channel.share_url or channel.link_url or "填写 link_url 和 customer_channel 后预览 final_url" }}</div>
+      <div class="channel-actions">
+        <button class="admin-button admin-button--secondary" type="button" data-copy-form-link>复制链接</button>
+        <button class="admin-button admin-button--secondary" type="button" data-share-form-link>分享链接</button>
+      </div>
+    </article>
+  </section>
+
+  <section class="admin-card channel-section">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>欢迎语与素材</h2>
+        <p>欢迎语、小程序、图片和 PDF 素材继续随渠道保存，素材总数最多 9 个。</p>
+      </div>
+      <div class="channel-actions">
+        <a class="admin-button admin-button--secondary" href="/admin/miniprogram-library">小程序素材库</a>
+        <a class="admin-button admin-button--secondary" href="/admin/attachment-library">附件素材库</a>
+        <button class="admin-button admin-button--primary" type="button" data-welcome-material-picker>从素材库选择</button>
+      </div>
+    </div>
+    <div class="channel-form-grid">
+      <label class="admin-field channel-form-wide">
+        <span>欢迎语文本</span>
+        <textarea name="welcome_message" rows="4" data-welcome-message>{{ channel.welcome_message or '' }}</textarea>
+      </label>
+      <label class="admin-field">
+        <span>welcome_miniprogram_library_ids</span>
+        <input name="welcome_miniprogram_library_ids" data-miniprogram-ids value="{{ (channel.welcome_miniprogram_library_ids or []) | join(',') }}" readonly placeholder="从素材库选择">
+      </label>
+      <label class="admin-field">
+        <span>welcome_attachment_library_ids</span>
+        <input name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}" readonly placeholder="从素材库选择">
+      </label>
+      <div class="channel-form-wide">
+        <span class="channel-muted">已选素材</span>
+        <div class="channel-selected-materials" data-selected-materials></div>
+      </div>
+      <label class="admin-field">
+        <span>entry_tag_id</span>
+        <input name="entry_tag_id" value="{{ channel.entry_tag_id or '' }}">
+      </label>
+      <label class="admin-field">
+        <span>entry_tag_name</span>
+        <input name="entry_tag_name" value="{{ channel.entry_tag_name or '' }}">
+      </label>
+    </div>
+  </section>
+
+  <aside class="channel-modal" data-material-modal hidden>
+    <div class="channel-modal__panel">
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>从素材库选择</h2>
+          <p>只选择已有素材，不在渠道页上传原始文件；欢迎语素材总数最多 9 个。</p>
+        </div>
+        <button class="channel-drawer__close" type="button" data-close-material-modal>关闭</button>
+      </div>
+      <div class="channel-form-grid">
+        <label class="admin-field">
+          <span>搜索</span>
+          <input type="search" data-material-search placeholder="搜索素材名称">
+        </label>
+        <label class="admin-field">
+          <span>类型筛选</span>
+          <select data-material-type-filter>
+            <option value="all">全部</option>
+            <option value="miniprogram">小程序</option>
+            <option value="image">图片</option>
+            <option value="pdf">PDF</option>
+          </select>
+        </label>
+      </div>
+      <div class="channel-material-list" data-material-results></div>
+      <div class="channel-actions channel-actions--right">
+        <button class="admin-button admin-button--primary" type="button" data-confirm-materials>确认选择</button>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="{{ url_for('static', filename='admin_console/channel_admission_pages.js') }}"></script>
+{% endblock %}

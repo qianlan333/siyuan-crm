@@ -818,7 +818,7 @@ def _program_entry_payload(program_id: int) -> dict[str, Any]:
         "channels": channels,
         "qrcode_channel": qrcode_channels[0] if qrcode_channels else {},
         "customer_acquisition_links": list_customer_acquisition_links(program_id=int(program_id)),
-        "wecom_tag_catalog": _program_entry_wecom_tag_catalog(),
+        "wecom_tag_catalog": {"items": [], "groups": [], "total_tags": 0, "tag_limit": 0, "synced_at": ""},
     }
 
 

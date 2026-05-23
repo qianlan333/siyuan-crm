@@ -84,7 +84,14 @@
         <div class="op-task-grid op-task-grid--three">
           <label class="op-task-field"><span>触发方式</span><select data-field="trigger_type"><option value="scheduled_daily">每天固定时间触发</option><option value="audience_entered">进入人群后立即触发</option></select></label>
           <label class="op-task-field" data-scheduled-trigger-field><span>每天触发时间</span><input data-field="send_time" type="time"></label>
-          <label class="op-task-field"><span>目标人群</span><select data-field="target_audience_code"><option value="pending_questionnaire">待填问卷</option><option value="operating">运营中</option><option value="converted">已转化</option></select></label>
+          <label class="op-task-field"><span>触达对象所在阶段</span><select data-field="target_stage_code">
+            {% for stage in targetable_stages %}
+              {% set stage_description = '已通过前置条件' if stage.stage_code == 'operating' else '已确认成交' if stage.stage_code == 'converted' else stage.description %}
+              <option value="{{ stage.stage_code }}" data-audience-code="{{ stage.compat_audience_code or '' }}">{{ stage.label }}{% if stage_description %} · {{ stage_description }}{% endif %}</option>
+            {% else %}
+              <option value="operating" data-audience-code="operating">运营中 · 已通过前置条件</option>
+            {% endfor %}
+          </select></label>
           <label class="op-task-field" data-scheduled-trigger-field><span>进入人群第 N 天</span><input data-field="audience_day_offset" type="number" min="1" step="1"></label>
           <label class="op-task-field" style="grid-column: 1 / -1;"><span>行为过滤</span><select data-field="behavior_filter"><option value="none">不过滤</option><option value="lt_2">消息少于 2 次</option><option value="between_2_9">消息 2-9 次</option><option value="gte_10">消息大于等于 10 次</option></select></label>
         </div>

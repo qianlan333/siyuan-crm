@@ -1,0 +1,224 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/automation_conversion_workspace.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/channel_admission_pages.css') }}">
+{% endblock %}
+
+{% block content %}
+{% set payload = entry_channels_payload or {} %}
+{% set program = payload.program or {} %}
+{% set bindings = payload.bindings or [] %}
+{% set candidates = payload.candidate_channels or [] %}
+{% set attempts = payload.admission_attempts or [] %}
+{% set ns = namespace(link=0, qrcode=0, active=0) %}
+{% for item in bindings %}
+  {% set channel = item.channel or {} %}
+  {% set is_link = channel.carrier_type == "link" or channel.channel_type == "wecom_customer_acquisition" %}
+  {% if is_link %}{% set ns.link = ns.link + 1 %}{% else %}{% set ns.qrcode = ns.qrcode + 1 %}{% endif %}
+  {% if item.binding_status == "active" %}{% set ns.active = ns.active + 1 %}{% endif %}
+{% endfor %}
+
+{% include "admin_console/_automation_program_context.html" %}
+{% include "admin_console/_automation_conversion_workspace_tabs.html" %}
+
+<div
+  class="channel-page"
+  data-channel-admission-page="entry-channels"
+  data-program-id="{{ program.id }}"
+  data-api-bindings="{{ payload.api_urls.bindings }}"
+  data-api-import="{{ payload.api_urls.import }}"
+  data-admin-token="{{ admin_action_token }}"
+>
+  <script type="application/json" data-channel-bootstrap>{{ payload | tojson }}</script>
+  {% if (payload.legacy_binding_report or {}).conflict_count %}
+  <section class="admin-alert admin-alert--error">
+    旧渠道绑定存在冲突：{{ (payload.legacy_binding_report or {}).conflict_count }} 个，需要人工确认；系统已优先采用 automation_channel.program_id。
+  </section>
+  {% endif %}
+
+  <section class="channel-metric-grid">
+    <article class="channel-metric">
+      <span>已绑定渠道</span>
+      <strong>{{ bindings | length }}</strong>
+      <em>{{ ns.active }} active</em>
+    </article>
+    <article class="channel-metric">
+      <span>普通二维码</span>
+      <strong>{{ ns.qrcode }}</strong>
+      <em>可下载二维码</em>
+    </article>
+    <article class="channel-metric">
+      <span>企微获客助手链接</span>
+      <strong>{{ ns.link }}</strong>
+      <em>复制 / 分享链接</em>
+    </article>
+    <article class="channel-metric">
+      <span>候选渠道</span>
+      <strong>{{ candidates | length }}</strong>
+      <em>未 active 绑定其他方案</em>
+    </article>
+  </section>
+
+  <section class="admin-card channel-section">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>已绑定渠道</h2>
+        <p>自动化运营可以绑定多个渠道；绑定不会自动导入历史用户，用户扫码或人工导入时才产生 pool_entered_at。</p>
+      </div>
+      <button class="admin-button admin-button--primary" type="button" data-open-bind-modal>绑定已有渠道码</button>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table channel-table">
+        <thead>
+          <tr>
+            <th>渠道</th>
+            <th>类型</th>
+            <th>绑定状态</th>
+            <th>绑定时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in bindings %}
+          {% set channel = item.channel or {} %}
+          {% set is_link = channel.carrier_type == "link" or channel.channel_type == "wecom_customer_acquisition" %}
+          <tr data-bound-channel-id="{{ channel.id or item.channel_id }}" data-binding-id="{{ item.id }}" data-bound-carrier="{{ 'link' if is_link else 'qrcode' }}">
+            <td>
+              <strong>{{ channel.channel_name or "-" }}</strong>
+              <span class="channel-code">{{ channel.channel_code or "-" }}</span>
+              <span class="channel-sub">{{ "customer_channel: " ~ channel.customer_channel if is_link else "scene: " ~ channel.scene_value }}</span>
+            </td>
+            <td><span class="channel-pill {{ 'is-link' if is_link else 'is-qrcode' }}">{{ "企微获客助手链接" if is_link else "普通二维码" }}</span></td>
+            <td><span class="channel-pill is-status">{{ item.binding_status }}</span></td>
+            <td>{{ item.bound_at or "-" }}</td>
+            <td>
+              <div class="channel-row-actions">
+                <button class="admin-button admin-button--secondary" type="button" data-open-import-panel data-binding-id="{{ item.id }}" data-channel-id="{{ channel.id or item.channel_id }}">池内用户现状</button>
+                <button class="admin-button admin-button--ghost" type="button" data-unbind-channel data-binding-id="{{ item.id }}">解绑</button>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5">当前方案还没有绑定渠道。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="channel-two-column">
+    <article class="admin-card channel-section">
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>入池清洗</h2>
+          <p>用户扫码后进入绑定方案池，先按订单审核、问卷审核、成交判定和分层规则清洗，不一定直接进入 operating。</p>
+        </div>
+      </div>
+      <ul class="channel-rule-list">
+        <li>绑定渠道不会自动导入历史用户。</li>
+        <li>历史用户导入默认使用导入时间，不能默认使用历史扫码时间。</li>
+        <li>Phase 1 不支持一个渠道 active 绑定多个自动化运营方案。</li>
+      </ul>
+    </article>
+
+    <article class="admin-card channel-section" data-import-panel>
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>历史用户导入</h2>
+          <p>默认 dry_run，只返回预计分布；正式导入也默认 use_historical_channel_entered_at=false。</p>
+        </div>
+      </div>
+      <label class="admin-field">
+        <span>选择渠道</span>
+        <select data-import-channel-id>
+          {% for item in bindings %}
+          {% set channel = item.channel or {} %}
+          <option value="{{ channel.id or item.channel_id }}">{{ channel.channel_name or channel.channel_code }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="channel-actions">
+        <button class="admin-button admin-button--secondary" type="button" data-run-import-dry-run>dry_run 预估</button>
+        <button class="admin-button admin-button--primary" type="button" data-run-import-confirm>确认导入</button>
+      </div>
+      <pre class="channel-json-preview" data-import-payload-preview>{"dry_run": true, "use_historical_channel_entered_at": false}</pre>
+    </article>
+  </section>
+
+  <section class="admin-card channel-section">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>入池清洗日志</h2>
+        <p>记录扫码、人工导入、重复 active、waiting、converted 等 admission attempt。</p>
+      </div>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table channel-table">
+        <thead><tr><th>时间</th><th>渠道</th><th>用户</th><th>状态</th><th>阶段</th><th>原因</th><th>操作</th></tr></thead>
+        <tbody>
+          {% for item in attempts %}
+          <tr data-admission-attempt-id="{{ item.id }}">
+            <td>{{ item.created_at or "-" }}</td>
+            <td>{{ item.channel_id or "-" }}</td>
+            <td>{{ item.external_contact_id or "-" }}</td>
+            <td><span class="channel-pill is-status">{{ item.admission_status }}</span></td>
+            <td>{{ item.stage_code or "-" }}</td>
+            <td>{{ item.entry_reason or "-" }}</td>
+            <td><button class="admin-button admin-button--ghost" type="button" data-open-attempt-drawer>清洗详情</button></td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7">暂无入池清洗日志。</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <aside class="channel-modal" data-bind-modal hidden>
+    <div class="channel-modal__panel">
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>绑定已有渠道码</h2>
+          <p>候选项包含未绑定的普通二维码和企微获客助手链接；已 active 绑定其他方案的渠道不会出现在候选列表。</p>
+        </div>
+        <button class="channel-drawer__close" type="button" data-close-bind-modal>关闭</button>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table channel-table">
+          <thead><tr><th>选择</th><th>渠道</th><th>类型</th><th>当前状态</th><th>最近进入</th></tr></thead>
+          <tbody>
+            {% for item in candidates %}
+            {% set is_link = item.carrier_type == "link" or item.channel_type == "wecom_customer_acquisition" %}
+            <tr data-bind-candidate data-channel-id="{{ item.id }}" data-candidate-carrier="{{ 'link' if is_link else 'qrcode' }}">
+              <td><input type="checkbox" value="{{ item.id }}" data-bind-channel-checkbox></td>
+              <td><strong>{{ item.channel_name }}</strong><span class="channel-code">{{ item.channel_code }}</span><span class="channel-sub">{{ item.customer_channel if is_link else item.scene_value }}</span></td>
+              <td><span class="channel-pill {{ 'is-link' if is_link else 'is-qrcode' }}">{{ "企微获客助手链接" if is_link else "普通二维码" }}</span></td>
+              <td><span class="channel-pill is-standalone">未绑定</span></td>
+              <td>{{ item.latest_channel_entered_at or "-" }}</td>
+            </tr>
+            {% else %}
+            <tr><td colspan="5">没有可绑定渠道。一个渠道只能 active 绑定一个自动化运营计划。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="channel-actions channel-actions--right">
+        <button class="admin-button admin-button--primary" type="button" data-confirm-bind>确认绑定</button>
+      </div>
+    </div>
+  </aside>
+
+  <aside class="channel-drawer" data-attempt-drawer hidden>
+    <div class="channel-drawer__panel">
+      <button class="channel-drawer__close" type="button" data-close-attempt-drawer>关闭</button>
+      <h2>清洗详情</h2>
+      <div data-attempt-drawer-body></div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="{{ url_for('static', filename='admin_console/channel_admission_pages.js') }}"></script>
+{% endblock %}

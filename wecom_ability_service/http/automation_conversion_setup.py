@@ -34,12 +34,14 @@ def api_admin_automation_program_setup_basic(program_id: int):
 
 
 def api_admin_automation_program_setup_entry_channel(program_id: int):
-    payload = request.get_json(silent=True) or {}
-    try:
-        result = save_entry_channel(int(program_id), payload)
-    except (LookupError, ValueError) as exc:
-        return jsonify({"ok": False, "error": str(exc)}), 400
-    return jsonify({"ok": True, **result})
+    return jsonify(
+        {
+            "ok": False,
+            "error": "entry_channel_migrated_to_entry_channels_page",
+            "reason": "entry_channel_migrated_to_entry_channels_page",
+            "entry_channels_url": f"/admin/automation-conversion/programs/{int(program_id)}/entry-channels",
+        }
+    ), 410
 
 
 def api_admin_automation_program_setup_segmentation(program_id: int):

@@ -232,134 +232,40 @@
   {% set tag_catalog = entry.wecom_tag_catalog or {} %}
   {% set tag_state = namespace(selected_known=false) %}
   <section class="setup-card">
-    <div>
-      <h2>入口渠道</h2>
-      <p class="setup-muted">普通二维码和企业微信获客助手都可以作为当前方案入口；配置任一入口后即可先发布入口使用。</p>
+    <div class="setup-card-head">
+      <div>
+        <h2>入口渠道</h2>
+        <p class="setup-muted">入口渠道已迁移到当前方案的入口渠道页。这里仅保留旧数据只读展示，不再创建、绑定或重新生成渠道。</p>
+      </div>
+      <a class="setup-button is-primary" href="{{ url_for('api.admin_automation_program_entry_channels', program_id=program.id) }}">前往入口渠道页</a>
     </div>
-    <div class="setup-tabs">
-      <button class="setup-tab is-active" type="button" data-setup-tab="qrcode">渠道二维码</button>
-      <button class="setup-tab" type="button" data-setup-tab="customer">企业微信获客助手</button>
-    </div>
-    <div class="setup-tab-panel" data-setup-tab-panel="qrcode">
-      <div class="setup-two-col">
-        <form class="setup-card" data-setup-form data-endpoint="entry_channel">
-          <h3>二维码配置</h3>
-          <div class="setup-form-grid">
-            <label class="setup-field"><span>渠道名称</span><input name="channel_name" value="{{ qrcode.channel_name or '' }}"></label>
-            <label class="setup-field"><span>是否免验证</span><select name="auto_accept_friend"><option value="1" {% if qrcode.auto_accept_friend %}selected{% endif %}>是</option><option value="0" {% if not qrcode.auto_accept_friend %}selected{% endif %}>否</option></select></label>
-            <div class="setup-field" style="grid-column: 1 / -1;">
-              <span>负责人</span>
-              <div class="setup-owner-card">
-                <div class="setup-owner-current">
-                  {% if owner.owner_staff_id %}
-                  <strong>{{ owner.owner_display_name or owner.owner_staff_id }}</strong>
-                  <small>{{ owner.owner_staff_id }}</small>
-                  {% else %}
-                  <strong>未选择负责人</strong>
-                  <small>请先在基础信息里添加负责人；未选择时会使用系统默认负责人。</small>
-                  {% endif %}
-                </div>
-                <a class="setup-button" href="{{ urls.base }}?step=basic">去基础信息设置</a>
-              </div>
-              <input type="hidden" name="owner_staff_id" value="{{ owner.owner_staff_id or qrcode.owner_staff_id or '' }}" data-entry-owner-staff-id>
-              <input type="hidden" name="owner_display_name" value="{{ owner.owner_display_name or '' }}">
-            </div>
-            <div class="setup-tag-select-card">
-              <label class="setup-field">
-                <span>扫码自动标签</span>
-                <select name="entry_tag_selector" data-entry-tag-select>
-                  <option value="" data-tag-name="" data-group-name="" data-group-id="">不自动打标签</option>
-                  {% for group in tag_catalog.groups or [] %}
-                  <optgroup label="{{ group.group_name }}">
-                    {% for tag in group.tags or [] %}
-                    {% if qrcode.entry_tag_id and qrcode.entry_tag_id == tag.tag_id %}{% set tag_state.selected_known = true %}{% endif %}
-                    <option value="{{ tag.tag_id }}" data-tag-name="{{ tag.tag_name }}" data-group-name="{{ tag.group_name or group.group_name }}" data-group-id="{{ tag.group_id or group.group_id }}" {% if qrcode.entry_tag_id and qrcode.entry_tag_id == tag.tag_id %}selected{% endif %}>{{ tag.tag_name }}</option>
-                    {% endfor %}
-                  </optgroup>
-                  {% endfor %}
-                  {% if qrcode.entry_tag_id and not tag_state.selected_known %}
-                  <optgroup label="已配置标签">
-                    <option value="{{ qrcode.entry_tag_id }}" data-tag-name="{{ qrcode.entry_tag_name or qrcode.entry_tag_id }}" data-group-name="{{ qrcode.entry_tag_group_name or '已配置标签' }}" data-group-id="" selected>{{ qrcode.entry_tag_group_name or '已配置标签' }} / {{ qrcode.entry_tag_name or qrcode.entry_tag_id }}</option>
-                  </optgroup>
-                  {% endif %}
-                </select>
-              </label>
-              <input type="hidden" name="entry_tag_id" value="{{ qrcode.entry_tag_id or '' }}" data-entry-tag-id>
-              <input type="hidden" name="entry_tag_name" value="{{ qrcode.entry_tag_name or '' }}" data-entry-tag-name>
-              <input type="hidden" name="entry_tag_group_name" value="{{ qrcode.entry_tag_group_name or '' }}" data-entry-tag-group-name>
-              <div class="setup-tag-preview{% if not qrcode.entry_tag_id %} is-empty{% endif %}" data-entry-tag-preview>
-                {% if qrcode.entry_tag_id %}
-                已选择：{{ qrcode.entry_tag_group_name or '标签' }} / {{ qrcode.entry_tag_name or qrcode.entry_tag_id }}
-                {% elif tag_catalog.error %}
-                {{ tag_catalog.error }}
-                {% elif not tag_catalog.items %}
-                当前没有可选企微标签，请先到企微标签管理同步或创建标签。
-                {% else %}
-                未选择标签
-                {% endif %}
-              </div>
-              {% if tag_catalog.error or not tag_catalog.items %}
-              <div class="setup-actions" style="justify-content:flex-start;"><a class="setup-button" href="{{ url_for('api.admin_wecom_tags_page') }}" target="_blank" rel="noreferrer">打开企微标签管理</a></div>
-              {% endif %}
-            </div>
-            <label class="setup-field" style="grid-column: 1 / -1;"><span>欢迎语</span><textarea name="welcome_message">{{ qrcode.welcome_message or '' }}</textarea></label>
-          </div>
-          <div class="setup-actions"><button class="setup-button is-primary" type="submit">保存二维码配置</button><button class="setup-button" type="button" data-generate-qrcode>生成 / 重新生成二维码</button></div>
-        </form>
-        <aside class="setup-result-card">
-          <h3>二维码结果</h3>
-          {% if qrcode_active %}
-          <div class="setup-qrcode-preview">
-            <img src="{{ qrcode.qr_url }}" alt="当前方案渠道二维码" loading="lazy">
-          </div>
-          {% elif qrcode.qr_url %}
-          <div class="setup-empty-hint">二维码配置已变更，请重新生成后再投放。</div>
-          {% elif qrcode.id %}
-          <div class="setup-empty-hint">二维码配置已保存，尚未生成二维码</div>
-          {% else %}
-          <div class="setup-empty-hint">还没有二维码配置，保存后可生成当前方案二维码</div>
+    <div class="setup-table-wrap">
+      <table class="setup-table">
+        <thead><tr><th>类型</th><th>名称</th><th>状态</th><th>标识</th><th>链接</th></tr></thead>
+        <tbody>
+          {% if qrcode.id %}
+          <tr>
+            <td>普通二维码</td>
+            <td>{{ qrcode.channel_name or "-" }}</td>
+            <td>{{ qrcode.status or "-" }}</td>
+            <td>{{ qrcode.scene_value or "-" }}</td>
+            <td>{{ qrcode.qr_url or "-" }}</td>
+          </tr>
           {% endif %}
-          <div class="setup-result-row"><strong>当前状态</strong><span>{{ "已生成可投放" if qrcode_active else "配置已变更，需重新生成" if qrcode.qr_url else "已保存未生成" if qrcode.id else "未配置" }}</span></div>
-          <div class="setup-result-row"><strong>二维码链接</strong><span>{{ qrcode.qr_url if qrcode_active else "-" }}</span></div>
-          <div class="setup-result-row"><strong>scene_value</strong><span>{{ qrcode.scene_value or "-" }}</span></div>
-          <div class="setup-actions">
-            {% if (not qrcode_active) and qrcode.id %}<button class="setup-button" type="button" data-generate-qrcode>生成二维码</button>{% endif %}
-            {% if qrcode_active %}
-            <button class="setup-button" type="button" data-copy-text="{{ qrcode.qr_url or '' }}">复制链接</button>
-            <a class="setup-button" href="{{ qrcode.qr_url }}" target="_blank" rel="noreferrer">打开链接</a>
-            <a class="setup-button" href="{{ qrcode.qr_url }}" download target="_blank" rel="noreferrer">下载二维码</a>
-            {% endif %}
-          </div>
-          {% if qrcode.id and not qrcode_active %}<p class="setup-muted">保存免验证、负责人、欢迎语或扫码标签后，需要重新生成当前方案二维码。</p>{% endif %}
-        </aside>
-      </div>
-    </div>
-    <div class="setup-tab-panel" data-setup-tab-panel="customer" hidden>
-      <p class="setup-muted">获客助手链接会统一映射为当前方案入口，系统会为原始获客链接生成 customer_channel 和 final_url。</p>
-      <form class="setup-card" data-customer-form>
-        <div class="setup-form-grid setup-form-grid--three">
-          <label class="setup-field"><span>link_id</span><input name="link_id" required></label>
-          <label class="setup-field"><span>link_name</span><input name="link_name"></label>
-          <label class="setup-field"><span>skip_verify</span><select name="skip_verify"><option value="1">是</option><option value="0">否</option></select></label>
-          <label class="setup-field" style="grid-column: 1 / -1;"><span>原始 link_url</span><input name="link_url" required></label>
-          <label class="setup-field"><span>range_user_list</span><input name="range_user_list" placeholder="多个成员用英文逗号分隔"></label>
-          <label class="setup-field"><span>range_department_list</span><input name="range_department_list" placeholder="多个部门用英文逗号分隔"></label>
-          <label class="setup-field"><span>priority_option</span><input name="priority_option" placeholder="默认留空"></label>
-          <label class="setup-field"><span>初始人群</span><select name="initial_audience_code"><option value="pending_questionnaire">待填问卷</option><option value="operating">运营中</option><option value="converted">已转化</option></select></label>
-          <label class="setup-field"><span>绑定运营动作</span><select name="workflow_id"><option value="">不绑定</option>{% for item in (workspace.operations.workflows if workspace.operations else []) or [] %}<option value="{{ item.id }}">{{ item.workflow_name }}</option>{% endfor %}</select></label>
-        </div>
-        <div class="setup-actions"><button class="setup-button is-primary" type="submit">创建 / 绑定获客助手入口</button></div>
-      </form>
-      <div class="setup-table-wrap">
-        <table class="setup-table">
-          <thead><tr><th>名称</th><th>link_id</th><th>初始人群</th><th>绑定动作</th><th>状态</th><th>final_url</th><th>最近事件</th><th>操作</th></tr></thead>
-          <tbody>
-            {% for link in entry.customer_acquisition_links or [] %}
-            <tr><td>{{ link.link_name or link.link_id }}</td><td>{{ link.link_id }}</td><td>{{ link.initial_audience_code }}</td><td>{{ link.workflow_id or "-" }}</td><td>{{ link.status }}</td><td>{{ link.final_url }}</td><td>{{ link.last_event_at or "-" }}</td><td><button class="setup-button" type="button" data-copy-text="{{ link.final_url or '' }}">复制链接</button></td></tr>
-            {% else %}<tr><td colspan="8">当前方案还没有获客助手入口。</td></tr>{% endfor %}
-          </tbody>
-        </table>
-      </div>
+          {% for link in entry.customer_acquisition_links or [] %}
+          <tr>
+            <td>企微获客助手链接</td>
+            <td>{{ link.link_name or link.link_id }}</td>
+            <td>{{ link.status }}</td>
+            <td>{{ link.customer_channel or link.link_id }}</td>
+            <td>{{ link.final_url or "-" }}</td>
+          </tr>
+          {% endfor %}
+          {% if not qrcode.id and not (entry.customer_acquisition_links or []) %}
+          <tr><td colspan="5">当前没有旧入口渠道数据。</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
     </div>
   </section>
 
@@ -749,52 +655,10 @@
     payload.auto_accept_friend = String(payload.auto_accept_friend || "") === "1";
     await postJson(urls[form.dataset.endpoint], payload);
   };
-  const entryTagSelect = root.querySelector("[data-entry-tag-select]");
-  const syncEntryTagFields = () => {
-    if (!entryTagSelect) return;
-    const option = entryTagSelect.selectedOptions?.[0];
-    const tagId = entryTagSelect.value || "";
-    const tagName = option?.dataset.tagName || "";
-    const groupName = option?.dataset.groupName || "";
-    const tagIdInput = root.querySelector("[data-entry-tag-id]");
-    const tagNameInput = root.querySelector("[data-entry-tag-name]");
-    const groupNameInput = root.querySelector("[data-entry-tag-group-name]");
-    const preview = root.querySelector("[data-entry-tag-preview]");
-    if (tagIdInput) tagIdInput.value = tagId;
-    if (tagNameInput) tagNameInput.value = tagName;
-    if (groupNameInput) groupNameInput.value = groupName;
-    if (preview) {
-      preview.textContent = tagId ? `已选择：${groupName || "标签"} / ${tagName || tagId}` : "未选择标签";
-      preview.classList.toggle("is-empty", !tagId);
-    }
-  };
-  entryTagSelect?.addEventListener("change", syncEntryTagFields);
   root.querySelectorAll("[data-setup-form]").forEach((form) => {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       try { await saveSimpleForm(form); showFeedback("草稿已保存", true); } catch (error) { showFeedback(error.message || "保存失败，请稍后重试"); }
-    });
-  });
-  root.querySelector("[data-customer-form]")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
-    payload.skip_verify = String(payload.skip_verify || "") === "1";
-    payload.range_user_list = String(payload.range_user_list || "").split(",").map((item) => item.trim()).filter(Boolean);
-    payload.range_department_list = String(payload.range_department_list || "").split(",").map((item) => item.trim()).filter(Boolean);
-    try { await postJson(urls.customer_acquisition_links, payload); showFeedback("已创建获客助手入口", true); window.location.reload(); } catch (error) { showFeedback(error.message || "创建失败，请稍后重试"); }
-  });
-  root.querySelectorAll("[data-generate-qrcode]").forEach((button) => {
-    button.addEventListener("click", async () => {
-      const form = root.querySelector("[data-endpoint='entry_channel']");
-      try {
-        if (form) await saveSimpleForm(form);
-        await postJson(urls.entry_channel_generate_qr, {
-          program_id: Number(root.dataset.programId || 0),
-          owner_staff_id: root.querySelector("[data-entry-owner-staff-id]")?.value || "",
-        });
-        showFeedback("二维码已生成", true);
-        window.location.reload();
-      } catch (error) { showFeedback(error.message || "二维码生成失败，请稍后重试"); }
     });
   });
   root.addEventListener("click", async (event) => {

@@ -81,6 +81,7 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
             "action_template_service.py",
             "admission_service.py",
             "channel_binding_service.py",
+            "channel_qrcode_download_service.py",
             "channel_service.py",
             "copy_workorder_service.py",
             "customer_acquisition_service.py",

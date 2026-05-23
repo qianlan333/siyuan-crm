@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from urllib.parse import quote
 
 from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.automation_conversion.channel_binding_service import (
@@ -240,18 +241,27 @@ def test_entry_channels_page_displays_two_types_and_filters_active_bound_links(a
     assert "入池时间：使用导入时间" in html
 
 
-def test_qrcode_download_is_png_attachment_and_link_channel_rejects(app, client, monkeypatch):
+def test_qrcode_download_is_channel_qrcode_image_attachment_and_link_channel_rejects(app, client, monkeypatch):
     login_admin(client, app, monkeypatch)
     with app.app_context():
         ids = _seed_page_channels()
 
+    direct_qrcode_png = b"\x89PNG\r\n\x1a\nactual-channel-qrcode-image"
+
+    class FakeQrResponse:
+        status_code = 200
+        content = direct_qrcode_png
+        headers = {"Content-Type": "image/png"}
+
+    monkeypatch.setattr("requests.get", lambda *args, **kwargs: FakeQrResponse())
     qrcode_response = client.get(f"/api/admin/channels/{ids['qrcode_id']}/qrcode/download")
     assert qrcode_response.status_code == 200
     assert qrcode_response.content_type.startswith("image/png")
     disposition = qrcode_response.headers.get("Content-Disposition", "")
     assert "attachment" in disposition
     assert "CH-PAGE-QR" in disposition
-    assert qrcode_response.data.startswith(b"\x89PNG")
+    assert quote("页面普通二维码") in disposition
+    assert qrcode_response.data == direct_qrcode_png
 
     link_response = client.get(f"/api/admin/channels/{ids['bound_link_id']}/qrcode/download")
     assert link_response.status_code == 400

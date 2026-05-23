@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from io import BytesIO
-import re
 
 from flask import jsonify, request, send_file
 
@@ -23,6 +22,7 @@ from ..domains.automation_conversion.channel_binding_service import (
     save_channel_resource,
     update_program_channel_binding,
 )
+from ..domains.automation_conversion.channel_qrcode_download_service import build_channel_qrcode_download
 from ._routes_helpers import _operator_from_request
 from .automation_conversion_compat import parent_patch
 from .internal_auth import validate_admin_console_action_token as _validate_admin_console_action_token
@@ -41,20 +41,6 @@ def _token_error_response():
     if action_token_error:
         return jsonify({"ok": False, "error": action_token_error, "reason": "admin_action_token_required"}), 400
     return None
-
-
-def _download_filename(channel: dict) -> str:
-    raw = str(channel.get("channel_code") or channel.get("id") or "channel").strip()
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._") or "channel"
-    return f"{safe}.png"
-
-
-def _png_qrcode_bytes(value: str) -> bytes:
-    import segno
-
-    out = BytesIO()
-    segno.make(str(value or ""), error="m").save(out, kind="png", scale=8, border=2)
-    return out.getvalue()
 
 
 def _welcome_material_type_filter(value: str) -> str:
@@ -183,15 +169,14 @@ def api_admin_channel_qrcode_download(channel_id: int):
                 "reason": "link_channel_does_not_support_qrcode_download",
             }
         ), 400
-    qrcode_value = str(channel.get("qr_url") or channel.get("scene_value") or channel.get("channel_code") or "").strip()
-    if not qrcode_value:
+    download = build_channel_qrcode_download(channel)
+    if not download:
         return jsonify({"ok": False, "error": "qrcode_not_ready", "reason": "qrcode_not_ready"}), 404
-    png = _png_qrcode_bytes(qrcode_value)
     return send_file(
-        BytesIO(png),
-        mimetype="image/png",
+        BytesIO(download["content"]),
+        mimetype=download["mimetype"],
         as_attachment=True,
-        download_name=_download_filename(channel),
+        download_name=download["filename"],
         max_age=0,
     )
 

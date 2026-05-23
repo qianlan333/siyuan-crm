@@ -326,3 +326,19 @@ def api_admin_program_member_stage_history(program_id: int, program_member_id: i
             "reason": "program_member_stage_history_listed",
         }
     )
+
+
+def register_routes(bp):
+    bp.route("/api/admin/channels", methods=["GET", "POST"])(api_admin_channels)
+    bp.route("/api/admin/channels/<int:channel_id>", methods=["GET", "PATCH"])(api_admin_channel_detail)
+    bp.route("/api/admin/channels/<int:channel_id>/contacts", methods=["GET"])(api_admin_channel_contacts)
+    bp.route("/api/admin/channels/<int:channel_id>/bindings", methods=["GET"])(api_admin_channel_bindings)
+    bp.route("/api/admin/channels/<int:channel_id>/qrcode/download", methods=["GET"])(api_admin_channel_qrcode_download)
+    bp.route("/api/admin/channels/<int:channel_id>/share-link", methods=["GET"])(api_admin_channel_share_link)
+    bp.route("/api/admin/channel-welcome-materials", methods=["GET"])(api_admin_channel_welcome_materials)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings", methods=["GET", "POST"])(api_admin_program_channel_bindings)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings/<int:binding_id>/member-stage-summary", methods=["GET"])(api_admin_program_channel_binding_member_stage_summary)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings/<int:binding_id>", methods=["PATCH", "DELETE"])(api_admin_program_channel_binding_detail)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/channel-bindings/import", methods=["POST"])(api_admin_program_channel_bindings_import)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/admission-attempts", methods=["GET"])(api_admin_program_admission_attempts)
+    bp.route("/api/admin/automation-conversion/programs/<int:program_id>/members/<int:program_member_id>/stage-history", methods=["GET"])(api_admin_program_member_stage_history)

@@ -174,14 +174,19 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
     new_html = new_page.get_data(as_text=True)
     assert "普通二维码预览" in new_html
     assert "保存后可下载二维码" in new_html
-    assert "welcome_miniprogram_library_ids" in new_html
-    assert "welcome_attachment_library_ids" in new_html
+    assert "已选小程序素材" in new_html
+    assert "已选图片/PDF素材" in new_html
     assert "从素材库选择" in new_html
     assert "data-material-search" in new_html
     assert "小程序" in new_html
     assert "图片" in new_html
     assert "PDF" in new_html
     assert "负责人 owner_staff_id" not in new_html
+    assert "<span>channel_code</span>" not in new_html
+    assert "<span>scene_value</span>" not in new_html
+    assert "<span>customer_channel</span>" not in new_html
+    assert "<span>entry_tag_id</span>" not in new_html
+    assert "<span>entry_tag_name</span>" not in new_html
     assert 'placeholder="sales_01"' not in new_html
     assert "选择负责人" in new_html
     assert "渠道负责人 01" in new_html
@@ -224,8 +229,8 @@ def test_entry_channels_page_displays_two_types_and_filters_active_bound_links(a
     assert "initial_audience_code" not in html
     assert f'data-bind-candidate data-channel-id="{ids["candidate_link_id"]}"' in html
     assert f'data-bind-candidate data-channel-id="{ids["other_bound_link_id"]}"' not in html
-    assert '"dry_run": true' in html
-    assert '"use_historical_channel_entered_at": false' in html
+    assert "导入模式：只做预估" in html
+    assert "入池时间：使用导入时间" in html
 
 
 def test_qrcode_download_is_png_attachment_and_link_channel_rejects(app, client, monkeypatch):

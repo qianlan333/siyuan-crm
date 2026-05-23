@@ -33,7 +33,7 @@
   <script type="application/json" data-channel-bootstrap>{{ payload | tojson }}</script>
   {% if (payload.legacy_binding_report or {}).conflict_count %}
   <section class="admin-alert admin-alert--error">
-    旧渠道绑定存在冲突：{{ (payload.legacy_binding_report or {}).conflict_count }} 个，需要人工确认；系统已优先采用 automation_channel.program_id。
+    旧渠道绑定存在冲突：{{ (payload.legacy_binding_report or {}).conflict_count }} 个，需要人工确认；系统已优先采用渠道本体记录的旧方案关系。
   </section>
   {% endif %}
 
@@ -41,7 +41,7 @@
     <article class="channel-metric">
       <span>已绑定渠道</span>
       <strong>{{ bindings | length }}</strong>
-      <em>{{ ns.active }} active</em>
+      <em>{{ ns.active }} 个启用中</em>
     </article>
     <article class="channel-metric">
       <span>普通二维码</span>
@@ -56,7 +56,7 @@
     <article class="channel-metric">
       <span>候选渠道</span>
       <strong>{{ candidates | length }}</strong>
-      <em>未 active 绑定其他方案</em>
+      <em>未启用绑定其他方案</em>
     </article>
   </section>
 
@@ -64,7 +64,7 @@
     <div class="admin-card-head admin-card-head--tight">
       <div>
         <h2>已绑定渠道</h2>
-        <p>自动化运营可以绑定多个渠道；绑定不会自动导入历史用户，用户扫码或人工导入时才产生 pool_entered_at。</p>
+        <p>自动化运营可以绑定多个渠道；绑定不会自动导入历史用户，用户扫码或人工导入时才产生入池时间。</p>
       </div>
       <button class="admin-button admin-button--primary" type="button" data-open-bind-modal>绑定已有渠道码</button>
     </div>
@@ -87,10 +87,10 @@
             <td>
               <strong>{{ channel.channel_name or "-" }}</strong>
               <span class="channel-code">{{ channel.channel_code or "-" }}</span>
-              <span class="channel-sub">{{ "customer_channel: " ~ channel.customer_channel if is_link else "scene: " ~ channel.scene_value }}</span>
+              <span class="channel-sub">{{ "企微渠道参数：" ~ channel.customer_channel if is_link else "场景值：" ~ channel.scene_value }}</span>
             </td>
             <td><span class="channel-pill {{ 'is-link' if is_link else 'is-qrcode' }}">{{ "企微获客助手链接" if is_link else "普通二维码" }}</span></td>
-            <td><span class="channel-pill is-status">{{ item.binding_status }}</span></td>
+            <td><span class="channel-pill is-status">{{ {"active":"启用","paused":"暂停","archived":"已解绑"}.get(item.binding_status, item.binding_status or "-") }}</span></td>
             <td>{{ item.bound_at or "-" }}</td>
             <td>
               <div class="channel-row-actions">
@@ -112,13 +112,13 @@
       <div class="admin-card-head admin-card-head--tight">
         <div>
           <h2>入池清洗</h2>
-          <p>用户扫码后进入绑定方案池，先按订单审核、问卷审核、成交判定和分层规则清洗，不一定直接进入 operating。</p>
+          <p>用户扫码后进入绑定方案池，先按订单审核、问卷审核、成交判定和分层规则清洗，不一定直接进入运营中阶段。</p>
         </div>
       </div>
       <ul class="channel-rule-list">
         <li>绑定渠道不会自动导入历史用户。</li>
         <li>历史用户导入默认使用导入时间，不能默认使用历史扫码时间。</li>
-        <li>Phase 1 不支持一个渠道 active 绑定多个自动化运营方案。</li>
+        <li>第一期不支持一个渠道同时启用绑定多个自动化运营方案。</li>
       </ul>
     </article>
 
@@ -126,7 +126,7 @@
       <div class="admin-card-head admin-card-head--tight">
         <div>
           <h2>历史用户导入</h2>
-          <p>默认 dry_run，只返回预计分布；正式导入也默认 use_historical_channel_entered_at=false。</p>
+          <p>默认只做预估，不创建池内成员；正式导入也默认使用导入时间，不使用历史扫码时间。</p>
         </div>
       </div>
       <label class="admin-field">
@@ -139,10 +139,10 @@
         </select>
       </label>
       <div class="channel-actions">
-        <button class="admin-button admin-button--secondary" type="button" data-run-import-dry-run>dry_run 预估</button>
+        <button class="admin-button admin-button--secondary" type="button" data-run-import-dry-run>预估导入</button>
         <button class="admin-button admin-button--primary" type="button" data-run-import-confirm>确认导入</button>
       </div>
-      <pre class="channel-json-preview" data-import-payload-preview>{"dry_run": true, "use_historical_channel_entered_at": false}</pre>
+      <div class="channel-json-preview" data-import-payload-preview>导入模式：只做预估；入池时间：使用导入时间</div>
     </article>
   </section>
 
@@ -150,7 +150,7 @@
     <div class="admin-card-head admin-card-head--tight">
       <div>
         <h2>入池清洗日志</h2>
-        <p>记录扫码、人工导入、重复 active、waiting、converted 等 admission attempt。</p>
+        <p>记录扫码、人工导入、重复扫码、等待审核、已成交等入池清洗尝试。</p>
       </div>
     </div>
     <div class="admin-table-wrap">
@@ -162,9 +162,9 @@
             <td>{{ item.created_at or "-" }}</td>
             <td>{{ item.channel_id or "-" }}</td>
             <td>{{ item.external_contact_id or "-" }}</td>
-            <td><span class="channel-pill is-status">{{ item.admission_status }}</span></td>
-            <td>{{ item.stage_code or "-" }}</td>
-            <td>{{ item.entry_reason or "-" }}</td>
+            <td><span class="channel-pill is-status">{{ {"standalone_channel":"独立渠道","accepted":"已入池","waiting":"等待审核","converted":"已成交","rejected":"已拒绝","duplicate_active":"重复扫码","manual_review":"人工审核"}.get(item.admission_status, item.admission_status or "-") }}</span></td>
+            <td>{{ {"scan_enter":"扫码进入","order_review":"订单审核","questionnaire_review":"问卷审核","operating":"运营中","conversion_review":"成交判定","converted":"已成交","finished":"结束"}.get(item.stage_code, item.stage_code or "-") }}</td>
+            <td>{{ {"order_review_pending":"等待订单支付","questionnaire_review_pending":"等待问卷提交","conversion_product_paid":"已支付成交商品","audience_entry_rule_passed":"入池规则通过"}.get(item.entry_reason, item.entry_reason or "-") }}</td>
             <td><button class="admin-button admin-button--ghost" type="button" data-open-attempt-drawer>清洗详情</button></td>
           </tr>
           {% else %}
@@ -180,7 +180,7 @@
       <div class="admin-card-head admin-card-head--tight">
         <div>
           <h2>绑定已有渠道码</h2>
-          <p>候选项包含未绑定的普通二维码和企微获客助手链接；已 active 绑定其他方案的渠道不会出现在候选列表。</p>
+          <p>候选项包含未绑定的普通二维码和企微获客助手链接；已启用绑定其他方案的渠道不会出现在候选列表。</p>
         </div>
         <button class="channel-drawer__close" type="button" data-close-bind-modal>关闭</button>
       </div>
@@ -192,13 +192,13 @@
             {% set is_link = item.carrier_type == "link" or item.channel_type == "wecom_customer_acquisition" %}
             <tr data-bind-candidate data-channel-id="{{ item.id }}" data-candidate-carrier="{{ 'link' if is_link else 'qrcode' }}">
               <td><input type="checkbox" value="{{ item.id }}" data-bind-channel-checkbox></td>
-              <td><strong>{{ item.channel_name }}</strong><span class="channel-code">{{ item.channel_code }}</span><span class="channel-sub">{{ item.customer_channel if is_link else item.scene_value }}</span></td>
+              <td><strong>{{ item.channel_name }}</strong><span class="channel-code">{{ item.channel_code }}</span><span class="channel-sub">{{ "企微渠道参数：" ~ item.customer_channel if is_link else "场景值：" ~ item.scene_value }}</span></td>
               <td><span class="channel-pill {{ 'is-link' if is_link else 'is-qrcode' }}">{{ "企微获客助手链接" if is_link else "普通二维码" }}</span></td>
               <td><span class="channel-pill is-standalone">未绑定</span></td>
               <td>{{ item.latest_channel_entered_at or "-" }}</td>
             </tr>
             {% else %}
-            <tr><td colspan="5">没有可绑定渠道。一个渠道只能 active 绑定一个自动化运营计划。</td></tr>
+            <tr><td colspan="5">没有可绑定渠道。一个渠道只能启用绑定一个自动化运营计划。</td></tr>
             {% endfor %}
           </tbody>
         </table>

@@ -124,6 +124,66 @@
     }
   }
 
+  function statusLabel(value) {
+    return {
+      active: "启用",
+      paused: "暂停",
+      archived: "归档",
+      accepted: "已入池",
+      waiting: "等待审核",
+      converted: "已成交",
+      rejected: "已拒绝",
+      duplicate_active: "重复扫码",
+      manual_review: "人工审核",
+      standalone_channel: "独立渠道",
+    }[value] || value || "-";
+  }
+
+  function stageLabel(value) {
+    return {
+      scan_enter: "扫码进入",
+      order_review: "订单审核",
+      questionnaire_review: "问卷审核",
+      operating: "运营中",
+      conversion_review: "成交判定",
+      converted: "已成交",
+      finished: "结束",
+    }[value] || statusLabel(value);
+  }
+
+  function renderImportResult(data) {
+    if (!data || typeof data !== "object") return "导入任务已处理";
+    const lines = [];
+    if (data.dry_run === true) lines.push("导入模式：只做预估");
+    if (data.dry_run === false) lines.push("导入模式：确认导入");
+    if (typeof data.planned_count !== "undefined") lines.push("预计导入人数：" + data.planned_count);
+    if (typeof data.imported_count !== "undefined") lines.push("已导入人数：" + data.imported_count);
+    if (typeof data.created_count !== "undefined") lines.push("新建人数：" + data.created_count);
+    if (typeof data.skipped_count !== "undefined") lines.push("跳过人数：" + data.skipped_count);
+    if (data.reason) lines.push("处理说明：" + data.reason);
+    if (Array.isArray(data.errors) && data.errors.length) lines.push("错误：" + data.errors.join("；"));
+    return lines.length ? lines.join("\n") : "导入任务已处理";
+  }
+
+  function renderMemberStageSummary(data) {
+    const summary = (data || {}).summary || {};
+    const members = (data || {}).members || [];
+    const summaryRows = [
+      ["总人数", summary.total],
+      ["订单审核", summary.order_review],
+      ["问卷审核", summary.questionnaire_review],
+      ["运营中", summary.operating],
+      ["已成交", summary.converted],
+      ["已结束", summary.finished],
+      ["已退出", summary.exited],
+    ].map((item) => "<tr><td>" + item[0] + "</td><td>" + (item[1] || 0) + "</td></tr>").join("");
+    const memberRows = members.length
+      ? members.map((item) => "<tr><td>" + (item.display_name || item.name || item.external_contact_id || "-") + "</td><td>" + stageLabel(item.current_stage_code) + "</td><td>" + (item.pool_entered_at || "-") + "</td><td>" + (item.stage_entered_at || "-") + "</td></tr>").join("")
+      : "<tr><td colspan=\"4\">暂无池内用户。</td></tr>";
+    return "<h3>阶段分布</h3><table class=\"admin-table channel-table\"><tbody>" + summaryRows + "</tbody></table>" +
+      "<h3>池内用户</h3><table class=\"admin-table channel-table\"><thead><tr><th>客户</th><th>当前阶段</th><th>入池时间</th><th>阶段进入时间</th></tr></thead><tbody>" + memberRows + "</tbody></table>";
+  }
+
   function setupChannelSearch() {
     const input = root.querySelector("[data-channel-search]");
     if (!input) return;
@@ -166,16 +226,16 @@
           const contacts = (contactsResult.data || {}).contacts || [];
           const bindings = (bindingsResult.data || {}).bindings || [];
           const contactRows = contacts.length
-            ? contacts.map((item) => "<tr><td>" + (item.external_contact_id || "-") + "</td><td>" + (item.enter_count || 0) + "</td><td>" + (item.last_channel_entered_at || "-") + "</td></tr>").join("")
+            ? contacts.map((item) => "<tr><td>" + (item.display_name || item.name || item.external_contact_id || "-") + "</td><td>" + (item.enter_count || 0) + "</td><td>" + (item.last_channel_entered_at || "-") + "</td></tr>").join("")
             : "<tr><td colspan=\"3\">暂无渠道用户。</td></tr>";
           const bindingText = bindings.length
-            ? bindings.map((item) => (item.program_name || item.program_id || "-") + " / " + item.binding_status).join("<br>")
-            : "standalone 独立使用";
+            ? bindings.map((item) => (item.program_name || item.program_id || "-") + " / " + statusLabel(item.binding_status)).join("<br>")
+            : "独立使用";
           body.innerHTML =
             "<p><strong>" + row.querySelector("strong").textContent + "</strong></p>" +
             "<p class=\"channel-muted\">当前绑定自动化运营状态：" + bindingText + "</p>" +
             "<h3>渠道用户列表</h3>" +
-            "<table class=\"admin-table channel-table\"><thead><tr><th>external_contact_id</th><th>进入次数</th><th>最近进入</th></tr></thead><tbody>" +
+            "<table class=\"admin-table channel-table\"><thead><tr><th>客户</th><th>进入次数</th><th>最近进入</th></tr></thead><tbody>" +
             contactRows +
             "</tbody></table>";
         });
@@ -203,7 +263,7 @@
       const preview = root.querySelector("[data-link-preview]");
       const finalInput = form.querySelector('[name="final_url"]');
       const computed = finalUrl(linkUrl, customerChannel);
-      if (preview) preview.textContent = computed || "填写 link_url 和 customer_channel 后预览 final_url";
+      if (preview) preview.textContent = computed || "填写原始链接和渠道参数后预览最终分享链接";
       if (finalInput && computed && isLink) finalInput.value = computed;
     }
   }
@@ -423,7 +483,7 @@
     const preview = root.querySelector("[data-import-payload-preview]");
     if (!preview) return;
     const update = (dryRun) => {
-      preview.textContent = JSON.stringify(importPayload(dryRun), null, 2);
+      preview.textContent = "导入模式：" + (dryRun === false ? "确认导入" : "只做预估") + "\n入池时间：使用导入时间";
     };
     update(true);
     root.querySelector("[data-import-channel-id]")?.addEventListener("change", () => update(true));
@@ -431,14 +491,14 @@
       const payload = importPayload(true);
       update(true);
       apiJson(root.dataset.apiImport, { method: "POST", body: JSON.stringify(payload) }).then(({ data }) => {
-        preview.textContent = JSON.stringify(data, null, 2);
+        preview.textContent = renderImportResult(data);
       });
     });
     root.querySelector("[data-run-import-confirm]")?.addEventListener("click", () => {
       const payload = importPayload(false);
       update(false);
       apiJson(root.dataset.apiImport, { method: "POST", body: JSON.stringify(payload) }).then(({ data }) => {
-        preview.textContent = JSON.stringify(data, null, 2);
+        preview.textContent = renderImportResult(data);
       });
     });
   }
@@ -466,7 +526,7 @@
         if (!bindingId || !url) return;
         apiJson(url, { method: "GET" }).then(({ data }) => {
           const preview = root.querySelector("[data-import-payload-preview]");
-          if (preview) preview.textContent = JSON.stringify(data, null, 2);
+          if (preview) preview.innerHTML = renderMemberStageSummary(data);
         });
       });
     });

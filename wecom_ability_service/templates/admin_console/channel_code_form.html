@@ -51,7 +51,7 @@
         </select>
       </label>
       <label class="admin-field">
-        <span>channel_code</span>
+        <span>渠道编码</span>
         <input name="channel_code" value="{{ channel.channel_code or '' }}" placeholder="CH-LIVE-0522">
       </label>
       <div class="admin-field">
@@ -73,29 +73,29 @@
       <label class="admin-field">
         <span>状态</span>
         <select name="status">
-          <option value="active" {% if channel.status == "active" %}selected{% endif %}>active</option>
-          <option value="inactive" {% if channel.status == "inactive" %}selected{% endif %}>inactive</option>
-          <option value="disabled" {% if channel.status == "disabled" %}selected{% endif %}>disabled</option>
+          <option value="active" {% if channel.status == "active" %}selected{% endif %}>启用</option>
+          <option value="inactive" {% if channel.status == "inactive" %}selected{% endif %}>停用</option>
+          <option value="disabled" {% if channel.status == "disabled" %}selected{% endif %}>禁用</option>
         </select>
       </label>
       <label class="admin-field" data-qrcode-field {% if is_link %}hidden{% endif %}>
-        <span>scene_value</span>
+        <span>普通二维码场景值</span>
         <input name="scene_value" value="{{ channel.scene_value or '' }}" placeholder="xhs_0520_trial">
       </label>
       <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
-        <span>customer_channel</span>
+        <span>企微渠道参数</span>
         <input name="customer_channel" value="{{ channel.customer_channel or channel.scene_value or '' }}" placeholder="wca_p1001_xxx">
       </label>
       <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
-        <span>企微获客助手原始链接 link_url</span>
+        <span>企微获客助手原始链接</span>
         <input name="link_url" value="{{ channel.link_url or '' }}" placeholder="https://work.weixin.qq.com/ca/cawcde...">
       </label>
       <label class="admin-field channel-form-wide" data-link-field {% if not is_link %}hidden{% endif %}>
-        <span>最终分享链接 final_url</span>
+        <span>最终分享链接</span>
         <input name="final_url" value="{{ channel.final_url or channel.share_url or '' }}" placeholder="保存后以后端生成为准">
       </label>
       <label class="admin-field channel-form-wide" data-qrcode-field {% if is_link %}hidden{% endif %}>
-        <span>二维码图片地址 qr_url</span>
+        <span>二维码图片地址</span>
         <input name="qr_url" value="{{ channel.qr_url or '' }}" placeholder="保存后可通过下载二维码入口访问">
       </label>
     </form>
@@ -124,7 +124,7 @@
           <p>该类型没有二维码下载动作，使用链接分享。</p>
         </div>
       </div>
-      <div class="channel-link-preview" data-link-preview>{{ channel.final_url or channel.share_url or channel.link_url or "填写 link_url 和 customer_channel 后预览 final_url" }}</div>
+      <div class="channel-link-preview" data-link-preview>{{ channel.final_url or channel.share_url or channel.link_url or "填写原始链接和渠道参数后预览最终分享链接" }}</div>
       <div class="channel-actions">
         <button class="admin-button admin-button--secondary" type="button" data-copy-form-link>复制链接</button>
         <button class="admin-button admin-button--secondary" type="button" data-share-form-link>分享链接</button>
@@ -150,11 +150,11 @@
         <textarea name="welcome_message" rows="4" data-welcome-message>{{ channel.welcome_message or '' }}</textarea>
       </label>
       <label class="admin-field">
-        <span>welcome_miniprogram_library_ids</span>
+        <span>已选小程序素材</span>
         <input name="welcome_miniprogram_library_ids" data-miniprogram-ids value="{{ (channel.welcome_miniprogram_library_ids or []) | join(',') }}" readonly placeholder="从素材库选择">
       </label>
       <label class="admin-field">
-        <span>welcome_attachment_library_ids</span>
+        <span>已选图片/PDF素材</span>
         <input name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}" readonly placeholder="从素材库选择">
       </label>
       <div class="channel-form-wide">
@@ -162,11 +162,11 @@
         <div class="channel-selected-materials" data-selected-materials></div>
       </div>
       <label class="admin-field">
-        <span>entry_tag_id</span>
+        <span>入渠标签编号</span>
         <input name="entry_tag_id" value="{{ channel.entry_tag_id or '' }}">
       </label>
       <label class="admin-field">
-        <span>entry_tag_name</span>
+        <span>入渠标签名称</span>
         <input name="entry_tag_name" value="{{ channel.entry_tag_name or '' }}">
       </label>
     </div>

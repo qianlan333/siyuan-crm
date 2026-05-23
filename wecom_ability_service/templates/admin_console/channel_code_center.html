@@ -35,7 +35,7 @@
       <em>独立获客资源</em>
     </article>
     <article class="channel-metric">
-      <span>standalone 独立使用</span>
+      <span>独立使用</span>
       <strong>{{ ns.standalone }}</strong>
       <em>未绑定自动化运营</em>
     </article>
@@ -47,7 +47,7 @@
     <article class="channel-metric">
       <span>渠道用户</span>
       <strong>{{ ns.entered }}</strong>
-      <em>channel_contact</em>
+      <em>渠道进入记录</em>
     </article>
   </section>
 
@@ -58,7 +58,7 @@
         <p>渠道码中心只管理渠道资产。绑定自动化运营入口请进入具体方案的“入口渠道”页面。</p>
       </div>
       <div class="channel-actions">
-        <input class="channel-search" type="search" data-channel-search placeholder="搜索名称 / channel_code / scene_value">
+        <input class="channel-search" type="search" data-channel-search placeholder="搜索名称 / 渠道编码 / 场景值">
         <a class="admin-button admin-button--primary" href="{{ url_for('api.admin_channel_new_page') }}">新建渠道</a>
       </div>
     </div>
@@ -89,12 +89,12 @@
             <td>
               <strong>{{ item.channel_name or "-" }}</strong>
               <span class="channel-code">{{ item.channel_code or "-" }}</span>
-              <span class="channel-sub">{{ "customer_channel: " ~ item.customer_channel if is_link else "scene: " ~ item.scene_value }}</span>
+              <span class="channel-sub">{{ "企微渠道参数：" ~ item.customer_channel if is_link else "场景值：" ~ item.scene_value }}</span>
             </td>
             <td>
               <span class="channel-pill {{ 'is-link' if is_link else 'is-qrcode' }}">{{ "企微获客助手链接" if is_link else "普通二维码" }}</span>
             </td>
-            <td><span class="channel-pill is-status">{{ item.status or "-" }}</span></td>
+            <td><span class="channel-pill is-status">{{ {"active":"启用","inactive":"停用","disabled":"禁用","paused":"暂停","archived":"归档"}.get(item.status, item.status or "-") }}</span></td>
             <td>
               <span class="channel-pill {{ 'is-ok' if item.welcome_message_configured else '' }}">{{ "欢迎语" if item.welcome_message_configured else "无欢迎语" }}</span>
               <span class="channel-pill">{{ item.welcome_attachment_count or 0 }} 素材</span>
@@ -134,7 +134,7 @@
     <div class="channel-drawer__panel">
       <button class="channel-drawer__close" type="button" data-close-channel-drawer>关闭</button>
       <h2>渠道详情</h2>
-      <p class="channel-muted">查看渠道用户列表、当前绑定自动化运营状态和 standalone 状态。</p>
+      <p class="channel-muted">查看渠道用户列表、当前绑定自动化运营状态和独立使用状态。</p>
       <div data-channel-drawer-body></div>
     </div>
   </aside>

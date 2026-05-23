@@ -35,18 +35,13 @@
       .slice(0, 9);
   }
 
-  function materialKey(type, id) {
-    const normalizedType = String(type || "") === "miniprogram" ? "miniprogram" : "attachment";
-    return normalizedType + ":" + String(id || "");
-  }
-
-  function selectedWelcomeMaterials() {
-    const miniIds = intList(root.querySelector("[data-miniprogram-ids]")?.value);
-    const attachmentIds = intList(root.querySelector("[data-attachment-ids]")?.value);
-    return [
-      ...miniIds.map((id) => ({ id, type: "miniprogram", name: "小程序 " + id })),
-      ...attachmentIds.map((id) => ({ id, type: "attachment", name: "附件 " + id })),
-    ];
+  function setIds(input, ids) {
+    if (!input) return;
+    input.value = (ids || [])
+      .map((item) => parseInt(item, 10))
+      .filter((item, index, list) => item > 0 && list.indexOf(item) === index)
+      .slice(0, 9)
+      .join(",");
   }
 
   function apiJson(url, options) {
@@ -284,7 +279,7 @@
       carrier_type: isLink ? "link" : "qrcode",
       channel_name: data.channel_name || "",
       channel_code: data.channel_code || "",
-      scene_value: isLink ? data.customer_channel || data.scene_value || "" : data.scene_value || "",
+      scene_value: isLink ? data.customer_channel || data.scene_value || "" : data.scene_value || data.channel_code || "",
       customer_channel: isLink ? data.customer_channel || data.scene_value || "" : "",
       link_url: isLink ? data.link_url || "" : "",
       final_url: isLink ? data.final_url || finalUrl(data.link_url, data.customer_channel) : "",
@@ -294,6 +289,7 @@
       welcome_attachment_library_ids: attachmentIds,
       entry_tag_id: data.entry_tag_id || "",
       entry_tag_name: data.entry_tag_name || "",
+      entry_tag_group_name: data.entry_tag_group_name || "",
       owner_staff_id: data.owner_staff_id || "",
       status: data.status || "active",
     };
@@ -367,75 +363,196 @@
   }
 
   function setupWelcomeMaterialPicker() {
-    const picker = root.querySelector("[data-welcome-material-picker]");
-    if (!picker) return;
-    const modal = root.querySelector("[data-material-modal]");
-    const list = root.querySelector("[data-material-results]");
-    const selectedBox = root.querySelector("[data-selected-materials]");
+    const modal = root.querySelector("[data-resource-picker-modal]");
+    if (!modal) return;
+    const list = root.querySelector("[data-resource-picker-results]");
+    const title = root.querySelector("[data-resource-picker-title]");
+    const subtitle = root.querySelector("[data-resource-picker-subtitle]");
+    const search = root.querySelector("[data-resource-picker-search]");
     const miniInput = root.querySelector("[data-miniprogram-ids]");
     const attachmentInput = root.querySelector("[data-attachment-ids]");
-    const renderSelected = () => {
-      const selected = selectedWelcomeMaterials();
-      selectedBox.innerHTML = selected.length
-        ? selected.map((item) => '<button type="button" class="channel-material-chip" data-remove-material data-material-type="' + item.type + '" data-material-id="' + item.id + '">' + item.name + ' ×</button>').join("")
-        : '<span class="channel-muted">暂未选择素材</span>';
-    };
-    const setSelected = (items) => {
-      const miniIds = [];
-      const attachmentIds = [];
-      items.forEach((item) => {
-        if (item.type === "miniprogram") miniIds.push(item.id);
-        else attachmentIds.push(item.id);
-      });
-      miniInput.value = miniIds.slice(0, 9).join(",");
-      attachmentInput.value = attachmentIds.slice(0, Math.max(0, 9 - miniIds.length)).join(",");
-      renderSelected();
-    };
-    const loadMaterials = () => {
+    const miniSelected = root.querySelector("[data-miniprogram-selected]");
+    const attachmentSelected = root.querySelector("[data-attachment-selected]");
+    const tagSelected = root.querySelector("[data-tag-selected]");
+    const tagIdInput = root.querySelector("[data-entry-tag-id]");
+    const tagNameInput = root.querySelector("[data-entry-tag-name]");
+    const tagGroupInput = root.querySelector("[data-entry-tag-group-name]");
+    const pickerState = { kind: "", selected: new Set(), selectedTagId: "", items: [] };
+
+    const materialTypeLabel = (type) => ({
+      miniprogram: "小程序",
+      image: "图片",
+      pdf: "PDF",
+      attachment: "附件",
+      tag: "标签",
+    }[type] || type || "素材");
+
+    const fetchWelcomeMaterials = (type, keyword) => {
       const url = new URL((bootstrap.api_urls || {}).welcome_materials || "/api/admin/channel-welcome-materials", window.location.origin);
-      url.searchParams.set("type", root.querySelector("[data-material-type-filter]")?.value || "all");
-      url.searchParams.set("keyword", root.querySelector("[data-material-search]")?.value || "");
-      apiJson(url.toString(), { method: "GET" }).then(({ data }) => {
-        const selectedKeys = new Set(selectedWelcomeMaterials().map((item) => materialKey(item.type, item.id)));
-        const rows = (data.materials || []).map((item) => {
-          const payloadType = item.type === "miniprogram" ? "miniprogram" : "attachment";
-          const checked = selectedKeys.has(materialKey(payloadType, item.id)) ? "checked" : "";
-          return '<label class="channel-material-row"><input type="checkbox" data-material-checkbox value="' + item.id + '" data-material-type="' + payloadType + '" ' + checked + '><strong>' + (item.name || item.title || "-") + '</strong><span>' + item.type + ' · ' + (item.description || "") + '</span></label>';
-        });
-        list.innerHTML = rows.length ? rows.join("") : '<p class="channel-muted">没有匹配素材。</p>';
+      url.searchParams.set("type", type);
+      url.searchParams.set("keyword", keyword || "");
+      return apiJson(url.toString(), { method: "GET" }).then(({ data }) => data.materials || []);
+    };
+
+    const fetchTags = (keyword) => {
+      const apiUrl = (bootstrap.api_urls || {}).wecom_tags || "/api/admin/wecom/tags";
+      return apiJson(apiUrl, { method: "GET" }).then(({ data }) => {
+        const query = String(keyword || "").trim().toLowerCase();
+        return (Array.isArray(data.items) ? data.items : [])
+          .filter((item) => {
+            if (!query) return true;
+            return [item.group_name, item.tag_name, item.tag_id].join(" ").toLowerCase().includes(query);
+          })
+          .map((item) => ({
+            id: item.tag_id,
+            type: "tag",
+            name: item.tag_name || item.tag_id,
+            description: item.group_name || "未分组",
+            tag_id: item.tag_id,
+            tag_name: item.tag_name || item.tag_id,
+            group_name: item.group_name || "",
+          }));
+      }).catch(() => []);
+    };
+
+    const renderSelectedMaterials = () => {
+      const miniIds = intList(miniInput?.value);
+      const attachmentIds = intList(attachmentInput?.value);
+      Promise.all([
+        fetchWelcomeMaterials("miniprogram", ""),
+        fetchWelcomeMaterials("all", ""),
+      ]).then(([miniItems, attachmentItems]) => {
+        const miniMap = new Map(miniItems.map((item) => [Number(item.id), item]));
+        const attachmentMap = new Map(attachmentItems.map((item) => [Number(item.id), item]));
+        if (miniSelected) {
+          miniSelected.innerHTML = miniIds.length
+            ? miniIds.map((id) => {
+              const item = miniMap.get(id) || { id, name: "小程序 " + id };
+              return '<button type="button" class="channel-material-chip" data-remove-picked="miniprogram" data-id="' + id + '">' + escapeHtml(item.name || item.title || ("小程序 " + id)) + ' ×</button>';
+            }).join("")
+            : '<span class="channel-muted">暂未选择小程序</span>';
+        }
+        if (attachmentSelected) {
+          attachmentSelected.innerHTML = attachmentIds.length
+            ? attachmentIds.map((id) => {
+              const item = attachmentMap.get(id) || { id, type: "attachment", name: "素材 " + id };
+              return '<button type="button" class="channel-material-chip" data-remove-picked="attachment" data-id="' + id + '">' + escapeHtml(materialTypeLabel(item.type)) + " · " + escapeHtml(item.name || item.title || ("素材 " + id)) + ' ×</button>';
+            }).join("")
+            : '<span class="channel-muted">暂未选择图片/PDF</span>';
+        }
+      });
+      if (tagSelected) {
+        const tagId = String(tagIdInput?.value || "").trim();
+        const tagName = String(tagNameInput?.value || "").trim();
+        const groupName = String(tagGroupInput?.value || "").trim();
+        tagSelected.innerHTML = tagId
+          ? '<button type="button" class="channel-material-chip" data-remove-picked="tag" data-id="' + escapeHtml(tagId) + '">' + escapeHtml((groupName ? groupName + " / " : "") + (tagName || tagId)) + ' ×</button>'
+          : '<span class="channel-muted">暂未选择标签</span>';
+      }
+    };
+
+    const renderPickerRows = () => {
+      const isTag = pickerState.kind === "tag";
+      const rows = pickerState.items.map((item) => {
+        const value = String(isTag ? item.tag_id : item.id);
+        const checked = isTag ? (pickerState.selectedTagId === value ? "checked" : "") : (pickerState.selected.has(value) ? "checked" : "");
+        const inputType = isTag ? "radio" : "checkbox";
+        const meta = isTag ? (item.description || "未分组") : (materialTypeLabel(item.type) + (item.description ? " · " + item.description : ""));
+        return '<label class="channel-material-row channel-material-row--preview">' +
+          '<input type="' + inputType + '" name="channel-resource-picker" data-resource-checkbox value="' + escapeHtml(value) + '" ' + checked + '>' +
+          '<strong>' + escapeHtml(item.name || item.title || value || "-") + '</strong>' +
+          '<span>' + escapeHtml(meta) + '</span>' +
+          '</label>';
+      });
+      list.innerHTML = rows.length ? rows.join("") : '<p class="channel-muted">没有匹配结果。</p>';
+    };
+
+    const loadPickerItems = () => {
+      const keyword = search?.value || "";
+      list.innerHTML = '<p class="channel-muted">正在加载...</p>';
+      const loader = pickerState.kind === "miniprogram"
+        ? fetchWelcomeMaterials("miniprogram", keyword)
+        : pickerState.kind === "attachment"
+          ? fetchWelcomeMaterials("all", keyword).then((items) => items.filter((item) => item.type === "image" || item.type === "pdf"))
+          : fetchTags(keyword);
+      loader.then((items) => {
+        pickerState.items = items;
+        renderPickerRows();
       });
     };
-    picker.addEventListener("click", () => {
+
+    const openPicker = (kind) => {
+      pickerState.kind = kind;
+      pickerState.items = [];
+      pickerState.selected = new Set(kind === "miniprogram" ? intList(miniInput?.value).map(String) : intList(attachmentInput?.value).map(String));
+      pickerState.selectedTagId = String(tagIdInput?.value || "");
+      if (search) search.value = "";
+      if (kind === "miniprogram") {
+        title.textContent = "预览并选择小程序素材";
+        subtitle.textContent = "从小程序素材库中预览标题、appid 和页面路径后选择。";
+      } else if (kind === "attachment") {
+        title.textContent = "预览并选择图片/PDF素材";
+        subtitle.textContent = "从附件素材库中选择图片或 PDF；欢迎语素材总数最多 9 个。";
+      } else {
+        title.textContent = "预览并选择标签";
+        subtitle.textContent = "从已同步的企微标签组中选择，保存时只写入标签编号。";
+      }
       modal.hidden = false;
-      loadMaterials();
-    });
-    root.querySelector("[data-close-material-modal]")?.addEventListener("click", () => {
+      loadPickerItems();
+    };
+
+    root.querySelector("[data-open-miniprogram-picker]")?.addEventListener("click", () => openPicker("miniprogram"));
+    root.querySelector("[data-open-attachment-picker]")?.addEventListener("click", () => openPicker("attachment"));
+    root.querySelector("[data-open-tag-picker]")?.addEventListener("click", () => openPicker("tag"));
+    root.querySelector("[data-close-resource-picker]")?.addEventListener("click", () => {
       modal.hidden = true;
     });
-    root.querySelector("[data-material-search]")?.addEventListener("input", loadMaterials);
-    root.querySelector("[data-material-type-filter]")?.addEventListener("change", loadMaterials);
-    root.querySelector("[data-confirm-materials]")?.addEventListener("click", () => {
-      const current = selectedWelcomeMaterials();
-      const byKey = new Map(current.map((item) => [materialKey(item.type, item.id), item]));
-      bySelector("[data-material-checkbox]", modal).forEach((checkbox) => {
-        const id = parseInt(checkbox.value, 10);
-        const type = checkbox.dataset.materialType || "";
-        const key = materialKey(type, id);
-        if (checkbox.checked) byKey.set(key, { id, type, name: type + " " + id });
-        else byKey.delete(key);
-      });
-      const items = Array.from(byKey.values()).slice(0, 9);
-      if (byKey.size > 9) toast("欢迎语素材最多选择 9 个，已保留前 9 个");
-      setSelected(items);
+    search?.addEventListener("input", loadPickerItems);
+    root.querySelector("[data-confirm-resource-picker]")?.addEventListener("click", () => {
+      if (pickerState.kind === "tag") {
+        const checked = modal.querySelector("[data-resource-checkbox]:checked");
+        const item = pickerState.items.find((candidate) => String(candidate.tag_id) === String(checked?.value || ""));
+        if (tagIdInput) tagIdInput.value = item?.tag_id || "";
+        if (tagNameInput) tagNameInput.value = item?.tag_name || "";
+        if (tagGroupInput) tagGroupInput.value = item?.group_name || "";
+      } else {
+        const checkedIds = Array.from(pickerState.selected);
+        const currentMini = pickerState.kind === "miniprogram" ? checkedIds : intList(miniInput?.value).map(String);
+        const currentAttachments = pickerState.kind === "attachment" ? checkedIds : intList(attachmentInput?.value).map(String);
+        if (currentMini.length + currentAttachments.length > 9) {
+          toast("欢迎语素材最多选择 9 个");
+          return;
+        }
+        if (pickerState.kind === "miniprogram") setIds(miniInput, checkedIds);
+        if (pickerState.kind === "attachment") setIds(attachmentInput, checkedIds);
+      }
       modal.hidden = true;
+      renderSelectedMaterials();
     });
-    selectedBox?.addEventListener("click", (event) => {
-      const button = event.target.closest("[data-remove-material]");
+    modal.addEventListener("change", (event) => {
+      const checkbox = event.target.closest("[data-resource-checkbox]");
+      if (!checkbox) return;
+      if (pickerState.kind === "tag") {
+        pickerState.selectedTagId = checkbox.value;
+        return;
+      }
+      if (checkbox.checked) pickerState.selected.add(checkbox.value);
+      else pickerState.selected.delete(checkbox.value);
+    });
+    root.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-picked]");
       if (!button) return;
-      const removeKey = materialKey(button.dataset.materialType, button.dataset.materialId);
-      setSelected(selectedWelcomeMaterials().filter((item) => materialKey(item.type, item.id) !== removeKey));
+      const kind = button.dataset.removePicked;
+      if (kind === "miniprogram") setIds(miniInput, intList(miniInput?.value).filter((id) => String(id) !== String(button.dataset.id)));
+      if (kind === "attachment") setIds(attachmentInput, intList(attachmentInput?.value).filter((id) => String(id) !== String(button.dataset.id)));
+      if (kind === "tag") {
+        if (tagIdInput) tagIdInput.value = "";
+        if (tagNameInput) tagNameInput.value = "";
+        if (tagGroupInput) tagGroupInput.value = "";
+      }
+      renderSelectedMaterials();
     });
-    renderSelected();
+    renderSelectedMaterials();
   }
 
   function setupBindModal() {

@@ -288,6 +288,16 @@
   gap: 8px;
 }
 
+.channel-selector-box {
+  display: grid;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
 .channel-material-chip,
 .channel-material-row {
   border: 1px solid var(--line);
@@ -305,6 +315,10 @@
   grid-template-columns: auto 1fr;
   column-gap: 10px;
   align-items: center;
+}
+
+.channel-material-row--preview {
+  cursor: pointer;
 }
 
 .channel-material-row span {

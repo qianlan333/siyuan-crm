@@ -183,10 +183,10 @@ def api_admin_channel_qrcode_download(channel_id: int):
                 "reason": "link_channel_does_not_support_qrcode_download",
             }
         ), 400
-    qr_url = str(channel.get("qr_url") or "").strip()
-    if not qr_url:
+    qrcode_value = str(channel.get("qr_url") or channel.get("scene_value") or channel.get("channel_code") or "").strip()
+    if not qrcode_value:
         return jsonify({"ok": False, "error": "qrcode_not_ready", "reason": "qrcode_not_ready"}), 404
-    png = _png_qrcode_bytes(qr_url)
+    png = _png_qrcode_bytes(qrcode_value)
     return send_file(
         BytesIO(png),
         mimetype="image/png",

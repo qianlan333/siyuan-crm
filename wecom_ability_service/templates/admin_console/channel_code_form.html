@@ -70,18 +70,6 @@
         </div>
         <input type="hidden" name="owner_staff_id" value="{{ channel.owner_staff_id or '' }}" data-channel-owner-staff-id>
       </div>
-      <label class="admin-field">
-        <span>状态</span>
-        <select name="status">
-          <option value="active" {% if channel.status == "active" %}selected{% endif %}>启用</option>
-          <option value="inactive" {% if channel.status == "inactive" %}selected{% endif %}>停用</option>
-          <option value="disabled" {% if channel.status == "disabled" %}selected{% endif %}>禁用</option>
-        </select>
-      </label>
-      <label class="admin-field" data-qrcode-field {% if is_link %}hidden{% endif %}>
-        <span>普通二维码场景值</span>
-        <input name="scene_value" value="{{ channel.scene_value or '' }}" placeholder="xhs_0520_trial">
-      </label>
       <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
         <span>企微渠道参数</span>
         <input name="customer_channel" value="{{ channel.customer_channel or channel.scene_value or '' }}" placeholder="wca_p1001_xxx">
@@ -94,30 +82,12 @@
         <span>最终分享链接</span>
         <input name="final_url" value="{{ channel.final_url or channel.share_url or '' }}" placeholder="保存后以后端生成为准">
       </label>
-      <label class="admin-field channel-form-wide" data-qrcode-field {% if is_link %}hidden{% endif %}>
-        <span>二维码图片地址</span>
-        <input name="qr_url" value="{{ channel.qr_url or '' }}" placeholder="保存后可通过下载二维码入口访问">
-      </label>
+      <input type="hidden" name="status" value="{{ channel.status or 'active' }}">
     </form>
   </section>
 
-  <section class="channel-preview-grid">
-    <article class="admin-card channel-section" data-qrcode-section {% if is_link %}hidden{% endif %}>
-      <div class="admin-card-head admin-card-head--tight">
-        <div>
-          <h2>普通二维码预览</h2>
-          <p>普通二维码保存后可使用下载二维码动作。</p>
-        </div>
-      </div>
-      <div class="channel-qr-preview" aria-label="二维码预览"></div>
-      {% if payload.is_edit and not is_link %}
-        <a class="admin-button admin-button--secondary" href="{{ payload.api_urls.qrcode_download }}">下载二维码</a>
-      {% else %}
-        <button class="admin-button admin-button--secondary" type="button" disabled>保存后可下载二维码</button>
-      {% endif %}
-    </article>
-
-    <article class="admin-card channel-section" data-link-section {% if not is_link %}hidden{% endif %}>
+  <section class="channel-preview-grid" data-link-section {% if not is_link %}hidden{% endif %}>
+    <article class="admin-card channel-section">
       <div class="admin-card-head admin-card-head--tight">
         <div>
           <h2>企微获客助手链接预览</h2>
@@ -141,7 +111,6 @@
       <div class="channel-actions">
         <a class="admin-button admin-button--secondary" href="/admin/miniprogram-library">小程序素材库</a>
         <a class="admin-button admin-button--secondary" href="/admin/attachment-library">附件素材库</a>
-        <button class="admin-button admin-button--primary" type="button" data-welcome-material-picker>从素材库选择</button>
       </div>
     </div>
     <div class="channel-form-grid">
@@ -149,56 +118,59 @@
         <span>欢迎语文本</span>
         <textarea name="welcome_message" rows="4" data-welcome-message>{{ channel.welcome_message or '' }}</textarea>
       </label>
-      <label class="admin-field">
-        <span>已选小程序素材</span>
-        <input name="welcome_miniprogram_library_ids" data-miniprogram-ids value="{{ (channel.welcome_miniprogram_library_ids or []) | join(',') }}" readonly placeholder="从素材库选择">
-      </label>
-      <label class="admin-field">
-        <span>已选图片/PDF素材</span>
-        <input name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}" readonly placeholder="从素材库选择">
-      </label>
-      <div class="channel-form-wide">
-        <span class="channel-muted">已选素材</span>
-        <div class="channel-selected-materials" data-selected-materials></div>
+      <div class="admin-field">
+        <span>小程序素材</span>
+        <div class="channel-selector-box">
+          <div class="channel-selected-materials" data-miniprogram-selected></div>
+          <button class="admin-button admin-button--secondary" type="button" data-open-miniprogram-picker>预览并选择小程序</button>
+        </div>
+        <input type="hidden" name="welcome_miniprogram_library_ids" data-miniprogram-ids value="{{ (channel.welcome_miniprogram_library_ids or []) | join(',') }}">
       </div>
-      <label class="admin-field">
-        <span>入渠标签编号</span>
-        <input name="entry_tag_id" value="{{ channel.entry_tag_id or '' }}">
-      </label>
-      <label class="admin-field">
-        <span>入渠标签名称</span>
-        <input name="entry_tag_name" value="{{ channel.entry_tag_name or '' }}">
-      </label>
+      <div class="admin-field">
+        <span>图片/PDF素材</span>
+        <div class="channel-selector-box">
+          <div class="channel-selected-materials" data-attachment-selected></div>
+          <button class="admin-button admin-button--secondary" type="button" data-open-attachment-picker>预览并选择图片/PDF</button>
+        </div>
+        <input type="hidden" name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}">
+      </div>
+      <div class="admin-field channel-form-wide">
+        <span>入渠标签</span>
+        <div class="channel-selector-box">
+          <div class="channel-selected-materials" data-tag-selected>
+            {% if channel.entry_tag_name %}
+              <span class="channel-material-chip">{{ channel.entry_tag_group_name or '标签' }} / {{ channel.entry_tag_name }}</span>
+            {% else %}
+              <span class="channel-muted">暂未选择标签</span>
+            {% endif %}
+          </div>
+          <button class="admin-button admin-button--secondary" type="button" data-open-tag-picker>预览并选择标签</button>
+        </div>
+        <input type="hidden" name="entry_tag_id" value="{{ channel.entry_tag_id or '' }}" data-entry-tag-id>
+        <input type="hidden" name="entry_tag_name" value="{{ channel.entry_tag_name or '' }}" data-entry-tag-name>
+        <input type="hidden" name="entry_tag_group_name" value="{{ channel.entry_tag_group_name or '' }}" data-entry-tag-group-name>
+      </div>
     </div>
   </section>
 
-  <aside class="channel-modal" data-material-modal hidden>
+  <aside class="channel-modal" data-resource-picker-modal hidden>
     <div class="channel-modal__panel">
       <div class="admin-card-head admin-card-head--tight">
         <div>
-          <h2>从素材库选择</h2>
-          <p>只选择已有素材，不在渠道页上传原始文件；欢迎语素材总数最多 9 个。</p>
+          <h2 data-resource-picker-title>预览并选择</h2>
+          <p data-resource-picker-subtitle>只选择已有素材，不在渠道页上传原始文件。</p>
         </div>
-        <button class="channel-drawer__close" type="button" data-close-material-modal>关闭</button>
+        <button class="channel-drawer__close" type="button" data-close-resource-picker>关闭</button>
       </div>
       <div class="channel-form-grid">
         <label class="admin-field">
           <span>搜索</span>
-          <input type="search" data-material-search placeholder="搜索素材名称">
-        </label>
-        <label class="admin-field">
-          <span>类型筛选</span>
-          <select data-material-type-filter>
-            <option value="all">全部</option>
-            <option value="miniprogram">小程序</option>
-            <option value="image">图片</option>
-            <option value="pdf">PDF</option>
-          </select>
+          <input type="search" data-resource-picker-search placeholder="搜索名称">
         </label>
       </div>
-      <div class="channel-material-list" data-material-results></div>
+      <div class="channel-material-list" data-resource-picker-results></div>
       <div class="channel-actions channel-actions--right">
-        <button class="admin-button admin-button--primary" type="button" data-confirm-materials>确认选择</button>
+        <button class="admin-button admin-button--primary" type="button" data-confirm-resource-picker>确认选择</button>
       </div>
     </div>
   </aside>

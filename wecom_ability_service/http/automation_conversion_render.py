@@ -319,6 +319,7 @@ def _render_channel_form_page(*, channel: dict[str, object] | None = None, page_
                 "qrcode_download": url_for("api.api_admin_channel_qrcode_download", channel_id=int((channel or {}).get("id") or 0)) if is_edit else "",
                 "share_link": url_for("api.api_admin_channel_share_link", channel_id=int((channel or {}).get("id") or 0)) if is_edit else "",
                 "welcome_materials": url_for("api.api_admin_channel_welcome_materials"),
+                "wecom_tags": "/api/admin/wecom/tags",
             },
         },
         page_error=page_error,

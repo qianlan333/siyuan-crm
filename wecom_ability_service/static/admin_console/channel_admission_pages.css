@@ -155,6 +155,48 @@
   grid-column: 1 / -1;
 }
 
+.channel-owner-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.channel-owner-current,
+.channel-owner-title {
+  display: grid;
+  gap: 3px;
+}
+
+.channel-owner-current small,
+.channel-owner-title span,
+.channel-owner-title small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.channel-owner-list {
+  display: grid;
+  gap: 10px;
+}
+
+.channel-owner-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
 .channel-qr-preview {
   width: 148px;
   height: 148px;

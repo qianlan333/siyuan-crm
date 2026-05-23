@@ -17,6 +17,16 @@
     }
   }
 
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;",
+    }[char]));
+  }
+
   function intList(value) {
     return String(value || "")
       .split(",")
@@ -267,6 +277,35 @@
     });
   }
 
+  function setupChannelOwnerPicker() {
+    const modal = root.querySelector("[data-channel-owner-modal]");
+    if (!modal) return;
+    const ownerStaffInput = root.querySelector("[data-channel-owner-staff-id]");
+    const ownerCurrent = root.querySelector("[data-channel-owner-current]");
+    root.querySelector("[data-channel-owner-picker-open]")?.addEventListener("click", () => {
+      modal.hidden = false;
+    });
+    root.querySelector("[data-channel-owner-picker-close]")?.addEventListener("click", () => {
+      modal.hidden = true;
+    });
+    modal.addEventListener("click", (event) => {
+      if (event.target === modal) {
+        modal.hidden = true;
+        return;
+      }
+      const pick = event.target.closest("[data-channel-owner-pick]");
+      if (!pick) return;
+      const ownerStaffId = pick.dataset.ownerStaffId || "";
+      const ownerDisplayName = pick.dataset.ownerDisplayName || ownerStaffId;
+      if (ownerStaffInput) ownerStaffInput.value = ownerStaffId;
+      if (ownerCurrent) {
+        ownerCurrent.innerHTML = "<strong>" + escapeHtml(ownerDisplayName || "未选择负责人") + "</strong><small>" + escapeHtml(ownerStaffId || "从企业微信通讯录或后台成员中选择") + "</small>";
+      }
+      modal.hidden = true;
+      toast("已选择负责人：" + (ownerDisplayName || ownerStaffId));
+    });
+  }
+
   function setupWelcomeMaterialPicker() {
     const picker = root.querySelector("[data-welcome-material-picker]");
     if (!picker) return;
@@ -450,6 +489,7 @@
   setupCopyShare();
   setupChannelDrawer();
   setupChannelForm();
+  setupChannelOwnerPicker();
   setupWelcomeMaterialPicker();
   setupBindModal();
   setupImportPanel();

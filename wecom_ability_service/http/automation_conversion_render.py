@@ -8,6 +8,7 @@ from ..domains.automation_conversion.channel_binding_service import (
     list_channels,
     list_program_channel_bindings,
 )
+from ..domains.automation_conversion.program_setup_service import list_owner_candidates
 from ..domains.automation_conversion.program_service import list_automation_programs
 from ._routes_helpers import (
     _program_route_or_main,
@@ -310,6 +311,7 @@ def _render_channel_form_page(*, channel: dict[str, object] | None = None, page_
                 "welcome_miniprogram_library_ids": [],
                 "welcome_attachment_library_ids": [],
             },
+            "owner_candidates": list_owner_candidates(),
             "is_edit": is_edit,
             "api_urls": {
                 "channels": url_for("api.api_admin_channels"),

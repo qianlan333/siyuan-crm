@@ -211,6 +211,10 @@ def _list_owner_candidates() -> list[dict[str, Any]]:
     return candidates
 
 
+def list_owner_candidates() -> list[dict[str, Any]]:
+    return _list_owner_candidates()
+
+
 def _owner_from_basic_payload(payload: dict[str, Any]) -> dict[str, str]:
     owner_staff_id = _normalized_text(payload.get("owner_staff_id") or payload.get("owner_userid"))
     owner_display_name = _normalized_text(payload.get("owner_display_name") or payload.get("owner_name")) or owner_staff_id

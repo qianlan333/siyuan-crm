@@ -144,20 +144,16 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
     assert saved["welcome_miniprogram_library_ids"] == [201]
     assert saved["welcome_attachment_library_ids"] == [102, 108]
 
-    new_page = client.get("/admin/channels/new")
-    assert new_page.status_code == 200
-    new_html = new_page.get_data(as_text=True)
-    assert "普通二维码预览" in new_html
-    assert "保存后可下载二维码" in new_html
-    assert "welcome_miniprogram_library_ids" in new_html
-    assert "welcome_attachment_library_ids" in new_html
-    assert "从素材库选择" in new_html
-    assert "data-material-search" in new_html
-    assert "小程序" in new_html
-    assert "图片" in new_html
-    assert "PDF" in new_html
-    assert "选择自动化运营计划" not in new_html
     with app.app_context():
+        get_db().execute(
+            """
+            INSERT INTO admin_users (wecom_userid, wecom_corpid, display_name, is_active)
+            VALUES (?, ?, ?, TRUE)
+            ON CONFLICT (wecom_corpid, wecom_userid)
+            DO UPDATE SET display_name = EXCLUDED.display_name, is_active = TRUE
+            """,
+            ("sales_owner_channel_01", app.config["WECOM_CORP_ID"], "渠道负责人 01"),
+        )
         get_db().execute(
             """
             INSERT INTO miniprogram_library (name, appid, pagepath, title, enabled)
@@ -172,6 +168,26 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
             """
         )
         get_db().commit()
+
+    new_page = client.get("/admin/channels/new")
+    assert new_page.status_code == 200
+    new_html = new_page.get_data(as_text=True)
+    assert "普通二维码预览" in new_html
+    assert "保存后可下载二维码" in new_html
+    assert "welcome_miniprogram_library_ids" in new_html
+    assert "welcome_attachment_library_ids" in new_html
+    assert "从素材库选择" in new_html
+    assert "data-material-search" in new_html
+    assert "小程序" in new_html
+    assert "图片" in new_html
+    assert "PDF" in new_html
+    assert "负责人 owner_staff_id" not in new_html
+    assert 'placeholder="sales_01"' not in new_html
+    assert "选择负责人" in new_html
+    assert "渠道负责人 01" in new_html
+    assert "sales_owner_channel_01" in new_html
+    assert "data-channel-owner-pick" in new_html
+    assert "选择自动化运营计划" not in new_html
     materials = client.get("/api/admin/channel-welcome-materials?type=all&keyword=欢迎")
     assert materials.status_code == 200
     material_types = {item["type"] for item in materials.get_json()["materials"]}

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import base64
+import logging
 from datetime import datetime, timedelta
 from typing import Any
 
+from ...application.identity_contact.commands import BindExternalContactIdentityCommand
+from ...application.identity_contact.dto import BindExternalContactIdentityCommandDTO, GetContactBindingStatusQueryDTO
 from ...application.customer_read_model import CustomerChatContextQueryDTO, GetCustomerChatContextQuery
-from ...application.identity_contact.dto import GetContactBindingStatusQueryDTO
 from ...application.identity_contact.queries import GetContactBindingStatusQuery
 from ...customer_center.repo import fetch_owner_role_map
 from ...domains import attachment_library, image_library, miniprogram_library
@@ -16,6 +18,8 @@ from ...domains.admin_console.customer_profile_service import (
 from ...domains.automation_conversion import private_message_dispatch
 from ...domains.wechat_pay import product_service as wechat_pay_product_service
 from . import repo
+
+logger = logging.getLogger(__name__)
 
 MODULES = ["profile", "questionnaires", "products", "orders", "materials", "other_staff_messages"]
 MAX_PROFILE_TEXT_LENGTH = 4000
@@ -122,6 +126,42 @@ def _customer_payload(context: dict[str, Any], binding: dict[str, Any], external
     }
 
 
+def _ensure_wechat_pay_order_mobile_binding(
+    *,
+    external_userid: str,
+    owner_userid: str,
+    binding: dict[str, Any],
+) -> dict[str, Any]:
+    if binding.get("is_bound"):
+        return binding
+    candidate = repo.get_bindable_wechat_pay_order_mobile(external_userid)
+    if not candidate:
+        return binding
+    mobile = _text(candidate.get("mobile_snapshot"))
+    if not mobile:
+        return binding
+    bind_by_userid = _text(owner_userid) or _text(candidate.get("userid_snapshot")) or "wechat_pay_order_mobile_sync"
+    try:
+        result = BindExternalContactIdentityCommand()(
+            BindExternalContactIdentityCommandDTO(
+                external_userid=external_userid,
+                owner_userid=_text(owner_userid) or _text(candidate.get("userid_snapshot")),
+                bind_by_userid=bind_by_userid,
+                mobile=mobile,
+                force_rebind=False,
+            )
+        )
+    except Exception as exc:
+        logger.warning(
+            "sidebar v2 skipped wechat pay mobile binding external_userid=%s mobile=%s reason=%s",
+            external_userid,
+            mobile,
+            exc,
+        )
+        return binding
+    return dict(result or binding)
+
+
 def _answer_profile_fallback(questionnaires: list[dict[str, Any]]) -> dict[str, str]:
     fields = {"source": "", "industry": "", "industry_description": "", "needs_blockers_followup": ""}
     for questionnaire in questionnaires:
@@ -172,6 +212,12 @@ def get_sidebar_workbench(*, external_userid: str, owner_userid: str = "") -> di
     normalized_owner = _text(owner_userid)
     context = _context(normalized_external_userid)
     binding = dict(context.get("binding") or {}) or _binding_status(normalized_external_userid, normalized_owner)
+    customer = _customer_payload(context, binding, normalized_external_userid, normalized_owner)
+    binding = _ensure_wechat_pay_order_mobile_binding(
+        external_userid=normalized_external_userid,
+        owner_userid=_text(customer.get("owner_userid")) or normalized_owner,
+        binding=binding,
+    )
     customer = _customer_payload(context, binding, normalized_external_userid, normalized_owner)
     questionnaires = get_questionnaires(external_userid=normalized_external_userid)["questionnaires"]
     sidebar_context = dict((context.get("customer") or {}).get("sidebar_context") or {})
@@ -509,6 +555,12 @@ def get_orders(*, external_userid: str) -> dict[str, Any]:
         raise ValueError("external_userid is required")
     context = _context(normalized_external_userid)
     binding = dict(context.get("binding") or {}) or _binding_status(normalized_external_userid, "")
+    customer = _customer_payload(context, binding, normalized_external_userid, "")
+    binding = _ensure_wechat_pay_order_mobile_binding(
+        external_userid=normalized_external_userid,
+        owner_userid=_text(customer.get("owner_userid")),
+        binding=binding,
+    )
     customer = _customer_payload(context, binding, normalized_external_userid, "")
     rows = repo.list_customer_wechat_pay_orders(
         external_userid=normalized_external_userid,

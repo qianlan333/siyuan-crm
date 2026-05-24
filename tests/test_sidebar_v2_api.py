@@ -379,6 +379,157 @@ def test_sidebar_v2_products_and_orders_use_existing_wechat_pay_records(client, 
     }
 
 
+def test_sidebar_v2_workbench_binds_unbound_mobile_from_paid_wechat_pay_order(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.user_ops.service._resolve_third_party_user_id_by_mobile",
+        lambda mobile: f"tp_{mobile}",
+    )
+    with app.app_context():
+        _seed_contact("wm_pay_unbound")
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO wecom_external_contact_identity_map (
+                corp_id, external_userid, unionid, openid, follow_user_userid, name
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("corp_sidebar", "wm_pay_unbound", "union_pay_unbound", "openid_pay_unbound", "owner_current", "月朗"),
+        )
+        db.execute(
+            """
+            INSERT INTO wechat_pay_orders (
+                out_trade_no, product_code, product_name, amount_total, currency,
+                payer_openid, unionid, external_userid, mobile_snapshot, status, trade_state,
+                transaction_id, paid_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz)
+            """,
+            (
+                "WXP_BIND_FROM_ORDER",
+                "prd_sidebar_active",
+                "黄小璨首月体验",
+                990,
+                "CNY",
+                "openid_pay_unbound",
+                "",
+                "",
+                "13166662677",
+                "paid",
+                "SUCCESS",
+                "4200003053202605243919108042",
+                "2026-05-24 09:58:40+00",
+                "2026-05-24 09:58:30+00",
+            ),
+        )
+        db.commit()
+
+    response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": "wm_pay_unbound"})
+
+    assert response.status_code == 200
+    assert response.get_json()["customer"]["is_bound"] is True
+    assert response.get_json()["customer"]["mobile"] == "13166662677"
+
+    status = client.get(
+        "/api/sidebar/contact-binding-status",
+        query_string={"external_userid": "wm_pay_unbound"},
+    ).get_json()
+    assert status["is_bound"] is True
+    assert status["mobile"] == "13166662677"
+
+    with app.app_context():
+        row = get_db().execute(
+            """
+            SELECT b.external_userid, p.mobile, p.third_party_user_id, b.first_bound_by_userid
+            FROM external_contact_bindings b
+            JOIN people p ON p.id = b.person_id
+            WHERE b.external_userid = ?
+            """,
+            ("wm_pay_unbound",),
+        ).fetchone()
+        assert dict(row) == {
+            "external_userid": "wm_pay_unbound",
+            "mobile": "13166662677",
+            "third_party_user_id": "tp_13166662677",
+            "first_bound_by_userid": "owner_current",
+        }
+
+
+def test_sidebar_v2_order_mobile_binding_skips_ambiguous_paid_order_mobiles(client, app, monkeypatch):
+    def fail_if_called(mobile: str) -> str:
+        raise AssertionError(f"unexpected bind for {mobile}")
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.user_ops.service._resolve_third_party_user_id_by_mobile",
+        fail_if_called,
+    )
+    with app.app_context():
+        _seed_contact("wm_pay_ambiguous")
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO wecom_external_contact_identity_map (
+                corp_id, external_userid, unionid, openid, follow_user_userid, name
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            ("corp_sidebar", "wm_pay_ambiguous", "union_pay_ambiguous", "openid_pay_ambiguous", "owner_current", "月朗"),
+        )
+        db.executemany(
+            """
+            INSERT INTO wechat_pay_orders (
+                out_trade_no, product_code, product_name, amount_total, currency,
+                payer_openid, unionid, external_userid, mobile_snapshot, status, trade_state,
+                transaction_id, paid_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz)
+            """,
+            [
+                (
+                    "WXP_AMBIGUOUS_1",
+                    "prd_sidebar_active",
+                    "黄小璨首月体验",
+                    990,
+                    "CNY",
+                    "openid_pay_ambiguous",
+                    "",
+                    "",
+                    "13166662677",
+                    "paid",
+                    "SUCCESS",
+                    "420000AMBIGUOUS1",
+                    "2026-05-24 09:58:40+00",
+                    "2026-05-24 09:58:30+00",
+                ),
+                (
+                    "WXP_AMBIGUOUS_2",
+                    "prd_sidebar_active",
+                    "黄小璨首月体验",
+                    990,
+                    "CNY",
+                    "openid_pay_ambiguous",
+                    "",
+                    "",
+                    "13166662678",
+                    "paid",
+                    "SUCCESS",
+                    "420000AMBIGUOUS2",
+                    "2026-05-24 10:58:40+00",
+                    "2026-05-24 10:58:30+00",
+                ),
+            ],
+        )
+        db.commit()
+
+    response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": "wm_pay_ambiguous"})
+
+    assert response.status_code == 200
+    assert response.get_json()["customer"]["is_bound"] is False
+    assert response.get_json()["customer"]["mobile"] == ""
+    with app.app_context():
+        binding_count = get_db().execute(
+            "SELECT COUNT(*) AS total FROM external_contact_bindings WHERE external_userid = ?",
+            ("wm_pay_ambiguous",),
+        ).fetchone()["total"]
+        assert binding_count == 0
+
+
 def test_sidebar_v2_other_staff_messages_filters_current_user_and_keeps_recent_text_images(client, app):
     with app.app_context():
         _seed_contact()

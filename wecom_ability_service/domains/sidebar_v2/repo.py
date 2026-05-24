@@ -77,6 +77,65 @@ def get_workflow_title_for_customer(external_userid: str) -> str:
     return str((row or {}).get("title") or "").strip()
 
 
+def get_bindable_wechat_pay_order_mobile(external_userid: str) -> dict[str, Any] | None:
+    normalized_external_userid = str(external_userid or "").strip()
+    if not normalized_external_userid:
+        return None
+    rows = fetchall_dicts(
+        get_db(),
+        """
+        WITH target(external_userid) AS (
+            VALUES (?)
+        ),
+        identity_openids AS (
+            SELECT m.openid
+            FROM wecom_external_contact_identity_map m
+            JOIN target t ON m.external_userid = t.external_userid
+            WHERE COALESCE(m.openid, '') <> ''
+        ),
+        identity_unionids AS (
+            SELECT m.unionid
+            FROM wecom_external_contact_identity_map m
+            JOIN target t ON m.external_userid = t.external_userid
+            WHERE COALESCE(m.unionid, '') <> ''
+        ),
+        matching_orders AS (
+            SELECT mobile_snapshot, userid_snapshot, paid_at, created_at, id
+            FROM wechat_pay_orders
+            WHERE COALESCE(mobile_snapshot, '') <> ''
+              AND (status = 'paid' OR trade_state = 'SUCCESS')
+              AND (
+                (
+                    COALESCE(external_userid, '') <> ''
+                    AND external_userid = (SELECT external_userid FROM target)
+                )
+                OR (
+                    COALESCE(payer_openid, '') <> ''
+                    AND payer_openid IN (SELECT openid FROM identity_openids)
+                )
+                OR (
+                    COALESCE(unionid, '') <> ''
+                    AND unionid IN (SELECT unionid FROM identity_unionids)
+                )
+              )
+        )
+        SELECT
+            mobile_snapshot,
+            MAX(COALESCE(NULLIF(userid_snapshot, ''), '')) AS userid_snapshot,
+            COUNT(*) AS order_count,
+            MAX(COALESCE(paid_at, created_at)) AS latest_order_at
+        FROM matching_orders
+        GROUP BY mobile_snapshot
+        ORDER BY latest_order_at DESC, mobile_snapshot ASC
+        LIMIT 2
+        """,
+        (normalized_external_userid,),
+    )
+    if len(rows) != 1:
+        return None
+    return rows[0]
+
+
 def list_customer_wechat_pay_orders(
     *,
     external_userid: str,

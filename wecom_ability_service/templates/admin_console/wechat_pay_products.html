@@ -233,10 +233,10 @@
       </section>
 
       <section class="wp-section">
-        <h2>支付后引流计划</h2>
+        <h2>支付后引流渠道码</h2>
         <div class="wp-field">
-          <label>引流计划</label>
-          <select id="leadPlan"></select>
+          <label>引流渠道码</label>
+          <select id="leadChannel"></select>
         </div>
       </section>
 
@@ -314,9 +314,10 @@
       cta_text: "立即报名",
       require_mobile: true,
       lead_program_id: 0,
+      lead_channel_id: 0,
       slices: []
     };
-    let leadPlans = [];
+    let leadChannels = [];
     let dragId = "";
     let activeShareUrl = "";
     let editorShare = null;
@@ -398,7 +399,7 @@
       draft.status = $("productStatus").value;
       draft.cta_text = $("ctaText").value.trim() || "立即报名";
       draft.require_mobile = document.querySelector('input[name="requireMobile"]:checked')?.value === "yes";
-      draft.lead_program_id = Number($("leadPlan").value || 0);
+      draft.lead_channel_id = Number($("leadChannel").value || 0);
     }
 
     function fillFields() {
@@ -409,7 +410,7 @@
       document.querySelectorAll('input[name="requireMobile"]').forEach(function (input) {
         input.checked = (input.value === "yes") === Boolean(draft.require_mobile);
       });
-      $("leadPlan").value = String(draft.lead_program_id || 0);
+      $("leadChannel").value = String(draft.lead_channel_id || 0);
     }
 
     function showEditorError(message) {
@@ -440,21 +441,23 @@
       if (editor) editor.hidden = false;
     }
 
-    function renderLeadPlans() {
-      const select = $("leadPlan");
+    function renderLeadChannels() {
+      const select = $("leadChannel");
       if (!select) return;
-      const plans = leadPlans.slice();
-      if (draft.lead_program_id && !plans.some(function (plan) { return Number(plan.program_id || 0) === Number(draft.lead_program_id); })) {
-        plans.push({
-          program_id: Number(draft.lead_program_id),
-          program_name: "已配置引流计划",
+      const channels = leadChannels.slice();
+      if (draft.lead_channel_id && !channels.some(function (channel) { return Number(channel.channel_id || 0) === Number(draft.lead_channel_id); })) {
+        channels.push({
+          channel_id: Number(draft.lead_channel_id),
+          channel_name: "已配置引流渠道码",
+          program_name: "",
           selectable: true
         });
       }
-      select.innerHTML = plans.map(function (plan) {
-        const disabled = plan.selectable ? "" : " disabled";
-        const suffix = plan.selectable ? "" : " · 未配置二维码";
-        return '<option value="' + Number(plan.program_id || 0) + '"' + disabled + '>' + escapeHtml(plan.program_name + suffix) + '</option>';
+      select.innerHTML = channels.map(function (channel) {
+        const disabled = channel.selectable ? "" : " disabled";
+        const programName = channel.program_name ? " · " + channel.program_name : "";
+        const suffix = channel.selectable ? "" : " · 未配置二维码";
+        return '<option value="' + Number(channel.channel_id || 0) + '"' + disabled + '>' + escapeHtml(channel.channel_name + programName + suffix) + '</option>';
       }).join("");
     }
 
@@ -512,22 +515,22 @@
     async function loadEditor() {
       showEditorError("");
       setEditorLoading("加载中");
-      leadPlans = [{ program_id: 0, program_name: "不配置引流计划", selectable: true }];
+      leadChannels = [{ channel_id: 0, channel_name: "不配置引流渠道码", selectable: true }];
       const productRequest = productId > 0
         ? api("/api/admin/wechat-pay/products/" + productId)
         : Promise.resolve({ product: draft });
-      const plansRequest = api("/api/admin/wechat-pay/products/lead-plans");
+      const channelsRequest = api("/api/admin/wechat-pay/products/lead-channels");
       const shareRequest = productId > 0
         ? api("/api/admin/wechat-pay/products/" + productId + "/share")
             .catch(function () { return { share: null }; })
         : Promise.resolve({ share: null });
-      const results = await Promise.all([productRequest, plansRequest, shareRequest]);
+      const results = await Promise.all([productRequest, channelsRequest, shareRequest]);
       if (productId > 0) {
         draft = results[0].product || draft;
       }
-      leadPlans = results[1].items || leadPlans;
+      leadChannels = results[1].items || leadChannels;
       editorShare = results[2].share || null;
-      renderLeadPlans();
+      renderLeadChannels();
       fillFields();
       renderSlices();
       renderEditorSharePreview();
@@ -608,7 +611,7 @@
         status: draft.status,
         require_mobile: draft.require_mobile,
         cta_text: draft.cta_text,
-        lead_program_id: draft.lead_program_id || null,
+        lead_channel_id: draft.lead_channel_id || null,
         slices: draft.slices.map(function (slice, index) {
           return { image_library_id: Number(slice.image_library_id), sort_order: index + 1 };
         })
@@ -705,7 +708,7 @@
       if (["productName", "productPrice", "ctaText"].includes(event.target.id)) syncDraftFromFields();
     });
     document.addEventListener("change", function (event) {
-      if (["productStatus", "leadPlan"].includes(event.target.id) || event.target.name === "requireMobile") syncDraftFromFields();
+      if (["productStatus", "leadChannel"].includes(event.target.id) || event.target.name === "requireMobile") syncDraftFromFields();
       if (event.target.id === "sliceInput") {
         uploadSlices(event.target.files).catch(function (err) { toast(err.message || "上传失败"); });
         event.target.value = "";

@@ -24,6 +24,15 @@ def _normalized_bool(value: Any) -> bool:
     return _normalized_text(value).lower() in {"1", "true", "yes", "y", "on"}
 
 
+def _positive_int_from_payload(payload: dict[str, Any], existing: dict[str, Any], key: str) -> int | None:
+    value = payload.get(key) if key in payload else existing.get(key)
+    try:
+        normalized = int(value or 0)
+    except (TypeError, ValueError):
+        normalized = 0
+    return normalized or None
+
+
 def _setting(key: str, default: str = "") -> str:
     stored = get_setting(key)
     if stored is not None:
@@ -165,18 +174,21 @@ def _lead_qr_from_channel(channel: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def resolve_lead_channel(program_id: int | None) -> dict[str, Any] | None:
+def resolve_lead_channel(program_id: int | None, *, channel_id: int | None = None) -> dict[str, Any] | None:
     from ..automation_conversion import service as automation_service
 
-    return automation_service.resolve_lead_channel_for_program(program_id)
+    return automation_service.resolve_lead_channel_for_program(program_id, channel_id=channel_id)
 
 
 def _lead_qr_for_product(product: dict[str, Any]) -> dict[str, Any]:
     from ..automation_conversion import service as automation_service
 
     channel_id = int(product.get("lead_channel_id") or 0)
+    program_id = int(product.get("lead_program_id") or 0)
+    if channel_id <= 0 and program_id <= 0:
+        return {}
     channel = automation_service.resolve_lead_channel_for_program(
-        int(product.get("lead_program_id") or 0),
+        program_id,
         channel_id=channel_id,
     )
     return _lead_qr_from_channel(channel)
@@ -191,7 +203,7 @@ def get_lead_qr_for_product_code(product_code: str) -> dict[str, Any]:
 
 def _present_db_product(product: dict[str, Any]) -> dict[str, Any]:
     metadata = product.get("metadata_json") if isinstance(product.get("metadata_json"), dict) else {}
-    lead_qr = _lead_qr_for_product(product) if int(product.get("lead_program_id") or 0) > 0 else {}
+    lead_qr = _lead_qr_for_product(product)
     return {
         "id": int(product.get("id") or 0),
         "product_code": _normalized_text(product.get("product_code")),
@@ -206,7 +218,7 @@ def _present_db_product(product: dict[str, Any]) -> dict[str, Any]:
         "require_mobile": bool(product.get("require_mobile")),
         "cta_text": _normalized_text(product.get("cta_text")) or "立即报名",
         "lead_program_id": int(product.get("lead_program_id") or 0) or None,
-        "lead_channel_id": int(product.get("lead_channel_id") or 0) or None,
+        "lead_channel_id": int(product.get("lead_channel_id") or lead_qr.get("channel_id") or 0) or None,
         "lead_plan_configured": bool(lead_qr.get("qr_url")),
         "lead_qr": lead_qr,
         "updated_at": _normalized_text(product.get("updated_at")),
@@ -287,9 +299,17 @@ def _normalize_product_payload(payload: dict[str, Any], *, existing: dict[str, A
     if amount_total <= 0:
         raise WeChatPayProductError("价格必须大于 0")
     status = _normalize_product_status(payload.get("status") if "status" in payload else existing.get("status"))
-    lead_program_id = int(payload.get("lead_program_id") or existing.get("lead_program_id") or 0) or None
-    lead_channel_id = int(payload.get("lead_channel_id") or existing.get("lead_channel_id") or 0) or None
-    if lead_program_id:
+    lead_channel_id = _positive_int_from_payload(payload, existing, "lead_channel_id")
+    if "lead_channel_id" in payload and not lead_channel_id and "lead_program_id" not in payload:
+        lead_program_id = None
+    else:
+        lead_program_id = _positive_int_from_payload(payload, existing, "lead_program_id")
+    if lead_channel_id:
+        channel = resolve_lead_channel(lead_program_id, channel_id=lead_channel_id)
+        if not _normalized_text((channel or {}).get("qr_url")):
+            raise WeChatPayProductError("所选引流渠道码未配置二维码")
+        lead_program_id = int((channel or {}).get("program_id") or 0) or lead_program_id
+    elif lead_program_id:
         channel = resolve_lead_channel(lead_program_id)
         if not _normalized_text((channel or {}).get("qr_url")):
             raise WeChatPayProductError("所选引流计划未配置二维码")
@@ -465,3 +485,9 @@ def list_lead_plan_options() -> list[dict[str, Any]]:
     from ..automation_conversion import service as automation_service
 
     return automation_service.list_product_lead_plan_options()
+
+
+def list_lead_channel_options() -> list[dict[str, Any]]:
+    from ..automation_conversion import service as automation_service
+
+    return automation_service.list_product_lead_channel_options()

@@ -80,6 +80,23 @@ def list_channels_by_program(program_id: int, *, include_inactive: bool = True) 
     return _fetchall_dicts(sql, tuple(params))
 
 
+def list_product_lead_channels() -> list[dict[str, Any]]:
+    return _fetchall_dicts(
+        """
+        SELECT
+            c.*,
+            p.program_code,
+            p.program_name,
+            p.status AS program_status
+        FROM automation_channel c
+        LEFT JOIN automation_program p ON p.id = c.program_id
+        WHERE c.qr_url <> ''
+          AND c.status IN ('active', 'configured')
+        ORDER BY c.updated_at DESC, c.id DESC
+        """
+    )
+
+
 def get_channel_by_id(channel_id: int) -> dict[str, Any] | None:
     return _fetchone_dict(
         """

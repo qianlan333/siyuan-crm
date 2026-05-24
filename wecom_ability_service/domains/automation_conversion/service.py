@@ -147,6 +147,36 @@ def list_product_lead_plan_options() -> list[dict[str, Any]]:
     return options
 
 
+def list_product_lead_channel_options() -> list[dict[str, Any]]:
+    options = [
+        {
+            "channel_id": 0,
+            "channel_name": "不配置引流渠道码",
+            "channel_code": "",
+            "program_id": None,
+            "program_name": "",
+            "status": "",
+            "qr_url": "",
+            "selectable": True,
+        }
+    ]
+    for channel in repo.list_product_lead_channels():
+        program_name = _normalized_text(channel.get("program_name")) or _normalized_text(channel.get("program_code"))
+        options.append(
+            {
+                "channel_id": int(channel.get("id") or 0),
+                "channel_name": _normalized_text(channel.get("channel_name")) or _normalized_text(channel.get("channel_code")),
+                "channel_code": _normalized_text(channel.get("channel_code")),
+                "program_id": int(channel.get("program_id") or 0) or None,
+                "program_name": program_name,
+                "status": _normalized_text(channel.get("status")),
+                "qr_url": _normalized_text(channel.get("qr_url")),
+                "selectable": bool(_normalized_text(channel.get("qr_url"))),
+            }
+        )
+    return options
+
+
 POOL_WON = local_projection.POOL_WON
 POOL_REMOVED = local_projection.POOL_REMOVED
 POOL_NO_REPLY = local_projection.POOL_NO_REPLY

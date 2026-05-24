@@ -146,14 +146,26 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
         else (existing or {}).get("welcome_attachment_library_ids")
     )
     welcome_attachment_library_ids = json.dumps(_normalize_positive_int_list(raw_attachment_ids), ensure_ascii=False)
+    raw_miniprogram_ids = (
+        payload.get("welcome_miniprogram_library_ids")
+        if "welcome_miniprogram_library_ids" in payload
+        else (existing or {}).get("welcome_miniprogram_library_ids")
+    )
+    welcome_miniprogram_library_ids = json.dumps(_normalize_positive_int_list(raw_miniprogram_ids), ensure_ascii=False)
     params = (
         program_id,
         channel_code,
         _normalized_text(payload.get("channel_name")),
+        _normalized_text(payload.get("channel_type")) or "qrcode",
+        _normalized_text(payload.get("carrier_type")) or "qrcode",
         _normalized_text(payload.get("qr_url")),
         _normalized_text(payload.get("qr_ticket")),
         _normalized_text(payload.get("scene_value")),
+        _normalized_text(payload.get("customer_channel")),
+        _normalized_text(payload.get("link_url")),
+        _normalized_text(payload.get("final_url")),
         _normalized_text(payload.get("welcome_message")),
+        welcome_miniprogram_library_ids,
         welcome_attachment_library_ids,
         _db_bool(bool(payload.get("auto_accept_friend"))),
         _normalized_text(payload.get("entry_tag_id")),
@@ -169,10 +181,16 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             SET program_id = ?,
                 channel_code = ?,
                 channel_name = ?,
+                channel_type = ?,
+                carrier_type = ?,
                 qr_url = ?,
                 qr_ticket = ?,
                 scene_value = ?,
+                customer_channel = ?,
+                link_url = ?,
+                final_url = ?,
                 welcome_message = ?,
+                welcome_miniprogram_library_ids = ?,
                 welcome_attachment_library_ids = ?,
                 auto_accept_friend = ?,
                 entry_tag_id = ?,
@@ -188,10 +206,16 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
                 program_id,
                 channel_code,
                 _normalized_text(payload.get("channel_name")),
+                _normalized_text(payload.get("channel_type")) or "qrcode",
+                _normalized_text(payload.get("carrier_type")) or "qrcode",
                 _normalized_text(payload.get("qr_url")),
                 _normalized_text(payload.get("qr_ticket")),
                 _normalized_text(payload.get("scene_value")),
+                _normalized_text(payload.get("customer_channel")),
+                _normalized_text(payload.get("link_url")),
+                _normalized_text(payload.get("final_url")),
                 _normalized_text(payload.get("welcome_message")),
+                welcome_miniprogram_library_ids,
                 welcome_attachment_library_ids,
                 _db_bool(bool(payload.get("auto_accept_friend"))),
                 _normalized_text(payload.get("entry_tag_id")),
@@ -209,10 +233,16 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             program_id,
             channel_code,
             channel_name,
+            channel_type,
+            carrier_type,
             qr_url,
             qr_ticket,
             scene_value,
+            customer_channel,
+            link_url,
+            final_url,
             welcome_message,
+            welcome_miniprogram_library_ids,
             welcome_attachment_library_ids,
             auto_accept_friend,
             entry_tag_id,
@@ -223,7 +253,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         """,
         params,

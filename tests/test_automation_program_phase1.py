@@ -379,10 +379,12 @@ def test_setup_entry_channel_renders_qrcode_image(app, client, monkeypatch):
 
     html = client.get(f"/admin/automation-conversion/programs/{program_id}/setup?step=entry").get_data(as_text=True)
 
-    assert '<img src="https://wework.qpic.cn/wwpic/current-program-qr.png" alt="当前方案渠道二维码"' in html
-    assert "复制链接" in html
-    assert "打开链接" in html
+    assert "入口渠道已迁移" in html
+    assert f"/admin/automation-conversion/programs/{program_id}/entry-channels" in html
+    assert "普通二维码" in html
+    assert qr_url in html
     assert "scene-current-program" in html
+    assert "生成二维码" not in html
 
 
 def test_setup_entry_channel_requires_regeneration_for_configured_qrcode(app, client, monkeypatch):
@@ -396,7 +398,7 @@ def test_setup_entry_channel_requires_regeneration_for_configured_qrcode(app, cl
             {
                 "program_id": program_id,
                 "channel_code": "program_stale_qr_case",
-                "channel_name": "待重新生成二维码",
+                "channel_name": "待处理旧入口",
                 "qr_url": stale_qr_url,
                 "scene_value": "scene-stale-program",
                 "status": "configured",
@@ -407,11 +409,10 @@ def test_setup_entry_channel_requires_regeneration_for_configured_qrcode(app, cl
 
     html = client.get(f"/admin/automation-conversion/programs/{program_id}/setup?step=entry").get_data(as_text=True)
 
-    assert stale_qr_url not in html
-    assert "二维码配置已变更，请重新生成后再投放。" in html
-    assert "配置已变更，需重新生成" in html
-    assert "保存免验证、负责人、欢迎语或扫码标签后，需要重新生成当前方案二维码。" in html
-    assert "生成二维码" in html
+    assert "入口渠道已迁移" in html
+    assert stale_qr_url in html
+    assert "生成二维码" not in html
+    assert "重新生成二维码" not in html
     assert "复制链接" not in html
     assert "打开链接" not in html
 
@@ -463,15 +464,9 @@ def test_setup_entry_channel_uses_wecom_tag_selector(app, client, monkeypatch):
 
     html = client.get(f"/admin/automation-conversion/programs/{program_id}/setup?step=entry").get_data(as_text=True)
 
-    assert 'data-entry-tag-select' in html
-    assert "渠道来源" in html
-    assert "二维码进入" in html
-    assert "客户分层" in html
-    assert "高意向" in html
-    assert '<input name="entry_tag_group_name"' not in html
-    assert '<input name="entry_tag_name"' not in html
-    assert 'type="hidden" name="entry_tag_group_name"' in html
-    assert 'type="hidden" name="entry_tag_name"' in html
+    assert "入口渠道已迁移" in html
+    assert 'data-entry-tag-select' not in html
+    assert "前往入口渠道页" in html
 
 
 def test_setup_basic_can_select_single_program_owner(app, client, monkeypatch):
@@ -608,7 +603,11 @@ def test_blank_setup_entry_does_not_show_default_qrcode(app, client, monkeypatch
     html = client.get(f"/admin/automation-conversion/programs/{blank['id']}/setup?step=entry").get_data(as_text=True)
 
     assert default_qr_url not in html
-    assert "尚未生成二维码" in html or "还没有二维码配置" in html
+    assert "入口渠道已迁移" in html
+    assert "当前没有旧入口渠道数据" in html
+    assert f"/admin/automation-conversion/programs/{blank['id']}/entry-channels" in html
+    assert "生成二维码" not in html
+    assert "initial_audience_code" not in html
 
 
 def test_setup_segmentation_shows_question_and_option_text_without_option_id_field(app, client, monkeypatch):
@@ -1966,6 +1965,10 @@ def test_operation_task_due_runner_enqueues_and_worker_handler_sends(app, monkey
         "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
         fake_dispatch,
     )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
+        lambda task_type, fn_name, payload, **kwargs: fake_dispatch(task_type, fn_name, payload),
+    )
 
     with app.app_context():
         from datetime import timedelta, timezone
@@ -2134,6 +2137,10 @@ def test_operation_task_audience_entered_trigger_enqueues_immediate_broadcast(ap
         "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
         fake_dispatch,
     )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
+        lambda task_type, fn_name, payload, **kwargs: fake_dispatch(task_type, fn_name, payload),
+    )
 
     with app.app_context():
         db = get_db()
@@ -2261,6 +2268,10 @@ def test_multiple_operation_tasks_due_at_same_time_send_independently(app, monke
     monkeypatch.setattr(
         "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
         fake_dispatch,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
+        lambda task_type, fn_name, payload, **kwargs: fake_dispatch(task_type, fn_name, payload),
     )
 
     with app.app_context():

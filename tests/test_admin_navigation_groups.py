@@ -15,6 +15,15 @@ def test_admin_navigation_groups_and_marks_active_item(monkeypatch):
     assert [group["title"] for group in groups] == ["运营", "交易", "素材", "配置及后台"]
     operations = groups[0]["items"]
     operations_by_key = {item["key"]: item["label"] for item in operations}
+    assert [item["label"] for item in operations] == [
+        "自动化运营",
+        "渠道码中心",
+        "AI 助手",
+        "客户激活 / 客户列表",
+        "漏斗 / 数据看板",
+        "问卷",
+        "企微标签管理",
+    ]
     assert operations_by_key["customers"] == "客户激活 / 客户列表"
     assert operations_by_key["user_ops_funnel"] == "漏斗 / 数据看板"
     assert {item["key"]: item["label"] for item in groups[3]["items"]}["jobs"] == "同步任务配置 / 同步任务"
@@ -84,6 +93,7 @@ def test_admin_base_template_renders_grouped_navigation():
     for endpoint, path in {
         "admin_dashboard_shell_context": "/api/admin/dashboard/shell-context",
         "admin_automation_conversion": "/admin/automation-conversion",
+        "admin_channels_page": "/admin/channels",
         "admin_cloud_orchestrator_workspace": "/admin/cloud-orchestrator",
         "admin_console_customers": "/admin/customers",
         "admin_hxc_dashboard_workspace": "/admin/user-ops",
@@ -121,6 +131,9 @@ def test_admin_base_template_renders_grouped_navigation():
     )
     assert re.search(r'class="admin-nav-link is-active"\s+href="/admin/wechat-pay/products"', html)
     assert '<div class="admin-nav-section-title">运营</div>' in html
+    assert "自动化运营" in html
+    assert "渠道码中心" in html
+    assert "AI 助手" in html
     assert "客户激活 / 客户列表" in html
     assert "漏斗 / 数据看板" in html
     assert "同步任务配置 / 同步任务" in html

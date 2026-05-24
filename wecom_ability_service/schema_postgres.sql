@@ -1229,10 +1229,16 @@ CREATE TABLE IF NOT EXISTS automation_channel (
     program_id BIGINT,
     channel_code TEXT NOT NULL UNIQUE,
     channel_name TEXT NOT NULL DEFAULT '',
+    channel_type TEXT NOT NULL DEFAULT 'qrcode',
+    carrier_type TEXT NOT NULL DEFAULT 'qrcode',
     qr_url TEXT NOT NULL DEFAULT '',
     qr_ticket TEXT NOT NULL DEFAULT '',
     scene_value TEXT NOT NULL DEFAULT '',
+    customer_channel TEXT NOT NULL DEFAULT '',
+    link_url TEXT NOT NULL DEFAULT '',
+    final_url TEXT NOT NULL DEFAULT '',
     welcome_message TEXT NOT NULL DEFAULT '',
+    welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     auto_accept_friend BOOLEAN NOT NULL DEFAULT FALSE,
     entry_tag_id TEXT NOT NULL DEFAULT '',
@@ -1857,6 +1863,153 @@ CREATE TABLE IF NOT EXISTS automation_program_config_block (
 
 CREATE INDEX IF NOT EXISTS idx_automation_program_config_block_program
 ON automation_program_config_block (program_id, block_key);
+
+CREATE TABLE IF NOT EXISTS automation_program_channel_binding (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+    binding_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (binding_status IN ('active', 'paused', 'archived')),
+    auto_enter_pool BOOLEAN NOT NULL DEFAULT TRUE,
+    initial_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'
+        CHECK (initial_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+    entry_rule_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    priority INTEGER NOT NULL DEFAULT 0,
+    bound_by TEXT NOT NULL DEFAULT '',
+    bound_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    unbound_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_program_channel_binding_program_channel UNIQUE (program_id, channel_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_program_channel_binding_active_channel
+ON automation_program_channel_binding (channel_id)
+WHERE binding_status = 'active';
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_channel_binding_program
+ON automation_program_channel_binding (program_id, binding_status, priority DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_channel_binding_channel
+ON automation_program_channel_binding (channel_id, binding_status, priority DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS automation_channel_contact (
+    id BIGSERIAL PRIMARY KEY,
+    channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+    external_contact_id TEXT NOT NULL DEFAULT '',
+    master_customer_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+    owner_staff_id TEXT NOT NULL DEFAULT '',
+    first_channel_entered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_channel_entered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    enter_count INTEGER NOT NULL DEFAULT 1,
+    source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_channel_contact_external
+ON automation_channel_contact (channel_id, external_contact_id)
+WHERE external_contact_id <> '';
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_contact_channel_last
+ON automation_channel_contact (channel_id, last_channel_entered_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_contact_external
+ON automation_channel_contact (external_contact_id);
+
+CREATE TABLE IF NOT EXISTS automation_program_member (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    external_contact_id TEXT NOT NULL DEFAULT '',
+    master_customer_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+    source_channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+    source_binding_id BIGINT REFERENCES automation_program_channel_binding(id) ON DELETE SET NULL,
+    first_source_channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+    latest_source_channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+    in_program BOOLEAN NOT NULL DEFAULT TRUE,
+    current_stage_code TEXT NOT NULL DEFAULT '',
+    current_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'
+        CHECK (current_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+    current_stage_entered_at TIMESTAMPTZ,
+    pool_entered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    exited_at TIMESTAMPTZ,
+    exit_reason TEXT NOT NULL DEFAULT '',
+    reentry_count INTEGER NOT NULL DEFAULT 0,
+    state_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_program_member_external
+ON automation_program_member (program_id, external_contact_id)
+WHERE external_contact_id <> '';
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_audience
+ON automation_program_member (program_id, current_stage_code, current_audience_code);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_member_source_channel
+ON automation_program_member (source_channel_id);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_member_latest_channel
+ON automation_program_member (latest_source_channel_id);
+
+CREATE TABLE IF NOT EXISTS automation_program_admission_attempt (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+    binding_id BIGINT REFERENCES automation_program_channel_binding(id) ON DELETE SET NULL,
+    external_contact_id TEXT NOT NULL DEFAULT '',
+    master_customer_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+    trigger_type TEXT NOT NULL DEFAULT 'channel_enter',
+    trigger_event_id TEXT NOT NULL DEFAULT '',
+    trigger_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    admission_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (admission_status IN ('standalone_channel', 'pending', 'accepted', 'waiting', 'converted', 'rejected', 'duplicate_active', 'manual_review')),
+    pool_entered_at TIMESTAMPTZ,
+    stage_code TEXT NOT NULL DEFAULT '',
+    audience_code TEXT NOT NULL DEFAULT '',
+    stage_entered_at TIMESTAMPTZ,
+    entry_reason TEXT NOT NULL DEFAULT '',
+    cleaning_result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_program
+ON automation_program_admission_attempt (program_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_channel
+ON automation_program_admission_attempt (channel_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_external
+ON automation_program_admission_attempt (external_contact_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_status
+ON automation_program_admission_attempt (admission_status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS automation_program_member_stage_history (
+    id BIGSERIAL PRIMARY KEY,
+    program_member_id BIGINT NOT NULL REFERENCES automation_program_member(id) ON DELETE CASCADE,
+    program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+    stage_code TEXT NOT NULL,
+    audience_code TEXT NOT NULL DEFAULT '',
+    entered_at TIMESTAMPTZ NOT NULL,
+    exited_at TIMESTAMPTZ,
+    entry_reason TEXT NOT NULL DEFAULT '',
+    source_event_type TEXT NOT NULL DEFAULT '',
+    source_event_id TEXT NOT NULL DEFAULT '',
+    snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_history_member
+ON automation_program_member_stage_history (program_member_id, entered_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_history_stage
+ON automation_program_member_stage_history (program_id, stage_code, entered_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_history_audience
+ON automation_program_member_stage_history (program_id, audience_code, entered_at DESC);
 
 CREATE TABLE IF NOT EXISTS automation_workflow (
     id BIGSERIAL PRIMARY KEY,

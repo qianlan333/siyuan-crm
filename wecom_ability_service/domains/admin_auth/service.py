@@ -20,6 +20,7 @@ ROLE_LABELS = {
 
 MODULE_LABELS = {
     "automation_conversion": "自动化运营",
+    "channels": "渠道码中心",
     "cloud_orchestrator": "AI 助手",
     "customers": "客户",
     "user_ops_funnel": "激活漏斗",
@@ -39,6 +40,7 @@ MODULE_LABELS = {
 ROLE_MODULE_ACCESS = {
     "super_admin": {
         "automation_conversion",
+        "channels",
         "cloud_orchestrator",
         "customers",
         "user_ops_funnel",
@@ -56,6 +58,7 @@ ROLE_MODULE_ACCESS = {
     },
     "automation_admin": {
         "automation_conversion",
+        "channels",
         "cloud_orchestrator",
         "customers",
         "user_ops_funnel",
@@ -70,6 +73,7 @@ ROLE_MODULE_ACCESS = {
     "config_admin": {"wechat_pay_transactions", "wechat_pay_products", "wecom_tags", "jobs", "config", "api_docs", "sunset"},
     "viewer": {
         "automation_conversion",
+        "channels",
         "cloud_orchestrator",
         "customers",
         "user_ops_funnel",

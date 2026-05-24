@@ -1,0 +1,216 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/channel_admission_pages.css') }}">
+{% endblock %}
+
+{% block content %}
+{% set payload = channel_form_payload or {} %}
+{% set channel = payload.channel or {} %}
+{% set is_link = channel.carrier_type == "link" or channel.channel_type == "wecom_customer_acquisition" %}
+{% set owner_candidates = payload.owner_candidates or [] %}
+{% set selected_owner = namespace(display_name='') %}
+{% for item in owner_candidates %}
+  {% if item.owner_staff_id == channel.owner_staff_id %}
+    {% set selected_owner.display_name = item.display_name or item.owner_staff_id %}
+  {% endif %}
+{% endfor %}
+
+<div
+  class="channel-page"
+  data-channel-admission-page="channel-form"
+  data-is-edit="{{ '1' if payload.is_edit else '0' }}"
+  data-api-create="{{ payload.api_urls.channels }}"
+  data-api-detail="{{ payload.api_urls.detail }}"
+  data-admin-token="{{ admin_action_token }}"
+>
+  <script type="application/json" data-channel-bootstrap>{{ payload | tojson }}</script>
+
+  <section class="admin-card channel-section">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>{{ "编辑渠道" if payload.is_edit else "新建渠道" }}</h2>
+        <p>创建后默认独立使用，渠道中心不做运营计划关联。绑定只能在方案内“入口渠道”完成。</p>
+      </div>
+      <div class="channel-actions">
+        <a class="admin-button admin-button--secondary" href="{{ url_for('api.admin_channels_page') }}">返回渠道码中心</a>
+        <button class="admin-button admin-button--primary" type="button" data-save-channel>保存渠道</button>
+      </div>
+    </div>
+
+    <form class="channel-form-grid" data-channel-form>
+      <label class="admin-field">
+        <span>渠道名称</span>
+        <input name="channel_name" value="{{ channel.channel_name or '' }}" required>
+      </label>
+      <label class="admin-field">
+        <span>渠道类型</span>
+        <select name="channel_type" data-channel-type-select>
+          <option value="qrcode" {% if not is_link %}selected{% endif %}>普通二维码</option>
+          <option value="wecom_customer_acquisition" {% if is_link %}selected{% endif %}>企微获客助手链接</option>
+        </select>
+      </label>
+      <label class="admin-field">
+        <span>渠道编码</span>
+        <input name="channel_code" value="{{ channel.channel_code or '' }}" placeholder="CH-LIVE-0522">
+      </label>
+      <div class="admin-field">
+        <span>负责人</span>
+        <div class="channel-owner-card">
+          <div class="channel-owner-current" data-channel-owner-current>
+            {% if channel.owner_staff_id %}
+              <strong>{{ selected_owner.display_name or channel.owner_staff_id }}</strong>
+              <small>{{ channel.owner_staff_id }}</small>
+            {% else %}
+              <strong>未选择负责人</strong>
+              <small>从企业微信通讯录或后台成员中选择</small>
+            {% endif %}
+          </div>
+          <button class="admin-button admin-button--secondary" type="button" data-channel-owner-picker-open>{{ "更换负责人" if channel.owner_staff_id else "选择负责人" }}</button>
+        </div>
+        <input type="hidden" name="owner_staff_id" value="{{ channel.owner_staff_id or '' }}" data-channel-owner-staff-id>
+      </div>
+      <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
+        <span>企微渠道参数</span>
+        <input name="customer_channel" value="{{ channel.customer_channel or channel.scene_value or '' }}" placeholder="wca_p1001_xxx">
+      </label>
+      <label class="admin-field" data-link-field {% if not is_link %}hidden{% endif %}>
+        <span>企微获客助手原始链接</span>
+        <input name="link_url" value="{{ channel.link_url or '' }}" placeholder="https://work.weixin.qq.com/ca/cawcde...">
+      </label>
+      <label class="admin-field channel-form-wide" data-link-field {% if not is_link %}hidden{% endif %}>
+        <span>最终分享链接</span>
+        <input name="final_url" value="{{ channel.final_url or channel.share_url or '' }}" placeholder="保存后以后端生成为准">
+      </label>
+      <input type="hidden" name="status" value="{{ channel.status or 'active' }}">
+    </form>
+  </section>
+
+  <section class="channel-preview-grid" data-link-section {% if not is_link %}hidden{% endif %}>
+    <article class="admin-card channel-section">
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>企微获客助手链接预览</h2>
+          <p>该类型没有二维码下载动作，使用链接分享。</p>
+        </div>
+      </div>
+      <div class="channel-link-preview" data-link-preview>{{ channel.final_url or channel.share_url or channel.link_url or "填写原始链接和渠道参数后预览最终分享链接" }}</div>
+      <div class="channel-actions">
+        <button class="admin-button admin-button--secondary" type="button" data-copy-form-link>复制链接</button>
+        <button class="admin-button admin-button--secondary" type="button" data-share-form-link>分享链接</button>
+      </div>
+    </article>
+  </section>
+
+  <section class="admin-card channel-section">
+    <div class="admin-card-head admin-card-head--tight">
+      <div>
+        <h2>欢迎语与素材</h2>
+        <p>欢迎语、小程序、图片和 PDF 素材继续随渠道保存，素材总数最多 9 个。</p>
+      </div>
+      <div class="channel-actions">
+        <a class="admin-button admin-button--secondary" href="/admin/miniprogram-library">小程序素材库</a>
+        <a class="admin-button admin-button--secondary" href="/admin/attachment-library">附件素材库</a>
+      </div>
+    </div>
+    <div class="channel-form-grid">
+      <label class="admin-field channel-form-wide">
+        <span>欢迎语文本</span>
+        <textarea name="welcome_message" rows="4" data-welcome-message>{{ channel.welcome_message or '' }}</textarea>
+      </label>
+      <div class="admin-field">
+        <span>小程序素材</span>
+        <div class="channel-selector-box">
+          <div class="channel-selected-materials" data-miniprogram-selected></div>
+          <button class="admin-button admin-button--secondary" type="button" data-open-miniprogram-picker>预览并选择小程序</button>
+        </div>
+        <input type="hidden" name="welcome_miniprogram_library_ids" data-miniprogram-ids value="{{ (channel.welcome_miniprogram_library_ids or []) | join(',') }}">
+      </div>
+      <div class="admin-field">
+        <span>图片/PDF素材</span>
+        <div class="channel-selector-box">
+          <div class="channel-selected-materials" data-attachment-selected></div>
+          <button class="admin-button admin-button--secondary" type="button" data-open-attachment-picker>预览并选择图片/PDF</button>
+        </div>
+        <input type="hidden" name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}">
+      </div>
+      <div class="admin-field channel-form-wide">
+        <span>入渠标签</span>
+        <div class="channel-selector-box">
+          <div class="channel-selected-materials" data-tag-selected>
+            {% if channel.entry_tag_name %}
+              <span class="channel-material-chip">{{ channel.entry_tag_group_name or '标签' }} / {{ channel.entry_tag_name }}</span>
+            {% else %}
+              <span class="channel-muted">暂未选择标签</span>
+            {% endif %}
+          </div>
+          <button class="admin-button admin-button--secondary" type="button" data-open-tag-picker>预览并选择标签</button>
+        </div>
+        <input type="hidden" name="entry_tag_id" value="{{ channel.entry_tag_id or '' }}" data-entry-tag-id>
+        <input type="hidden" name="entry_tag_name" value="{{ channel.entry_tag_name or '' }}" data-entry-tag-name>
+        <input type="hidden" name="entry_tag_group_name" value="{{ channel.entry_tag_group_name or '' }}" data-entry-tag-group-name>
+      </div>
+    </div>
+  </section>
+
+  <aside class="channel-modal" data-resource-picker-modal hidden>
+    <div class="channel-modal__panel">
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2 data-resource-picker-title>预览并选择</h2>
+          <p data-resource-picker-subtitle>只选择已有素材，不在渠道页上传原始文件。</p>
+        </div>
+        <button class="channel-drawer__close" type="button" data-close-resource-picker>关闭</button>
+      </div>
+      <div class="channel-form-grid">
+        <label class="admin-field">
+          <span>搜索</span>
+          <input type="search" data-resource-picker-search placeholder="搜索名称">
+        </label>
+      </div>
+      <div class="channel-material-list" data-resource-picker-results></div>
+      <div class="channel-actions channel-actions--right">
+        <button class="admin-button admin-button--primary" type="button" data-confirm-resource-picker>确认选择</button>
+      </div>
+    </div>
+  </aside>
+
+  <aside class="channel-modal" data-channel-owner-modal hidden>
+    <div class="channel-modal__panel">
+      <div class="admin-card-head admin-card-head--tight">
+        <div>
+          <h2>选择负责人</h2>
+          <p>从已同步的企业微信通讯录、后台成员和负责人角色表中选择，不需要手动输入 ID。</p>
+        </div>
+        <button class="channel-drawer__close" type="button" data-channel-owner-picker-close>关闭</button>
+      </div>
+      {% if owner_candidates %}
+      <div class="channel-owner-list">
+        {% for item in owner_candidates %}
+        <div class="channel-owner-row">
+          <div class="channel-owner-title">
+            <strong>{{ item.display_name or item.owner_staff_id }}</strong>
+            <span>{{ item.position or item.source or item.owner_staff_id }}</span>
+            <small>{{ item.owner_staff_id }}</small>
+          </div>
+          <button
+            class="admin-button admin-button--primary"
+            type="button"
+            data-channel-owner-pick
+            data-owner-staff-id="{{ item.owner_staff_id }}"
+            data-owner-display-name="{{ item.display_name or item.owner_staff_id }}"
+          >选择</button>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <p class="channel-muted">还没有可选负责人，请先同步企业微信通讯录或创建后台成员。</p>
+      {% endif %}
+    </div>
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="{{ url_for('static', filename='admin_console/channel_admission_pages.js') }}"></script>
+{% endblock %}

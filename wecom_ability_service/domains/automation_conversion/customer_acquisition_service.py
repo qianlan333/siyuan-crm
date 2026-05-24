@@ -120,9 +120,14 @@ def create_customer_acquisition_link(payload: Mapping[str, Any]) -> dict[str, An
                 "program_id": program_id,
                 "channel_code": f"wecom_customer_acquisition_{customer_channel}",
                 "channel_name": link_name,
+                "channel_type": "wecom_customer_acquisition",
+                "carrier_type": "link",
                 "qr_url": final_url,
                 "qr_ticket": link_id,
                 "scene_value": customer_channel,
+                "customer_channel": customer_channel,
+                "link_url": link_url,
+                "final_url": final_url,
                 "welcome_message": "",
                 "auto_accept_friend": False,
                 "entry_tag_id": "",
@@ -151,6 +156,20 @@ def create_customer_acquisition_link(payload: Mapping[str, Any]) -> dict[str, An
                 "status": "active",
             }
         )
+        if program_id:
+            from .channel_binding_service import bind_channels_to_program
+
+            bind_channels_to_program(
+                int(program_id),
+                [int(channel["id"])],
+                {
+                    "binding_status": "active",
+                    "auto_enter_pool": True,
+                    "initial_audience_code": initial_audience_code,
+                    "entry_rule_json": {"source": "wecom_customer_acquisition_link"},
+                },
+                operator_id="wecom_customer_acquisition",
+            )
         db.commit()
     except Exception:
         db.rollback()

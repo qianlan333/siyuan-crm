@@ -192,6 +192,19 @@ def _allow_legacy_channel_fallback(program_id: int | None) -> bool:
         return False
 
 
+def _ensure_program_binding_for_channel(program_id: int | None, channel: dict[str, Any], *, operator: str = "") -> None:
+    if int(program_id or 0) <= 0 or int((channel or {}).get("id") or 0) <= 0:
+        return
+    from .channel_binding_service import bind_channels_to_program
+
+    bind_channels_to_program(
+        int(program_id or 0),
+        [int(channel["id"])],
+        {"binding_status": "active", "auto_enter_pool": True},
+        operator_id=_normalized_text(operator) or "program_entry_channel",
+    )
+
+
 
 def get_default_channel_settings_payload(*, program_id: int | None = None) -> dict[str, Any]:
     normalized_program_id = int(program_id or 0) or None
@@ -265,7 +278,7 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
         or entry_tag_payload["entry_tag_name"] != _normalized_text(existing.get("entry_tag_name"))
         or entry_tag_payload["entry_tag_group_name"] != _normalized_text(existing.get("entry_tag_group_name"))
     )
-    repo.save_channel(
+    saved = repo.save_channel(
         {
             "program_id": normalized_program_id,
             "channel_code": _program_default_channel_code(normalized_program_id),
@@ -286,6 +299,11 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
                 else (_normalized_text(payload.get("channel_status")) or _normalized_text(existing.get("status")) or CHANNEL_STATUS_CONFIGURED)
             ),
         }
+    )
+    _ensure_program_binding_for_channel(
+        normalized_program_id,
+        saved,
+        operator="program_entry_channel_settings",
     )
     get_db().commit()
     return get_default_channel_settings_payload(program_id=normalized_program_id)
@@ -418,6 +436,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
             "status": _normalized_text(channel_payload.get("status")) or CHANNEL_STATUS_ACTIVE,
         }
     )
+    _ensure_program_binding_for_channel(normalized_program_id, saved, operator=operator)
     get_db().commit()
     return {
         "generated": True,

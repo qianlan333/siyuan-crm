@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from flask import redirect, url_for
+from werkzeug.routing import BuildError
 
 from ..domains.admin_dashboard import (
     build_admin_shell_status,
@@ -13,6 +14,41 @@ def _breadcrumb_items(*items: tuple[str, str | None]) -> list[dict[str, str]]:
         {"label": label, "href": href or ""}
         for label, href in items
     ]
+
+
+_ADMIN_NAV_FALLBACK_HREFS = {
+    "api.admin_automation_conversion": "/admin/automation-conversion",
+    "api.admin_channels_page": "/admin/channels",
+    "api.admin_cloud_orchestrator_workspace": "/admin/cloud-orchestrator",
+    "api.admin_console_customers": "/admin/customers",
+    "api.admin_hxc_dashboard_workspace": "/admin/hxc-dashboard",
+    "api.admin_console_questionnaires": "/admin/questionnaires",
+    "api.admin_wecom_tags_page": "/admin/wecom-tags",
+    "api.admin_wechat_pay_transactions_page": "/admin/wechat-pay/transactions",
+    "api.admin_wechat_pay_products_page": "/admin/wechat-pay/products",
+    "api.admin_image_library_workspace": "/admin/image-library",
+    "api.admin_miniprogram_library_workspace": "/admin/miniprogram-library",
+    "api.admin_attachment_library_workspace": "/admin/attachment-library",
+    "api.admin_console_jobs": "/admin/jobs",
+    "api.admin_config_home": "/admin/config",
+    "api.admin_console_api_docs": "/admin/api-docs",
+}
+
+
+def _admin_nav_href(endpoint: str) -> str:
+    try:
+        return url_for(endpoint)
+    except BuildError:
+        return _ADMIN_NAV_FALLBACK_HREFS.get(endpoint, "#")
+
+
+def _navigation_with_hrefs(active_nav: str) -> list[dict]:
+    groups = []
+    for group in list_admin_navigation(active_nav):
+        items = [{**item, "href": _admin_nav_href(str(item.get("endpoint") or ""))} for item in group["items"]]
+        groups.append({**group, "items": items})
+    return groups
+
 
 def _render_admin_template(
     template_name: str,
@@ -32,7 +68,7 @@ def _render_admin_template(
         page_title=page_title,
         page_summary=page_summary,
         breadcrumbs=breadcrumbs,
-        nav_items=list_admin_navigation(active_nav),
+        nav_items=_navigation_with_hrefs(active_nav),
         shell_status=build_admin_shell_status(),
         current_admin_user=current_admin_session_user(),
         admin_action_token=extra.pop("admin_action_token", ensure_admin_console_action_token()),

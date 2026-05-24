@@ -473,6 +473,7 @@ def _automation_program_workspace_tabs(program_id: int, active_key: str) -> list
     normalized_program_id = int(program_id)
     tabs = (
         ("overview", "概览", "api.admin_automation_program_overview"),
+        ("entry_channels", "入口渠道", "api.admin_automation_program_entry_channels"),
         ("flow_design", "基础配置", "api.admin_automation_program_flow_design"),
         ("member_ops", "成员运营", "api.admin_automation_program_member_ops"),
         ("operations", "运营编排", "api.admin_automation_program_operations"),

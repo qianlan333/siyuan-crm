@@ -1,0 +1,341 @@
+.channel-page {
+  display: grid;
+  gap: 16px;
+}
+
+.channel-section {
+  border-radius: 8px;
+}
+
+.channel-metric-grid,
+.channel-two-column,
+.channel-preview-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.channel-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.channel-two-column,
+.channel-preview-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.channel-metric {
+  display: grid;
+  gap: 6px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-strong);
+}
+
+.channel-metric span,
+.channel-muted,
+.channel-sub,
+.channel-code {
+  color: var(--muted);
+}
+
+.channel-metric strong {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.channel-metric em {
+  font-style: normal;
+  color: #4e5969;
+  font-size: 13px;
+}
+
+.channel-actions,
+.channel-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.channel-actions--right {
+  justify-content: flex-end;
+  margin-top: 14px;
+}
+
+.channel-search {
+  min-width: 260px;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+}
+
+.channel-table {
+  min-width: 1080px;
+}
+
+.channel-table strong,
+.channel-code,
+.channel-sub {
+  display: block;
+}
+
+.channel-code {
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.channel-sub {
+  margin-top: 2px;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.channel-row-actions .admin-button {
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+}
+
+.channel-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  margin: 2px 4px 2px 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fffdf8;
+  color: #4e5969;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.channel-pill.is-qrcode {
+  color: #1456f0;
+  background: #eef4ff;
+  border-color: #c8d7ff;
+}
+
+.channel-pill.is-link {
+  color: #6d3f00;
+  background: #fff4d9;
+  border-color: #f4d48a;
+}
+
+.channel-pill.is-ok,
+.channel-pill.is-standalone {
+  color: #067647;
+  background: #ecfdf3;
+  border-color: #b7e6cb;
+}
+
+.channel-pill.is-bound {
+  color: #73431a;
+  background: var(--brand-soft);
+}
+
+.channel-pill.is-status {
+  color: #344054;
+  background: #f5f6f7;
+}
+
+.channel-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.channel-form-wide {
+  grid-column: 1 / -1;
+}
+
+.channel-owner-card {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.channel-owner-current,
+.channel-owner-title {
+  display: grid;
+  gap: 3px;
+}
+
+.channel-owner-current small,
+.channel-owner-title span,
+.channel-owner-title small {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.channel-owner-list {
+  display: grid;
+  gap: 10px;
+}
+
+.channel-owner-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.channel-qr-preview {
+  width: 148px;
+  height: 148px;
+  margin-bottom: 14px;
+  border: 10px solid #fff;
+  box-shadow: 0 0 0 1px var(--line);
+  background:
+    linear-gradient(45deg, #22190d 25%, transparent 25%),
+    linear-gradient(-45deg, #22190d 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #22190d 75%),
+    linear-gradient(-45deg, transparent 75%, #22190d 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+
+.channel-link-preview,
+.channel-json-preview {
+  width: 100%;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+  color: #344054;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.channel-rule-list {
+  margin: 0;
+  padding-left: 18px;
+  color: #4e5969;
+  line-height: 1.8;
+}
+
+.channel-modal,
+.channel-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(39, 29, 16, 0.28);
+}
+
+.channel-modal[hidden],
+.channel-drawer[hidden],
+[data-link-field][hidden],
+[data-link-section][hidden],
+[data-qrcode-field][hidden],
+[data-qrcode-section][hidden] {
+  display: none;
+}
+
+.channel-modal__panel,
+.channel-drawer__panel {
+  border: 1px solid var(--line);
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-hover);
+}
+
+.channel-modal__panel {
+  width: min(920px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  margin: 24px auto;
+  padding: 18px;
+  border-radius: 8px;
+  overflow: auto;
+}
+
+.channel-drawer__panel {
+  margin-left: auto;
+  width: min(520px, 100vw);
+  min-height: 100%;
+  padding: 22px;
+}
+
+.channel-drawer__close {
+  float: right;
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf8;
+  color: var(--text);
+}
+
+.channel-selected-materials,
+.channel-material-list {
+  display: grid;
+  gap: 8px;
+}
+
+.channel-selector-box {
+  display: grid;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.channel-material-chip,
+.channel-material-row {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+}
+
+.channel-material-chip {
+  width: fit-content;
+}
+
+.channel-material-row {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 10px;
+  align-items: center;
+}
+
+.channel-material-row--preview {
+  cursor: pointer;
+}
+
+.channel-material-row span {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .channel-metric-grid,
+  .channel-two-column,
+  .channel-preview-grid,
+  .channel-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .channel-search {
+    min-width: 100%;
+  }
+}

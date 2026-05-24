@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from flask import url_for
 
+from ..domains.automation_conversion.admission_service import list_admission_attempts
+from ..domains.automation_conversion.channel_binding_service import (
+    ensure_legacy_program_channel_bindings,
+    list_channels,
+    list_program_channel_bindings,
+)
+from ..domains.automation_conversion.program_setup_service import list_owner_candidates
 from ..domains.automation_conversion.program_service import list_automation_programs
 from ._routes_helpers import (
     _program_route_or_main,
@@ -182,6 +189,142 @@ def _render_member_ops_page(*, page_error: str = "", program: dict[str, object] 
         member_ops_workspace=_build_member_ops_workspace(),
         page_error=page_error,
         admin_action_token=ensure_admin_console_action_token(),
+    )
+
+
+def _render_entry_channels_page(*, page_error: str = "", program: dict[str, object] | None = None):
+    program_id = int((program or {}).get("id") or 0)
+    legacy_binding_report = ensure_legacy_program_channel_bindings()
+    channels = list_channels(limit=300)
+    bindings = list_program_channel_bindings(program_id) if program_id else []
+    display_bindings = [
+        {
+            "id": item.get("id"),
+            "program_id": item.get("program_id"),
+            "channel_id": item.get("channel_id"),
+            "binding_status": item.get("binding_status"),
+            "bound_at": item.get("bound_at"),
+            "unbound_at": item.get("unbound_at"),
+            "channel": item.get("channel") or {},
+        }
+        for item in bindings
+    ]
+    bound_channel_ids = {
+        int(((item.get("channel") or {}).get("id") or item.get("channel_id") or 0))
+        for item in display_bindings
+        if str(item.get("binding_status") or "") == "active"
+    }
+    candidate_channels = [
+        item
+        for item in channels
+        if not item.get("bound_program_id") and int(item.get("id") or 0) not in bound_channel_ids
+    ]
+    return _render_admin_template(
+        "automation_conversion_entry_channels.html",
+        active_nav="automation_conversion",
+        page_title="入口渠道",
+        page_summary="在当前自动化运营方案内绑定已有渠道。普通二维码和企微获客助手链接都可以入池，但一个渠道同一时间只能 active 绑定一个方案。",
+        breadcrumbs=_breadcrumb_items(
+            ("客户管理后台", url_for("api.admin_console_home")),
+            ("自动化运营方案", url_for("api.admin_automation_conversion")),
+            ((program or {}).get("program_name") or "自动化运营", url_for("api.admin_automation_program_overview", program_id=program_id) if program_id else None),
+            ("入口渠道", None),
+        ),
+        page_actions=[
+            {"label": "渠道码中心", "href": url_for("api.admin_channels_page"), "variant": "secondary"},
+        ],
+        workspace_tabs=_automation_program_workspace_tabs(program_id, "entry_channels") if program_id else [],
+        program_context=_program_context(program, active_key="entry_channels") if program else None,
+        entry_channels_payload={
+            "program": program or {},
+            "bindings": display_bindings,
+            "channels": channels,
+            "candidate_channels": candidate_channels,
+            "admission_attempts": list_admission_attempts(program_id, limit=30) if program_id else [],
+            "legacy_binding_report": legacy_binding_report,
+            "api_urls": {
+                "bindings": url_for("api.api_admin_program_channel_bindings", program_id=program_id),
+                "binding_base": url_for("api.api_admin_program_channel_binding_detail", program_id=program_id, binding_id=0),
+                "member_stage_summary_base": url_for("api.api_admin_program_channel_binding_member_stage_summary", program_id=program_id, binding_id=0),
+                "import": url_for("api.api_admin_program_channel_bindings_import", program_id=program_id),
+                "attempts": url_for("api.api_admin_program_admission_attempts", program_id=program_id),
+                "channels": url_for("api.api_admin_channels"),
+            },
+        },
+        admin_action_token=ensure_admin_console_action_token(),
+        page_error=page_error,
+        show_shell_meta=False,
+    )
+
+
+def _render_channel_center_page(*, page_error: str = "", page_notice: str = ""):
+    legacy_binding_report = ensure_legacy_program_channel_bindings()
+    channels = list_channels(limit=300)
+    return _render_admin_template(
+        "channel_code_center.html",
+        active_nav="channels",
+        page_title="渠道码中心",
+        page_summary="渠道是独立获客资源。普通二维码下载二维码图片；企微获客助手是链接型渠道，只复制或分享链接。",
+        breadcrumbs=_breadcrumb_items(
+            ("客户管理后台", url_for("api.admin_console_home")),
+            ("渠道码中心", None),
+        ),
+        page_actions=[
+            {"label": "新建渠道", "href": url_for("api.admin_channel_new_page"), "variant": "primary"},
+        ],
+        channel_center_payload={
+            "channels": channels,
+            "legacy_binding_report": legacy_binding_report,
+            "api_urls": {
+                "channels": url_for("api.api_admin_channels"),
+                "detail_base": url_for("api.api_admin_channel_detail", channel_id=0),
+                "contacts_base": url_for("api.api_admin_channel_contacts", channel_id=0),
+                "bindings_base": url_for("api.api_admin_channel_bindings", channel_id=0),
+                "qrcode_download_base": url_for("api.api_admin_channel_qrcode_download", channel_id=0),
+                "share_link_base": url_for("api.api_admin_channel_share_link", channel_id=0),
+            },
+        },
+        page_error=page_error,
+        page_notice=page_notice,
+        admin_action_token=ensure_admin_console_action_token(),
+        show_shell_meta=False,
+    )
+
+
+def _render_channel_form_page(*, channel: dict[str, object] | None = None, page_error: str = ""):
+    is_edit = bool(channel)
+    return _render_admin_template(
+        "channel_code_form.html",
+        active_nav="channels",
+        page_title="编辑渠道" if is_edit else "新建渠道",
+        page_summary="创建渠道资产本身，不在渠道中心绑定自动化运营。普通二维码和企微获客助手链接按载体类型显示不同操作。",
+        breadcrumbs=_breadcrumb_items(
+            ("客户管理后台", url_for("api.admin_console_home")),
+            ("渠道码中心", url_for("api.admin_channels_page")),
+            ("编辑渠道" if is_edit else "新建渠道", None),
+        ),
+        channel_form_payload={
+            "channel": channel or {
+                "channel_type": "qrcode",
+                "carrier_type": "qrcode",
+                "status": "active",
+                "welcome_miniprogram_library_ids": [],
+                "welcome_attachment_library_ids": [],
+            },
+            "owner_candidates": list_owner_candidates(),
+            "is_edit": is_edit,
+            "api_urls": {
+                "channels": url_for("api.api_admin_channels"),
+                "detail": url_for("api.api_admin_channel_detail", channel_id=int((channel or {}).get("id") or 0)) if is_edit else "",
+                "qrcode_download": url_for("api.api_admin_channel_qrcode_download", channel_id=int((channel or {}).get("id") or 0)) if is_edit else "",
+                "share_link": url_for("api.api_admin_channel_share_link", channel_id=int((channel or {}).get("id") or 0)) if is_edit else "",
+                "welcome_materials": url_for("api.api_admin_channel_welcome_materials"),
+                "wecom_tags": "/api/admin/wecom/tags",
+            },
+        },
+        page_error=page_error,
+        admin_action_token=ensure_admin_console_action_token(),
+        show_shell_meta=False,
     )
 
 

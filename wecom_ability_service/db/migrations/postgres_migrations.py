@@ -184,6 +184,12 @@ def _ensure_postgres_attachment_library(db) -> None:
     )
     db.execute(
         """
+        ALTER TABLE IF EXISTS automation_channel
+        ADD COLUMN IF NOT EXISTS welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+        """
+    )
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS attachment_library (
             id BIGSERIAL PRIMARY KEY,
             name TEXT NOT NULL DEFAULT '',
@@ -1269,6 +1275,219 @@ def _ensure_postgres_automation_program_tables(db) -> None:
     )
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS automation_program_channel_binding (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+            binding_status TEXT NOT NULL DEFAULT 'active'
+                CHECK (binding_status IN ('active', 'paused', 'archived')),
+            auto_enter_pool BOOLEAN NOT NULL DEFAULT TRUE,
+            initial_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'
+                CHECK (initial_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+            entry_rule_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            priority INTEGER NOT NULL DEFAULT 0,
+            bound_by TEXT NOT NULL DEFAULT '',
+            bound_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            unbound_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_automation_program_channel_binding_program_channel UNIQUE (program_id, channel_id)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_program_channel_binding_active_channel
+        ON automation_program_channel_binding (channel_id)
+        WHERE binding_status = 'active'
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_channel_binding_program
+        ON automation_program_channel_binding (program_id, binding_status, priority DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_channel_binding_channel
+        ON automation_program_channel_binding (channel_id, binding_status, priority DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_channel_contact (
+            id BIGSERIAL PRIMARY KEY,
+            channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+            external_contact_id TEXT NOT NULL DEFAULT '',
+            master_customer_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            owner_staff_id TEXT NOT NULL DEFAULT '',
+            first_channel_entered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_channel_entered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            enter_count INTEGER NOT NULL DEFAULT 1,
+            source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_channel_contact_external
+        ON automation_channel_contact (channel_id, external_contact_id)
+        WHERE external_contact_id <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_contact_channel_last
+        ON automation_channel_contact (channel_id, last_channel_entered_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_contact_external
+        ON automation_channel_contact (external_contact_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_program_member (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            external_contact_id TEXT NOT NULL DEFAULT '',
+            master_customer_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            source_channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+            source_binding_id BIGINT REFERENCES automation_program_channel_binding(id) ON DELETE SET NULL,
+            first_source_channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+            latest_source_channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+            in_program BOOLEAN NOT NULL DEFAULT TRUE,
+            current_stage_code TEXT NOT NULL DEFAULT '',
+            current_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire'
+                CHECK (current_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+            current_stage_entered_at TIMESTAMPTZ,
+            pool_entered_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            exited_at TIMESTAMPTZ,
+            exit_reason TEXT NOT NULL DEFAULT '',
+            reentry_count INTEGER NOT NULL DEFAULT 0,
+            state_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_program_member_external
+        ON automation_program_member (program_id, external_contact_id)
+        WHERE external_contact_id <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_audience
+        ON automation_program_member (program_id, current_stage_code, current_audience_code)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_member_source_channel
+        ON automation_program_member (source_channel_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_member_latest_channel
+        ON automation_program_member (latest_source_channel_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_program_admission_attempt (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+            binding_id BIGINT REFERENCES automation_program_channel_binding(id) ON DELETE SET NULL,
+            external_contact_id TEXT NOT NULL DEFAULT '',
+            master_customer_id BIGINT REFERENCES people(id) ON DELETE SET NULL,
+            trigger_type TEXT NOT NULL DEFAULT 'channel_enter',
+            trigger_event_id TEXT NOT NULL DEFAULT '',
+            trigger_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            admission_status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (admission_status IN ('standalone_channel', 'pending', 'accepted', 'waiting', 'converted', 'rejected', 'duplicate_active', 'manual_review')),
+            pool_entered_at TIMESTAMPTZ,
+            stage_code TEXT NOT NULL DEFAULT '',
+            audience_code TEXT NOT NULL DEFAULT '',
+            stage_entered_at TIMESTAMPTZ,
+            entry_reason TEXT NOT NULL DEFAULT '',
+            cleaning_result_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_program
+        ON automation_program_admission_attempt (program_id, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_channel
+        ON automation_program_admission_attempt (channel_id, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_external
+        ON automation_program_admission_attempt (external_contact_id, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_admission_attempt_status
+        ON automation_program_admission_attempt (admission_status, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_program_member_stage_history (
+            id BIGSERIAL PRIMARY KEY,
+            program_member_id BIGINT NOT NULL REFERENCES automation_program_member(id) ON DELETE CASCADE,
+            program_id BIGINT NOT NULL REFERENCES automation_program(id) ON DELETE CASCADE,
+            stage_code TEXT NOT NULL,
+            audience_code TEXT NOT NULL DEFAULT '',
+            entered_at TIMESTAMPTZ NOT NULL,
+            exited_at TIMESTAMPTZ,
+            entry_reason TEXT NOT NULL DEFAULT '',
+            source_event_type TEXT NOT NULL DEFAULT '',
+            source_event_id TEXT NOT NULL DEFAULT '',
+            snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_history_member
+        ON automation_program_member_stage_history (program_member_id, entered_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_history_stage
+        ON automation_program_member_stage_history (program_id, stage_code, entered_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_program_member_stage_history_audience
+        ON automation_program_member_stage_history (program_id, audience_code, entered_at DESC)
+        """
+    )
+    db.execute(
+        """
         ALTER TABLE IF EXISTS automation_workflow
         ADD COLUMN IF NOT EXISTS program_id BIGINT REFERENCES automation_program(id) ON DELETE SET NULL
         """
@@ -1352,6 +1571,15 @@ def _init_postgres(db) -> None:
         ADD COLUMN IF NOT EXISTS program_id BIGINT
         """
     )
+    for stmt in (
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS channel_type TEXT NOT NULL DEFAULT 'qrcode'",
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS carrier_type TEXT NOT NULL DEFAULT 'qrcode'",
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS customer_channel TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS link_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS final_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
+    ):
+        db.execute(stmt)
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_channel

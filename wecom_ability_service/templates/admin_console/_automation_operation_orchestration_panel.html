@@ -84,7 +84,7 @@
         <div class="op-task-grid op-task-grid--three">
           <label class="op-task-field"><span>触发方式</span><select data-field="trigger_type"><option value="scheduled_daily">每天固定时间触发</option><option value="audience_entered">进入人群后立即触发</option></select></label>
           <label class="op-task-field" data-scheduled-trigger-field><span>每天触发时间</span><input data-field="send_time" type="time"></label>
-          <label class="op-task-field"><span>触达对象所在阶段</span><select data-field="target_stage_code">
+          <label class="op-task-field"><span>目标人群所在阶段</span><select data-field="target_stage_code">
             {% for stage in targetable_stages %}
               {% set stage_description = '已通过前置条件' if stage.stage_code == 'operating' else '已确认成交' if stage.stage_code == 'converted' else stage.description %}
               <option value="{{ stage.stage_code }}" data-audience-code="{{ stage.compat_audience_code or '' }}">{{ stage.label }}{% if stage_description %} · {{ stage_description }}{% endif %}</option>

@@ -181,17 +181,6 @@ from .automation_conversion_workflows import (
     api_admin_automation_conversion_workflow_update,
     api_admin_automation_conversion_workflows,
 )
-from .internal_auth import validate_admin_console_action_token
-from ..domains.automation_conversion.channel_service import generate_default_channel_qr
-from ..domains.automation_conversion.message_activity_service import run_message_activity_sync
-from ..domains.automation_conversion.reply_monitor_service import (
-    run_due_reply_monitor,
-    run_reply_monitor_capture,
-    run_router_test_dispatch,
-    save_reply_monitor_enabled,
-)
-from ..domains.automation_conversion.service import save_settings
-from ..domains.automation_conversion.workflow_service import apply_dashboard_signup_tag
 def register_routes(bp):
     bp.route("/admin/automation-conversion", methods=["GET"])(admin_automation_conversion)
     bp.route("/admin/automation-conversion/programs/new", methods=["GET"])(admin_automation_program_new)
@@ -243,7 +232,6 @@ def register_routes(bp):
     bp.route("/admin/automation-conversion/auto-reply/reply-monitor/toggle", methods=["POST"])(admin_automation_auto_reply_monitor_toggle)
     bp.route("/admin/automation-conversion/auto-reply/reply-monitor/capture", methods=["POST"])(admin_automation_auto_reply_monitor_capture)
     bp.route("/admin/automation-conversion/auto-reply/reply-monitor/run-due", methods=["POST"])(admin_automation_auto_reply_monitor_run_due)
-
     bp.route("/api/admin/automation-conversion/member", methods=["GET"])(api_admin_automation_conversion_member)
     bp.route("/api/admin/automation-conversion/member/put-in-pool", methods=["POST"])(api_admin_automation_conversion_put_in_pool)
     bp.route("/api/admin/automation-conversion/member/remove-from-pool", methods=["POST"])(api_admin_automation_conversion_remove_from_pool)

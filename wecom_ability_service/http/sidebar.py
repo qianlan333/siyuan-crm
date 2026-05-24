@@ -59,8 +59,12 @@ def _bind_external_contact_identity_payload(
 
 
 def sidebar_bind_mobile_page():
+    v2_flag = str(current_app.config.get("SIDEBAR_WORKBENCH_V2_ENABLED", "true") or "").strip().lower()
+    v2_enabled = v2_flag not in {"0", "false", "no", "off"}
+    legacy_requested = str(request.args.get("v", "") or "").strip().lower() == "legacy"
+    template = "sidebar_customer_workbench.html" if v2_enabled and not legacy_requested else "sidebar_bind_mobile.html"
     return render_template(
-        "sidebar_bind_mobile.html",
+        template,
         debug_enabled=bool(current_app.config.get("DEBUG")),
     )
 

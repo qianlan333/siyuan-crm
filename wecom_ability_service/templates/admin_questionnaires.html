@@ -534,6 +534,18 @@
       font-size: 12px;
       font-weight: 700;
     }
+    .profile-map-chip {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 6px;
+      padding: 5px 9px;
+      border-radius: 999px;
+      background: #eef6ee;
+      color: #23784d;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
     .preview-options {
       display: grid;
       gap: 8px;
@@ -1956,6 +1968,13 @@
     let toastTimer = null;
     const DEFAULT_ASSESSMENT_TEMPLATE_ID = 'siyuan_ip_business';
     const DEFAULT_ASSESSMENT_TEMPLATE_NAME = '小 IP 商业力测评';
+    const SIDEBAR_PROFILE_FIELD_OPTIONS = [
+      { value: '', label: '无，不映射到侧边栏' },
+      { value: 'source', label: '用户来源' },
+      { value: 'industry', label: '行业信息' },
+      { value: 'industry_description', label: '行业具体描述' },
+      { value: 'needs_blockers_followup', label: '需求、卡点、跟进状态' },
+    ];
 
     function nextLocalKey(prefix) {
       localSeq += 1;
@@ -2002,6 +2021,29 @@
       if (type === 'textarea') return '文本题';
       if (type === 'mobile') return '手机号题';
       return type || '题目';
+    }
+
+    function normalizeSidebarProfileField(value) {
+      const normalized = String(value || '').trim();
+      return SIDEBAR_PROFILE_FIELD_OPTIONS.some((item) => item.value === normalized) ? normalized : '';
+    }
+
+    function sidebarProfileFieldLabel(value) {
+      const normalized = normalizeSidebarProfileField(value);
+      if (!normalized) return '';
+      return SIDEBAR_PROFILE_FIELD_OPTIONS.find((item) => item.value === normalized)?.label || '';
+    }
+
+    function sidebarProfileFieldOptionsHtml(value) {
+      const normalized = normalizeSidebarProfileField(value);
+      return SIDEBAR_PROFILE_FIELD_OPTIONS.map((item) => `
+        <option value="${escapeHtml(item.value)}" ${item.value === normalized ? 'selected' : ''}>${escapeHtml(item.label)}</option>
+      `).join('');
+    }
+
+    function sidebarProfileChipHtml(question) {
+      const label = sidebarProfileFieldLabel(question.sidebar_profile_field);
+      return label ? `<span class="profile-map-chip">${escapeHtml(label)}</span>` : '';
     }
 
     function buildDefaultAssessmentConfig() {
@@ -2827,6 +2869,7 @@
         title: question.title || '',
         placeholder_text: question.placeholder_text || '',
         assessment_dimension_key: question.assessment_dimension_key || '',
+        sidebar_profile_field: normalizeSidebarProfileField(question.sidebar_profile_field),
         assessment_template_id: question.assessment_template_id || '',
         assessment_template_name: question.assessment_template_name || '',
         required: Boolean(question.required),
@@ -3106,6 +3149,7 @@
             type: question.type,
             title: question.title,
             assessment_dimension_key: question.assessment_dimension_key || '',
+            sidebar_profile_field: normalizeSidebarProfileField(question.sidebar_profile_field),
             required: Boolean(question.required),
             sort_order: Number(question.sort_order || (index + 1)),
           };
@@ -3492,7 +3536,7 @@
               </div>
             `).join('');
             card.innerHTML = `
-              <div class="question-meta-row"><span>Q${escapeHtml(String(questionIndex + 1).padStart(2, '0'))} / ${escapeHtml(dimensionName)}</span><span>单选测评题</span></div>
+              <div class="question-meta-row"><span>Q${escapeHtml(String(questionIndex + 1).padStart(2, '0'))} / ${escapeHtml(dimensionName)}</span><span>单选测评题${sidebarProfileChipHtml(question)}</span></div>
               <h4>${escapeHtml(question.title || '题目标题')}</h4>
               <div class="preview-options">${optionPreview}</div>
             `;
@@ -3513,6 +3557,7 @@
               <span class="question-type">
                 ${escapeHtml(formatQuestionType(question.type))}${question.required ? ' · 必填' : ''}${state.questionnaire.assessment_enabled && question.assessment_dimension_key ? ` · ${escapeHtml(formatAssessmentDimensionName(question.assessment_dimension_key) || question.assessment_dimension_key)}` : ''}
               </span>
+              ${sidebarProfileChipHtml(question)}
               <h4>${escapeHtml(question.title || '题目标题')}</h4>
               <div class="preview-options">${optionPreview}</div>
             `;
@@ -4270,6 +4315,17 @@
             <input id="question-required" type="checkbox" ${question.required ? 'checked' : ''}> 必填
           </label>
         </section>
+        <section class="config-group">
+          <div class="config-head">
+            <div><h3>侧边栏核心画像映射</h3></div>
+          </div>
+          <label class="field">同步字段
+            <select id="question-sidebar-profile-field">
+              ${sidebarProfileFieldOptionsHtml(question.sidebar_profile_field)}
+            </select>
+          </label>
+          <p>用户填什么就同步什么；多个题目映射同一字段时，后填写覆盖前填写。</p>
+        </section>
         <section class="config-group${['textarea', 'mobile'].includes(question.type) ? ' hidden' : ''}" id="question-options-group">
           <div class="config-head">
             <div><h3>选项</h3></div>
@@ -4298,6 +4354,10 @@
       }
       inspectorBodyEl.querySelector('#question-required').addEventListener('change', (event) => {
         question.required = event.target.checked;
+        renderPreview();
+      });
+      inspectorBodyEl.querySelector('#question-sidebar-profile-field').addEventListener('change', (event) => {
+        question.sidebar_profile_field = normalizeSidebarProfileField(event.target.value);
         renderPreview();
       });
       inspectorBodyEl.querySelector('#question-type').addEventListener('change', (event) => {
@@ -4764,6 +4824,15 @@
             <label class="field">题目说明 / 占位提示
               <input data-question-field="placeholder_text" value="${escapeHtml(question.placeholder_text || '')}" placeholder="可选">
             </label>
+            <section class="config-group" style="margin:0 0 12px;">
+              <div class="config-head">
+                <div><h3>侧边栏核心画像映射</h3></div>
+              </div>
+              <label class="field">同步字段
+                <select data-question-field="sidebar_profile_field">${sidebarProfileFieldOptionsHtml(question.sidebar_profile_field)}</select>
+              </label>
+              <p>用户填什么就同步什么；多个题目映射同一字段时，后填写覆盖前填写。</p>
+            </section>
             <div class="config-head" style="margin:8px 0;">
               <div><h4 style="margin:0;font-size:13px;">选项</h4></div>
               <button type="button" class="btn secondary" data-add-option="${escapeHtml(question.local_key)}" ${['textarea', 'mobile'].includes(question.type) ? 'disabled' : ''}>添加选项</button>
@@ -4990,6 +5059,8 @@
         question.type = event.target.value;
         if (['textarea', 'mobile'].includes(question.type)) question.options = [];
         else if (!question.options.length) question.options = [createOption({}, 0)];
+      } else if (field === 'sidebar_profile_field') {
+        question.sidebar_profile_field = normalizeSidebarProfileField(event.target.value);
       } else {
         question[field] = event.target.value;
       }
@@ -5475,7 +5546,7 @@
         </div>
         ${questions.map((question, index) => `
           <div class="h5-question-v2">
-            <div class="question-meta-row"><span>第 ${index + 1} 题</span><span>${escapeHtml(formatQuestionType(question.type))}</span></div>
+            <div class="question-meta-row"><span>第 ${index + 1} 题</span><span>${escapeHtml(formatQuestionType(question.type))}${sidebarProfileChipHtml(question)}</span></div>
             <strong>${escapeHtml(question.title || '题目标题')}</strong>
             ${['textarea', 'mobile'].includes(question.type)
               ? `<div class="h5-option-v2"><span>${escapeHtml(question.placeholder_text || '开放输入')}</span></div>`

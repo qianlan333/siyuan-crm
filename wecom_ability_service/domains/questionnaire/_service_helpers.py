@@ -38,6 +38,7 @@ from ...infra.json_utils import (
 questionnaire_logger = logging.getLogger("questionnaire")
 QUESTIONNAIRE_TYPES = {"single_choice", "multi_choice", "textarea", "mobile"}
 QUESTIONNAIRE_ANSWER_DISPLAY_MODES = {"all_in_one", "one_by_one"}
+QUESTIONNAIRE_SIDEBAR_PROFILE_FIELDS = {"", "source", "industry", "industry_description", "needs_blockers_followup"}
 QUESTIONNAIRE_EXTERNAL_PUSH_STATUS_SUCCESS = "success"
 QUESTIONNAIRE_EXTERNAL_PUSH_STATUS_FAILED = "failed"
 QUESTIONNAIRE_EXTERNAL_PUSH_STATUS_SKIPPED = "skipped"
@@ -287,6 +288,13 @@ def _normalize_answer_display_mode(value: Any, *, strict: bool = False) -> str:
     return "all_in_one"
 
 
+def _normalize_sidebar_profile_field(value: Any) -> str:
+    normalized = str(value or "").strip()
+    if normalized in QUESTIONNAIRE_SIDEBAR_PROFILE_FIELDS:
+        return normalized
+    raise ValueError("sidebar_profile_field is invalid")
+
+
 def _normalize_questionnaire_payload(
     payload: dict[str, Any],
     *,
@@ -367,6 +375,7 @@ def _normalize_questionnaire_payload(
             "assessment_dimension_key": str(
                 item.get("assessment_dimension_key") or item.get("dimension_key") or ""
             ).strip(),
+            "sidebar_profile_field": _normalize_sidebar_profile_field(item.get("sidebar_profile_field")),
             "required": _normalize_bool(item.get("required")),
             "sort_order": _normalize_int(item.get("sort_order"), index),
             "options": [],
@@ -500,7 +509,7 @@ def _load_questionnaire_questions(questionnaire_id: int) -> list[dict[str, Any]]
         db,
         """
         SELECT id, questionnaire_id, type, title, placeholder_text, assessment_dimension_key,
-               required, sort_order, created_at, updated_at
+               sidebar_profile_field, required, sort_order, created_at, updated_at
         FROM questionnaire_questions
         WHERE questionnaire_id = ?
         ORDER BY sort_order ASC, id ASC
@@ -544,6 +553,7 @@ def _load_questionnaire_questions(questionnaire_id: int) -> list[dict[str, Any]]
             "title": row.get("title", ""),
             "placeholder_text": row.get("placeholder_text", "") or "",
             "assessment_dimension_key": row.get("assessment_dimension_key", "") or "",
+            "sidebar_profile_field": _normalize_sidebar_profile_field(row.get("sidebar_profile_field")),
             "required": _normalize_bool(row.get("required")),
             "sort_order": int(row.get("sort_order") or 0),
             "created_at": row.get("created_at", ""),
@@ -634,9 +644,9 @@ def _sync_questionnaire_questions(questionnaire_id: int, questions: list[dict[st
             """
             INSERT INTO questionnaire_questions (
                 questionnaire_id, type, title, placeholder_text, assessment_dimension_key,
-                required, sort_order, created_at, updated_at
+                sidebar_profile_field, required, sort_order, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
             """,
             (
@@ -645,6 +655,7 @@ def _sync_questionnaire_questions(questionnaire_id: int, questions: list[dict[st
                 item["title"],
                 item.get("placeholder_text", "") or "",
                 item.get("assessment_dimension_key", "") or "",
+                item.get("sidebar_profile_field", "") or "",
                 item["required"],
                 item["sort_order"],
             ),

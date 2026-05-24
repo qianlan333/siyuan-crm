@@ -3212,6 +3212,38 @@ def test_questionnaire_admin_routes_and_public_h5(client):
     assert enable_response.get_json()["questionnaire"]["is_disabled"] is False
 
 
+def test_questionnaire_sidebar_profile_field_saves_and_admin_reads_while_public_hides(client):
+    from wecom_ability_service.domains.questionnaire import service as questionnaire_service
+
+    payload = _build_questionnaire_payload()
+    payload["questions"][0]["sidebar_profile_field"] = "source"
+    payload["questions"][1]["sidebar_profile_field"] = "industry"
+
+    create_response = client.post("/api/admin/questionnaires", json=payload)
+
+    assert create_response.status_code == 200
+    questionnaire = create_response.get_json()["questionnaire"]
+    assert questionnaire["questions"][0]["sidebar_profile_field"] == "source"
+    assert questionnaire["questions"][1]["sidebar_profile_field"] == "industry"
+    assert questionnaire["questions"][2]["sidebar_profile_field"] == ""
+
+    detail = questionnaire_service.get_questionnaire_detail(int(questionnaire["id"]))
+    assert [item["sidebar_profile_field"] for item in detail["questions"]] == ["source", "industry", ""]
+
+    public_questionnaire = questionnaire_service.get_public_questionnaire_by_slug(str(questionnaire["slug"]))
+    assert "sidebar_profile_field" not in public_questionnaire["questions"][0]
+
+
+def test_questionnaire_rejects_invalid_sidebar_profile_field(client):
+    payload = _build_questionnaire_payload()
+    payload["questions"][0]["sidebar_profile_field"] = "customer_level"
+
+    response = client.post("/api/admin/questionnaires", json=payload)
+
+    assert response.status_code == 400
+    assert response.get_json()["error"] == "sidebar_profile_field is invalid"
+
+
 def test_questionnaire_open_questions_support_placeholder_text(client):
     payload = _build_questionnaire_payload_with_mobile()
     payload["questions"][2]["placeholder_text"] = "请补充你的实际需求，便于老师了解"
@@ -3579,6 +3611,167 @@ def test_questionnaire_submit_matches_identity_and_marks_tags(client, app, monke
         "focus_service",
         "score_high",
     }
+
+
+def test_questionnaire_single_choice_sidebar_profile_mapping_writes_selected_text(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm",
+        lambda submission_id: {"applied": False, "reason": "test"},
+    )
+    payload = _build_questionnaire_payload(slug="sidebar-single-choice")
+    payload["questions"][0]["sidebar_profile_field"] = "source"
+    create_response = client.post("/api/admin/questionnaires", json=payload)
+    questionnaire = create_response.get_json()["questionnaire"]
+    q1, q2, q3 = questionnaire["questions"]
+
+    response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "external_userid": "wm_sidebar_profile_single",
+            "answers": {
+                str(q1["id"]): q1["options"][1]["id"],
+                str(q2["id"]): [],
+                str(q3["id"]): "",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        row = get_db().execute(
+            "SELECT source, updated_by FROM sidebar_customer_profile_fields WHERE external_userid = ?",
+            ("wm_sidebar_profile_single",),
+        ).fetchone()
+        assert row["source"] == "10-30万"
+        assert row["updated_by"] == "questionnaire_submit"
+
+
+def test_questionnaire_multi_text_and_later_answer_overwrite_sidebar_profile(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm",
+        lambda submission_id: {"applied": False, "reason": "test"},
+    )
+    payload = _build_questionnaire_payload(slug="sidebar-multi-text-overwrite")
+    payload["questions"][0]["sidebar_profile_field"] = "source"
+    payload["questions"][1]["sidebar_profile_field"] = "industry"
+    payload["questions"][2]["sidebar_profile_field"] = "needs_blockers_followup"
+    payload["questions"].append(
+        {
+            "type": "textarea",
+            "title": "最终来源",
+            "required": False,
+            "sort_order": 4,
+            "sidebar_profile_field": "source",
+        }
+    )
+    create_response = client.post("/api/admin/questionnaires", json=payload)
+    questionnaire = create_response.get_json()["questionnaire"]
+    q1, q2, q3, q4 = questionnaire["questions"]
+
+    response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "external_userid": "wm_sidebar_profile_overwrite",
+            "answers": {
+                str(q1["id"]): q1["options"][0]["id"],
+                str(q2["id"]): [q2["options"][0]["id"], q2["options"][1]["id"]],
+                str(q3["id"]): "想看案例，预算待确认",
+                str(q4["id"]): "朋友转介绍覆盖",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        row = get_db().execute(
+            """
+            SELECT source, industry, needs_blockers_followup
+            FROM sidebar_customer_profile_fields
+            WHERE external_userid = ?
+            """,
+            ("wm_sidebar_profile_overwrite",),
+        ).fetchone()
+        assert row["source"] == "朋友转介绍覆盖"
+        assert row["industry"] == "效果、服务"
+        assert row["needs_blockers_followup"] == "想看案例，预算待确认"
+
+    workbench = client.get(
+        "/api/sidebar/v2/workbench",
+        query_string={"external_userid": "wm_sidebar_profile_overwrite"},
+    ).get_json()
+    assert workbench["profile"] == {
+        "source": "朋友转介绍覆盖",
+        "industry": "效果、服务",
+        "industry_description": "",
+        "needs_blockers_followup": "想看案例，预算待确认",
+    }
+
+
+def test_questionnaire_text_mapping_without_external_userid_does_not_write_profile(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm",
+        lambda submission_id: {"applied": False, "reason": "test"},
+    )
+    payload = _build_questionnaire_payload(slug="sidebar-no-external")
+    payload["questions"][2]["sidebar_profile_field"] = "needs_blockers_followup"
+    create_response = client.post("/api/admin/questionnaires", json=payload)
+    questionnaire = create_response.get_json()["questionnaire"]
+    q1, q2, q3 = questionnaire["questions"]
+
+    response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "answers": {
+                str(q1["id"]): q1["options"][0]["id"],
+                str(q2["id"]): [],
+                str(q3["id"]): "没有 external_userid 也应提交成功",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        count = get_db().execute("SELECT COUNT(*) AS total FROM sidebar_customer_profile_fields").fetchone()["total"]
+        assert int(count) == 0
+
+
+def test_questionnaire_sidebar_profile_mapping_failure_does_not_block_submit(client, monkeypatch):
+    payload = _build_questionnaire_payload(slug="sidebar-failure-nonblocking")
+    payload["questions"][0]["sidebar_profile_field"] = "source"
+    create_response = client.post("/api/admin/questionnaires", json=payload)
+    questionnaire = create_response.get_json()["questionnaire"]
+    q1, q2, q3 = questionnaire["questions"]
+
+    def fail_mapping(submission, computed_result):
+        raise RuntimeError("profile write failed")
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.questionnaire.service.apply_questionnaire_sidebar_profile_mapping",
+        fail_mapping,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm",
+        lambda submission_id: {"applied": False, "reason": "test"},
+    )
+
+    response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "external_userid": "wm_sidebar_profile_fail",
+            "answers": {
+                str(q1["id"]): q1["options"][0]["id"],
+                str(q2["id"]): [],
+                str(q3["id"]): "",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
 
 
 def test_assessment_questionnaire_saves_snapshot_and_renders_result_page(client, app):
@@ -5689,7 +5882,7 @@ def test_sidebar_jssdk_config_returns_signatures(client, monkeypatch):
 
 
 def test_sidebar_page_contains_jssdk_debug_chain(client):
-    response = client.get("/sidebar/bind-mobile")
+    response = client.get("/sidebar/bind-mobile?v=legacy")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
     assert "wx.config success" in body
@@ -5751,7 +5944,7 @@ def test_sidebar_page_hides_debug_and_uses_customer_display_name(client, app):
     assert status_response.get_json()["display_name"] == "周青"
     assert status_response.get_json()["owner_userid"] == "sales_01"
 
-    page_response = client.get("/sidebar/bind-mobile")
+    page_response = client.get("/sidebar/bind-mobile?v=legacy")
     body = page_response.get_data(as_text=True)
     assert "当前未识别到客户信息，请从企微客户侧边栏重新打开。" in body
     assert "客户昵称：识别中" in body

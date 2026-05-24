@@ -57,6 +57,16 @@ CREATE TABLE IF NOT EXISTS external_contact_bindings (
 CREATE INDEX IF NOT EXISTS idx_external_contact_bindings_person_id
 ON external_contact_bindings (person_id);
 
+CREATE TABLE IF NOT EXISTS sidebar_customer_profile_fields (
+    external_userid TEXT PRIMARY KEY,
+    source TEXT NOT NULL DEFAULT '',
+    industry TEXT NOT NULL DEFAULT '',
+    industry_description TEXT NOT NULL DEFAULT '',
+    needs_blockers_followup TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS group_chats (
     id BIGSERIAL PRIMARY KEY,
     chat_id TEXT NOT NULL UNIQUE,
@@ -1064,6 +1074,7 @@ CREATE TABLE IF NOT EXISTS questionnaire_questions (
     title TEXT NOT NULL,
     placeholder_text TEXT NOT NULL DEFAULT '',
     assessment_dimension_key TEXT NOT NULL DEFAULT '',
+    sidebar_profile_field TEXT NOT NULL DEFAULT '',
     required BOOLEAN NOT NULL DEFAULT FALSE,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),

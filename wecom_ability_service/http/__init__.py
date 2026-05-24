@@ -50,6 +50,7 @@ from .public_questionnaire_diagnostics import register_routes as register_public
 from .wechat_pay import register_routes as register_wechat_pay_routes
 from .settings_ops import register_routes as register_settings_routes
 from .sidebar import register_routes as register_sidebar_routes
+from .sidebar_v2 import register_routes as register_sidebar_v2_routes
 from .sidebar_marketing import register_routes as register_sidebar_marketing_routes
 from .setup_wizard import register_routes as register_setup_wizard_routes
 from .system_health import register_routes as register_system_health_routes
@@ -65,6 +66,7 @@ HTTP_CONTROLLER_RULES = (
 
 HTTP_ROUTE_MODULES = {
     "sidebar": "wecom_ability_service.http.sidebar",
+    "sidebar_v2": "wecom_ability_service.http.sidebar_v2",
     "sidebar_lead_pool": "wecom_ability_service.http.sidebar_lead_pool",
     "identity": "wecom_ability_service.http.identity",
     "ops": "wecom_ability_service.http.ops",
@@ -144,6 +146,7 @@ HTTP_ROUTE_MODULES = {
 HTTP_ROUTE_PLACEMENT = {
     "customer": (
         "sidebar.py for /sidebar/* contact binding, signup-tag, and JSSDK endpoints",
+        "sidebar_v2.py for /api/sidebar/v2* customer workbench APIs",
         "sidebar_lead_pool.py for /api/sidebar/lead-pool* user-ops handlers registered by sidebar.py",
         "sidebar_marketing.py for /api/sidebar/marketing-status* automation-engine handlers",
         "customer_center.py for /api/customers* list/detail",
@@ -229,6 +232,7 @@ HTTP_ROUTE_PLACEMENT = {
 
 HTTP_ROUTE_REGISTRARS = (
     ("sidebar", register_sidebar_routes),
+    ("sidebar_v2", register_sidebar_v2_routes),
     ("sidebar_marketing", register_sidebar_marketing_routes),
     ("identity", register_identity_routes),
     ("ops", register_ops_routes),

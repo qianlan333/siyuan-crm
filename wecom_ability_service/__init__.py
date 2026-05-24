@@ -132,6 +132,7 @@ def create_app(test_config: dict | None = None) -> Flask:
         SIDEBAR_THIRD_PARTY_API_URL=os.getenv("SIDEBAR_THIRD_PARTY_API_URL", ""),
         SIDEBAR_THIRD_PARTY_API_TOKEN=os.getenv("SIDEBAR_THIRD_PARTY_API_TOKEN", ""),
         SIDEBAR_THIRD_PARTY_TIMEOUT_SECONDS=int(os.getenv("SIDEBAR_THIRD_PARTY_TIMEOUT_SECONDS", "10")),
+        SIDEBAR_WORKBENCH_V2_ENABLED=os.getenv("SIDEBAR_WORKBENCH_V2_ENABLED", "true"),
         SIDEBAR_PERSON_DETAIL_URL_TEMPLATE=os.getenv(
             "SIDEBAR_PERSON_DETAIL_URL_TEMPLATE",
             "https://www.youcangogogo.com/person/{person_id}",

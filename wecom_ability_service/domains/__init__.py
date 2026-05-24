@@ -196,6 +196,13 @@ DOMAIN_LAYOUTS: dict[str, DomainLayoutSpec] = {
         persistence_modules=("repo.py",),
         notes="Owner role map, routing config, domain-local definitions.py rules.",
     ),
+    "sidebar_v2": DomainLayoutSpec(
+        name="sidebar_v2",
+        mode="simple",
+        service_module="service.py",
+        persistence_modules=("repo.py",),
+        notes="WeCom customer sidebar V2 workbench read and write adapters.",
+    ),
     "tags": DomainLayoutSpec(
         name="tags",
         mode="simple",

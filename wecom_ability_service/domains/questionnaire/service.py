@@ -1389,6 +1389,101 @@ def save_questionnaire_submission(
     }
 
 
+def _questionnaire_sidebar_profile_answer_text(item: dict[str, Any]) -> str:
+    question_type = str(item.get("question_type") or "").strip()
+    if question_type == "single_choice":
+        return str((_dedupe_strings(item.get("selected_option_texts_snapshot") or []) or [""])[0] or "").strip()
+    if question_type == "multi_choice":
+        return "、".join(_dedupe_strings(item.get("selected_option_texts_snapshot") or [])).strip()
+    if question_type in {"textarea", "mobile"}:
+        return str(item.get("text_value") or "").strip()
+    return ""
+
+
+def apply_questionnaire_sidebar_profile_mapping(
+    submission: dict[str, Any],
+    computed_result: dict[str, Any],
+) -> dict[str, Any]:
+    external_userid = str((submission or {}).get("external_userid") or "").strip()
+    if not external_userid:
+        return {"applied": False, "reason": "external_userid_missing", "patch": {}}
+
+    answer_snapshots = [item for item in (computed_result.get("answer_snapshots") or []) if isinstance(item, dict)]
+    question_ids = [int(item["question_id"]) for item in answer_snapshots if item.get("question_id") not in (None, "")]
+    if not question_ids:
+        return {"applied": False, "reason": "answers_missing", "patch": {}}
+
+    placeholders = ",".join("?" for _ in question_ids)
+    rows = get_db().execute(
+        f"""
+        SELECT id, sidebar_profile_field
+        FROM questionnaire_questions
+        WHERE id IN ({placeholders})
+        """,
+        tuple(question_ids),
+    ).fetchall()
+    mapping_by_question_id = {
+        int(row["id"]): str(row.get("sidebar_profile_field") or "").strip()
+        for row in rows
+    }
+
+    patch: dict[str, str] = {}
+    for item in answer_snapshots:
+        question_id = int(item["question_id"])
+        field = mapping_by_question_id.get(question_id, "")
+        if field not in {"source", "industry", "industry_description", "needs_blockers_followup"}:
+            continue
+        answer_text = _questionnaire_sidebar_profile_answer_text(item)
+        if answer_text:
+            patch[field] = answer_text
+
+    if not patch:
+        return {"applied": False, "reason": "patch_empty", "patch": {}}
+
+    existing = get_db().execute(
+        """
+        SELECT source, industry, industry_description, needs_blockers_followup
+        FROM sidebar_customer_profile_fields
+        WHERE external_userid = ?
+        """,
+        (external_userid,),
+    ).fetchone()
+    next_values = {
+        "source": str((existing or {}).get("source") or ""),
+        "industry": str((existing or {}).get("industry") or ""),
+        "industry_description": str((existing or {}).get("industry_description") or ""),
+        "needs_blockers_followup": str((existing or {}).get("needs_blockers_followup") or ""),
+    }
+    next_values.update(patch)
+    row = get_db().execute(
+        """
+        INSERT INTO sidebar_customer_profile_fields (
+            external_userid, source, industry, industry_description,
+            needs_blockers_followup, updated_by, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT (external_userid) DO UPDATE SET
+            source = EXCLUDED.source,
+            industry = EXCLUDED.industry,
+            industry_description = EXCLUDED.industry_description,
+            needs_blockers_followup = EXCLUDED.needs_blockers_followup,
+            updated_by = EXCLUDED.updated_by,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING external_userid, source, industry, industry_description,
+                  needs_blockers_followup, updated_by, updated_at
+        """,
+        (
+            external_userid,
+            next_values["source"],
+            next_values["industry"],
+            next_values["industry_description"],
+            next_values["needs_blockers_followup"],
+            "questionnaire_submit",
+        ),
+    ).fetchone()
+    get_db().commit()
+    return {"applied": True, "patch": patch, "profile": dict(row or {})}
+
+
 def _questionnaire_submit_webhook_payload(submission: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "mobile": str((submission or {}).get("mobile_snapshot") or "").strip(),
@@ -2026,6 +2121,13 @@ def submit_questionnaire(slug: str, payload: dict[str, Any], request_meta: dict[
         answers,
         request_meta=submit_meta,
     )
+    try:
+        apply_questionnaire_sidebar_profile_mapping(submission, computed_result)
+    except Exception:
+        questionnaire_logger.exception(
+            "sidebar profile mapping failed after questionnaire submit submission_id=%s",
+            submission.get("id"),
+        )
     apply_questionnaire_mobile_binding(submission)
     apply_questionnaire_submission_tags_to_scrm(submission["id"])
     try:

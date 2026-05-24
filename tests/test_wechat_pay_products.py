@@ -125,6 +125,12 @@ def test_admin_product_create_generates_code_and_list_shape(app, client):
     assert "商品简介" not in html
     assert "介绍页路径" not in html
 
+    new_page = client.get("/admin/wechat-pay/products/new")
+    assert new_page.status_code == 200
+    new_html = new_page.get_data(as_text=True)
+    assert "支付后引流渠道码" in new_html
+    assert "支付后引流计划" not in new_html
+
     items = client.get("/api/admin/wechat-pay/products").get_json()["items"]
     assert items[0]["name"] == "私域成交动作拆解课"
     assert {"name", "amount_total", "status", "updated_at"}.issubset(items[0])
@@ -307,41 +313,77 @@ def test_admin_product_share_returns_public_link_and_qr(app, client):
     assert 'xmlns="http://www.w3.org/2000/svg"' in unquote(share["qr_data_url"])
 
 
-def test_lead_plan_options_skip_program_summary_dependency(app, client, monkeypatch):
+def test_lead_channel_options_skip_program_summary_dependency(app, client, monkeypatch):
     from wecom_ability_service.domains.automation_conversion import program_service
 
     _login_admin(client)
     program = get_db().execute(
         """
         INSERT INTO automation_program (program_code, program_name, status, config_json)
-        VALUES ('lead_plan_direct_options', '直接读取的引流计划', 'active', '{}'::jsonb)
+        VALUES ('lead_channel_direct_options', '渠道所属计划', 'active', '{}'::jsonb)
         RETURNING *
         """
     ).fetchone()
-    get_db().execute(
+    channel = get_db().execute(
         """
         INSERT INTO automation_channel (
             program_id, channel_code, channel_name, qr_url, status
         )
-        VALUES (?, 'program_direct_options', '默认渠道', 'https://example.com/direct-qr.png', 'active')
+        VALUES (?, 'program_direct_options', '已付费引流渠道码', 'https://example.com/direct-qr.png', 'active')
+        RETURNING *
         """,
         (program["id"],),
-    )
+    ).fetchone()
     get_db().commit()
 
     def fail_summary_loader(**kwargs):
-        raise AssertionError("lead plan options must not depend on program summaries")
+        raise AssertionError("lead channel options must not depend on program summaries")
 
     monkeypatch.setattr(program_service, "list_automation_programs", fail_summary_loader)
 
-    response = client.get("/api/admin/wechat-pay/products/lead-plans")
+    response = client.get("/api/admin/wechat-pay/products/lead-channels")
 
     assert response.status_code == 200
     items = response.get_json()["items"]
-    option = next(item for item in items if item["program_id"] == program["id"])
-    assert option["program_name"] == "直接读取的引流计划"
+    option = next(item for item in items if item["channel_id"] == channel["id"])
+    assert option["channel_name"] == "已付费引流渠道码"
+    assert option["program_name"] == "渠道所属计划"
     assert option["qr_url"] == "https://example.com/direct-qr.png"
     assert option["selectable"] is True
+
+
+def test_product_can_bind_direct_lead_channel(app, client):
+    token = _login_admin(client)
+    program = get_db().execute(
+        """
+        INSERT INTO automation_program (program_code, program_name, status, config_json)
+        VALUES ('lead_channel_product_bind', '渠道码所属计划', 'active', '{}'::jsonb)
+        RETURNING *
+        """
+    ).fetchone()
+    channel = get_db().execute(
+        """
+        INSERT INTO automation_channel (
+            program_id, channel_code, channel_name, qr_url, status
+        )
+        VALUES (?, 'product_bind_channel', '支付后渠道码', 'https://example.com/product-bind-qr.png', 'configured')
+        RETURNING *
+        """,
+        (program["id"],),
+    ).fetchone()
+    get_db().commit()
+
+    product = _create_product(client, token, lead_channel_id=channel["id"])
+
+    assert product["lead_channel_id"] == channel["id"]
+    assert product["lead_program_id"] == program["id"]
+    assert product_service.get_lead_qr_for_product_code(product["product_code"])["qr_url"] == "https://example.com/product-bind-qr.png"
+
+    cleared = product_service.update_admin_product(product["id"], {"lead_channel_id": None}, operator="pytest")
+
+    assert cleared["lead_channel_id"] is None
+    assert cleared["lead_program_id"] is None
+    assert product_service.get_lead_qr_for_product_code(product["product_code"]) == {}
 
 
 def test_product_slices_sort_and_public_page_render_order(app, client):

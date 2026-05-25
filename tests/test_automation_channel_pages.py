@@ -411,7 +411,7 @@ def test_entry_channel_binding_payload_is_channel_ids_only_and_old_setup_is_read
     assert "initial_audience_code" not in setup_html
 
 
-def test_channel_form_payload_reads_entry_tag_inputs_from_page_root():
+def test_channel_form_payload_preserves_qrcode_scene_and_reads_entry_tag_inputs_from_page_root():
     with open(CHANNEL_ADMISSION_JS, encoding="utf-8") as handle:
         source = handle.read()
 
@@ -422,3 +422,5 @@ def test_channel_form_payload_reads_entry_tag_inputs_from_page_root():
     assert "entry_tag_id: data.entry_tag_id" not in source
     assert "entry_tag_name: data.entry_tag_name" not in source
     assert "entry_tag_group_name: data.entry_tag_group_name" not in source
+    assert "data.scene_value || data.channel_code" not in source
+    assert "payload.scene_value = data.customer_channel || data.scene_value || \"\";" in source

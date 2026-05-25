@@ -147,6 +147,80 @@ def find_channel_by_scene_value(scene_value: str) -> dict[str, Any] | None:
     )
 
 
+def find_channel_by_historical_scene_value(scene_value: str) -> dict[str, Any] | None:
+    normalized = _normalized_text(scene_value)
+    if not normalized:
+        return None
+    return _fetchone_dict(
+        """
+        WITH scene_events AS (
+            SELECT external_userid, created_at
+            FROM wecom_external_contact_event_logs
+            WHERE change_type = 'add_external_contact'
+              AND external_userid <> ''
+              AND COALESCE(NULLIF(payload_json->>'State', ''), NULLIF(payload_json->>'state', '')) = ?
+        ),
+        channel_votes AS (
+            SELECT
+                m.source_channel_id AS channel_id,
+                COUNT(*) AS vote_count,
+                MAX(e.created_at) AS latest_event_at
+            FROM scene_events e
+            JOIN automation_member m ON m.external_contact_id = e.external_userid
+            WHERE m.source_channel_id IS NOT NULL
+            GROUP BY m.source_channel_id
+        )
+        SELECT c.*
+        FROM channel_votes votes
+        JOIN automation_channel c ON c.id = votes.channel_id
+        ORDER BY votes.vote_count DESC, votes.latest_event_at DESC, c.updated_at DESC, c.id DESC
+        LIMIT 1
+        """,
+        (normalized,),
+    )
+
+
+def find_entry_tag_by_historical_scene_value(scene_value: str, *, owner_staff_id: str = "") -> dict[str, str]:
+    normalized = _normalized_text(scene_value)
+    normalized_owner = _normalized_text(owner_staff_id)
+    if not normalized:
+        return {}
+
+    def _find_tag(owner: str = "") -> dict[str, Any] | None:
+        owner_filter = "AND t.userid = ?" if owner else ""
+        params: tuple[Any, ...] = (normalized, owner) if owner else (normalized,)
+        return _fetchone_dict(
+            f"""
+            WITH scene_events AS (
+                SELECT external_userid, created_at
+                FROM wecom_external_contact_event_logs
+                WHERE change_type = 'add_external_contact'
+                  AND external_userid <> ''
+                  AND COALESCE(NULLIF(payload_json->>'State', ''), NULLIF(payload_json->>'state', '')) = ?
+            )
+            SELECT
+                t.tag_id AS entry_tag_id,
+                COALESCE(NULLIF(t.tag_name, ''), t.tag_id) AS entry_tag_name,
+                '' AS entry_tag_group_name,
+                COUNT(*) AS usage_count,
+                MAX(e.created_at) AS latest_event_at
+            FROM scene_events e
+            JOIN contact_tags t ON t.external_userid = e.external_userid
+            WHERE t.tag_id <> ''
+              {owner_filter}
+            GROUP BY t.tag_id, COALESCE(NULLIF(t.tag_name, ''), t.tag_id)
+            ORDER BY usage_count DESC, latest_event_at DESC, entry_tag_name ASC, entry_tag_id ASC
+            LIMIT 1
+            """,
+            params,
+        )
+
+    row = _find_tag(normalized_owner) if normalized_owner else None
+    if not row:
+        row = _find_tag()
+    return dict(row) if row else {}
+
+
 def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
     program_id = int(payload.get("program_id") or 0) or None
     channel_code = _normalized_text(payload.get("channel_code"))

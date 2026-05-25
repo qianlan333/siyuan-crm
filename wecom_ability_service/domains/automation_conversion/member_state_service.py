@@ -687,6 +687,28 @@ def _apply_channel_entry_tag_for_contact(
     }
 
 
+def _channel_with_historical_entry_tag(
+    channel: dict[str, Any],
+    *,
+    channel_scene: str = "",
+    owner_staff_id: str = "",
+) -> dict[str, Any]:
+    if _normalized_text(channel.get("entry_tag_id")):
+        return channel
+    historical_tag = repo.find_entry_tag_by_historical_scene_value(
+        channel_scene,
+        owner_staff_id=_normalized_text(owner_staff_id),
+    )
+    if not _normalized_text(historical_tag.get("entry_tag_id")):
+        return channel
+    return {
+        **channel,
+        "entry_tag_id": _normalized_text(historical_tag.get("entry_tag_id")),
+        "entry_tag_name": _normalized_text(historical_tag.get("entry_tag_name")),
+        "entry_tag_group_name": _normalized_text(historical_tag.get("entry_tag_group_name")),
+    }
+
+
 def handle_channel_enter_from_callback(
     *,
     external_contact_id: str,
@@ -700,13 +722,16 @@ def handle_channel_enter_from_callback(
     event_action: str = "qrcode_enter",
     send_welcome_message: bool = False,
 ) -> dict[str, Any]:
+    channel_scene = ""
     if not channel:
         channel_scene = _extract_channel_scene(payload_json or {})
         if not channel_scene:
             return {"handled": False, "reason": "missing_channel_scene"}
         channel = repo.find_channel_by_scene_value(channel_scene)
         if not channel:
-            return {"handled": False, "reason": "channel_not_found"}
+            channel = repo.find_channel_by_historical_scene_value(channel_scene)
+            if not channel:
+                return {"handled": False, "reason": "channel_not_found"}
     if (
         source_type == SOURCE_TYPE_WECOM_CUSTOMER_ACQUISITION
         and _normalized_text(channel.get("status")) != "active"
@@ -714,6 +739,11 @@ def handle_channel_enter_from_callback(
         return {"handled": False, "reason": "channel_disabled"}
     trigger_time = service_seams._iso_now()
     owner_staff_id = _normalized_text(follow_user_userid) or _normalized_text(channel.get("owner_staff_id")) or DEFAULT_OWNER_STAFF_ID
+    channel = _channel_with_historical_entry_tag(
+        channel,
+        channel_scene=channel_scene,
+        owner_staff_id=owner_staff_id,
+    )
     master_customer_id = repo.lookup_person_id_by_external_contact_id(external_contact_id)
     channel_contact = upsert_channel_contact(
         channel_id=int(channel["id"]),

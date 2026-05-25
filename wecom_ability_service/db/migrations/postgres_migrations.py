@@ -179,6 +179,12 @@ def _ensure_postgres_attachment_library(db) -> None:
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_channel
+        ADD COLUMN IF NOT EXISTS welcome_image_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS automation_channel
         ADD COLUMN IF NOT EXISTS welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb
         """
     )
@@ -1577,6 +1583,7 @@ def _init_postgres(db) -> None:
         "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS customer_channel TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS link_url TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS final_url TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS welcome_image_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
         "ALTER TABLE IF EXISTS automation_channel ADD COLUMN IF NOT EXISTS welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb",
     ):
         db.execute(stmt)

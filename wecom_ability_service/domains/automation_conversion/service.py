@@ -932,11 +932,16 @@ def _send_channel_welcome_message(
         if welcome_attachments:
             request_payload["attachments"] = welcome_attachments
     try:
+        raw_image_ids = channel.get("welcome_image_library_ids") or []
         raw_attachment_ids = channel.get("welcome_attachment_library_ids") or []
-        if raw_attachment_ids:
-            from .. import attachment_library as _attachment_library
+        if raw_image_ids or raw_attachment_ids:
+            from .. import attachment_library as _attachment_library, image_library as _image_library
 
             welcome_attachments = list(request_payload.get("attachments") or [])
+            for iid in _attachment_library._normalize_id_list(raw_image_ids):
+                welcome_attachments.append(
+                    {"msgtype": "image", "image": {"media_id": _image_library.resolve_image_media_id(iid)}}
+                )
             for aid in _attachment_library._normalize_id_list(raw_attachment_ids):
                 welcome_attachments.append(_attachment_library.materialize_file_attachment(aid))
             if len(welcome_attachments) > 9:
@@ -1126,6 +1131,7 @@ def get_settings_payload(*, program_id: int | None = None) -> dict[str, Any]:
             "qr_ticket": _normalized_text(channel.get("qr_ticket")),
             "scene_value": _normalized_text(channel.get("scene_value")),
             "welcome_message": _normalized_text(channel.get("welcome_message")),
+            "welcome_image_library_ids": _normalize_attachment_ids(channel.get("welcome_image_library_ids")),
             "welcome_attachment_library_ids": _normalize_attachment_ids(channel.get("welcome_attachment_library_ids")),
             "auto_accept_friend": _normalize_bool(channel.get("auto_accept_friend")),
             "entry_tag_id": _normalized_text(channel.get("entry_tag_id")),
@@ -1137,6 +1143,7 @@ def get_settings_payload(*, program_id: int | None = None) -> dict[str, Any]:
                 provider=provider,
                 channel_status=_normalized_text(channel.get("status")) or CHANNEL_STATUS_NOT_GENERATED,
                 welcome_message=_normalized_text(channel.get("welcome_message")),
+                welcome_image_library_ids=_normalize_attachment_ids(channel.get("welcome_image_library_ids")),
                 welcome_attachment_library_ids=_normalize_attachment_ids(channel.get("welcome_attachment_library_ids")),
                 auto_accept_friend=_normalize_bool(channel.get("auto_accept_friend")),
                 entry_tag_name=_normalized_text(channel.get("entry_tag_name")),

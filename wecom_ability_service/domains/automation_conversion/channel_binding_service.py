@@ -87,6 +87,7 @@ def _serialize_channel(row: dict[str, Any]) -> dict[str, Any]:
         return {}
     item["id"] = int(item.get("id") or 0)
     item["program_id"] = int(item.get("program_id") or 0) or None
+    item["welcome_image_library_ids"] = _normalize_id_list(item.get("welcome_image_library_ids"))
     item["welcome_attachment_library_ids"] = _normalize_id_list(item.get("welcome_attachment_library_ids"))
     item["welcome_miniprogram_library_ids"] = _normalize_id_list(item.get("welcome_miniprogram_library_ids"))
     item["auto_accept_friend"] = bool(item.get("auto_accept_friend"))
@@ -114,7 +115,11 @@ def _serialize_channel(row: dict[str, Any]) -> dict[str, Any]:
     item["qr_download_url"] = f"/api/admin/channels/{item['id']}/qrcode/download" if carrier_type != "link" else ""
     item["qr_download_ready"] = carrier_type != "link"
     item["welcome_message_configured"] = bool(_normalized_text(item.get("welcome_message")))
-    item["welcome_attachment_count"] = len(item["welcome_attachment_library_ids"]) + len(item["welcome_miniprogram_library_ids"])
+    item["welcome_attachment_count"] = (
+        len(item["welcome_image_library_ids"])
+        + len(item["welcome_attachment_library_ids"])
+        + len(item["welcome_miniprogram_library_ids"])
+    )
     item["entry_tag_configured"] = bool(_normalized_text(item.get("entry_tag_id")) or _normalized_text(item.get("entry_tag_name")))
     item["channel_contact_count"] = int(item.get("channel_contact_count") or 0)
     item["bound_program_id"] = int(item.get("bound_program_id") or 0) or None
@@ -247,6 +252,7 @@ def save_channel_resource(payload: dict[str, Any], *, channel_id: int | None = N
         "link_url": _normalized_text(payload.get("link_url")) or _normalized_text((existing or {}).get("link_url")),
         "final_url": _normalized_text(payload.get("final_url")) or _normalized_text((existing or {}).get("final_url")),
         "welcome_message": _normalized_text(payload.get("welcome_message")) if "welcome_message" in payload else _normalized_text((existing or {}).get("welcome_message")),
+        "welcome_image_library_ids": payload.get("welcome_image_library_ids", (existing or {}).get("welcome_image_library_ids") or []),
         "welcome_miniprogram_library_ids": payload.get("welcome_miniprogram_library_ids", (existing or {}).get("welcome_miniprogram_library_ids") or []),
         "welcome_attachment_library_ids": payload.get("welcome_attachment_library_ids", (existing or {}).get("welcome_attachment_library_ids") or []),
         "auto_accept_friend": _truthy(payload.get("auto_accept_friend"), default=bool((existing or {}).get("auto_accept_friend"))),
@@ -285,6 +291,7 @@ def save_channel_resource(payload: dict[str, Any], *, channel_id: int | None = N
                 link_url = ?,
                 final_url = ?,
                 welcome_message = ?,
+                welcome_image_library_ids = CAST(? AS jsonb),
                 welcome_miniprogram_library_ids = CAST(? AS jsonb),
                 welcome_attachment_library_ids = CAST(? AS jsonb),
                 auto_accept_friend = ?,
@@ -310,6 +317,7 @@ def save_channel_resource(payload: dict[str, Any], *, channel_id: int | None = N
                 channel_payload["link_url"],
                 channel_payload["final_url"],
                 channel_payload["welcome_message"],
+                _json_dumps(_normalize_id_list(channel_payload["welcome_image_library_ids"] or [])),
                 _json_dumps(_normalize_id_list(channel_payload["welcome_miniprogram_library_ids"] or [])),
                 _json_dumps(channel_payload["welcome_attachment_library_ids"] or []),
                 bool(channel_payload["auto_accept_friend"]),

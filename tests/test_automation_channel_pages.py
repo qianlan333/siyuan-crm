@@ -136,6 +136,7 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
             "channel_code": "CH-SAVE-LINK",
             "customer_channel": "wca_save_link",
             "link_url": "https://work.weixin.qq.com/ca/save",
+            "welcome_image_library_ids": [301],
             "welcome_miniprogram_library_ids": [201],
             "welcome_attachment_library_ids": [102, 108],
             "status": "active",
@@ -147,6 +148,7 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
     assert saved["carrier_type"] == "link"
     assert saved["customer_channel"] == "wca_save_link"
     assert saved["final_url"].endswith("customer_channel=wca_save_link")
+    assert saved["welcome_image_library_ids"] == [301]
     assert saved["welcome_miniprogram_library_ids"] == [201]
     assert saved["welcome_attachment_library_ids"] == [102, 108]
 
@@ -168,9 +170,14 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
         )
         get_db().execute(
             """
+            INSERT INTO image_library (name, file_name, mime_type, enabled)
+            VALUES ('欢迎图片', 'welcome.png', 'image/png', TRUE)
+            """
+        )
+        get_db().execute(
+            """
             INSERT INTO attachment_library (name, file_name, mime_type, enabled)
-            VALUES ('欢迎图片', 'welcome.png', 'image/png', TRUE),
-                   ('欢迎PDF', 'welcome.pdf', 'application/pdf', TRUE)
+            VALUES ('欢迎PDF', 'welcome.pdf', 'application/pdf', TRUE)
             """
         )
         get_db().commit()
@@ -188,6 +195,7 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
     assert "预览并选择小程序" in new_html
     assert "预览并选择图片/PDF" in new_html
     assert "预览并选择标签" in new_html
+    assert "data-image-ids" in new_html
     assert "data-resource-picker-search" in new_html
     assert "小程序" in new_html
     assert "图片" in new_html
@@ -210,6 +218,9 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
     assert materials.status_code == 200
     material_types = {item["type"] for item in materials.get_json()["materials"]}
     assert {"miniprogram", "image", "pdf"}.issubset(material_types)
+    preview_materials = client.get("/api/admin/channel-welcome-materials?type=all").get_json()["materials"]
+    assert any(item["type"] == "image" and item.get("library") == "image_library" for item in preview_materials)
+    assert any(item["type"] == "pdf" and item.get("library") == "attachment_library" for item in preview_materials)
     pdf_materials = client.get("/api/admin/channel-welcome-materials?type=pdf&keyword=欢迎").get_json()["materials"]
     assert pdf_materials
     assert {item["type"] for item in pdf_materials} == {"pdf"}
@@ -404,6 +415,7 @@ def test_channel_form_payload_reads_entry_tag_inputs_from_page_root():
     with open(CHANNEL_ADMISSION_JS, encoding="utf-8") as handle:
         source = handle.read()
 
+    assert "welcome_image_library_ids" in source
     assert 'root.querySelector("[data-entry-tag-id]")?.value || ""' in source
     assert 'root.querySelector("[data-entry-tag-name]")?.value || ""' in source
     assert 'root.querySelector("[data-entry-tag-group-name]")?.value || ""' in source

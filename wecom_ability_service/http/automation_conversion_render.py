@@ -308,6 +308,7 @@ def _render_channel_form_page(*, channel: dict[str, object] | None = None, page_
                 "channel_type": "qrcode",
                 "carrier_type": "qrcode",
                 "status": "active",
+                "welcome_image_library_ids": [],
                 "welcome_miniprogram_library_ids": [],
                 "welcome_attachment_library_ids": [],
             },

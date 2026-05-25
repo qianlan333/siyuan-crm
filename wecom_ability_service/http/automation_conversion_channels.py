@@ -49,7 +49,7 @@ def _welcome_material_type_filter(value: str) -> str:
 
 
 def _list_channel_welcome_materials(*, material_type: str = "all", keyword: str = "") -> list[dict]:
-    from ..domains import attachment_library, miniprogram_library
+    from ..domains import attachment_library, image_library, miniprogram_library
 
     material_type = _welcome_material_type_filter(material_type)
     keyword = str(keyword or "").strip().lower()
@@ -69,24 +69,35 @@ def _list_channel_welcome_materials(*, material_type: str = "all", keyword: str 
                     "description": str(item.get("pagepath") or item.get("appid") or ""),
                 }
             )
-    if material_type in {"all", "image", "pdf"}:
-        attachments = attachment_library.list_attachments(enabled_only=True, limit=200, q=keyword or None)
-        for item in attachments:
-            mime = str(item.get("mime_type") or "").lower()
-            is_pdf = mime == "application/pdf" or str(item.get("file_name") or "").lower().endswith(".pdf")
-            is_image = mime.startswith("image/")
-            if material_type == "pdf" and not is_pdf:
-                continue
-            if material_type == "image" and not is_image:
-                continue
-            if material_type == "all" and not (is_pdf or is_image):
-                continue
-            item_type = "image" if is_image else "pdf"
+    if material_type in {"all", "image"}:
+        for item in image_library.list_images(enabled_only=True, limit=200, q=keyword or None):
             name = str(item.get("name") or item.get("file_name") or "")
             items.append(
                 {
                     "id": int(item.get("id") or 0),
-                    "type": item_type,
+                    "type": "image",
+                    "library": "image_library",
+                    "name": name,
+                    "title": name,
+                    "description": str(item.get("file_name") or item.get("mime_type") or ""),
+                    "mime_type": str(item.get("mime_type") or ""),
+                }
+            )
+    if material_type in {"all", "pdf"}:
+        attachments = attachment_library.list_attachments(enabled_only=True, limit=200, q=keyword or None)
+        for item in attachments:
+            mime = str(item.get("mime_type") or "").lower()
+            is_pdf = mime == "application/pdf" or str(item.get("file_name") or "").lower().endswith(".pdf")
+            if material_type == "pdf" and not is_pdf:
+                continue
+            if material_type == "all" and not is_pdf:
+                continue
+            name = str(item.get("name") or item.get("file_name") or "")
+            items.append(
+                {
+                    "id": int(item.get("id") or 0),
+                    "type": "pdf",
+                    "library": "attachment_library",
                     "name": name,
                     "title": name,
                     "description": str(item.get("file_name") or item.get("mime_type") or ""),

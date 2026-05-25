@@ -163,6 +163,12 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
         else (existing or {}).get("welcome_attachment_library_ids")
     )
     welcome_attachment_library_ids = json.dumps(_normalize_positive_int_list(raw_attachment_ids), ensure_ascii=False)
+    raw_image_ids = (
+        payload.get("welcome_image_library_ids")
+        if "welcome_image_library_ids" in payload
+        else (existing or {}).get("welcome_image_library_ids")
+    )
+    welcome_image_library_ids = json.dumps(_normalize_positive_int_list(raw_image_ids), ensure_ascii=False)
     raw_miniprogram_ids = (
         payload.get("welcome_miniprogram_library_ids")
         if "welcome_miniprogram_library_ids" in payload
@@ -182,6 +188,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
         _normalized_text(payload.get("link_url")),
         _normalized_text(payload.get("final_url")),
         _normalized_text(payload.get("welcome_message")),
+        welcome_image_library_ids,
         welcome_miniprogram_library_ids,
         welcome_attachment_library_ids,
         _db_bool(bool(payload.get("auto_accept_friend"))),
@@ -207,6 +214,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
                 link_url = ?,
                 final_url = ?,
                 welcome_message = ?,
+                welcome_image_library_ids = ?,
                 welcome_miniprogram_library_ids = ?,
                 welcome_attachment_library_ids = ?,
                 auto_accept_friend = ?,
@@ -232,6 +240,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
                 _normalized_text(payload.get("link_url")),
                 _normalized_text(payload.get("final_url")),
                 _normalized_text(payload.get("welcome_message")),
+                welcome_image_library_ids,
                 welcome_miniprogram_library_ids,
                 welcome_attachment_library_ids,
                 _db_bool(bool(payload.get("auto_accept_friend"))),
@@ -259,6 +268,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             link_url,
             final_url,
             welcome_message,
+            welcome_image_library_ids,
             welcome_miniprogram_library_ids,
             welcome_attachment_library_ids,
             auto_accept_friend,
@@ -270,7 +280,7 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         """,
         params,

@@ -132,6 +132,7 @@
           <div class="channel-selected-materials" data-attachment-selected></div>
           <button class="admin-button admin-button--secondary" type="button" data-open-attachment-picker>预览并选择图片/PDF</button>
         </div>
+        <input type="hidden" name="welcome_image_library_ids" data-image-ids value="{{ (channel.welcome_image_library_ids or []) | join(',') }}">
         <input type="hidden" name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}">
       </div>
       <div class="admin-field channel-form-wide">

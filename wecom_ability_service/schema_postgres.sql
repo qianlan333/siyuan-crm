@@ -1238,6 +1238,7 @@ CREATE TABLE IF NOT EXISTS automation_channel (
     link_url TEXT NOT NULL DEFAULT '',
     final_url TEXT NOT NULL DEFAULT '',
     welcome_message TEXT NOT NULL DEFAULT '',
+    welcome_image_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
     auto_accept_friend BOOLEAN NOT NULL DEFAULT FALSE,

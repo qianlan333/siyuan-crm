@@ -33,6 +33,7 @@ def _default_channel_field_statuses(
     provider: Any,
     channel_status: str,
     welcome_message: str,
+    welcome_image_library_ids: list[int] | None = None,
     welcome_attachment_library_ids: list[int] | None = None,
     auto_accept_friend: bool,
     entry_tag_name: str,
@@ -61,17 +62,19 @@ def _default_channel_field_statuses(
         welcome_status = "not_set"
         welcome_detail = "当前未配置欢迎语。"
 
+    image_ids = _normalize_attachment_ids(welcome_image_library_ids or [])
     attachment_ids = _normalize_attachment_ids(welcome_attachment_library_ids or [])
-    if attachment_ids:
+    material_count = len(image_ids) + len(attachment_ids)
+    if material_count:
         attachment_status = "applied" if generated else "pending"
         attachment_detail = (
-            f"已绑定 {len(attachment_ids)} 个附件；欢迎语触发时会先上传企微附件资源并发送 file 附件。"
+            f"已绑定 {material_count} 个图片/PDF 素材；欢迎语触发时会先上传企微资源并发送。"
             if generated
-            else f"已选择 {len(attachment_ids)} 个附件；保存后需重新生成默认二维码，附件才会绑定到当前默认渠道。"
+            else f"已选择 {material_count} 个图片/PDF 素材；保存后需重新生成默认二维码，素材才会绑定到当前默认渠道。"
         )
     else:
         attachment_status = "not_set"
-        attachment_detail = "当前未配置欢迎语附件。支持 PDF / Word / Excel / PPT / TXT / ZIP / RAR，单个不超过 10MB。"
+        attachment_detail = "当前未配置欢迎语图片/PDF素材。图片来自图片素材库，PDF 来自附件素材库。"
 
     if auto_accept_supported:
         if auto_accept_friend:
@@ -220,6 +223,9 @@ def get_default_channel_settings_payload(*, program_id: int | None = None) -> di
         channel["welcome_attachment_library_ids"] = _normalize_attachment_ids(
             channel.get("welcome_attachment_library_ids")
         )
+        channel["welcome_image_library_ids"] = _normalize_attachment_ids(
+            channel.get("welcome_image_library_ids")
+        )
         return {
             "default_channel": channel,
             "provider_available": bool(provider),
@@ -230,6 +236,9 @@ def get_default_channel_settings_payload(*, program_id: int | None = None) -> di
     channel = dict(payload.get("default_channel") or {})
     channel["welcome_attachment_library_ids"] = _normalize_attachment_ids(
         channel.get("welcome_attachment_library_ids")
+    )
+    channel["welcome_image_library_ids"] = _normalize_attachment_ids(
+        channel.get("welcome_image_library_ids")
     )
     return {
         "default_channel": channel,
@@ -265,15 +274,22 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
         if "welcome_attachment_library_ids" in payload
         else _normalize_attachment_ids(existing.get("welcome_attachment_library_ids"))
     )
+    next_image_ids = (
+        _normalize_attachment_ids(payload.get("welcome_image_library_ids"))
+        if "welcome_image_library_ids" in payload
+        else _normalize_attachment_ids(existing.get("welcome_image_library_ids"))
+    )
     current_channel_name = _normalized_text(existing.get("channel_name")) or DEFAULT_CHANNEL_NAME
     current_welcome_message = _normalized_text(existing.get("welcome_message"))
     current_auto_accept_friend = _normalize_bool(existing.get("auto_accept_friend"))
     current_attachment_ids = _normalize_attachment_ids(existing.get("welcome_attachment_library_ids"))
+    current_image_ids = _normalize_attachment_ids(existing.get("welcome_image_library_ids"))
     channel_settings_changed = (
         next_channel_name != current_channel_name
         or next_welcome_message != current_welcome_message
         or next_auto_accept_friend != current_auto_accept_friend
         or next_attachment_ids != current_attachment_ids
+        or next_image_ids != current_image_ids
         or entry_tag_payload["entry_tag_id"] != _normalized_text(existing.get("entry_tag_id"))
         or entry_tag_payload["entry_tag_name"] != _normalized_text(existing.get("entry_tag_name"))
         or entry_tag_payload["entry_tag_group_name"] != _normalized_text(existing.get("entry_tag_group_name"))
@@ -287,6 +303,7 @@ def save_default_channel_settings(payload: dict[str, Any], *, program_id: int | 
             "qr_ticket": _normalized_text(payload.get("qr_ticket")) or _normalized_text(existing.get("qr_ticket")),
             "scene_value": _normalized_text(payload.get("scene_value")) or _normalized_text(existing.get("scene_value")),
             "welcome_message": next_welcome_message,
+            "welcome_image_library_ids": next_image_ids,
             "welcome_attachment_library_ids": next_attachment_ids,
             "auto_accept_friend": next_auto_accept_friend,
             "entry_tag_id": entry_tag_payload["entry_tag_id"],
@@ -328,6 +345,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
             "error_code": "provider_missing",
         }
     welcome_message = _normalized_text(existing.get("welcome_message"))
+    welcome_image_library_ids = _normalize_attachment_ids(existing.get("welcome_image_library_ids"))
     welcome_attachment_library_ids = _normalize_attachment_ids(existing.get("welcome_attachment_library_ids"))
     auto_accept_friend = _normalize_bool(existing.get("auto_accept_friend"))
     entry_tag_id = _normalized_text(existing.get("entry_tag_id"))
@@ -350,6 +368,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 "qr_ticket": _normalized_text(existing.get("qr_ticket")),
                 "scene_value": _normalized_text(existing.get("scene_value")),
                 "welcome_message": welcome_message,
+                "welcome_image_library_ids": welcome_image_library_ids,
                 "welcome_attachment_library_ids": welcome_attachment_library_ids,
                 "auto_accept_friend": auto_accept_friend,
                 "entry_tag_id": entry_tag_id,
@@ -372,6 +391,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 provider=provider,
                 channel_status=_normalized_text(saved.get("status")) or "generation_failed",
                 welcome_message=welcome_message,
+                welcome_image_library_ids=welcome_image_library_ids,
                 welcome_attachment_library_ids=welcome_attachment_library_ids,
                 auto_accept_friend=auto_accept_friend,
                 entry_tag_name=entry_tag_name,
@@ -387,6 +407,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 "qr_ticket": _normalized_text(existing.get("qr_ticket")),
                 "scene_value": _normalized_text(existing.get("scene_value")),
                 "welcome_message": welcome_message,
+                "welcome_image_library_ids": welcome_image_library_ids,
                 "welcome_attachment_library_ids": welcome_attachment_library_ids,
                 "auto_accept_friend": auto_accept_friend,
                 "entry_tag_id": entry_tag_id,
@@ -413,6 +434,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 provider=provider,
                 channel_status=_normalized_text(saved.get("status")) or "generation_failed",
                 welcome_message=welcome_message,
+                welcome_image_library_ids=welcome_image_library_ids,
                 welcome_attachment_library_ids=welcome_attachment_library_ids,
                 auto_accept_friend=auto_accept_friend,
                 entry_tag_name=entry_tag_name,
@@ -427,6 +449,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
             "qr_ticket": _normalized_text(channel_payload.get("qr_ticket")),
             "scene_value": _normalized_text(channel_payload.get("scene_value")),
             "welcome_message": welcome_message,
+            "welcome_image_library_ids": welcome_image_library_ids,
             "welcome_attachment_library_ids": welcome_attachment_library_ids,
             "auto_accept_friend": auto_accept_friend,
             "entry_tag_id": entry_tag_id,
@@ -448,6 +471,7 @@ def generate_default_channel_qr(*, operator: str = "", program_id: int | None = 
                 provider=provider,
                 channel_status=_normalized_text(saved.get("status")) or CHANNEL_STATUS_ACTIVE,
                 welcome_message=welcome_message,
+                welcome_image_library_ids=welcome_image_library_ids,
                 welcome_attachment_library_ids=welcome_attachment_library_ids,
                 auto_accept_friend=auto_accept_friend,
                 entry_tag_name=entry_tag_name,

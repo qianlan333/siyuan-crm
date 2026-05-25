@@ -504,11 +504,16 @@ def _send_channel_welcome_message(
         if welcome_attachments:
             request_payload["attachments"] = welcome_attachments
     try:
+        raw_image_ids = channel.get("welcome_image_library_ids") or []
         raw_attachment_ids = channel.get("welcome_attachment_library_ids") or []
-        if raw_attachment_ids:
-            from .. import attachment_library as _attachment_library
+        if raw_image_ids or raw_attachment_ids:
+            from .. import attachment_library as _attachment_library, image_library as _image_library
 
             welcome_attachments = list(request_payload.get("attachments") or [])
+            for iid in _attachment_library._normalize_id_list(raw_image_ids):
+                welcome_attachments.append(
+                    {"msgtype": "image", "image": {"media_id": _image_library.resolve_image_media_id(iid)}}
+                )
             for aid in _attachment_library._normalize_id_list(raw_attachment_ids):
                 welcome_attachments.append(_attachment_library.materialize_file_attachment(aid))
             if len(welcome_attachments) > 9:

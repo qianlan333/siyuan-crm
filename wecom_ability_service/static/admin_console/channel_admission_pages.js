@@ -269,11 +269,12 @@
     const data = Object.fromEntries(new FormData(form).entries());
     const isLink = data.channel_type === "wecom_customer_acquisition";
     const miniprogramIds = intList(root.querySelector("[data-miniprogram-ids]")?.value);
+    const imageIds = intList(root.querySelector("[data-image-ids]")?.value);
     const attachmentIds = intList(root.querySelector("[data-attachment-ids]")?.value);
     const entryTagId = root.querySelector("[data-entry-tag-id]")?.value || "";
     const entryTagName = root.querySelector("[data-entry-tag-name]")?.value || "";
     const entryTagGroupName = root.querySelector("[data-entry-tag-group-name]")?.value || "";
-    if (miniprogramIds.length + attachmentIds.length > 9) {
+    if (miniprogramIds.length + imageIds.length + attachmentIds.length > 9) {
       throw new Error("欢迎语素材最多选择 9 个");
     }
     return {
@@ -288,6 +289,7 @@
       final_url: isLink ? data.final_url || finalUrl(data.link_url, data.customer_channel) : "",
       qr_url: isLink ? "" : data.qr_url || "",
       welcome_message: root.querySelector("[data-welcome-message]")?.value || "",
+      welcome_image_library_ids: imageIds,
       welcome_miniprogram_library_ids: miniprogramIds,
       welcome_attachment_library_ids: attachmentIds,
       entry_tag_id: entryTagId,
@@ -373,6 +375,7 @@
     const subtitle = root.querySelector("[data-resource-picker-subtitle]");
     const search = root.querySelector("[data-resource-picker-search]");
     const miniInput = root.querySelector("[data-miniprogram-ids]");
+    const imageInput = root.querySelector("[data-image-ids]");
     const attachmentInput = root.querySelector("[data-attachment-ids]");
     const miniSelected = root.querySelector("[data-miniprogram-selected]");
     const attachmentSelected = root.querySelector("[data-attachment-selected]");
@@ -418,15 +421,35 @@
       }).catch(() => []);
     };
 
+    const materialPickerValue = (item) => {
+      if (pickerState.kind !== "attachment") return String(item.id);
+      return String(item.type || "material") + ":" + String(item.id);
+    };
+
+    const splitAttachmentSelection = (values) => {
+      const imageIds = [];
+      const attachmentIds = [];
+      (values || []).forEach((value) => {
+        const parts = String(value || "").split(":");
+        const type = parts.length > 1 ? parts[0] : "pdf";
+        const id = parseInt(parts.length > 1 ? parts[1] : parts[0], 10);
+        if (!id) return;
+        if (type === "image" && imageIds.indexOf(id) === -1) imageIds.push(id);
+        if (type === "pdf" && attachmentIds.indexOf(id) === -1) attachmentIds.push(id);
+      });
+      return { imageIds, attachmentIds };
+    };
+
     const renderSelectedMaterials = () => {
       const miniIds = intList(miniInput?.value);
+      const imageIds = intList(imageInput?.value);
       const attachmentIds = intList(attachmentInput?.value);
       Promise.all([
         fetchWelcomeMaterials("miniprogram", ""),
         fetchWelcomeMaterials("all", ""),
       ]).then(([miniItems, attachmentItems]) => {
         const miniMap = new Map(miniItems.map((item) => [Number(item.id), item]));
-        const attachmentMap = new Map(attachmentItems.map((item) => [Number(item.id), item]));
+        const attachmentMap = new Map(attachmentItems.map((item) => [String(item.type) + ":" + Number(item.id), item]));
         if (miniSelected) {
           miniSelected.innerHTML = miniIds.length
             ? miniIds.map((id) => {
@@ -436,11 +459,16 @@
             : '<span class="channel-muted">暂未选择小程序</span>';
         }
         if (attachmentSelected) {
-          attachmentSelected.innerHTML = attachmentIds.length
-            ? attachmentIds.map((id) => {
-              const item = attachmentMap.get(id) || { id, type: "attachment", name: "素材 " + id };
-              return '<button type="button" class="channel-material-chip" data-remove-picked="attachment" data-id="' + id + '">' + escapeHtml(materialTypeLabel(item.type)) + " · " + escapeHtml(item.name || item.title || ("素材 " + id)) + ' ×</button>';
-            }).join("")
+          const imageChips = imageIds.map((id) => {
+            const item = attachmentMap.get("image:" + id) || { id, type: "image", name: "图片 " + id };
+            return '<button type="button" class="channel-material-chip" data-remove-picked="image" data-id="' + id + '">' + escapeHtml(materialTypeLabel(item.type)) + " · " + escapeHtml(item.name || item.title || ("图片 " + id)) + ' ×</button>';
+          });
+          const attachmentChips = attachmentIds.map((id) => {
+            const item = attachmentMap.get("pdf:" + id) || { id, type: "pdf", name: "PDF " + id };
+            return '<button type="button" class="channel-material-chip" data-remove-picked="attachment" data-id="' + id + '">' + escapeHtml(materialTypeLabel(item.type)) + " · " + escapeHtml(item.name || item.title || ("PDF " + id)) + ' ×</button>';
+          });
+          attachmentSelected.innerHTML = imageChips.length + attachmentChips.length
+            ? imageChips.concat(attachmentChips).join("")
             : '<span class="channel-muted">暂未选择图片/PDF</span>';
         }
       });
@@ -457,7 +485,7 @@
     const renderPickerRows = () => {
       const isTag = pickerState.kind === "tag";
       const rows = pickerState.items.map((item) => {
-        const value = String(isTag ? item.tag_id : item.id);
+        const value = String(isTag ? item.tag_id : materialPickerValue(item));
         const checked = isTag ? (pickerState.selectedTagId === value ? "checked" : "") : (pickerState.selected.has(value) ? "checked" : "");
         const inputType = isTag ? "radio" : "checkbox";
         const meta = isTag ? (item.description || "未分组") : (materialTypeLabel(item.type) + (item.description ? " · " + item.description : ""));
@@ -487,7 +515,11 @@
     const openPicker = (kind) => {
       pickerState.kind = kind;
       pickerState.items = [];
-      pickerState.selected = new Set(kind === "miniprogram" ? intList(miniInput?.value).map(String) : intList(attachmentInput?.value).map(String));
+      pickerState.selected = new Set(
+        kind === "miniprogram"
+          ? intList(miniInput?.value).map(String)
+          : intList(imageInput?.value).map((id) => "image:" + id).concat(intList(attachmentInput?.value).map((id) => "pdf:" + id))
+      );
       pickerState.selectedTagId = String(tagIdInput?.value || "");
       if (search) search.value = "";
       if (kind === "miniprogram") {
@@ -521,13 +553,18 @@
       } else {
         const checkedIds = Array.from(pickerState.selected);
         const currentMini = pickerState.kind === "miniprogram" ? checkedIds : intList(miniInput?.value).map(String);
-        const currentAttachments = pickerState.kind === "attachment" ? checkedIds : intList(attachmentInput?.value).map(String);
-        if (currentMini.length + currentAttachments.length > 9) {
+        const pickedAttachments = pickerState.kind === "attachment"
+          ? splitAttachmentSelection(checkedIds)
+          : { imageIds: intList(imageInput?.value), attachmentIds: intList(attachmentInput?.value) };
+        if (currentMini.length + pickedAttachments.imageIds.length + pickedAttachments.attachmentIds.length > 9) {
           toast("欢迎语素材最多选择 9 个");
           return;
         }
         if (pickerState.kind === "miniprogram") setIds(miniInput, checkedIds);
-        if (pickerState.kind === "attachment") setIds(attachmentInput, checkedIds);
+        if (pickerState.kind === "attachment") {
+          setIds(imageInput, pickedAttachments.imageIds);
+          setIds(attachmentInput, pickedAttachments.attachmentIds);
+        }
       }
       modal.hidden = true;
       renderSelectedMaterials();
@@ -547,6 +584,7 @@
       if (!button) return;
       const kind = button.dataset.removePicked;
       if (kind === "miniprogram") setIds(miniInput, intList(miniInput?.value).filter((id) => String(id) !== String(button.dataset.id)));
+      if (kind === "image") setIds(imageInput, intList(imageInput?.value).filter((id) => String(id) !== String(button.dataset.id)));
       if (kind === "attachment") setIds(attachmentInput, intList(attachmentInput?.value).filter((id) => String(id) !== String(button.dataset.id)));
       if (kind === "tag") {
         if (tagIdInput) tagIdInput.value = "";

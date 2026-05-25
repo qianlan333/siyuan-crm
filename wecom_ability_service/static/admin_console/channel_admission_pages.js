@@ -270,6 +270,9 @@
     const isLink = data.channel_type === "wecom_customer_acquisition";
     const miniprogramIds = intList(root.querySelector("[data-miniprogram-ids]")?.value);
     const attachmentIds = intList(root.querySelector("[data-attachment-ids]")?.value);
+    const entryTagId = root.querySelector("[data-entry-tag-id]")?.value || "";
+    const entryTagName = root.querySelector("[data-entry-tag-name]")?.value || "";
+    const entryTagGroupName = root.querySelector("[data-entry-tag-group-name]")?.value || "";
     if (miniprogramIds.length + attachmentIds.length > 9) {
       throw new Error("欢迎语素材最多选择 9 个");
     }
@@ -287,9 +290,9 @@
       welcome_message: root.querySelector("[data-welcome-message]")?.value || "",
       welcome_miniprogram_library_ids: miniprogramIds,
       welcome_attachment_library_ids: attachmentIds,
-      entry_tag_id: data.entry_tag_id || "",
-      entry_tag_name: data.entry_tag_name || "",
-      entry_tag_group_name: data.entry_tag_group_name || "",
+      entry_tag_id: entryTagId,
+      entry_tag_name: entryTagName,
+      entry_tag_group_name: entryTagGroupName,
       owner_staff_id: data.owner_staff_id || "",
       status: data.status || "active",
     };

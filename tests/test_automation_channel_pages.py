@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from urllib.parse import quote
 
 from wecom_ability_service.db import get_db
@@ -10,6 +11,10 @@ from wecom_ability_service.domains.automation_conversion.channel_binding_service
 )
 
 from automation_channel_admission_helpers import admin_action_token, create_program, login_admin
+
+
+ROOT = Path(__file__).resolve().parents[1]
+CHANNEL_ADMISSION_JS = ROOT / "wecom_ability_service/static/admin_console/channel_admission_pages.js"
 
 
 def _row_for(html: str, marker: str) -> str:
@@ -377,11 +382,7 @@ def test_entry_channel_binding_payload_is_channel_ids_only_and_old_setup_is_read
     assert "initial_audience_code" not in entry_html
     assert "auto_enter_pool" not in entry_html
     assert "entry_rule_json" not in entry_html
-    js_source = (
-        "/Users/qianlan/Documents/New project/AI-CRM-channel-admission/"
-        "wecom_ability_service/static/admin_console/channel_admission_pages.js"
-    )
-    with open(js_source, encoding="utf-8") as handle:
+    with open(CHANNEL_ADMISSION_JS, encoding="utf-8") as handle:
         source = handle.read()
     bind_body = source[source.index("channel_ids: ids") - 120 : source.index("channel_ids: ids") + 60]
     assert "channel_ids: ids" in bind_body
@@ -397,3 +398,15 @@ def test_entry_channel_binding_payload_is_channel_ids_only_and_old_setup_is_read
     assert "生成二维码" not in setup_html
     assert "重新生成二维码" not in setup_html
     assert "initial_audience_code" not in setup_html
+
+
+def test_channel_form_payload_reads_entry_tag_inputs_from_page_root():
+    with open(CHANNEL_ADMISSION_JS, encoding="utf-8") as handle:
+        source = handle.read()
+
+    assert 'root.querySelector("[data-entry-tag-id]")?.value || ""' in source
+    assert 'root.querySelector("[data-entry-tag-name]")?.value || ""' in source
+    assert 'root.querySelector("[data-entry-tag-group-name]")?.value || ""' in source
+    assert "entry_tag_id: data.entry_tag_id" not in source
+    assert "entry_tag_name: data.entry_tag_name" not in source
+    assert "entry_tag_group_name: data.entry_tag_group_name" not in source

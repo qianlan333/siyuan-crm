@@ -24,7 +24,7 @@ from ..application.questionnaire.queries import (
     ListQuestionnairesQuery,
 )
 from .common import _build_excel_xml, _deprecated_admin_redirect
-from .questionnaire_support import _attach_questionnaire_links
+from .questionnaire_support import _attach_questionnaire_links, _build_questionnaire_share_payload
 
 
 def admin_list_questionnaires():
@@ -67,6 +67,19 @@ def admin_get_questionnaire(questionnaire_id: int):
     if not questionnaire:
         return jsonify({"ok": False, "error": "questionnaire not found"}), 404
     return jsonify({"ok": True, "questionnaire": _attach_questionnaire_links(questionnaire)})
+
+
+def admin_get_questionnaire_share(questionnaire_id: int):
+    questionnaire = GetQuestionnaireDetailQuery()(
+        GetQuestionnaireDetailQueryDTO(questionnaire_id=int(questionnaire_id))
+    )
+    if not questionnaire:
+        return jsonify({"ok": False, "error": "questionnaire not found"}), 404
+    try:
+        share = _build_questionnaire_share_payload(questionnaire)
+    except ValueError as exc:
+        return jsonify({"ok": False, "error": str(exc)}), 400
+    return jsonify({"ok": True, "share": share})
 
 
 def admin_questionnaire_latest_submit_debug(questionnaire_id: int):
@@ -145,6 +158,7 @@ def register_routes(bp):
     bp.route('/admin/questionnaires/ui', methods=['GET'])(admin_questionnaires_ui)
     bp.route('/api/admin/questionnaires', methods=['POST'])(admin_create_questionnaire)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>', methods=['GET'])(admin_get_questionnaire)
+    bp.route('/api/admin/questionnaires/<int:questionnaire_id>/share', methods=['GET'])(admin_get_questionnaire_share)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>/latest-submit-debug', methods=['GET'])(admin_questionnaire_latest_submit_debug)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>', methods=['PUT'])(admin_update_questionnaire)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>/disable', methods=['POST'])(admin_disable_questionnaire)

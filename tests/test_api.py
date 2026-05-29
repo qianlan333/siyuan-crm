@@ -10,6 +10,7 @@ import requests
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
+from urllib.parse import unquote
 
 import pytest
 
@@ -1715,6 +1716,19 @@ def test_admin_questionnaire_editor_existing_page_contains_editor(client):
     assert '<div id="questionnaire-list"' not in text
 
 
+def test_admin_questionnaire_list_contains_share_modal(client):
+    response = client.get("/admin/questionnaires")
+    text = response.get_data(as_text=True)
+
+    assert response.status_code == 200
+    assert 'id="questionnaire-share-modal"' in text
+    assert "分享问卷" in text
+    assert "问卷链接" in text
+    assert "问卷二维码" in text
+    assert "保存二维码" in text
+    assert "/api/admin/questionnaires/${item.id}/share" in text
+
+
 def test_admin_questionnaire_editor_page_script_has_valid_javascript(client):
     response = client.get("/admin/questionnaires/new")
     text = response.get_data(as_text=True)
@@ -3151,6 +3165,15 @@ def test_questionnaire_admin_routes_and_public_h5(client):
     assert list_response.status_code == 200
     assert list_payload["questionnaires"][0]["public_path"] == f"/s/{slug}"
     assert list_payload["questionnaires"][0]["public_url"].endswith(f"/s/{slug}")
+
+    share_response = client.get(f"/api/admin/questionnaires/{questionnaire_id}/share")
+    assert share_response.status_code == 200
+    share = share_response.get_json()["share"]
+    assert share["questionnaire_id"] == questionnaire_id
+    assert share["slug"] == slug
+    assert share["url"].endswith(f"/s/{slug}")
+    assert share["qr_data_url"].startswith("data:image/svg+xml;charset=UTF-8,")
+    assert 'xmlns="http://www.w3.org/2000/svg"' in unquote(share["qr_data_url"])
 
     detail_response = client.get(f"/api/admin/questionnaires/{questionnaire_id}")
     detail_payload = detail_response.get_json()["questionnaire"]

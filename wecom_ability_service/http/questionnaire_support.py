@@ -4,7 +4,7 @@ import base64
 import json
 import logging
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from flask import current_app, jsonify, render_template, request, session, url_for
 
@@ -51,6 +51,33 @@ def _attach_questionnaire_links(item: dict) -> dict:
         enriched["public_path"] = _questionnaire_public_path(slug)
         enriched["public_url"] = _questionnaire_public_url(slug)
     return enriched
+
+
+def _questionnaire_share_qr_data_url(share_url: str) -> str:
+    from io import BytesIO
+
+    import segno
+
+    qr = segno.make(str(share_url or "").strip(), error="m", micro=False)
+    buffer = BytesIO()
+    qr.save(buffer, kind="svg", scale=6, xmldecl=False, svgns=True, nl=False)
+    svg = buffer.getvalue().decode("utf-8")
+    return "data:image/svg+xml;charset=UTF-8," + quote(svg)
+
+
+def _build_questionnaire_share_payload(questionnaire: dict) -> dict:
+    enriched = _attach_questionnaire_links(questionnaire)
+    share_url = str(enriched.get("public_url") or "").strip()
+    if not share_url:
+        raise ValueError("问卷分享链接生成失败")
+    return {
+        "questionnaire_id": int(enriched["id"]),
+        "slug": str(enriched.get("slug") or "").strip(),
+        "title": str(enriched.get("title") or enriched.get("name") or "").strip(),
+        "url": share_url,
+        "public_path": str(enriched.get("public_path") or "").strip(),
+        "qr_data_url": _questionnaire_share_qr_data_url(share_url),
+    }
 
 
 def _wechat_oauth_is_configured() -> bool:

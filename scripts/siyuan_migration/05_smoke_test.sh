@@ -4,19 +4,23 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://127.0.0.1:5001}"
 ADMIN_TOKEN="${ADMIN_TOKEN:-}"
 SAMPLE_SCENE_VALUE="${SAMPLE_SCENE_VALUE:-}"
+FOLLOW_REDIRECTS="${FOLLOW_REDIRECTS:-false}"
 
 failures=0
 
 request() {
   local label="$1"
   local path="$2"
-  local headers body status auth_args=()
+  local headers body status auth_args=() curl_args=(-sS)
   headers="$(mktemp)"
   body="$(mktemp)"
+  if [[ "${FOLLOW_REDIRECTS}" == "true" ]]; then
+    curl_args+=(-L)
+  fi
   if [[ -n "${ADMIN_TOKEN}" ]]; then
     auth_args=(-H "Authorization: Bearer ${ADMIN_TOKEN}" -H "X-Admin-Action-Token: ${ADMIN_TOKEN}")
   fi
-  status="$(curl -sS -L -D "${headers}" -o "${body}" -w '%{http_code}' "${auth_args[@]}" "${BASE_URL}${path}" || true)"
+  status="$(curl "${curl_args[@]}" -D "${headers}" -o "${body}" -w '%{http_code}' "${auth_args[@]}" "${BASE_URL}${path}" || true)"
   printf '\n[%s] GET %s -> %s\n' "${label}" "${path}" "${status}"
   awk 'BEGIN{IGNORECASE=1} /^X-AICRM-Route-Owner:|^X-AICRM-App:|^X-AICRM-Release-SHA:/ {gsub(/\r/,""); print "HEADER " $0}' "${headers}" || true
   if [[ "${status}" =~ ^5 ]]; then

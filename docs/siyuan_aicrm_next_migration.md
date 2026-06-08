@@ -53,6 +53,11 @@
 
 以下命令应在人工维护窗口内执行，且先对预发库操作。
 
+数据库 URL 分两类使用：
+
+- `DATABASE_URL` / `APP_DATABASE_URL`：给 Python 应用和 SQLAlchemy 使用，可以是 `postgresql+psycopg://...`。
+- `PG_CLI_DATABASE_URL`：给 `psql`、`pg_dump`、`pg_restore` 使用，必须是 PostgreSQL CLI 可识别的 `postgresql://...` 或 `postgres://...`，可通过 `scripts/siyuan_migration/lib_db_url.sh` 从应用 URL 转换。
+
 ```bash
 cd /path/to/siyuan-crm-next-release
 source /home/ubuntu/.openclaw-wecom-pg.env
@@ -72,7 +77,7 @@ scripts/siyuan_migration/01_backup_current_assets.sh
 
 ```bash
 DUMP_FILE=/home/ubuntu/backups/siyuan-aicrm-migration/siyuan-current-YYYYMMDD-HHMMSS.dump \
-STAGING_DATABASE_URL='postgresql://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next' \
+STAGING_DATABASE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next' \
 CLEAN=true \
 scripts/siyuan_migration/02_restore_to_staging_db.sh
 ```
@@ -81,6 +86,9 @@ scripts/siyuan_migration/02_restore_to_staging_db.sh
 
 ```bash
 export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next'
+source scripts/siyuan_migration/lib_db_url.sh
+PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
+
 python3 app.py health
 python3 app.py init-db-legacy
 ```
@@ -88,8 +96,8 @@ python3 app.py init-db-legacy
 执行渠道码 backfill 和校验：
 
 ```bash
-psql "$DATABASE_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
-psql "$DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
 ```
 
 启动服务后 smoke test：
@@ -122,7 +130,9 @@ AI-CRM Next 的企业微信回调解析不只依赖旧 `automation_channel.scene
 验证方式：
 
 ```bash
-psql "$DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
+source scripts/siyuan_migration/lib_db_url.sh
+PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
 curl 'http://127.0.0.1:5001/api/admin/channels/runtime-diagnosis?scene_value=旧scene'
 ```
 
@@ -138,6 +148,8 @@ curl 'http://127.0.0.1:5001/api/admin/channels/runtime-diagnosis?scene_value=旧
 以下配置必须从 siyuan 生产 env 迁移或核对，不能从 AI-CRM 仓库复制真实值：
 
 - `DATABASE_URL`
+  - 应用运行可使用 `postgresql+psycopg://...`。
+  - PostgreSQL CLI 工具需要使用 `normalize_pg_cli_url "$DATABASE_URL"` 得到的 `PG_CLI_DATABASE_URL`。
 - `SECRET_KEY`
 - `WECOM_CORP_ID`
 - `WECOM_AGENT_ID`

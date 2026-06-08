@@ -4,10 +4,14 @@ set -euo pipefail
 BACKUP_DIR="${BACKUP_DIR:-/home/ubuntu/backups/siyuan-aicrm-migration}"
 ENV_FILE="${ENV_FILE:-/home/ubuntu/.openclaw-wecom-pg.env}"
 APP_DIR="${APP_DIR:-$(pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp="$(date +%Y%m%d-%H%M%S)"
 
 pass() { printf 'PASS %s\n' "$*"; }
 fail() { printf 'FAIL %s\n' "$*"; exit 1; }
+
+# shellcheck disable=SC1091
+source "${SCRIPT_DIR}/lib_db_url.sh"
 
 mkdir -p "${BACKUP_DIR}"
 backup_abs="$(cd "${BACKUP_DIR}" && pwd)"
@@ -22,13 +26,18 @@ set -a
 # shellcheck disable=SC1090
 source "${ENV_FILE}"
 set +a
-[[ -n "${DATABASE_URL:-}" ]] || fail "DATABASE_URL is not set after sourcing ${ENV_FILE}"
+APP_DATABASE_URL="${DATABASE_URL:-}"
+[[ -n "${APP_DATABASE_URL}" ]] || fail "DATABASE_URL is not set after sourcing ${ENV_FILE}"
+if ! PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "${APP_DATABASE_URL}")"; then
+  fail "DATABASE_URL must use postgresql://, postgres://, postgresql+psycopg://, or postgresql+psycopg2://"
+fi
+pass "DATABASE_URL is available for PostgreSQL CLI tools"
 
 dump_file="${backup_abs}/siyuan-current-${timestamp}.dump"
 env_backup="${backup_abs}/$(basename "${ENV_FILE}").${timestamp}"
 assets_archive="${backup_abs}/siyuan-assets-${timestamp}.tar.gz"
 
-pg_dump "${DATABASE_URL}" --format=custom --file="${dump_file}"
+pg_dump "${PG_CLI_DATABASE_URL}" --format=custom --file="${dump_file}"
 chmod 600 "${dump_file}"
 pass "database backup written to ${dump_file}"
 

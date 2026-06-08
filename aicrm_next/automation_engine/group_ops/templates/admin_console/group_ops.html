@@ -1,0 +1,22 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/group-ops/admin_console/group_ops.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=group-ops-create-legacy-20260601">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=group-ops-create-legacy-20260601">
+{% endblock %}
+
+{% block content %}
+<div
+  id="group-ops-app"
+  class="group-ops"
+  data-page-mode="{{ group_ops_page_mode }}"
+  data-plan-id="{{ group_ops_plan_id }}"
+></div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=group-ops-create-legacy-20260601"></script>
+<script defer src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=group-ops-create-legacy-20260601"></script>
+<script defer src="/static/group-ops/admin_console/group_ops.js?v=group-ops-create-legacy-20260601"></script>
+{% endblock %}

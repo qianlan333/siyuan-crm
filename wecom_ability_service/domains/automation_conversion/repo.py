@@ -180,6 +180,260 @@ def find_channel_by_historical_scene_value(scene_value: str) -> dict[str, Any] |
     )
 
 
+def upsert_channel_scene_alias(
+    *,
+    channel_id: int,
+    scene_value: str,
+    corp_id: str = "",
+    config_id: str = "",
+    qr_url: str = "",
+    carrier_type: str = "qrcode",
+    provider_name: str = "wecom_contact_way",
+    status: str = "active",
+    source: str = "",
+) -> dict[str, Any]:
+    normalized_scene = _normalized_text(scene_value)
+    normalized_status = _normalized_text(status) or "active"
+    if not normalized_scene:
+        return {}
+    if normalized_status not in {"active", "retired", "revoked"}:
+        normalized_status = "active"
+    row = get_db().execute(
+        """
+        INSERT INTO automation_channel_scene_alias (
+            corp_id, channel_id, scene_value, config_id, qr_url, carrier_type,
+            provider_name, status, source, first_seen_at, last_seen_at,
+            retired_at, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP,
+            CASE WHEN ? = 'retired' THEN CURRENT_TIMESTAMP ELSE NULL END,
+            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (corp_id, scene_value) DO UPDATE
+        SET channel_id = EXCLUDED.channel_id,
+            config_id = CASE WHEN EXCLUDED.config_id <> '' THEN EXCLUDED.config_id ELSE automation_channel_scene_alias.config_id END,
+            qr_url = CASE WHEN EXCLUDED.qr_url <> '' THEN EXCLUDED.qr_url ELSE automation_channel_scene_alias.qr_url END,
+            carrier_type = EXCLUDED.carrier_type,
+            provider_name = EXCLUDED.provider_name,
+            status = CASE
+                WHEN automation_channel_scene_alias.status = 'revoked' THEN automation_channel_scene_alias.status
+                ELSE EXCLUDED.status
+            END,
+            source = CASE WHEN EXCLUDED.source <> '' THEN EXCLUDED.source ELSE automation_channel_scene_alias.source END,
+            last_seen_at = CURRENT_TIMESTAMP,
+            retired_at = CASE
+                WHEN EXCLUDED.status = 'retired' AND automation_channel_scene_alias.retired_at IS NULL THEN CURRENT_TIMESTAMP
+                WHEN EXCLUDED.status <> 'retired' THEN NULL
+                ELSE automation_channel_scene_alias.retired_at
+            END,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        (
+            _normalized_text(corp_id),
+            int(channel_id),
+            normalized_scene,
+            _normalized_text(config_id),
+            _normalized_text(qr_url),
+            _normalized_text(carrier_type) or "qrcode",
+            _normalized_text(provider_name) or "wecom_contact_way",
+            normalized_status,
+            _normalized_text(source),
+            normalized_status,
+        ),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
+def find_channel_by_scene_alias(corp_id: str, scene_value: str) -> dict[str, Any] | None:
+    normalized_scene = _normalized_text(scene_value)
+    if not normalized_scene:
+        return None
+    row = _fetchone_dict(
+        """
+        SELECT c.*,
+               a.id AS scene_alias_id,
+               a.corp_id AS scene_alias_corp_id,
+               a.scene_value AS scene_alias_value,
+               a.status AS scene_alias_status,
+               a.source AS scene_alias_source
+        FROM automation_channel_scene_alias a
+        JOIN automation_channel c ON c.id = a.channel_id
+        WHERE a.corp_id = ?
+          AND a.scene_value = ?
+          AND a.status <> 'revoked'
+        ORDER BY CASE WHEN a.status = 'active' THEN 0 ELSE 1 END,
+                 a.updated_at DESC,
+                 a.id DESC
+        LIMIT 1
+        """,
+        (_normalized_text(corp_id), normalized_scene),
+    )
+    if row:
+        return row
+    return _fetchone_dict(
+        """
+        SELECT c.*,
+               a.id AS scene_alias_id,
+               a.corp_id AS scene_alias_corp_id,
+               a.scene_value AS scene_alias_value,
+               a.status AS scene_alias_status,
+               a.source AS scene_alias_source
+        FROM automation_channel_scene_alias a
+        JOIN automation_channel c ON c.id = a.channel_id
+        WHERE a.corp_id = ''
+          AND a.scene_value = ?
+          AND a.status <> 'revoked'
+        ORDER BY CASE WHEN a.status = 'active' THEN 0 ELSE 1 END,
+                 a.updated_at DESC,
+                 a.id DESC
+        LIMIT 1
+        """,
+        (normalized_scene,),
+    )
+
+
+def retire_previous_scene_aliases(channel_id: int, except_scene_value: str) -> int:
+    normalized_scene = _normalized_text(except_scene_value)
+    result = get_db().execute(
+        """
+        UPDATE automation_channel_scene_alias
+        SET status = 'retired',
+            retired_at = COALESCE(retired_at, CURRENT_TIMESTAMP),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE channel_id = ?
+          AND scene_value <> ?
+          AND status = 'active'
+        """,
+        (int(channel_id), normalized_scene),
+    )
+    return int(getattr(result, "rowcount", 0) or 0)
+
+
+def backfill_scene_alias_from_historical_vote(scene_value: str, channel_id: int) -> dict[str, Any]:
+    channel = get_channel_by_id(int(channel_id)) or {}
+    return upsert_channel_scene_alias(
+        channel_id=int(channel_id),
+        scene_value=scene_value,
+        qr_url=_normalized_text(channel.get("qr_url")),
+        carrier_type=_normalized_text(channel.get("carrier_type")) or "qrcode",
+        status="active",
+        source="historical_backfill",
+    )
+
+
+def get_channel_scene_aliases(channel_id: int) -> list[dict[str, Any]]:
+    return _fetchall_dicts(
+        """
+        SELECT *
+        FROM automation_channel_scene_alias
+        WHERE channel_id = ?
+        ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'retired' THEN 1 ELSE 2 END,
+                 updated_at DESC,
+                 id DESC
+        """,
+        (int(channel_id),),
+    )
+
+
+def get_channel_entry_effect_log(effect_type: str, idempotency_key: str) -> dict[str, Any] | None:
+    return _fetchone_dict(
+        """
+        SELECT *
+        FROM automation_channel_entry_effect_log
+        WHERE effect_type = ?
+          AND idempotency_key = ?
+        LIMIT 1
+        """,
+        (_normalized_text(effect_type), _normalized_text(idempotency_key)),
+    )
+
+
+def upsert_channel_entry_effect_log(
+    *,
+    effect_type: str,
+    idempotency_key: str,
+    status: str,
+    event_log_id: int | None = None,
+    channel_id: int | None = None,
+    scene_value: str = "",
+    external_contact_id: str = "",
+    owner_staff_id: str = "",
+    reason: str = "",
+    request_json: dict[str, Any] | None = None,
+    response_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    normalized_status = _normalized_text(status) or "attempted"
+    if normalized_status not in {"skipped", "attempted", "success", "failed"}:
+        normalized_status = "attempted"
+    row = get_db().execute(
+        """
+        INSERT INTO automation_channel_entry_effect_log (
+            event_log_id, channel_id, scene_value, external_contact_id, owner_staff_id,
+            effect_type, idempotency_key, status, reason, request_json, response_json,
+            created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        ON CONFLICT (effect_type, idempotency_key) DO UPDATE
+        SET event_log_id = COALESCE(EXCLUDED.event_log_id, automation_channel_entry_effect_log.event_log_id),
+            channel_id = COALESCE(EXCLUDED.channel_id, automation_channel_entry_effect_log.channel_id),
+            scene_value = CASE WHEN EXCLUDED.scene_value <> '' THEN EXCLUDED.scene_value ELSE automation_channel_entry_effect_log.scene_value END,
+            external_contact_id = CASE WHEN EXCLUDED.external_contact_id <> '' THEN EXCLUDED.external_contact_id ELSE automation_channel_entry_effect_log.external_contact_id END,
+            owner_staff_id = CASE WHEN EXCLUDED.owner_staff_id <> '' THEN EXCLUDED.owner_staff_id ELSE automation_channel_entry_effect_log.owner_staff_id END,
+            status = EXCLUDED.status,
+            reason = EXCLUDED.reason,
+            request_json = EXCLUDED.request_json,
+            response_json = EXCLUDED.response_json,
+            updated_at = CURRENT_TIMESTAMP
+        RETURNING *
+        """,
+        (
+            int(event_log_id) if event_log_id else None,
+            int(channel_id) if channel_id else None,
+            _normalized_text(scene_value),
+            _normalized_text(external_contact_id),
+            _normalized_text(owner_staff_id),
+            _normalized_text(effect_type),
+            _normalized_text(idempotency_key),
+            normalized_status,
+            _normalized_text(reason),
+            json.dumps(request_json or {}, ensure_ascii=False, default=str),
+            json.dumps(response_json or {}, ensure_ascii=False, default=str),
+        ),
+    ).fetchone()
+    return dict(row) if row else {}
+
+
+def list_channel_entry_effect_logs(
+    *,
+    channel_id: int | None = None,
+    scene_value: str = "",
+    external_contact_id: str = "",
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    filters: list[str] = []
+    params: list[Any] = []
+    if int(channel_id or 0) > 0:
+        filters.append("channel_id = ?")
+        params.append(int(channel_id or 0))
+    if _normalized_text(scene_value):
+        filters.append("scene_value = ?")
+        params.append(_normalized_text(scene_value))
+    if _normalized_text(external_contact_id):
+        filters.append("external_contact_id = ?")
+        params.append(_normalized_text(external_contact_id))
+    where = f"WHERE {' AND '.join(filters)}" if filters else ""
+    return _fetchall_dicts(
+        f"""
+        SELECT *
+        FROM automation_channel_entry_effect_log
+        {where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        tuple(params + [int(limit or 20)]),
+    )
+
+
 def find_entry_tag_by_historical_scene_value(scene_value: str, *, owner_staff_id: str = "") -> dict[str, str]:
     normalized = _normalized_text(scene_value)
     normalized_owner = _normalized_text(owner_staff_id)
@@ -326,7 +580,29 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
                 int(existing["id"]),
             ),
         ).fetchone()
-        return dict(row) if row else {}
+        saved = dict(row) if row else {}
+        if saved:
+            old_scene = _normalized_text((existing or {}).get("scene_value"))
+            new_scene = _normalized_text(saved.get("scene_value"))
+            if old_scene:
+                upsert_channel_scene_alias(
+                    channel_id=int(saved["id"]),
+                    scene_value=old_scene,
+                    qr_url=_normalized_text((existing or {}).get("qr_url")),
+                    carrier_type=_normalized_text((existing or {}).get("carrier_type")) or "qrcode",
+                    status="active",
+                    source="generated" if _normalized_text((existing or {}).get("qr_url")) else "manual",
+                )
+            if new_scene:
+                upsert_channel_scene_alias(
+                    channel_id=int(saved["id"]),
+                    scene_value=new_scene,
+                    qr_url=_normalized_text(saved.get("qr_url")),
+                    carrier_type=_normalized_text(saved.get("carrier_type")) or "qrcode",
+                    status="active",
+                    source="generated" if _normalized_text(saved.get("qr_url")) else "manual",
+                )
+        return saved
     row = db.execute(
         """
         INSERT INTO automation_channel (
@@ -359,7 +635,17 @@ def save_channel(payload: dict[str, Any]) -> dict[str, Any]:
         """,
         params,
     ).fetchone()
-    return dict(row) if row else {}
+    saved = dict(row) if row else {}
+    if saved and _normalized_text(saved.get("scene_value")):
+        upsert_channel_scene_alias(
+            channel_id=int(saved["id"]),
+            scene_value=_normalized_text(saved.get("scene_value")),
+            qr_url=_normalized_text(saved.get("qr_url")),
+            carrier_type=_normalized_text(saved.get("carrier_type")) or "qrcode",
+            status="active",
+            source="generated" if _normalized_text(saved.get("qr_url")) else "manual",
+        )
+    return saved
 
 
 def get_latest_questionnaire_submission(

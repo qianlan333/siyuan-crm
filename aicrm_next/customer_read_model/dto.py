@@ -1,0 +1,41 @@
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+
+class ListCustomersRequest(BaseModel):
+    owner_userid: str | None = None
+    tag: str | None = None
+    status: str | None = None
+    is_bound: str | None = None
+    mobile: str | None = None
+    keyword: str | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+class CustomerDetailRequest(BaseModel):
+    external_userid: str
+
+
+class CustomerTimelineRequest(BaseModel):
+    external_userid: str
+    event_type: str | None = None
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+
+
+class CustomerContextRequest(BaseModel):
+    external_userid: str | None = None
+    mobile: str | None = None
+    user_id: str | None = None
+    recent_message_limit: int = Field(default=20, ge=1, le=100)
+    timeline_limit: int = Field(default=20, ge=1, le=100)
+
+
+CustomerChatContextRequest = CustomerContextRequest
+
+
+class RecentMessagesRequest(BaseModel):
+    external_userid: str
+    limit: int = Field(default=20, ge=1, le=100)

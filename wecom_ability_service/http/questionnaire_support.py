@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
+from html import escape
 import json
 import logging
 from typing import Any
 from urllib.parse import urlencode
 
 from flask import current_app, jsonify, render_template, request, session, url_for
+from itsdangerous import BadSignature, URLSafeSerializer
 
 from ..infra.wechat_oauth import fetch_wechat_userinfo
 
@@ -21,7 +24,13 @@ QUESTIONNAIRE_SOURCE_PARAM_FIELDS = (
     "campaign_id",
     "staff_id",
 )
-QUESTIONNAIRE_META_FIELDS = QUESTIONNAIRE_IDENTITY_HINT_FIELDS + QUESTIONNAIRE_SOURCE_PARAM_FIELDS
+QUESTIONNAIRE_SIGNED_CONTEXT_FIELDS = (
+    "sidebar_context_token",
+    "sidebar_context",
+)
+QUESTIONNAIRE_META_FIELDS = QUESTIONNAIRE_IDENTITY_HINT_FIELDS + QUESTIONNAIRE_SOURCE_PARAM_FIELDS + QUESTIONNAIRE_SIGNED_CONTEXT_FIELDS
+QUESTIONNAIRE_SIDEBAR_CONTEXT_SESSION_KEY = "questionnaire_sidebar_context"
+QUESTIONNAIRE_SIDEBAR_CONTEXT_SALT = "aicrm-sidebar-questionnaire-context-v1"
 
 
 def _questionnaire_public_path(slug: str) -> str:
@@ -42,6 +51,91 @@ def _external_base_url() -> str:
 
 def _questionnaire_public_url(slug: str) -> str:
     return f"{_external_base_url()}{_questionnaire_public_path(slug)}"
+
+
+def _sidebar_context_secret() -> str:
+    return str(current_app.config.get("SECRET_KEY", "") or "").strip() or "dev-secret-key-change-me"
+
+
+def _sidebar_context_serializer() -> URLSafeSerializer:
+    return URLSafeSerializer(_sidebar_context_secret(), salt=QUESTIONNAIRE_SIDEBAR_CONTEXT_SALT)
+
+
+def build_sidebar_questionnaire_context_token(
+    *,
+    external_userid: str,
+    owner_userid: str = "",
+    follow_user_userid: str = "",
+    bind_by_userid: str = "",
+    max_age_seconds: int = 86400,
+) -> str:
+    now = int(datetime.now(timezone.utc).timestamp())
+    ttl = max(60, min(int(max_age_seconds or 86400), 7 * 86400))
+    payload = {
+        "external_userid": str(external_userid or "").strip(),
+        "owner_userid": str(owner_userid or "").strip(),
+        "follow_user_userid": str(follow_user_userid or owner_userid or "").strip(),
+        "bind_by_userid": str(bind_by_userid or owner_userid or follow_user_userid or "").strip(),
+        "source": "sidebar_questionnaire_link",
+        "issued_at": now,
+        "expires_at": now + ttl,
+    }
+    if not payload["external_userid"]:
+        raise ValueError("external_userid is required")
+    return _sidebar_context_serializer().dumps(payload)
+
+
+def _normalize_sidebar_context(payload: dict[str, Any] | None) -> dict[str, str]:
+    source = dict(payload or {}) if isinstance(payload, dict) else {}
+    now = int(datetime.now(timezone.utc).timestamp())
+    expires_at = int(source.get("expires_at") or 0)
+    external_userid = str(source.get("external_userid") or "").strip()
+    if not external_userid:
+        return {}
+    if expires_at and expires_at < now:
+        return {}
+    return {
+        "external_userid": external_userid,
+        "owner_userid": str(source.get("owner_userid") or source.get("follow_user_userid") or "").strip(),
+        "follow_user_userid": str(source.get("follow_user_userid") or source.get("owner_userid") or "").strip(),
+        "bind_by_userid": str(source.get("bind_by_userid") or source.get("owner_userid") or source.get("follow_user_userid") or "").strip(),
+        "source": "sidebar_questionnaire_link",
+        "issued_at": str(source.get("issued_at") or ""),
+        "expires_at": str(source.get("expires_at") or ""),
+    }
+
+
+def load_sidebar_questionnaire_context_token(token: str) -> dict[str, str]:
+    normalized_token = str(token or "").strip()
+    if not normalized_token:
+        return {}
+    try:
+        payload = _sidebar_context_serializer().loads(normalized_token)
+    except (BadSignature, ValueError, TypeError):
+        return {}
+    return _normalize_sidebar_context(payload)
+
+
+def _request_sidebar_context_token(payload: dict[str, Any] | None = None) -> str:
+    for key in QUESTIONNAIRE_SIGNED_CONTEXT_FIELDS:
+        value = str((payload or {}).get(key) or "").strip() if isinstance(payload, dict) else ""
+        if value:
+            return value
+    for key in QUESTIONNAIRE_SIGNED_CONTEXT_FIELDS:
+        value = str(request.values.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def capture_sidebar_questionnaire_context(payload: dict[str, Any] | None = None) -> dict[str, str]:
+    token = _request_sidebar_context_token(payload)
+    context = load_sidebar_questionnaire_context_token(token)
+    if context:
+        session[QUESTIONNAIRE_SIDEBAR_CONTEXT_SESSION_KEY] = context
+        return context
+    session_context = session.get(QUESTIONNAIRE_SIDEBAR_CONTEXT_SESSION_KEY) or {}
+    return _normalize_sidebar_context(session_context if isinstance(session_context, dict) else {})
 
 
 def _attach_questionnaire_links(item: dict) -> dict:
@@ -100,11 +194,15 @@ def _mask_identity_value(value: str) -> str:
 def _questionnaire_session_identity() -> dict[str, str]:
     identity = session.get("questionnaire_h5_identity") or {}
     if not isinstance(identity, dict):
-        return {}
+        identity = {}
+    sidebar_context = session.get(QUESTIONNAIRE_SIDEBAR_CONTEXT_SESSION_KEY) or {}
+    if not isinstance(sidebar_context, dict):
+        sidebar_context = {}
     return {
         "openid": str(identity.get("openid") or "").strip(),
         "unionid": str(identity.get("unionid") or "").strip(),
-        "respondent_key": str(identity.get("respondent_key") or "").strip(),
+        "external_userid": str(identity.get("external_userid") or sidebar_context.get("external_userid") or "").strip(),
+        "respondent_key": str(identity.get("respondent_key") or sidebar_context.get("external_userid") or "").strip(),
     }
 
 
@@ -130,6 +228,43 @@ def _require_wechat_browser_api():
     if _is_wechat_browser():
         return None
     return jsonify({"ok": False, "error": "please_open_in_wechat"}), 403
+
+
+def _oauth_browser_error_page(
+    *,
+    title: str,
+    message: str,
+    return_url: str = "/",
+    button_label: str = "返回",
+    status_code: int = 400,
+):
+    safe_return_url = escape(str(return_url or "/"), quote=True)
+    safe_title = escape(str(title or "授权未完成"))
+    safe_message = escape(str(message or "授权未完成，请重新进入页面。"))
+    safe_button_label = escape(str(button_label or "返回"))
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{safe_title}</title>
+  <style>
+    body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #f6f7fb; color: #1f2937; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Segoe UI", sans-serif; }}
+    main {{ width: min(100%, 420px); padding: 28px 22px; border: 1px solid #e5e7eb; border-radius: 18px; background: #fff; text-align: center; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08); }}
+    h1 {{ margin: 0 0 12px; font-size: 22px; line-height: 1.35; }}
+    p {{ margin: 0; color: #6b7280; font-size: 15px; line-height: 1.7; }}
+    a {{ display: inline-flex; align-items: center; justify-content: center; margin-top: 22px; min-height: 44px; padding: 0 20px; border-radius: 999px; background: #2563eb; color: #fff; font-weight: 700; text-decoration: none; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>{safe_title}</h1>
+    <p>{safe_message}</p>
+    <a href="{safe_return_url}">{safe_button_label}</a>
+  </main>
+</body>
+</html>"""
+    return html, status_code, {"Content-Type": "text/html; charset=utf-8"}
 
 
 def _questionnaire_oauth_start_url(slug: str, source_params: dict[str, Any] | None = None) -> str:

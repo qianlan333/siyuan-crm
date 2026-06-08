@@ -140,13 +140,7 @@ def admin_export_questionnaire(questionnaire_id: int):
 
 
 def register_routes(bp):
-    bp.route('/api/admin/questionnaires', methods=['GET'])(admin_list_questionnaires)
-    bp.route('/api/admin/questionnaires/preflight', methods=['GET'])(admin_questionnaires_preflight)
-    bp.route('/admin/questionnaires/ui', methods=['GET'])(admin_questionnaires_ui)
     bp.route('/api/admin/questionnaires', methods=['POST'])(admin_create_questionnaire)
-    bp.route('/api/admin/questionnaires/<int:questionnaire_id>', methods=['GET'])(admin_get_questionnaire)
-    bp.route('/api/admin/questionnaires/<int:questionnaire_id>/latest-submit-debug', methods=['GET'])(admin_questionnaire_latest_submit_debug)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>', methods=['PUT'])(admin_update_questionnaire)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>/disable', methods=['POST'])(admin_disable_questionnaire)
     bp.route('/api/admin/questionnaires/<int:questionnaire_id>', methods=['DELETE'])(admin_delete_questionnaire)
-    bp.route('/api/admin/questionnaires/<int:questionnaire_id>/export', methods=['GET'])(admin_export_questionnaire)

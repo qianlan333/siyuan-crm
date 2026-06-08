@@ -1,0 +1,67 @@
+version: 15
+status: active
+
+autopilot:
+  enabled: true
+  mode: product_development_with_targeted_runtime_migration
+  target_duration_minutes_min: 15
+  target_duration_minutes_max: 20
+  admin_override_allowed: false
+  runtime_changes_allowed: targeted_owner_approved_only
+
+current_phase: post_phase7_cleanup_closeout
+last_merged_pr: "#878"
+last_merged_cleanup_wave: sidebar_customer_readonly_track3b
+recommended_next_pr: product_development_or_targeted_runtime_migration
+owner_approval_required: false
+runtime_behavior_changed: false
+delete_ready: false
+
+cleanup_closeout:
+  global_non_runtime_cleanup: complete
+  low_medium_admin_runtime_fallback_migration: complete_enough_for_product_development
+  global_deletion_task_status: closed
+  broad_legacy_runtime_deletion_authorized: false
+  continue_deletion_mode: false
+
+active_safety_gates:
+  - check_legacy_facade_growth_freeze
+  - generate_legacy_replacement_backlog
+  - check_production_route_resolution
+  - check_automerge_eligibility
+  - check_autonomous_development_loop
+  - pr_smoke
+
+completed_runtime_fallback_tracks:
+  - channels_entry_channel_next_ownership
+  - channel_legacy_runtime_cleanup_after_next_entry_bindings
+  - media_material_libraries_next_ownership
+  - sidebar_customer_broad_fallback_narrowing
+  - sidebar_customer_readonly_cleanup
+
+remaining_runtime_fallback_tracks:
+  product_specific_migration_required:
+    - wecom_callback_events
+    - questionnaire_oauth_public_submit
+    - wecom_tags_tag_groups
+    - payment_checkout_orders_public_products
+    - automation_runtime_run_due_reply_monitor_jobs
+    - automation_member_manual_send_focus_sop
+    - sidebar_write_external_paths
+    - hxc_dashboard_cloud_orchestrator
+  handling_rule: migrate only when the related product capability is actively being developed
+
+protected_runtime_boundaries:
+  - app.py
+  - legacy_flask_app.py
+  - aicrm_next/main.py
+  - aicrm_next/production_compat/api.py high-risk and retained fallback entries only
+  - wecom_ability_service runtime
+  - migrations/deploy/nginx/systemd
+  - payment/OAuth/WeCom callback/public submit/product/checkout/order/image upload/runtime/outbound paths
+
+next_cleanup_candidates:
+  non_runtime_cleanup: complete
+  runtime_fallback_cleanup: closed_as_global_task
+  future_runtime_migration: product_specific_only
+  high_risk_external_cleanup: separate_owner_approval_required

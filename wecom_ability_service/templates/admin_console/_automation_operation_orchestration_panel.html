@@ -1,4 +1,5 @@
 {% set workspace = operations_workspace or {} %}
+{% set targetable_stages = workspace.targetable_stages or [] %}
 <style>
   .op-task-workspace { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; min-width: 0; }
   .op-task-card, .op-task-panel { border: 1px solid rgba(15,23,42,.08); border-radius: 16px; background: #fff; min-width: 0; }
@@ -84,7 +85,7 @@
         <div class="op-task-grid op-task-grid--three">
           <label class="op-task-field"><span>触发方式</span><select data-field="trigger_type"><option value="scheduled_daily">每天固定时间触发</option><option value="audience_entered">进入人群后立即触发</option></select></label>
           <label class="op-task-field" data-scheduled-trigger-field><span>每天触发时间</span><input data-field="send_time" type="time"></label>
-          <label class="op-task-field"><span>目标人群所在阶段</span><select data-field="target_stage_code">
+          <label class="op-task-field"><span>触达对象所在阶段</span><select data-field="target_stage_code">
             {% for stage in targetable_stages %}
               {% set stage_description = '已通过前置条件' if stage.stage_code == 'operating' else '已确认成交' if stage.stage_code == 'converted' else stage.description %}
               <option value="{{ stage.stage_code }}" data-audience-code="{{ stage.compat_audience_code or '' }}">{{ stage.label }}{% if stage_description %} · {{ stage_description }}{% endif %}</option>
@@ -125,6 +126,7 @@
   const root = document.querySelector("[data-operation-task-root]");
   if (!root) return;
   const apiUrls = JSON.parse(root.dataset.apiUrls || "{}");
+  const targetStages = {{ targetable_stages|tojson }};
   const withId = (url, id) => String(url || "").replace(/\/0(?=\/|\?|$)/, `/${encodeURIComponent(String(id || 0))}`);
   const state = { groups: [], tasks: [], currentTask: null, profileTemplates: [], profileSegments: [], agents: [], preview: {} };
   const labels = {
@@ -158,15 +160,29 @@
   };
   const clearFeedback = () => [dom.feedback, dom.listFeedback].forEach((item) => { if (item) item.style.display = "none"; });
   const requestJson = async (url, options = {}) => {
+    if (!url) throw new Error("页面接口地址缺失，请刷新页面后重试");
     const response = await fetch(url, { headers: { Accept: "application/json", "Content-Type": "application/json", ...(options.headers || {}) }, ...options });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.ok === false) throw new Error(data.error || "操作失败，请稍后重试");
+    if (!response.ok || data.ok === false) throw new Error(data.error || `请求失败（${response.status}），请刷新页面后重试`);
     return data;
   };
   const currentId = () => Number((state.currentTask || {}).id || 0);
   const getField = (name) => root.querySelector(`[data-field="${name}"]`);
   const setValue = (name, value) => { const field = getField(name); if (field) field.value = value ?? ""; };
   const getValue = (name) => getField(name)?.value ?? "";
+  const stageByCode = (code) => targetStages.find((stage) => String(stage.stage_code || "") === String(code || ""));
+  const stageCodeForAudience = (audienceCode) => {
+    if (audienceCode === "converted") return stageByCode("converted") ? "converted" : "operating";
+    if (audienceCode === "pending_questionnaire") {
+      if (stageByCode("questionnaire_review")) return "questionnaire_review";
+      if (stageByCode("order_review")) return "order_review";
+    }
+    return "operating";
+  };
+  const audienceForStage = (stageCode) => {
+    const stage = stageByCode(stageCode);
+    return String(stage?.compat_audience_code || (stageCode === "converted" ? "converted" : "operating"));
+  };
 
   function groupName(id) {
     const group = state.groups.find((item) => Number(item.id) === Number(id));
@@ -236,7 +252,7 @@
     setValue("description", task.description || "");
     setValue("trigger_type", task.trigger_type || "scheduled_daily");
     setValue("send_time", task.send_time || "10:00");
-    setValue("target_audience_code", task.target_audience_code || "operating");
+    setValue("target_stage_code", task.target_stage_code || stageCodeForAudience(task.target_audience_code || "operating"));
     setValue("audience_day_offset", task.audience_day_offset || 1);
     setValue("behavior_filter", task.behavior_filter || "none");
     setValue("profile_segment_template_id", task.profile_segment_template_id || "");
@@ -274,7 +290,7 @@
     if (!templateId || !apiUrls.profile_segment_template_detail_base) return [];
     const data = await requestJson(withId(apiUrls.profile_segment_template_detail_base, templateId));
     const bundle = data.template_bundle || data.bundle || data;
-    const segments = bundle.segments || bundle.profile_segments || (bundle.template || {}).segments || [];
+    const segments = bundle.categories || (bundle.template || {}).categories || bundle.segments || bundle.profile_segments || (bundle.template || {}).segments || [];
     state.profileSegments = segments.map((item) => ({
       segment_key: item.segment_key || item.category_key || item.profile_segment_key || item.key || String(item.id || ""),
       segment_name: item.segment_name || item.category_name || item.profile_segment_name || item.name || item.segment_key || String(item.id || ""),
@@ -300,6 +316,10 @@
     const mode = String((state.currentTask || {}).content_mode || "unified");
     const rows = segmentRowsForMode();
     dom.profileField.hidden = mode !== "profile_layered";
+    if (mode === "profile_layered" && !rows.length) {
+      dom.segments.innerHTML = `<div class="op-task-empty">当前画像模板还没有可填写的分层，请先选择包含分层分类的画像模板。</div>`;
+      return;
+    }
     dom.segments.innerHTML = rows.map((row) => {
       const content = segmentContent(row.segment_key);
       const count = (state.preview.segment_counts || {})[row.segment_key];
@@ -354,7 +374,8 @@
       trigger_type: getValue("trigger_type") || "scheduled_daily",
       send_time: getValue("send_time") || "10:00",
       timezone: "Asia/Shanghai",
-      target_audience_code: getValue("target_audience_code") || "operating",
+      target_stage_code: getValue("target_stage_code") || "operating",
+      target_audience_code: audienceForStage(getValue("target_stage_code") || "operating"),
       audience_day_offset: Number(getValue("audience_day_offset") || 1),
       behavior_filter: getValue("behavior_filter") || "none",
       content_mode: mode,
@@ -413,6 +434,7 @@
         status: "draft",
         trigger_type: "scheduled_daily",
         send_time: "10:00",
+        target_stage_code: "operating",
         target_audience_code: "operating",
         audience_day_offset: 1,
         behavior_filter: "none",

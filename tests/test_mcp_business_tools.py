@@ -332,6 +332,63 @@ def test_resolve_customer_returns_available_actions(client, app):
     assert "send_pool_private_message" in payload["available_actions"]
 
 
+def test_resolve_customer_supports_masked_mobile(client, app):
+    _insert_customer(
+        app,
+        external_userid="wm_resolve_masked_001",
+        mobile="17612345555",
+        customer_name="掩码手机号客户",
+        owner_userid="sales_09",
+    )
+
+    response = _mcp_call(
+        client,
+        "resolve_customer",
+        {"customer_ref": "176xxxx5555"},
+    )
+
+    payload = response.get_json()["result"]["structuredContent"]
+    assert payload["ok"] is True
+    assert payload["external_userid"] == "wm_resolve_masked_001"
+    assert payload["matched_by"] == "masked_mobile"
+    assert payload["customer"]["mobile"] == "17612345555"
+
+    star_response = _mcp_call(
+        client,
+        "resolve_customer",
+        {"customer_ref": "176****5555"},
+    )
+    star_payload = star_response.get_json()["result"]["structuredContent"]
+    assert star_payload["external_userid"] == "wm_resolve_masked_001"
+
+
+def test_resolve_customer_rejects_ambiguous_masked_mobile(client, app):
+    _insert_customer(
+        app,
+        external_userid="wm_resolve_masked_a",
+        mobile="17600005555",
+        customer_name="掩码手机号客户 A",
+        owner_userid="sales_09",
+    )
+    _insert_customer(
+        app,
+        external_userid="wm_resolve_masked_b",
+        mobile="17611115555",
+        customer_name="掩码手机号客户 B",
+        owner_userid="sales_09",
+    )
+
+    response = _mcp_call(
+        client,
+        "resolve_customer",
+        {"customer_ref": "176xxxx5555"},
+    )
+
+    payload = response.get_json()
+    assert "error" in payload
+    assert payload["error"]["message"].startswith("masked mobile is ambiguous: 176xxxx5555")
+
+
 def test_create_private_message_task_resolves_mobile_then_executes(client, app, monkeypatch):
     monkeypatch.setattr("requests.get", fake_wecom_get)
     monkeypatch.setattr("requests.post", fake_wecom_post)

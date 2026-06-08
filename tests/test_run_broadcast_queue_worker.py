@@ -52,14 +52,15 @@ def _enqueue_due_job(*, content_payload=None, source_id="job-1"):
 def test_worker_dispatches_due_job_and_marks_sent(app, monkeypatch):
     captured: dict = {}
 
-    def fake_dispatch(task_type, fn_name, payload):
+    def fake_dispatch(task_type, fn_name, payload, **kwargs):
         captured["task_type"] = task_type
         captured["fn_name"] = fn_name
         captured["payload"] = payload
+        captured["broadcast_job_id"] = kwargs.get("broadcast_job_id")
         return {"task_id": 555, "wecom_result": {"errcode": 0}}
 
     monkeypatch.setattr(
-        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         fake_dispatch,
     )
 
@@ -72,17 +73,18 @@ def test_worker_dispatches_due_job_and_marks_sent(app, monkeypatch):
     assert summary["sent_ok"] == 1
     assert summary["sent_failed"] == 0
     assert captured["fn_name"] == "send_text"
+    assert captured["broadcast_job_id"] == job_id
     assert job["status"] == "sent"
     assert job["outbound_task_id"] == 555
     assert job["sent_count"] == 3
 
 
 def test_worker_marks_failed_when_dispatch_raises(app, monkeypatch):
-    def fake_dispatch(task_type, fn_name, payload):
+    def fake_dispatch(task_type, fn_name, payload, **kwargs):
         raise RuntimeError("wecom api 401 invalid token")
 
     monkeypatch.setattr(
-        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         fake_dispatch,
     )
 
@@ -105,7 +107,7 @@ def test_worker_marks_failed_when_payload_missing_fn_name(app, monkeypatch):
         return {"task_id": 1, "wecom_result": {}}
 
     monkeypatch.setattr(
-        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         fake_dispatch,
     )
 

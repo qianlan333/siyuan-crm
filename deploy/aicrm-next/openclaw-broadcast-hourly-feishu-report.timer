@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw Broadcast Queue Feishu hourly report at minute 5
+
+[Timer]
+OnCalendar=*-*-* *:05:00
+Persistent=true
+Unit=openclaw-broadcast-hourly-feishu-report.service
+
+[Install]
+WantedBy=timers.target

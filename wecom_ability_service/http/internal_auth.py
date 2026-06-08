@@ -3,6 +3,7 @@ from __future__ import annotations
 from urllib.parse import quote
 
 from flask import abort, current_app, jsonify, redirect, render_template, request, url_for
+from werkzeug.routing import BuildError
 
 from ..domains.admin_auth import (
     admin_role_can_access_module,
@@ -13,6 +14,7 @@ from ..domains.admin_auth import (
     ensure_admin_console_action_token,
     exchange_code_for_wecom_user,
     is_break_glass_login_enabled,
+    logout_admin_session,
     require_admin_login,
     require_admin_roles,
 )
@@ -32,10 +34,9 @@ ADMIN_API_MODULE_PREFIXES = (
     ("/api/admin/image-library", "image_library"),
     ("/api/admin/jobs", "jobs"),
     ("/api/admin/marketing-automation", "config"),
-    ("/api/admin/wechat-pay/products", "wechat_pay_products"),
+    ("/api/admin/alipay", "wechat_pay_transactions"), ("/api/admin/wechat-pay/products", "wechat_pay_products"),
     ("/api/admin/miniprogram-library", "miniprogram_library"),
     ("/api/admin/broadcast-jobs", "jobs"),
-    ("/api/admin/user-ops", "user_ops_funnel"),
     ("/api/admin/wechat-pay", "wechat_pay_transactions"),
 )
 ADMIN_ROUTE_MODULE_PREFIXES = (
@@ -50,7 +51,7 @@ ADMIN_ROUTE_MODULE_PREFIXES = (
     ("/admin/jobs", "jobs"),
     ("/admin/miniprogram-library", "miniprogram_library"),
     ("/admin/questionnaires", "questionnaires"),
-    ("/admin/wechat-pay/products", "wechat_pay_products"),
+    ("/admin/alipay", "wechat_pay_transactions"), ("/admin/wechat-pay/products", "wechat_pay_products"),
     ("/admin/wechat-pay", "wechat_pay_transactions"),
     ("/admin/wecom-tags", "wecom_tags"),
     ("/admin/config", "config"),
@@ -58,11 +59,8 @@ ADMIN_ROUTE_MODULE_PREFIXES = (
     ("/admin/mcp", "api_docs"),
     ("/admin", "automation_conversion"),
 )
-ADMIN_SUNSET_PAGE_PREFIXES = (
-    "/admin/user-ops",
-    "/admin/audit",
-    "/admin/class-user-management",
-)
+ADMIN_SUNSET_PAGE_PREFIXES = ("/admin/user-ops", "/admin/audit", "/admin/class-user-management")
+REMOVED_USER_OPS_API_PREFIXES = ("/api/admin/user-ops", "/api/internal/user-ops")
 REMOVED_ADMIN_CONFIG_PATHS = {
     "/admin/config/routing",
     "/admin/config/routing/owner-role",
@@ -100,6 +98,23 @@ def current_admin_session_user() -> dict | None:
     return current_admin_user()
 
 
+def admin_login():
+    if current_admin_session_user():
+        return redirect(_safe_next_path(request.args.get("next")), code=302)
+    return _render_admin_auth_page(next_path=request.args.get("next"))
+
+
+def admin_logout():
+    logout_admin_session()
+    return redirect("/login", code=302)
+
+
+def register_routes(bp):
+    bp.route("/login", methods=["GET"])(admin_login)
+    bp.route("/logout", methods=["GET"])(admin_logout)
+    return bp
+
+
 def _safe_next_path(value: object) -> str:
     next_path = _normalized_text(value)
     if not next_path.startswith("/") or next_path.startswith("//"):
@@ -131,7 +146,9 @@ def _module_for_admin_api_path(path: str) -> str:
 
 def _is_sunset_admin_path(path: str) -> bool:
     normalized_path = _normalized_text(path)
-    return any(normalized_path == prefix or normalized_path.startswith(prefix + "/") for prefix in ADMIN_SUNSET_PAGE_PREFIXES)
+    return any(
+        normalized_path == prefix or normalized_path.startswith(prefix + "/") for prefix in ADMIN_SUNSET_PAGE_PREFIXES
+    )
 
 
 def _can_access_admin_module(module_key: str, *, write: bool = False) -> bool:
@@ -188,7 +205,7 @@ def _wecom_login_links(next_path: str) -> dict[str, str]:
     try:
         qr_url = url_for("api.admin_wecom_start", next=next_path, mode="qr")
         oauth_url = url_for("api.admin_wecom_start", next=next_path, mode="oauth")
-    except RuntimeError:
+    except (RuntimeError, BuildError):
         qr_url = "/auth/wecom/start?mode=qr"
         oauth_url = "/auth/wecom/start?mode=oauth"
     return {"qr": qr_url, "oauth": oauth_url}
@@ -316,6 +333,8 @@ def register_admin_request_guards(app) -> None:
             if path.startswith("/api/"):
                 return jsonify({"ok": False, "error": "not found"}), 404
             abort(404)
+        if any(path == prefix or path.startswith(prefix + "/") for prefix in REMOVED_USER_OPS_API_PREFIXES):
+            return jsonify({"ok": False, "error": "gone", "message": "user-ops admin page APIs have been retired"}), 410
 
         api_module_key = _module_for_admin_api_path(path)
         if api_module_key:

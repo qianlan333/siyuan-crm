@@ -28,6 +28,16 @@ logger = logging.getLogger(__name__)
 _DEFAULT_SAMPLE_SIZE = 20
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        loaded = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _normalize_code(code: str) -> str:
     text = (code or "").strip().lower()
     text = re.sub(r"[^a-z0-9_]+", "_", text)
@@ -98,10 +108,7 @@ def list_segments(
         # 实时重算 headcount（解决 cached_headcount 永远是创建时旧值的问题）
         if recompute:
             sql_query = str(d.pop("sql_query", "") or "")
-            try:
-                params = json.loads(d.pop("sql_params_json", "") or "{}")
-            except (TypeError, ValueError):
-                params = {}
+            params = _json_object(d.pop("sql_params_json", "") or "{}")
             if sql_query:
                 try:
                     res = run_segment_query(sql=sql_query, params=params)
@@ -156,10 +163,7 @@ def get_segment(
     if not row:
         return None
     d = dict(row)
-    try:
-        d["sql_params"] = json.loads(d.get("sql_params_json") or "{}")
-    except (TypeError, ValueError):
-        d["sql_params"] = {}
+    d["sql_params"] = _json_object(d.get("sql_params_json") or "{}")
     try:
         d["cached_sample"] = json.loads(d.get("cached_sample_json") or "[]")
     except (TypeError, ValueError):

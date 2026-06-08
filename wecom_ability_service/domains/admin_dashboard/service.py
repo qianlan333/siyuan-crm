@@ -13,11 +13,13 @@ ADMIN_NAV_GROUPS = (
         "title": "运营",
         "items": (
             {"key": "automation_conversion", "label": "自动化运营", "endpoint": "api.admin_automation_conversion"},
+            {"key": "group_ops", "label": "群运营计划", "endpoint": "api.admin_group_ops_ui"},
             {"key": "channels", "label": "渠道码中心", "endpoint": "api.admin_channels_page"},
             {"key": "cloud_orchestrator", "label": "AI 助手", "endpoint": "api.admin_cloud_orchestrator_workspace"},
             {"key": "customers", "label": "客户激活 / 客户列表", "endpoint": "api.admin_console_customers"},
             {"key": "user_ops_funnel", "label": "漏斗 / 数据看板", "endpoint": "api.admin_hxc_dashboard_workspace"},
             {"key": "questionnaires", "label": "问卷", "endpoint": "api.admin_console_questionnaires"},
+            {"key": "radar_links", "label": "内容雷达", "endpoint": "api.admin_radar_links"},
             {"key": "wecom_tags", "label": "企微标签管理", "endpoint": "api.admin_wecom_tags_page"},
         ),
     },
@@ -40,6 +42,7 @@ ADMIN_NAV_GROUPS = (
         "title": "配置及后台",
         "items": (
             {"key": "jobs", "label": "同步任务配置 / 同步任务", "endpoint": "api.admin_console_jobs"},
+            {"key": "owner_migration", "label": "负责人迁移", "endpoint": "api.admin_owner_migration_page"},
             {"key": "config", "label": "配置", "endpoint": "api.admin_config_home"},
             {"key": "api_docs", "label": "API 文档", "endpoint": "api.admin_console_api_docs"},
         ),
@@ -254,7 +257,7 @@ def build_dashboard_summary() -> dict[str, Any]:
             "label": "联系人",
             "value": counts["contacts_total"],
             "description": "联系人快照总量",
-            "href": "/admin/customers",
+            "href": "/admin/jobs",
         },
         {
             "key": "group_chats_total",
@@ -268,7 +271,7 @@ def build_dashboard_summary() -> dict[str, Any]:
             "label": "客户",
             "value": counts["customers_total"],
             "description": "当前客户总量",
-            "href": "/admin/customers",
+            "href": "/admin/jobs",
         },
         {
             "key": "questionnaire_total",
@@ -390,7 +393,7 @@ def _build_mcp_runtime_group() -> dict[str, Any]:
         "tone": "warn" if items else "ok",
         "items": items,
         "empty_title": "AI 工具配置正常",
-        "href": "/admin/api-docs",
+        "href": "/admin/mcp",
     }
 
 

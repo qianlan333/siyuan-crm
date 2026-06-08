@@ -15,6 +15,7 @@ from ..contacts.repo import count_contacts, get_last_contacts_sync_time
 from ..group_chats.repo import count_group_chats
 from ..identity.service import count_external_contact_identity_maps
 from ..questionnaire import build_questionnaire_preflight_payload, list_questionnaires
+from ..questionnaire.preflight_service import runtime_config_value
 
 
 def detect_environment(config: Mapping[str, Any]) -> dict[str, str]:
@@ -216,8 +217,8 @@ def get_questionnaire_preflight_snapshot(config: Mapping[str, Any]) -> dict[str,
     # Dashboard only needs a lightweight readiness summary. The detailed remote
     # WeCom tag fetch remains on the questionnaire center preflight endpoint.
     def _lightweight_tag_probe() -> list[dict[str, Any]]:
-        required_keys = ["WECOM_CORP_ID", "WECOM_CONTACT_SECRET", "WECOM_API_BASE"]
-        missing = [key for key in required_keys if not str(config.get(key, "") or "").strip()]
+        required_keys = ["WECOM_CORP_ID", "WECOM_SECRET", "WECOM_API_BASE"]
+        missing = [key for key in required_keys if not runtime_config_value(config, key)]
         if missing:
             raise RuntimeError(f"missing config: {', '.join(missing)}")
         return [{"tag_id": "config-ok", "tag_name": "config-ok"}]

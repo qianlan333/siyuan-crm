@@ -13,3 +13,6 @@ follow_imports = "silent"
 pretty = true
 show_error_codes = true
 exclude = "^(\\.venv310|node_modules)/"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

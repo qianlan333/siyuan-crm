@@ -12,6 +12,7 @@ focus_send / user_ops_deferred）的"未来该发的批次"统一到 broadcast_j
 - 失败不自动重试（v1），由运营手动 retry
 
 公共 API（service 层）：
+- enqueue_broadcast_job(...) — 标准化入队协议，补业务归类 / 渠道 / 目标类型 / 幂等键
 - enqueue_job(...)          — 各 domain 展平器入队
 - list_jobs(...)            — 前端列表
 - get_job(id)               — 详情

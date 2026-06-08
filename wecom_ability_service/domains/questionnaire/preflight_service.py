@@ -3,11 +3,28 @@ from __future__ import annotations
 from typing import Any, Callable, Mapping
 
 
+def runtime_config_value(config: Mapping[str, Any], key: str) -> str:
+    try:
+        from ...infra.settings import get_setting
+
+        setting = get_setting(key)
+        if setting is not None:
+            return str(setting or "").strip()
+    except Exception:
+        pass
+    return str(config.get(key, "") or "").strip()
+
+
+def _runtime_config_bool(config: Mapping[str, Any], key: str) -> bool:
+    value = runtime_config_value(config, key).lower()
+    return value in {"1", "true", "yes", "on"}
+
+
 def _wechat_oauth_is_configured(config: Mapping[str, Any]) -> bool:
-    secret_key = str(config.get("SECRET_KEY", "") or "").strip()
+    secret_key = runtime_config_value(config, "SECRET_KEY")
     return bool(
-        config.get("WECHAT_MP_APP_ID")
-        and config.get("WECHAT_MP_APP_SECRET")
+        runtime_config_value(config, "WECHAT_MP_APP_ID")
+        and runtime_config_value(config, "WECHAT_MP_APP_SECRET")
         and secret_key
         and secret_key != "dev-secret-key-change-me"
     )
@@ -22,10 +39,10 @@ def build_questionnaire_preflight_payload(
     payload: dict[str, Any] = {
         "wechat_oauth_configured": _wechat_oauth_is_configured(config),
         "wecom_contact_configured": all(
-            str(config.get(key, "") or "").strip()
+            runtime_config_value(config, key)
             for key in ["WECOM_CORP_ID", "WECOM_CONTACT_SECRET"]
         ),
-        "debug_session_api_enabled": bool(config.get("ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API")),
+        "debug_session_api_enabled": _runtime_config_bool(config, "ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API"),
         "questionnaire_admin_ui_enabled": True,
         "wecom_tags_api_available": False,
         "identity_map_available": False,

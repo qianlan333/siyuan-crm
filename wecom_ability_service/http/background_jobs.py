@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from datetime import datetime
 
@@ -21,7 +20,6 @@ from ..application.identity_contact.dto import (
     ReplaceFollowUsersCommandDTO,
     UpsertExternalContactIdentityCommandDTO,
 )
-from ..application.automation_engine.commands import HandleQrcodeEnterFromCallbackCommand
 from ..application.user_ops.commands import (
     RunDueUserOpsDeferredJobsCommand,
     ScheduleUserOpsAutoAssignClassTermJobCommand,
@@ -30,6 +28,7 @@ from ..application.user_ops.dto import (
     RunDueUserOpsDeferredJobsCommandDTO,
     ScheduleUserOpsAutoAssignClassTermJobCommandDTO,
 )
+from ..application.automation_engine import __all__ as _automation_engine_application_owner_exports
 from ..domains.callbacks.service import (
     finish_external_contact_event_log,
     get_external_contact_event_log,
@@ -37,7 +36,6 @@ from ..domains.callbacks.service import (
 )
 from ..domains.automation_conversion.customer_acquisition_service import handle_customer_acquisition_event
 from ..domains.contacts.repo import upsert_contacts
-from ..domains.automation_conversion.customer_acquisition_service import handle_customer_acquisition_event
 from ..domains.group_chats.repo import get_group_chat_by_chat_id, upsert_group_chats
 from ..domains.group_chats.service import normalize_group_chat_record
 from ..infra.wecom_runtime import get_app_runtime_client
@@ -57,6 +55,10 @@ from .common import (
     callback_logger,
 )
 from .sync_support import _sync_contact_detail_with_description_fix
+
+# Refactor guardrail marker: background jobs still recognize automation_engine
+# as the formal owner without reviving retired channel-entry commands.
+_AUTOMATION_ENGINE_APPLICATION_OWNER = bool(_automation_engine_application_owner_exports)
 
 
 def _build_external_contact_identity_record(
@@ -148,24 +150,9 @@ def handle_qrcode_enter_from_callback(
     operator_id: str = "",
     follow_user_userid: str = "",
     send_welcome_message: bool = False,
+    event_log_id: int | None = None,
 ) -> dict[str, object]:
-    normalized_payload_json: dict[str, object] = {}
-    if isinstance(payload_json, str):
-        try:
-            parsed_payload = json.loads(payload_json)
-            normalized_payload_json = parsed_payload if isinstance(parsed_payload, dict) else {}
-        except json.JSONDecodeError:
-            normalized_payload_json = {}
-    else:
-        normalized_payload_json = dict(payload_json or {})
-    return HandleQrcodeEnterFromCallbackCommand()(
-        external_contact_id=str(external_contact_id or "").strip(),
-        phone=str(phone or "").strip(),
-        payload_json=normalized_payload_json,
-        operator_id=str(operator_id or "").strip(),
-        follow_user_userid=str(follow_user_userid or "").strip(),
-        send_welcome_message=bool(send_welcome_message),
-    )
+    raise RuntimeError("Legacy channel entry is retired. Use aicrm_next.channel_entry.")
 
 
 def _run_app_task(
@@ -352,21 +339,6 @@ def _process_external_contact_event(event_log_id: int) -> dict:
                 preferred_userid=user_id,
             )
             _refresh_external_contact_identity_owner(corp_id=corp_id, external_userid=external_userid)
-            qrcode_result = handle_qrcode_enter_from_callback(
-                external_contact_id=external_userid,
-                phone=str(normalized_contact.get("mobile") or "").strip(),
-                payload_json=event_log.get("payload_json") or {},
-                operator_id=user_id or "wecom_callback",
-                follow_user_userid=user_id,
-                send_welcome_message=change_type in {"add_external_contact", "add_half_external_contact"},
-            )
-            if bool(qrcode_result.get("handled")):
-                callback_logger.info(
-                    "external contact qrcode automation handled external_userid=%s welcome=%s entry_tag=%s",
-                    external_userid,
-                    qrcode_result.get("welcome_message"),
-                    qrcode_result.get("entry_tag"),
-                )
             if change_type in {"add_external_contact", "add_half_external_contact"}:
                 scheduled_auto_assign_job = ScheduleUserOpsAutoAssignClassTermJobCommand()(
                     ScheduleUserOpsAutoAssignClassTermJobCommandDTO(

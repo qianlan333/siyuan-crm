@@ -59,12 +59,8 @@ def _bind_external_contact_identity_payload(
 
 
 def sidebar_bind_mobile_page():
-    v2_flag = str(current_app.config.get("SIDEBAR_WORKBENCH_V2_ENABLED", "true") or "").strip().lower()
-    v2_enabled = v2_flag not in {"0", "false", "no", "off"}
-    legacy_requested = str(request.args.get("v", "") or "").strip().lower() == "legacy"
-    template = "sidebar_customer_workbench.html" if v2_enabled and not legacy_requested else "sidebar_bind_mobile.html"
     return render_template(
-        template,
+        "sidebar_customer_workbench.html",
         debug_enabled=bool(current_app.config.get("DEBUG")),
     )
 
@@ -76,6 +72,7 @@ def sidebar_contact_binding_status():
         return jsonify({"ok": False, "error": "external_userid is required"}), 400
     status = _get_contact_binding_status_payload(external_userid, owner_userid)
     status["ok"] = True
+    status.setdefault("mobile", "")
     if sidebar_marketing_target_exists(external_userid):
         try:
             status["marketing_profile"] = get_customer_marketing_profile(external_userid)

@@ -238,6 +238,34 @@ def test_wechat_pay_oauth_requests_userinfo_by_default(app, client, tmp_path):
     assert "scope=snsapi_userinfo" in response.headers["Location"]
 
 
+def test_wechat_pay_oauth_start_unconfigured_returns_readable_html(app, client):
+    app.config.update(WECHAT_MP_APP_ID="", WECHAT_MP_APP_SECRET="", SECRET_KEY="")
+
+    response = client.get(
+        "/api/h5/wechat-pay/oauth/start?return_url=/pay/assessment_report_v1",
+        headers=_wechat_headers(),
+    )
+
+    assert response.status_code == 501
+    assert response.content_type.startswith("text/html")
+    assert "当前微信授权配置未完成，请联系管理员" in response.get_data(as_text=True)
+    assert '{"ok":' not in response.get_data(as_text=True)
+
+
+def test_wechat_pay_oauth_callback_missing_code_returns_readable_html(app, client, tmp_path):
+    _configure_pay(app, tmp_path)
+
+    response = client.get(
+        "/api/h5/wechat-pay/oauth/callback",
+        headers=_wechat_headers(),
+    )
+
+    assert response.status_code == 400
+    assert response.content_type.startswith("text/html")
+    assert "授权未完成，请重新进入商品页" in response.get_data(as_text=True)
+    assert '{"ok":' not in response.get_data(as_text=True)
+
+
 def test_wechat_pay_oauth_callback_stores_payer_name(app, client, tmp_path, monkeypatch):
     _configure_pay(app, tmp_path)
 
@@ -319,6 +347,43 @@ def test_create_jsapi_order_uses_session_openid_and_server_catalog(app, client, 
     )
     assert status_response.status_code == 200
     assert status_response.get_json()["order"]["out_trade_no"] == payload["order"]["out_trade_no"]
+
+
+def test_create_jsapi_order_repairs_stale_mojibake_payer_name(app, client, tmp_path, monkeypatch):
+    _configure_pay(app, tmp_path)
+
+    class FakeClient:
+        def create_jsapi_transaction(self, payload):
+            return {"prepay_id": "wx-prepay-id"}
+
+        def build_jsapi_pay_params(self, prepay_id):
+            return {
+                "appId": "wx-pay-app",
+                "timeStamp": "1710000000",
+                "nonceStr": "nonce",
+                "package": f"prepay_id={prepay_id}",
+                "signType": "RSA",
+                "paySign": "signed",
+            }
+
+    monkeypatch.setattr(wechat_pay_service, "_create_wechat_pay_client", lambda: FakeClient())
+    with client.session_transaction() as sess:
+        sess["wechat_pay_h5_identity"] = {"openid": "op_test", "payer_name": "æ›¾å¾·é’§"}
+
+    response = client.post(
+        "/api/h5/wechat-pay/jsapi/orders",
+        json={"product_code": "assessment_report_v1"},
+        headers=_wechat_headers(),
+    )
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    close_db()
+    row = get_db().execute(
+        "SELECT payer_name_snapshot FROM wechat_pay_orders WHERE out_trade_no = ?",
+        (payload["order"]["out_trade_no"],),
+    ).fetchone()
+    assert row["payer_name_snapshot"] == "曾德钧"
 
 
 def test_create_jsapi_order_rejects_unknown_product(app, client, tmp_path, monkeypatch):

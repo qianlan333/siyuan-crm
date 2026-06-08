@@ -449,6 +449,93 @@ def get_contact_binding_row(external_userid: str):
     ).fetchone()
 
 
+def get_unique_mobile_candidate_from_identity_sources(external_userid: str):
+    normalized_external_userid = str(external_userid or "").strip()
+    if not normalized_external_userid:
+        return None
+    rows = get_db().execute(
+        """
+        WITH identity_values AS (
+            SELECT
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(openid, '')), NULL) AS openids,
+                ARRAY_REMOVE(ARRAY_AGG(DISTINCT NULLIF(unionid, '')), NULL) AS unionids
+            FROM wecom_external_contact_identity_map
+            WHERE external_userid = ?
+        ),
+        raw_candidates AS (
+            SELECT
+                regexp_replace(COALESCE(mobile_snapshot, ''), '\\D', '', 'g') AS raw_mobile,
+                created_at AS matched_at,
+                'wechat_pay_order' AS source
+            FROM wechat_pay_orders, identity_values
+            WHERE COALESCE(mobile_snapshot, '') <> ''
+              AND (status = 'paid' OR trade_state = 'SUCCESS')
+              AND (
+                    external_userid = ?
+                    OR payer_openid = ANY(COALESCE(openids, ARRAY[]::TEXT[]))
+                    OR unionid = ANY(COALESCE(unionids, ARRAY[]::TEXT[]))
+                    OR respondent_key = ANY(COALESCE(unionids, ARRAY[]::TEXT[]))
+                  )
+            UNION ALL
+            SELECT
+                regexp_replace(COALESCE(mobile_snapshot, ''), '\\D', '', 'g') AS raw_mobile,
+                submitted_at AS matched_at,
+                'questionnaire_submission' AS source
+            FROM questionnaire_submissions, identity_values
+            WHERE COALESCE(mobile_snapshot, '') <> ''
+              AND (
+                    external_userid = ?
+                    OR openid = ANY(COALESCE(openids, ARRAY[]::TEXT[]))
+                    OR unionid = ANY(COALESCE(unionids, ARRAY[]::TEXT[]))
+                    OR respondent_key = ANY(COALESCE(unionids, ARRAY[]::TEXT[]))
+                    OR respondent_key = ANY(COALESCE(openids, ARRAY[]::TEXT[]))
+                  )
+        ),
+        normalized_candidates AS (
+            SELECT
+                CASE
+                    WHEN LENGTH(raw_mobile) = 13 AND LEFT(raw_mobile, 2) = '86' THEN SUBSTRING(raw_mobile FROM 3)
+                    ELSE raw_mobile
+                END AS mobile,
+                matched_at,
+                source
+            FROM raw_candidates
+        )
+        SELECT
+            mobile,
+            COUNT(*) AS matched_count,
+            MAX(matched_at) AS latest_matched_at,
+            STRING_AGG(DISTINCT source, ',' ORDER BY source) AS sources
+        FROM normalized_candidates
+        WHERE mobile ~ '^1[3-9][0-9]{9}$'
+        GROUP BY mobile
+        ORDER BY MAX(matched_at) DESC, mobile ASC
+        LIMIT 2
+        """,
+        (normalized_external_userid, normalized_external_userid, normalized_external_userid),
+    ).fetchall()
+    if len(rows) != 1:
+        return None
+    return rows[0]
+
+
+def list_unbound_external_userids_with_identity_sources(*, limit: int = 500) -> list[str]:
+    rows = get_db().execute(
+        """
+        SELECT DISTINCT m.external_userid
+        FROM wecom_external_contact_identity_map m
+        LEFT JOIN external_contact_bindings b ON b.external_userid = m.external_userid
+        WHERE b.external_userid IS NULL
+          AND COALESCE(m.external_userid, '') <> ''
+          AND (COALESCE(m.unionid, '') <> '' OR COALESCE(m.openid, '') <> '')
+        ORDER BY m.external_userid ASC
+        LIMIT ?
+        """,
+        (max(1, min(int(limit or 500), 5000)),),
+    ).fetchall()
+    return [str(row.get("external_userid") or "").strip() for row in rows if str(row.get("external_userid") or "").strip()]
+
+
 def get_or_create_person_for_mobile(mobile: str) -> tuple[int, str]:
     db = get_db()
     person = db.execute(

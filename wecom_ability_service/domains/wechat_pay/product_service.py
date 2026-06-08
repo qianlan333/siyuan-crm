@@ -5,10 +5,13 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
-from flask import current_app
+from flask import current_app, has_app_context
+
+from aicrm_next.commerce.domain import completion_redirect_projection, safe_completion_redirect_url
 
 from ...db import get_db
 from ...infra.json_utils import safe_json_loads
+from ...infra.signed_context import append_ctx_query
 from ...infra.settings import get_setting
 from . import product_repo
 from .exceptions import WeChatPayOrderError, WeChatPayProductError
@@ -89,6 +92,8 @@ def _product_catalog() -> dict[str, dict[str, Any]]:
             "lead_program_id": None,
             "lead_channel_id": None,
             "lead_plan_configured": False,
+            "completion_redirect_enabled": _normalized_bool(item.get("completion_redirect_enabled")),
+            "completion_redirect_url": safe_completion_redirect_url(item.get("completion_redirect_url")),
         }
     return catalog
 
@@ -194,6 +199,38 @@ def _lead_qr_for_product(product: dict[str, Any]) -> dict[str, Any]:
     return _lead_qr_from_channel(channel)
 
 
+def _normalize_completion_redirect_payload(payload: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    enabled = (
+        _normalized_bool(payload.get("completion_redirect_enabled"))
+        if "completion_redirect_enabled" in payload
+        else bool(existing.get("completion_redirect_enabled"))
+    )
+    raw_url = (
+        _normalized_text(payload.get("completion_redirect_url"))
+        if "completion_redirect_url" in payload
+        else _normalized_text(existing.get("completion_redirect_url"))
+    )
+    safe_url = safe_completion_redirect_url(raw_url)
+    if enabled and raw_url and not safe_url:
+        raise WeChatPayProductError("完成后跳转 URL 必须是 https 链接或安全站内路径")
+    return {
+        "completion_redirect_enabled": enabled,
+        "completion_redirect_url": safe_url,
+    }
+
+
+def get_completion_redirect_for_product_code(product_code: str) -> dict[str, Any]:
+    if not has_app_context():
+        return completion_redirect_projection(False, "")
+    product = product_repo.get_product_by_code(_normalized_text(product_code))
+    if not product:
+        return completion_redirect_projection(False, "")
+    return completion_redirect_projection(
+        product.get("completion_redirect_enabled"),
+        product.get("completion_redirect_url"),
+    )
+
+
 def get_lead_qr_for_product_code(product_code: str) -> dict[str, Any]:
     product = product_repo.get_product_by_code(_normalized_text(product_code))
     if not product:
@@ -204,6 +241,10 @@ def get_lead_qr_for_product_code(product_code: str) -> dict[str, Any]:
 def _present_db_product(product: dict[str, Any]) -> dict[str, Any]:
     metadata = product.get("metadata_json") if isinstance(product.get("metadata_json"), dict) else {}
     lead_qr = _lead_qr_for_product(product)
+    completion_redirect = completion_redirect_projection(
+        product.get("completion_redirect_enabled"),
+        product.get("completion_redirect_url"),
+    )
     return {
         "id": int(product.get("id") or 0),
         "product_code": _normalized_text(product.get("product_code")),
@@ -221,6 +262,7 @@ def _present_db_product(product: dict[str, Any]) -> dict[str, Any]:
         "lead_channel_id": int(product.get("lead_channel_id") or lead_qr.get("channel_id") or 0) or None,
         "lead_plan_configured": bool(lead_qr.get("qr_url")),
         "lead_qr": lead_qr,
+        **completion_redirect,
         "updated_at": _normalized_text(product.get("updated_at")),
         "created_at": _normalized_text(product.get("created_at")),
     }
@@ -258,14 +300,17 @@ def get_product_slices(product_id: int, *, include_image_url: bool = True) -> li
     ]
 
 
-def get_public_product_page_state(product_code: str) -> dict[str, Any]:
+def get_public_product_page_state(product_code: str, *, context_token: str = "", context_status: str = "") -> dict[str, Any]:
     product = get_product(product_code)
     if not product:
         raise WeChatPayOrderError("product_not_configured")
+    checkout_path = f"/pay/{product['product_code']}"
     return {
         "product": product,
         "slices": get_product_slices(int(product.get("id") or 0)),
-        "checkout_url": f"/pay/{product['product_code']}",
+        "checkout_url": append_ctx_query(checkout_path, context_token) if context_token else checkout_path,
+        "context_token": context_token,
+        "context_status": context_status or ("valid" if context_token else "missing"),
     }
 
 
@@ -316,6 +361,7 @@ def _normalize_product_payload(payload: dict[str, Any], *, existing: dict[str, A
         lead_channel_id = int((channel or {}).get("id") or 0) or lead_channel_id
     else:
         lead_channel_id = None
+    completion_redirect = _normalize_completion_redirect_payload(payload, existing)
     return {
         "name": name[:120],
         "amount_total": amount_total,
@@ -326,6 +372,7 @@ def _normalize_product_payload(payload: dict[str, Any], *, existing: dict[str, A
         "require_mobile": _normalized_bool(payload.get("require_mobile")) if "require_mobile" in payload else bool(existing.get("require_mobile")),
         "lead_program_id": lead_program_id,
         "lead_channel_id": lead_channel_id,
+        **completion_redirect,
         "metadata": existing.get("metadata_json") if isinstance(existing.get("metadata_json"), dict) else {},
     }
 
@@ -427,6 +474,8 @@ def copy_admin_product(product_id: int, *, operator: str = "") -> dict[str, Any]
             "require_mobile": bool(existing.get("require_mobile")),
             "lead_program_id": existing.get("lead_program_id"),
             "lead_channel_id": existing.get("lead_channel_id"),
+            "completion_redirect_enabled": bool(existing.get("completion_redirect_enabled")),
+            "completion_redirect_url": existing.get("completion_redirect_url"),
         },
         existing=existing,
     )
@@ -446,7 +495,12 @@ def delete_admin_product(product_id: int, *, operator: str = "") -> None:
     if not existing:
         raise WeChatPayProductError("商品不存在")
     product_code = _normalized_text(existing.get("product_code"))
-    if product_code and product_repo.count_orders_for_product_code(product_code) > 0:
+    product_status = _normalized_text(existing.get("status")) or PRODUCT_STATUS_DRAFT
+    if (
+        product_status == PRODUCT_STATUS_ACTIVE
+        and product_code
+        and product_repo.count_orders_for_product_code(product_code) > 0
+    ):
         raise WeChatPayProductError("已有订单的商品不能删除，请先下架")
     product_repo.delete_product(int(product_id))
     get_db().commit()

@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenClaw Automation Ops Scheduler — enqueue due automation ops into broadcast_jobs
+After=network.target openclaw-wecom-postgres.service
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_automation_ops_scheduler.py'

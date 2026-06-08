@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{ editor_page_title or "问卷编辑" }}</title>
+  <link rel="stylesheet" href="/static/admin_console/wecom_tag_picker.css?v=unified-tag-picker-20260608">
   <style>
     :root {
       color-scheme: light;
@@ -873,98 +874,6 @@
       line-height: 1.7;
       background: rgba(255,255,255,0.7);
     }
-    .tag-modal-overlay {
-      position: fixed;
-      inset: 0;
-      z-index: 90;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 20px;
-      background: rgba(14, 25, 18, 0.38);
-      backdrop-filter: blur(8px);
-    }
-    .tag-modal {
-      width: min(960px, 100%);
-      max-height: calc(100vh - 40px);
-      overflow: auto;
-      padding: 18px;
-      border-radius: 24px;
-      border: 1px solid var(--line);
-      background: #ffffff;
-      box-shadow: 0 28px 72px rgba(14, 25, 18, 0.22);
-    }
-    .tag-modal-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      margin-bottom: 14px;
-    }
-    .tag-modal-head h3 {
-      margin: 0;
-      font-size: 22px;
-      line-height: 1.15;
-    }
-    .tag-modal-search {
-      width: 100%;
-      margin: 12px 0 16px;
-      padding: 12px 13px;
-      border-radius: 14px;
-      border: 1px solid var(--line);
-      background: #fffdfa;
-    }
-    .tag-modal-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.9fr);
-      gap: 14px;
-    }
-    .tag-group-list,
-    .tag-selected-panel {
-      padding: 14px;
-      border-radius: 18px;
-      background: #fffaf3;
-      border: 1px solid var(--line);
-    }
-    .tag-group {
-      margin-bottom: 16px;
-    }
-    .tag-group:last-child { margin-bottom: 0; }
-    .tag-group-title {
-      margin: 0 0 10px;
-      color: var(--text);
-      font-size: 14px;
-      font-weight: 700;
-    }
-    .tag-chip-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-    }
-    .tag-chip {
-      padding: 8px 10px;
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: #ffffff;
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 700;
-    }
-    .tag-chip.active {
-      background: #f4e7d7;
-      color: var(--primary);
-      border-color: rgba(157, 99, 48, 0.24);
-    }
-    .tag-selected-panel h4 {
-      margin: 0 0 10px;
-      font-size: 14px;
-    }
-    .tag-modal-actions {
-      display: flex;
-      justify-content: flex-end;
-      gap: 8px;
-      margin-top: 16px;
-    }
     .drawer-overlay {
       position: fixed;
       inset: 0;
@@ -1037,7 +946,6 @@
         height: auto;
         overflow: visible;
       }
-      .tag-modal-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 980px) {
       .shell { padding: 14px; }
@@ -1793,7 +1701,7 @@
               <p class="section-subtitle">{% if editor_default_assessment %}这是专门创建测评模板的页面，左侧只放模板建设需要的动作。{% else %}点击添加到当前问卷。{% endif %}</p>
             </div>
           </div>
-          <div id="tag-catalog-message" class="inline-alert hidden" style="margin-bottom:12px;">企微标签加载失败，可稍后重试或手工填写 tag_id</div>
+          <div id="tag-catalog-message" class="inline-alert hidden" style="margin-bottom:12px;">企微标签加载失败，可稍后重试</div>
           <div class="tool-grid">
             <button id="add-single" type="button" class="tool-card">
               <span class="tool-mark">单</span>
@@ -1857,34 +1765,6 @@
       </aside>
     </div>
 
-    <div id="tag-modal-overlay" class="tag-modal-overlay hidden">
-      <div class="tag-modal">
-        <div class="tag-modal-head">
-          <div>
-            <h3>选择标签</h3>
-            <p class="section-subtitle">按标签组选择，确认后仅保存 tag_id。</p>
-          </div>
-          <button id="tag-modal-close" type="button" class="btn ghost">关闭</button>
-        </div>
-        <input id="tag-modal-search" class="tag-modal-search" type="text" placeholder="搜索标签名称或标签组">
-        <div class="tag-modal-grid">
-          <div id="tag-modal-groups" class="tag-group-list"></div>
-          <div class="tag-selected-panel">
-            <h4>已选标签</h4>
-            <div id="tag-modal-selected" class="tag-badges"></div>
-            <details class="tag-fallback">
-              <summary>手工填写 tag_id 兜底</summary>
-              <input id="tag-modal-manual" type="text" placeholder='例如 ["etxxx1","etxxx2"]' style="width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid rgba(73,55,29,0.12);">
-            </details>
-          </div>
-        </div>
-        <div class="tag-modal-actions">
-          <button id="tag-modal-cancel" type="button" class="btn ghost">取消</button>
-          <button id="tag-modal-confirm" type="button" class="btn primary">确认选择</button>
-        </div>
-      </div>
-    </div>
-
     <div id="drawer-overlay" class="drawer-overlay hidden">
       <div class="drawer-panel">
         <div class="section-head">
@@ -1899,6 +1779,7 @@
 
     <div id="toast" class="toast hidden"></div>
   </div>
+  <script src="/static/admin_console/wecom_tag_picker.js?v=unified-tag-picker-20260608"></script>
   <script>
     const editorConfig = {
       mode: {{ (editor_mode or 'new')|tojson }},
@@ -1929,11 +1810,6 @@
     const drawerTitleEl = document.getElementById('drawer-title');
     const drawerBodyEl = document.getElementById('drawer-body');
     const toastEl = document.getElementById('toast');
-    const tagModalOverlayEl = document.getElementById('tag-modal-overlay');
-    const tagModalGroupsEl = document.getElementById('tag-modal-groups');
-    const tagModalSelectedEl = document.getElementById('tag-modal-selected');
-    const tagModalSearchEl = document.getElementById('tag-modal-search');
-    const tagModalManualEl = document.getElementById('tag-modal-manual');
 
     const state = {
       list: [],
@@ -2585,7 +2461,7 @@
     }
 
     function buildUnknownTag(tagId) {
-      return { tag_id: tagId, tag_name: `未匹配标签（${tagId}）`, group_name: '未匹配标签' };
+      return { tag_id: tagId, tag_name: '未匹配标签', group_name: '' };
     }
 
     function ensureTagKnown(tagId) {
@@ -2593,7 +2469,7 @@
     }
 
     function formatTagLabel(tag) {
-      return `${tag.group_name || '未分组'} / ${tag.tag_name}`;
+      return `${tag.group_name ? `${tag.group_name} / ` : ''}${tag.tag_name || '未匹配标签'}`;
     }
 
     function formatTagGroupName(tag) {
@@ -2694,6 +2570,7 @@
         assessment_config: '测评结果规则',
         assessment_dimension_key: '测评维度',
         assessment_type_key: '测评分型',
+        external_push_expires_at_ts: '到期时间戳',
       };
       return labels[fieldName] || fieldName;
     }
@@ -2780,71 +2657,46 @@
       drawerOverlayEl.classList.add('hidden');
     }
 
-    function openTagModal(target, selectedTagIds = []) {
-      state.tagModal = {
-        open: true,
-        search: '',
-        selected: normalizeTagIds(selectedTagIds),
-        target,
-      };
-      tagModalSearchEl.value = '';
-      tagModalManualEl.value = '';
-      renderTagModal();
-      tagModalOverlayEl.classList.remove('hidden');
-    }
-
-    function closeTagModal() {
-      state.tagModal.open = false;
-      state.tagModal.target = null;
-      tagModalOverlayEl.classList.add('hidden');
-    }
-
-    function toggleModalTag(tagId) {
-      const selected = new Set(state.tagModal.selected);
-      if (selected.has(tagId)) {
-        selected.delete(tagId);
-      } else {
-        selected.add(tagId);
+    function applyTagSelection(target, tagIds) {
+      const merged = normalizeTagIds(tagIds);
+      if (target?.type === 'option') {
+        const question = state.questionnaire.questions.find((item) => item.local_key === target.questionKey);
+        const option = question?.options.find((item) => item.local_key === target.optionKey);
+        if (option) option.tag_codes = merged;
       }
-      state.tagModal.selected = [...selected];
-      renderTagModal();
+      if (target?.type === 'rule') {
+        const rule = state.questionnaire.score_rules.find((item) => item.local_key === target.ruleKey);
+        if (rule) rule.tag_codes = merged;
+      }
+      if (target?.type === 'assessment_type') {
+        const dimension = assessmentDimensions().find((item) => item.key === target.dimensionKey);
+        const type = (dimension?.types || []).find((item) => item.key === target.typeKey);
+        if (type) type.tag_codes = merged;
+      }
+      if (target?.type === 'assessment_overall_level') {
+        const level = (ensureAssessmentBuilder().overall_levels || []).find((item) => item.local_key === target.levelKey);
+        if (level) level.tag_codes = merged;
+      }
+      renderWorkspace();
     }
 
-    function groupedTagsForModal() {
-      const keyword = state.tagModal.search.trim().toLowerCase();
-      const tags = state.availableTags.filter((tag) => {
-        if (!keyword) return true;
-        const haystack = `${tag.group_name || ''} ${tag.tag_name || ''} ${tag.tag_id || ''}`.toLowerCase();
-        return haystack.includes(keyword);
-      });
-      const groups = new Map();
-      tags.forEach((tag) => {
-        const groupName = formatTagGroupName(tag);
-        if (!groups.has(groupName)) groups.set(groupName, []);
-        groups.get(groupName).push(tag);
-      });
-      return [...groups.entries()];
-    }
-
-    function renderTagModal() {
-      const groups = groupedTagsForModal();
-      tagModalGroupsEl.innerHTML = groups.length
-        ? groups.map(([groupName, tags]) => `
-            <section class="tag-group">
-              <h4 class="tag-group-title">${escapeHtml(groupName)}</h4>
-              <div class="tag-chip-grid">
-                ${tags.map((tag) => `
-                  <button type="button" class="tag-chip${state.tagModal.selected.includes(tag.tag_id) ? ' active' : ''}" data-tag-id="${escapeHtml(tag.tag_id)}">
-                    ${escapeHtml(tag.tag_name)}
-                  </button>
-                `).join('')}
-              </div>
-            </section>
-          `).join('')
-        : '<div class="empty-state">没有匹配到标签</div>';
-      tagModalSelectedEl.innerHTML = buildTagBadges(state.tagModal.selected);
-      tagModalGroupsEl.querySelectorAll('[data-tag-id]').forEach((button) => {
-        button.addEventListener('click', () => toggleModalTag(button.dataset.tagId));
+    function openTagModal(target, selectedTagIds = []) {
+      if (!window.AICRMWeComTagPicker) {
+        showToast('标签选择器加载失败，请刷新后重试', true);
+        return;
+      }
+      const selected = normalizeTagIds(selectedTagIds).map((tagId) => ensureTagKnown(tagId));
+      window.AICRMWeComTagPicker.open({
+        title: '选择标签',
+        mode: 'multiple',
+        value: selected,
+        catalog: { items: state.availableTags },
+        onConfirm: (tags) => {
+          applyTagSelection(target, normalizeTagIds((tags || []).map((tag) => tag.tag_id)));
+        },
+        onClear: () => {
+          applyTagSelection(target, []);
+        },
       });
     }
 
@@ -2969,6 +2821,8 @@
         assessment_builder: defaultAssessmentBuilder,
         external_push_enabled: false,
         external_push_url: '',
+        external_push_type: '',
+        external_push_expires_at_ts: '',
         external_push_day: '',
         external_push_frequency: '',
         external_push_remark: '',
@@ -3019,6 +2873,10 @@
         assessment_builder: assessmentBuilder,
         external_push_enabled: Boolean(questionnaire.external_push_enabled),
         external_push_url: questionnaire.external_push_url || '',
+        external_push_type: questionnaire.external_push_type || '',
+        external_push_expires_at_ts: questionnaire.external_push_enabled
+          ? questionnaire.external_push_expires_at_ts ?? ''
+          : '',
         external_push_day: questionnaire.external_push_day ?? '',
         external_push_frequency: questionnaire.external_push_frequency ?? '',
         external_push_remark: questionnaire.external_push_remark || '',
@@ -3134,6 +2992,8 @@
           : buildAssessmentConfigFromBuilder(ensureAssessmentBuilder()),
         external_push_enabled: Boolean(state.questionnaire.external_push_enabled),
         external_push_url: state.questionnaire.external_push_url,
+        external_push_type: state.questionnaire.external_push_type || '',
+        external_push_expires_at_ts: state.questionnaire.external_push_expires_at_ts === '' ? '' : Number(state.questionnaire.external_push_expires_at_ts),
         external_push_day: state.questionnaire.external_push_day === '' ? '' : Number(state.questionnaire.external_push_day),
         external_push_frequency: state.questionnaire.external_push_frequency === '' ? '' : Number(state.questionnaire.external_push_frequency),
         external_push_remark: state.questionnaire.external_push_remark,
@@ -3248,7 +3108,7 @@
         state.availableTags = data.items || [];
         state.availableTagMap = new Map(state.availableTags.map((item) => [item.tag_id, item]));
         if (!state.availableTags.length) {
-          tagCatalogMessageEl.textContent = '当前未获取到企微标签，可手工填写 tag_id';
+          tagCatalogMessageEl.textContent = '当前未获取到企微标签，可稍后重试';
           tagCatalogMessageEl.className = 'inline-alert warning';
         } else {
           tagCatalogMessageEl.textContent = '';
@@ -3257,7 +3117,7 @@
       } catch (error) {
         state.availableTags = [];
         state.availableTagMap = new Map();
-        tagCatalogMessageEl.textContent = '企微标签加载失败，可稍后重试或手工填写 tag_id';
+        tagCatalogMessageEl.textContent = '企微标签加载失败，可稍后重试';
         tagCatalogMessageEl.className = 'inline-alert error';
       }
       renderInspector();
@@ -3578,21 +3438,9 @@
         <div class="tag-inline">
           <button type="button" class="btn ghost open-tag-modal">选择标签</button>
           <div class="tag-badges">${buildTagBadges(normalizedSelected)}</div>
-          <details class="tag-fallback">
-            <summary>手工填写 tag_id 兜底</summary>
-            <input class="manual-tag-input" type="text" placeholder='例如 ["etxxx1","etxxx2"]' style="width:100%;margin-top:10px;padding:11px 12px;border-radius:12px;border:1px solid rgba(73,55,29,0.12);">
-          </details>
         </div>
       `;
-      const manualInput = host.querySelector('.manual-tag-input');
       const openButton = host.querySelector('.open-tag-modal');
-      manualInput.value = '';
-      manualInput.addEventListener('input', () => {
-        const merged = normalizeTagIds([...normalizedSelected, ...parseManualTagInput(manualInput.value || '')]);
-        host.querySelector('.tag-badges').innerHTML = buildTagBadges(merged);
-        onChange(merged);
-        updateDraftIndicator();
-      });
       openButton.addEventListener('click', () => openTagModal(target, onChange.currentValue ? onChange.currentValue() : normalizedSelected));
     }
 
@@ -3701,14 +3549,27 @@
             <input id="field-external-push-url" type="text" value="${escapeHtml(state.questionnaire.external_push_url)}" placeholder="https://hooks.example.com/...">
           </label>
           <div class="field-grid compact">
-            <label class="field">day
-              <input id="field-external-push-day" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_day ?? ''))}" placeholder="20">
+            <label class="field">会员类型
+              <select id="field-external-push-type">
+                <option value="" ${!state.questionnaire.external_push_type ? 'selected' : ''}></option>
+                <option value="subscription" ${state.questionnaire.external_push_type === 'subscription' ? 'selected' : ''}>订阅版</option>
+                <option value="premium" ${state.questionnaire.external_push_type === 'premium' ? 'selected' : ''}>私教版</option>
+                <option value="trial" ${state.questionnaire.external_push_type === 'trial' ? 'selected' : ''}>首月权益</option>
+              </select>
             </label>
-            <label class="field">frequency
-              <input id="field-external-push-frequency" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_frequency ?? ''))}" placeholder="20">
+            <label class="field">到期时间戳
+              <input id="field-external-push-expires-at-ts" type="number" step="1" min="1" value="${escapeHtml(String(state.questionnaire.external_push_expires_at_ts ?? ''))}">
             </label>
           </div>
-          <label class="field">remark
+          <div class="field-grid compact">
+            <label class="field">开通天数
+              <input id="field-external-push-day" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_day ?? ''))}">
+            </label>
+            <label class="field">咨询次数额度
+              <input id="field-external-push-frequency" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_frequency ?? ''))}">
+            </label>
+          </div>
+          <label class="field">备注
             <input id="field-external-push-remark" type="text" value="${escapeHtml(state.questionnaire.external_push_remark || '')}" placeholder="备注文本">
           </label>
           <div class="config-head" style="margin-top:8px;">
@@ -3755,6 +3616,14 @@
       });
       inspectorBodyEl.querySelector('#field-external-push-url').addEventListener('input', (event) => {
         state.questionnaire.external_push_url = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-type').addEventListener('change', (event) => {
+        state.questionnaire.external_push_type = event.target.value;
+        updateDraftIndicator();
+      });
+      inspectorBodyEl.querySelector('#field-external-push-expires-at-ts').addEventListener('input', (event) => {
+        state.questionnaire.external_push_expires_at_ts = event.target.value;
         updateDraftIndicator();
       });
       inspectorBodyEl.querySelector('#field-external-push-day').addEventListener('input', (event) => {
@@ -5214,7 +5083,7 @@
         <label class="field">CTA 按钮文案<input data-type-result-field="cta_text" value="${escapeHtml(type.cta_text || '')}"></label>
         <div class="config-head inline">
           <h3>企微打标签</h3>
-          <p>命中此维度分类后打标签。实际保存 tag_id，不保存标签名称。</p>
+          <p>命中此维度分类后自动打上所选标签。</p>
         </div>
         <div id="v2-type-tag-host"></div>
         <label class="field"><input data-type-result-field="enabled" type="checkbox" ${type.enabled !== false ? 'checked' : ''}> 启用</label>
@@ -5261,7 +5130,7 @@
         <label class="field">CTA 按钮文案<input data-overall-field="cta_text" value="${escapeHtml(level.cta_text || '')}"></label>
         <div class="config-head inline">
           <h3>企微打标签</h3>
-          <p>命中此总分分层后打标签。实际保存 tag_id，不保存标签名称。</p>
+          <p>命中此总分分层后自动打上所选标签。</p>
         </div>
         <div id="v2-overall-tag-host"></div>
         <label class="field"><input data-overall-field="enabled" type="checkbox" ${level.enabled !== false ? 'checked' : ''}> 启用</label>
@@ -5930,38 +5799,6 @@
       enterRuleMode();
     });
     document.getElementById('drawer-close').addEventListener('click', closeDrawer);
-    document.getElementById('tag-modal-close').addEventListener('click', closeTagModal);
-    document.getElementById('tag-modal-cancel').addEventListener('click', closeTagModal);
-    document.getElementById('tag-modal-confirm').addEventListener('click', () => {
-      const merged = normalizeTagIds([...state.tagModal.selected, ...parseManualTagInput(tagModalManualEl.value || '')]);
-      if (state.tagModal.target?.type === 'option') {
-        const question = state.questionnaire.questions.find((item) => item.local_key === state.tagModal.target.questionKey);
-        const option = question?.options.find((item) => item.local_key === state.tagModal.target.optionKey);
-        if (option) option.tag_codes = merged;
-      }
-      if (state.tagModal.target?.type === 'rule') {
-        const rule = state.questionnaire.score_rules.find((item) => item.local_key === state.tagModal.target.ruleKey);
-        if (rule) rule.tag_codes = merged;
-      }
-      if (state.tagModal.target?.type === 'assessment_type') {
-        const dimension = assessmentDimensions().find((item) => item.key === state.tagModal.target.dimensionKey);
-        const type = (dimension?.types || []).find((item) => item.key === state.tagModal.target.typeKey);
-        if (type) type.tag_codes = merged;
-      }
-      if (state.tagModal.target?.type === 'assessment_overall_level') {
-        const level = (ensureAssessmentBuilder().overall_levels || []).find((item) => item.local_key === state.tagModal.target.levelKey);
-        if (level) level.tag_codes = merged;
-      }
-      closeTagModal();
-      renderWorkspace();
-    });
-    tagModalSearchEl.addEventListener('input', (event) => {
-      state.tagModal.search = event.target.value;
-      renderTagModal();
-    });
-    tagModalOverlayEl.addEventListener('click', (event) => {
-      if (event.target === tagModalOverlayEl) closeTagModal();
-    });
     drawerOverlayEl.addEventListener('click', (event) => {
       if (event.target === drawerOverlayEl) closeDrawer();
     });

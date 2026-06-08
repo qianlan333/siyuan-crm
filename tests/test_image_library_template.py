@@ -9,7 +9,7 @@
 - 启用 / 停用 / 删除操作移到编辑 modal 里
 - 删除走硬删 + 引用悬空二次确认（PR-E）
 
-同 ``test_admin_static_contract.py`` 风格。
+同其他静态模板契约测试风格。
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE = ROOT / "wecom_ability_service" / "templates" / "admin_console" / "image_library.html"
+TEMPLATE = ROOT / "aicrm_next" / "frontend_compat" / "templates" / "admin_console" / "image_library.html"
 
 
 @pytest.fixture(scope="module")
@@ -79,7 +79,14 @@ def test_upload_modal_prepares_large_image_before_post(source: str):
     """上传前先校验/压缩图片，避免 1MB+ 文件被 nginx 直接 413 成 HTML。"""
     assert "prepareImageForUpload(f)" in source
     assert "prepared.file" in source
-    assert "ImageUploadClient.requestJson" in source
+    assert "requestJsonWithTimeout || client.requestJson" in source
+
+
+def test_json_request_helper_falls_back_to_old_upload_client(source: str):
+    """静态资源缓存可能让页面拿到旧 image_upload_client.js，模板不能直接崩。"""
+    assert "function requestJSON" in source
+    assert "client.requestJsonWithTimeout || client.requestJson" in source
+    assert "图片上传客户端未加载" in source
 
 
 def test_upload_modal_has_open_close_handlers(source: str):
@@ -257,34 +264,29 @@ def test_include_disabled_passes_enabled_only_false(source: str):
 
 # ---------- 不能误删的老路径 ---------- #
 
-def test_thumbnail_loader_handles_url_and_base64_sources(source: str):
-    """缩略图加载逻辑保留：source=url 直链，否则拉 base64 详情。"""
-    assert "data_base64" in source
+def test_thumbnail_loader_uses_variant_urls(source: str):
+    """缩略图加载逻辑使用服务端变体 URL，不再批量拉原图详情。"""
+    assert "thumb_320_url" in source
+    assert "thumb_160_url" in source
+    assert "preview_url" in source
+    assert "/api/admin/image-library/' + encodeURIComponent(String(item.id)) + '/thumbnail?size='" in source
+    assert "/api/admin/image-library/' + item.id" not in source
+    assert "include_data=true" not in source
     assert "source === 'url'" in source
-    assert "data:" in source  # data url
 
 
-def test_full_image_cache_avoids_duplicate_fetch(source: str):
-    """列表已经拉过的 base64 应该缓存，编辑 modal 打开时复用。"""
-    assert "fullCache" in source
+def test_thumbnail_img_uses_responsive_lazy_attrs(source: str):
+    assert 'loading="lazy"' in source
+    assert 'decoding="async"' in source
+    assert "srcset" in source
+    assert "sizes=\"180px\"" in source
 
 
-# ---------- L1 缩略图加速三件套（IDB + 懒加载 + 并发限流）---------- #
+# ---------- 缩略图懒加载 ---------- #
 
-def test_thumb_uses_indexeddb_persistent_cache(source: str):
-    """L1：缩略图 base64 走 IndexedDB 持久缓存，跨刷新 / 跨 tab 都生效。"""
-    assert "indexedDB.open" in source
-    # 提供一个统一的 IDB 工具对象，避免在多处散落 raw indexedDB API
-    assert "IDB.get" in source
-    assert "IDB.set" in source
-
-
-def test_thumb_cache_key_includes_updated_at(source: str):
-    """IDB cache key 必须含 updated_at，让图改了自动失效（避免脏数据）。"""
-    assert "_thumbCacheKey" in source
-    # key 形态：il:<id>:<updated_at>
-    assert "'il:'" in source
-    assert "item.updated_at" in source
+def test_no_indexeddb_original_base64_cache_left(source: str):
+    assert "indexedDB.open" not in source
+    assert "data_base64" not in source
 
 
 def test_thumb_lazy_load_via_intersection_observer(source: str):
@@ -301,21 +303,15 @@ def test_thumb_observer_disconnect_on_rerender(source: str):
     assert "disconnect" in source
 
 
-def test_thumb_fetch_concurrency_limited(source: str):
-    """L1：缩略图网络请求走并发限流（≤ 4），避免一次性 100 个 fetch 排队。"""
-    assert "pLimit" in source
-    assert "fetchLimit" in source
+def test_filter_changes_abort_old_list_request(source: str):
+    assert "listController" in source
+    assert "AbortController" in source
+    assert ".abort()" in source
 
 
-def test_thumb_concurrent_request_dedupe(source: str):
-    """同一张图在并发场景下只 fetch 一次（_thumbPromise 复用）。"""
-    assert "_thumbPromise" in source
-
-
-def test_edit_modal_reuses_thumbnail_url_for_large_image(source: str):
-    """编辑 modal 加载大图走 thumbnailUrl()，跟列表共享 IDB + 内存缓存。"""
-    # 编辑 modal 里直接 await thumbnailUrl(item)，不重复实现一套缓存逻辑
-    assert "await thumbnailUrl(item)" in source
+def test_edit_modal_uses_preview_variant(source: str):
+    """编辑 modal 加载 preview_720，不用列表卡片图或原图 base64。"""
+    assert "thumbnailUrl(item, 'preview')" in source
 
 
 def test_extends_admin_console_base(source: str):

@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>{{ page_state.product.name }}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f9fe;
+      --panel: #ffffff;
+      --line: #e4eaf4;
+      --text: #10203a;
+      --muted: #687891;
+      --blue: #1677ff;
+      --green: #128a45;
+      --red: #e23030;
+      --shadow: 0 18px 50px rgba(23,42,76,.08);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    }
+    .pay-page { width: min(100%, 520px); min-height: 100vh; margin: 0 auto; padding: 72px 18px 110px; }
+    .pay-card { border: 1px solid var(--line); border-radius: 18px; background: var(--panel); box-shadow: var(--shadow); padding: 20px; }
+    .pay-title { font-size: 21px; font-weight: 950; margin-bottom: 14px; letter-spacing: 0; }
+    .pay-row { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed var(--line); padding: 12px 0; }
+    .pay-label { color: var(--muted); font-weight: 800; }
+    .pay-value { font-weight: 900; text-align: right; }
+    .pay-mobile { margin-top: 18px; }
+    .pay-mobile label { display: block; margin-bottom: 7px; }
+    .pay-mobile input {
+      width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 12px;
+      padding: 0 13px; outline: none; font: inherit;
+    }
+    .pay-mobile input:focus { border-color: #9bc2ff; box-shadow: 0 0 0 3px rgba(22,119,255,.12); }
+    .state-line { min-height: 22px; margin-top: 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .state-line.error { color: var(--red); }
+    .state-line.success { color: var(--green); }
+    .error-text { font-size: 12px; color: var(--red); margin-top: 6px; min-height: 18px; }
+    .pay-action {
+      width: 100%; height: 52px; border: 0; border-radius: 13px; background: var(--blue); color: #fff;
+      font: inherit; font-weight: 950; margin-top: 12px; cursor: pointer;
+    }
+    .pay-action[disabled] { opacity: .55; cursor: default; }
+  </style>
+</head>
+<body>
+  <main class="pay-page">
+    <section class="pay-card">
+      <div class="pay-title">确认报名信息</div>
+      <div class="pay-row">
+        <span class="pay-label">购买商品</span>
+        <span class="pay-value">{{ page_state.product.name }}</span>
+      </div>
+      <div class="pay-row">
+        <span class="pay-label">支付金额</span>
+        <span class="pay-value">¥{{ "%.2f"|format((page_state.product.amount_total or 0) / 100) }}</span>
+      </div>
+      {% if page_state.require_mobile %}
+      <div class="pay-mobile">
+        <label class="pay-label" for="mobileInput">手机号</label>
+        <input id="mobileInput" inputmode="numeric" maxlength="11" placeholder="请输入手机号">
+        <div class="error-text" id="mobileError"></div>
+      </div>
+      {% endif %}
+      <div id="payState" class="state-line">
+        {% if not page_state.enabled %}
+          当前支付暂未启用。
+        {% else %}
+          已就绪。
+        {% endif %}
+      </div>
+      <button id="payButton" class="pay-action" type="button" {% if not page_state.enabled %}disabled{% endif %}>{{ page_state.cta_text }}</button>
+    </section>
+  </main>
+
+  <script>
+    (function () {
+      const state = {{ page_state|tojson }};
+      const payButton = document.getElementById("payButton");
+      const stateLine = document.getElementById("payState");
+      const mobileInput = document.getElementById("mobileInput");
+      const mobileError = document.getElementById("mobileError");
+
+      function setState(message, type) {
+        if (!stateLine) return;
+        stateLine.textContent = message;
+        stateLine.classList.remove("error", "success");
+        if (type) stateLine.classList.add(type);
+      }
+
+      function normalizedMobile() {
+        return String((mobileInput && mobileInput.value) || "").replace(/\D+/g, "");
+      }
+
+      function validateMobile() {
+        if (!state.require_mobile) return "";
+        const value = normalizedMobile();
+        if (!/^1\d{10}$/.test(value)) {
+          if (mobileError) mobileError.textContent = "请填写 11 位手机号后再继续。";
+          return "";
+        }
+        if (mobileError) mobileError.textContent = "";
+        return value;
+      }
+
+      async function createOrder() {
+        const body = {
+          product_code: state.product.product_code,
+          order_source: "product_alipay_wap"
+        };
+        if (state.require_mobile) {
+          const mobile = validateMobile();
+          if (!mobile) return null;
+          body.mobile = mobile;
+        }
+        const response = await fetch(state.create_order_url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        const payload = await response.json();
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || "下单失败");
+        }
+        return payload;
+      }
+
+      if (payButton) {
+        payButton.addEventListener("click", async function () {
+          if (state.require_mobile && !validateMobile()) return;
+          payButton.disabled = true;
+          setState("正在创建订单...");
+          try {
+            const payload = await createOrder();
+            if (!payload) {
+              payButton.disabled = false;
+              return;
+            }
+            setState("正在打开支付宝...", "success");
+            window.location.href = payload.payment_url;
+          } catch (err) {
+            setState(err.message || "支付失败，请稍后重试", "error");
+            payButton.disabled = false;
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

@@ -415,9 +415,16 @@ def _resolve_member_conversion_audience(member: dict[str, Any]) -> dict[str, Any
         snapshot = _current_audience_source_snapshot(member, marketing_state, questionnaire_state=questionnaire_state)
         snapshot["audience_entry_rule"] = {
             "program_id": int(entry_rule_state.get("program_id") or 0),
+            "stage_code": _normalized_text(entry_rule_state.get("stage_code")),
+            "stage_label": _normalized_text(entry_rule_state.get("stage_label")),
             "checkpoint": _normalized_text(entry_rule_state.get("checkpoint")),
             "entry_reason": _normalized_text(entry_rule_state.get("entry_reason")),
         }
+        snapshot["program_id"] = int(entry_rule_state.get("program_id") or 0)
+        snapshot["stage_code"] = _normalized_text(entry_rule_state.get("stage_code"))
+        snapshot["stage_label"] = _normalized_text(entry_rule_state.get("stage_label"))
+        snapshot["checkpoint"] = _normalized_text(entry_rule_state.get("checkpoint"))
+        snapshot["entry_reason"] = _normalized_text(entry_rule_state.get("entry_reason"))
         return {
             "audience_code": target_code or AUDIENCE_PENDING_QUESTIONNAIRE,
             "entered_at": entered_at,
@@ -503,9 +510,11 @@ def sync_conversion_member_audience(member: dict[str, Any]) -> dict[str, Any]:
     current_code = _normalized_text(member.get("current_audience_code"))
     current_entered_at = _normalized_text(member.get("current_audience_entered_at"))
     target_code = _normalized_text(resolved.get("audience_code"))
+    target_reason = _normalized_text(resolved.get("entry_reason"))
     target_entered_at = _normalized_text(resolved.get("entered_at")) or _iso_now()
 
-    if current_entry and _normalized_text(current_entry.get("audience_code")) == target_code:
+    current_reason = _normalized_text(current_entry.get("entry_reason")) if current_entry else ""
+    if current_entry and _normalized_text(current_entry.get("audience_code")) == target_code and current_reason == target_reason:
         if current_code != target_code or current_entered_at != _normalized_text(current_entry.get("entered_at")):
             workflow_repo.update_member_current_audience_row(
                 member_id,

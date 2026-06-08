@@ -391,6 +391,13 @@ APP_SETTING_DEFINITIONS = (
         "description": "AI-CRM 请求老黄 AI 的异步聊天接口地址。",
     },
     {
+        "key": "LAOHUANG_CHAT_WEBHOOK_TOKEN",
+        "label": "老黄 AI 聊天接口 Token",
+        "mode": "masked",
+        "input_type": "password",
+        "description": "以 URL query 的 token 参数传给老黄 AI 聊天 webhook；页面不会显示完整内容，留空表示保持原值。",
+    },
+    {
         "key": "LAOHUANG_CHAT_TIMEOUT_SECONDS",
         "label": "老黄 AI 请求超时",
         "mode": "editable",

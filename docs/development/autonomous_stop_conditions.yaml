@@ -1,0 +1,85 @@
+version: 1
+status: autonomous_stop_conditions_active
+
+high_risk_stop_conditions:
+  - id: production_owner_switch
+    terms:
+      - production owner switch
+      - route ownership switch
+      - route_switch_ready
+  - id: fallback_removal
+    terms:
+      - fallback removal
+      - remove legacy fallback
+  - id: production_write
+    terms:
+      - production write
+      - production_write_authorized
+  - id: real_external_call
+    terms:
+      - real external call
+      - wecom external
+      - payment
+      - oauth
+      - openclaw
+      - mcp
+  - id: timer_or_execution
+    terms:
+      - timer
+      - run-due
+      - automation execution
+      - execution enabled
+  - id: outbound_send
+    terms:
+      - outbound send
+      - send enabled
+  - id: deploy_config
+    terms:
+      - deploy config
+      - nginx
+      - systemd
+  - id: destructive_migration
+    terms:
+      - drop table
+      - drop column
+      - destructive migration
+      - delete from
+  - id: delete_ready
+    terms:
+      - delete_ready true
+      - delete_ready: true
+  - id: canary_approval
+    terms:
+      - canary approved
+      - canary_approved
+
+protected_paths:
+  - aicrm_next/main.py
+  - aicrm_next/production_compat/api.py
+  - wecom_ability_service/
+  - migrations/
+  - deploy/
+  - systemd/
+  - nginx/
+  - app.py
+  - legacy_flask_app.py
+
+low_risk_allowed_paths:
+  - docs/development/
+  - tools/check_
+  - tests/test_
+
+required_pr_body_sections:
+  - Business value
+  - Business continuity
+  - Risk / rollback
+  - Next action
+
+unauthorized_claims:
+  - production_ready
+  - delete_ready: true
+  - delete_ready true
+  - canary_approved
+  - canary approved
+  - route_switch_ready=true
+  - route_switch_ready: true

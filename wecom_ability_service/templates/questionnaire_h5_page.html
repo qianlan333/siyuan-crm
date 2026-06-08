@@ -452,12 +452,17 @@
 
       function collectMetaFromQuery() {
         const params = new URLSearchParams(window.location.search);
-        const fields = ['respondent_key', 'openid', 'unionid', 'external_userid', 'source_channel', 'campaign_id', 'staff_id'];
-        return fields.reduce((acc, field) => {
+        const fields = ['respondent_key', 'openid', 'unionid', 'external_userid', 'source_channel', 'campaign_id', 'staff_id', 'sidebar_context_token', 'sidebar_context'];
+        const meta = fields.reduce((acc, field) => {
           const value = params.get(field);
           if (value) acc[field] = value;
           return acc;
         }, {});
+        fields.forEach((field) => {
+          const hidden = formEl.querySelector(`input[type="hidden"][name="${field}"]`);
+          if (hidden && hidden.value && !meta[field]) meta[field] = hidden.value;
+        });
+        return meta;
       }
 
       function validateQuestionnaire(data) {

@@ -241,7 +241,7 @@
       <b>{{ dashboard_summary.latest_refresh.finished_at or dashboard_summary.latest_refresh.started_at or "暂无" }}</b>
       &nbsp;·&nbsp;状态:
       <b>{{ dashboard_summary.latest_refresh.status }}</b>
-      <span id="hxc-auto-refresh-status" class="hxc-auto-refresh-status"> · 每 10 分钟自动刷新</span>
+      <span id="hxc-auto-refresh-status" class="hxc-auto-refresh-status"> · 后端每 30 分钟刷新快照</span>
     </div>
   </div>
 
@@ -295,32 +295,8 @@
 <script>
 (function(){
   const data = JSON.parse(document.getElementById('hxc-dashboard-data').textContent);
-  const latestRefresh = {{ dashboard_summary.latest_refresh | tojson }};
-  const AUTO_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
   let refreshInFlight = false;
   let refreshReloading = false;
-  let lastAutoRefreshAttemptAt = 0;
-
-  function parseDashboardTime(value){
-    const raw = String(value || '').trim();
-    if (!raw) return null;
-    const normalized = raw
-      .replace(' ', 'T')
-      .replace(/(\.\d{3})\d+/, '$1');
-    const timestamp = Date.parse(normalized);
-    return Number.isFinite(timestamp) ? timestamp : null;
-  }
-
-  const latestRefreshAt = parseDashboardTime(
-    latestRefresh.finished_at || latestRefresh.started_at || ''
-  );
-
-  function setAutoRefreshStatus(text, isError){
-    const el = document.getElementById("hxc-auto-refresh-status");
-    if (!el) return;
-    el.textContent = text;
-    el.classList.toggle("hxc-auto-refresh-status--error", Boolean(isError));
-  }
 
   function tick(cell){
     const v = cell.getValue();
@@ -667,14 +643,13 @@
     table.download("xlsx", "hxc-dashboard-" + ts() + ".xlsx", {sheetName: "激活漏斗"});
   });
 
-  async function refreshDashboard({triggerSource = "admin", manual = false} = {}){
+  async function refreshDashboard({triggerSource = "admin"} = {}){
     if (refreshInFlight || refreshReloading) return;
     const btn = document.getElementById("hxc-refresh-btn");
     const original = btn.textContent;
     refreshInFlight = true;
     btn.disabled = true;
-    btn.textContent = manual ? "刷新中…" : "自动刷新中…";
-    setAutoRefreshStatus(manual ? " · 手动刷新中..." : " · 自动刷新中...", false);
+    btn.textContent = "刷新中…";
     try {
       const resp = await fetch("/api/admin/hxc-dashboard/refresh", {
         method: "POST",
@@ -684,43 +659,26 @@
       const result = await resp.json();
       if (resp.ok && result.ok) {
         refreshReloading = true;
-        btn.textContent = manual ? "刷新成功, 重载中…" : "已自动刷新, 重载中…";
-        setAutoRefreshStatus(" · 已刷新, 正在重载...", false);
+        btn.textContent = "刷新成功, 重载中…";
         setTimeout(() => window.location.reload(), 600);
       } else {
         btn.textContent = original;
         btn.disabled = false;
         const message = result.error || result.status || "未知错误";
-        setAutoRefreshStatus(" · 自动刷新失败: " + message, true);
-        if (manual) alert("刷新失败: " + message);
+        alert("刷新失败: " + message);
       }
     } catch (err) {
       btn.textContent = original;
       btn.disabled = false;
-      setAutoRefreshStatus(" · 自动刷新失败: " + err.message, true);
-      if (manual) alert("刷新失败: " + err.message);
+      alert("刷新失败: " + err.message);
     } finally {
       refreshInFlight = false;
     }
   }
 
-  function maybeAutoRefresh(){
-    if (document.hidden || refreshInFlight || refreshReloading) return;
-    const now = Date.now();
-    if (now - lastAutoRefreshAttemptAt < AUTO_REFRESH_INTERVAL_MS) return;
-    if (latestRefreshAt && now - latestRefreshAt < AUTO_REFRESH_INTERVAL_MS) return;
-    lastAutoRefreshAttemptAt = now;
-    refreshDashboard({triggerSource: "auto_10m"});
-  }
-
-  // —— 立即刷新 + 10 分钟自动刷新 ——
+  // —— 手动刷新：定时刷新由后端 scheduler 每 30 分钟执行 ——
   document.getElementById("hxc-refresh-btn").addEventListener("click", () => {
-    refreshDashboard({triggerSource: "admin", manual: true});
-  });
-  window.setTimeout(maybeAutoRefresh, 1000);
-  window.setInterval(maybeAutoRefresh, AUTO_REFRESH_INTERVAL_MS);
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) maybeAutoRefresh();
+    refreshDashboard({triggerSource: "admin"});
   });
 
   // ═══════════════════════════════════════════════════════════════

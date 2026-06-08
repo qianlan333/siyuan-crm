@@ -3,11 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ page_title }} · 心流商业客户管理</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='admin_console/admin_console.css') }}">
+  <title>{{ page_title }} · 客户管理后台</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='admin_console/admin_console.css') }}?v=operation-member-picker-fix-20260527">
   {% block head_extra %}{% endblock %}
   <script defer src="{{ url_for('static', filename='admin_console/admin_api_client.js') }}"></script>
   <script defer src="{{ url_for('static', filename='admin_console/admin_console.js') }}"></script>
+  <script defer src="{{ url_for('static', filename='admin_console/operation_member_picker.js') }}?v=operation-member-picker-fix-20260527"></script>
 </head>
 <body
   class="admin-shell"
@@ -17,10 +18,10 @@
     <aside class="admin-sidebar">
       <div class="admin-brand">
         <div class="admin-brand-mark">CRM</div>
-        <div class="admin-brand-title">心流商业客户管理</div>
+        <div class="admin-brand-title">客户管理后台</div>
       </div>
 
-      <nav class="admin-nav" aria-label="心流商业客户管理导航">
+      <nav class="admin-nav" aria-label="客户管理后台导航">
         {% for group in nav_items %}
         <section class="admin-nav-section{% if group.active %} is-active{% endif %}">
           <div class="admin-nav-section-title">{{ group.title }}</div>
@@ -28,7 +29,7 @@
             {% for item in group["items"] %}
             <a
               class="admin-nav-link{% if item.active %} is-active{% endif %}"
-              href="{{ url_for(item.endpoint) }}"
+              href="{{ item.href if item.href is defined and item.href else url_for(item.endpoint) }}"
             >
               <span class="admin-nav-label">{{ item.label }}</span>
             </a>

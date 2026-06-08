@@ -1,0 +1,139 @@
+{% extends "admin_console/config_base.html" %}
+
+{% block config_content %}
+<section class="admin-card-grid">
+  {% for card in summary_cards %}
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">{{ card.label }}</div>
+    <div class="admin-card-value">{{ card.value }}</div>
+    <p class="admin-card-copy">{{ card.description }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="admin-card">
+  <form class="admin-filter-bar admin-form-grid admin-form-grid--filters" method="get">
+    <label>
+      <span>筛选</span>
+      <input type="text" name="q" value="{{ filters.q }}" placeholder="设置项 / 名称 / 说明">
+    </label>
+    <label>
+      <span>查看范围</span>
+      <select name="scope">
+        <option value="" {% if not filters.scope %}selected{% endif %}>全部</option>
+        <option value="editable" {% if filters.scope == "editable" %}selected{% endif %}>可直接编辑</option>
+        <option value="masked" {% if filters.scope == "masked" %}selected{% endif %}>敏感信息</option>
+      </select>
+    </label>
+    <div class="admin-form-actions">
+      <button class="admin-button admin-button--primary" type="submit">应用筛选</button>
+      <a class="admin-button admin-button--ghost" href="/admin/config/app-settings">重置</a>
+    </div>
+  </form>
+</section>
+
+<section class="admin-card">
+  <div class="config-editor-layout">
+    <div class="config-list-stack">
+      <div class="admin-card-head">
+        <div>
+          <h2>设置快照</h2>
+          <p>这里展示当前正在生效的设置值和来源。</p>
+        </div>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>设置项</th>
+              <th>名称</th>
+              <th>类型</th>
+              <th>当前值</th>
+              <th>来源</th>
+              <th>最近修改人</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td><code>{{ row.key }}</code></td>
+              <td>{{ row.label }}</td>
+              <td>{{ "可直接编辑" if row.mode == "editable" else "敏感信息" }}</td>
+              <td>{{ row.display_value or "-" }}</td>
+              <td>{{ "数据库" if row.source == "app_settings" else "配置文件" }}</td>
+              <td>{{ row.last_modified_by or "-" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <aside class="config-editor-aside">
+      <div class="admin-card-head">
+        <div>
+          <h2>编辑系统设置</h2>
+          <p>这些内容可以直接修改。保存后会记录操作人和时间。</p>
+        </div>
+      </div>
+      <form class="admin-form-grid admin-form-grid--stacked" method="post" action="/admin/config/app-settings/save">
+        <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
+        {% for row in editable_rows %}
+        <label>
+          <span>{{ row.label }} <code>{{ row.key }}</code></span>
+          {% if row.input_type == "textarea" %}
+          <textarea name="setting__{{ row.key }}" rows="10">{{ row.value }}</textarea>
+          {% else %}
+          <input type="{{ row.input_type }}" name="setting__{{ row.key }}" value="{{ row.value }}">
+          {% endif %}
+          <small>{{ row.description }} · 来源：{{ "数据库" if row.source == "app_settings" else "配置文件" }} · 最近修改：{{ row.last_modified_by or "-" }} {{ row.last_modified_at or "" }}</small>
+        </label>
+        {% endfor %}
+
+        <div class="admin-card-head admin-card-head--tight">
+          <div>
+            <h2>敏感信息</h2>
+            <p>页面不会显示完整内容；留空表示保持原值。</p>
+          </div>
+        </div>
+
+        {% for row in masked_rows %}
+        <label>
+          <span>{{ row.label }} <code>{{ row.key }}</code></span>
+          <input type="password" name="setting__{{ row.key }}" placeholder="当前状态：{{ row.display_value or '未配置' }}">
+          <small>{{ row.description }} · 当前{{ "已配置" if row.configured else "未配置" }} · 最近修改：{{ row.last_modified_by or "-" }} {{ row.last_modified_at or "" }}</small>
+        </label>
+        {% endfor %}
+
+        <label>
+          <span>操作人</span>
+          <input type="text" name="operator" placeholder="填写本次修改人">
+        </label>
+        <label class="admin-check-line">
+          <input type="checkbox" name="confirm" value="1">
+          <span>我确认保存本次系统设置修改</span>
+        </label>
+        <div class="admin-form-actions">
+          <button class="admin-button admin-button--primary" type="submit">保存系统设置</button>
+        </div>
+      </form>
+    </aside>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>最近审计</h2>
+      <p>这里展示系统设置最近的修改记录。</p>
+    </div>
+  </div>
+  <div class="admin-audit-list">
+    {% for item in audit_entries %}
+    <div class="admin-audit-item">
+      <strong>{{ item.target_id }}</strong>
+      <span>{{ item.action_type }} · {{ item.operator }} · {{ item.created_at }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

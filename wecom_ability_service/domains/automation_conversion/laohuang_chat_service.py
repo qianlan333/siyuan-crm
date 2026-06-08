@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import requests
 from flask import current_app
@@ -81,6 +82,21 @@ def laohuang_chat_enabled() -> bool:
 
 def _laohuang_webhook_url() -> str:
     return _setting_text("LAOHUANG_CHAT_WEBHOOK_URL", default=DEFAULT_LAOHUANG_CHAT_WEBHOOK_URL) or DEFAULT_LAOHUANG_CHAT_WEBHOOK_URL
+
+
+def _laohuang_webhook_token() -> str:
+    return _setting_text("LAOHUANG_CHAT_WEBHOOK_TOKEN", default="")
+
+
+def _laohuang_webhook_url_with_token() -> str:
+    target_url = _laohuang_webhook_url()
+    token = _laohuang_webhook_token()
+    if not token:
+        return target_url
+    parts = urlsplit(target_url)
+    query_items = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True) if key != "token"]
+    query_items.append(("token", token))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
 
 
 def _laohuang_timeout_seconds() -> int:
@@ -386,7 +402,7 @@ def dispatch_reply_monitor_queue_item(
         )
         try:
             response = client.post(
-                _laohuang_webhook_url(),
+                _laohuang_webhook_url_with_token(),
                 json=request_payload,
             )
         except OutboundHttpError as exc:

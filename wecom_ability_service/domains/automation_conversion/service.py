@@ -1669,6 +1669,25 @@ def sync_member_from_questionnaire_submission(
     )
 
 
+def sync_questionnaire_submission_audience_transition(
+    *,
+    external_contact_id: str = "",
+    phone: str = "",
+    questionnaire_id: int | None = None,
+    submission_id: int | None = None,
+    operator_id: str = "questionnaire_submit",
+) -> dict[str, Any]:
+    from . import questionnaire_bridge_service
+
+    return questionnaire_bridge_service.sync_questionnaire_submission_audience_transition(
+        external_contact_id=external_contact_id,
+        phone=phone,
+        questionnaire_id=questionnaire_id,
+        submission_id=submission_id,
+        operator_id=operator_id,
+    )
+
+
 def sync_member_activation(*, external_contact_id: str = "", phone: str = "", operator_id: str = "system") -> dict[str, Any]:
     from . import member_state_service
 
@@ -1731,6 +1750,8 @@ def handle_qrcode_enter_from_callback(
     operator_id: str = "",
     follow_user_userid: str = "",
     send_welcome_message: bool = False,
+    event_log_id: int | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     from . import member_state_service
 
@@ -1741,6 +1762,8 @@ def handle_qrcode_enter_from_callback(
         operator_id=operator_id,
         follow_user_userid=follow_user_userid,
         send_welcome_message=send_welcome_message,
+        event_log_id=event_log_id,
+        dry_run=dry_run,
     )
 
 

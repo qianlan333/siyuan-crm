@@ -1,5 +1,13 @@
 # CLAUDE.md
 
+## 前端开发第一入口
+
+在 AI-CRM 仓库内执行任何前端开发、页面开发、组件开发、UI 调整或管理后台功能开发之前，必须先阅读并遵守
+[docs/skills/frontend-development-skill.md](docs/skills/frontend-development-skill.md)。
+
+该 Skill 优先级高于一般开发习惯；如果未读取该 Skill，不应开始前端实现。后续任何前端任务的最终回复必须输出
+`Frontend Skill Checklist`。
+
 ## 生产直连（直接查日志/数据/文件）
 
 📖 **完整能力手册**：[docs/claude_prod_query_capabilities.md](docs/claude_prod_query_capabilities.md) — 所有子命令、白名单边界、查询配方、典型 cookbook 都在这里。

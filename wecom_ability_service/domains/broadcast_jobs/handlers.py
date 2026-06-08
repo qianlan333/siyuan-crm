@@ -39,7 +39,7 @@ def execute_job(job: dict[str, Any]) -> dict[str, Any]:
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _handle_generic(job: dict[str, Any]) -> dict[str, Any]:
-    from ..tasks.service import dispatch_wecom_task
+    from ..tasks.service import dispatch_wecom_task_with_intent
 
     payload = job.get("content_payload") or {}
     fn_name = str(payload.get("fn_name") or "").strip()
@@ -48,7 +48,21 @@ def _handle_generic(job: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "error": "content_payload missing fn_name or wecom_payload"}
 
     task_type = f"broadcast_job/{job.get('source_type', 'manual')}"
-    result = dispatch_wecom_task(task_type, fn_name, wecom_payload)
+    existing_outbound_task_id = int(job.get("outbound_task_id") or 0)
+    if existing_outbound_task_id:
+        return {
+            "ok": True,
+            "sent_count": int(job.get("target_count") or 0),
+            "failed_count": 0,
+            "outbound_task_id": existing_outbound_task_id,
+        }
+    result = dispatch_wecom_task_with_intent(
+        task_type,
+        fn_name,
+        wecom_payload,
+        broadcast_job_id=int(job.get("id") or 0) or None,
+        trace_id=str(job.get("trace_id") or ""),
+    )
     return {
         "ok": True,
         "sent_count": int(job.get("target_count") or 0),
@@ -86,7 +100,9 @@ def _handle_focus_send(job: dict[str, Any]) -> dict[str, Any]:
 def _handle_campaign(job: dict[str, Any]) -> dict[str, Any]:
     from ..campaigns.scheduler import run_campaign_batch
 
-    payload = job.get("content_payload") or {}
+    payload = dict(job.get("content_payload") or {})
+    payload["broadcast_job_id"] = int(job.get("id") or 0) or None
+    payload["resume_outbound_task_id"] = int(job.get("outbound_task_id") or 0) or None
     # 预排期 job 没有 request_payload，run_campaign_batch 会现场 resolve
     if not payload.get("request_payload") and not payload.get("campaign"):
         return {"ok": False, "error": "campaign job missing request_payload"}
@@ -114,8 +130,33 @@ def _handle_sop(job: dict[str, Any]) -> dict[str, Any]:
 @register("workflow")
 def _handle_workflow(job: dict[str, Any]) -> dict[str, Any]:
     from ..automation_conversion.workflow_runtime import run_workflow_execution, run_pre_scheduled_workflow_node
+    from ..tasks.service import dispatch_wecom_group_task_with_intent
 
     payload = job.get("content_payload") or {}
+    if str(payload.get("channel") or "").strip() == "wecom_customer_group":
+        existing_outbound_task_id = int(job.get("outbound_task_id") or 0)
+        if existing_outbound_task_id:
+            from ..tasks.service import assert_group_outbound_exact_target_verified
+
+            assert_group_outbound_exact_target_verified(existing_outbound_task_id)
+            return {
+                "ok": True,
+                "sent_count": len(payload.get("chat_ids") or []),
+                "failed_count": 0,
+                "outbound_task_id": existing_outbound_task_id,
+            }
+        result = dispatch_wecom_group_task_with_intent(
+            "broadcast_job/group_ops",
+            payload,
+            broadcast_job_id=int(job.get("id") or 0) or None,
+            trace_id=str(job.get("trace_id") or ""),
+        )
+        return {
+            "ok": True,
+            "sent_count": len(payload.get("chat_ids") or []),
+            "failed_count": 0,
+            "outbound_task_id": int(result.get("task_id") or 0) or None,
+        }
     # 预排期的 job 没有 execution_id，到期后走完整 node 执行流程
     if payload.get("pre_scheduled"):
         workflow_id = int(payload.get("workflow_id") or 0)
@@ -145,13 +186,20 @@ def _handle_operation_task(job: dict[str, Any]) -> dict[str, Any]:
 
 @register("cloud_plan")
 def _handle_cloud_plan(job: dict[str, Any]) -> dict[str, Any]:
-    from ..cloud_orchestrator.broadcast_planner import execute_committed_plan
+    from ..cloud_orchestrator.broadcast_planner import execute_recipient_messages
 
     payload = job.get("content_payload") or {}
     plan_id = str(payload.get("plan_id") or "").strip()
     if not plan_id:
         return {"ok": False, "error": "cloud_plan job missing plan_id"}
-    return execute_committed_plan(plan_id=plan_id)
+    recipient_id = payload.get("recipient_id")
+    if recipient_id:
+        return execute_recipient_messages(
+            plan_id=plan_id,
+            recipient_id=int(recipient_id),
+            broadcast_job_id=int(job.get("id") or 0) or None,
+        )
+    return {"ok": False, "error": "cloud_plan bulk job is disabled; approve an individual recipient"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

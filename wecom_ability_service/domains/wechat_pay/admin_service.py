@@ -13,8 +13,11 @@ from zoneinfo import ZoneInfo
 
 from flask import current_app
 
+from aicrm_next.commerce.product_code_aliases import canonical_product_code
+
 from ...db import get_db
 from ...infra.json_utils import safe_json_loads
+from ...infra.text_encoding import repair_utf8_mojibake
 from ..admin_audit import record_audit
 from . import repo
 from .product_service import list_products
@@ -32,10 +35,8 @@ ALLOWED_LIMITS = {20, 50, 100}
 EXPORT_HEADERS = [
     "订单创建时间",
     "微信单号",
-    "付款人/客户身份",
     "手机号",
-    "userid",
-    "external_userid",
+    "unionid",
     "商品名称",
     "商品编码",
     "金额",
@@ -72,8 +73,6 @@ def _dt_text(value: Any) -> str:
 
 def _iso_text(value: Any) -> str:
     if isinstance(value, datetime):
-        if value.tzinfo is None:
-            value = value.replace(tzinfo=timezone.utc)
         return value.isoformat()
     return _normalized_text(value)
 
@@ -105,7 +104,7 @@ def _merge_order_status(order: dict[str, Any]) -> str:
 
 
 def _identity_text(order: dict[str, Any]) -> str:
-    payer_name = _normalized_text(order.get("payer_name_snapshot")) or "未记录付款人"
+    payer_name = repair_utf8_mojibake(order.get("payer_name_snapshot")) or "未记录付款人"
     mobile = _normalized_text(order.get("mobile_snapshot")) or "未记录手机号"
     userid = _normalized_text(order.get("userid_snapshot"))
     external_userid = _normalized_text(order.get("external_userid"))
@@ -121,15 +120,16 @@ def _present_order(order: dict[str, Any], *, include_refund: bool = False) -> di
     if not active_refunding and include_refund and int(order.get("id") or 0) > 0:
         active_refunding = max(0, repo.sum_active_refund_amount(int(order.get("id") or 0)))
     refundable = max(0, amount_total - refunded - active_refunding)
-    product_code = _normalized_text(order.get("product_code"))
+    product_code = canonical_product_code(order.get("product_code"))
     product_name = _normalized_text(order.get("product_name")) or product_code
     presented = {
         "id": int(order.get("id") or 0),
         "created_at": _dt_text(order.get("created_at")),
         "transaction_id": _normalized_text(order.get("transaction_id")) or "待支付暂无微信单号",
         "has_transaction_id": bool(_normalized_text(order.get("transaction_id"))),
-        "payer_name": _normalized_text(order.get("payer_name_snapshot")) or "未记录付款人",
+        "payer_name": repair_utf8_mojibake(order.get("payer_name_snapshot")) or "未记录付款人",
         "mobile": _normalized_text(order.get("mobile_snapshot")),
+        "unionid": _normalized_text(order.get("unionid")),
         "userid": _normalized_text(order.get("userid_snapshot")),
         "external_userid": _normalized_text(order.get("external_userid")),
         "identity": _identity_text(order),
@@ -202,7 +202,7 @@ def list_product_options() -> list[dict[str, Any]]:
         name = _normalized_text(product.get("name")) or code
         options[code] = {"product_code": code, "product_name": name, "label": name}
     for product in repo.list_products_from_orders():
-        code = _normalized_text(product.get("product_code"))
+        code = canonical_product_code(product.get("product_code"))
         if not code or code in options:
             continue
         name = _normalized_text(product.get("product_name")) or code
@@ -490,10 +490,8 @@ def _export_row(row: dict[str, Any]) -> list[str]:
     return [
         _normalized_text(row.get("created_at")),
         _normalized_text(row.get("transaction_id")),
-        _normalized_text(row.get("identity")),
         _normalized_text(row.get("mobile")),
-        _normalized_text(row.get("userid")),
-        _normalized_text(row.get("external_userid")),
+        _normalized_text(row.get("unionid")),
         _normalized_text(row.get("product_name")),
         _normalized_text(row.get("product_code")),
         _normalized_text(row.get("amount_yuan")),

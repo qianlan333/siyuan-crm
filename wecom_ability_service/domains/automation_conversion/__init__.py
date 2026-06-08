@@ -144,6 +144,7 @@ from .service import (
     set_follow_type,
     sync_member_activation,
     sync_member_from_questionnaire_submission,
+    sync_questionnaire_submission_audience_transition,
     unmark_won,
 )
 from .sop_service import (
@@ -351,6 +352,7 @@ __all__ = [
     "sync_all_conversion_member_audiences",
     "sync_conversion_member_audience",
     "sync_member_from_questionnaire_submission",
+    "sync_questionnaire_submission_audience_transition",
     "suggest_pool_action",
     "test_model_infra_connection",
     "unmark_won",

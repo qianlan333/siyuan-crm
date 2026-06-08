@@ -1,0 +1,1 @@
+"""Owner migration admin capability."""

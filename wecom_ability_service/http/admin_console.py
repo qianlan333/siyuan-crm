@@ -18,11 +18,20 @@ def _breadcrumb_items(*items: tuple[str, str | None]) -> list[dict[str, str]]:
 
 _ADMIN_NAV_FALLBACK_HREFS = {
     "api.admin_automation_conversion": "/admin/automation-conversion",
+    "api.admin_group_ops_ui": "/admin/automation-conversion/group-ops/ui",
+    "api.admin_group_ops_plan_detail": "/admin/automation-conversion/group-ops/plans",
+    "api.admin_group_ops_groups_ui": "/admin/automation-conversion/group-ops/groups/ui",
     "api.admin_channels_page": "/admin/channels",
     "api.admin_cloud_orchestrator_workspace": "/admin/cloud-orchestrator",
     "api.admin_console_customers": "/admin/customers",
+    "api.admin_owner_migration_page": "/admin/owner-migration",
+    "api.admin_owner_migration_action": "/admin/owner-migration",
     "api.admin_hxc_dashboard_workspace": "/admin/hxc-dashboard",
     "api.admin_console_questionnaires": "/admin/questionnaires",
+    "api.admin_radar_links": "/admin/radar-links",
+    "api.admin_radar_link_new": "/admin/radar-links/new",
+    "api.admin_radar_link_edit": "/admin/radar-links",
+    "api.admin_radar_link_detail": "/admin/radar-links",
     "api.admin_wecom_tags_page": "/admin/wecom-tags",
     "api.admin_wechat_pay_transactions_page": "/admin/wechat-pay/transactions",
     "api.admin_wechat_pay_products_page": "/admin/wechat-pay/products",
@@ -75,16 +84,6 @@ def _render_admin_template(
         show_shell_meta=extra.pop("show_shell_meta", True),
         show_page_header=extra.pop("show_page_header", True),
         **extra,
-    )
-
-
-def render_admin_user_ops_shell():
-    return _render_admin_template(
-        "user_ops.html",
-        active_nav="operations",
-        page_title="运营管理",
-        page_summary="转化链路运营页。当前页只针对有班期标识的引流品用户做筛选、客户详情复用、批量群发、免打扰和发送记录。",
-        breadcrumbs=_breadcrumb_items(("客户管理后台", url_for("api.admin_console_home")), ("运营", None)),
     )
 
 

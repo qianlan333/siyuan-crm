@@ -76,6 +76,11 @@ def _failed_event_count_24h() -> int | None:
 def system_health():
     pending = _pending_event_stats()
     archive = _get_archive_sync_info()
+    try:
+        from aicrm_next.shared.runtime import runtime_route_map_state
+        runtime = runtime_route_map_state()
+    except Exception:
+        runtime = {}
     return jsonify({
         "status": "ok",
         "started_at": APP_STARTED_AT_TEXT,
@@ -88,7 +93,16 @@ def system_health():
         "circuit_breaker_state": _get_circuit_breaker_state(),
         "task_queue_backend": "rq" if is_rq_active() else "thread_pool",
         "task_queue_pending": get_queue_depth(),
+        "web_release_sha": runtime.get("web_release_sha", "unknown"),
+        "worker_release_sha": runtime.get("worker_release_sha", "unknown"),
+        "callback_async_enabled": runtime.get("callback_async_enabled", "unknown"),
     })
+
+
+def runtime_route_map():
+    from aicrm_next.shared.runtime import runtime_route_map_state
+
+    return jsonify(runtime_route_map_state())
 
 
 def run_compensating_scan():
@@ -150,4 +164,5 @@ def api_compensating_scan():
 
 def register_routes(bp):
     bp.route('/api/system/health', methods=['GET'])(system_health)
+    bp.route('/api/system/runtime-route-map', methods=['GET'])(runtime_route_map)
     bp.route('/api/system/compensate', methods=['POST'])(api_compensating_scan)

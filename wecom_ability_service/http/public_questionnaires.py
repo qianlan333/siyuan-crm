@@ -20,6 +20,7 @@ from ..application.questionnaire.queries import (
 from ..application.questionnaire import QuestionnaireAlreadySubmittedError
 from .questionnaire_support import (
     _build_questionnaire_page_state,
+    capture_sidebar_questionnaire_context,
     _is_wechat_browser,
     _parse_questionnaire_form_payload,
     _questionnaire_oauth_start_url,
@@ -117,6 +118,7 @@ def questionnaire_h5_page(slug: str):
     if not questionnaire:
         abort(404)
     wechat_gate = _require_wechat_browser_page()
+    capture_sidebar_questionnaire_context()
     source_params = _questionnaire_source_params()
     session_identity = _questionnaire_session_identity()
     request_identity = _resolve_public_questionnaire_identity(session_identity=session_identity)
@@ -168,6 +170,7 @@ def public_get_questionnaire(slug: str):
     wechat_gate = _require_wechat_browser_api()
     if wechat_gate is not None:
         return wechat_gate
+    capture_sidebar_questionnaire_context()
     questionnaire = _load_public_questionnaire(slug)
     if not questionnaire:
         return jsonify({"ok": False, "error": "questionnaire not found"}), 404
@@ -200,6 +203,9 @@ def public_submit_questionnaire(slug: str):
     if is_form_submit:
         payload = _parse_questionnaire_form_payload(questionnaire)
     request_meta = _questionnaire_request_meta()
+    sidebar_context = capture_sidebar_questionnaire_context(payload)
+    if sidebar_context:
+        request_meta["signed_sidebar_context"] = sidebar_context
     is_wechat_browser = _is_wechat_browser()
     session_identity = _questionnaire_session_identity()
     resolved_identity = _resolve_public_questionnaire_identity(session_identity=session_identity)
@@ -253,8 +259,4 @@ def public_submit_questionnaire(slug: str):
 
 
 def register_routes(bp):
-    bp.route('/s/<slug>', methods=['GET'])(questionnaire_h5_page)
-    bp.route('/s/<slug>/submitted', methods=['GET'])(questionnaire_h5_submitted)
-    bp.route('/s/<slug>/result/<result_token>', methods=['GET'])(questionnaire_h5_assessment_result)
-    bp.route('/api/h5/questionnaires/<slug>', methods=['GET'])(public_get_questionnaire)
     bp.route('/api/h5/questionnaires/<slug>/submit', methods=['POST'])(public_submit_questionnaire)

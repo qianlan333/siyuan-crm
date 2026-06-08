@@ -8,7 +8,7 @@ from flask import current_app
 
 from ...infra.constants import DEFAULT_WECOM_CORP_TAG_LIMIT, SIGNUP_TAG_GROUP_NAME, SIGNUP_TAG_STATUS_DEFINITIONS
 from ...infra.settings import get_setting
-from ...wecom_client import WeComClient
+from ...wecom_client import WeComClient, WeComClientError
 from . import repo
 
 
@@ -117,6 +117,214 @@ def build_wecom_tag_catalog(payload: dict[str, Any]) -> dict[str, Any]:
         "tag_limit": wecom_corp_tag_limit(payload),
         "synced_at": synced_at,
     }
+
+
+def _iso_text(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.replace(microsecond=0).isoformat()
+    return _normalized_text(value)
+
+
+def _normalize_remote_catalog(payload: dict[str, Any], *, synced_at: str) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    groups: list[dict[str, Any]] = []
+    tags: list[dict[str, Any]] = []
+    for raw_group in list((payload or {}).get("tag_group") or []):
+        group = dict(raw_group or {})
+        group_id = _normalized_text(group.get("group_id") or group.get("id"))
+        group_name = _normalized_text(group.get("group_name") or group.get("name")) or "未命名标签组"
+        group_key = group_id or f"group-name:{group_name}"
+        raw_tags = list(group.get("tag") or [])
+        groups.append(
+            {
+                "group_id": group_id,
+                "group_name": group_name,
+                "group_key": group_key,
+                "tag_count": len(raw_tags),
+                "raw_payload": group,
+                "synced_at": synced_at,
+            }
+        )
+        for index, raw_tag in enumerate(raw_tags):
+            tag = dict(raw_tag or {})
+            tag_id = _normalized_text(tag.get("id") or tag.get("tag_id"))
+            tag_name = _normalized_text(tag.get("name") or tag.get("tag_name")) or "未命名标签"
+            if not tag_id and not tag_name:
+                continue
+            order_value = tag.get("order") if tag.get("order") not in (None, "") else tag.get("order_index")
+            try:
+                order_index = int(order_value or index)
+            except (TypeError, ValueError):
+                order_index = index
+            tags.append(
+                {
+                    "tag_id": tag_id,
+                    "tag_name": tag_name,
+                    "group_id": group_id,
+                    "group_name": group_name,
+                    "order_index": order_index,
+                    "raw_payload": tag,
+                    "synced_at": synced_at,
+                }
+            )
+    return groups, tags
+
+
+def _build_catalog_from_cache(
+    *,
+    source_status: str,
+    sync_error: str = "",
+    sync_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    cache = repo.list_wecom_corp_tag_cache()
+    cached_groups = [dict(item) for item in cache.get("groups") or []]
+    cached_tags = [dict(item) for item in cache.get("tags") or []]
+    usage_counts = repo.count_contact_tag_usage_by_tag_ids(
+        [_normalized_text(item.get("tag_id")) for item in cached_tags]
+    )
+    groups_by_key: dict[str, dict[str, Any]] = {}
+    for group in cached_groups:
+        group_id = _normalized_text(group.get("group_id"))
+        group_name = _normalized_text(group.get("group_name")) or "未命名标签组"
+        group_key = _normalized_text(group.get("group_key")) or group_id or f"group-name:{group_name}"
+        groups_by_key[group_key] = {
+            "group_key": group_key,
+            "group_id": group_id,
+            "group_name": group_name,
+            "missing_group_id": not bool(group_id),
+            "tag_count": 0,
+            "tags": [],
+            "synced_at": _iso_text(group.get("synced_at")),
+        }
+    for tag in cached_tags:
+        tag_id = _normalized_text(tag.get("tag_id"))
+        group_id = _normalized_text(tag.get("group_id"))
+        group_name = _normalized_text(tag.get("group_name")) or "未命名标签组"
+        group_key = group_id or f"group-name:{group_name}"
+        if group_key not in groups_by_key:
+            groups_by_key[group_key] = {
+                "group_key": group_key,
+                "group_id": group_id,
+                "group_name": group_name,
+                "missing_group_id": not bool(group_id),
+                "tag_count": 0,
+                "tags": [],
+                "synced_at": _iso_text(tag.get("synced_at")),
+            }
+        groups_by_key[group_key]["tags"].append(
+            {
+                "tag_id": tag_id,
+                "tag_name": _normalized_text(tag.get("tag_name")) or "未命名标签",
+                "group_id": group_id,
+                "group_name": group_name,
+                "usage_count": usage_counts.get(tag_id, 0) if tag_id else 0,
+                "synced_at": _iso_text(tag.get("synced_at")),
+                "missing_tag_id": not bool(tag_id),
+            }
+        )
+
+    groups = sorted(
+        groups_by_key.values(),
+        key=lambda item: (_normalized_text(item.get("group_name")), _normalized_text(item.get("group_id"))),
+    )
+    for group in groups:
+        group["tags"] = sorted(
+            group["tags"],
+            key=lambda item: (_normalized_text(item.get("tag_name")), _normalized_text(item.get("tag_id"))),
+        )
+        group["tag_count"] = len(group["tags"])
+
+    items = sorted(
+        [
+            {
+                "tag_id": tag["tag_id"],
+                "tag_name": tag["tag_name"],
+                "group_name": tag["group_name"],
+                "group_id": tag["group_id"],
+            }
+            for group in groups
+            for tag in group["tags"]
+            if tag["tag_id"] and tag["tag_name"]
+        ],
+        key=lambda item: ((item.get("group_name") or ""), (item.get("tag_name") or ""), item["tag_id"]),
+    )
+    latest_synced_at = ""
+    for tag in cached_tags:
+        latest_synced_at = max(latest_synced_at, _iso_text(tag.get("synced_at")))
+    for group in cached_groups:
+        latest_synced_at = max(latest_synced_at, _iso_text(group.get("synced_at")))
+    payload = {
+        "items": items,
+        "groups": groups,
+        "total_tags": len(items),
+        "tag_limit": wecom_corp_tag_limit(),
+        "synced_at": latest_synced_at,
+        "source_status": source_status,
+    }
+    if sync_error:
+        payload["sync_error"] = sync_error
+    if sync_result:
+        payload["sync_result"] = sync_result
+    return payload
+
+
+def sync_wecom_tag_catalog(*, operator: str = "", record_run: bool = False) -> dict[str, Any]:
+    run_id = repo.create_wecom_tag_sync_run(operator=operator) if record_run else 0
+    synced_at = _synced_at_text()
+    try:
+        remote_payload = list_wecom_tags({})
+        groups, tags = _normalize_remote_catalog(remote_payload, synced_at=synced_at)
+        upserted = repo.upsert_wecom_corp_tag_catalog(groups=groups, tags=tags, synced_at=synced_at)
+        marked_deleted = repo.mark_missing_wecom_corp_tags_deleted(
+            seen_tag_ids=[_normalized_text(item.get("tag_id")) for item in tags],
+            synced_at=synced_at,
+        )
+        result = {
+            "ok": True,
+            "fetched_groups": len(groups),
+            "fetched_tags": len(tags),
+            "upserted_groups": int(upserted.get("upserted_groups") or 0),
+            "upserted_tags": int(upserted.get("upserted_tags") or 0),
+            "marked_deleted_tags": marked_deleted,
+            "source_status": "remote_synced",
+            "error_message": "",
+            "synced_at": synced_at,
+        }
+        if run_id:
+            result["sync_run_id"] = run_id
+            repo.finish_wecom_tag_sync_run(
+                run_id,
+                status="success",
+                fetched_count=len(tags),
+                inserted_count=int(upserted.get("upserted_tags") or 0),
+                raw_response=result,
+            )
+        return result
+    except Exception as exc:
+        message = str(exc)
+        result = {
+            "ok": False,
+            "fetched_groups": 0,
+            "fetched_tags": 0,
+            "upserted_groups": 0,
+            "upserted_tags": 0,
+            "marked_deleted_tags": 0,
+            "source_status": "cache_fallback",
+            "error_message": message,
+            "synced_at": synced_at,
+        }
+        if run_id:
+            result["sync_run_id"] = run_id
+            repo.finish_wecom_tag_sync_run(
+                run_id,
+                status="failed",
+                fetched_count=0,
+                inserted_count=0,
+                raw_response=result,
+                error_message=message,
+            )
+        if isinstance(exc, WeComClientError):
+            return result
+        return result
 
 
 def signup_tag_group_name() -> str:
@@ -355,12 +563,29 @@ def list_wecom_tags(payload: dict[str, Any] | None = None) -> dict[str, Any]:
 
 
 def list_wecom_tag_catalog(payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    return build_wecom_tag_catalog(list_wecom_tags(payload or {}))
+    _ = payload
+    sync_result = sync_wecom_tag_catalog()
+    if sync_result.get("ok"):
+        return _build_catalog_from_cache(source_status="remote_synced", sync_result=sync_result)
+    return _build_catalog_from_cache(
+        source_status="cache_fallback",
+        sync_error=_normalized_text(sync_result.get("error_message")),
+        sync_result=sync_result,
+    )
+
+
+def list_cached_wecom_tag_catalog() -> dict[str, Any]:
+    return _build_catalog_from_cache(source_status="cache")
+
+
+def refresh_wecom_tag_catalog_after_write() -> dict[str, Any]:
+    return sync_wecom_tag_catalog()
 
 
 def create_wecom_tag(payload: dict[str, Any]) -> dict[str, Any]:
     client = WeComClient.from_app()
-    return client.create_tag(payload)
+    result = client.create_tag(payload)
+    return {"wecom_result": result, "catalog_refresh": refresh_wecom_tag_catalog_after_write()}
 
 
 def create_wecom_tag_group(
@@ -407,7 +632,8 @@ def update_wecom_tag_group(*, group_id: str, group_name: str) -> dict[str, Any]:
     if not normalized_group_name:
         raise ValueError("标签组名称不能为空")
     client = WeComClient.from_app()
-    return client.update_tag_group({"id": normalized_group_id, "name": normalized_group_name})
+    result = client.update_tag_group({"id": normalized_group_id, "name": normalized_group_name})
+    return {"wecom_result": result, "catalog_refresh": refresh_wecom_tag_catalog_after_write()}
 
 
 def delete_wecom_tag_group(*, group_id: str) -> dict[str, Any]:
@@ -415,7 +641,8 @@ def delete_wecom_tag_group(*, group_id: str) -> dict[str, Any]:
     if not normalized_group_id:
         raise ValueError("当前标签组缺少 group_id，无法执行该操作，请先同步企微标签。")
     client = WeComClient.from_app()
-    return client.delete_tag_group({"group_id": [normalized_group_id]})
+    result = client.delete_tag_group({"group_id": [normalized_group_id]})
+    return {"wecom_result": result, "catalog_refresh": refresh_wecom_tag_catalog_after_write()}
 
 
 def update_wecom_tag(*, tag_id: str, tag_name: str) -> dict[str, Any]:
@@ -426,7 +653,8 @@ def update_wecom_tag(*, tag_id: str, tag_name: str) -> dict[str, Any]:
     if not normalized_tag_name:
         raise ValueError("标签名称不能为空")
     client = WeComClient.from_app()
-    return client.update_tag({"id": normalized_tag_id, "name": normalized_tag_name})
+    result = client.update_tag({"id": normalized_tag_id, "name": normalized_tag_name})
+    return {"wecom_result": result, "catalog_refresh": refresh_wecom_tag_catalog_after_write()}
 
 
 def delete_wecom_tag(*, tag_id: str) -> dict[str, Any]:
@@ -434,7 +662,8 @@ def delete_wecom_tag(*, tag_id: str) -> dict[str, Any]:
     if not normalized_tag_id:
         raise ValueError("当前标签缺少 tag_id，无法执行该操作，请先同步企微标签。")
     client = WeComClient.from_app()
-    return client.delete_tag({"tag_id": [normalized_tag_id]})
+    result = client.delete_tag({"tag_id": [normalized_tag_id]})
+    return {"wecom_result": result, "catalog_refresh": refresh_wecom_tag_catalog_after_write()}
 
 
 def mark_customer_tags(payload: dict[str, Any]) -> dict[str, Any]:

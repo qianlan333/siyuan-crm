@@ -1,0 +1,24 @@
+# AI-CRM Agent Entry
+
+## Frontend Development Gate
+
+In this repository, any AI/Codex/Agent task that touches frontend development,
+page development, component development, UI adjustment, or admin-console feature
+work must read and follow
+[`docs/skills/frontend-development-skill.md`](docs/skills/frontend-development-skill.md)
+before implementation starts.
+
+This frontend skill has priority over casual development habits and old page
+patterns. If a frontend task starts without reading it, the implementation
+should not proceed.
+
+Every frontend-related final response must include the required
+`Frontend Skill Checklist` from the skill. For non-frontend tasks, state that the
+checklist is not applicable.
+
+## Architecture Gate
+
+All Codex development tasks must also follow
+[`docs/development/ai_crm_next_architecture_skill.md`](docs/development/ai_crm_next_architecture_skill.md)
+for AI-CRM Next architecture boundaries, production safety, legacy freeze rules,
+and PR output expectations.

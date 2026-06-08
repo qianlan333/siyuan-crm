@@ -8,6 +8,8 @@ from . import _runtime
 from .dto import (
     BindExternalContactIdentityCommandDTO,
     BindExternalContactIdentityResultDTO,
+    BindExternalContactMobileFromIdentitySourcesCommandDTO,
+    BindExternalContactMobileFromIdentitySourcesResultDTO,
     MarkExternalContactFollowUserStatusCommandDTO,
     MarkExternalContactFollowUserStatusResultDTO,
     MarkExternalContactIdentityStatusCommandDTO,
@@ -54,6 +56,28 @@ class BindExternalContactIdentityCommand:
             )
 
         raise ValueError("mobile or openid is required")
+
+    execute = __call__
+
+
+class BindExternalContactMobileFromIdentitySourcesCommand:
+    def __call__(
+        self,
+        dto: BindExternalContactMobileFromIdentitySourcesCommandDTO,
+    ) -> BindExternalContactMobileFromIdentitySourcesResultDTO:
+        _runtime.bind_user_ops_runtime()
+        return identity_domain_service.bind_mobile_to_external_contact_from_identity_sources(
+            external_userid=str(dto.external_userid or "").strip(),
+            owner_userid=str(dto.owner_userid or "").strip(),
+            bind_by_userid=str(dto.bind_by_userid or "").strip(),
+            force_rebind=bool(dto.force_rebind),
+            resolve_binding_owner_userid=user_ops_domain_service._resolve_binding_owner_userid,
+            contact_profile_loader=user_ops_domain_service._sidebar_contact_profile,
+            resolve_third_party_user_id_by_mobile=user_ops_domain_service._resolve_third_party_user_id_by_mobile,
+            merge_lead_pool_after_mobile_bind=user_ops_domain_service._merge_lead_pool_after_mobile_bind,
+            conflict_error_cls=identity_domain_service.ContactBindingConflictError,
+            sync_error_cls=user_ops_domain_service.ThirdPartyUserSyncError,
+        )
 
     execute = __call__
 
@@ -144,6 +168,7 @@ class BuildExternalContactIdentityRecordCommand:
 
 __all__ = [
     "BindExternalContactIdentityCommand",
+    "BindExternalContactMobileFromIdentitySourcesCommand",
     "BuildExternalContactIdentityRecordCommand",
     "MarkExternalContactFollowUserStatusCommand",
     "MarkExternalContactIdentityStatusCommand",

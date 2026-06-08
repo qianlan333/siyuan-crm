@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from ...db import get_db
@@ -26,14 +26,25 @@ VALID_SOURCE_TYPES = (
     "manual",
 )
 
+VALID_FAILURE_TYPES = (
+    "before_external_call",
+    "external_call_failed_known",
+    "external_call_unknown",
+    "validation_failed",
+    "handler_error",
+    "unknown",
+)
+
 _BASE_COLUMNS = (
     "id, source_type, source_id, source_table, scheduled_for, priority, batch_key, "
+    "business_domain, idempotency_key, channel, target_kind, failure_type, retry_policy_json, metadata_json, "
     "status, requires_approval, approved_by, approved_at, "
     "cancelled_by, cancelled_at, cancel_reason, "
     "target_external_userids, target_count, target_summary, "
     "content_type, content_payload, content_summary, "
     "attempt_count, last_error, outbound_task_id, sent_count, failed_count, "
-    "trace_id, created_by, created_at, updated_at, claimed_at, sent_at"
+    "trace_id, created_by, created_at, updated_at, claimed_at, sent_at, "
+    "claim_token, lease_expires_at"
 )
 
 
@@ -89,8 +100,43 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
     record["content_payload"] = _decode_jsonb(
         record.get("content_payload"), default={}
     )
+    record["retry_policy_json"] = _decode_jsonb(
+        record.get("retry_policy_json"), default={}
+    )
+    record["metadata_json"] = _decode_jsonb(
+        record.get("metadata_json"), default={}
+    )
     record["requires_approval"] = bool(record.get("requires_approval") or False)
     return record
+
+
+def _claim_order_key(item: dict[str, Any]) -> tuple[tuple[int, float | str], int, int]:
+    scheduled = item.get("scheduled_for")
+    if isinstance(scheduled, datetime):
+        value = scheduled
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return (
+            (0, value.astimezone(timezone.utc).timestamp()),
+            int(item.get("priority") or 100),
+            int(item.get("id") or 0),
+        )
+    text_value = str(scheduled or "").strip().replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(text_value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (
+            (0, parsed.astimezone(timezone.utc).timestamp()),
+            int(item.get("priority") or 100),
+            int(item.get("id") or 0),
+        )
+    except ValueError:
+        return (
+            (1, text_value),
+            int(item.get("priority") or 100),
+            int(item.get("id") or 0),
+        )
 
 
 def insert_job(
@@ -101,6 +147,12 @@ def insert_job(
     scheduled_for: Any,
     priority: int,
     batch_key: str,
+    business_domain: str = "",
+    idempotency_key: str = "",
+    channel: str = "",
+    target_kind: str = "",
+    retry_policy_json: dict[str, Any] | None = None,
+    metadata_json: dict[str, Any] | None = None,
     status: str,
     requires_approval: bool,
     target_external_userids: list[str],
@@ -117,16 +169,24 @@ def insert_job(
         raise ValueError(f"invalid status: {status!r}")
     target_list = list(target_external_userids or [])
     target_count = len(target_list)
+    clean_idempotency_key = str(idempotency_key or "").strip()
+    conflict_sql = (
+        "ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL AND idempotency_key <> '' DO NOTHING"
+        if clean_idempotency_key
+        else ""
+    )
     db = get_db()
     row = db.execute(
-        """
+        f"""
         INSERT INTO broadcast_jobs (
             source_type, source_id, source_table, scheduled_for, priority, batch_key,
+            business_domain, idempotency_key, channel, target_kind, retry_policy_json, metadata_json,
             status, requires_approval,
             target_external_userids, target_count, target_summary,
             content_type, content_payload, content_summary,
             trace_id, created_by
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        {conflict_sql}
         RETURNING id
         """,
         (
@@ -136,6 +196,12 @@ def insert_job(
             _normalize_dt(scheduled_for),
             int(priority),
             str(batch_key or ""),
+            str(business_domain or ""),
+            clean_idempotency_key or None,
+            str(channel or ""),
+            str(target_kind or ""),
+            _to_jsonb_text(retry_policy_json or {}, default="{}"),
+            _to_jsonb_text(metadata_json or {}, default="{}"),
             status,
             _bool_to_db(requires_approval),
             _to_jsonb_text(target_list, default="[]"),
@@ -150,6 +216,8 @@ def insert_job(
     )
     result = row.fetchone()
     db.commit()
+    if not result:
+        return 0
     return int(result["id"])
 
 
@@ -158,6 +226,17 @@ def fetch_job_by_id(job_id: int) -> dict[str, Any] | None:
     row = db.execute(
         f"SELECT {_BASE_COLUMNS} FROM broadcast_jobs WHERE id = ? LIMIT 1",
         (int(job_id),),
+    ).fetchone()
+    return _row_to_dict(row) if row else None
+
+
+def fetch_job_by_idempotency_key(idempotency_key: str) -> dict[str, Any] | None:
+    key = str(idempotency_key or "").strip()
+    if not key:
+        return None
+    row = get_db().execute(
+        f"SELECT {_BASE_COLUMNS} FROM broadcast_jobs WHERE idempotency_key = ? ORDER BY id DESC LIMIT 1",
+        (key,),
     ).fetchone()
     return _row_to_dict(row) if row else None
 
@@ -223,7 +302,13 @@ def fetch_job_by_source(
     return _row_to_dict(row) if row else None
 
 
-def claim_due_jobs(*, now: Any, limit: int) -> list[dict[str, Any]]:
+def claim_due_jobs(
+    *,
+    now: Any,
+    limit: int,
+    claim_token: str = "",
+    lease_seconds: int = 900,
+) -> list[dict[str, Any]]:
     """原子地把到期的 queued 任务标 claimed 并返回。
 
     用 UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED) RETURNING
@@ -231,12 +316,20 @@ def claim_due_jobs(*, now: Any, limit: int) -> list[dict[str, Any]]:
     """
     db = get_db()
     cutoff = _normalize_dt(now)
+    base_dt = now if isinstance(now, datetime) else datetime.now(timezone.utc)
+    if base_dt.tzinfo is None:
+        base_dt = base_dt.replace(tzinfo=timezone.utc)
+    lease_expires_at = _normalize_dt(
+        base_dt + timedelta(seconds=max(1, int(lease_seconds)))
+    )
     rows = db.execute(
         f"""
         UPDATE broadcast_jobs
         SET status = 'claimed',
             claimed_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP,
+            claim_token = ?,
+            lease_expires_at = ?,
             attempt_count = attempt_count + 1
         WHERE id IN (
             SELECT id FROM broadcast_jobs
@@ -247,10 +340,130 @@ def claim_due_jobs(*, now: Any, limit: int) -> list[dict[str, Any]]:
         )
         RETURNING {_BASE_COLUMNS}
         """,
+        (str(claim_token or ""), lease_expires_at, cutoff, int(limit)),
+    ).fetchall()
+    db.commit()
+    claimed = [_row_to_dict(r) for r in rows]
+    return sorted(claimed, key=_claim_order_key)
+
+
+def recover_stale_claimed_jobs(
+    *,
+    now: Any,
+    older_than_seconds: int,
+    limit: int,
+) -> dict[str, list[dict[str, Any]]]:
+    """恢复带租约的 stale claimed 任务。
+
+    只处理 ``claim_token`` 非空的新 worker 租约，避免把历史遗留 claimed job 自动
+    重发。恢复规则：
+    - 无 outbound intent：安全回队列；
+    - outbound 已 created：回队列，由 handler 复用 outbound_task_id 补业务 side effects；
+    - outbound 仍 pending/failed：标 failed，要求人工核对，避免未知外部副作用被重复发送。
+    """
+    db = get_db()
+    base_dt = now if isinstance(now, datetime) else datetime.now(timezone.utc)
+    if base_dt.tzinfo is None:
+        base_dt = base_dt.replace(tzinfo=timezone.utc)
+    cutoff = _normalize_dt(base_dt - timedelta(seconds=int(older_than_seconds)))
+    requeued_without_outbound = db.execute(
+        f"""
+        UPDATE broadcast_jobs
+        SET status = 'queued',
+            claimed_at = NULL,
+            claim_token = '',
+            lease_expires_at = NULL,
+            updated_at = CURRENT_TIMESTAMP,
+            last_error = 'requeued stale claimed job before outbound dispatch'
+        WHERE id IN (
+            SELECT id FROM broadcast_jobs
+            WHERE status = 'claimed'
+              AND claim_token <> ''
+              AND claimed_at IS NOT NULL
+              AND claimed_at <= ?
+              AND sent_at IS NULL
+              AND outbound_task_id IS NULL
+            ORDER BY claimed_at ASC, id ASC
+            LIMIT ?
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING {_BASE_COLUMNS}
+        """,
+        (cutoff, int(limit)),
+    ).fetchall()
+    requeued_created_outbound = db.execute(
+        f"""
+        UPDATE broadcast_jobs
+        SET status = 'queued',
+            claimed_at = NULL,
+            claim_token = '',
+            lease_expires_at = NULL,
+            updated_at = CURRENT_TIMESTAMP,
+            last_error = 'resuming stale claimed job with created outbound task'
+        WHERE id IN (
+            SELECT bj2.id FROM broadcast_jobs bj2
+            JOIN outbound_tasks ot2 ON ot2.id = bj2.outbound_task_id
+            WHERE bj2.status = 'claimed'
+              AND bj2.claim_token <> ''
+              AND bj2.claimed_at IS NOT NULL
+              AND bj2.claimed_at <= ?
+              AND bj2.sent_at IS NULL
+              AND bj2.outbound_task_id IS NOT NULL
+              AND ot2.status = 'created'
+            ORDER BY bj2.claimed_at ASC, bj2.id ASC
+            LIMIT ?
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING {_BASE_COLUMNS}
+        """,
+        (cutoff, int(limit)),
+    ).fetchall()
+    failed_unknown_outbound = db.execute(
+        f"""
+        UPDATE broadcast_jobs
+        SET status = 'failed',
+            claim_token = '',
+            lease_expires_at = NULL,
+            updated_at = CURRENT_TIMESTAMP,
+            last_error = 'stale claimed job has unresolved outbound intent; manual reconciliation required'
+        WHERE id IN (
+            SELECT bj2.id FROM broadcast_jobs bj2
+            JOIN outbound_tasks ot2 ON ot2.id = bj2.outbound_task_id
+            WHERE bj2.status = 'claimed'
+              AND bj2.claim_token <> ''
+              AND bj2.claimed_at IS NOT NULL
+              AND bj2.claimed_at <= ?
+              AND bj2.sent_at IS NULL
+              AND bj2.outbound_task_id IS NOT NULL
+              AND ot2.status <> 'created'
+            ORDER BY bj2.claimed_at ASC, bj2.id ASC
+            LIMIT ?
+            FOR UPDATE SKIP LOCKED
+        )
+        RETURNING {_BASE_COLUMNS}
+        """,
         (cutoff, int(limit)),
     ).fetchall()
     db.commit()
-    return [_row_to_dict(r) for r in rows]
+    return {
+        "requeued_without_outbound": [_row_to_dict(r) for r in requeued_without_outbound],
+        "requeued_created_outbound": [_row_to_dict(r) for r in requeued_created_outbound],
+        "failed_unknown_outbound": [_row_to_dict(r) for r in failed_unknown_outbound],
+    }
+
+
+def mark_dispatch_started(job_id: int, *, outbound_task_id: int) -> None:
+    db = get_db()
+    db.execute(
+        """
+        UPDATE broadcast_jobs
+        SET outbound_task_id = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ? AND status = 'claimed' AND outbound_task_id IS NULL
+        """,
+        (int(outbound_task_id), int(job_id)),
+    )
+    db.commit()
 
 
 def mark_sent(
@@ -267,6 +480,8 @@ def mark_sent(
         SET status = 'sent',
             sent_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP,
+            claim_token = '',
+            lease_expires_at = NULL,
             outbound_task_id = ?,
             sent_count = ?,
             failed_count = ?,
@@ -283,17 +498,23 @@ def mark_sent(
     db.commit()
 
 
-def mark_failed(job_id: int, *, error: str) -> None:
+def mark_failed(job_id: int, *, error: str, failure_type: str = "unknown") -> None:
+    clean_failure_type = str(failure_type or "unknown").strip() or "unknown"
+    if clean_failure_type not in VALID_FAILURE_TYPES:
+        clean_failure_type = "unknown"
     db = get_db()
     db.execute(
         """
         UPDATE broadcast_jobs
         SET status = 'failed',
             updated_at = CURRENT_TIMESTAMP,
+            claim_token = '',
+            lease_expires_at = NULL,
+            failure_type = ?,
             last_error = ?
         WHERE id = ? AND status IN ('claimed', 'queued')
         """,
-        (str(error or "")[:4000], int(job_id)),
+        (clean_failure_type, str(error or "")[:4000], int(job_id)),
     )
     db.commit()
 
@@ -357,3 +578,52 @@ def count_jobs_by_status() -> dict[str, int]:
         "SELECT status, COUNT(*) AS cnt FROM broadcast_jobs GROUP BY status"
     ).fetchall()
     return {str(r["status"]): int(r["cnt"]) for r in rows}
+
+
+def insert_broadcast_job_event(
+    *,
+    job_id: int,
+    event_type: str,
+    from_status: str | None = None,
+    to_status: str | None = None,
+    event_payload: dict[str, Any] | None = None,
+    actor_type: str = "",
+    actor_id: str = "",
+) -> int:
+    row = get_db().execute(
+        """
+        INSERT INTO broadcast_job_events (
+            job_id, event_type, from_status, to_status, event_payload, actor_type, actor_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        RETURNING id
+        """,
+        (
+            int(job_id),
+            str(event_type or ""),
+            from_status,
+            to_status,
+            _to_jsonb_text(event_payload or {}, default="{}"),
+            str(actor_type or ""),
+            str(actor_id or ""),
+        ),
+    ).fetchone()
+    get_db().commit()
+    return int(row["id"]) if row else 0
+
+
+def list_broadcast_job_events(job_id: int) -> list[dict[str, Any]]:
+    rows = get_db().execute(
+        """
+        SELECT id, job_id, event_type, from_status, to_status, event_payload, actor_type, actor_id, created_at
+        FROM broadcast_job_events
+        WHERE job_id = ?
+        ORDER BY id ASC
+        """,
+        (int(job_id),),
+    ).fetchall()
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        item["event_payload"] = _decode_jsonb(item.get("event_payload"), default={})
+        events.append(item)
+    return events

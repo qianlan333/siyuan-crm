@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw WeCom external contact full reconciliation daily
+
+[Timer]
+OnCalendar=*-*-* 03:20:00
+Persistent=true
+Unit=openclaw-external-contact-full-sync.service
+
+[Install]
+WantedBy=timers.target

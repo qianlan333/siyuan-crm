@@ -54,6 +54,16 @@ def _new_campaign_code() -> str:
     return f"camp-{uuid.uuid4().hex[:12]}"
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    try:
+        loaded = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
 def _find_active_member_conflicts(*, campaign_id: int, limit: int = 10) -> dict[str, Any]:
     db = get_db()
     cur = db.cursor()
@@ -131,6 +141,71 @@ def _ensure_campaign_editable(camp: dict[str, Any]) -> None:
     run_status = camp.get("run_status")
     if run_status not in _EDITABLE_RUN_STATUSES:
         raise PermissionError(f"campaign run_status={run_status} not editable")
+
+
+def _table_columns(table_name: str) -> set[str]:
+    db = get_db()
+    cur = db.cursor()
+    try:
+        cur.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = ?
+            """,
+            (table_name,),
+        )
+        columns = {str(row["column_name"]) for row in (cur.fetchall() or [])}
+        if columns:
+            return columns
+    except Exception:
+        try:
+            if hasattr(db, "rollback"):
+                db.rollback()
+        except Exception:
+            pass
+    return set()
+
+
+def _insert_campaign_member(
+    *,
+    cur: Any,
+    campaign_member_columns: set[str],
+    campaign_id: int,
+    campaign_segment_id: int,
+    segment_id: int,
+    member_id: int,
+    external_contact_id: str,
+    trace_id: str,
+) -> None:
+    columns = [
+        "campaign_id",
+        "campaign_segment_id",
+        "segment_id",
+        "member_id",
+        "external_contact_id",
+        "status",
+    ]
+    values: list[Any] = [
+        int(campaign_id),
+        int(campaign_segment_id),
+        int(segment_id),
+        int(member_id),
+        external_contact_id,
+        "pending",
+    ]
+    if "current_step_index" in campaign_member_columns:
+        columns.append("current_step_index")
+        values.append(-1)
+    if "trace_id" in campaign_member_columns:
+        columns.append("trace_id")
+        values.append(trace_id)
+    placeholders = ", ".join("?" for _ in values)
+    cur.execute(
+        f"INSERT INTO campaign_members ({', '.join(columns)}) VALUES ({placeholders})",
+        tuple(values),
+    )
 
 
 # ---------- 创建 / 编辑 -----------------------------------------------------
@@ -323,16 +398,15 @@ def allocate_campaign_members(
     collision = 0
     per_segment: dict[int, dict[str, int]] = {}
     seen_member_ids: set[int] = set()
+    allocation_errors: list[dict[str, Any]] = []
+    campaign_member_columns = _table_columns("campaign_members")
 
     for s in seg_rows:
         if str(s["status"] or "") != "active":
             continue
         seg_id = int(s["segment_id"])
         cs_id = int(s["campaign_segment_id"])
-        try:
-            params = json.loads(s["sql_params_json"] or "{}")
-        except (TypeError, ValueError):
-            params = {}
+        params = _json_object(s["sql_params_json"])
         try:
             member_rows = fetch_member_rows(sql=str(s["sql_query"] or ""), params=params)
         except Exception as exc:  # pragma: no cover - defensive
@@ -358,37 +432,46 @@ def allocate_campaign_members(
                 mr = cur.fetchone()
                 external = str(mr["external_contact_id"] or "") if mr else ""
             try:
-                cur.execute(
-                    """
-                    INSERT INTO campaign_members
-                        (campaign_id, campaign_segment_id, segment_id, member_id,
-                         external_contact_id, status, current_step_index,
-                         trace_id)
-                    VALUES (?, ?, ?, ?, ?, 'pending', -1, ?)
-                    """,
-                    (
-                        int(campaign_id),
-                        cs_id,
-                        seg_id,
-                        int(mid),
-                        external,
-                        trace_id,
-                    ),
+                sp_name = f"_campaign_member_alloc_{cs_id}_{int(mid)}"
+                cur.execute(f"SAVEPOINT {sp_name}")
+                _insert_campaign_member(
+                    cur=cur,
+                    campaign_member_columns=campaign_member_columns,
+                    campaign_id=int(campaign_id),
+                    campaign_segment_id=cs_id,
+                    segment_id=seg_id,
+                    member_id=int(mid),
+                    external_contact_id=external,
+                    trace_id=trace_id,
                 )
+                cur.execute(f"RELEASE SAVEPOINT {sp_name}")
                 seen_member_ids.add(mid)
                 allocated += 1
                 bucket["allocated"] += 1
             except Exception as exc:
-                # UNIQUE 约束兜底（极端并发情况下）
+                try:
+                    cur.execute(f"ROLLBACK TO SAVEPOINT {sp_name}")
+                    cur.execute(f"RELEASE SAVEPOINT {sp_name}")
+                except Exception:
+                    pass
                 logger.debug("allocate skip mid=%s reason=%s", mid, exc)
                 collision += 1
                 bucket["skipped"] += 1
+                if len(allocation_errors) < 10:
+                    allocation_errors.append(
+                        {
+                            "member_id": int(mid),
+                            "campaign_segment_id": cs_id,
+                            "reason": str(exc),
+                        }
+                    )
     db.commit()
     return {
         "campaign_id": campaign_id,
         "allocated": allocated,
         "skipped_collisions": collision,
         "per_segment": per_segment,
+        "errors": allocation_errors,
         "trace_id": trace_id,
     }
 
@@ -527,11 +610,40 @@ def start_campaign(
 def pause_campaign(*, campaign_id: int, reason: str = "") -> dict[str, Any]:
     db = get_db()
     cur = db.cursor()
+    now = _now_iso()
     cur.execute(
         "UPDATE campaigns SET run_status = 'paused', paused_at = ?, paused_reason = ?, updated_at = ? "
         "WHERE id = ? AND run_status = 'active'",
-        (_now_iso(), str(reason)[:200], _now_iso(), int(campaign_id)),
+        (now, str(reason)[:200], now, int(campaign_id)),
     )
+    if cur.rowcount:
+        # Campaign jobs are keyed as "{campaign_id}:{campaign_segment_id}:{step_index}"
+        # (and older jobs as "{campaign_id}:{step_index}").  Pausing must stop
+        # already scheduled queue entries too; otherwise the worker can still
+        # send from broadcast_jobs after the campaign is paused.
+        cur.execute(
+            """
+            UPDATE broadcast_jobs
+            SET status = 'cancelled',
+                cancelled_by = ?,
+                cancelled_at = CURRENT_TIMESTAMP,
+                cancel_reason = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE source_type = 'campaign'
+              AND source_id LIKE ?
+              AND status IN ('queued', 'waiting_approval')
+            """,
+            (
+                "campaign_pause",
+                (str(reason) or "campaign paused")[:1000],
+                f"{int(campaign_id)}:%",
+            ),
+        )
+        logger.info(
+            "campaign %s paused; cancelled %s open broadcast job(s)",
+            campaign_id,
+            int(cur.rowcount or 0),
+        )
     db.commit()
     return get_campaign(campaign_id=campaign_id) or {}
 
@@ -660,6 +772,8 @@ def list_campaigns(
     review_status: str = "",
     run_status: str = "",
     limit: int = 500,
+    offset: int = 0,
+    group_code: str = "",
 ) -> list[dict[str, Any]]:
     db = get_db()
     cur = db.cursor()
@@ -671,7 +785,10 @@ def list_campaigns(
     if run_status:
         where.append("run_status = ?")
         args.append(run_status)
-    args.append(int(limit))
+    if group_code:
+        where.append("CAST(c.metadata_json AS TEXT) LIKE ?")
+        args.append(f'%"{group_code}"%')
+    args.extend([max(1, min(int(limit or 500), 5000)), max(0, int(offset or 0))])
     cur.execute(
         f"""
         SELECT c.id, c.campaign_code, c.display_name, c.intent, c.anchor_mode, c.anchor_date,
@@ -681,7 +798,7 @@ def list_campaigns(
                (SELECT COUNT(*) FROM campaign_segments cs WHERE cs.campaign_id = c.id) AS segment_count,
                (SELECT COUNT(*) FROM campaign_members cm WHERE cm.campaign_id = c.id) AS member_count
         FROM campaigns c WHERE {' AND '.join(where)}
-        ORDER BY c.id DESC LIMIT ?
+        ORDER BY c.id DESC LIMIT ? OFFSET ?
         """,
         tuple(args),
     )
@@ -699,6 +816,8 @@ def list_campaigns(
                 meta = {}
         d["group_code"] = str(meta.get("group_code") or "")
         d["group_label"] = str(meta.get("group_label") or "")
+        if group_code and d["group_code"] != group_code:
+            continue
         rows.append(d)
     return rows
 

@@ -1,0 +1,164 @@
+from __future__ import annotations
+
+import pytest
+from fastapi.testclient import TestClient
+
+from aicrm_next.main import create_app
+from aicrm_next.questionnaire.h5_write import get_questionnaire_h5_write_audit_events
+from aicrm_next.questionnaire.oauth import COOKIE_NAME, build_questionnaire_h5_identity_cookie
+
+
+@pytest.fixture()
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
+    monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
+    return TestClient(create_app())
+
+
+def _assert_next_command(body: dict, command_name: str) -> None:
+    assert body["ok"] is True
+    assert body["command_name"] == command_name
+    assert body["source_status"] == "next_command"
+    assert body["route_owner"] == "ai_crm_next"
+    assert body["fallback_used"] is False
+    assert body["real_external_call_executed"] is False
+    assert body["audit_recorded"] is True
+    assert body["command_id"]
+
+
+def test_h5_submit_executes_next_commandbus_and_writes_submission_projection(client: TestClient) -> None:
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={
+            "answers": {"q_activation": "activated", "q_interest": ["ai_tools"]},
+            "identity": {
+                "external_userid": "wx_ext_001",
+                "openid": "openid_001",
+                "unionid": "unionid_001",
+                "mobile": "13800138000",
+            },
+            "source": {"scene": "unit"},
+        },
+        headers={"Idempotency-Key": "h5-submit-command"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_next_command(body, "questionnaire.h5.submit")
+    assert body["success"] is True
+    assert body["submission_id"]
+    assert body["questionnaire_id"] == 1
+    assert body["slug"] == "hxc-activation-v1"
+    assert body["write_model_status"] == "submitted"
+    assert body["result"]["score"] == 13
+    assert "tag_hxc_activated" in body["result"]["final_tags"]
+    assert "tag_interest_ai_tools" in body["result"]["final_tags"]
+    assert body["identity"]["anonymous"] is False
+    assert body["external_userid"] == "wx_ext_001"
+    assert body["mobile"] == "13800138000"
+
+    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{body['submission_id']}")
+    assert result.status_code == 200
+    assert result.json()["result"]["answers"]["q_activation"] == "activated"
+
+    audit_events = get_questionnaire_h5_write_audit_events()
+    assert body["command_id"] in {event["command_id"] for event in audit_events}
+
+
+def test_h5_submit_supports_anonymous_identity(client: TestClient) -> None:
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={"answers": {"q_activation": "not_activated"}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_next_command(body, "questionnaire.h5.submit")
+    assert body["identity"]["anonymous"] is True
+    assert body["binding_status"] == "unresolved"
+    assert body["result"]["score"] == 0
+
+
+def test_h5_submit_uses_oauth_cookie_identity_when_payload_has_no_identity(client: TestClient) -> None:
+    client.cookies.set(
+        COOKIE_NAME,
+        build_questionnaire_h5_identity_cookie(
+            {
+                "openid": "openid-cookie-001",
+                "unionid": "unionid-cookie-001",
+                "respondent_key": "unionid-cookie-001",
+                "external_userid": "wm_cookie_identity_001",
+            }
+        ),
+    )
+
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={"answers": {"q_activation": "not_activated"}},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_next_command(body, "questionnaire.h5.submit")
+    assert body["identity"]["anonymous"] is False
+    assert body["identity"]["openid"] == "openid-cookie-001"
+    assert body["identity"]["unionid"] == "unionid-cookie-001"
+    assert body["external_userid"] == "wm_cookie_identity_001"
+
+
+def test_h5_submit_rejects_repeated_identity(client: TestClient) -> None:
+    payload = {
+        "answers": {"q_activation": "activated"},
+        "identity": {
+            "external_userid": "wm_repeat_001",
+            "openid": "openid-repeat-001",
+            "unionid": "unionid-repeat-001",
+        },
+    }
+    first = client.post("/api/h5/questionnaires/hxc-activation-v1/submit", json=payload)
+    assert first.status_code == 200
+
+    second = client.post("/api/h5/questionnaires/hxc-activation-v1/submit", json=payload)
+    assert second.status_code == 409
+    body = second.json()
+    assert body["error"] == "already_submitted"
+    assert body["source_status"] == "already_submitted"
+    assert body["write_model_status"] == "already_submitted"
+
+
+def test_h5_submit_validates_required_answers(client: TestClient) -> None:
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={"answers": {"q_interest": ["ai_tools"]}},
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    assert body["source_status"] == "input_error"
+    assert body["fallback_used"] is False
+    assert body["real_external_call_executed"] is False
+
+
+def test_h5_submit_rejects_disabled_questionnaire(client: TestClient) -> None:
+    response = client.post(
+        "/api/h5/questionnaires/disabled-demo/submit",
+        json={"answers": {"q_disabled": "yes"}},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["source_status"] == "not_found"
+
+
+def test_h5_submit_and_diagnostics_options_are_next_owned(client: TestClient) -> None:
+    for path in [
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        "/api/h5/questionnaires/hxc-activation-v1/client-diagnostics",
+    ]:
+        response = client.options(path)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["source_status"] == "next_command"
+        assert body["route_owner"] == "ai_crm_next"
+        assert body["fallback_used"] is False
+        assert body["real_external_call_executed"] is False

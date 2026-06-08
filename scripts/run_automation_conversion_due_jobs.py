@@ -20,8 +20,14 @@ JOB_DEFINITIONS = {
         "label": "自动化转化任务流",
         "path": "/api/admin/automation-conversion/jobs/run-due",
         "payload": {"jobs": ["conversion_workflow"]},
-    }
+    },
+    "operation_task": {
+        "label": "自动化运营任务",
+        "path": "/api/admin/automation-conversion/jobs/run-due",
+        "payload": {"jobs": ["operation_task"]},
+    },
 }
+DEFAULT_JOB_CODES = ["sop", "conversion_workflow"]
 
 
 def _post_json(
@@ -58,7 +64,7 @@ def run(*, jobs: list[str] | None = None) -> str:
         DEFAULT_RETRY_INTERVAL_SECONDS,
     )
 
-    selected_jobs = jobs or list(JOB_DEFINITIONS.keys())
+    selected_jobs = jobs or list(DEFAULT_JOB_CODES)
     invalid_jobs = [job_code for job_code in selected_jobs if job_code not in JOB_DEFINITIONS]
     if invalid_jobs:
         raise ValueError(f"unsupported due jobs: {', '.join(sorted(dict.fromkeys(invalid_jobs)))}")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import secrets
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -80,11 +79,6 @@ def _customer_acquisition_final_url(link_url: str, customer_channel: str) -> str
     ]
     query_items.append(("customer_channel", normalized_channel))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query_items), parts.fragment))
-
-
-def _new_standalone_channel_code() -> str:
-    today = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%y%m%d")
-    return f"channel_{today}_{secrets.token_hex(2)}"
 
 
 def _serialize_channel(row: dict[str, Any]) -> dict[str, Any]:
@@ -244,7 +238,7 @@ def save_channel_resource(payload: dict[str, Any], *, channel_id: int | None = N
         raise LookupError("channel_not_found")
     channel_code = _normalized_text(payload.get("channel_code")) or _normalized_text((existing or {}).get("channel_code"))
     if not channel_code:
-        channel_code = f"channel_{int(channel_id)}" if channel_id else _new_standalone_channel_code()
+        channel_code = DEFAULT_CHANNEL_CODE if not channel_id else f"channel_{int(channel_id)}"
     channel_payload = {
         "program_id": payload.get("program_id", (existing or {}).get("program_id")),
         "channel_code": channel_code,

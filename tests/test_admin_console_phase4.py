@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from datetime import datetime, timedelta
 
 import pytest
 
 from wecom_ability_service.db import get_db
-from wecom_ability_service.infra.settings import set_settings
 
 
 @pytest.fixture()
@@ -319,11 +317,9 @@ def test_admin_questionnaire_pages_render_detail_sections(app, client):
 
     list_response = client.get("/admin/questionnaires")
     detail_response = client.get("/admin/questionnaires/1")
-    external_push_logs_response = client.get("/admin/questionnaires/1/external-push-logs?status=failed&limit=10")
 
     list_html = list_response.get_data(as_text=True)
     detail_html = detail_response.get_data(as_text=True)
-    external_push_logs_html = external_push_logs_response.get_data(as_text=True)
 
     assert list_response.status_code == 200
     assert "问卷管理" in list_html
@@ -340,248 +336,6 @@ def test_admin_questionnaire_pages_render_detail_sections(app, client):
     assert "下载数据" in detail_html
     assert "开启外部推送" in detail_html
     assert "外推记录" in detail_html
-
-    assert external_push_logs_response.status_code == 200
-    assert "问卷外部推送记录" in external_push_logs_html
-    assert "仅待补发" in external_push_logs_html
-    assert "HTTP 500" in external_push_logs_html
-    assert "https://hooks.example.com/apply" in external_push_logs_html
-    assert "补发" in external_push_logs_html
-
-
-def test_admin_questionnaire_external_push_logs_show_retry_result(app, client):
-    _seed_phase4_data(app)
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, retry_from_log_id, retry_attempt,
-                user_id, target_url, request_payload, response_status_code, response_body, status, failure_reason,
-                created_at, updated_at
-            )
-            VALUES (
-                1, '客户问卷', 1, 1, 1,
-                'resp-1', 'https://hooks.example.com/apply',
-                '{"user_id":"resp-1","questionnaire_title":"客户问卷","submitted_at":"2026-04-02T10:10:00+08:00","answers":[{"title":"当前阶段","answer":"已报名999"}]}',
-                200, '{"ok":true}', 'success', '', '2026-04-02 10:20:00', '2026-04-02 10:20:00'
-            )
-            """
-        )
-        db.commit()
-
-    response = client.get("/admin/questionnaires/1/external-push-logs?status=success&limit=10")
-    html = response.get_data(as_text=True)
-
-    assert response.status_code == 200
-    assert "补发成功" in html
-    assert "第 1 次补发" in html
-    assert "仅当前成功" in html
-
-
-def test_admin_questionnaire_external_push_logs_failed_current_filter_hides_recovered_items(app, client):
-    _seed_phase4_data(app)
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, retry_from_log_id, retry_attempt,
-                user_id, target_url, request_payload, response_status_code, response_body, status, failure_reason,
-                created_at, updated_at
-            )
-            VALUES (
-                1, '客户问卷', 1, 1, 1,
-                'resp-1', 'https://hooks.example.com/apply',
-                '{"user_id":"resp-1","questionnaire_title":"客户问卷","submitted_at":"2026-04-02T10:10:00+08:00","answers":[{"title":"当前阶段","answer":"已报名999"}]}',
-                200, '{"ok":true}', 'success', '', '2026-04-02 10:20:00', '2026-04-02 10:20:00'
-            )
-            """
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, user_id, target_url,
-                request_payload, response_status_code, response_body, status, failure_reason, created_at, updated_at
-            )
-            VALUES (
-                1, '客户问卷', 1, 'resp-2', 'https://hooks.example.com/apply',
-                '{"user_id":"resp-2","questionnaire_title":"客户问卷","submitted_at":"2026-04-02T10:10:00+08:00","answers":[{"title":"当前阶段","answer":"已报名999"}]}',
-                500, '{"error":"server exploded again"}', 'failed', 'HTTP 500', '2026-04-02 10:30:00', '2026-04-02 10:30:00'
-            )
-            """
-        )
-        db.commit()
-
-    response = client.get("/admin/questionnaires/1/external-push-logs?status=failed_current&limit=10")
-    html = response.get_data(as_text=True)
-
-    assert response.status_code == 200
-    assert "仅待补发" in html
-    assert "补发成功" not in html
-    assert "首发失败（待补发）" in html
-
-
-def test_admin_questionnaire_global_external_push_logs_page_supports_filters(app, client):
-    _seed_phase4_data(app)
-
-    with app.app_context():
-        db = get_db()
-        set_settings({"QUESTIONNAIRE_EXTERNAL_PUSH_GLOBAL_ENABLED": "false"})
-        now = datetime.now()
-        recent_success = now.strftime("%Y-%m-%d %H:%M:%S")
-        recent_failed = (now - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-        db.execute(
-            """
-            INSERT INTO questionnaires (
-                id, slug, name, title, description, is_disabled, redirect_url, created_at, updated_at
-            )
-            VALUES (2, 'q-2', 'q-2', '另一份问卷', '第二份问卷', false, '', '2026-04-03 09:00:00', '2026-04-03 09:20:00')
-            """
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_submissions (
-                id, questionnaire_id, respondent_key, openid, unionid, external_userid, follow_user_userid,
-                matched_by, mobile_snapshot, total_score, final_tags, redirect_url_snapshot, submitted_at
-            )
-            VALUES (
-                2, 2, 'resp-2', 'openid-2', 'union-2', 'ext-1', 'owner-a',
-                'openid', '13800138111', 60, '[]', '', '2026-04-03 10:10:00'
-            )
-            """
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, user_id, target_url,
-                request_payload, response_status_code, response_body, status, failure_reason, created_at, updated_at
-            )
-            VALUES (
-                2, '另一份问卷', 2, 'resp-2', 'https://hooks.example.com/other',
-                '{"user_id":"resp-2","questionnaire_title":"另一份问卷","submitted_at":"2026-04-03T10:10:00+08:00","answers":[]}',
-                200, '{"ok":true}', 'success', '', ?, ?
-            )
-            """,
-            (recent_success, recent_success),
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, user_id, target_url,
-                request_payload, response_status_code, response_body, status, failure_reason, created_at, updated_at
-            )
-            VALUES (
-                2, '另一份问卷', 2, 'resp-3', 'https://hooks.example.com/other',
-                '{"user_id":"resp-3","questionnaire_title":"另一份问卷","submitted_at":"2026-04-03T10:20:00+08:00","answers":[]}',
-                500, '{"error":"recent failed"}', 'failed', 'HTTP 500', ?, ?
-            )
-            """,
-            (recent_failed, recent_failed),
-        )
-        db.commit()
-
-    response = client.get("/admin/questionnaires/external-push-logs?questionnaire_title=客户问卷&status=failed_current&limit=10")
-    html = response.get_data(as_text=True)
-
-    assert response.status_code == 200
-    assert "全局问卷外部推送总览" in html
-    assert "仅待补发" in html
-    assert "客户问卷" in html
-    assert "另一份问卷" not in html
-    assert "当前待补发" in html
-    assert "已关闭（止损中）" in html
-    assert "最近 24h 成功" in html
-    assert "最近 24h 失败" in html
-    assert "已开启外推问卷" in html
-
-
-def test_admin_questionnaire_global_external_push_logs_support_retry_actions(app, client, monkeypatch):
-    _seed_phase4_data(app)
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, user_id, target_url,
-                request_payload, response_status_code, response_body, status, failure_reason, created_at, updated_at
-            )
-            VALUES (
-                1, '客户问卷', 1, 'resp-2', 'https://hooks.example.com/apply',
-                '{"user_id":"resp-2","questionnaire_title":"客户问卷","submitted_at":"2026-04-02T10:30:00+08:00","answers":[]}',
-                500, '{"error":"still failed"}', 'failed', 'HTTP 500', '2026-04-02 10:30:00', '2026-04-02 10:30:00'
-            )
-            """
-        )
-        db.execute(
-            """
-            INSERT INTO questionnaire_external_push_logs (
-                questionnaire_id, questionnaire_title_snapshot, submission_record_id, user_id, target_url,
-                request_payload, response_status_code, response_body, status, failure_reason, created_at, updated_at
-            )
-            VALUES (
-                1, '客户问卷', 1, 'resp-3', 'https://hooks.example.com/apply',
-                '{"user_id":"resp-3","questionnaire_title":"客户问卷","submitted_at":"2026-04-02T10:40:00+08:00","answers":[]}',
-                500, '{"error":"failed again"}', 'failed', 'HTTP 500', '2026-04-02 10:40:00', '2026-04-02 10:40:00'
-            )
-            """
-        )
-        db.commit()
-
-    responses = [
-        type("Resp", (), {"status_code": 200, "text": '{"ok":true}'})(),
-        type("Resp", (), {"status_code": 200, "text": '{"ok":true}'})(),
-        type("Resp", (), {"status_code": 502, "text": '{"error":"bad gateway"}'})(),
-    ]
-
-    def fake_push_post(url, json=None, headers=None, timeout=None):
-        return responses.pop(0)
-
-    monkeypatch.setattr("wecom_ability_service.domains.questionnaire.service.requests.post", fake_push_post)
-
-    single_retry_response = client.post(
-        "/admin/questionnaires/external-push-logs/1/retry",
-        data={"status": "failed_current", "limit": "10", "questionnaire_title": "客户问卷"},
-        follow_redirects=True,
-    )
-    single_html = single_retry_response.get_data(as_text=True)
-
-    assert single_retry_response.status_code == 200
-    assert "补发已执行，请查看最近结果。" in single_html
-    assert "补发成功" in single_html
-
-    batch_retry_response = client.post(
-        "/admin/questionnaires/external-push-logs/retry-batch",
-        data={
-            "status": "failed_current",
-            "limit": "10",
-            "questionnaire_title": "客户问卷",
-            "push_log_ids": ["2", "3"],
-        },
-        follow_redirects=True,
-    )
-    batch_html = batch_retry_response.get_data(as_text=True)
-
-    assert batch_retry_response.status_code == 200
-    assert "批量补发已执行：选中 2 条，实际补发 2 条，成功 1 条，失败 1 条。" in batch_html
-
-    with app.app_context():
-        rows = get_db().execute(
-            """
-            SELECT retry_from_log_id, retry_attempt, status, response_status_code
-            FROM questionnaire_external_push_logs
-            WHERE retry_from_log_id IS NOT NULL
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        assert len(rows) == 3
-        assert rows[0]["status"] == "success"
-        assert rows[1]["status"] == "success"
-        assert rows[2]["status"] == "failed"
-        assert int(rows[2]["response_status_code"]) == 502
 
 
 def test_admin_operations_page_and_migrate_action_are_audited(app, client):

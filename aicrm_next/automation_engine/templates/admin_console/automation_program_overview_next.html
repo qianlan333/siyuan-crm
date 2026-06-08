@@ -1,0 +1,65 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/automation-engine/admin_console/automation_conversion_workspace.css">
+<style>
+  .program-overview { display: grid; gap: 18px; }
+  .overview-panel { display: grid; gap: 14px; padding: 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 12px; background: #fff; }
+  .overview-panel h2, .overview-panel h3 { margin: 0; color: #111827; }
+  .overview-muted { margin: 0; color: #64748b; line-height: 1.7; }
+  .overview-section-grid { display: grid; gap: 14px; align-items: start; }
+  .overview-list-block { display: grid; gap: 10px; min-width: 0; }
+  .overview-list-block h3 { font-size: 17px; }
+  .overview-list { display: grid; gap: 8px; }
+  .overview-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; background: #f8fafc; }
+  .overview-row--total { border-color: #dfe7f3; background: #fff; }
+  .overview-row strong { color: #111827; font-size: 15px; }
+  .overview-row--total strong { color: #1d4ed8; }
+  .overview-row span { color: #64748b; font-size: 13px; font-weight: 800; }
+  .overview-row em { color: #111827; font-style: normal; font-size: 22px; font-weight: 900; }
+  .overview-empty { padding: 14px; border-radius: 10px; background: #f8fafc; color: #64748b; font-weight: 800; }
+  .overview-alert { padding: 12px 14px; border-radius: 10px; background: #fff7ed; color: #9a3412; font-weight: 800; }
+  .overview-action { display: inline-flex; align-items: center; justify-content: center; min-height: 42px; padding: 0 16px; border: 1px solid rgba(37,99,235,.18); border-radius: 10px; background: #eef4ff; color: #1456f0; font-weight: 800; text-decoration: none; }
+  .overview-row--total .overview-action { background: #2563eb; color: #fff; box-shadow: 0 10px 22px rgba(37,99,235,.18); }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set workspace = overview_workspace or {} %}
+{% set program = workspace.program or {} %}
+{% set summary = workspace.summary or {} %}
+{% set stage_segments = workspace.stage_segments or [] %}
+
+<section class="program-overview">
+  {% if workspace.page_error %}
+  <div class="overview-alert">{{ workspace.page_error }}</div>
+  {% endif %}
+
+  <section class="overview-panel">
+    <div>
+      <h3>方案人数统计</h3>
+      <p class="overview-muted">按当前方案和阶段展示人数，每一行可进入成员明细 list。</p>
+    </div>
+    <div class="overview-section-grid">
+      <article class="overview-list-block">
+        <div class="overview-list">
+          <div class="overview-row overview-row--total" data-stage-key="all">
+            <span><strong>当前方案总人数</strong><br>全部成员</span>
+            <em>{{ summary.member_count or 0 }}</em>
+            <a class="overview-action" href="{{ workspace.all_members_url or url_for('api.admin_automation_program_members', program_id=program.id, stage='all', page=1, page_size=20) }}">查看 list</a>
+          </div>
+          {% for item in stage_segments %}
+          <div class="overview-row" data-stage-key="{{ item.key }}">
+            <span><strong>{{ item.label }}</strong><br>当前阶段</span>
+            <em>{{ item.count }}</em>
+            <a class="overview-action" href="{{ item.list_url }}">查看 list</a>
+          </div>
+          {% else %}
+          <div class="overview-empty">当前方案还没有阶段记录。</div>
+          {% endfor %}
+        </div>
+      </article>
+    </div>
+  </section>
+</section>
+{% endblock %}

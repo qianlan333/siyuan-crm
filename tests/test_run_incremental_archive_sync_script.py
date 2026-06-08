@@ -35,7 +35,7 @@ def test_run_incremental_archive_sync_uses_internal_http_helper(monkeypatch, cap
     module = _load_script_module()
     captured: dict[str, object] = {}
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, *, timeout):
         captured["url"] = request.full_url
         captured["timeout"] = timeout
         captured["headers"] = {key.lower(): value for key, value in request.header_items()}

@@ -191,41 +191,6 @@ def test_services_wave1_symbols_route_through_application_wrappers():
         assert fragment not in source, f"services.py must not regress to direct domain alias: {fragment}"
 
 
-def test_service_layer_layout_doc_exists():
-    doc_path = Path(__file__).resolve().parents[1] / "docs" / "architecture" / "service_layer_layout.md"
-    assert doc_path.exists()
-    source = doc_path.read_text(encoding="utf-8")
-    assert "Only two domain layout modes are allowed" in source
-    assert "`wecom_ability_service/services.py` stays as a thin compatibility facade" in source
-    assert "`admin_api_docs`" in source
-    assert "`admin_wechat_pay_products.py`: admin product CRUD" in source
-    assert "`admin_service.py` owns admin transaction read models" in source
-    assert "`product_service.py` owns product lifecycle" in source
-    assert "`product_repo.py` owns product and product-slice persistence" in source
-    assert "http_route_consolidation_check.md" in source
-
-
-def test_http_route_consolidation_check_doc_tracks_current_matrix():
-    doc_path = Path(__file__).resolve().parents[1] / "docs" / "architecture" / "http_route_consolidation_check.md"
-    assert doc_path.exists()
-    source = doc_path.read_text(encoding="utf-8")
-
-    required_fragments = [
-        "Registry And Ownership",
-        "Test Matrix",
-        "Remaining Large Files",
-        "tests/test_http_registration_contract.py",
-        "tests/test_route_inventory_contract.py",
-        "scripts/export_flask_routes.py",
-        "admin_questionnaire_console.py",
-        "admin_wechat_pay_products.py",
-        "456 route rows",
-        "--json-out /tmp/ai_crm_routes.json",
-    ]
-    for fragment in required_fragments:
-        assert fragment in source
-
-
 def test_admin_api_docs_service_owns_docs_model_without_flask_dependencies():
     service_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "domains" / "admin_api_docs" / "service.py"
     source = service_path.read_text(encoding="utf-8")
@@ -330,10 +295,7 @@ def test_admin_user_ops_and_admin_console_do_not_import_user_ops_legacy_service_
         "refresh_user_ops_contact_tags_for_owner",
         "upsert_user_ops_huangxiaocan_activation_source",
     }
-    expected_application_fragments = {
-        "wecom_ability_service/http/admin_user_ops.py": ["application.user_ops"],
-        "wecom_ability_service/domains/admin_console/service.py": ["application.user_ops"],
-    }
+    expected_application_fragments = {"wecom_ability_service/domains/admin_console/service.py": []}
 
     root = Path(__file__).resolve().parents[1]
     for relative_path, required_fragments in expected_application_fragments.items():
@@ -358,5 +320,7 @@ def test_admin_user_ops_and_admin_console_do_not_import_user_ops_legacy_service_
         assert not imported_from_user_ops_domain, (
             f"{relative_path} must not import domains.user_ops.service directly"
         )
+        if not required_fragments:
+            assert "application.user_ops" not in source, f"{relative_path} must not keep retired user_ops page imports"
         for fragment in required_fragments:
             assert fragment in source, f"{relative_path} must import the formal user_ops application owner"

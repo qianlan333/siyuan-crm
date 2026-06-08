@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from flask import jsonify, request, url_for
+from werkzeug.routing import BuildError
 
 from ..domains.admin_console.customer_profile_service import (
     build_customer_detail_payload,
@@ -27,6 +28,13 @@ def _lookup_params(source) -> dict[str, str]:
         "mobile": str(getter("mobile") or "").strip(),
         "user_id": str(getter("user_id") or "").strip(),
     }
+
+
+def _customer_list_href() -> str:
+    try:
+        return url_for("api.admin_console_customers")
+    except BuildError:
+        return "/admin/customers"
 
 
 def admin_console_customers():
@@ -58,10 +66,10 @@ def _render_customer_detail_page(
             page_summary="当前客户编号没有查到对应客户。",
             breadcrumbs=_breadcrumb_items(
                 ("客户管理后台", url_for("api.admin_console_home")),
-                ("客户", url_for("api.admin_console_customers")),
+                ("客户", _customer_list_href()),
                 (external_userid, None),
             ),
-            actions=[{"label": "返回客户列表", "href": url_for("api.admin_console_customers"), "variant": "secondary"}],
+            actions=[{"label": "返回客户列表", "href": _customer_list_href(), "variant": "secondary"}],
             state_title="客户不存在",
             state_body="请确认客户编号是否正确，或稍后重试。",
             state_items=["检查客户编号是否输入正确", "确认当前环境已经同步到该客户数据"],
@@ -75,7 +83,7 @@ def _render_customer_detail_page(
         page_summary="查看客户基础资料、实时标签、问卷问答和聊天记录。",
         breadcrumbs=_breadcrumb_items(
             ("客户管理后台", url_for("api.admin_console_home")),
-            ("客户", url_for("api.admin_console_customers")),
+            ("客户", _customer_list_href()),
             (payload["customer"].get("customer_name") or external_userid, None),
         ),
         customer_payload=payload,
@@ -231,8 +239,9 @@ def admin_customer_profile_messages_api():
 
 
 def register_routes(bp):
-    bp.route("/admin/customers", methods=["GET"])(admin_console_customers)
-    bp.route("/admin/customers/<external_userid>", methods=["GET"])(admin_console_customer_detail)
+    # D3 legacy retirement: AI-CRM Next owns customer readonly admin pages.
+    # Keep legacy customer profile APIs and write fallbacks importable, but do not
+    # register the retired readonly page owner here.
     bp.route("/admin/customers/<external_userid>/tags", methods=["POST"])(admin_console_customer_tag_action)
     bp.route("/admin/customers/<external_userid>/tasks", methods=["POST"])(admin_console_customer_task_action)
     bp.route("/api/admin/customers/profile", methods=["GET"])(admin_customer_profile_api)

@@ -46,6 +46,8 @@ def test_questionnaire_identity_resolution_prefers_unionid_then_openid_then_exte
 
 
 def test_apply_questionnaire_mobile_binding_routes_through_application_command(monkeypatch):
+    app = Flask(__name__)
+    app.config["WECOM_CORP_ID"] = "ww-test"
     calls: dict[str, object] = {}
 
     class FakeBindExternalContactIdentityCommand:
@@ -58,6 +60,10 @@ def test_apply_questionnaire_mobile_binding_routes_through_application_command(m
             calls["resolve_dto"] = dto
             return {"person_id": 101, "is_bound": True}
 
+    def fake_backfill_questionnaire_submissions_for_mobile_binding(**kwargs):
+        calls["backfill"] = kwargs
+        return {"updated_count": 0, "skipped": True}
+
     monkeypatch.setattr(
         questionnaire_helpers,
         "BindExternalContactIdentityCommand",
@@ -68,15 +74,21 @@ def test_apply_questionnaire_mobile_binding_routes_through_application_command(m
         "ResolvePersonIdentityQuery",
         FakeResolvePersonIdentityQuery,
     )
-
-    payload = questionnaire_service.apply_questionnaire_mobile_binding(
-        {
-            "id": 88,
-            "mobile_snapshot": "13800138000",
-            "external_userid": "wm_ext_questionnaire_001",
-            "follow_user_userid": "sales_01",
-        }
+    monkeypatch.setattr(
+        questionnaire_service,
+        "backfill_questionnaire_submissions_for_mobile_binding",
+        fake_backfill_questionnaire_submissions_for_mobile_binding,
     )
+
+    with app.app_context():
+        payload = questionnaire_service.apply_questionnaire_mobile_binding(
+            {
+                "id": 88,
+                "mobile_snapshot": "13800138000",
+                "external_userid": "wm_ext_questionnaire_001",
+                "follow_user_userid": "sales_01",
+            }
+        )
 
     bind_dto = calls["bind_dto"]
     resolve_dto = calls["resolve_dto"]
@@ -86,6 +98,11 @@ def test_apply_questionnaire_mobile_binding_routes_through_application_command(m
     assert bind_dto.mobile == "13800138000"
     assert bind_dto.force_rebind is True
     assert resolve_dto.external_userid == "wm_ext_questionnaire_001"
+    assert calls["backfill"] == {
+        "external_userid": "wm_ext_questionnaire_001",
+        "mobile": "13800138000",
+        "follow_user_userid": "sales_01",
+    }
     assert payload["bound"] is True
     assert payload["binding"]["person_id"] == 101
 

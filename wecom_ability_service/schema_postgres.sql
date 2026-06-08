@@ -81,6 +81,24 @@ CREATE TABLE IF NOT EXISTS group_chats (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS wecom_group_chat_snapshots (
+    chat_id TEXT PRIMARY KEY,
+    group_name TEXT NOT NULL DEFAULT '',
+    owner_userid TEXT NOT NULL DEFAULT '',
+    owner_name TEXT NOT NULL DEFAULT '',
+    admin_userids TEXT NOT NULL DEFAULT '[]',
+    internal_member_count INTEGER NOT NULL DEFAULT 0,
+    external_member_count INTEGER NOT NULL DEFAULT 0,
+    synced_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status TEXT NOT NULL DEFAULT 'active'
+);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_group_chat_snapshots_owner
+ON wecom_group_chat_snapshots (owner_userid, status, synced_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_group_chat_snapshots_name
+ON wecom_group_chat_snapshots (group_name);
+
 CREATE INDEX IF NOT EXISTS idx_group_chats_owner_userid
 ON group_chats (owner_userid);
 
@@ -149,6 +167,40 @@ ON outbound_webhook_deliveries (status, created_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_outbound_webhook_deliveries_next_retry
 ON outbound_webhook_deliveries (next_retry_at, status);
 
+CREATE TABLE IF NOT EXISTS broadcast_queue_notification_settings (
+    id BIGSERIAL PRIMARY KEY,
+    channel TEXT NOT NULL DEFAULT 'feishu',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    webhook_url TEXT NOT NULL,
+    validation_status TEXT NOT NULL DEFAULT 'unverified'
+        CHECK (validation_status IN ('unverified', 'valid', 'invalid')),
+    validated_at TIMESTAMPTZ,
+    last_validation_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_broadcast_queue_notification_settings_channel
+ON broadcast_queue_notification_settings(channel);
+
+CREATE TABLE IF NOT EXISTS broadcast_job_hourly_reports (
+    id BIGSERIAL PRIMARY KEY,
+    report_key TEXT NOT NULL UNIQUE,
+    window_start TIMESTAMPTZ NOT NULL,
+    window_end TIMESTAMPTZ NOT NULL,
+    channel TEXT NOT NULL DEFAULT 'feishu',
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'sent', 'failed')),
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_message TEXT,
+    sent_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_broadcast_job_hourly_reports_window
+ON broadcast_job_hourly_reports (channel, window_start DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS contact_tags (
     id BIGSERIAL PRIMARY KEY,
     external_userid TEXT NOT NULL,
@@ -161,6 +213,37 @@ CREATE TABLE IF NOT EXISTS contact_tags (
 
 CREATE INDEX IF NOT EXISTS idx_contact_tags_external_userid
 ON contact_tags (external_userid);
+
+CREATE TABLE IF NOT EXISTS wecom_corp_tag_groups (
+    group_id TEXT PRIMARY KEY,
+    group_name TEXT NOT NULL DEFAULT '',
+    group_key TEXT NOT NULL DEFAULT '',
+    tag_count INTEGER NOT NULL DEFAULT 0,
+    raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    synced_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_corp_tag_groups_name
+ON wecom_corp_tag_groups (group_name);
+
+CREATE TABLE IF NOT EXISTS wecom_corp_tags (
+    tag_id TEXT PRIMARY KEY,
+    tag_name TEXT NOT NULL DEFAULT '',
+    group_id TEXT NOT NULL DEFAULT '',
+    group_name TEXT NOT NULL DEFAULT '',
+    order_index INTEGER NOT NULL DEFAULT 0,
+    deleted_at TIMESTAMPTZ,
+    raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    synced_at TIMESTAMPTZ,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_corp_tags_group
+ON wecom_corp_tags (group_id, deleted_at, order_index, tag_name);
+
+CREATE INDEX IF NOT EXISTS idx_wecom_corp_tags_deleted
+ON wecom_corp_tags (deleted_at, synced_at DESC);
 
 CREATE TABLE IF NOT EXISTS owner_role_map (
     userid TEXT PRIMARY KEY,
@@ -1037,6 +1120,124 @@ CREATE TABLE IF NOT EXISTS wecom_external_contact_event_logs (
 CREATE INDEX IF NOT EXISTS idx_external_contact_event_logs_status
 ON wecom_external_contact_event_logs (process_status, updated_at);
 
+CREATE TABLE IF NOT EXISTS radar_links (
+    id BIGSERIAL PRIMARY KEY,
+    code VARCHAR(64) NOT NULL UNIQUE,
+    title TEXT NOT NULL,
+    target_type TEXT NOT NULL DEFAULT 'link' CHECK (target_type IN ('link', 'image', 'pdf')),
+    original_url TEXT NOT NULL,
+    media_item_id TEXT NOT NULL DEFAULT '',
+    preview_mode TEXT NOT NULL DEFAULT '',
+    file_name_snapshot TEXT NOT NULL DEFAULT '',
+    mime_type_snapshot TEXT NOT NULL DEFAULT '',
+    file_size_snapshot BIGINT NOT NULL DEFAULT 0,
+    pdf_processing_status TEXT NOT NULL DEFAULT '',
+    pdf_page_count INTEGER NOT NULL DEFAULT 0,
+    pdf_preview_error_code TEXT NOT NULL DEFAULT '',
+    pdf_preview_error_message TEXT NOT NULL DEFAULT '',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    auth_required BOOLEAN NOT NULL DEFAULT TRUE,
+    source_channel TEXT NOT NULL DEFAULT '',
+    campaign_id TEXT NOT NULL DEFAULT '',
+    staff_id TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMPTZ
+);
+
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS target_type TEXT NOT NULL DEFAULT 'link';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS media_item_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS preview_mode TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS file_name_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS mime_type_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS file_size_snapshot BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS pdf_processing_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS pdf_page_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS pdf_preview_error_code TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS pdf_preview_error_message TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS created_by TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_links ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+UPDATE radar_links SET target_type = 'link' WHERE target_type IS NULL OR target_type = '';
+
+CREATE INDEX IF NOT EXISTS idx_radar_links_enabled
+ON radar_links (enabled, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_radar_links_target_type
+ON radar_links (target_type, enabled, id DESC);
+
+CREATE TABLE IF NOT EXISTS radar_click_events (
+    id BIGSERIAL PRIMARY KEY,
+    link_id BIGINT NOT NULL REFERENCES radar_links(id) ON DELETE CASCADE,
+    code VARCHAR(64) NOT NULL DEFAULT '',
+    target_type_snapshot TEXT NOT NULL DEFAULT '',
+    stage VARCHAR(64) NOT NULL,
+    openid TEXT NOT NULL DEFAULT '',
+    unionid TEXT NOT NULL DEFAULT '',
+    external_userid TEXT NOT NULL DEFAULT '',
+    person_id TEXT NOT NULL DEFAULT '',
+    ip_hash TEXT NOT NULL DEFAULT '',
+    source_channel TEXT NOT NULL DEFAULT '',
+    campaign_id TEXT NOT NULL DEFAULT '',
+    staff_id TEXT NOT NULL DEFAULT '',
+    source_channel_snapshot TEXT NOT NULL DEFAULT '',
+    campaign_id_snapshot TEXT NOT NULL DEFAULT '',
+    staff_id_snapshot TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    referer TEXT NOT NULL DEFAULT '',
+    query_params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_code TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS target_type_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS person_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS ip_hash TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS source_channel_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS campaign_id_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS staff_id_snapshot TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS referer TEXT NOT NULL DEFAULT '';
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS query_params_json JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE radar_click_events ADD COLUMN IF NOT EXISTS error_code TEXT NOT NULL DEFAULT '';
+
+CREATE INDEX IF NOT EXISTS idx_radar_click_events_link_created
+ON radar_click_events (link_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_radar_click_events_stage
+ON radar_click_events (link_id, stage, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_radar_click_events_identity
+ON radar_click_events (link_id, unionid, openid, external_userid);
+
+CREATE TABLE IF NOT EXISTS radar_pdf_preview_assets (
+    id BIGSERIAL PRIMARY KEY,
+    media_item_id TEXT NOT NULL,
+    radar_link_id BIGINT REFERENCES radar_links(id) ON DELETE CASCADE,
+    link_id BIGINT NOT NULL REFERENCES radar_links(id) ON DELETE CASCADE,
+    source_file_hash TEXT NOT NULL DEFAULT '',
+    page_no INTEGER NOT NULL,
+    page_count INTEGER NOT NULL DEFAULT 0,
+    preview_mime_type TEXT NOT NULL DEFAULT 'image/jpeg',
+    preview_storage_key TEXT NOT NULL DEFAULT '',
+    preview_data_base64 TEXT NOT NULL DEFAULT '',
+    preview_public_url TEXT NOT NULL DEFAULT '',
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    file_size BIGINT NOT NULL DEFAULT 0,
+    render_dpi INTEGER NOT NULL DEFAULT 144,
+    render_quality INTEGER NOT NULL DEFAULT 82,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'ready', 'failed')),
+    error_code TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (link_id, media_item_id, page_no)
+);
+
+CREATE INDEX IF NOT EXISTS idx_radar_pdf_preview_assets_link
+ON radar_pdf_preview_assets (link_id, media_item_id, page_no);
+
 CREATE TABLE IF NOT EXISTS questionnaires (
     id BIGSERIAL PRIMARY KEY,
     slug VARCHAR(128) NOT NULL UNIQUE,
@@ -1050,6 +1251,8 @@ CREATE TABLE IF NOT EXISTS questionnaires (
     assessment_config JSONB NOT NULL DEFAULT '{}'::jsonb,
     external_push_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     external_push_url TEXT NOT NULL DEFAULT '',
+    external_push_type TEXT NOT NULL DEFAULT '',
+    external_push_expires_at_ts BIGINT,
     external_push_day INTEGER,
     external_push_frequency INTEGER,
     external_push_remark TEXT NOT NULL DEFAULT '',
@@ -1091,13 +1294,29 @@ CREATE TABLE IF NOT EXISTS questionnaire_options (
     score DOUBLE PRECISION NOT NULL DEFAULT 0,
     assessment_type_key TEXT NOT NULL DEFAULT '',
     tag_codes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    is_other BOOLEAN NOT NULL DEFAULT FALSE,
+    other_placeholder TEXT NOT NULL DEFAULT '',
+    other_max_length INTEGER NOT NULL DEFAULT 80,
     sort_order INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+ALTER TABLE questionnaire_options
+ADD COLUMN IF NOT EXISTS is_other BOOLEAN NOT NULL DEFAULT FALSE;
+
+ALTER TABLE questionnaire_options
+ADD COLUMN IF NOT EXISTS other_placeholder TEXT NOT NULL DEFAULT '';
+
+ALTER TABLE questionnaire_options
+ADD COLUMN IF NOT EXISTS other_max_length INTEGER NOT NULL DEFAULT 80;
+
 CREATE INDEX IF NOT EXISTS idx_questionnaire_options_question
 ON questionnaire_options (question_id, sort_order, id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_questionnaire_options_one_other_per_question
+ON questionnaire_options(question_id)
+WHERE is_other = TRUE;
 
 CREATE TABLE IF NOT EXISTS questionnaire_score_rules (
     id BIGSERIAL PRIMARY KEY,
@@ -1259,6 +1478,86 @@ ON automation_channel (program_id, updated_at DESC, id DESC);
 
 CREATE INDEX IF NOT EXISTS idx_automation_channel_scene
 ON automation_channel (scene_value);
+
+CREATE TABLE IF NOT EXISTS automation_channel_scene_alias (
+    id BIGSERIAL PRIMARY KEY,
+    corp_id TEXT NOT NULL DEFAULT '',
+    channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+    scene_value TEXT NOT NULL,
+    config_id TEXT NOT NULL DEFAULT '',
+    qr_url TEXT NOT NULL DEFAULT '',
+    carrier_type TEXT NOT NULL DEFAULT 'qrcode',
+    provider_name TEXT NOT NULL DEFAULT 'wecom_contact_way',
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'retired', 'revoked')),
+    source TEXT NOT NULL DEFAULT '',
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    last_seen_at TIMESTAMPTZ,
+    retired_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_channel_scene_alias_corp_scene UNIQUE (corp_id, scene_value)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_scene_alias_channel_status
+ON automation_channel_scene_alias (channel_id, status);
+
+CREATE TABLE IF NOT EXISTS automation_channel_qrcode_asset (
+    id BIGSERIAL PRIMARY KEY,
+    corp_id TEXT NOT NULL DEFAULT '',
+    channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+    scene_value TEXT NOT NULL,
+    config_id TEXT NOT NULL DEFAULT '',
+    qr_url TEXT NOT NULL DEFAULT '',
+    qr_url_hash TEXT NOT NULL DEFAULT '',
+    provider_name TEXT NOT NULL DEFAULT 'wecom_contact_way',
+    provider_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'retired', 'revoked', 'stale', 'quarantined')),
+    generation_source TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    retired_at TIMESTAMPTZ,
+    last_callback_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_channel_qrcode_asset_corp_scene UNIQUE (corp_id, scene_value)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_channel_qrcode_asset_corp_config
+ON automation_channel_qrcode_asset (corp_id, config_id)
+WHERE config_id <> '';
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_qrcode_asset_channel_status
+ON automation_channel_qrcode_asset (channel_id, status);
+
+CREATE TABLE IF NOT EXISTS automation_channel_entry_effect_log (
+    id BIGSERIAL PRIMARY KEY,
+    event_log_id BIGINT,
+    channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+    scene_value TEXT NOT NULL DEFAULT '',
+    external_contact_id TEXT NOT NULL DEFAULT '',
+    owner_staff_id TEXT NOT NULL DEFAULT '',
+    effect_type TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('skipped', 'attempted', 'success', 'failed')),
+    reason TEXT NOT NULL DEFAULT '',
+    request_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_channel_entry_effect_idempotency UNIQUE (effect_type, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_entry_effect_channel
+ON automation_channel_entry_effect_log (channel_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_entry_effect_scene
+ON automation_channel_entry_effect_log (scene_value, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_channel_entry_effect_external
+ON automation_channel_entry_effect_log (external_contact_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS wecom_customer_acquisition_links (
     id BIGSERIAL PRIMARY KEY,
@@ -1625,6 +1924,67 @@ ON automation_agent_config (updated_at DESC, id DESC);
 CREATE INDEX IF NOT EXISTS idx_automation_agent_config_scenario
 ON automation_agent_config (scenario_code, enabled, updated_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS automation_agents (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL DEFAULT 0,
+    workflow_id BIGINT NOT NULL DEFAULT 0,
+    node_id BIGINT NOT NULL DEFAULT 0,
+    task_id BIGINT NOT NULL DEFAULT 0,
+    agent_code TEXT NOT NULL,
+    agent_name TEXT NOT NULL DEFAULT '',
+    agent_type TEXT NOT NULL DEFAULT 'assistant',
+    status TEXT NOT NULL DEFAULT 'active',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    archived_at TEXT NOT NULL DEFAULT '',
+    CONSTRAINT uq_automation_agents_workflow_code UNIQUE (workflow_id, agent_code)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_agents_program
+ON automation_agents (program_id, enabled, sort_order ASC, id ASC);
+
+CREATE INDEX IF NOT EXISTS idx_automation_agents_workflow
+ON automation_agents (workflow_id, node_id, task_id, sort_order ASC, id ASC);
+
+CREATE TABLE IF NOT EXISTS automation_agent_idempotency (
+    id BIGSERIAL PRIMARY KEY,
+    route_family TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    response_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resource_type TEXT NOT NULL DEFAULT 'agent',
+    resource_id BIGINT,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_agent_idempotency_scope
+        UNIQUE (route_family, operation, operator, idempotency_key)
+);
+
+CREATE TABLE IF NOT EXISTS automation_agent_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    route_family TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    resource_type TEXT NOT NULL DEFAULT 'agent',
+    resource_id BIGINT,
+    before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    validation_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+    rollback_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    side_effect_safety JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS automation_agent_skill_registry (
     id BIGSERIAL PRIMARY KEY,
     skill_code TEXT NOT NULL UNIQUE,
@@ -1829,6 +2189,54 @@ ON automation_profile_segment_option_mapping (category_id, question_id, option_i
 
 CREATE INDEX IF NOT EXISTS idx_automation_profile_segment_option_mapping_template
 ON automation_profile_segment_option_mapping (template_id, question_id, option_id, id DESC);
+
+CREATE TABLE IF NOT EXISTS automation_profile_segment_template_idempotency (
+    id BIGSERIAL PRIMARY KEY,
+    route_family TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    response_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resource_type TEXT NOT NULL DEFAULT 'profile_segment_template',
+    resource_id BIGINT,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_profile_segment_template_idempotency_scope
+        UNIQUE (route_family, operation, operator, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_segment_template_idempotency_resource
+ON automation_profile_segment_template_idempotency (resource_type, resource_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_profile_segment_template_idempotency_status
+ON automation_profile_segment_template_idempotency (status, updated_at);
+
+CREATE TABLE IF NOT EXISTS automation_profile_segment_template_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    route_family TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    resource_type TEXT NOT NULL DEFAULT 'profile_segment_template',
+    resource_id BIGINT,
+    before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    validation_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+    rollback_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    side_effect_safety JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_profile_segment_template_audit_resource
+ON automation_profile_segment_template_audit_log (resource_type, resource_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_profile_segment_template_audit_operator
+ON automation_profile_segment_template_audit_log (operator, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_profile_segment_template_audit_operation
+ON automation_profile_segment_template_audit_log (operation, created_at);
 
 CREATE TABLE IF NOT EXISTS automation_program (
     id BIGSERIAL PRIMARY KEY,
@@ -2075,6 +2483,54 @@ ON automation_operation_templates (template_source, status, updated_at DESC, id 
 CREATE INDEX IF NOT EXISTS idx_automation_operation_templates_category
 ON automation_operation_templates (category, status, updated_at DESC, id DESC);
 
+CREATE TABLE IF NOT EXISTS automation_operation_template_idempotency (
+    id BIGSERIAL PRIMARY KEY,
+    route_family TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    request_hash TEXT NOT NULL,
+    response_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    resource_type TEXT NOT NULL DEFAULT 'action_template',
+    resource_id BIGINT,
+    status TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_action_template_idempotency_key
+        UNIQUE (route_family, operation, operator, idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_template_idempotency_resource
+ON automation_operation_template_idempotency (resource_type, resource_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_action_template_idempotency_status
+ON automation_operation_template_idempotency (status, updated_at);
+
+CREATE TABLE IF NOT EXISTS automation_operation_template_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    route_family TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    operator TEXT NOT NULL,
+    resource_type TEXT NOT NULL DEFAULT 'action_template',
+    resource_id BIGINT,
+    before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    validation_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+    rollback_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    side_effect_safety JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_action_template_audit_resource
+ON automation_operation_template_audit_log (resource_type, resource_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_action_template_audit_operator
+ON automation_operation_template_audit_log (operator, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_action_template_audit_operation
+ON automation_operation_template_audit_log (operation, created_at);
+
 CREATE TABLE IF NOT EXISTS automation_workflow_audience (
     id BIGSERIAL PRIMARY KEY,
     workflow_id BIGINT NOT NULL REFERENCES automation_workflow(id) ON DELETE CASCADE,
@@ -2287,6 +2743,7 @@ CREATE TABLE IF NOT EXISTS automation_operation_task (
     timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
     target_audience_code TEXT NOT NULL DEFAULT 'operating'
         CHECK (target_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+    target_stage_code TEXT NOT NULL DEFAULT '',
     audience_day_offset INTEGER NOT NULL DEFAULT 1,
     behavior_filter TEXT NOT NULL DEFAULT 'none'
         CHECK (behavior_filter IN ('none', 'lt_2', 'between_2_9', 'gte_10')),
@@ -2699,6 +3156,65 @@ ON cloud_broadcast_plans (trace_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_cloud_broadcast_plans_session
 ON cloud_broadcast_plans (session_id, created_at DESC, id DESC);
 
+ALTER TABLE IF EXISTS cloud_broadcast_plans
+ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS owner_userid TEXT NOT NULL DEFAULT '',
+ADD COLUMN IF NOT EXISTS review_status TEXT NOT NULL DEFAULT 'pending_review',
+ADD COLUMN IF NOT EXISTS run_status TEXT NOT NULL DEFAULT 'draft';
+
+CREATE TABLE IF NOT EXISTS cloud_broadcast_plan_recipients (
+    id BIGSERIAL PRIMARY KEY,
+    plan_id TEXT NOT NULL REFERENCES cloud_broadcast_plans(plan_id) ON DELETE CASCADE,
+    external_userid TEXT NOT NULL,
+    owner_userid TEXT NOT NULL DEFAULT '',
+    display_name TEXT NOT NULL DEFAULT '',
+    planned_message_count INTEGER NOT NULL DEFAULT 0,
+    approval_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (approval_status IN ('pending', 'approved', 'rejected')),
+    send_status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (send_status IN ('pending', 'queued', 'sending', 'sent', 'failed', 'cancelled')),
+    approved_by TEXT NOT NULL DEFAULT '',
+    approved_at TIMESTAMPTZ,
+    rejected_by TEXT NOT NULL DEFAULT '',
+    rejected_at TIMESTAMPTZ,
+    reject_reason TEXT NOT NULL DEFAULT '',
+    broadcast_job_id BIGINT,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_cloud_broadcast_plan_recipients_plan_external
+ON cloud_broadcast_plan_recipients (plan_id, external_userid);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_broadcast_plan_recipients_plan_status
+ON cloud_broadcast_plan_recipients (plan_id, approval_status, send_status, id);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_broadcast_plan_recipients_external
+ON cloud_broadcast_plan_recipients (external_userid);
+
+CREATE TABLE IF NOT EXISTS cloud_broadcast_plan_recipient_messages (
+    id BIGSERIAL PRIMARY KEY,
+    plan_id TEXT NOT NULL REFERENCES cloud_broadcast_plans(plan_id) ON DELETE CASCADE,
+    recipient_id BIGINT NOT NULL REFERENCES cloud_broadcast_plan_recipients(id) ON DELETE CASCADE,
+    external_userid TEXT NOT NULL,
+    sequence_index INTEGER NOT NULL DEFAULT 1,
+    day_offset INTEGER NOT NULL DEFAULT 0,
+    send_time TEXT NOT NULL DEFAULT '',
+    content_text TEXT NOT NULL DEFAULT '',
+    content_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    attachments_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'queued', 'sent', 'failed', 'skipped')),
+    sent_at TIMESTAMPTZ,
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_cloud_broadcast_plan_recipient_messages_recipient
+ON cloud_broadcast_plan_recipient_messages (recipient_id, sequence_index);
+
 CREATE TABLE IF NOT EXISTS cloud_agent_audit_log (
     id BIGSERIAL PRIMARY KEY,
     session_id TEXT NOT NULL DEFAULT '',
@@ -2988,6 +3504,27 @@ ON image_library (category) WHERE category <> '';
 CREATE INDEX IF NOT EXISTS idx_image_library_tags_gin
 ON image_library USING GIN (tags);
 
+CREATE TABLE IF NOT EXISTS image_library_variants (
+    id BIGSERIAL PRIMARY KEY,
+    image_id BIGINT NOT NULL REFERENCES image_library(id) ON DELETE CASCADE,
+    variant_key TEXT NOT NULL,
+    storage_backend TEXT NOT NULL DEFAULT 'db_base64',
+    storage_key TEXT NOT NULL DEFAULT '',
+    public_url TEXT NOT NULL DEFAULT '',
+    mime_type TEXT NOT NULL DEFAULT 'image/png',
+    width INTEGER NOT NULL DEFAULT 0,
+    height INTEGER NOT NULL DEFAULT 0,
+    file_size INTEGER NOT NULL DEFAULT 0,
+    checksum TEXT NOT NULL DEFAULT '',
+    data_base64 TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (image_id, variant_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_image_library_variants_image
+ON image_library_variants (image_id, variant_key);
+
 CREATE TABLE IF NOT EXISTS attachment_library (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL DEFAULT '',
@@ -3027,6 +3564,13 @@ CREATE TABLE IF NOT EXISTS broadcast_jobs (
     scheduled_for TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     priority INTEGER NOT NULL DEFAULT 100,
     batch_key TEXT NOT NULL DEFAULT '',
+    business_domain TEXT,
+    idempotency_key TEXT,
+    channel TEXT,
+    target_kind TEXT,
+    failure_type TEXT,
+    retry_policy_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     status TEXT NOT NULL DEFAULT 'queued'
         CHECK (status IN ('waiting_approval', 'queued', 'claimed', 'sent', 'failed', 'cancelled')),
     requires_approval BOOLEAN NOT NULL DEFAULT FALSE,
@@ -3051,7 +3595,9 @@ CREATE TABLE IF NOT EXISTS broadcast_jobs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     claimed_at TIMESTAMPTZ,
-    sent_at TIMESTAMPTZ
+    sent_at TIMESTAMPTZ,
+    claim_token TEXT NOT NULL DEFAULT '',
+    lease_expires_at TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_due
@@ -3066,9 +3612,38 @@ ON broadcast_jobs (source_type, source_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_trace
 ON broadcast_jobs (trace_id, id DESC);
 
+CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_lease
+ON broadcast_jobs (status, claim_token, lease_expires_at, id ASC)
+WHERE status = 'claimed' AND claim_token <> '';
+
 CREATE UNIQUE INDEX IF NOT EXISTS uq_broadcast_jobs_source_scheduled
 ON broadcast_jobs (source_table, source_id, scheduled_for)
 WHERE source_id <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_broadcast_jobs_idempotency_key
+ON broadcast_jobs (idempotency_key)
+WHERE idempotency_key IS NOT NULL AND idempotency_key <> '';
+
+CREATE TABLE IF NOT EXISTS broadcast_job_events (
+    id BIGSERIAL PRIMARY KEY,
+    job_id BIGINT NOT NULL,
+    event_type TEXT NOT NULL,
+    from_status TEXT,
+    to_status TEXT,
+    event_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    actor_type TEXT,
+    actor_id TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_broadcast_job_events_job_id
+ON broadcast_job_events (job_id);
+
+CREATE INDEX IF NOT EXISTS idx_broadcast_job_events_event_type_created_at
+ON broadcast_job_events (event_type, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_broadcast_job_events_created_at
+ON broadcast_job_events (created_at);
 
 -- ---------- 用户激活漏斗看板快照 (alembic 0010) ----------
 -- CRM × 黄小璨 聚合快照, 每 30 分钟 TRUNCATE + 重写, 供 admin 看板页 + 外部 API.
@@ -3256,6 +3831,8 @@ CREATE TABLE IF NOT EXISTS wechat_pay_products (
     require_mobile BOOLEAN NOT NULL DEFAULT FALSE,
     lead_program_id BIGINT,
     lead_channel_id BIGINT,
+    completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    completion_redirect_url TEXT NOT NULL DEFAULT '',
     metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -3279,6 +3856,91 @@ CREATE TABLE IF NOT EXISTS wechat_pay_product_page_slices (
 
 CREATE INDEX IF NOT EXISTS idx_wechat_pay_product_slices_product_order
 ON wechat_pay_product_page_slices (product_id, sort_order ASC, id ASC);
+
+CREATE TABLE IF NOT EXISTS external_push_config (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    webhook_url TEXT NOT NULL DEFAULT '',
+    push_type TEXT NOT NULL DEFAULT '',
+    expires_at_ts BIGINT,
+    day INTEGER,
+    frequency INTEGER,
+    remark TEXT NOT NULL DEFAULT '',
+    custom_params JSONB NOT NULL DEFAULT '{}'::jsonb,
+    secret TEXT NOT NULL DEFAULT '',
+    created_by TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_external_push_config_target_event
+ON external_push_config (tenant_id, target_type, target_id, event_type);
+
+CREATE INDEX IF NOT EXISTS idx_external_push_config_target
+ON external_push_config (tenant_id, target_type, target_id);
+
+CREATE INDEX IF NOT EXISTS idx_external_push_config_event
+ON external_push_config (tenant_id, event_type);
+
+CREATE TABLE IF NOT EXISTS external_push_delivery (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+    config_id BIGINT NOT NULL REFERENCES external_push_config(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    delivery_id TEXT NOT NULL UNIQUE,
+    target_type TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    order_id BIGINT NOT NULL DEFAULT 0,
+    product_id BIGINT NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'sending', 'success', 'failed', 'retrying', 'gave_up', 'skipped')),
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    request_url TEXT NOT NULL DEFAULT '',
+    request_headers JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_body JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_status INTEGER,
+    response_body TEXT NOT NULL DEFAULT '',
+    error_message TEXT NOT NULL DEFAULT '',
+    next_retry_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_external_push_delivery_config_order_event
+ON external_push_delivery (config_id, order_id, event_type)
+WHERE order_id > 0;
+
+CREATE INDEX IF NOT EXISTS idx_external_push_delivery_order
+ON external_push_delivery (tenant_id, order_id, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_external_push_delivery_retry
+ON external_push_delivery (status, next_retry_at);
+
+CREATE TABLE IF NOT EXISTS domain_event_outbox (
+    id BIGSERIAL PRIMARY KEY,
+    tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+    event_type TEXT NOT NULL,
+    aggregate_type TEXT NOT NULL,
+    aggregate_id TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'success', 'failed', 'gave_up', 'skipped')),
+    retry_count INTEGER NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_domain_event_outbox_event_aggregate
+ON domain_event_outbox (tenant_id, event_type, aggregate_type, aggregate_id);
+
+CREATE INDEX IF NOT EXISTS idx_domain_event_outbox_status_retry
+ON domain_event_outbox (status, next_retry_at, id ASC);
 
 CREATE TABLE IF NOT EXISTS wechat_pay_orders (
     id BIGSERIAL PRIMARY KEY,
@@ -3406,3 +4068,64 @@ CREATE TABLE IF NOT EXISTS wechat_pay_order_export_jobs (
 
 CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_export_jobs_status
 ON wechat_pay_order_export_jobs (status, created_at DESC, id DESC);
+
+CREATE TABLE IF NOT EXISTS alipay_pay_orders (
+    id BIGSERIAL PRIMARY KEY,
+    out_trade_no TEXT NOT NULL UNIQUE,
+    trade_no TEXT NOT NULL DEFAULT '',
+    order_source TEXT NOT NULL DEFAULT 'h5_alipay_wap',
+    client_order_ref TEXT NOT NULL DEFAULT '',
+    product_code TEXT NOT NULL DEFAULT '',
+    product_name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    amount_total INTEGER NOT NULL,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    buyer_id TEXT NOT NULL DEFAULT '',
+    buyer_logon_id TEXT NOT NULL DEFAULT '',
+    mobile_snapshot TEXT NOT NULL DEFAULT '',
+    identity_snapshot TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'created',
+    trade_status TEXT NOT NULL DEFAULT '',
+    success_url TEXT NOT NULL DEFAULT '',
+    metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    return_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    refunded_amount_total INTEGER NOT NULL DEFAULT 0,
+    refund_status TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    expires_at TIMESTAMPTZ,
+    paid_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_status_created
+ON alipay_pay_orders (status, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_product_created
+ON alipay_pay_orders (product_code, created_at DESC, id DESC);
+
+CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_mobile_created
+ON alipay_pay_orders (mobile_snapshot, created_at DESC, id DESC)
+WHERE mobile_snapshot <> '';
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_alipay_pay_orders_trade_no
+ON alipay_pay_orders (trade_no)
+WHERE trade_no <> '';
+
+CREATE TABLE IF NOT EXISTS alipay_pay_order_events (
+    id BIGSERIAL PRIMARY KEY,
+    out_trade_no TEXT NOT NULL REFERENCES alipay_pay_orders(out_trade_no) ON DELETE CASCADE,
+    event_type TEXT NOT NULL DEFAULT '',
+    trade_no TEXT NOT NULL DEFAULT '',
+    trade_status TEXT NOT NULL DEFAULT '',
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_alipay_pay_order_events_order
+ON alipay_pay_order_events (out_trade_no, created_at DESC, id DESC);

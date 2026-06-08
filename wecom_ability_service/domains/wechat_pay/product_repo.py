@@ -38,6 +38,8 @@ def _serialize_product(row: dict[str, Any] | None) -> dict[str, Any] | None:
     payload["require_mobile"] = bool(payload.get("require_mobile"))
     payload["lead_program_id"] = int(payload.get("lead_program_id") or 0) or None
     payload["lead_channel_id"] = int(payload.get("lead_channel_id") or 0) or None
+    payload["completion_redirect_enabled"] = bool(payload.get("completion_redirect_enabled"))
+    payload["completion_redirect_url"] = _normalized_text(payload.get("completion_redirect_url"))
     payload["metadata_json"] = _json_obj(payload.get("metadata_json"))
     if "slice_count" in payload:
         payload["slice_count"] = int(payload.get("slice_count") or 0)
@@ -58,11 +60,13 @@ def insert_product(payload: dict[str, Any]) -> dict[str, Any]:
             require_mobile,
             lead_program_id,
             lead_channel_id,
+            completion_redirect_enabled,
+            completion_redirect_url,
             metadata_json,
             created_at,
             updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CAST(? AS jsonb), CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         RETURNING *
         """,
         (
@@ -76,6 +80,8 @@ def insert_product(payload: dict[str, Any]) -> dict[str, Any]:
             bool(payload.get("require_mobile")),
             int(payload.get("lead_program_id") or 0) or None,
             int(payload.get("lead_channel_id") or 0) or None,
+            bool(payload.get("completion_redirect_enabled")),
+            _normalized_text(payload.get("completion_redirect_url")),
             _json(payload.get("metadata") or {}),
         ),
     ).fetchone()
@@ -95,6 +101,8 @@ def update_product(product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
             require_mobile = ?,
             lead_program_id = ?,
             lead_channel_id = ?,
+            completion_redirect_enabled = ?,
+            completion_redirect_url = ?,
             metadata_json = CAST(? AS jsonb),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
@@ -110,6 +118,8 @@ def update_product(product_id: int, payload: dict[str, Any]) -> dict[str, Any]:
             bool(payload.get("require_mobile")),
             int(payload.get("lead_program_id") or 0) or None,
             int(payload.get("lead_channel_id") or 0) or None,
+            bool(payload.get("completion_redirect_enabled")),
+            _normalized_text(payload.get("completion_redirect_url")),
             _json(payload.get("metadata") or {}),
             int(product_id),
         ),
@@ -160,6 +170,8 @@ def list_admin_products() -> list[dict[str, Any]]:
             p.require_mobile,
             p.lead_program_id,
             p.lead_channel_id,
+            p.completion_redirect_enabled,
+            p.completion_redirect_url,
             p.metadata_json,
             p.created_at,
             p.updated_at,
@@ -179,6 +191,8 @@ def list_admin_products() -> list[dict[str, Any]]:
             p.require_mobile,
             p.lead_program_id,
             p.lead_channel_id,
+            p.completion_redirect_enabled,
+            p.completion_redirect_url,
             p.metadata_json,
             p.created_at,
             p.updated_at
@@ -326,5 +340,4 @@ def delete_product_slice(product_id: int, slice_id: int) -> None:
         "DELETE FROM wechat_pay_product_page_slices WHERE id = ? AND product_id = ?",
         (int(slice_id), int(product_id)),
     )
-
 

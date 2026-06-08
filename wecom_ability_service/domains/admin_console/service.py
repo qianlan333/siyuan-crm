@@ -6,29 +6,6 @@ from typing import Any
 from flask import current_app
 
 from ...application.customer_read_model import CustomerDetailQueryDTO, GetCustomerDetailQuery
-from ...application.questionnaire.commands import RetryQuestionnaireExternalPushCommand
-from ...application.questionnaire.dto import RetryQuestionnaireExternalPushCommandDTO
-from ...application.questionnaire.queries import (
-    GetGlobalQuestionnaireExternalPushLogsQuery,
-    GetQuestionnaireExternalPushLogsQuery,
-)
-from ...application.user_ops import (
-    BackfillOwnerClassTermsCommand,
-    BackfillOwnerClassTermsCommandDTO,
-    GetUserOpsOverviewQuery,
-    GetUserOpsOverviewQueryDTO,
-    ImportActivationStatusCommand,
-    ImportActivationStatusCommandDTO,
-    ImportMobileClassTermCommand,
-    ImportMobileClassTermCommandDTO,
-    LeadPoolFiltersDTO,
-    ListLeadPoolQuery,
-    ListLeadPoolQueryDTO,
-    ListUserOpsHistoryQuery,
-    ListUserOpsHistoryQueryDTO,
-    RunDueUserOpsDeferredJobsCommand,
-    RunDueUserOpsDeferredJobsCommandDTO,
-)
 from ...application.class_user.commands import MigrateClassUserStatusFromContactTagsCommand
 from ...application.class_user.dto import (
     ListClassUserManagementRecordsQueryDTO,
@@ -69,6 +46,7 @@ from ...domains.tags.service import get_signup_status_definition
 from ...infra.json_utils import safe_json_loads as _json_loads
 from ...infra.settings import get_setting
 from ..questionnaire import build_questionnaire_preflight_payload
+from ..questionnaire.preflight_service import runtime_config_value
 from ..tags.service import mark_customer_tags, unmark_customer_tags
 from ..tasks.service import dispatch_wecom_task
 from . import repo
@@ -134,11 +112,6 @@ TARGET_QUESTIONNAIRE_ACTION = "questionnaire_console_action"
 TARGET_OPERATIONS_ACTION = "operations_console_action"
 
 OPERATIONS_TABS = (
-    {"key": "overview", "label": "总览"},
-    {"key": "user-ops", "label": "运营名单"},
-    {"key": "history", "label": "运营名单历史"},
-    {"key": "imports", "label": "导入"},
-    {"key": "deferred", "label": "待处理作业"},
     {"key": "class-users", "label": "班级状态"},
     {"key": "class-history", "label": "班级状态历史"},
 )
@@ -438,8 +411,8 @@ def build_questionnaire_index_payload() -> dict[str, Any]:
     preflight_error = ""
     try:
         def _lightweight_tag_probe() -> list[dict[str, Any]]:
-            required_keys = ["WECOM_CORP_ID", "WECOM_CONTACT_SECRET", "WECOM_API_BASE"]
-            missing = [key for key in required_keys if not _normalized_text(current_app.config.get(key))]
+            required_keys = ["WECOM_CORP_ID", "WECOM_SECRET", "WECOM_API_BASE"]
+            missing = [key for key in required_keys if not runtime_config_value(current_app.config, key)]
             if missing:
                 raise RuntimeError(f"缺少配置：{', '.join(missing)}")
             return [{"tag_id": "config-ok", "tag_name": "config-ok"}]
@@ -493,76 +466,6 @@ def build_questionnaire_detail_payload(questionnaire_id: int) -> dict[str, Any] 
             for row in repo.list_questionnaire_apply_logs(int(questionnaire_id), limit=50)
         ],
     }
-
-def build_questionnaire_external_push_logs_payload(
-    questionnaire_id: int,
-    *,
-    status: str = "",
-    limit: int = 50,
-) -> dict[str, Any] | None:
-    return GetQuestionnaireExternalPushLogsQuery()(
-        questionnaire_id=int(questionnaire_id),
-        status=status,
-        limit=limit,
-    )
-
-def build_global_questionnaire_external_push_logs_payload(
-    *,
-    questionnaire_id: str = "",
-    questionnaire_title: str = "",
-    status: str = "",
-    user_id: str = "",
-    target_url: str = "",
-    limit: int = 50,
-) -> dict[str, Any]:
-    return GetGlobalQuestionnaireExternalPushLogsQuery()(
-        questionnaire_id=questionnaire_id,
-        questionnaire_title=questionnaire_title,
-        status=status,
-        user_id=user_id,
-        target_url=target_url,
-        limit=limit,
-    )
-
-def retry_questionnaire_external_push_log_for_console(push_log_id: int) -> dict[str, Any]:
-    return RetryQuestionnaireExternalPushCommand()(
-        RetryQuestionnaireExternalPushCommandDTO(push_log_id=int(push_log_id))
-    )
-
-def retry_questionnaire_external_push_logs_for_console(push_log_ids: list[int]) -> dict[str, Any]:
-    return RetryQuestionnaireExternalPushCommand()(
-        RetryQuestionnaireExternalPushCommandDTO(
-            push_log_ids=[int(item) for item in push_log_ids],
-        )
-    )
-
-def _questionnaire_external_push_status_tone(value: str) -> str:
-    if value == "success":
-        return "ok"
-    if value == "skipped":
-        return "warn"
-    return "danger"
-
-def _questionnaire_external_push_status_label(value: str) -> str:
-    if value == "success":
-        return "成功"
-    if value == "skipped":
-        return "跳过"
-    return "失败"
-
-def _questionnaire_external_push_effective_state_label(row: dict[str, Any]) -> str:
-    latest_status = str(row.get("latest_status") or "").strip()
-    if row.get("has_retry"):
-        if latest_status == "success":
-            return "补发成功"
-        if latest_status == "skipped":
-            return "补发已跳过"
-        return "补发仍失败（待补发）"
-    if str(row.get("status") or "").strip() == "success":
-        return "首次成功"
-    if str(row.get("status") or "").strip() == "skipped":
-        return "全局关闭跳过"
-    return "首次失败（待补发）"
 
 def parse_questionnaire_editor_form(form: Any) -> dict[str, Any]:
     questions_json = _normalized_text(form.get("questions_json"))
@@ -627,193 +530,29 @@ def toggle_questionnaire_disabled(questionnaire_id: int, *, is_disabled: bool, o
     return updated
 
 def operations_tabs(active_key: str) -> list[dict[str, Any]]:
-    normalized = _normalized_text(active_key) or "overview"
+    normalized = _normalized_text(active_key) or "class-users"
     return [
         {
             **item,
             "active": item["key"] == normalized,
-            "href": f"/admin/user-ops?tab={item['key']}",
+            "href": f"/admin/class-users?tab={item['key']}",
         }
         for item in OPERATIONS_TABS
     ]
 
-def _lead_pool_filters_dto(
-    *,
-    is_wecom_added: str = "",
-    is_mobile_bound: str = "",
-    huangxiaocan_activation_state: str = "",
-    class_term_no: str = "",
-    owner_userid: str = "",
-    query: str = "",
-) -> LeadPoolFiltersDTO:
-    return LeadPoolFiltersDTO(
-        is_wecom_added=is_wecom_added,
-        is_mobile_bound=is_mobile_bound,
-        huangxiaocan_activation_state=huangxiaocan_activation_state,
-        class_term_no=class_term_no,
-        owner_userid=owner_userid,
-        query=query,
-    )
-
 def build_operations_payload(args: Any) -> dict[str, Any]:
-    active_tab = _normalized_text(args.get("tab")) or "overview"
+    active_tab = _normalized_text(args.get("tab")) or "class-users"
     if active_tab not in {item["key"] for item in OPERATIONS_TABS}:
-        active_tab = "overview"
-    overview = GetUserOpsOverviewQuery()(GetUserOpsOverviewQueryDTO())
-    user_ops_filters = {
-        "is_wecom_added": _normalized_text(args.get("is_wecom_added")),
-        "is_mobile_bound": _normalized_text(args.get("is_mobile_bound")),
-        "huangxiaocan_activation_state": _normalized_text(args.get("huangxiaocan_activation_state")),
-        "class_term_no": _normalized_text(args.get("class_term_no")),
-        "owner_userid": _normalized_text(args.get("owner_userid")),
-        "query": _normalized_text(args.get("query")),
-    }
+        active_tab = "class-users"
     class_status_filter = _normalized_text(args.get("signup_status"))
     history_limit = _normalized_int(args.get("limit"), default=100, minimum=1, maximum=200)
-    user_ops_filters_dto = _lead_pool_filters_dto(**user_ops_filters)
-    user_ops_list_payload = (
-        ListLeadPoolQuery()(ListLeadPoolQueryDTO(filters=user_ops_filters_dto))
-        if active_tab in {"overview", "user-ops"}
-        else {}
-    )
-    user_ops_history_payload = (
-        ListUserOpsHistoryQuery()(ListUserOpsHistoryQueryDTO(limit=history_limit))
-        if active_tab in {"overview", "history"}
-        else {}
-    )
-    class_user_payload = (
-        list_class_user_management_records(signup_status=class_status_filter) if active_tab in {"overview", "class-users"} else {}
-    )
-    class_history_payload = list_class_user_status_history(limit=history_limit) if active_tab in {"overview", "class-history"} else {}
-    deferred_jobs = repo.list_deferred_jobs(limit=50) if active_tab in {"overview", "deferred"} else []
-    import_batches = repo.list_recent_user_ops_import_batches(limit=20) if active_tab in {"overview", "imports"} else []
-    recent_audit = repo.list_recent_admin_operation_logs(target_type=TARGET_OPERATIONS_ACTION, limit=20)
+    class_user_payload = list_class_user_management_records(signup_status=class_status_filter) if active_tab == "class-users" else {}
+    class_history_payload = list_class_user_status_history(limit=history_limit) if active_tab == "class-history" else {}
     return {
         "active_tab": active_tab,
         "tabs": operations_tabs(active_tab),
-        "overview": overview,
-        "user_ops_filters": user_ops_filters,
         "class_status_filter": class_status_filter,
-        "user_ops_list": user_ops_list_payload,
-        "user_ops_history": user_ops_history_payload,
         "class_user_list": class_user_payload,
         "class_user_history": class_history_payload,
-        "deferred_jobs": deferred_jobs,
-        "import_batches": import_batches,
-        "recent_audit": recent_audit,
         "mcp_auth_configured": bool(_normalized_text(get_setting("MCP_BEARER_TOKEN"))),
     }
-
-def execute_operations_action(
-    *,
-    action: str,
-    form: Any,
-    files: Any,
-    operator: str,
-) -> dict[str, Any]:
-    normalized_action = _normalized_text(action)
-    operator_value = _operator(operator)
-    if normalized_action == "backfill-owner-class-terms":
-        owner_userid = _normalized_text(form.get("owner_userid"))
-        class_term_min = _normalized_int(form.get("class_term_min"), default=1, minimum=1, maximum=99)
-        class_term_max = _normalized_int(form.get("class_term_max"), default=5, minimum=1, maximum=99)
-        confirm = _normalize_bool(form.get("confirm"))
-        payload = BackfillOwnerClassTermsCommand()(
-            BackfillOwnerClassTermsCommandDTO(
-                owner_userid=owner_userid,
-                class_term_min=class_term_min,
-                class_term_max=class_term_max,
-                dry_run=not confirm,
-                operator=operator_value,
-                entry_source=_normalized_text(form.get("entry_source")),
-            )
-        )
-        _audit_log(
-            operator=operator_value,
-            action_type="apply_backfill_owner_class_terms" if confirm else "preview_backfill_owner_class_terms",
-            target_type=TARGET_OPERATIONS_ACTION,
-            target_id=owner_userid,
-            before={"action": normalized_action, "confirm": confirm},
-            after=payload,
-        )
-        return payload
-
-    if normalized_action == "run-deferred-jobs":
-        if not _normalize_bool(form.get("confirm")):
-            raise ValueError("执行待处理作业前请先勾选确认")
-        limit = _normalized_int(form.get("limit"), default=20, minimum=1, maximum=200)
-        payload = RunDueUserOpsDeferredJobsCommand()(RunDueUserOpsDeferredJobsCommandDTO(limit=limit))
-        _audit_log(
-            operator=operator_value,
-            action_type="run_deferred_jobs",
-            target_type=TARGET_OPERATIONS_ACTION,
-            target_id=f"limit:{limit}",
-            before={"action": normalized_action},
-            after=payload,
-        )
-        return payload
-
-    if normalized_action == "migrate-class-user":
-        if not _normalize_bool(form.get("confirm")):
-            raise ValueError("执行班级状态同步前请先勾选确认")
-        payload = migrate_class_user_status_from_contact_tags()
-        _audit_log(
-            operator=operator_value,
-            action_type="migrate_class_user_status",
-            target_type=TARGET_OPERATIONS_ACTION,
-            target_id="class_user_status",
-            before={"action": normalized_action},
-            after=payload,
-        )
-        return payload
-
-    if normalized_action in {"import-mobile-class-terms", "import-activation-status"}:
-        if not _normalize_bool(form.get("confirm")):
-            raise ValueError("导入前请先勾选确认")
-        uploaded_file = files.get("file") if files else None
-        pasted_text = _normalized_text(form.get("pasted_text"))
-        if not uploaded_file and not pasted_text:
-            raise ValueError("请上传文件或粘贴内容")
-        if normalized_action == "import-mobile-class-terms":
-            if uploaded_file and uploaded_file.filename:
-                payload = ImportMobileClassTermCommand()(
-                    ImportMobileClassTermCommandDTO(
-                        file_name=uploaded_file.filename,
-                        file_bytes=uploaded_file.read(),
-                        created_by=operator_value,
-                    )
-                )
-            else:
-                payload = ImportMobileClassTermCommand()(
-                    ImportMobileClassTermCommandDTO(
-                        pasted_text=pasted_text,
-                        created_by=operator_value,
-                    )
-                )
-        else:
-            if uploaded_file and uploaded_file.filename:
-                payload = ImportActivationStatusCommand()(
-                    ImportActivationStatusCommandDTO(
-                        file_name=uploaded_file.filename,
-                        file_bytes=uploaded_file.read(),
-                        created_by=operator_value,
-                    )
-                )
-            else:
-                payload = ImportActivationStatusCommand()(
-                    ImportActivationStatusCommandDTO(
-                        pasted_text=pasted_text,
-                        created_by=operator_value,
-                    )
-                )
-        _audit_log(
-            operator=operator_value,
-            action_type=normalized_action.replace("-", "_"),
-            target_type=TARGET_OPERATIONS_ACTION,
-            target_id=str(payload.get("batch_id") or normalized_action),
-            before={"action": normalized_action},
-            after=payload,
-        )
-        return payload
-
-    raise ValueError("不支持的运营操作")

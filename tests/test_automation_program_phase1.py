@@ -6,7 +6,6 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
-from flask import Blueprint, Flask
 
 from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.admin_auth import save_admin_user
@@ -77,54 +76,6 @@ def _program_row(html: str, program_id: int) -> str:
     match = re.search(rf'<tr id="program-row-{program_id}".*?</tr>', html, flags=re.S)
     assert match
     return match.group(0)
-
-
-def test_program_workflow_page_handlers_redirect_to_setup_without_pg(monkeypatch):
-    from wecom_ability_service.http import automation_conversion_pages as pages
-
-    app = Flask(__name__)
-    api = Blueprint("api", __name__)
-    api.add_url_rule(
-        "/admin/automation-conversion/programs/<int:program_id>/setup",
-        "admin_automation_program_setup",
-        lambda program_id: "",
-    )
-    app.register_blueprint(api)
-    monkeypatch.setattr(pages, "_load_program_or_404", lambda program_id: {"id": int(program_id)})
-
-    handlers = (
-        (pages.admin_automation_program_operations, (42,)),
-        (pages.admin_automation_program_workflows, (42,)),
-        (pages.admin_automation_program_workflow_new, (42,)),
-        (pages.admin_automation_program_workflow_edit, (42, 1)),
-        (pages.admin_automation_program_workflow_nodes, (42, 1)),
-    )
-
-    with app.test_request_context("/"):
-        for handler, args in handlers:
-            response = handler(*args)
-            assert response.status_code == 302
-            assert response.headers["Location"].endswith(
-                "/admin/automation-conversion/programs/42/setup?step=operations"
-            )
-
-
-def test_active_automation_templates_do_not_show_legacy_workflow_terms():
-    active_template_names = [
-        "automation_program_list.html",
-        "automation_conversion_overview_workspace.html",
-        "automation_conversion_execution_records.html",
-        "automation_conversion_agent_config_workspace.html",
-    ]
-    combined_source = "\n".join(
-        (REPO_ROOT / "wecom_ability_service/templates/admin_console" / name).read_text(encoding="utf-8")
-        for name in active_template_names
-    )
-
-    assert "任务流" not in combined_source
-    assert "节点配置" not in combined_source
-    assert "执行节点" not in combined_source
-    assert "旧入口" not in combined_source
 
 
 def test_stale_workflow_page_templates_are_removed():
@@ -209,7 +160,7 @@ def test_operation_task_panel_uses_single_task_language():
     assert "新增任务" in source
     assert "所属分组" in source
     assert "每天触发时间" in source
-    assert "目标人群" in source
+    assert "触达对象所在阶段" in source
     assert "进入人群第 N 天" in source
     assert "行为过滤" in source
     assert "刷新人群预览" in source
@@ -225,6 +176,7 @@ def test_operation_task_panel_uses_single_task_language():
     assert "执行节点" not in source
     assert "节点配置" not in source
     assert "任务流" not in source
+    assert "目标人群" not in source
     assert "入口来源" not in source
     assert "发送去重" not in source
     assert "检查与执行" not in source
@@ -241,8 +193,6 @@ def test_default_program_bootstraps_and_automation_entry_lists_programs(app, cli
     assert response.status_code == 200
     assert "自动化运营方案" in html
     assert "id=\"program-create-panel\" class=\"admin-card program-panel\" hidden" in html
-    assert "共享资源" in html
-    assert "/admin/automation-conversion/shared/agents" in html
     assert "运行时中心" in html
     assert "/admin/automation-conversion/runtime" in html
     assert "新建方案" in html
@@ -531,51 +481,6 @@ def test_setup_basic_owner_flows_to_entry_channel(app, client, monkeypatch):
     assert block_payload["owner_display_name"] == "销售负责人 02"
 
 
-def test_setup_entry_qrcode_generation_uses_program_owner(app, client, monkeypatch):
-    from wecom_ability_service.domains.automation_conversion.program_setup_service import (
-        save_entry_channel,
-        save_setup_basic,
-    )
-
-    captured = {}
-
-    class _FakeRuntimeClient:
-        def create_contact_way(self, payload: dict) -> dict:
-            captured["payload"] = payload
-            return {"config_id": "cfg-owner", "qr_code": "https://wecom.example/qr/cfg-owner"}
-
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.provider.get_contact_runtime_client",
-        lambda: _FakeRuntimeClient(),
-    )
-    _login(client, app, monkeypatch)
-    program_id = _default_program_id(app)
-    with app.app_context():
-        save_setup_basic(
-            program_id,
-            {
-                "program_name": "负责人生成码方案",
-                "program_code": "signup_conversion_v1",
-                "status": "active",
-                "owner_staff_id": "sales_owner_03",
-                "owner_display_name": "销售负责人 03",
-            },
-            operator_id="test",
-        )
-        save_entry_channel(program_id, {"channel_name": "负责人生成码", "welcome_message": "欢迎"})
-
-    response = client.post(
-        "/api/admin/automation-conversion/settings/default-channel/generate",
-        json={"program_id": program_id},
-    )
-    payload = response.get_json()
-
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["channel"]["owner_staff_id"] == "sales_owner_03"
-    assert captured["payload"]["user"] == ["sales_owner_03"]
-
-
 def test_blank_setup_entry_does_not_show_default_qrcode(app, client, monkeypatch):
     from wecom_ability_service.domains.automation_conversion import repo
     from wecom_ability_service.domains.automation_conversion.program_service import create_automation_program
@@ -662,7 +567,10 @@ def test_setup_footer_saves_before_navigation(app, client, monkeypatch):
 
 
 def test_audience_entry_rule_v5_save_validation(app):
-    from wecom_ability_service.domains.automation_conversion.program_setup_service import save_audience_entry_rule
+    from wecom_ability_service.domains.automation_conversion.program_setup_service import (
+        build_program_stage_flow,
+        save_audience_entry_rule,
+    )
 
     program_id = _default_program_id(app)
     with app.app_context():
@@ -684,7 +592,7 @@ def test_audience_entry_rule_v5_save_validation(app):
             save_audience_entry_rule(program_id, {"order_review": {"enabled": True}})
         with pytest.raises(ValueError, match="问卷审核已启用"):
             save_audience_entry_rule(program_id, {"questionnaire_review": {"enabled": True}})
-        with pytest.raises(ValueError, match="已转化判定已启用"):
+        with pytest.raises(ValueError, match="成交判定已启用"):
             save_audience_entry_rule(program_id, {"conversion_review": {"enabled": True}})
 
         draft = save_audience_entry_rule(
@@ -699,6 +607,34 @@ def test_audience_entry_rule_v5_save_validation(app):
         draft_payload = draft["audience_entry_rule"]["payload_json"]
         assert draft_payload["order_review"]["enabled"] is True
         assert draft_payload["order_review"]["selected_product_id"] is None
+
+        all_enabled = save_audience_entry_rule(
+            program_id,
+            {
+                "_allow_incomplete": True,
+                "order_review": {"enabled": True},
+                "questionnaire_review": {"enabled": True},
+                "conversion_review": {"enabled": True},
+            },
+        )
+        all_enabled_stages = {
+            item["stage_code"] for item in all_enabled["stage_flow"]["targetable_stages"]
+        }
+        assert {"order_review", "questionnaire_review", "operating", "converted"}.issubset(all_enabled_stages)
+
+        save_audience_entry_rule(
+            program_id,
+            {
+                "_allow_incomplete": True,
+                "order_review": {"enabled": False},
+                "questionnaire_review": {"enabled": True},
+                "conversion_review": {"enabled": False},
+            },
+        )
+        no_order_stages = {item["stage_code"] for item in build_program_stage_flow(program_id)["targetable_stages"]}
+        assert "order_review" not in no_order_stages
+        assert "questionnaire_review" in no_order_stages
+        assert "converted" not in no_order_stages
 
 
 def test_audience_entry_rule_v5_publish_check_dynamic(app):
@@ -806,18 +742,14 @@ def test_audience_entry_rule_v5_preserves_saved_selection_with_compat_rules(app,
                 "conversion_review": {"enabled": False},
             },
         )
-        raw_payload = (
-            get_db()
-            .execute(
-                """
-                SELECT payload_json
-                FROM automation_program_config_block
-                WHERE program_id = ? AND block_key = 'audience_entry_rule'
-                """,
-                (program_id,),
-            )
-            .fetchone()["payload_json"]
-        )
+        raw_payload = get_db().execute(
+            """
+            SELECT payload_json
+            FROM automation_program_config_block
+            WHERE program_id = ? AND block_key = 'audience_entry_rule'
+            """,
+            (program_id,),
+        ).fetchone()["payload_json"]
         payload = raw_payload if isinstance(raw_payload, dict) else json.loads(raw_payload)
         check = build_publish_check(program_id)
 
@@ -868,7 +800,7 @@ def test_audience_entry_rule_v5_page_plain_state_line_and_picker(app, client, mo
         f"/admin/automation-conversion/programs/{program_id}/setup?step=entry-rule&audience_picker=order_product"
     ).get_data(as_text=True)
 
-    for label in ["扫码进入", "订单审核", "问卷审核", "运营中", "已转化"]:
+    for label in ["扫码进入", "订单审核", "问卷审核", "运营中", "成交判定", "已转化"]:
         assert label in html
     assert "必填" not in html
     assert "不可关闭" not in html
@@ -954,6 +886,8 @@ def test_audience_entry_rule_v5_runtime_resolves_order_questionnaire_and_convers
         before_order = _resolve_member_conversion_audience(member)
         assert before_order["audience_code"] == "pending_questionnaire"
         assert before_order["entry_reason"] == "order_review_pending"
+        assert before_order["stage_code"] == "order_review"
+        assert before_order["stage_label"] == "订单审核"
 
         db.execute(
             """
@@ -970,6 +904,8 @@ def test_audience_entry_rule_v5_runtime_resolves_order_questionnaire_and_convers
         after_order = _resolve_member_conversion_audience(member)
         assert after_order["audience_code"] == "pending_questionnaire"
         assert after_order["entry_reason"] == "questionnaire_review_pending"
+        assert after_order["stage_code"] == "questionnaire_review"
+        assert after_order["stage_label"] == "问卷审核"
 
         db.execute(
             """
@@ -985,6 +921,8 @@ def test_audience_entry_rule_v5_runtime_resolves_order_questionnaire_and_convers
         db.commit()
         after_questionnaire = _resolve_member_conversion_audience(member)
         assert after_questionnaire["audience_code"] == "operating"
+        assert after_questionnaire["stage_code"] == "operating"
+        assert after_questionnaire["stage_label"] == "运营中"
         assert after_questionnaire["entry_reason"] == "audience_entry_rule_passed"
 
         db.execute(
@@ -1002,6 +940,8 @@ def test_audience_entry_rule_v5_runtime_resolves_order_questionnaire_and_convers
         after_conversion = _resolve_member_conversion_audience(member)
         assert after_conversion["audience_code"] == "converted"
         assert after_conversion["entry_reason"] == "conversion_product_paid"
+        assert after_conversion["stage_code"] == "converted"
+        assert after_conversion["stage_label"] == "已转化"
 
 
 def test_program_basic_info_edit_updates_list_and_context_header(app, client, monkeypatch):
@@ -1070,7 +1010,7 @@ def test_removed_shared_and_runtime_legacy_routes_are_gone(app, client, monkeypa
 
     assert legacy_agent_config.status_code == 404
     assert legacy_run_center.status_code == 404
-    assert shared_agents.status_code == 200
+    assert shared_agents.status_code == 404
     assert runtime.status_code == 200
 
 
@@ -1787,8 +1727,20 @@ def test_operation_action_templates_and_from_template_create_current_workflow(ap
 
 
 def test_action_orchestration_page_is_main_operations_entry(app, client, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion.program_setup_service import save_audience_entry_rule
+
     _login(client, app, monkeypatch)
     program_id = _default_program_id(app)
+    with app.app_context():
+        save_audience_entry_rule(
+            program_id,
+            {
+                "_allow_incomplete": True,
+                "order_review": {"enabled": True},
+                "questionnaire_review": {"enabled": True},
+                "conversion_review": {"enabled": True},
+            },
+        )
 
     response = client.get(f"/admin/automation-conversion/programs/{program_id}/setup?step=operations")
     html = response.get_data(as_text=True)
@@ -1810,6 +1762,10 @@ def test_action_orchestration_page_is_main_operations_entry(app, client, monkeyp
     assert "每天触发时间" in html
     assert "进入人群第 N 天" in html
     assert "行为过滤" in html
+    assert '<option value="order_review" data-audience-code="pending_questionnaire">订单审核 · 待支付 / 待确认订单</option>' in html
+    assert '<option value="questionnaire_review" data-audience-code="pending_questionnaire">问卷审核 · 待填写问卷</option>' in html
+    assert '<option value="operating" data-audience-code="operating">运营中 · 已通过前置条件</option>' in html
+    assert '<option value="converted" data-audience-code="converted">已转化 · 已确认成交</option>' in html
     assert "刷新人群预览" in html
     assert "统一内容" in html
     assert "按画像分层群发" in html
@@ -1932,6 +1888,99 @@ def test_operation_task_group_create_copy_filter_and_preview(app, client, monkey
     ).get_json()["task"]
     assert task_after_group_delete["group_id"] is None
     assert copied_after_group_delete["group_id"] is None
+
+
+def test_operation_task_preview_filters_by_target_stage(app):
+    from wecom_ability_service.domains.automation_conversion.operation_task_service import (
+        create_operation_task,
+        preview_operation_task_audience,
+    )
+    from wecom_ability_service.domains.automation_conversion.program_setup_service import save_audience_entry_rule
+
+    program_id = _default_program_id(app)
+    with app.app_context():
+        save_audience_entry_rule(
+            program_id,
+            {
+                "_allow_incomplete": True,
+                "order_review": {"enabled": True},
+                "questionnaire_review": {"enabled": True},
+                "conversion_review": {"enabled": True},
+            },
+        )
+        db = get_db()
+        channel_id = int(
+            db.execute(
+                """
+                INSERT INTO automation_channel (
+                    program_id, channel_code, channel_name, owner_staff_id, status
+                )
+                VALUES (?, ?, '阶段预览渠道', 'stage-preview-owner', 'active')
+                RETURNING id
+                """,
+                (program_id, f"program_{program_id}_stage_preview"),
+            ).fetchone()["id"]
+        )
+        fixtures = [
+            ("ext-stage-order", "pending_questionnaire", "order_review_pending"),
+            ("ext-stage-questionnaire", "pending_questionnaire", "questionnaire_review_pending"),
+            ("ext-stage-operating", "operating", "audience_entry_rule_passed"),
+            ("ext-stage-converted", "converted", "conversion_product_paid"),
+        ]
+        for external_contact_id, audience_code, entry_reason in fixtures:
+            member_id = int(
+                db.execute(
+                    """
+                    INSERT INTO automation_member (
+                        external_contact_id, phone, current_audience_code,
+                        current_audience_entered_at, behavior_tier_key, source_channel_id
+                    )
+                    VALUES (?, '13800001111', ?, CURRENT_DATE::text, 'lt_2', ?)
+                    RETURNING id
+                    """,
+                    (external_contact_id, audience_code, channel_id),
+                ).fetchone()["id"]
+            )
+            db.execute(
+                """
+                INSERT INTO automation_member_audience_entry (
+                    member_id, audience_code, entered_at, is_current, entry_source, entry_reason
+                )
+                VALUES (?, ?, CURRENT_DATE::text, TRUE, 'test', ?)
+                """,
+                (member_id, audience_code, entry_reason),
+            )
+        db.commit()
+
+        base_payload = {
+            "task_name": "阶段预览任务",
+            "status": "draft",
+            "send_time": "10:00",
+            "audience_day_offset": 1,
+            "behavior_filter": "none",
+            "content_mode": "unified",
+            "unified_content_json": {"content_text": "测试"},
+        }
+        assert preview_operation_task_audience(program_id, {**base_payload, "target_stage_code": "order_review"})["preview"][
+            "target_count"
+        ] == 1
+        assert preview_operation_task_audience(
+            program_id, {**base_payload, "target_stage_code": "questionnaire_review"}
+        )["preview"]["target_count"] == 1
+        assert preview_operation_task_audience(program_id, {**base_payload, "target_stage_code": "operating"})["preview"][
+            "target_count"
+        ] == 1
+        assert preview_operation_task_audience(program_id, {**base_payload, "target_stage_code": "converted"})["preview"][
+            "target_count"
+        ] == 1
+
+        created = create_operation_task(
+            program_id,
+            {**base_payload, "task_name": "旧待审核任务", "target_audience_code": "pending_questionnaire"},
+            operator_id="pytest",
+        )["task"]
+        assert created["target_stage_code"] == "questionnaire_review"
+        assert created["target_stage_label"] == "问卷审核"
 
 
 def test_operation_task_due_runner_enqueues_and_worker_handler_sends(app, monkeypatch):
@@ -2103,6 +2152,149 @@ def test_operation_task_due_runner_enqueues_and_worker_handler_sends(app, monkey
         assert item["status"] == "sent"
         assert int(item["send_record_id"] or 0) > 0
         assert item["error_message"] == ""
+
+
+def test_operation_task_agent_mode_generates_content_before_send(app, monkeypatch):
+    from datetime import datetime
+
+    from wecom_ability_service.domains.automation_conversion.operation_task_service import (
+        create_operation_task,
+        run_due_operation_tasks,
+    )
+    from wecom_ability_service.domains.broadcast_jobs import service as queue_service
+    from wecom_ability_service.domains.broadcast_jobs.handlers import execute_job
+
+    program_id = _default_program_id(app)
+    captured_dispatch: dict[str, object] = {}
+    captured_generation: dict[str, object] = {}
+
+    def fake_generate_content_with_agent(**kwargs):
+        captured_generation.update(kwargs)
+        return {
+            "content_text": "Agent 已按问卷上下文生成的话术",
+            "content_source": "agent_generated",
+            "fallback_reason": "",
+            "agent_run_id": "run-operation-task-agent",
+            "agent_output_id": "output-operation-task-agent",
+            "agent_code": "questionnaire_agent",
+        }
+
+    def fake_dispatch(task_type, fn_name, payload):
+        captured_dispatch["task_type"] = task_type
+        captured_dispatch["fn_name"] = fn_name
+        captured_dispatch["payload"] = payload
+        return {"task_id": 7789, "wecom_result": {"errcode": 0, "fail_list": []}}
+
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.workflow_runtime.sync_all_conversion_member_audiences",
+        lambda: None,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.workflow_runtime._generate_content_with_agent",
+        fake_generate_content_with_agent,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.automation_conversion.private_message_dispatch.dispatch_wecom_task",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task",
+        fake_dispatch,
+    )
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
+        lambda task_type, fn_name, payload, **kwargs: fake_dispatch(task_type, fn_name, payload),
+    )
+
+    with app.app_context():
+        db = get_db()
+        db.execute("DELETE FROM automation_channel WHERE program_id = ?", (program_id,))
+        channel_id = int(
+            db.execute(
+                """
+                INSERT INTO automation_channel (
+                    program_id, channel_code, channel_name, owner_staff_id, status
+                )
+                VALUES (?, ?, 'Agent 群发渠道', 'agent_channel_sender', 'active')
+                RETURNING id
+                """,
+                (program_id, f"program_{program_id}_default_qrcode"),
+            ).fetchone()["id"]
+        )
+        member_id = int(
+            db.execute(
+                """
+                INSERT INTO automation_member (
+                    external_contact_id, phone, owner_staff_id, current_audience_code,
+                    current_audience_entered_at, behavior_tier_key, source_channel_id
+                )
+                VALUES ('ext-operation-task-agent', '13800000003', 'agent_member_owner', 'operating', CURRENT_DATE::text, 'lt_2', ?)
+                RETURNING id
+                """,
+                (channel_id,),
+            ).fetchone()["id"]
+        )
+        db.execute(
+            """
+            INSERT INTO automation_member_audience_entry (
+                member_id, audience_code, entered_at, is_current, entry_source
+            )
+            VALUES (?, 'operating', CURRENT_DATE::text, TRUE, 'test')
+            """,
+            (member_id,),
+        )
+        task = create_operation_task(
+            program_id,
+            {
+                "task_name": "Agent 个性化群发",
+                "status": "active",
+                "trigger_type": "scheduled_daily",
+                "send_time": "15:00",
+                "target_audience_code": "operating",
+                "audience_day_offset": 1,
+                "behavior_filter": "none",
+                "content_mode": "agent",
+                "agent_config_json": {
+                    "agent_code": "questionnaire_agent",
+                    "requirement": "结合问卷回答生成一条关怀话术",
+                },
+            },
+            operator_id="pytest",
+        )["task"]
+
+        scheduled_now = datetime.now().replace(hour=15, minute=1, second=0, microsecond=0)
+        due_result = run_due_operation_tasks(program_id=program_id, now=scheduled_now, operator_id="pytest-runner")
+        assert due_result["ok"] is True
+        assert due_result["enqueued_count"] >= 1
+
+        claimed = queue_service.claim_due_jobs(limit=10, now=scheduled_now.replace(minute=2))
+        operation_jobs = [item for item in claimed if item["source_type"] == "operation_task"]
+        assert len(operation_jobs) == 1
+
+        outcome = execute_job(operation_jobs[0])
+        assert outcome["ok"] is True, outcome
+        assert outcome["sent_count"] == 1
+        assert captured_dispatch["fn_name"] == "create_private_message_task"
+        assert captured_dispatch["payload"]["sender"] == "agent_channel_sender"
+        assert captured_dispatch["payload"]["external_userid"] == ["ext-operation-task-agent"]
+        assert captured_dispatch["payload"]["text"]["content"] == "Agent 已按问卷上下文生成的话术"
+        assert captured_generation["agent_binding"]["agent_code"] == "questionnaire_agent"
+        assert captured_generation["standard_content_text"] == "结合问卷回答生成一条关怀话术"
+        assert captured_generation["generation_source"] == "automation_operation_task"
+
+        item = db.execute(
+            """
+            SELECT status, rendered_content_text, content_snapshot_json
+            FROM automation_operation_task_execution_item
+            WHERE task_id = ?
+            LIMIT 1
+            """,
+            (task["id"],),
+        ).fetchone()
+        assert item["status"] == "sent"
+        assert item["rendered_content_text"] == "Agent 已按问卷上下文生成的话术"
+        assert item["content_snapshot_json"]["content_source"] == "agent_generated"
+        assert item["content_snapshot_json"]["agent_run_id"] == "run-operation-task-agent"
 
 
 def test_operation_task_audience_entered_trigger_enqueues_immediate_broadcast(app, monkeypatch):
@@ -2426,6 +2618,8 @@ def test_operation_task_panel_saves_single_task_payload():
     assert "trigger_type" in html
     assert "进入人群后立即触发" in html
     assert "send_time" in html
+    assert "target_stage_code" in html
+    assert "触达对象所在阶段" in html
     assert "target_audience_code" in html
     assert "audience_day_offset" in html
     assert "behavior_filter" in html
@@ -2442,6 +2636,18 @@ def test_operation_task_panel_saves_single_task_payload():
     assert "apiUrls.task_preview_base" not in html
     assert "operation_config" not in html
     assert "loadExistingAction" not in html
+
+
+def test_operation_task_profile_layered_uses_template_categories_for_copy_boxes():
+    html = (
+        REPO_ROOT
+        / "wecom_ability_service/templates/admin_console/_automation_operation_orchestration_panel.html"
+    ).read_text(encoding="utf-8")
+
+    assert "bundle.categories" in html
+    assert "category_key" in html
+    assert "category_name" in html
+    assert "当前画像模板还没有可填写的分层" in html
 
 
 def test_ai_action_template_generate_returns_chinese_error_when_model_unavailable(app, client, monkeypatch):

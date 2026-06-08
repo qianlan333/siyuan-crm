@@ -1,0 +1,86 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<section class="admin-card admin-module-banner">
+  <div class="admin-section-header admin-section-header--compact">
+    <div>
+      <div class="admin-eyebrow">首次配置</div>
+      <h2>系统配置向导</h2>
+      <p class="admin-muted">按步骤填写企业微信和系统配置信息。带 <span style="color:#ef4444;">*</span> 为必填项，密码字段留空表示保持原值。</p>
+    </div>
+  </div>
+</section>
+
+<form method="post" action="/setup/wizard/save">
+  <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
+
+  {% for group in schema_groups %}
+  <section class="admin-card" style="margin-bottom: 1.5rem;">
+    <div class="admin-card-head">
+      <div>
+        <h2>
+          {{ loop.index }}. {{ group.label }}
+          {% if group.required %}<span style="color:#ef4444; font-size:0.8em;">(必需)</span>{% endif %}
+        </h2>
+      </div>
+    </div>
+    <div class="admin-form-grid admin-form-grid--stacked" style="padding: 0 1rem 1rem;">
+      {% for field_key, field in group.fields.items() %}
+      <label>
+        <span>
+          {{ field.label }}
+          {% if field.required %}<span style="color:#ef4444;">*</span>{% endif %}
+          <code style="font-size:0.8em; color:#6b7280;">{{ field_key }}</code>
+        </span>
+        {% if field.type == "secret" %}
+        <input type="password" name="setting__{{ field_key }}"
+               placeholder="{{ '当前已配置' if current_values.get(field_key) else '未配置' }}"
+               autocomplete="off">
+        {% elif field.type == "integer" %}
+        <input type="number" name="setting__{{ field_key }}"
+               value="{{ current_values.get(field_key, field.get('default', '')) }}">
+        {% else %}
+        <input type="text" name="setting__{{ field_key }}"
+               value="{{ current_values.get(field_key, field.get('default', '')) }}">
+        {% endif %}
+        {% if field.help %}
+        <small style="color:#6b7280;">{{ field.help }}</small>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  </section>
+  {% endfor %}
+
+  {% if validation_errors %}
+  <section class="admin-card" style="border-left: 3px solid #ef4444; margin-bottom: 1.5rem;">
+    <div class="admin-card-head">
+      <div><h2 style="color:#ef4444;">配置验证失败</h2></div>
+    </div>
+    <ul style="padding: 0 1rem 1rem; list-style: disc; margin-left: 1rem;">
+      {% for err in validation_errors %}
+      <li><strong>{{ err.field }}</strong> ({{ err.key }}): {{ err.error }}</li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+
+  {% if save_success %}
+  <section class="admin-card" style="border-left: 3px solid #22c55e; margin-bottom: 1.5rem; padding: 1rem;">
+    <strong style="color:#22c55e;">&#10003; 配置已保存成功</strong>
+    <p>可以前往 <a href="/admin/config/checklist">配置检查清单</a> 查看完成状态。</p>
+  </section>
+  {% endif %}
+
+  <section class="admin-card" style="padding: 1rem;">
+    <label>
+      <span>操作人</span>
+      <input type="text" name="operator" placeholder="填写本次配置人" required>
+    </label>
+    <div class="admin-form-actions" style="margin-top: 1rem;">
+      <button class="admin-button admin-button--primary" type="submit">保存全部配置</button>
+      <a class="admin-button admin-button--ghost" href="/admin/config/checklist">查看检查清单</a>
+    </div>
+  </section>
+</form>
+{% endblock %}

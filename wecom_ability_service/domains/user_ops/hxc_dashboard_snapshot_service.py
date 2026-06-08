@@ -53,6 +53,14 @@ FUNNEL_LABELS = {
 # 激活/开通类问卷; 当前固定 4 个, 后续要新增直接改这里
 HXC_ACTIVATION_QUESTIONNAIRE_IDS: tuple[int, ...] = (14, 19, 20, 21)
 
+# 黄小璨 MySQL 历史表存在 utf8mb4_unicode_ci / utf8mb4_general_ci 混用.
+# 文本主外键联表必须显式归一, 否则生产刷新会在 "=" 比较时报 1267.
+HXC_TEXT_COLLATION = "utf8mb4_unicode_ci"
+
+
+def _hxc_collated(expr: str) -> str:
+    return f"{expr} COLLATE {HXC_TEXT_COLLATION}"
+
 
 # ── CRM 三表并集 + 问卷聚合 (PG) ──
 
@@ -120,7 +128,7 @@ LEFT JOIN q                             ON q.mobile  = am.mobile
 
 # ── 黄小璨聚合 SQL (MySQL) ──
 
-_HXC_USERS_SQL = """
+_HXC_USERS_SQL = f"""
 SELECT
   u.phone,
   u.id AS hxc_user_id,
@@ -143,8 +151,12 @@ SELECT
   COUNT(CASE WHEN m.role='assistant' THEN m.id END) AS msg_ai,
   MAX(m.created_at) AS last_msg_at
 FROM new_version_users u
-LEFT JOIN new_version_conversations c ON u.id=c.user_id AND c.is_deleted=0
-LEFT JOIN new_version_messages m ON c.id=m.session_id AND m.is_deleted=0
+LEFT JOIN new_version_conversations c
+  ON {_hxc_collated("u.id")} = {_hxc_collated("c.user_id")}
+ AND c.is_deleted=0
+LEFT JOIN new_version_messages m
+  ON {_hxc_collated("c.id")} = {_hxc_collated("m.session_id")}
+ AND m.is_deleted=0
 WHERE u.is_deleted=0
   AND u.phone IS NOT NULL
   AND TRIM(u.phone) <> ''
@@ -157,7 +169,7 @@ GROUP BY
   u.last_login_at, u.created_at
 """
 
-_HXC_PROFILE_SQL = """
+_HXC_PROFILE_SQL = f"""
 SELECT
   u.id AS hxc_user_id,
   ub.identity_stage,
@@ -225,8 +237,10 @@ SELECT
   credits.growth_credit_period_used,
   credits.growth_credit_period_ends_at
 FROM new_version_users u
-LEFT JOIN new_version_user_backgrounds ub ON ub.user_id = u.id
-LEFT JOIN new_version_user_diagnoses ud ON ud.user_id = u.id
+LEFT JOIN new_version_user_backgrounds ub
+  ON {_hxc_collated("ub.user_id")} = {_hxc_collated("u.id")}
+LEFT JOIN new_version_user_diagnoses ud
+  ON {_hxc_collated("ud.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -239,8 +253,9 @@ LEFT JOIN (
     SUBSTRING_INDEX(GROUP_CONCAT(CAST(dimension_scores AS CHAR) ORDER BY COALESCE(completed_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS assessment_dimension_scores
   FROM new_version_assessments
   GROUP BY user_id
-) ass ON ass.user_id = u.id
-LEFT JOIN new_version_user_subscriptions us ON us.user_id = u.id
+) ass ON {_hxc_collated("ass.user_id")} = {_hxc_collated("u.id")}
+LEFT JOIN new_version_user_subscriptions us
+  ON {_hxc_collated("us.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -250,14 +265,14 @@ LEFT JOIN (
     MAX(created_at) AS last_activation_at
   FROM new_version_subscription_activations
   GROUP BY user_id
-) act ON act.user_id = u.id
+) act ON {_hxc_collated("act.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
     SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active_goals_count
   FROM new_version_growth_goals
   GROUP BY user_id
-) goals ON goals.user_id = u.id
+) goals ON {_hxc_collated("goals.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -265,7 +280,7 @@ LEFT JOIN (
     MAX(current_milestone) AS current_milestone_max
   FROM new_version_growth_paths
   GROUP BY user_id
-) paths ON paths.user_id = u.id
+) paths ON {_hxc_collated("paths.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -273,7 +288,7 @@ LEFT JOIN (
     SUM(CASE WHEN status='completed' THEN 1 ELSE 0 END) AS completed_tasks_count
   FROM new_version_consultation_tasks
   GROUP BY user_id
-) tasks ON tasks.user_id = u.id
+) tasks ON {_hxc_collated("tasks.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -283,7 +298,7 @@ LEFT JOIN (
     SUBSTRING_INDEX(GROUP_CONCAT(state_score ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_task_checkin_state_score
   FROM new_version_task_checkins
   GROUP BY user_id
-) checkins ON checkins.user_id = u.id
+) checkins ON {_hxc_collated("checkins.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -292,7 +307,7 @@ LEFT JOIN (
     SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY COALESCE(next_review_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS review_schedule_status
   FROM new_version_review_schedules
   GROUP BY user_id
-) reviews ON reviews.user_id = u.id
+) reviews ON {_hxc_collated("reviews.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -300,7 +315,7 @@ LEFT JOIN (
     SUBSTRING_INDEX(GROUP_CONCAT(event_type ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS last_recent_event_type
   FROM new_version_user_recent_events
   GROUP BY user_id
-) ev ON ev.user_id = u.id
+) ev ON {_hxc_collated("ev.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -308,7 +323,7 @@ LEFT JOIN (
     MAX(generated_at) AS recommended_topic_generated_at
   FROM new_version_recommended_topics
   GROUP BY user_id
-) rec ON rec.user_id = u.id
+) rec ON {_hxc_collated("rec.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -318,7 +333,7 @@ LEFT JOIN (
   FROM new_version_topic_summary_cards
   WHERE deleted_at IS NULL
   GROUP BY user_id
-) topics ON topics.user_id = u.id
+) topics ON {_hxc_collated("topics.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -331,7 +346,7 @@ LEFT JOIN (
     SUBSTRING_INDEX(GROUP_CONCAT(mode ORDER BY created_at DESC SEPARATOR '||'), '||', 1) AS role_mode
   FROM new_version_session_role_scores
   GROUP BY user_id
-) roles ON roles.user_id = u.id
+) roles ON {_hxc_collated("roles.user_id")} = {_hxc_collated("u.id")}
 LEFT JOIN (
   SELECT
     user_id,
@@ -340,7 +355,7 @@ LEFT JOIN (
     period_used AS growth_credit_period_used,
     period_ends_at AS growth_credit_period_ends_at
   FROM new_version_growth_credit_accounts
-) credits ON credits.user_id = u.id
+) credits ON {_hxc_collated("credits.user_id")} = {_hxc_collated("u.id")}
 WHERE u.is_deleted=0
 """
 
@@ -359,18 +374,19 @@ WHERE mb.phone IS NOT NULL AND mb.phone <> ''
 ORDER BY mb.phone, (mb.status='active') DESC, mb.end_date DESC
 """
 
-_HXC_CONSULT_SQL = """
+_HXC_CONSULT_SQL = f"""
 SELECT
   c.user_id,
   SUM(CASE WHEN cs.consultation_status='completed' THEN 1 ELSE 0 END) AS consult_completed,
   ROUND(AVG(cs.turn_count), 2) AS consult_avg_turn
 FROM new_version_conversations c
-JOIN new_version_consultation_states cs ON c.id=cs.session_id
+JOIN new_version_consultation_states cs
+  ON {_hxc_collated("c.id")} = {_hxc_collated("cs.session_id")}
 WHERE c.is_deleted=0
 GROUP BY c.user_id
 """
 
-_HXC_PHONE_AUX_SQL = """
+_HXC_PHONE_AUX_SQL = f"""
 SELECT
   phones.phone,
   COALESCE(wq.webhook_questionnaire_count, 0) AS webhook_questionnaire_count,
@@ -383,23 +399,27 @@ SELECT
   cj.last_crm_chat_job_at,
   cj.last_crm_chat_callback_status
 FROM (
-  SELECT phone FROM new_version_webhook_questionnaires WHERE phone IS NOT NULL AND phone <> ''
+  SELECT phone COLLATE {HXC_TEXT_COLLATION} AS phone
+  FROM new_version_webhook_questionnaires
+  WHERE phone IS NOT NULL AND phone <> ''
   UNION
-  SELECT phone FROM new_version_crm_chat_jobs WHERE phone IS NOT NULL AND phone <> ''
+  SELECT phone COLLATE {HXC_TEXT_COLLATION} AS phone
+  FROM new_version_crm_chat_jobs
+  WHERE phone IS NOT NULL AND phone <> ''
 ) phones
 LEFT JOIN (
   SELECT
-    phone,
+    phone COLLATE {HXC_TEXT_COLLATION} AS phone,
     COUNT(*) AS webhook_questionnaire_count,
     MAX(submitted_at) AS last_webhook_questionnaire_at,
     SUBSTRING_INDEX(GROUP_CONCAT(status ORDER BY COALESCE(submitted_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS last_webhook_questionnaire_status
   FROM new_version_webhook_questionnaires
   WHERE phone IS NOT NULL AND phone <> ''
-  GROUP BY phone
+  GROUP BY phone COLLATE {HXC_TEXT_COLLATION}
 ) wq ON wq.phone = phones.phone
 LEFT JOIN (
   SELECT
-    phone,
+    phone COLLATE {HXC_TEXT_COLLATION} AS phone,
     COUNT(*) AS crm_chat_job_count,
     SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) AS crm_chat_done_count,
     SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS crm_chat_failed_count,
@@ -408,7 +428,7 @@ LEFT JOIN (
     SUBSTRING_INDEX(GROUP_CONCAT(callback_status ORDER BY COALESCE(finished_at, updated_at, created_at) DESC SEPARATOR '||'), '||', 1) AS last_crm_chat_callback_status
   FROM new_version_crm_chat_jobs
   WHERE phone IS NOT NULL AND phone <> ''
-  GROUP BY phone
+  GROUP BY phone COLLATE {HXC_TEXT_COLLATION}
 ) cj ON cj.phone = phones.phone
 """
 

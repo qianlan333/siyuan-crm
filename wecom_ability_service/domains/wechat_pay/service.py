@@ -8,13 +8,16 @@ from typing import Any
 
 from flask import current_app
 
+from aicrm_next.commerce.domain import safe_completion_redirect_url
+
 from ...db import get_db
 from ...infra.json_utils import safe_json_loads
 from ...infra.settings import get_setting
+from ...infra.text_encoding import repair_utf8_mojibake
 from . import repo
 from .client import WeChatPayClient, WeChatPayClientConfig, WeChatPayClientError
 from .exceptions import WeChatPayConfigError, WeChatPayOrderError
-from .product_service import get_lead_qr_for_product_code, get_product, list_products
+from .product_service import get_completion_redirect_for_product_code, get_lead_qr_for_product_code, get_product, list_products
 
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,15 @@ logger = logging.getLogger(__name__)
 
 def _normalized_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _mask_mobile(value: Any) -> str:
+    digits = "".join(ch for ch in str(value or "") if ch.isdigit())
+    if not digits:
+        return ""
+    if len(digits) <= 5:
+        return "*" * len(digits)
+    return f"{digits[:3]}****{digits[-4:]}"
 
 
 def _setting(key: str, default: str = "") -> str:
@@ -133,10 +145,27 @@ def _order_public_payload(order: dict[str, Any]) -> dict[str, Any]:
         "paid_at": _normalized_text(order.get("paid_at")),
         "created_at": _normalized_text(order.get("created_at")),
     }
+    completion_redirect = get_completion_redirect_for_product_code(payload["product_code"])
+    payload["completion_redirect_enabled"] = bool(completion_redirect.get("completion_redirect_enabled"))
+    payload["completion_redirect_url"] = safe_completion_redirect_url(completion_redirect.get("completion_redirect_url"))
+    effective_completion_redirect = dict(completion_redirect.get("completion_redirect") or {})
+    payload["completion_redirect"] = {
+        "enabled": bool(effective_completion_redirect.get("enabled")),
+        "url": safe_completion_redirect_url(effective_completion_redirect.get("url")),
+    }
+    payload["completion_action"] = (
+        {"type": "redirect", "redirect_url": payload["completion_redirect"]["url"]}
+        if payload["completion_redirect"]["enabled"] and payload["completion_redirect"]["url"]
+        else {"type": "default", "redirect_url": ""}
+    )
     if _is_order_effectively_paid(order):
-        lead_qr = get_lead_qr_for_product_code(payload["product_code"])
-        if lead_qr.get("qr_url"):
-            payload["lead_qr"] = lead_qr
+        if payload["completion_redirect"]["enabled"] and payload["completion_redirect"]["url"]:
+            payload["completion_redirect_url"] = payload["completion_redirect"]["url"]
+        else:
+            lead_qr = get_lead_qr_for_product_code(payload["product_code"])
+            if lead_qr.get("qr_url"):
+                payload["lead_qr"] = lead_qr
+                payload["completion_action"] = {"type": "lead_qr", "redirect_url": ""}
     return payload
 
 
@@ -170,6 +199,8 @@ def _mobile_binding_audit(
     openid: str,
     unionid: str,
     external_userid: str,
+    owner_userid: str = "",
+    bind_by_userid: str = "",
 ) -> dict[str, Any]:
     if not mobile:
         return {}
@@ -189,33 +220,34 @@ def _mobile_binding_audit(
             )
         ) or {}
         resolved_external_userid = _normalized_text(resolved.get("external_userid")) or _normalized_text(external_userid)
-        owner_userid = (
-            _normalized_text(resolved.get("follow_user_userid"))
+        resolved_owner_userid = (
+            _normalized_text(owner_userid)
+            or _normalized_text(resolved.get("follow_user_userid"))
             or _normalized_text(resolved.get("owner_userid"))
             or _normalized_text(resolved.get("last_owner_userid"))
             or _normalized_text(resolved.get("first_owner_userid"))
         )
         if not resolved_external_userid:
-            return {"status": "skipped", "reason": "external_userid_unresolved", "mobile": mobile}
+            return {"status": "skipped", "reason": "external_userid_unresolved", "mobile_masked": _mask_mobile(mobile)}
         binding = BindExternalContactIdentityCommand()(
             BindExternalContactIdentityCommandDTO(
                 external_userid=resolved_external_userid,
-                owner_userid=owner_userid,
-                bind_by_userid=owner_userid or "wechat_pay_h5",
+                owner_userid=resolved_owner_userid,
+                bind_by_userid=_normalized_text(bind_by_userid) or resolved_owner_userid or "wechat_pay_h5",
                 mobile=mobile,
                 force_rebind=False,
             )
         )
         return {
             "status": "bound",
-            "mobile": mobile,
+            "mobile_masked": _mask_mobile(mobile),
             "external_userid": resolved_external_userid,
-            "owner_userid": owner_userid,
+            "owner_userid": resolved_owner_userid,
             "person_id": (binding or {}).get("person_id") if isinstance(binding, dict) else None,
         }
     except Exception as exc:  # Do not block payment if identity binding cannot be resolved.
-        logger.warning("wechat pay mobile bind skipped mobile=%s reason=%s", mobile, exc)
-        return {"status": "skipped", "reason": str(exc), "mobile": mobile}
+        logger.warning("wechat pay mobile bind skipped mobile=%s reason=%s", _mask_mobile(mobile), exc)
+        return {"status": "skipped", "reason": str(exc), "mobile_masked": _mask_mobile(mobile)}
 
 
 def _transaction_amount_total(transaction: dict[str, Any]) -> int:
@@ -381,6 +413,10 @@ def create_jsapi_order(
     notify_url: str,
     mobile: str = "",
     request_meta: dict[str, Any] | None = None,
+    owner_userid: str = "",
+    bind_by_userid: str = "",
+    context_source: str = "",
+    mobile_source: str = "",
 ) -> dict[str, Any]:
     config = _require_ready_for_order()
     product = get_product(product_code)
@@ -401,13 +437,22 @@ def create_jsapi_order(
     normalized_mobile = _normalize_order_mobile(product=product, mobile=mobile)
     request_meta_payload = dict(request_meta or {})
     identity_external_userid = _normalized_text(external_userid)
-    userid_snapshot = ""
+    userid_snapshot = _normalized_text(owner_userid)
+    if _normalized_text(context_source):
+        request_meta_payload["sidebar_context"] = {
+            "context_source": _normalized_text(context_source),
+            "external_userid_present": bool(identity_external_userid),
+            "owner_userid_present": bool(userid_snapshot),
+            "mobile_source": _normalized_text(mobile_source) or ("payload" if normalized_mobile else "none"),
+        }
     if normalized_mobile:
         mobile_binding = _mobile_binding_audit(
             mobile=normalized_mobile,
             openid=openid,
             unionid=unionid,
             external_userid=external_userid,
+            owner_userid=owner_userid,
+            bind_by_userid=bind_by_userid,
         )
         request_meta_payload["mobile_binding"] = mobile_binding
         if isinstance(mobile_binding, dict) and mobile_binding.get("status") == "bound":
@@ -431,7 +476,7 @@ def create_jsapi_order(
             "external_userid": identity_external_userid,
             "userid_snapshot": userid_snapshot,
             "mobile_snapshot": normalized_mobile,
-            "payer_name_snapshot": _normalized_text(payer_name),
+            "payer_name_snapshot": repair_utf8_mojibake(payer_name),
             "status": "created",
             "success_url": success_url,
             "metadata": product.get("metadata") or {},
@@ -481,6 +526,10 @@ def _apply_transaction(transaction: dict[str, Any], *, event_type: str, headers:
     out_trade_no = _normalized_text(transaction.get("out_trade_no"))
     if not out_trade_no:
         raise WeChatPayOrderError("out_trade_no_missing")
+    previous_order = repo.get_order(out_trade_no)
+    was_paid = _normalized_text((previous_order or {}).get("status")) == "paid" or _normalized_text(
+        (previous_order or {}).get("trade_state")
+    ) == "SUCCESS"
     order = repo.update_order_from_transaction(transaction)
     if not order:
         _recover_missing_order_from_transaction(transaction, event_type=event_type)
@@ -488,6 +537,11 @@ def _apply_transaction(transaction: dict[str, Any], *, event_type: str, headers:
     if not order:
         raise WeChatPayOrderError("order_not_found")
     order = _enrich_recovered_order_from_transaction(order, transaction)
+    is_now_paid = _normalized_text(order.get("status")) == "paid" or _normalized_text(order.get("trade_state")) == "SUCCESS"
+    if is_now_paid and not was_paid:
+        from ..external_push import service as external_push_service
+
+        external_push_service.enqueue_transaction_paid_event(order)
     repo.insert_event(
         out_trade_no=out_trade_no,
         event_type=event_type,
@@ -527,12 +581,15 @@ def build_checkout_page_state(
     product_code: str,
     identity: dict[str, str] | None,
     oauth_start_url: str,
+    context_token: str = "",
+    context_status: str = "",
 ) -> dict[str, Any]:
     product = get_product(product_code)
     if not product:
         raise WeChatPayOrderError("product_not_configured")
     identity_payload = dict(identity or {})
     paid_order = _existing_paid_order_for_product(product, identity_payload) if identity_payload else None
+    completion_redirect = get_completion_redirect_for_product_code(product["product_code"])
     return {
         "product": product,
         "identity_ready": bool(_normalized_text(identity_payload.get("openid"))),
@@ -543,5 +600,9 @@ def build_checkout_page_state(
         "require_mobile": bool(product.get("require_mobile")),
         "cta_text": _normalized_text(product.get("cta_text")) or "确认支付",
         "lead_plan_configured": bool(product.get("lead_plan_configured")),
+        "completion_redirect": completion_redirect,
+        "completion_action": completion_redirect.get("completion_action") or {"type": "default", "redirect_url": ""},
         "paid_order": paid_order,
+        "context_token": _normalized_text(context_token),
+        "context_status": _normalized_text(context_status) or ("valid" if _normalized_text(context_token) else "missing"),
     }

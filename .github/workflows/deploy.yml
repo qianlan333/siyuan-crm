@@ -22,7 +22,8 @@ jobs:
               git stash push --include-untracked -m "deploy-backup-$(date -u +%Y%m%dT%H%M%SZ)"
             fi
             before_sha="$(git rev-parse HEAD)"
-            git pull --ff-only origin main
+            git fetch origin main:refs/remotes/origin/main
+            git reset --hard refs/remotes/origin/main
             after_sha="$(git rev-parse HEAD)"
             set -a
             source /home/ubuntu/.openclaw-wecom-pg.env
@@ -46,3 +47,10 @@ jobs:
               sleep 0.5
             done
             curl -sSf http://127.0.0.1:5001/health
+            sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/
+            sudo cp deploy/openclaw-external-push-worker.timer /etc/systemd/system/
+            sudo systemctl daemon-reload
+            sudo systemctl enable openclaw-external-push-worker.timer
+            sudo systemctl restart openclaw-external-push-worker.timer
+            sudo systemctl start openclaw-external-push-worker.service
+            sudo systemctl status openclaw-external-push-worker.timer --no-pager

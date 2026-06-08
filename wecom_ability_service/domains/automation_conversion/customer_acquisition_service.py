@@ -285,7 +285,7 @@ def handle_customer_acquisition_event(
         follow_user_userid=follow_user_userid,
         initial_audience_code=_normalized_text(matched_link.get("initial_audience_code")) or DEFAULT_INITIAL_AUDIENCE_CODE,
         event_action="customer_acquisition_enter",
-        send_welcome_message=False,
+        send_welcome_message=True,
     )
 
 

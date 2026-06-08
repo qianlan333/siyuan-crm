@@ -6,6 +6,7 @@ from typing import Any
 from ...db import get_db
 from . import local_projection
 from . import repo
+from . import service as automation_service
 from .service import (
     FOCUS_SEND_INTERVAL_SECONDS,
     TOUCH_PROGRAM_SIGNUP_CONVERSION,
@@ -20,13 +21,6 @@ FOCUS_SEND_QUEUE_SOURCE_TYPE = "focus_send"
 FOCUS_SEND_QUEUE_SOURCE_TABLE = "automation_focus_send_batch"
 FOCUS_SEND_QUEUE_HANDLER = "focus_send"
 FOCUS_SEND_OPEN_QUEUE_STATUSES = ("waiting_approval", "queued", "claimed")
-
-
-def push_openclaw(*args: Any, **kwargs: Any) -> dict[str, Any]:
-    """Lazy proxy to service.push_openclaw so monkeypatch on service.push_openclaw propagates here."""
-    from . import service as _svc
-    return _svc.push_openclaw(*args, **kwargs)
-
 
 
 def _iso_now() -> str:
@@ -347,7 +341,7 @@ def _dispatch_focus_send_batch_item(
 ) -> dict[str, Any]:
     serialized_item = _serialize_focus_send_batch_item(item)
     external_contact_id = _normalized_text(serialized_item.get("external_contact_id"))
-    push_result = push_openclaw(
+    push_result = automation_service.push_openclaw(
         external_contact_id=external_contact_id,
         operator_id=_normalized_text(operator_id),
     )

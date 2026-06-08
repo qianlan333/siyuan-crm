@@ -100,11 +100,12 @@
   .wp-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
   .wp-grid--three { grid-template-columns: 1.1fr .7fr .7fr; }
   .wp-field label { display: flex; align-items: center; color: #53647d; font-weight: 850; font-size: 13px; margin-bottom: 7px; }
-  .wp-field input, .wp-field select {
+  .wp-field input, .wp-field select, .wp-field textarea {
     width: 100%; height: 44px; border: 1px solid var(--pay-line); border-radius: 13px;
     background: #fff; color: var(--pay-text); outline: none; padding: 0 13px;
   }
-  .wp-field input:focus, .wp-field select:focus { border-color: #9bb8ff; box-shadow: 0 0 0 3px rgba(47,109,246,.12); }
+  .wp-field textarea { min-height: 84px; padding: 11px 13px; resize: vertical; line-height: 1.5; }
+  .wp-field input:focus, .wp-field select:focus, .wp-field textarea:focus { border-color: #9bb8ff; box-shadow: 0 0 0 3px rgba(47,109,246,.12); }
   .wp-radio-group { display: flex; gap: 8px; flex-wrap: wrap; }
   .wp-radio-pill {
     height: 44px; padding: 0 16px; border: 1px solid var(--pay-line); border-radius: 13px;
@@ -127,6 +128,11 @@
   .wp-slice.is-dragging { opacity: .55; transform: scale(.992); }
   .wp-drag { height: 34px; border: 1px solid var(--pay-line); border-radius: 10px; background: #f7f9fe; display: flex; align-items: center; justify-content: center; color: #8a98ad; cursor: grab; font-weight: 900; }
   .wp-slice-name { font-weight: 850; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .wp-switch-row { display: flex; align-items: center; gap: 10px; font-weight: 850; color: #334155; }
+  .wp-switch-row input { width: auto; height: auto; accent-color: var(--pay-blue); }
+  .wp-param-list { display: grid; gap: 10px; margin-top: 10px; }
+  .wp-param-row { display: grid; grid-template-columns: minmax(120px,.75fr) minmax(160px,1fr) auto; gap: 10px; align-items: center; }
+  .wp-push-result { margin-top: 10px; color: var(--pay-muted); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
   .wp-preview { border: 1px solid var(--pay-line); border-radius: 24px; background: #fff; box-shadow: 0 14px 34px rgba(21,42,80,.07); padding: 18px; position: sticky; top: 18px; }
   .wp-preview h2 { font-size: 20px; margin: 0 0 14px; font-weight: 900; }
   .wp-share-preview { border-radius: 18px; border: 1px solid var(--pay-line); background: #fbfcff; padding: 18px; display: grid; gap: 14px; justify-items: stretch; }
@@ -238,6 +244,65 @@
           <label>引流渠道码</label>
           <select id="leadChannel"></select>
         </div>
+        <p class="wp-muted" id="completionRedirectLeadHint" style="display:none;margin:14px 0 0">当前已开启完成后跳转，支付成功后将不会自动弹出引流二维码。</p>
+      </section>
+
+      <section class="wp-section">
+        <h2>报名完成后跳转</h2>
+        <p class="wp-muted" style="margin:-8px 0 16px">开启后，用户完成商品报名/支付成功后将直接跳转到指定链接，不再弹出引流二维码。关闭后保持原有二维码引流逻辑。</p>
+        <div class="wp-field">
+          <label class="wp-switch-row"><input id="completionRedirectEnabled" type="checkbox"> 开启完成后跳转</label>
+        </div>
+        <div class="wp-field" style="margin-top:14px">
+          <label>跳转链接</label>
+          <input id="completionRedirectUrl" placeholder="https://example.com/welcome">
+          <p class="wp-muted" style="margin:8px 0 0">建议填写 https 链接。开启后该链接优先级高于支付后引流二维码。</p>
+        </div>
+      </section>
+
+      <section class="wp-section" id="externalPushSection">
+        <h2>外部推送</h2>
+        <p class="wp-muted" style="margin:-8px 0 16px">提交后向指定 webhook 发送 POST。</p>
+        <div class="wp-field" style="margin-bottom:14px">
+          <label class="wp-switch-row"><input id="externalPushEnabled" type="checkbox"> 开启外部推送</label>
+        </div>
+        <div class="wp-grid">
+          <div class="wp-field">
+            <label>推送地址</label>
+            <input id="externalPushUrl" placeholder="https://hooks.example.com/...">
+          </div>
+          <div class="wp-field">
+            <label>type</label>
+            <input id="externalPushType" placeholder="paid_notify">
+          </div>
+        </div>
+        <div class="wp-grid wp-grid--three" style="margin-top:14px">
+          <div class="wp-field">
+            <label>expires_at_ts</label>
+            <input id="externalPushExpiresAtTs" type="number" step="1">
+          </div>
+          <div class="wp-field">
+            <label>day</label>
+            <input id="externalPushDay" type="number" step="1">
+          </div>
+          <div class="wp-field">
+            <label>frequency</label>
+            <input id="externalPushFrequency" type="number" step="1">
+          </div>
+        </div>
+        <div class="wp-field" style="margin-top:14px">
+          <label>remark</label>
+          <textarea id="externalPushRemark" placeholder="用户购买后通知外部系统"></textarea>
+        </div>
+        <div class="wp-field" style="margin-top:14px">
+          <label>自定义参数</label>
+          <div class="wp-param-list" id="externalPushParams"></div>
+          <button class="wp-button wp-button--small" id="addExternalPushParam" type="button" style="margin-top:10px">新增参数</button>
+        </div>
+        <div class="wp-actions" style="justify-content:flex-start;margin-top:14px">
+          <button class="wp-button wp-button--ghost" id="testExternalPushBtn" type="button">测试推送</button>
+        </div>
+        <div class="wp-push-result" id="externalPushResult"></div>
       </section>
 
       <section class="wp-section">
@@ -315,7 +380,19 @@
       require_mobile: true,
       lead_program_id: 0,
       lead_channel_id: 0,
+      completion_redirect_enabled: false,
+      completion_redirect_url: "",
       slices: []
+    };
+    let externalPush = {
+      enabled: false,
+      webhook_url: "",
+      push_type: "",
+      expires_at_ts: "",
+      day: "",
+      frequency: "",
+      remark: "",
+      custom_params: {}
     };
     let leadChannels = [];
     let dragId = "";
@@ -400,6 +477,10 @@
       draft.cta_text = $("ctaText").value.trim() || "立即报名";
       draft.require_mobile = document.querySelector('input[name="requireMobile"]:checked')?.value === "yes";
       draft.lead_channel_id = Number($("leadChannel").value || 0);
+      draft.completion_redirect_enabled = Boolean($("completionRedirectEnabled") && $("completionRedirectEnabled").checked);
+      draft.completion_redirect_url = $("completionRedirectUrl") ? $("completionRedirectUrl").value.trim() : "";
+      const redirectHint = $("completionRedirectLeadHint");
+      if (redirectHint) redirectHint.style.display = draft.completion_redirect_enabled ? "block" : "none";
     }
 
     function fillFields() {
@@ -411,6 +492,101 @@
         input.checked = (input.value === "yes") === Boolean(draft.require_mobile);
       });
       $("leadChannel").value = String(draft.lead_channel_id || 0);
+      if ($("completionRedirectEnabled")) $("completionRedirectEnabled").checked = Boolean(draft.completion_redirect_enabled);
+      if ($("completionRedirectUrl")) $("completionRedirectUrl").value = draft.completion_redirect_url || "";
+      syncDraftFromFields();
+    }
+
+    function fillExternalPushFields() {
+      const section = $("externalPushSection");
+      if (!section) return;
+      if (productId <= 0) {
+        section.hidden = true;
+        return;
+      }
+      section.hidden = false;
+      $("externalPushEnabled").checked = Boolean(externalPush.enabled);
+      $("externalPushUrl").value = externalPush.webhook_url || "";
+      $("externalPushType").value = externalPush.push_type || "";
+      $("externalPushExpiresAtTs").value = externalPush.expires_at_ts == null ? "" : String(externalPush.expires_at_ts);
+      $("externalPushDay").value = externalPush.day == null ? "" : String(externalPush.day);
+      $("externalPushFrequency").value = externalPush.frequency == null ? "" : String(externalPush.frequency);
+      $("externalPushRemark").value = externalPush.remark || "";
+      renderExternalPushParams();
+    }
+
+    function syncExternalPushFromFields() {
+      if (!$("externalPushEnabled")) return;
+      externalPush.enabled = $("externalPushEnabled").checked;
+      externalPush.webhook_url = $("externalPushUrl").value.trim();
+      externalPush.push_type = $("externalPushType").value.trim();
+      externalPush.expires_at_ts = $("externalPushExpiresAtTs").value.trim();
+      externalPush.day = $("externalPushDay").value.trim();
+      externalPush.frequency = $("externalPushFrequency").value.trim();
+      externalPush.remark = $("externalPushRemark").value.trim();
+      const params = {};
+      const seen = new Set();
+      document.querySelectorAll(".wp-param-row").forEach(function (row) {
+        const key = row.querySelector(".js-param-key").value.trim();
+        const value = row.querySelector(".js-param-value").value;
+        if (!key && !value) return;
+        if (!key) throw new Error("自定义参数 key 不能为空");
+        if (seen.has(key)) throw new Error("自定义参数 key 不能重复");
+        seen.add(key);
+        params[key] = value;
+      });
+      externalPush.custom_params = params;
+    }
+
+    function numberOrNull(value, label) {
+      const textValue = String(value == null ? "" : value).trim();
+      if (!textValue) return null;
+      const numberValue = Number(textValue);
+      if (!Number.isFinite(numberValue)) throw new Error(label + " 必须是数字");
+      return Math.trunc(numberValue);
+    }
+
+    function externalPushPayload() {
+      syncExternalPushFromFields();
+      if (externalPush.enabled && !externalPush.webhook_url) throw new Error("开启外部推送时推送地址必填");
+      if (externalPush.webhook_url && !externalPush.webhook_url.startsWith("https://")) throw new Error("webhook_url 必须是 https URL");
+      return {
+        enabled: externalPush.enabled,
+        webhook_url: externalPush.webhook_url,
+        push_type: externalPush.push_type,
+        expires_at_ts: numberOrNull(externalPush.expires_at_ts, "expires_at_ts"),
+        day: numberOrNull(externalPush.day, "day"),
+        frequency: numberOrNull(externalPush.frequency, "frequency"),
+        remark: externalPush.remark,
+        custom_params: externalPush.custom_params || {}
+      };
+    }
+
+    function completionRedirectPayload() {
+      const enabled = Boolean(draft.completion_redirect_enabled);
+      const url = String(draft.completion_redirect_url || "").trim();
+      const isSafeInternalPath = /^\/(?!\/)[^\s\\]*$/.test(url);
+      if (enabled && !url) throw new Error("请填写跳转链接");
+      if (url && !/^https:\/\/[^/\s?#]+/i.test(url) && !isSafeInternalPath) throw new Error("跳转链接格式不合法");
+      return {
+        completion_redirect_enabled: enabled,
+        completion_redirect_url: url
+      };
+    }
+
+    function renderExternalPushParams() {
+      const target = $("externalPushParams");
+      if (!target) return;
+      const params = externalPush.custom_params && typeof externalPush.custom_params === "object" ? externalPush.custom_params : {};
+      const entries = Object.entries(params);
+      if (!entries.length) entries.push(["", ""]);
+      target.innerHTML = entries.map(function (entry) {
+        return '<div class="wp-param-row">' +
+          '<input class="js-param-key" placeholder="key" value="' + escapeHtml(entry[0]) + '">' +
+          '<input class="js-param-value" placeholder="value" value="' + escapeHtml(entry[1]) + '">' +
+          '<button class="wp-button wp-button--small wp-button--danger js-remove-push-param" type="button">删除</button>' +
+        '</div>';
+      }).join("");
     }
 
     function showEditorError(message) {
@@ -524,14 +700,20 @@
         ? api("/api/admin/wechat-pay/products/" + productId + "/share")
             .catch(function () { return { share: null }; })
         : Promise.resolve({ share: null });
-      const results = await Promise.all([productRequest, channelsRequest, shareRequest]);
+      const externalPushRequest = productId > 0
+        ? api("/api/admin/wechat-pay/products/" + productId + "/external-push")
+            .catch(function () { return { config: externalPush }; })
+        : Promise.resolve({ config: externalPush });
+      const results = await Promise.all([productRequest, channelsRequest, shareRequest, externalPushRequest]);
       if (productId > 0) {
         draft = results[0].product || draft;
       }
       leadChannels = results[1].items || leadChannels;
       editorShare = results[2].share || null;
+      externalPush = results[3].config || externalPush;
       renderLeadChannels();
       fillFields();
+      fillExternalPushFields();
       renderSlices();
       renderEditorSharePreview();
       showEditorContent();
@@ -605,7 +787,7 @@
 
     async function saveProduct() {
       syncDraftFromFields();
-      const body = {
+      const body = Object.assign({
         name: draft.name,
         amount_total: draft.amount_total,
         status: draft.status,
@@ -615,13 +797,22 @@
         slices: draft.slices.map(function (slice, index) {
           return { image_library_id: Number(slice.image_library_id), sort_order: index + 1 };
         })
-      };
+      }, completionRedirectPayload());
       const isEdit = productId > 0;
       const payload = await api(isEdit ? "/api/admin/wechat-pay/products/" + productId : "/api/admin/wechat-pay/products", {
         method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: mutationBody(body)
       });
+      if (isEdit) {
+        const pushPayload = await api("/api/admin/wechat-pay/products/" + productId + "/external-push", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: mutationBody(externalPushPayload())
+        });
+        externalPush = pushPayload.config || externalPush;
+        fillExternalPushFields();
+      }
       toast("已保存");
       if (!isEdit && payload.product && payload.product.id) {
         window.location.href = "/admin/wechat-pay/products/" + payload.product.id + "/edit";
@@ -675,6 +866,39 @@
           draft.slices = draft.slices.filter(function (slice) { return String(slice.local_id || slice.id || slice.image_library_id) !== removeId; });
           renderSlices();
         }
+        if (button.classList.contains("js-remove-push-param")) {
+          const rows = Array.from(document.querySelectorAll(".wp-param-row"));
+          if (rows.length <= 1) {
+            button.closest(".wp-param-row").querySelector(".js-param-key").value = "";
+            button.closest(".wp-param-row").querySelector(".js-param-value").value = "";
+          } else {
+            button.closest(".wp-param-row").remove();
+          }
+          syncExternalPushFromFields();
+        }
+        if (button.id === "addExternalPushParam") {
+          syncExternalPushFromFields();
+          externalPush.custom_params = Object.assign({}, externalPush.custom_params || {}, { "": "" });
+          const target = $("externalPushParams");
+          target.insertAdjacentHTML("beforeend", '<div class="wp-param-row"><input class="js-param-key" placeholder="key"><input class="js-param-value" placeholder="value"><button class="wp-button wp-button--small wp-button--danger js-remove-push-param" type="button">删除</button></div>');
+        }
+        if (button.id === "testExternalPushBtn") {
+          if (productId <= 0) throw new Error("保存商品后才能测试推送");
+          await api("/api/admin/wechat-pay/products/" + productId + "/external-push", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: mutationBody(externalPushPayload())
+          });
+          const resultTarget = $("externalPushResult");
+          if (resultTarget) resultTarget.textContent = "正在发送测试推送...";
+          const testPayload = await api("/api/admin/wechat-pay/products/" + productId + "/external-push/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: mutationBody({})
+          });
+          const delivery = (testPayload.result || {}).delivery || {};
+          if (resultTarget) resultTarget.textContent = "测试推送 " + (delivery.status || "完成") + "，delivery_id: " + (delivery.delivery_id || "-") + (delivery.error_message ? "，失败原因：" + delivery.error_message : "");
+        }
         if (button.id === "saveProductBtn") {
           await saveProduct();
         }
@@ -705,10 +929,19 @@
     }
 
     document.addEventListener("input", function (event) {
-      if (["productName", "productPrice", "ctaText"].includes(event.target.id)) syncDraftFromFields();
+      if (["productName", "productPrice", "ctaText", "completionRedirectUrl"].includes(event.target.id)) syncDraftFromFields();
+      if (event.target.id && event.target.id.startsWith("externalPush")) {
+        try { syncExternalPushFromFields(); } catch (err) {}
+      }
+      if (event.target.classList && (event.target.classList.contains("js-param-key") || event.target.classList.contains("js-param-value"))) {
+        try { syncExternalPushFromFields(); } catch (err) {}
+      }
     });
     document.addEventListener("change", function (event) {
-      if (["productStatus", "leadChannel"].includes(event.target.id) || event.target.name === "requireMobile") syncDraftFromFields();
+      if (["productStatus", "leadChannel", "completionRedirectEnabled"].includes(event.target.id) || event.target.name === "requireMobile") syncDraftFromFields();
+      if (event.target.id && event.target.id.startsWith("externalPush")) {
+        try { syncExternalPushFromFields(); } catch (err) {}
+      }
       if (event.target.id === "sliceInput") {
         uploadSlices(event.target.files).catch(function (err) { toast(err.message || "上传失败"); });
         event.target.value = "";

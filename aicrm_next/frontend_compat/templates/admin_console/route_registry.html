@@ -1,0 +1,99 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>Route Registry</h2>
+      <p>当前登记 {{ stats.total_routes }} 条 route，runtime owner 与 legacy fallback 状态来自 registry service。</p>
+    </div>
+  </div>
+  <section class="admin-card-grid">
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">Total</div>
+      <div class="admin-card-value admin-card-value--compact">{{ stats.total_routes }}</div>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">Next Native</div>
+      <div class="admin-card-value admin-card-value--compact">{{ stats.next_native_routes }}</div>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">Legacy Fallback</div>
+      <div class="admin-card-value admin-card-value--compact">{{ stats.legacy_fallback_routes }}</div>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">Wildcard</div>
+      <div class="admin-card-value admin-card-value--compact">{{ stats.wildcard_routes }}</div>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">Delete Ready</div>
+      <div class="admin-card-value admin-card-value--compact">{{ stats.delete_ready_routes }}</div>
+    </article>
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">Unknown Owner</div>
+      <div class="admin-card-value admin-card-value--compact">{{ stats.unknown_owner_routes }}</div>
+    </article>
+  </section>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>Routes</h2>
+      <p>按 owner、fallback、delete status、capability owner 和 side-effect risk 筛选。</p>
+    </div>
+  </div>
+  <form class="admin-filter-bar" method="get">
+    <input name="runtime_owner" value="{{ filters.runtime_owner }}" placeholder="runtime_owner">
+    <input name="capability_owner" value="{{ filters.capability_owner }}" placeholder="capability_owner">
+    <input name="delete_status" value="{{ filters.delete_status }}" placeholder="delete_status">
+    <input name="external_side_effect_risk" value="{{ filters.external_side_effect_risk }}" placeholder="external_side_effect_risk">
+    <select name="legacy_fallback_allowed">
+      <option value="" {% if not filters.legacy_fallback_allowed %}selected{% endif %}>legacy fallback</option>
+      <option value="true" {% if filters.legacy_fallback_allowed == "true" %}selected{% endif %}>true</option>
+      <option value="false" {% if filters.legacy_fallback_allowed == "false" %}selected{% endif %}>false</option>
+    </select>
+    <button class="admin-button admin-button--primary" type="submit">筛选</button>
+  </form>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>path_pattern</th>
+          <th>methods</th>
+          <th>capability_owner</th>
+          <th>runtime_owner</th>
+          <th>legacy</th>
+          <th>delete_status</th>
+          <th>replacement_status</th>
+          <th>risk</th>
+          <th>adapter</th>
+          <th>checker</th>
+          <th>notes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for route in routes %}
+        <tr>
+          <td><code>{{ route.path_pattern }}</code></td>
+          <td>{{ route.methods | join(", ") }}</td>
+          <td>{{ route.capability_owner }}</td>
+          <td>{{ route.runtime_owner }}</td>
+          <td>{{ route.legacy_fallback_allowed }}</td>
+          <td>{{ route.delete_status }}</td>
+          <td>{{ route.replacement_status }}</td>
+          <td>{{ route.external_side_effect_risk }}</td>
+          <td>{{ route.adapter_mode }}</td>
+          <td><code>{{ route.checker }}</code></td>
+          <td>{{ route.notes }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="11">当前没有匹配 route。</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

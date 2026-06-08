@@ -1,0 +1,1024 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/automation-engine/admin_console/automation_conversion_workspace.css">
+<link rel="stylesheet" href="/static/automation-engine/admin_console/channel_admission_pages.css">
+<style>
+  .setup-shell { display: grid; gap: 14px; max-width: 1800px; min-width: 960px; margin: 0 auto; }
+  .setup-panel h2, .setup-panel h3 { margin: 0; color: #111827; }
+  .setup-muted { margin: 0; color: #64748b; line-height: 1.62; }
+  .setup-steps { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 12px; }
+  .setup-step { display: grid; gap: 5px; min-height: 74px; padding: 13px 15px; border: 1px solid rgba(37,99,235,.14); border-radius: 14px; background: #fff; color: #1f2937; text-decoration: none; }
+  .setup-step.is-active { background: #eaf2ff; color: #1456f0; border-color: rgba(37,99,235,.34); box-shadow: 0 0 0 3px rgba(37,99,235,.08); }
+  .setup-step span { font-size: 12px; font-weight: 800; }
+  .setup-step strong { font-size: 16px; line-height: 1.35; }
+  .setup-panel { display: grid; gap: 15px; padding: 20px; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; background: #fff; box-shadow: 0 14px 34px rgba(15,23,42,.05); }
+  .setup-panel--operations { padding: 0; border: 0; background: transparent; box-shadow: none; }
+  .setup-panel-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; }
+  .setup-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .setup-field { display: grid; gap: 7px; }
+  .setup-field span { color: #475569; font-size: 13px; font-weight: 800; }
+  .setup-field input, .setup-field select, .setup-field textarea, .setup-table input, .setup-table textarea { width: 100%; padding: 11px 13px; border: 1px solid rgba(15,23,42,.14); border-radius: 11px; background: #fff; color: #111827; font: inherit; }
+  .setup-field textarea { min-height: 92px; resize: vertical; }
+  .setup-summary-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .setup-summary-item { display: grid; gap: 7px; padding: 14px; border: 1px solid rgba(15,23,42,.08); border-radius: 13px; background: #f8fafc; }
+  .setup-summary-item span { color: #64748b; font-size: 13px; font-weight: 800; }
+  .setup-summary-item strong { color: #111827; font-size: 24px; }
+  .setup-tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .setup-tab { border: 1px solid rgba(37,99,235,.16); border-radius: 999px; padding: 9px 14px; background: #fff; color: #334155; cursor: pointer; font-weight: 800; }
+  .setup-tab.is-active { background: #eef4ff; color: #1456f0; border-color: rgba(37,99,235,.28); }
+  .setup-tab-panel[hidden] { display: none !important; }
+  .setup-two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, .72fr); gap: 16px; align-items: start; }
+  .setup-table-wrap { overflow: auto; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; }
+  .setup-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+  .setup-table th, .setup-table td { padding: 13px 14px; border-bottom: 1px solid rgba(15,23,42,.06); text-align: left; vertical-align: top; }
+  .setup-table th { background: #f8fafc; color: #64748b; font-size: 13px; font-weight: 900; }
+  .setup-table td { color: #1f2937; }
+  .setup-table input, .setup-table textarea { width: 100%; padding: 9px 10px; border: 1px solid rgba(15,23,42,.14); border-radius: 8px; }
+  .setup-table textarea { min-height: 64px; resize: vertical; }
+  .setup-table tr:last-child td { border-bottom: 0; }
+  .setup-chip-list, .setup-option-pool { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .setup-chip { display: inline-flex; align-items: center; min-height: 28px; padding: 4px 10px; border-radius: 999px; background: #eef4ff; color: #1456f0; font-size: 12px; font-weight: 800; }
+  .setup-chip-remove { width: 20px; height: 20px; margin-left: 6px; border: 0; border-radius: 999px; background: rgba(37,99,235,.12); color: #1456f0; cursor: pointer; font-weight: 900; line-height: 1; }
+  .setup-seg-toolbar { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.25fr) minmax(240px, .8fr); gap: 12px; align-items: end; }
+  .setup-category-grid { display: grid; grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); gap: 14px; align-items: start; }
+  .setup-unassigned-panel, .setup-category-list { display: grid; gap: 10px; }
+  .setup-category-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .setup-unassigned-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .setup-count { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 28px; border-radius: 999px; background: #e0edff; color: #1456f0; font-weight: 900; }
+  .setup-category-card { display: grid; gap: 10px; padding: 14px; border: 1px solid rgba(15,23,42,.08); border-radius: 14px; background: #fff; }
+  .setup-category-card__head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: end; }
+  .setup-option-pool { min-height: 36px; }
+  .setup-option-pill { border: 1px solid rgba(15,23,42,.10); border-radius: 999px; padding: 7px 10px; background: #f8fafc; color: #334155; font-weight: 800; cursor: pointer; }
+  .setup-option-pill:hover { border-color: rgba(37,99,235,.34); color: #1456f0; background: #eef4ff; }
+  .setup-rule-grid { display: grid; gap: 14px; }
+  .setup-rule-card { display: grid; gap: 12px; padding: 16px; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; background: #fbfdff; }
+  .setup-audience-line { display: grid; gap: 12px; }
+  .setup-audience-row { display: grid; grid-template-columns: minmax(180px, .55fr) minmax(320px, 1.1fr) minmax(160px, .35fr); gap: 18px; align-items: center; padding: 16px; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; background: #fff; }
+  .setup-audience-row.is-muted { background: #f8fafc; }
+  .setup-audience-title { display: grid; gap: 8px; align-content: start; }
+  .setup-audience-title p, .setup-choice-label, .setup-audience-next span { margin: 0; color: #64748b; font-size: 13px; font-weight: 800; }
+  .setup-choice-field { display: grid; gap: 8px; }
+  .setup-choice-box { display: flex; gap: 10px; align-items: center; justify-content: space-between; min-height: 48px; padding: 10px 12px; border: 1px solid rgba(15,23,42,.10); border-radius: 10px; background: #fbfdff; }
+  .setup-selection-summary { color: #1f2937; font-weight: 800; line-height: 1.45; }
+  .setup-selection-summary.is-empty { color: #94a3b8; }
+  .setup-selection-ok { margin-right: 8px; color: #1456f0; }
+  .setup-audience-next { display: grid; gap: 4px; justify-items: start; }
+  .setup-audience-next strong { color: #111827; font-size: 17px; }
+  .setup-segmented { display: inline-flex; width: max-content; overflow: hidden; border: 1px solid rgba(15,23,42,.12); border-radius: 10px; background: #fff; }
+  .setup-segmented button { min-width: 64px; min-height: 38px; border: 0; border-left: 1px solid rgba(15,23,42,.08); background: #fff; color: #64748b; cursor: pointer; font-weight: 900; }
+  .setup-segmented button:first-child { border-left: 0; }
+  .setup-segmented button.is-enabled { color: #1456f0; background: #eef4ff; }
+  .setup-segmented button.is-disabled { color: #b91c1c; background: #fff7f7; }
+  .setup-picker-grid { display: grid; gap: 10px; max-height: min(62vh, 520px); overflow: auto; }
+  .setup-picker-row { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 12px; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; background: #fff; }
+  .setup-picker-title { display: grid; gap: 4px; color: #111827; font-weight: 900; }
+  .setup-picker-subtitle { color: #64748b; font-size: 13px; font-weight: 800; }
+  .setup-empty-hint { padding: 14px; border-radius: 10px; background: #f8fafc; color: #64748b; font-weight: 800; }
+  .setup-modal[hidden] { display: none !important; }
+  .setup-modal { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; padding: 22px; background: rgba(15,23,42,.30); }
+  .setup-modal__panel { display: grid; gap: 14px; width: min(720px, 100%); max-height: min(80vh, 680px); padding: 18px; border-radius: 12px; background: #fff; box-shadow: 0 24px 64px rgba(15,23,42,.24); }
+  .setup-modal__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .setup-result-card { display: grid; gap: 8px; padding: 16px; border: 1px solid rgba(15,23,42,.08); border-radius: 10px; background: #f8fafc; }
+  .setup-result-row { display: grid; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; word-break: break-all; }
+  .setup-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .setup-check-list { display: grid; gap: 10px; }
+  .setup-check-item { display: grid; gap: 4px; padding: 13px 14px; border-radius: 10px; background: #fff7ed; color: #9a3412; }
+  .setup-check-item.is-pass { background: #ecfdf3; color: #067647; }
+  .setup-check-item.is-fail { background: #fef2f2; color: #991b1b; }
+  .setup-actions { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+  .setup-action { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 18px; border: 1px solid rgba(37,99,235,.18); border-radius: 10px; background: #eef4ff; color: #1456f0; font-weight: 800; text-decoration: none; cursor: pointer; }
+  .setup-action.is-primary { background: #2563eb; color: #fff; box-shadow: 0 10px 22px rgba(37,99,235,.18); }
+  .setup-action.is-danger { border-color: #fecaca; background: #fff; color: #b42318; }
+  .setup-action:disabled { opacity: .55; cursor: not-allowed; }
+  .setup-feedback { display: none; padding: 12px 14px; border-radius: 10px; background: #fef2f2; color: #991b1b; }
+  .setup-feedback.is-success { background: #ecfdf3; color: #166534; }
+  .setup-footer { position: sticky; bottom: 14px; z-index: 20; display: flex; justify-content: space-between; gap: 12px; padding: 12px; border: 1px solid rgba(15,23,42,.08); border-radius: 16px; background: rgba(255,255,255,.96); box-shadow: 0 16px 32px rgba(15,23,42,.10); backdrop-filter: blur(10px); }
+  .setup-footer-side { display: flex; gap: 10px; flex-wrap: wrap; }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set workspace = setup_workspace or {} %}
+{% set program = workspace.program or {} %}
+{% set summary = workspace.summary or {} %}
+{% set urls = workspace.urls or {} %}
+{% set current_step = workspace.step or "basic" %}
+{% set status_label = "启用" if program.status == "active" else "草稿" if program.status == "draft" else "停用" if program.status == "paused" else "归档" if program.status == "archived" else program.status %}
+
+<section class="setup-shell" data-setup-root data-urls='{{ urls|tojson|forceescape }}' data-program-id="{{ program.id or '' }}">
+  <nav class="setup-steps" aria-label="配置步骤">
+    {% for item in workspace.steps or [] %}
+    <a class="setup-step{% if item.key == current_step %} is-active{% endif %}" href="{{ urls['base'] }}?step={{ item.key }}">
+      <span>第 {{ loop.index }} 步</span>
+      <strong>{{ item.label }}</strong>
+    </a>
+    {% endfor %}
+  </nav>
+
+  <div class="setup-feedback" data-setup-feedback></div>
+
+  {% if current_step == "basic" %}
+  <form id="setup-basic-form" class="setup-panel" method="post" action="{{ urls['update'] }}">
+    <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
+    <div>
+      <h2>方案身份</h2>
+      <p class="setup-muted">编辑当前方案自己的名称、编码、说明和状态。</p>
+    </div>
+    <div class="setup-form-grid">
+      <label class="setup-field"><span>方案名称</span><input name="program_name" value="{{ program.program_name or '' }}" required></label>
+      <label class="setup-field"><span>方案编码</span><input name="program_code" value="{{ program.program_code or '' }}" required></label>
+      <label class="setup-field">
+        <span>方案状态</span>
+        <select name="status">
+          {% for value, label in [("draft","草稿"),("active","启用"),("paused","停用"),("archived","归档")] %}
+          <option value="{{ value }}" {% if program.status == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="setup-field" style="grid-column: 1 / -1;"><span>方案描述</span><textarea name="description">{{ program.description or "" }}</textarea></label>
+    </div>
+  </form>
+
+  <section class="setup-panel">
+    <div>
+      <h2>创建来源</h2>
+      <p class="setup-muted">复制方案只复制配置，不复制成员、执行记录和运行日志。</p>
+    </div>
+    <div class="setup-summary-grid">
+      <article class="setup-summary-item"><span>创建方式</span><strong>{{ "历史默认方案" if workspace.is_default_program else "独立方案" }}</strong></article>
+      <article class="setup-summary-item"><span>入口数</span><strong>{{ summary.channel_count or 0 }}</strong></article>
+      <article class="setup-summary-item"><span>运营编排</span><strong>{{ summary.workflow_count or 0 }}</strong></article>
+    </div>
+  </section>
+  {% elif current_step == "entry" %}
+  {% set entry = workspace.entry or {} %}
+  {% set entry_payload = {"program": program, "bindings": entry.channels or [], "candidate_channels": entry.candidate_channels or [], "api_urls": entry.api_urls or {}} %}
+  <div
+    class="channel-page"
+    data-channel-admission-page="entry-channels"
+    data-program-id="{{ program.id }}"
+    data-api-bindings="{{ (entry.api_urls or {}).bindings }}"
+    data-admin-token="{{ admin_action_token }}"
+  >
+    <script type="application/json" data-channel-bootstrap>{{ entry_payload | tojson }}</script>
+    <section class="setup-panel">
+      <div class="setup-panel-head">
+        <div>
+          <h2>入口渠道</h2>
+          <p class="setup-muted">入口渠道用于承接不同二维码或企微获客助手链接进入的人群。一个方案可以绑定多个入口渠道；渠道本体请在渠道码中心维护。</p>
+        </div>
+        <div class="setup-actions">
+          <button class="setup-action is-primary" type="button" data-open-bind-modal>绑定已有渠道码</button>
+          <a class="setup-action" href="{{ urls['entry_channels'] }}">前往入口渠道页</a>
+        </div>
+      </div>
+      <div class="setup-summary-grid">
+        <article class="setup-summary-item"><span>已绑定渠道数量</span><strong>{{ (entry.channels or []) | length }}</strong></article>
+        <article class="setup-summary-item"><span>可绑定候选</span><strong>{{ (entry.candidate_channels or []) | length }}</strong></article>
+        <article class="setup-summary-item"><span>渠道维护</span><strong><a href="/admin/channels">渠道码中心</a></strong></article>
+      </div>
+      <div class="setup-table-wrap">
+        <table class="setup-table">
+          <thead><tr><th>类型</th><th>名称</th><th>状态</th><th>标识</th><th>链接</th><th>操作</th></tr></thead>
+          <tbody>
+            {% for channel in entry.channels or [] %}
+            {% set is_link = channel.carrier_type == "link" or channel.channel_type == "wecom_customer_acquisition" %}
+            <tr data-bound-channel-id="{{ channel.id }}" data-binding-id="{{ channel.binding_id }}" data-bound-carrier="{{ 'link' if is_link else 'qrcode' }}">
+              <td>{{ "企微获客助手链接" if is_link else "普通二维码" }}</td>
+              <td>{{ channel.channel_name or channel.channel_code }}</td>
+              <td>{{ {"active":"启用","paused":"暂停","archived":"已解绑"}.get(channel.binding_status, channel.status or "-") }}</td>
+              <td>{{ (channel.customer_channel or channel.scene_value or channel.channel_code or "-") if is_link else (channel.scene_value or channel.channel_code or "-") }}</td>
+              <td>{{ channel.final_url or channel.link_url or channel.qr_url or "-" }}</td>
+              <td>
+                <button class="setup-action" type="button" data-unbind-channel data-binding-id="{{ channel.binding_id }}" {% if not channel.binding_id %}disabled{% endif %}>解绑</button>
+              </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="6">当前方案还没有绑定渠道，请绑定已有渠道码。</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <aside class="channel-modal" data-bind-modal hidden>
+      <div class="channel-modal__panel">
+        <div class="setup-modal__head">
+          <div>
+            <h2>绑定已有渠道码</h2>
+            <p class="setup-muted">可多选普通二维码或企微获客助手链接；已被其他方案 active 绑定的渠道不会出现在这里。</p>
+          </div>
+          <button class="setup-action" type="button" data-close-bind-modal>关闭</button>
+        </div>
+        <div class="setup-table-wrap">
+          <table class="setup-table">
+            <thead><tr><th>选择</th><th>渠道</th><th>类型</th><th>状态</th><th>标识</th><th>链接</th></tr></thead>
+            <tbody>
+              {% for item in entry.candidate_channels or [] %}
+              {% set is_link = item.carrier_type == "link" or item.channel_type == "wecom_customer_acquisition" %}
+              <tr data-bind-candidate data-channel-id="{{ item.id }}" data-candidate-carrier="{{ 'link' if is_link else 'qrcode' }}">
+                <td><input type="checkbox" value="{{ item.id }}" data-bind-channel-checkbox></td>
+                <td><strong>{{ item.channel_name or item.channel_code }}</strong><span class="channel-code">{{ item.channel_code }}</span></td>
+                <td>{{ "企微获客助手链接" if is_link else "普通二维码" }}</td>
+                <td>{{ item.status or "active" }}</td>
+                <td>{{ (item.customer_channel or item.scene_value or item.channel_code or "-") if is_link else (item.scene_value or item.channel_code or "-") }}</td>
+                <td>{{ item.final_url or item.link_url or item.qr_url or "-" }}</td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6">没有可绑定渠道。请先去<a href="/admin/channels">渠道码中心</a>创建渠道，或解绑其他方案占用的渠道。</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <div class="setup-actions">
+          <button class="setup-action is-primary" type="button" data-confirm-bind>确认绑定</button>
+        </div>
+      </div>
+    </aside>
+  </div>
+  {% elif current_step == "segmentation" %}
+  {% set segmentation = workspace.segmentation or {} %}
+  {% set normal = segmentation.normal_question_rules or {} %}
+  {% set score = segmentation.score_segments or {} %}
+  {% set profile = segmentation.profile_dimension or {} %}
+  <section class="setup-panel" data-segmentation-form>
+    <div class="setup-panel-head">
+      <div>
+        <h2>分层规则</h2>
+        <p class="setup-muted">用可视化方式配置普通问卷规则、总分分层和多维画像兼容项。</p>
+      </div>
+      <a class="setup-action" href="/admin/questionnaires" target="_blank" rel="noreferrer">去问卷模块创建</a>
+    </div>
+    <input type="hidden" name="default_strategy" value="{{ segmentation.default_strategy or 'normal_question_rules' }}">
+    <div class="setup-seg-toolbar">
+      <label class="setup-field">
+        <span>问卷选择器</span>
+        <select name="questionnaire_id" data-questionnaire-select>
+          {% if not segmentation.available_questionnaires %}<option value="">暂无可选问卷</option>{% endif %}
+          {% for item in segmentation.available_questionnaires or [] %}
+          <option value="{{ item.id }}" data-questions='{{ (item.questions or [])|tojson|forceescape }}' {% if item.id == segmentation.questionnaire_id %}selected{% endif %}>{{ item.title }} · {{ item.status }} · {{ item.question_count }} 题</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="setup-tabs" aria-label="分层策略">
+        <button class="setup-tab is-active" type="button" data-setup-tab="normal" data-default-strategy="normal_question_rules">普通问卷规则</button>
+        <button class="setup-tab" type="button" data-setup-tab="score" data-default-strategy="score_segments">总分分层</button>
+        <button class="setup-tab" type="button" data-setup-tab="profile" data-default-strategy="manual">多维画像</button>
+      </div>
+      <article class="setup-result-card"><strong>当前问卷</strong><span>{{ (segmentation.selected_questionnaire or {}).title or "未绑定问卷" }}</span></article>
+    </div>
+
+    <div class="setup-tab-panel" data-setup-tab-panel="normal">
+      {% set selected_question = normal.selected_question or {} %}
+      {% if normal.legacy_rows %}
+      <div class="setup-result-card">
+        <strong>旧规则已保留</strong>
+        <span>当前方案存在旧版普通问卷规则，运行时仍会保留；新的编辑方式请使用下方选项分类。</span>
+      </div>
+      {% endif %}
+      <div class="setup-category-grid" data-normal-category-editor>
+        <aside class="setup-result-card setup-unassigned-panel">
+          <div class="setup-unassigned-head">
+            <h3>分层题目选择</h3>
+            <span class="setup-count" data-unassigned-count>{{ (normal.unassigned_options or [])|length }}</span>
+          </div>
+          <label class="setup-field">
+            <span>分层题目</span>
+            <select name="segmentation_question_id" data-segmentation-question-select>
+              {% if not segmentation.question_rows %}<option value="">当前问卷没有可用于分层的单选或多选题</option>{% endif %}
+              {% for question in segmentation.question_rows or [] %}
+              <option value="{{ question.id }}" data-options='{{ (question.options or [])|tojson|forceescape }}' {% if question.id == normal.segmentation_question_id %}selected{% endif %}>{{ question.title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <h3>未分配选项</h3>
+          <div class="setup-option-pool" data-unassigned-options>
+            {% for option in normal.unassigned_options or [] %}
+            <span class="setup-chip" data-option-id="{{ option.id }}">{{ option.option_text }}</span>
+            {% else %}
+            <span class="setup-muted">所有选项都已分配。需要调整时，先从右侧分类中移除选项。</span>
+            {% endfor %}
+          </div>
+        </aside>
+        <div class="setup-category-list" data-category-body>
+          {% for category in normal.category_rows or [] %}
+          <article class="setup-category-card" data-category-card data-category-key="{{ category.category_key }}">
+            <div class="setup-category-card__head">
+              <label class="setup-field"><span>分类名称</span><input name="category_name" value="{{ category.category_name }}" placeholder="例如：入门用户"></label>
+              <button class="setup-action is-danger" type="button" data-remove-category>删除分类</button>
+            </div>
+            <div class="setup-field">
+              <span>已选择选项</span>
+              <div class="setup-chip-list" data-selected-options>
+                {% for option in category.option_snapshots or [] %}
+                <span class="setup-chip" data-selected-option data-option-id="{{ option.id }}" data-option-text="{{ option.option_text }}">{{ option.option_text }}<button class="setup-chip-remove" type="button" data-remove-option aria-label="移除选项">×</button></span>
+                {% else %}
+                <span class="setup-muted" data-empty-selected>还没有选择选项</span>
+                {% endfor %}
+              </div>
+            </div>
+            <div class="setup-field"><span>可加入此分类的未分配选项</span><div class="setup-option-pool" data-available-options></div></div>
+          </article>
+          {% else %}
+          <article class="setup-category-card" data-category-card data-category-key="category_a">
+            <div class="setup-category-card__head">
+              <label class="setup-field"><span>分类名称</span><input name="category_name" placeholder="例如：入门用户"></label>
+              <button class="setup-action is-danger" type="button" data-remove-category>删除分类</button>
+            </div>
+            <div class="setup-field">
+              <span>已选择选项</span>
+              <div class="setup-chip-list" data-selected-options><span class="setup-muted" data-empty-selected>还没有选择选项</span></div>
+            </div>
+            <div class="setup-field"><span>可加入此分类的未分配选项</span><div class="setup-option-pool" data-available-options></div></div>
+          </article>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="setup-actions"><button class="setup-action" type="button" data-add-category>新增分类</button></div>
+    </div>
+
+    <div class="setup-tab-panel" data-setup-tab-panel="score" hidden>
+      <label class="setup-field"><span>是否启用总分分层</span><select name="score_enabled"><option value="1" {% if score.enabled %}selected{% endif %}>启用</option><option value="0" {% if not score.enabled %}selected{% endif %}>停用</option></select></label>
+      <div class="setup-table-wrap">
+        <table class="setup-table">
+          <thead><tr><th>最低分</th><th>最高分</th><th>分层 key</th><th>分层名称</th><th>诊断文案</th><th>推荐动作</th><th>操作</th></tr></thead>
+          <tbody data-score-body>
+            {% for row in score.rows or [] %}
+            <tr data-score-row><td><input name="min_score" type="number" value="{{ row.min_score }}"></td><td><input name="max_score" type="number" value="{{ row.max_score }}"></td><td><input name="segment_key" value="{{ row.segment_key }}"></td><td><input name="segment_name" value="{{ row.segment_name }}"></td><td><textarea name="diagnosis_text">{{ row.diagnosis_text }}</textarea></td><td><textarea name="recommended_action">{{ row.recommended_action }}</textarea></td><td><button class="setup-action" type="button" data-remove-row>删除</button></td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <div class="setup-actions"><button class="setup-action" type="button" data-add-score-row>新增分层</button><button class="setup-action" type="button" data-apply-score-presets>应用推荐 4 档</button><button class="setup-action" type="button" data-test-score>测试分数命中</button></div>
+    </div>
+
+    <div class="setup-tab-panel" data-setup-tab-panel="profile" hidden>
+      <div class="setup-form-grid">
+        <label class="setup-field"><span>画像模板</span><select name="profile_template_id"><option value="">未绑定</option>{% for item in profile.available_templates or [] %}<option value="{{ item.id }}" {% if item.id == profile.template_id %}selected{% endif %}>{{ item.template_name }}</option>{% endfor %}</select></label>
+        <div class="setup-result-card"><strong>状态</strong><span>{{ "已绑定" if profile.template_id else "未绑定" }}</span></div>
+      </div>
+      <p class="setup-muted">多维画像可用于后续内容变量、细分触达和运营动作条件；本阶段不作为完整发布必填项。</p>
+    </div>
+  </section>
+  {% elif current_step == "entry-rule" %}
+  {% set rule = workspace.audience_entry_rule or {} %}
+  {% set order = rule.order_review or {} %}
+  {% set questionnaire = rule.questionnaire_review or {} %}
+  {% set conversion = rule.conversion_review or {} %}
+  {% set next_steps = rule.next_steps or {} %}
+  <section class="setup-panel" data-audience-rule-form
+    data-order-enabled="{{ '1' if order.enabled else '0' }}"
+    data-questionnaire-enabled="{{ '1' if questionnaire.enabled else '0' }}"
+    data-conversion-enabled="{{ '1' if conversion.enabled else '0' }}"
+    data-order-product-id="{{ order.selected_product_id or '' }}"
+    data-order-product-name="{{ (order.selected_product_snapshot or {}).name or '' }}"
+    data-order-product-price="{{ (order.selected_product_snapshot or {}).price_text or '' }}"
+    data-questionnaire-id="{{ questionnaire.selected_questionnaire_id or '' }}"
+    data-questionnaire-title="{{ (questionnaire.selected_questionnaire_snapshot or {}).title or '' }}"
+    data-conversion-product-id="{{ conversion.selected_product_id or '' }}"
+    data-conversion-product-name="{{ (conversion.selected_product_snapshot or {}).name or '' }}"
+    data-conversion-product-price="{{ (conversion.selected_product_snapshot or {}).price_text or '' }}">
+    <div>
+      <h2>入池规则</h2>
+      <p class="setup-muted">配置扫码进入后的订单审核、问卷审核、运营中和转化判定链路。</p>
+    </div>
+    <div class="setup-audience-line">
+      <article class="setup-audience-row" data-audience-row="scan_enter">
+        <div class="setup-audience-title"><h3>扫码进入</h3><p>当前方案入口</p></div>
+        <div class="setup-choice-field">
+          <span class="setup-choice-label">入口来源</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary">当前方案入口</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="scan_enter">{{ next_steps.scan_enter or "运营中" }}</strong></div>
+      </article>
+      <article class="setup-audience-row{% if not order.enabled %} is-muted{% endif %}" data-audience-row="order_review">
+        <div class="setup-audience-title">
+          <h3>订单审核</h3><p>判定是否支付</p>
+          <div class="setup-segmented" data-toggle-group="order_review">
+            <button type="button" data-toggle-value="1" class="{% if order.enabled %}is-enabled{% endif %}">启用</button>
+            <button type="button" data-toggle-value="0" class="{% if not order.enabled %}is-disabled{% endif %}">不启用</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-enabled-area="order_review" {% if not order.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box">
+            <span class="setup-selection-summary{% if not order.selected_product_id %} is-empty{% endif %}" data-selected-summary="order_review">
+              {% if order.selected_product_id %}<span class="setup-selection-ok">已选择</span>{{ (order.selected_product_snapshot or {}).name }} · {{ (order.selected_product_snapshot or {}).price_text }}{% else %}未选择商品{% endif %}
+            </span>
+            <button class="setup-action" type="button" data-open-picker="order_product">选择商品</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-disabled-area="order_review" {% if order.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary is-empty">未启用时无需选择</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="order_review">{{ next_steps.order_review or "本项已跳过" }}</strong></div>
+      </article>
+      <article class="setup-audience-row{% if not questionnaire.enabled %} is-muted{% endif %}" data-audience-row="questionnaire_review">
+        <div class="setup-audience-title">
+          <h3>问卷审核</h3><p>判定是否填写问卷</p>
+          <div class="setup-segmented" data-toggle-group="questionnaire_review">
+            <button type="button" data-toggle-value="1" class="{% if questionnaire.enabled %}is-enabled{% endif %}">启用</button>
+            <button type="button" data-toggle-value="0" class="{% if not questionnaire.enabled %}is-disabled{% endif %}">不启用</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-enabled-area="questionnaire_review" {% if not questionnaire.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择问卷</span>
+          <div class="setup-choice-box">
+            <span class="setup-selection-summary{% if not questionnaire.selected_questionnaire_id %} is-empty{% endif %}" data-selected-summary="questionnaire_review">
+              {% if questionnaire.selected_questionnaire_id %}<span class="setup-selection-ok">已选择</span>{{ (questionnaire.selected_questionnaire_snapshot or {}).title }}{% else %}未选择问卷{% endif %}
+            </span>
+            <button class="setup-action" type="button" data-open-picker="questionnaire">选择问卷</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-disabled-area="questionnaire_review" {% if questionnaire.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择问卷</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary is-empty">未启用时无需选择</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="questionnaire_review">{{ next_steps.questionnaire_review or "本项已跳过" }}</strong></div>
+      </article>
+      <article class="setup-audience-row" data-audience-row="operating">
+        <div class="setup-audience-title"><h3>运营中</h3><p>默认必须启用</p></div>
+        <div class="setup-choice-field">
+          <span class="setup-choice-label">状态</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary">进入后开始后续运营</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="operating">{{ next_steps.operating or "结束" }}</strong></div>
+      </article>
+      <article class="setup-audience-row{% if not conversion.enabled %} is-muted{% endif %}" data-audience-row="conversion_review">
+        <div class="setup-audience-title">
+          <h3>已转化</h3><p>运营后的成交判定</p>
+          <div class="setup-segmented" data-toggle-group="conversion_review">
+            <button type="button" data-toggle-value="1" class="{% if conversion.enabled %}is-enabled{% endif %}">启用</button>
+            <button type="button" data-toggle-value="0" class="{% if not conversion.enabled %}is-disabled{% endif %}">不启用</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-enabled-area="conversion_review" {% if not conversion.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box">
+            <span class="setup-selection-summary{% if not conversion.selected_product_id %} is-empty{% endif %}" data-selected-summary="conversion_review">
+              {% if conversion.selected_product_id %}<span class="setup-selection-ok">已选择</span>{{ (conversion.selected_product_snapshot or {}).name }} · {{ (conversion.selected_product_snapshot or {}).price_text }}{% else %}未选择成交商品{% endif %}
+            </span>
+            <button class="setup-action" type="button" data-open-picker="conversion_product">选择商品</button>
+          </div>
+        </div>
+        <div class="setup-choice-field" data-disabled-area="conversion_review" {% if conversion.enabled %}style="display:none"{% endif %}>
+          <span class="setup-choice-label">选择商品</span>
+          <div class="setup-choice-box"><span class="setup-selection-summary is-empty">未启用时不做成交判定</span></div>
+        </div>
+        <div class="setup-audience-next"><span>下一步</span><strong data-next-step="conversion_review">{{ next_steps.conversion_review or "本项已关闭" }}</strong></div>
+      </article>
+    </div>
+  </section>
+  <div class="setup-modal" data-audience-modal hidden>
+    <div class="setup-modal__panel" role="dialog" aria-modal="true" aria-labelledby="audience-picker-title">
+      <div class="setup-modal__head">
+        <h3 id="audience-picker-title" data-picker-title>选择</h3>
+        <button class="setup-action" type="button" data-close-picker>关闭</button>
+      </div>
+      <div class="setup-picker-grid" data-picker-panel="order_product" hidden>
+        {% for item in rule.available_products or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.name }}</span><span class="setup-picker-subtitle">{{ item.price_text }}</span></div>
+          <button class="setup-action is-primary" type="button" data-pick-audience-item data-picker="order_product" data-value="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price_text }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择商品。</div>
+        {% endfor %}
+      </div>
+      <div class="setup-picker-grid" data-picker-panel="questionnaire" hidden>
+        {% for item in rule.available_questionnaires or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.title }}</span><span class="setup-picker-subtitle">{{ item.status }} · {{ item.question_count }} 题</span></div>
+          <button class="setup-action is-primary" type="button" data-pick-audience-item data-picker="questionnaire" data-value="{{ item.id }}" data-name="{{ item.title }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择问卷。</div>
+        {% endfor %}
+      </div>
+      <div class="setup-picker-grid" data-picker-panel="conversion_product" hidden>
+        {% for item in rule.available_products or [] %}
+        <article class="setup-picker-row">
+          <div class="setup-picker-title"><span>{{ item.name }}</span><span class="setup-picker-subtitle">{{ item.price_text }}</span></div>
+          <button class="setup-action is-primary" type="button" data-pick-audience-item data-picker="conversion_product" data-value="{{ item.id }}" data-name="{{ item.name }}" data-price="{{ item.price_text }}">选择</button>
+        </article>
+        {% else %}
+        <div class="setup-empty-hint">当前没有可选择商品。</div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% elif current_step == "operations" %}
+  <section class="setup-panel setup-panel--operations">
+    {% set operations_workspace = workspace.operations_workspace or {} %}
+    {% include "admin_console/_automation_operation_orchestration_panel.html" %}
+  </section>
+  {% else %}
+  {% set checks = workspace.publish_check or {} %}
+  <section class="setup-panel">
+    <div>
+      <h2>检查并发布</h2>
+      <p class="setup-muted">读取入口发布和完整自动化发布的逐项检查结果。</p>
+    </div>
+    <div class="setup-check-grid">
+      {% for key, title in [("entry", "入口发布检查"), ("full", "完整自动化发布检查")] %}
+      {% set group = checks[key] or {} %}
+      <article class="setup-result-card">
+        <h3>{{ title }}</h3>
+        <div class="setup-check-list">
+          {% for item in group["items"] or [] %}
+          <div class="setup-check-item {% if item.passed %}is-pass{% else %}is-fail{% endif %}">
+            <strong>{{ "通过" if item.passed else "待处理" }}</strong>
+            <span>{{ item.label }}</span>
+            {% if not item.passed %}<span>{{ item.message }}</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+
+  <footer class="setup-footer">
+    <div class="setup-footer-side">
+      <a class="setup-action" href="{{ url_for('api.admin_automation_conversion') }}">返回列表</a>
+    </div>
+    <div class="setup-footer-side">
+      {% if current_step == "basic" %}
+      <button class="setup-action" type="submit" form="setup-basic-form" name="next" value="{{ urls['base'] }}?step=publish">去检查发布</button>
+      <button class="setup-action is-primary" type="submit" form="setup-basic-form" name="next" value="{{ urls['base'] }}?step=entry">保存并下一步</button>
+      {% elif current_step == "segmentation" %}
+      <button class="setup-action" type="button" data-save-and-publish>去检查发布</button>
+      <button class="setup-action is-primary" type="button" data-save-and-next data-next-step="entry-rule">保存并下一步</button>
+      {% elif current_step == "entry-rule" %}
+      <button class="setup-action" type="button" data-save-and-publish>去检查发布</button>
+      <button class="setup-action is-primary" type="button" data-save-and-next data-next-step="operations">保存并下一步</button>
+      {% elif current_step == "operations" %}
+      <button class="setup-action" type="button" data-save-operations-and-publish>去检查发布</button>
+      <button class="setup-action is-primary" type="button" data-save-operations-and-next data-next-step="publish">保存并下一步</button>
+      {% elif current_step == "publish" %}
+      <button class="setup-action is-primary" type="button" data-publish-full {% if not (((workspace.publish_check or {}).get("full") or {}).get("passed")) %}disabled{% endif %}>发布完整自动化</button>
+      {% else %}
+      <a class="setup-action" href="{{ urls['base'] }}?step=publish">去检查发布</a>
+      <a class="setup-action is-primary" href="{{ urls['base'] }}?step={{ 'entry' if current_step == 'basic' else 'segmentation' if current_step == 'entry' else 'entry-rule' if current_step == 'segmentation' else 'operations' if current_step == 'entry-rule' else 'publish' }}">保存并下一步</a>
+      {% endif %}
+    </div>
+  </footer>
+</section>
+{% if current_step == "entry" %}
+<script defer src="/static/automation-engine/admin_console/channel_admission_pages.js"></script>
+{% endif %}
+{% if current_step == "segmentation" %}
+<script>
+(() => {
+  const root = document.querySelector("[data-setup-root]");
+  if (!root) return;
+  const urls = JSON.parse(root.dataset.urls || "{}");
+  const feedback = root.querySelector("[data-setup-feedback]");
+  const form = root.querySelector("[data-segmentation-form]");
+  const showFeedback = (message, ok = false) => {
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle("is-success", ok);
+    feedback.style.display = "block";
+    feedback.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
+  const postJson = async (url, payload) => {
+    const response = await fetch(url, { method: "POST", headers: {"Content-Type": "application/json", "Accept": "application/json"}, body: JSON.stringify(payload) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.detail || data.error || "保存失败，请稍后重试");
+    return data;
+  };
+  root.querySelectorAll("[data-setup-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const key = button.dataset.setupTab;
+      const strategy = button.dataset.defaultStrategy;
+      if (strategy && form.querySelector("[name='default_strategy']")) form.querySelector("[name='default_strategy']").value = strategy;
+      root.querySelectorAll("[data-setup-tab]").forEach((item) => item.classList.toggle("is-active", item === button));
+      root.querySelectorAll("[data-setup-tab-panel]").forEach((panel) => { panel.hidden = panel.dataset.setupTabPanel !== key; });
+    });
+  });
+
+  const questionnaireSelect = root.querySelector("[data-questionnaire-select]");
+  const questionSelect = root.querySelector("[data-segmentation-question-select]");
+  const categoryBody = root.querySelector("[data-category-body]");
+  const readQuestions = () => {
+    const selected = questionnaireSelect?.selectedOptions?.[0];
+    try { return JSON.parse(selected?.dataset.questions || "[]"); } catch { return []; }
+  };
+  const currentQuestionOptions = () => {
+    const selected = questionSelect?.selectedOptions?.[0];
+    try { return JSON.parse(selected?.dataset.options || "[]"); } catch { return []; }
+  };
+  const categoryKey = (index) => `category_${String.fromCharCode(97 + Math.min(index, 25))}`;
+  const allAssignedOptionIds = () => new Set([...root.querySelectorAll("[data-selected-option]")].map((item) => String(item.dataset.optionId || "")));
+  const selectedChipHtml = (option) => `<span class="setup-chip" data-selected-option data-option-id="${option.id}" data-option-text="${escapeHtml(option.option_text)}">${escapeHtml(option.option_text)}<button class="setup-chip-remove" type="button" data-remove-option aria-label="移除选项">×</button></span>`;
+  const availableOptionHtml = (option) => `<button class="setup-option-pill" type="button" data-add-option data-option-id="${option.id}" data-option-text="${escapeHtml(option.option_text)}">${escapeHtml(option.option_text)}</button>`;
+  const ensureSelectedEmptyState = (card) => {
+    const selectedBox = card.querySelector("[data-selected-options]");
+    if (!selectedBox) return;
+    const hasSelected = Boolean(selectedBox.querySelector("[data-selected-option]"));
+    selectedBox.querySelector("[data-empty-selected]")?.remove();
+    if (!hasSelected) selectedBox.innerHTML = `<span class="setup-muted" data-empty-selected>还没有选择选项</span>`;
+  };
+  const updateOptionState = () => {
+    const options = currentQuestionOptions();
+    const assigned = allAssignedOptionIds();
+    const unassignedRows = options.filter((option) => !assigned.has(String(option.id)));
+    const unassigned = root.querySelector("[data-unassigned-options]");
+    if (unassigned) {
+      unassigned.innerHTML = unassignedRows.length
+        ? unassignedRows.map((option) => `<span class="setup-chip" data-option-id="${option.id}">${escapeHtml(option.option_text)}</span>`).join("")
+        : `<span class="setup-muted">所有选项都已分配。需要调整时，先从右侧分类中移除选项。</span>`;
+    }
+    const count = root.querySelector("[data-unassigned-count]");
+    if (count) count.textContent = String(unassignedRows.length);
+    root.querySelectorAll("[data-category-card]").forEach((card) => {
+      ensureSelectedEmptyState(card);
+      const available = card.querySelector("[data-available-options]");
+      if (!available) return;
+      available.innerHTML = unassignedRows.length
+        ? unassignedRows.map((option) => availableOptionHtml(option)).join("")
+        : `<span class="setup-muted">暂无可加入选项</span>`;
+    });
+  };
+  const resetSelectedOptions = () => {
+    root.querySelectorAll("[data-selected-options]").forEach((box) => {
+      box.innerHTML = `<span class="setup-muted" data-empty-selected>还没有选择选项</span>`;
+    });
+  };
+  const renderQuestionOptions = () => {
+    if (!questionSelect) return;
+    const questions = readQuestions();
+    questionSelect.innerHTML = questions.length
+      ? questions.map((question) => `<option value="${question.id}" data-options="${escapeHtml(JSON.stringify(question.options || []))}">${escapeHtml(question.title || "")}</option>`).join("")
+      : `<option value="">当前问卷没有可用于分层的单选或多选题</option>`;
+    resetSelectedOptions();
+    updateOptionState();
+  };
+  const addCategoryCard = (name = "", selectedIds = [], key = "") => {
+    if (!categoryBody) return;
+    const index = categoryBody.querySelectorAll("[data-category-card]").length;
+    const selected = new Set(selectedIds.map((item) => String(item)));
+    const selectedOptions = currentQuestionOptions().filter((option) => selected.has(String(option.id)));
+    const card = document.createElement("article");
+    card.className = "setup-category-card";
+    card.dataset.categoryCard = "";
+    card.dataset.categoryKey = key || categoryKey(index);
+    card.innerHTML = `
+      <div class="setup-category-card__head">
+        <label class="setup-field"><span>分类名称</span><input name="category_name" value="${escapeHtml(name)}" placeholder="例如：入门用户"></label>
+        <button class="setup-action is-danger" type="button" data-remove-category>删除分类</button>
+      </div>
+      <div class="setup-field"><span>已选择选项</span><div class="setup-chip-list" data-selected-options>${selectedOptions.map((option) => selectedChipHtml(option)).join("")}</div></div>
+      <div class="setup-field"><span>可加入此分类的未分配选项</span><div class="setup-option-pool" data-available-options></div></div>
+    `;
+    categoryBody.appendChild(card);
+    updateOptionState();
+  };
+  root.querySelector("[data-add-category]")?.addEventListener("click", () => addCategoryCard());
+  questionnaireSelect?.addEventListener("change", renderQuestionOptions);
+  questionSelect?.addEventListener("change", () => {
+    resetSelectedOptions();
+    updateOptionState();
+  });
+  root.addEventListener("click", (event) => {
+    const addOption = event.target.closest("[data-add-option]");
+    if (addOption) {
+      const card = addOption.closest("[data-category-card]");
+      const selectedBox = card?.querySelector("[data-selected-options]");
+      if (selectedBox && addOption.dataset.optionId) {
+        selectedBox.querySelector("[data-empty-selected]")?.remove();
+        selectedBox.insertAdjacentHTML("beforeend", selectedChipHtml({ id: addOption.dataset.optionId, option_text: addOption.textContent || addOption.dataset.optionText || "" }));
+        updateOptionState();
+      }
+    }
+    const removeOption = event.target.closest("[data-remove-option]");
+    if (removeOption) {
+      const card = removeOption.closest("[data-category-card]");
+      removeOption.closest("[data-selected-option]")?.remove();
+      if (card) ensureSelectedEmptyState(card);
+      updateOptionState();
+    }
+    const removeCategory = event.target.closest("[data-remove-category]");
+    if (removeCategory) {
+      removeCategory.closest("[data-category-card]")?.remove();
+      updateOptionState();
+    }
+    const removeRow = event.target.closest("[data-remove-row]");
+    if (removeRow) removeRow.closest("tr")?.remove();
+  });
+  updateOptionState();
+
+  const scoreBody = root.querySelector("[data-score-body]");
+  const scoreRowHtml = (min = "", max = "", key = "", name = "") => `<tr data-score-row><td><input name="min_score" type="number" value="${min}"></td><td><input name="max_score" type="number" value="${max}"></td><td><input name="segment_key" value="${key}"></td><td><input name="segment_name" value="${name}"></td><td><textarea name="diagnosis_text"></textarea></td><td><textarea name="recommended_action"></textarea></td><td><button class="setup-action" type="button" data-remove-row>删除</button></td></tr>`;
+  root.querySelector("[data-add-score-row]")?.addEventListener("click", () => scoreBody?.insertAdjacentHTML("beforeend", scoreRowHtml()));
+  root.querySelector("[data-apply-score-presets]")?.addEventListener("click", () => {
+    if (!scoreBody) return;
+    scoreBody.innerHTML = scoreRowHtml(0,44,"low","低意向") + scoreRowHtml(45,64,"medium","中意向") + scoreRowHtml(65,84,"high","高意向") + scoreRowHtml(85,100,"excellent","强意向");
+  });
+  root.querySelector("[data-test-score]")?.addEventListener("click", () => {
+    const value = Number(window.prompt("输入要测试的总分", "72") || 0);
+    const hit = [...root.querySelectorAll("[data-score-row]")].find((row) => Number(row.querySelector("[name='min_score']").value || 0) <= value && value <= Number(row.querySelector("[name='max_score']").value || 0));
+    showFeedback(hit ? `命中：${hit.querySelector("[name='segment_name']").value || "未命名分层"}` : "没有命中任何分层", Boolean(hit));
+  });
+
+  const saveSegmentation = async () => {
+    const questionnaireId = Number(form.querySelector("[name='questionnaire_id']")?.value || 0) || null;
+    const segmentationQuestion = form.querySelector("[name='segmentation_question_id']");
+    const selectedQuestionId = Number(segmentationQuestion?.value || 0) || null;
+    const selectedQuestionTitle = segmentationQuestion?.selectedOptions?.[0]?.textContent || "";
+    const selectedOptions = new Map(currentQuestionOptions().map((option) => [String(option.id), option.option_text || ""]));
+    const seenOptions = new Set();
+    const categories = [...form.querySelectorAll("[data-category-card]")].map((card, index) => {
+      const optionIds = [...card.querySelectorAll("[data-selected-option]")].map((item) => Number(item.dataset.optionId)).filter(Boolean);
+      optionIds.forEach((optionId) => {
+        const key = String(optionId);
+        if (seenOptions.has(key)) throw new Error("同一个选项不能同时属于多个分类");
+        seenOptions.add(key);
+      });
+      return {
+        category_key: card.dataset.categoryKey || categoryKey(index),
+        category_name: card.querySelector("[name='category_name']")?.value || "",
+        description: card.querySelector("[name='description']")?.value || "",
+        option_ids: optionIds,
+        option_snapshots: optionIds.map((optionId) => ({ id: optionId, option_text: selectedOptions.get(String(optionId)) || "" })),
+      };
+    }).filter((row) => row.category_name || row.option_ids.length || row.description);
+    const scoreRows = [...form.querySelectorAll("[data-score-row]")].map((row) => ({
+      min_score: Number(row.querySelector("[name='min_score']")?.value),
+      max_score: Number(row.querySelector("[name='max_score']")?.value),
+      segment_key: row.querySelector("[name='segment_key']")?.value || "",
+      segment_name: row.querySelector("[name='segment_name']")?.value || "",
+      diagnosis_text: row.querySelector("[name='diagnosis_text']")?.value || "",
+      recommended_action: row.querySelector("[name='recommended_action']")?.value || "",
+    })).filter((row) => row.segment_key || row.segment_name || Number.isFinite(row.min_score) || Number.isFinite(row.max_score));
+    await postJson(urls.segmentation, {
+      questionnaire_id: questionnaireId,
+      default_strategy: form.querySelector("[name='default_strategy']")?.value || "normal_question_rules",
+      normal_question_mode: "single_question_option_category",
+      segmentation_question_id: selectedQuestionId,
+      normal_question_categories: categories,
+      score_segment_rows: scoreRows,
+      strategies: {
+        normal_question_rules: {
+          enabled: (form.querySelector("[name='default_strategy']")?.value || "normal_question_rules") !== "manual",
+          mode: "single_question_option_category",
+          segmentation_question_id: selectedQuestionId,
+          segmentation_question_title: selectedQuestionTitle,
+          categories,
+        },
+        score_segments: { enabled: form.querySelector("[name='score_enabled']")?.value === "1" },
+        profile_dimension: { enabled: Boolean(form.querySelector("[name='profile_template_id']")?.value), template_id: Number(form.querySelector("[name='profile_template_id']")?.value || 0) || null, usage: "content_variable_only" },
+      },
+    });
+  };
+  root.querySelectorAll("[data-save-current]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try { await saveSegmentation(); showFeedback("草稿已保存", true); } catch (error) { showFeedback(error.message || "保存失败，请稍后重试"); }
+    });
+  });
+  root.querySelectorAll("[data-save-and-next]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      const nextStep = event.currentTarget?.dataset.nextStep || "entry-rule";
+      try {
+        await saveSegmentation();
+        window.location.href = `${urls.base}?step=${encodeURIComponent(nextStep)}`;
+      } catch (error) { showFeedback(error.message || "保存失败，请先处理当前页面配置"); }
+    });
+  });
+  root.querySelectorAll("[data-save-and-publish]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await saveSegmentation();
+        window.location.href = `${urls.base}?step=publish`;
+      } catch (error) { showFeedback(error.message || "保存失败，请先处理当前页面配置"); }
+    });
+  });
+})();
+</script>
+{% endif %}
+{% if current_step == "entry-rule" %}
+<script>
+(() => {
+  const root = document.querySelector("[data-setup-root]");
+  const form = root?.querySelector("[data-audience-rule-form]");
+  if (!root || !form) return;
+  const urls = JSON.parse(root.dataset.urls || "{}");
+  const feedback = root.querySelector("[data-setup-feedback]");
+  const modal = root.querySelector("[data-audience-modal]");
+  const showFeedback = (message, ok = false) => {
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle("is-success", ok);
+    feedback.style.display = "block";
+    feedback.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const postJson = async (url, payload) => {
+    const response = await fetch(url, { method: "POST", headers: {"Content-Type": "application/json", "Accept": "application/json"}, body: JSON.stringify(payload) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.detail || data.error || "保存失败，请稍后重试");
+    return data;
+  };
+  const enabledDatasetKeys = { order_review: "orderEnabled", questionnaire_review: "questionnaireEnabled", conversion_review: "conversionEnabled" };
+  const isEnabled = (key) => form.dataset[enabledDatasetKeys[key]] === "1";
+  const writeEnabled = (key, enabled) => {
+    form.dataset[enabledDatasetKeys[key]] = enabled ? "1" : "0";
+    form.querySelector(`[data-audience-row="${key}"]`)?.classList.toggle("is-muted", !enabled);
+    form.querySelectorAll(`[data-toggle-group="${key}"] button`).forEach((button) => {
+      const active = button.dataset.toggleValue === (enabled ? "1" : "0");
+      button.classList.toggle(button.dataset.toggleValue === "1" ? "is-enabled" : "is-disabled", active);
+    });
+    form.querySelectorAll(`[data-enabled-area="${key}"]`).forEach((item) => { item.style.display = enabled ? "" : "none"; });
+    form.querySelectorAll(`[data-disabled-area="${key}"]`).forEach((item) => { item.style.display = enabled ? "none" : ""; });
+    updateNextSteps();
+  };
+  const updateNextSteps = () => {
+    const order = isEnabled("order_review");
+    const questionnaire = isEnabled("questionnaire_review");
+    const conversion = isEnabled("conversion_review");
+    const values = {
+      scan_enter: order ? "订单审核" : (questionnaire ? "问卷审核" : "运营中"),
+      order_review: order ? (questionnaire ? "问卷审核" : "运营中") : "本项已跳过",
+      questionnaire_review: questionnaire ? "运营中" : "本项已跳过",
+      operating: conversion ? "已转化" : "结束",
+      conversion_review: conversion ? "结束" : "本项已关闭",
+    };
+    Object.entries(values).forEach(([key, value]) => {
+      const node = form.querySelector(`[data-next-step="${key}"]`);
+      if (node) node.textContent = value;
+    });
+  };
+  const setSummary = (key, text, empty = false) => {
+    const summary = form.querySelector(`[data-selected-summary="${key}"]`);
+    if (!summary) return;
+    summary.innerHTML = empty ? text : `<span class="setup-selection-ok">已选择</span>${text}`;
+    summary.classList.toggle("is-empty", empty);
+  };
+  const openPicker = (picker) => {
+    if (!modal) return;
+    const titles = { order_product: "选择订单审核商品", questionnaire: "选择问卷审核问卷", conversion_product: "选择成交判定商品" };
+    const title = modal.querySelector("[data-picker-title]");
+    if (title) title.textContent = titles[picker] || "选择";
+    modal.querySelectorAll("[data-picker-panel]").forEach((panel) => { panel.hidden = panel.dataset.pickerPanel !== picker; });
+    modal.hidden = false;
+  };
+  const closePicker = () => { if (modal) modal.hidden = true; };
+  const currentAudiencePayload = () => ({
+    entry_source: "both",
+    order_review: {
+      enabled: isEnabled("order_review"),
+      selected_product_id: form.dataset.orderProductId || null,
+      selected_product_snapshot: { name: form.dataset.orderProductName || "", price_text: form.dataset.orderProductPrice || "" },
+    },
+    questionnaire_review: {
+      enabled: isEnabled("questionnaire_review"),
+      selected_questionnaire_id: Number(form.dataset.questionnaireId || 0) || null,
+      selected_questionnaire_snapshot: { title: form.dataset.questionnaireTitle || "" },
+    },
+    operating: { enabled: true, fixed: true },
+    conversion_review: {
+      enabled: isEnabled("conversion_review"),
+      selected_product_id: form.dataset.conversionProductId || null,
+      selected_product_snapshot: { name: form.dataset.conversionProductName || "", price_text: form.dataset.conversionProductPrice || "" },
+    },
+  });
+  const saveAudienceRules = async () => {
+    const payload = currentAudiencePayload();
+    if (payload.order_review.enabled && !payload.order_review.selected_product_id) throw new Error("订单审核已启用，请先选择商品");
+    if (payload.questionnaire_review.enabled && !payload.questionnaire_review.selected_questionnaire_id) throw new Error("问卷审核已启用，请先选择问卷");
+    if (payload.conversion_review.enabled && !payload.conversion_review.selected_product_id) throw new Error("已转化判定已启用，请先选择成交商品");
+    await postJson(urls.audience_entry_rule, payload);
+  };
+  root.addEventListener("click", (event) => {
+    const toggle = event.target.closest("[data-toggle-group] button");
+    if (toggle) writeEnabled(toggle.closest("[data-toggle-group]").dataset.toggleGroup, toggle.dataset.toggleValue === "1");
+    const open = event.target.closest("[data-open-picker]");
+    if (open) openPicker(open.dataset.openPicker);
+    const close = event.target.closest("[data-close-picker]");
+    if (close) closePicker();
+    const pick = event.target.closest("[data-pick-audience-item]");
+    if (pick) {
+      const picker = pick.dataset.picker;
+      if (picker === "questionnaire") {
+        form.dataset.questionnaireId = pick.dataset.value || "";
+        form.dataset.questionnaireTitle = pick.dataset.name || "";
+        setSummary("questionnaire_review", pick.dataset.name || "已选择问卷");
+      } else if (picker === "order_product") {
+        form.dataset.orderProductId = pick.dataset.value || "";
+        form.dataset.orderProductName = pick.dataset.name || "";
+        form.dataset.orderProductPrice = pick.dataset.price || "";
+        setSummary("order_review", `${pick.dataset.name || ""} · ${pick.dataset.price || ""}`.trim());
+      } else if (picker === "conversion_product") {
+        form.dataset.conversionProductId = pick.dataset.value || "";
+        form.dataset.conversionProductName = pick.dataset.name || "";
+        form.dataset.conversionProductPrice = pick.dataset.price || "";
+        setSummary("conversion_review", `${pick.dataset.name || ""} · ${pick.dataset.price || ""}`.trim());
+      }
+      closePicker();
+    }
+  });
+  root.querySelectorAll("[data-save-current]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try { await saveAudienceRules(); showFeedback("草稿已保存", true); } catch (error) { showFeedback(error.message || "保存失败，请稍后重试"); }
+    });
+  });
+  root.querySelectorAll("[data-save-and-next]").forEach((button) => {
+    button.addEventListener("click", async (event) => {
+      const nextStep = event.currentTarget?.dataset.nextStep || "operations";
+      try {
+        await saveAudienceRules();
+        window.location.href = `${urls.base}?step=${encodeURIComponent(nextStep)}`;
+      } catch (error) { showFeedback(error.message || "保存失败，请先处理当前页面配置"); }
+    });
+  });
+  root.querySelectorAll("[data-save-and-publish]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      try {
+        await saveAudienceRules();
+        window.location.href = `${urls.base}?step=publish`;
+      } catch (error) { showFeedback(error.message || "保存失败，请先处理当前页面配置"); }
+    });
+  });
+  updateNextSteps();
+})();
+</script>
+{% endif %}
+{% if current_step == "operations" %}
+<script>
+(() => {
+  const root = document.querySelector("[data-setup-root]");
+  if (!root) return;
+  const urls = JSON.parse(root.dataset.urls || "{}");
+  const feedback = root.querySelector("[data-setup-feedback]");
+  const showFeedback = (message, ok = false) => {
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle("is-success", ok);
+    feedback.style.display = "block";
+    feedback.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const saveAndGo = async (step) => {
+    try {
+      if (typeof window.__automationOperationSaveCurrent === "function") {
+        await window.__automationOperationSaveCurrent();
+      }
+      window.location.href = `${urls.base}?step=${encodeURIComponent(step || "publish")}`;
+    } catch (error) {
+      showFeedback(error.message || "保存运营任务失败，请先处理当前任务配置");
+    }
+  };
+  root.querySelector("[data-save-operations-and-next]")?.addEventListener("click", (event) => {
+    saveAndGo(event.currentTarget?.dataset.nextStep || "publish");
+  });
+  root.querySelector("[data-save-operations-and-publish]")?.addEventListener("click", () => {
+    saveAndGo("publish");
+  });
+})();
+</script>
+{% endif %}
+{% if current_step == "publish" %}
+<script>
+(() => {
+  const root = document.querySelector("[data-setup-root]");
+  if (!root) return;
+  const urls = JSON.parse(root.dataset.urls || "{}");
+  const feedback = root.querySelector("[data-setup-feedback]");
+  const showFeedback = (message, ok = false) => {
+    if (!feedback) return;
+    feedback.textContent = message;
+    feedback.classList.toggle("is-success", ok);
+    feedback.style.display = "block";
+    feedback.scrollIntoView({ block: "start", behavior: "smooth" });
+  };
+  const postJson = async (url) => {
+    const response = await fetch(url, { method: "POST", headers: {"Accept": "application/json"} });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.ok === false) throw new Error(data.detail || data.error || "发布失败，请稍后重试");
+    return data;
+  };
+  const bindPublish = (selector, urlKey, label) => {
+    root.querySelectorAll(selector).forEach((button) => {
+      button.addEventListener("click", async () => {
+        if (button.disabled) return;
+        button.disabled = true;
+        try {
+          const data = await postJson(urls[urlKey]);
+          const status = (data.summary || {}).publish_status_label || label;
+          showFeedback(`${status}，正在刷新发布状态`, true);
+          window.setTimeout(() => { window.location.href = urls.overview || window.location.href; }, 550);
+        } catch (error) {
+          button.disabled = false;
+          showFeedback(error.message || "发布失败，请先处理检查项");
+        }
+      });
+    });
+  };
+  bindPublish("[data-publish-full]", "publish_full", "完整自动化已发布");
+})();
+</script>
+{% endif %}
+{% endblock %}

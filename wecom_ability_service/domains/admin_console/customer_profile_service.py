@@ -343,7 +343,6 @@ def get_customer_messages_payload(
     messages = []
     for row in reversed(rows):
         formatted = format_message_row(row, group_map=group_map)
-        roomid = _normalized_text(formatted.get("roomid") or formatted.get("chat_id"))
         messages.append(
             {
                 "id": int(row["id"]),
@@ -354,9 +353,9 @@ def get_customer_messages_payload(
                 "receiver": _normalized_text(row.get("receiver")),
                 "msgtype": _normalized_text(formatted.get("msgtype") or row.get("msgtype")),
                 "chat_type": _normalized_text(formatted.get("chat_type") or row.get("chat_type")),
-                "roomid": roomid,
-                "chat_id": roomid,
+                "chat_id": _normalized_text(formatted.get("chat_id") or formatted.get("roomid")),
                 "group_name": _normalized_text(formatted.get("group_name")),
+                "owner_userid": _normalized_text(row.get("owner_userid")),
             }
         )
     return {

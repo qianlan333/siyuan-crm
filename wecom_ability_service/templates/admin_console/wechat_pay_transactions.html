@@ -274,6 +274,29 @@
     font-size: 13px;
     line-height: 1.6;
   }
+  .wxpay-delivery-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  .wxpay-delivery-table th,
+  .wxpay-delivery-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid #edf2f7;
+    text-align: left;
+    vertical-align: top;
+  }
+  .wxpay-delivery-table th {
+    color: #475569;
+    font-weight: 900;
+    background: #fbfdff;
+  }
+  .wxpay-url-cell {
+    max-width: 260px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
   @media (max-width: 1180px) {
     .wxpay-filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .wxpay-detail-grid { grid-template-columns: 1fr; }
@@ -399,6 +422,37 @@
         {% endif %}
       </div>
     </section>
+
+    <section class="wxpay-card" style="margin-top:18px" data-order-id="{{ order.id }}">
+      <div class="wxpay-card__head">
+        <div>
+          <h2>外部推送记录</h2>
+          <p>展示该订单触发的 webhook delivery、响应状态和失败原因。</p>
+        </div>
+      </div>
+      <div class="wxpay-card__body">
+        <div id="externalPushDeliveryStatus" class="wxpay-muted">正在加载外推记录...</div>
+        <div class="wxpay-table-wrap" id="externalPushDeliveryWrap" style="display:none;margin-top:12px">
+          <table class="wxpay-delivery-table">
+            <thead>
+              <tr>
+                <th>delivery_id</th>
+                <th>event_type</th>
+                <th>webhook_url</th>
+                <th>status</th>
+                <th>attempt</th>
+                <th>HTTP</th>
+                <th>失败原因</th>
+                <th>更新时间</th>
+                <th>下次重试</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="externalPushDeliveryBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
     {% endif %}
   {% else %}
   <section class="wxpay-card">
@@ -508,7 +562,7 @@
       <div class="wxpay-card__head">
         <div>
           <h2 id="exportTitle">创建导出任务</h2>
-          <p>导出文件只包含订单创建时间、微信单号、客户身份、商品、金额和状态。</p>
+          <p>导出文件包含订单创建时间、微信单号、手机号、unionid、商品名称、商品编码、金额和状态。</p>
         </div>
         <button class="wxpay-text-link" id="exportClose" type="button">关闭</button>
       </div>
@@ -596,6 +650,92 @@
       }
     });
   }
+  const deliverySection = document.querySelector("[data-order-id]");
+  const deliveryStatus = document.getElementById("externalPushDeliveryStatus");
+  const deliveryWrap = document.getElementById("externalPushDeliveryWrap");
+  const deliveryBody = document.getElementById("externalPushDeliveryBody");
+  let deliveryItems = [];
+
+  function showDeliveryBody(kind, deliveryId) {
+    const item = deliveryItems.find((entry) => entry.delivery_id === deliveryId);
+    if (!item) return;
+    const value = kind === "request" ? item.request_body : item.response_body;
+    window.alert(typeof value === "string" ? value : JSON.stringify(value || {}, null, 2));
+  }
+
+  async function retryDelivery(deliveryId) {
+    const orderId = deliverySection.dataset.orderId;
+    const response = await fetch(`/api/admin/wechat-pay/orders/${orderId}/external-push-deliveries/${encodeURIComponent(deliveryId)}/retry`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({admin_action_token: adminActionToken})
+    });
+    const data = await response.json();
+    if (!data.ok) {
+      deliveryStatus.textContent = data.error || "重试失败";
+      return;
+    }
+    deliveryStatus.textContent = "重试已执行，正在刷新记录...";
+    await loadDeliveries();
+  }
+
+  function renderDeliveries(items) {
+    deliveryItems = items || [];
+    if (!deliveryItems.length) {
+      deliveryStatus.textContent = "暂无外部推送记录。";
+      deliveryWrap.style.display = "none";
+      return;
+    }
+    deliveryStatus.textContent = `共 ${deliveryItems.length} 条外部推送记录`;
+    deliveryWrap.style.display = "";
+    deliveryBody.innerHTML = deliveryItems.map((item) => {
+      const canRetry = ["failed", "retrying", "gave_up"].includes(text(item.status));
+      return `<tr>
+        <td><span class="wxpay-id">${escapeHtml(item.delivery_id)}</span></td>
+        <td>${escapeHtml(item.event_type)}</td>
+        <td class="wxpay-url-cell" title="${escapeHtml(item.request_url)}">${escapeHtml(item.request_url)}</td>
+        <td><span class="wxpay-pill">${escapeHtml(item.status)}</span></td>
+        <td>${escapeHtml(item.attempt_count)}</td>
+        <td>${escapeHtml(item.response_status || "-")}</td>
+        <td>${escapeHtml(item.error_message || "-")}</td>
+        <td>${escapeHtml(item.updated_at || item.created_at || "-")}</td>
+        <td>${escapeHtml(item.next_retry_at || "-")}</td>
+        <td>
+          <button class="wxpay-text-link js-delivery-body" data-kind="request" data-delivery-id="${escapeHtml(item.delivery_id)}" type="button">请求</button>
+          <button class="wxpay-text-link js-delivery-body" data-kind="response" data-delivery-id="${escapeHtml(item.delivery_id)}" type="button">响应</button>
+          ${canRetry ? `<button class="wxpay-text-link js-delivery-retry" data-delivery-id="${escapeHtml(item.delivery_id)}" type="button">重试</button>` : ""}
+        </td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function loadDeliveries() {
+    if (!deliverySection) return;
+    const orderId = deliverySection.dataset.orderId;
+    const response = await fetch(`/api/admin/wechat-pay/orders/${orderId}/external-push-deliveries`, {credentials: "same-origin"});
+    const data = await response.json();
+    if (!data.ok) {
+      deliveryStatus.textContent = data.error || "外推记录加载失败";
+      return;
+    }
+    renderDeliveries(data.items || []);
+  }
+
+  if (deliveryBody) {
+    deliveryBody.addEventListener("click", (event) => {
+      const bodyButton = event.target.closest(".js-delivery-body");
+      if (bodyButton) {
+        showDeliveryBody(bodyButton.dataset.kind, bodyButton.dataset.deliveryId);
+        return;
+      }
+      const retryButton = event.target.closest(".js-delivery-retry");
+      if (retryButton) {
+        deliveryStatus.textContent = "正在重试...";
+        retryDelivery(retryButton.dataset.deliveryId);
+      }
+    });
+  }
+  loadDeliveries();
   {% else %}
 
   const tableBody = document.getElementById("wxpayTableBody");

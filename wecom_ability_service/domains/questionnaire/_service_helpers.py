@@ -50,16 +50,20 @@ QUESTIONNAIRE_EXTERNAL_PUSH_RESERVED_KEYS = {
     "submitted_at",
     "answers",
     "phone_number",
+    "type",
+    "expires_at_ts",
     "day",
     "frequency",
     "remark",
 }
+QUESTIONNAIRE_EXTERNAL_PUSH_TYPES = {"subscription", "premium", "trial"}
 QUESTIONNAIRE_ROW_SELECT = """
     SELECT id, slug, name, title, description, is_disabled, redirect_url,
            answer_display_mode,
            assessment_enabled, assessment_config,
-           external_push_enabled, external_push_url, external_push_day, external_push_frequency,
-           external_push_remark, external_push_custom_params, created_at, updated_at
+           external_push_enabled, external_push_url, external_push_type, external_push_expires_at_ts,
+           external_push_day, external_push_frequency, external_push_remark, external_push_custom_params,
+           created_at, updated_at
     FROM questionnaires
 """
 
@@ -315,6 +319,18 @@ def _normalize_questionnaire_payload(
         payload.get("external_push_enabled", (existing or {}).get("external_push_enabled"))
     )
     external_push_url = str(payload.get("external_push_url") or "").strip()
+    external_push_type = str(
+        payload.get("external_push_type", (existing or {}).get("external_push_type") or "") or ""
+    ).strip()
+    raw_external_push_expires_at_ts = payload.get(
+        "external_push_expires_at_ts",
+        (existing or {}).get("external_push_expires_at_ts"),
+    )
+    external_push_expires_at_ts = _normalize_required_integer(
+        raw_external_push_expires_at_ts,
+        "external_push_expires_at_ts",
+        allow_none=True,
+    )
     external_push_day = _normalize_required_integer(
         payload.get("external_push_day", (existing or {}).get("external_push_day")),
         "external_push_day",
@@ -346,6 +362,8 @@ def _normalize_questionnaire_payload(
         raise ValueError("title is required")
     if external_push_enabled and not external_push_url:
         raise ValueError("external_push_url is required when external_push_enabled is enabled")
+    if external_push_type and external_push_type not in QUESTIONNAIRE_EXTERNAL_PUSH_TYPES:
+        raise ValueError("external_push_type must be subscription, premium or trial")
     if _questionnaire_exists_by_slug(slug, exclude_id=questionnaire_id):
         if has_explicit_slug:
             raise ValueError("slug already exists")
@@ -446,6 +464,8 @@ def _normalize_questionnaire_payload(
         "assessment_config": assessment_config,
         "external_push_enabled": external_push_enabled,
         "external_push_url": external_push_url,
+        "external_push_type": external_push_type,
+        "external_push_expires_at_ts": external_push_expires_at_ts,
         "external_push_day": external_push_day,
         "external_push_frequency": external_push_frequency,
         "external_push_remark": external_push_remark,
@@ -490,6 +510,10 @@ def _serialize_questionnaire_row(row: dict[str, Any]) -> dict[str, Any]:
         "assessment_config": _normalize_questionnaire_assessment_config(row.get("assessment_config")),
         "external_push_enabled": _normalize_bool(row.get("external_push_enabled")),
         "external_push_url": row.get("external_push_url", "") or "",
+        "external_push_type": row.get("external_push_type", "") or "",
+        "external_push_expires_at_ts": int(row["external_push_expires_at_ts"])
+        if row.get("external_push_expires_at_ts") is not None
+        else "",
         "external_push_day": int(row["external_push_day"]) if row.get("external_push_day") is not None else "",
         "external_push_frequency": int(row["external_push_frequency"])
         if row.get("external_push_frequency") is not None

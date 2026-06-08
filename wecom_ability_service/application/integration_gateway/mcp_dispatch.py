@@ -119,11 +119,120 @@ def _normalize_customer_ref(value: Any) -> str:
         compact = compact[2:]
     if re.fullmatch(r"1\d{10}", compact):
         return compact
+    if _masked_mobile_parts(compact):
+        return compact.lower()
     return text
 
 
 def _is_mobile_customer_ref(value: str) -> bool:
     return bool(re.fullmatch(r"1\d{10}", value))
+
+
+def _masked_mobile_parts(value: str) -> tuple[str, str] | None:
+    compact = re.sub(r"[\s()\-]+", "", str(value or "").strip())
+    if compact.startswith("+86"):
+        compact = compact[3:]
+    elif compact.startswith("86") and len(compact) == 13:
+        compact = compact[2:]
+    match = re.fullmatch(r"(1\d{2})(?:x{4}|\*{4})(\d{4})", compact, flags=re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(1), match.group(2)
+
+
+def _resolve_masked_mobile_identity(masked_mobile: str) -> dict[str, Any]:
+    parts = _masked_mobile_parts(masked_mobile)
+    if not parts:
+        return {}
+    prefix3, last4 = parts
+    match_key = f"{prefix3}_{last4}"
+    db = get_db()
+    rows = db.execute(
+        """
+        WITH candidates AS (
+            SELECT
+                p.mobile AS mobile,
+                b.external_userid AS external_userid,
+                c.customer_name AS customer_name,
+                c.owner_userid AS owner_userid,
+                c.remark AS remark,
+                0 AS source_rank,
+                COALESCE(b.updated_at, b.created_at) AS updated_at
+            FROM people p
+            JOIN external_contact_bindings b ON b.person_id = p.id
+            LEFT JOIN contacts c ON c.external_userid = b.external_userid
+            WHERE p.mobile LIKE ?
+            UNION ALL
+            SELECT
+                pc.mobile AS mobile,
+                pc.external_userid AS external_userid,
+                COALESCE(c.customer_name, '') AS customer_name,
+                COALESCE(c.owner_userid, pc.owner_userid) AS owner_userid,
+                COALESCE(c.remark, '') AS remark,
+                1 AS source_rank,
+                pc.updated_at AS updated_at
+            FROM user_ops_pool_current pc
+            LEFT JOIN contacts c ON c.external_userid = pc.external_userid
+            WHERE pc.mobile LIKE ? AND pc.external_userid <> ''
+            UNION ALL
+            SELECT
+                am.phone AS mobile,
+                am.external_contact_id AS external_userid,
+                COALESCE(c.customer_name, '') AS customer_name,
+                COALESCE(c.owner_userid, am.owner_staff_id) AS owner_userid,
+                COALESCE(c.remark, '') AS remark,
+                2 AS source_rank,
+                am.updated_at AS updated_at
+            FROM automation_member am
+            LEFT JOIN contacts c ON c.external_userid = am.external_contact_id
+            WHERE am.phone LIKE ? AND am.external_contact_id <> ''
+            UNION ALL
+            SELECT
+                i.phone AS mobile,
+                i.external_contact_id AS external_userid,
+                COALESCE(c.customer_name, '') AS customer_name,
+                COALESCE(c.owner_userid, '') AS owner_userid,
+                COALESCE(c.remark, '') AS remark,
+                3 AS source_rank,
+                i.created_at AS updated_at
+            FROM automation_message_activity_sync_item i
+            LEFT JOIN contacts c ON c.external_userid = i.external_contact_id
+            WHERE i.phone_match_key = ? AND i.external_contact_id <> ''
+        )
+        SELECT mobile, external_userid, customer_name, owner_userid, remark
+        FROM candidates
+        WHERE external_userid <> ''
+        ORDER BY source_rank ASC, updated_at DESC NULLS LAST, external_userid ASC
+        """,
+        (f"{prefix3}%{last4}", f"{prefix3}%{last4}", f"{prefix3}%{last4}", match_key),
+    ).fetchall() or []
+    by_external: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        item = dict(row)
+        external_userid = str(item.get("external_userid") or "").strip()
+        if external_userid and external_userid not in by_external:
+            by_external[external_userid] = item
+    if not by_external:
+        raise ValueError(f"customer not found for masked mobile: {masked_mobile}")
+    if len(by_external) > 1:
+        examples = ",".join(sorted(by_external.keys())[:5])
+        raise ValueError(
+            f"masked mobile is ambiguous: {masked_mobile} matched {len(by_external)} customers: {examples}"
+        )
+    matched = next(iter(by_external.values()))
+    external_userid = str(matched.get("external_userid") or "").strip()
+    identity = resolve_person_identity(external_userid=external_userid)
+    if not identity.get("external_userid"):
+        identity["external_userid"] = external_userid
+    if not identity.get("mobile"):
+        identity["mobile"] = str(matched.get("mobile") or "").strip()
+    if not identity.get("customer_name"):
+        identity["customer_name"] = str(matched.get("customer_name") or "").strip()
+    if not identity.get("owner_userid"):
+        identity["owner_userid"] = str(matched.get("owner_userid") or "").strip()
+    if not identity.get("remark"):
+        identity["remark"] = str(matched.get("remark") or "").strip()
+    return identity
 
 
 def _resolve_customer_locator(arguments: dict[str, Any], *, required: bool = True) -> dict[str, Any]:
@@ -153,6 +262,15 @@ def _resolve_customer_locator(arguments: dict[str, Any], *, required: bool = Tru
         return {
             "customer_ref": customer_ref,
             "matched_by": "mobile",
+            "external_userid": external_userid,
+            "identity": identity,
+        }
+    if _masked_mobile_parts(customer_ref):
+        identity = _resolve_masked_mobile_identity(customer_ref)
+        external_userid = str(identity.get("external_userid") or "").strip()
+        return {
+            "customer_ref": customer_ref,
+            "matched_by": "masked_mobile",
             "external_userid": external_userid,
             "identity": identity,
         }

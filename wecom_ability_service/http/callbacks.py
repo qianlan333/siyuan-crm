@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from .callback_runtime import handle_external_contact_callback_request, handle_wecom_event_request
+_RETIREMENT_MESSAGE = "Legacy WeCom callback routes are retired. Use aicrm_next.channel_entry."
 
 
 def receive_external_contact_callback():
-    return handle_external_contact_callback_request()
+    raise RuntimeError(_RETIREMENT_MESSAGE)
 
 
 def receive_wecom_event():
-    return handle_wecom_event_request()
+    raise RuntimeError(_RETIREMENT_MESSAGE)
 
 
 def register_routes(bp):
-    bp.route('/wecom/external-contact/callback', methods=['GET', 'POST'])(receive_external_contact_callback)
-    bp.route('/api/wecom/events', methods=['GET', 'POST'])(receive_wecom_event)
+    return None

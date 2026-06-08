@@ -52,6 +52,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Check no duplicate Next source
+        run: bash scripts/check_no_duplicate_next_source.sh
+
+      - name: Check no new legacy surface
+        run: python scripts/check_no_new_legacy.py --strict
+
+      - name: Check legacy replacement backlog is generated
+        run: python tools/generate_legacy_replacement_backlog.py --check
+
       - name: Run PR smoke tests (PG-only, targeted)
         run: |
           python -m pytest \
@@ -111,6 +120,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Check no new legacy surface
+        run: python scripts/check_no_new_legacy.py --strict
+
+      - name: Check legacy replacement backlog is generated
+        run: python tools/generate_legacy_replacement_backlog.py --check
 
       - name: Run main smoke tests (PG-only, targeted)
         run: |
@@ -176,6 +191,12 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+
+      - name: Check no new legacy surface
+        run: python scripts/check_no_new_legacy.py --strict
+
+      - name: Check legacy replacement backlog is generated
+        run: python tools/generate_legacy_replacement_backlog.py --check
 
       - name: Run all tests (PG-only, parallel)
         # ``-n auto`` 让 pytest-xdist 按 CPU 核数派发 test 到 worker 子进程；

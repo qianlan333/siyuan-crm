@@ -47,6 +47,8 @@ def test_pr_smoke_covers_admin_navigation_and_wechat_pay_splits():
     source = _ci_source()
     pr_smoke_block = source[source.index("pr-smoke:"):source.index("main-smoke:")]
 
+    assert "bash scripts/check_no_duplicate_next_source.sh" in pr_smoke_block
+
     for test_path in (
         "tests/test_admin_navigation_groups.py",
         "tests/test_wechat_pay_products.py",

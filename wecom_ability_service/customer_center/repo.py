@@ -52,32 +52,167 @@ def _normalize_bool_filter(value: Any) -> bool | None:
     raise ValueError("is_bound must be one of true/false/1/0")
 
 
-def _customer_list_scope_sql() -> str:
+def _owner_userid_scope_predicate(column: str) -> str:
+    return f"""
+    (
+        {column} = ?
+        OR {column} IN (
+            SELECT owner_role.userid
+            FROM owner_role_map owner_role
+            WHERE owner_role.display_name = ?
+        )
+    )
+    """
+
+
+def _like_predicate(*columns: str) -> str:
+    return "(" + " OR ".join(f"LOWER({column}) LIKE ?" for column in columns) + ")"
+
+
+def _customer_list_prefilter_scope(filters: dict[str, Any] | None = None) -> tuple[str, list[Any], bool]:
+    normalized = {key: _normalized_text(value) for key, value in (filters or {}).items()}
+    owner_userid = normalized.get("owner_userid", "")
+    keyword = normalized.get("keyword", "").lower()
+    if not owner_userid and not keyword:
+        return (
+            """
+            SELECT external_userid FROM contacts
+            UNION
+            SELECT external_userid FROM external_contact_bindings
+            UNION
+            SELECT external_userid FROM wecom_external_contact_identity_map
+            UNION
+            SELECT external_userid FROM wecom_external_contact_follow_users
+            UNION
+            SELECT external_userid FROM contact_tags
+            UNION
+            SELECT external_userid FROM class_user_status_current
+            UNION
+            SELECT external_userid FROM archived_messages
+            """,
+            [],
+            False,
+        )
+
+    selects: list[str] = []
+    params: list[Any] = []
+
+    if owner_userid:
+        selects.extend(
+            [
+                f"SELECT external_userid FROM contacts WHERE {_owner_userid_scope_predicate('owner_userid')}",
+                f"SELECT external_userid FROM class_user_status_current WHERE {_owner_userid_scope_predicate('owner_userid_snapshot')}",
+                f"SELECT external_userid FROM external_contact_bindings WHERE {_owner_userid_scope_predicate('last_owner_userid')} OR {_owner_userid_scope_predicate('first_owner_userid')}",
+                f"SELECT external_userid FROM wecom_external_contact_identity_map WHERE {_owner_userid_scope_predicate('follow_user_userid')}",
+                f"SELECT external_userid FROM wecom_external_contact_follow_users WHERE {_owner_userid_scope_predicate('user_id')}",
+            ]
+        )
+        params.extend([owner_userid, owner_userid])
+        params.extend([owner_userid, owner_userid])
+        params.extend([owner_userid, owner_userid, owner_userid, owner_userid])
+        params.extend([owner_userid, owner_userid])
+        params.extend([owner_userid, owner_userid])
+
+    if keyword:
+        like_keyword = f"%{keyword}%"
+        keyword_selects = [
+            (
+                "SELECT external_userid FROM contacts WHERE "
+                + _like_predicate("external_userid", "customer_name", "owner_userid", "remark", "description")
+            ),
+            (
+                "SELECT external_userid FROM class_user_status_current WHERE "
+                + _like_predicate(
+                    "external_userid",
+                    "customer_name_snapshot",
+                    "owner_userid_snapshot",
+                    "mobile_snapshot",
+                    "signup_status",
+                    "signup_label_name",
+                )
+            ),
+            (
+                """
+                SELECT binding.external_userid
+                FROM external_contact_bindings binding
+                LEFT JOIN people people ON people.id = binding.person_id
+                WHERE """
+                + _like_predicate(
+                    "binding.external_userid",
+                    "binding.last_owner_userid",
+                    "binding.first_owner_userid",
+                    "people.mobile",
+                )
+            ),
+            (
+                "SELECT external_userid FROM wecom_external_contact_identity_map WHERE "
+                + _like_predicate("external_userid", "follow_user_userid", "name")
+            ),
+            (
+                "SELECT external_userid FROM wecom_external_contact_follow_users WHERE "
+                + _like_predicate("external_userid", "user_id")
+            ),
+            (
+                "SELECT external_userid FROM contact_tags WHERE "
+                + _like_predicate("external_userid", "tag_id", "tag_name")
+            ),
+            "SELECT external_userid FROM archived_messages WHERE LOWER(external_userid) LIKE ?",
+            """
+            SELECT contact.external_userid
+            FROM contacts contact
+            JOIN owner_role_map owner_role ON owner_role.userid = contact.owner_userid
+            WHERE LOWER(owner_role.display_name) LIKE ?
+            """,
+            """
+            SELECT class_status.external_userid
+            FROM class_user_status_current class_status
+            JOIN owner_role_map owner_role ON owner_role.userid = class_status.owner_userid_snapshot
+            WHERE LOWER(owner_role.display_name) LIKE ?
+            """,
+            """
+            SELECT binding.external_userid
+            FROM external_contact_bindings binding
+            JOIN owner_role_map owner_role
+              ON owner_role.userid = binding.last_owner_userid
+              OR owner_role.userid = binding.first_owner_userid
+            WHERE LOWER(owner_role.display_name) LIKE ?
+            """,
+            """
+            SELECT identity.external_userid
+            FROM wecom_external_contact_identity_map identity
+            JOIN owner_role_map owner_role ON owner_role.userid = identity.follow_user_userid
+            WHERE LOWER(owner_role.display_name) LIKE ?
+            """,
+            """
+            SELECT follow_user.external_userid
+            FROM wecom_external_contact_follow_users follow_user
+            JOIN owner_role_map owner_role ON owner_role.userid = follow_user.user_id
+            WHERE LOWER(owner_role.display_name) LIKE ?
+            """,
+        ]
+        selects.extend(keyword_selects)
+        params.extend([like_keyword] * (5 + 6 + 4 + 3 + 2 + 3 + 1 + 5))
+
+    return "\nUNION\n".join(selects), params, True
+
+
+def _customer_list_scope_sql(filters: dict[str, Any] | None = None) -> tuple[str, list[Any]]:
     class_status_updated_at = cast_text("class_status.updated_at")
     contact_updated_at = cast_text("contact.updated_at")
     binding_updated_at = cast_text("binding.updated_at")
+    scope_select_sql, scope_params, prefiltered = _customer_list_prefilter_scope(filters)
+    latest_messages_join_scope = "JOIN scope ON scope.external_userid = archived_messages.external_userid" if prefiltered else ""
 
     return f"""
     WITH scope AS (
-        SELECT external_userid FROM contacts
-        UNION
-        SELECT external_userid FROM external_contact_bindings
-        UNION
-        SELECT external_userid FROM wecom_external_contact_identity_map
-        UNION
-        SELECT external_userid FROM wecom_external_contact_follow_users
-        UNION
-        SELECT external_userid FROM contact_tags
-        UNION
-        SELECT external_userid FROM class_user_status_current
-        UNION
-        SELECT external_userid FROM archived_messages
+        {scope_select_sql}
     ),
     latest_messages AS (
-        SELECT external_userid, MAX(send_time) AS last_message_at
+        SELECT archived_messages.external_userid, MAX(archived_messages.send_time) AS last_message_at
         FROM archived_messages
-        WHERE external_userid IS NOT NULL AND external_userid <> ''
-        GROUP BY external_userid
+        {latest_messages_join_scope}
+        WHERE archived_messages.external_userid IS NOT NULL AND archived_messages.external_userid <> ''
+        GROUP BY archived_messages.external_userid
     ),
     decorated AS (
         SELECT
@@ -148,7 +283,7 @@ def _customer_list_scope_sql() -> str:
         WHERE scope.external_userid IS NOT NULL
           AND scope.external_userid <> ''
     )
-    """
+    """, scope_params
 
 
 def _customer_list_where(filters: dict[str, Any] | None) -> tuple[list[str], list[Any]]:
@@ -247,16 +382,17 @@ def list_customer_scope_external_userids(
 ) -> list[str]:
     where, params = _customer_list_where(filters)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    scope_sql, scope_params = _customer_list_scope_sql(filters)
     rows = _fetchall_dict(
         f"""
-        {_customer_list_scope_sql()}
+        {scope_sql}
         SELECT decorated.external_userid
         FROM decorated
         {where_sql}
         ORDER BY decorated.sort_updated_at DESC, decorated.external_userid DESC
         LIMIT ? OFFSET ?
         """,
-        tuple(params + [max(1, int(limit)), max(0, int(offset))]),
+        tuple(scope_params + params + [max(1, int(limit)), max(0, int(offset))]),
     )
     return [_normalized_text(row.get("external_userid")) for row in rows if _normalized_text(row.get("external_userid"))]
 
@@ -264,14 +400,15 @@ def list_customer_scope_external_userids(
 def count_customer_scope_external_userids(filters: dict[str, Any] | None = None) -> int:
     where, params = _customer_list_where(filters)
     where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+    scope_sql, scope_params = _customer_list_scope_sql(filters)
     row = get_db().execute(
         f"""
-        {_customer_list_scope_sql()}
+        {scope_sql}
         SELECT COUNT(*) AS total
         FROM decorated
         {where_sql}
         """,
-        tuple(params),
+        tuple(scope_params + params),
     ).fetchone()
     return int(row["total"] or 0) if row else 0
 

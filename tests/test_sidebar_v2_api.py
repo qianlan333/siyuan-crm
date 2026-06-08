@@ -6,6 +6,7 @@ import json
 import pytest
 
 from wecom_ability_service.db import get_db
+from wecom_ability_service.infra.signed_context import load_sidebar_product_context_token
 
 _TINY_PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAEAAAcAAekVCC0AAAAASUVORK5CYII="
@@ -30,7 +31,10 @@ def _seed_contact(external_userid: str = "wm_sidebar_v2") -> None:
     db.commit()
 
 
-def test_sidebar_v2_workbench_returns_text_profile_fields_without_enum_options(client):
+def test_sidebar_v2_workbench_returns_text_profile_fields_without_enum_options(client, app):
+    with app.app_context():
+        _seed_contact("wx_ext_001")
+
     response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": "wx_ext_001"})
 
     assert response.status_code == 200
@@ -45,6 +49,139 @@ def test_sidebar_v2_workbench_returns_text_profile_fields_without_enum_options(c
     assert "profile_options" not in payload
     assert payload["modules"] == ["profile", "questionnaires", "products", "orders", "materials", "other_staff_messages"]
     assert "counts" not in payload
+    assert payload["diagnostics"]["display_name_source"]
+
+
+def test_sidebar_v2_workbench_resolves_display_name_from_contacts_or_identity_map(client, app):
+    external_userid = "wmbNXy_raw_should_not_title"
+    identity_only_external_userid = "wm_identity_name_only"
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO contacts (external_userid, customer_name, owner_userid, remark, description)
+            VALUES (?, '', 'sales_01', '真实备注名', '')
+            """,
+            (external_userid,),
+        )
+        db.execute(
+            """
+            INSERT INTO wecom_external_contact_identity_map (
+                corp_id, external_userid, unionid, openid, follow_user_userid, name
+            ) VALUES (?, ?, '', '', ?, ?)
+            """,
+            ("ww-test", external_userid, "sales_01", "身份表姓名"),
+        )
+        db.execute(
+            """
+            INSERT INTO wecom_external_contact_identity_map (
+                corp_id, external_userid, unionid, openid, follow_user_userid, name
+            ) VALUES (?, ?, '', '', ?, ?)
+            """,
+            ("ww-test", identity_only_external_userid, "sales_02", "身份表唯一姓名"),
+        )
+        db.commit()
+
+    response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": external_userid})
+    identity_only_response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": identity_only_external_userid})
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["customer"]["display_name"] == "真实备注名"
+    assert payload["customer"]["external_userid"] == external_userid
+    assert payload["diagnostics"]["display_name_source"] == "contacts.remark"
+    assert payload["customer"]["display_name"] != external_userid
+    assert identity_only_response.status_code == 200
+    identity_only_payload = identity_only_response.get_json()
+    assert identity_only_payload["customer"]["display_name"] == "身份表唯一姓名"
+    assert identity_only_payload["diagnostics"]["display_name_source"] == "wecom_external_contact_identity_map.name"
+
+
+def _seed_mobile_binding(external_userid: str, mobile: str = "18906252970", owner_userid: str = "owner_current") -> None:
+    db = get_db()
+    person_id = db.execute(
+        """
+        INSERT INTO people (mobile, third_party_user_id)
+        VALUES (?, '')
+        ON CONFLICT (mobile) DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+        RETURNING id
+        """,
+        (mobile,),
+    ).fetchone()["id"]
+    db.execute(
+        """
+        INSERT INTO external_contact_bindings (
+            external_userid, person_id, first_bound_by_userid,
+            first_owner_userid, last_owner_userid
+        ) VALUES (?, ?, 'questionnaire_submit', ?, ?)
+        ON CONFLICT (external_userid) DO UPDATE SET
+            person_id = EXCLUDED.person_id,
+            last_owner_userid = EXCLUDED.last_owner_userid,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (external_userid, person_id, owner_userid, owner_userid),
+    )
+    db.commit()
+
+
+def test_sidebar_v2_workbench_uses_fresh_binding_after_customer_context_failure(client, app, monkeypatch):
+    from aicrm_next.customer_read_model import sidebar_v2 as sidebar_read_model
+
+    external_userid = "wm_context_failed_but_bound"
+
+    class FailingContextQuery:
+        def __call__(self, request):
+            raise RuntimeError("customer read model transaction aborted")
+
+    monkeypatch.setattr(sidebar_read_model, "GetCustomerContextQuery", lambda: FailingContextQuery())
+    monkeypatch.setattr(sidebar_read_model, "build_customer_live_source_repository", lambda: (_ for _ in ()).throw(RuntimeError("live source shares aborted transaction")))
+    with app.app_context():
+        _seed_contact(external_userid)
+        _seed_mobile_binding(external_userid)
+
+    response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": external_userid})
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["customer"]["is_bound"] is True
+    assert payload["customer"]["mobile"] == "18906252970"
+    assert payload["diagnostics"]["context_source_status"] == "error"
+    assert payload["diagnostics"]["binding_source"] == "fresh_binding_status"
+
+
+def test_sidebar_v2_workbench_fresh_binding_overrides_stale_unbound_context(client, app, monkeypatch):
+    from aicrm_next.customer_read_model import sidebar_v2 as sidebar_read_model
+
+    external_userid = "wm_stale_context_but_bound"
+
+    class StaleContextQuery:
+        def __call__(self, request):
+            return {
+                "ok": True,
+                "customer": {
+                    "display_name": "陈旧上下文姓名",
+                    "owner_userid": "owner_current",
+                    "binding": {"is_bound": False, "mobile": "", "binding_status": "unbound"},
+                },
+                "binding": {"is_bound": False, "mobile": "", "binding_status": "unbound"},
+                "timeline": {"items": []},
+                "recent_messages": [],
+            }
+
+    monkeypatch.setattr(sidebar_read_model, "GetCustomerContextQuery", lambda: StaleContextQuery())
+    with app.app_context():
+        _seed_contact(external_userid)
+        _seed_mobile_binding(external_userid, "18906252970")
+
+    response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": external_userid})
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["customer"]["display_name"] == "月朗"
+    assert payload["customer"]["is_bound"] is True
+    assert payload["customer"]["mobile"] == "18906252970"
+    assert payload["diagnostics"]["context_source_status"] == "next_read_model"
+    assert payload["diagnostics"]["binding_source"] == "fresh_binding_status"
 
 
 def test_sidebar_v2_profile_put_accepts_free_text_source_and_industry(client):
@@ -159,58 +296,86 @@ def test_sidebar_v2_questionnaires_groups_answers(client, app):
     ]
 
 
-def test_sidebar_v2_materials_use_unified_schema(client, monkeypatch):
-    from wecom_ability_service.domains.sidebar_v2 import service
-
-    monkeypatch.setattr(
-        service.image_library,
-        "list_images",
-        lambda **kwargs: [
-            {
-                "id": 1,
-                "name": "",
-                "file_name": "poster.png",
-                "source": "url",
-                "source_url": "https://example.com/raw-big-image.png",
-                "tags": ["课程介绍", "朋友圈", "海报", "第四个标签"],
-                "enabled": True,
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        service.miniprogram_library,
-        "list_miniprograms",
-        lambda **kwargs: [{"id": 2, "title": "", "name": "mini", "enabled": True, "tags": ["小程序", "测评", "转化", "多余"]}],
-    )
-    monkeypatch.setattr(
-        service.attachment_library,
-        "list_attachments",
-        lambda **kwargs: [{"id": 3, "name": "", "file_name": "阅读资料.pdf", "tags": ["PDF"], "enabled": True}],
-    )
+def test_sidebar_v2_materials_use_unified_schema(client, app):
+    with app.app_context():
+        db = get_db()
+        image_id = db.execute(
+            """
+            INSERT INTO image_library (
+                name, file_name, source, source_url, data_base64, mime_type, file_size,
+                thumb_media_id, thumb_media_id_expires_at, enabled, description, tags, category, ai_metadata
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, '', NULL, ?, '', ?::jsonb, '', '{}'::jsonb)
+            RETURNING id
+            """,
+            ("", "poster.png", "url", "https://example.com/raw-big-image.png", "", "image/png", 0, True, json.dumps(["课程介绍", "朋友圈", "海报", "第四个标签"], ensure_ascii=False)),
+        ).fetchone()["id"]
+        mini_id = db.execute(
+            """
+            INSERT INTO miniprogram_library (
+                name, appid, pagepath, title, thumb_image_url, thumb_image_base64,
+                thumb_image_id, thumb_media_id, thumb_media_id_expires_at, enabled
+            ) VALUES (?, ?, ?, ?, '', '', NULL, '', NULL, ?)
+            RETURNING id
+            """,
+            ("mini", "wx-mini", "pages/index", "", True),
+        ).fetchone()["id"]
+        pdf_id = db.execute(
+            """
+            INSERT INTO attachment_library (
+                name, file_name, mime_type, file_size, data_base64, media_id,
+                media_id_expires_at, enabled, description, tags
+            ) VALUES (?, ?, ?, ?, '', '', NULL, ?, '', ?::jsonb)
+            RETURNING id
+            """,
+            ("", "阅读资料.pdf", "application/pdf", 0, True, json.dumps(["PDF"], ensure_ascii=False)),
+        ).fetchone()["id"]
+        db.commit()
 
     image = client.get("/api/sidebar/v2/materials", query_string={"type": "image"}).get_json()["materials"][0]
     mini = client.get("/api/sidebar/v2/materials", query_string={"type": "mini"}).get_json()["materials"][0]
     pdf = client.get("/api/sidebar/v2/materials", query_string={"type": "pdf"}).get_json()["materials"][0]
 
     assert image == {
-        "id": 1,
+        "id": image_id,
         "type": "image",
         "title": "poster.png",
         "thumbnail_label": "图",
-        "thumbnail_url": "/api/sidebar/v2/materials/image/1/thumbnail",
+        "thumbnail_url": f"/api/sidebar/v2/materials/image/{image_id}/thumbnail",
         "tags": ["课程介绍", "朋友圈", "海报"],
         "enabled": True,
     }
-    assert mini == {"id": 2, "type": "mini", "title": "mini", "thumbnail_label": "小", "thumbnail_url": "", "tags": ["小程序", "测评", "转化"], "enabled": True}
-    assert pdf == {"id": 3, "type": "pdf", "title": "阅读资料.pdf", "thumbnail_label": "PDF", "thumbnail_url": "", "tags": ["PDF"], "enabled": True}
+    assert mini == {"id": mini_id, "type": "mini", "title": "mini", "thumbnail_label": "小", "thumbnail_url": "", "tags": [], "enabled": True}
+    assert pdf == {"id": pdf_id, "type": "pdf", "title": "阅读资料.pdf", "thumbnail_label": "PDF", "thumbnail_url": "", "tags": ["PDF"], "enabled": True}
 
 
-def test_sidebar_v2_material_titles_have_safe_fallbacks(client, monkeypatch):
-    from wecom_ability_service.domains.sidebar_v2 import service
-
-    monkeypatch.setattr(service.image_library, "list_images", lambda **kwargs: [{"id": 11, "enabled": True}])
-    monkeypatch.setattr(service.miniprogram_library, "list_miniprograms", lambda **kwargs: [{"id": 12, "enabled": True}])
-    monkeypatch.setattr(service.attachment_library, "list_attachments", lambda **kwargs: [{"id": 13, "enabled": True}])
+def test_sidebar_v2_material_titles_have_safe_fallbacks(client, app):
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO image_library (
+                name, file_name, source, source_url, data_base64, mime_type, file_size,
+                thumb_media_id, thumb_media_id_expires_at, enabled, description, tags, category, ai_metadata
+            ) VALUES ('', '', 'upload', '', '', 'image/png', 0, '', NULL, TRUE, '', '[]'::jsonb, '', '{}'::jsonb)
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO miniprogram_library (
+                name, appid, pagepath, title, thumb_image_url, thumb_image_base64,
+                thumb_image_id, thumb_media_id, thumb_media_id_expires_at, enabled
+            ) VALUES ('', 'wx-mini', 'pages/index', '', '', '', NULL, '', NULL, TRUE)
+            """
+        )
+        db.execute(
+            """
+            INSERT INTO attachment_library (
+                name, file_name, mime_type, file_size, data_base64, media_id,
+                media_id_expires_at, enabled, description, tags
+            ) VALUES ('', '', 'application/pdf', 0, '', '', NULL, TRUE, '', '[]'::jsonb)
+            """
+        )
+        db.commit()
 
     image = client.get("/api/sidebar/v2/materials", query_string={"type": "image"}).get_json()["materials"][0]
     mini = client.get("/api/sidebar/v2/materials", query_string={"type": "mini"}).get_json()["materials"][0]
@@ -347,43 +512,50 @@ def test_sidebar_v2_products_and_orders_use_existing_wechat_pay_records(client, 
         ).fetchone()["id"]
         db.commit()
 
-    products_response = client.get("/api/sidebar/v2/products", query_string={"external_userid": "wm_sidebar_v2"})
-    orders_response = client.get("/api/sidebar/v2/orders", query_string={"external_userid": "wm_sidebar_v2"})
+    products_response = client.get(
+        "/api/sidebar/v2/products",
+        query_string={"external_userid": "wm_sidebar_v2", "owner_userid": "owner_current", "bind_by_userid": "sales_01"},
+    )
+    orders_response = client.get(
+        "/api/sidebar/v2/orders",
+        query_string={"external_userid": "wm_sidebar_v2", "owner_userid": "owner_current"},
+    )
 
     assert products_response.status_code == 200
     assert orders_response.status_code == 200
-    assert products_response.get_json() == {
-        "ok": True,
-        "products": [
-            {
-                "id": "prd_sidebar_active",
-                "title": "暑期阅读提升营 · 4 周",
-                "price_label": "¥399",
-                "product_url": "/p/prd_sidebar_active",
-            }
-        ],
-    }
-    assert orders_response.get_json() == {
-        "ok": True,
-        "orders": [
-            {
-                "id": "WXP_SIDE_001",
-                "order_id": str(order_id),
-                "title": "暑期阅读提升营 · 4 周",
-                "amount_label": "¥399",
-                "status_label": "已支付",
-                "paid_at": "2026-05-20 14:22",
-                "detail_url": f"/admin/wechat-pay/transactions/{order_id}",
-            }
-        ],
-    }
+    products_payload = products_response.get_json()
+    product = products_payload["products"][0]
+    assert product["id"] == "prd_sidebar_active"
+    assert product["title"] == "暑期阅读提升营 · 4 周"
+    assert product["price_label"] == "¥399"
+    assert product["product_url"].startswith("/p/prd_sidebar_active?ctx=")
+    assert product["checkout_url"].startswith("/pay/prd_sidebar_active?ctx=")
+    assert "wm_sidebar_v2" not in product["product_url"]
+    token = product["product_url"].split("ctx=", 1)[1]
+    token_payload = load_sidebar_product_context_token(token)
+    assert token_payload["ok"] is True
+    assert token_payload["context"]["external_userid"] == "wm_sidebar_v2"
+    assert token_payload["context"]["owner_userid"] == "owner_current"
+    assert token_payload["context"]["bind_by_userid"] == "sales_01"
+    assert products_payload["diagnostics"]["context_status"] == "signed"
+
+    orders_payload = orders_response.get_json()
+    assert orders_payload["orders"] == [
+        {
+            "id": "WXP_SIDE_001",
+            "order_id": str(order_id),
+            "title": "暑期阅读提升营 · 4 周",
+            "amount_label": "¥399",
+            "status_label": "已支付",
+            "paid_at": "2026-05-20 14:22",
+            "detail_url": f"/admin/wechat-pay/transactions/{order_id}",
+        }
+    ]
+    assert orders_payload["customer"]["external_userid"] == "wm_sidebar_v2"
+    assert orders_payload["diagnostics"]["paid_order_mobile_binding"]["status"] in {"already_bound", "no_single_candidate"}
 
 
-def test_sidebar_v2_workbench_binds_unbound_mobile_from_paid_wechat_pay_order(client, app, monkeypatch):
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.user_ops.service._resolve_third_party_user_id_by_mobile",
-        lambda mobile: f"tp_{mobile}",
-    )
+def test_sidebar_v2_workbench_binds_unbound_mobile_from_paid_wechat_pay_order(client, app):
     with app.app_context():
         _seed_contact("wm_pay_unbound")
         db = get_db()
@@ -425,42 +597,140 @@ def test_sidebar_v2_workbench_binds_unbound_mobile_from_paid_wechat_pay_order(cl
     response = client.get("/api/sidebar/v2/workbench", query_string={"external_userid": "wm_pay_unbound"})
 
     assert response.status_code == 200
-    assert response.get_json()["customer"]["is_bound"] is True
-    assert response.get_json()["customer"]["mobile"] == "13166662677"
+    payload = response.get_json()
+    assert payload["customer"]["is_bound"] is True
+    assert payload["customer"]["mobile"] == "13166662677"
+    assert payload["diagnostics"]["paid_order_mobile_binding"]["status"] == "read_overlay"
 
     status = client.get(
         "/api/sidebar/contact-binding-status",
         query_string={"external_userid": "wm_pay_unbound"},
     ).get_json()
-    assert status["is_bound"] is True
-    assert status["mobile"] == "13166662677"
+    assert status["is_bound"] is False
+    assert status["mobile"] == ""
+
+    with app.app_context():
+        binding_count = get_db().execute(
+            "SELECT COUNT(*) AS total FROM external_contact_bindings WHERE external_userid = ?",
+            ("wm_pay_unbound",),
+        ).fetchone()["total"]
+        assert binding_count == 0
+
+
+def test_sidebar_v2_workbench_backfills_orphan_questionnaire_submissions_from_paid_order(client, app):
+    with app.app_context():
+        _seed_contact("wm_pay_questionnaire_orphan")
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO wecom_external_contact_identity_map (
+                corp_id, external_userid, unionid, openid, follow_user_userid, name
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "corp_sidebar",
+                "wm_pay_questionnaire_orphan",
+                "union_pay_questionnaire_orphan",
+                "openid_pay_questionnaire_orphan",
+                "owner_current",
+                "月朗",
+            ),
+        )
+        db.execute(
+            """
+            INSERT INTO wechat_pay_orders (
+                out_trade_no, product_code, product_name, amount_total, currency,
+                payer_openid, unionid, external_userid, mobile_snapshot, status, trade_state,
+                transaction_id, paid_at, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::timestamptz, ?::timestamptz)
+            """,
+            (
+                "WXP_BIND_ORPHAN_QUESTIONNAIRE",
+                "prd_sidebar_active",
+                "黄小璨首月体验",
+                990,
+                "CNY",
+                "openid_pay_questionnaire_orphan",
+                "",
+                "",
+                "13166662679",
+                "paid",
+                "SUCCESS",
+                "4200003053202606043919108042",
+                "2026-06-04 05:58:40+00",
+                "2026-06-04 05:58:30+00",
+            ),
+        )
+        questionnaire_id = db.execute(
+            """
+            INSERT INTO questionnaires (slug, name, title)
+            VALUES (?, ?, ?)
+            RETURNING id
+            """,
+            ("orphan-binding-v1", "孤儿提交补偿问卷", "孤儿提交补偿问卷"),
+        ).fetchone()["id"]
+        submission_id = db.execute(
+            """
+            INSERT INTO questionnaire_submissions (
+                questionnaire_id, external_userid, follow_user_userid, matched_by,
+                mobile_snapshot, submitted_at
+            ) VALUES (?, '', '', '', ?, ?::timestamptz)
+            RETURNING id
+            """,
+            (questionnaire_id, "131 6666 2679", "2026-06-04 05:00:21+00"),
+        ).fetchone()["id"]
+        db.execute(
+            """
+            INSERT INTO questionnaire_submission_answers (
+                submission_id, question_id, question_type, question_title_snapshot,
+                selected_option_texts_snapshot, text_value
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                submission_id,
+                1,
+                "textarea",
+                "主要需求",
+                json.dumps([], ensure_ascii=False),
+                "想了解首月体验",
+            ),
+        )
+        db.commit()
+
+    workbench = client.get(
+        "/api/sidebar/v2/workbench",
+        query_string={"external_userid": "wm_pay_questionnaire_orphan"},
+    )
+    assert workbench.status_code == 200
+    assert workbench.get_json()["customer"]["is_bound"] is True
+    assert workbench.get_json()["customer"]["mobile"] == "13166662679"
+
+    questionnaires = client.get(
+        "/api/sidebar/v2/questionnaires",
+        query_string={"external_userid": "wm_pay_questionnaire_orphan"},
+    )
+    assert questionnaires.status_code == 200
+    questionnaire = questionnaires.get_json()["questionnaires"][0]
+    assert questionnaire["title"] == "孤儿提交补偿问卷"
+    assert questionnaire["answers"] == [{"question": "主要需求", "answer": "想了解首月体验"}]
 
     with app.app_context():
         row = get_db().execute(
             """
-            SELECT b.external_userid, p.mobile, p.third_party_user_id, b.first_bound_by_userid
-            FROM external_contact_bindings b
-            JOIN people p ON p.id = b.person_id
-            WHERE b.external_userid = ?
+            SELECT external_userid, follow_user_userid, matched_by
+            FROM questionnaire_submissions
+            WHERE id = ?
             """,
-            ("wm_pay_unbound",),
+            (submission_id,),
         ).fetchone()
         assert dict(row) == {
-            "external_userid": "wm_pay_unbound",
-            "mobile": "13166662677",
-            "third_party_user_id": "tp_13166662677",
-            "first_bound_by_userid": "owner_current",
+            "external_userid": "",
+            "follow_user_userid": "",
+            "matched_by": "",
         }
 
 
-def test_sidebar_v2_order_mobile_binding_skips_ambiguous_paid_order_mobiles(client, app, monkeypatch):
-    def fail_if_called(mobile: str) -> str:
-        raise AssertionError(f"unexpected bind for {mobile}")
-
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.user_ops.service._resolve_third_party_user_id_by_mobile",
-        fail_if_called,
-    )
+def test_sidebar_v2_order_mobile_binding_skips_ambiguous_paid_order_mobiles(client, app):
     with app.app_context():
         _seed_contact("wm_pay_ambiguous")
         db = get_db()

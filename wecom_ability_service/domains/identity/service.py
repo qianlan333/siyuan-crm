@@ -369,3 +369,62 @@ def bind_mobile_to_external_contact(
         result["third_party_sync_status"] = "success" if result.get("third_party_user_id") else "empty"
     result["lead_pool_merge"] = lead_pool_merge
     return result
+
+
+def bind_mobile_to_external_contact_from_identity_sources(
+    *,
+    external_userid: str,
+    owner_userid: str,
+    bind_by_userid: str,
+    force_rebind: bool = False,
+    resolve_binding_owner_userid: Callable[[str, str], str],
+    contact_profile_loader: Callable[[str, str], dict[str, Any]],
+    resolve_third_party_user_id_by_mobile: Callable[[str], str],
+    merge_lead_pool_after_mobile_bind: Callable[..., dict[str, Any]],
+    conflict_error_cls: type[Exception] = ContactBindingConflictError,
+    sync_error_cls: type[Exception] = Exception,
+) -> dict[str, Any]:
+    normalized_external_userid = str(external_userid or "").strip()
+    if not normalized_external_userid:
+        return {"status": "skipped", "reason": "external_userid_missing"}
+
+    existing = get_contact_binding_status(
+        normalized_external_userid,
+        str(owner_userid or "").strip(),
+        contact_profile_loader=contact_profile_loader,
+    )
+    if existing.get("is_bound"):
+        return {
+            "status": "already_bound",
+            "mobile": str(existing.get("mobile") or "").strip(),
+            "binding": existing,
+        }
+
+    candidate = repo.get_unique_mobile_candidate_from_identity_sources(normalized_external_userid)
+    if not candidate:
+        return {"status": "skipped", "reason": "no_single_candidate"}
+
+    mobile = str(candidate.get("mobile") or "").strip()
+    try:
+        binding = bind_mobile_to_external_contact(
+            external_userid=normalized_external_userid,
+            owner_userid=str(owner_userid or "").strip(),
+            bind_by_userid=str(bind_by_userid or "").strip(),
+            mobile=mobile,
+            force_rebind=force_rebind,
+            resolve_binding_owner_userid=resolve_binding_owner_userid,
+            contact_profile_loader=contact_profile_loader,
+            resolve_third_party_user_id_by_mobile=resolve_third_party_user_id_by_mobile,
+            merge_lead_pool_after_mobile_bind=merge_lead_pool_after_mobile_bind,
+            conflict_error_cls=conflict_error_cls,
+            sync_error_cls=sync_error_cls,
+        )
+    except conflict_error_cls as exc:
+        return {"status": "conflict", "reason": str(exc), "mobile": mobile}
+
+    return {
+        "status": "bound",
+        "mobile": mobile,
+        "candidate": dict(candidate),
+        "binding": binding,
+    }

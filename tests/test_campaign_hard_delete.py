@@ -10,6 +10,9 @@ active 状态的 campaign 不能删 —— 队列里可能正在跑，删了 wor
 from __future__ import annotations
 
 import pytest
+from fastapi.testclient import TestClient
+
+from aicrm_next.main import create_app as create_next_app
 
 from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.campaigns import service as campaign_service
@@ -289,33 +292,54 @@ def test_delete_campaign_step_removes_one_step_when_multiple_exist(app):
         assert _row_count("campaign_steps", "campaign_id = ? AND step_index = 1", (cid,)) == 1
 
 
-# ---------- HTTP endpoint ----------
+# ---------- Next command endpoint ----------
 
-def test_http_delete_campaign_endpoint(app):
+def _next_client() -> TestClient:
+    return TestClient(create_next_app(), raise_server_exceptions=False)
+
+
+def test_next_delete_campaign_endpoint_uses_next_command_boundary(app):
     with app.app_context():
         camp = _create_draft("via-http")
         code = camp["campaign_code"]
 
-    client = app.test_client()
-    resp = client.delete(f"/api/admin/cloud-orchestrator/campaigns/{code}")
+    client = _next_client()
+    resp = client.delete(
+        f"/api/admin/cloud-orchestrator/campaigns/{code}",
+        headers={"Idempotency-Key": "campaign-delete-next-command"},
+    )
     assert resp.status_code == 200
-    body = resp.get_json()
+    assert resp.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert resp.headers["X-AICRM-Fallback-Used"] == "false"
+    body = resp.json()
     assert body["ok"] is True
-    assert body["deleted_campaign_code"] == code
+    assert body["source_status"] == "next_command"
+    assert body["route_owner"] == "ai_crm_next"
+    assert body["fallback_used"] is False
+    assert body["real_external_call_executed"] is False
+    assert body["command_name"] == "cloud_orchestrator.campaign.delete"
+    assert body["write_model_status"] == "deleted"
+    assert body["campaign"]["campaign_code"] == code
 
     with app.app_context():
-        assert campaign_service.get_campaign(campaign_code=code) is None
+        assert campaign_service.get_campaign(campaign_code=code) is not None
 
 
-def test_http_delete_campaign_not_found_returns_404(app):
-    client = app.test_client()
-    resp = client.delete("/api/admin/cloud-orchestrator/campaigns/no-such-camp")
+def test_next_delete_campaign_not_found_returns_404(app):
+    client = _next_client()
+    resp = client.delete(
+        "/api/admin/cloud-orchestrator/campaigns/no-such-camp",
+        headers={"Idempotency-Key": "campaign-delete-missing-next-command"},
+    )
     assert resp.status_code == 404
-    body = resp.get_json()
+    body = resp.json()
     assert body["ok"] is False
+    assert body["source_status"] == "next_command"
+    assert body["route_owner"] == "ai_crm_next"
+    assert body["fallback_used"] is False
 
 
-def test_http_delete_active_campaign_returns_409(app):
+def test_next_delete_active_campaign_is_plan_only_not_legacy_http_409(app):
     with app.app_context():
         camp = _create_draft("active-via-http")
         cid = int(camp["id"])
@@ -325,9 +349,14 @@ def test_http_delete_active_campaign_returns_409(app):
         cur.execute("UPDATE campaigns SET run_status = 'active' WHERE id = ?", (cid,))
         db.commit()
 
-    client = app.test_client()
-    resp = client.delete(f"/api/admin/cloud-orchestrator/campaigns/{code}")
-    assert resp.status_code == 409
-    body = resp.get_json()
-    assert body["ok"] is False
-    assert "active" in body["error"]
+    client = _next_client()
+    resp = client.delete(
+        f"/api/admin/cloud-orchestrator/campaigns/{code}",
+        headers={"Idempotency-Key": "campaign-delete-active-next-command"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["source_status"] == "next_command"
+    assert body["real_external_call_executed"] is False
+    assert body["write_model_status"] == "deleted"

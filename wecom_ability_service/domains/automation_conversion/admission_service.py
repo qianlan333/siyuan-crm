@@ -29,6 +29,7 @@ from .workflow_definitions import (
     STAGE_OPERATING,
     STAGE_ORDER_REVIEW,
     STAGE_QUESTIONNAIRE_REVIEW,
+    list_supported_behavior_tiers,
 )
 
 ADMISSION_ACCEPTED = "accepted"
@@ -437,6 +438,59 @@ def _upsert_legacy_projection(
     return dict(legacy or {})
 
 
+def _realtime_operation_task_hook(
+    *,
+    member_id: int = 0,
+    external_contact_id: str = "",
+    operator_id: str = "",
+    entry_source: str = "program_admission",
+) -> dict[str, Any]:
+    try:
+        from aicrm_next.automation_engine.audience_transition.application import handle_committed_audience_transition
+
+        hook = handle_committed_audience_transition(
+            member_id=int(member_id or 0),
+            external_userid=_normalized_text(external_contact_id),
+            operator_id=_normalized_text(operator_id) or entry_source,
+            entry_source=entry_source,
+        )
+    except Exception as exc:
+        try:
+            get_db().rollback()
+        except Exception:
+            pass
+        hook = {
+            "audience_entry_id": 0,
+            "audience_code": "",
+            "entry_reason": "",
+            "realtime_operation_tasks_ran": 0,
+            "realtime_operation_tasks_enqueued_count": 0,
+            "realtime_operation_tasks_results": [],
+            "realtime_operation_tasks_error": str(exc),
+            "realtime_operation_tasks_reason": "realtime_hook_exception",
+        }
+    payload = dict(hook or {})
+    payload["ok"] = not bool(_normalized_text(payload.get("realtime_operation_tasks_error")))
+    return payload
+
+
+def _with_realtime_operation_task_hook(result: dict[str, Any], hook: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(result or {})
+    for key in (
+        "audience_entry_id",
+        "audience_code",
+        "entry_reason",
+        "realtime_operation_tasks_ran",
+        "realtime_operation_tasks_enqueued_count",
+        "realtime_operation_tasks_results",
+        "realtime_operation_tasks_error",
+        "realtime_operation_tasks_reason",
+    ):
+        payload[key] = hook.get(key)
+    payload["realtime_task_hook"] = dict(hook or {})
+    return payload
+
+
 def _resolve_segmentation(program_id: int, member_identity: dict[str, Any]) -> dict[str, Any]:
     from . import workflow_service
 
@@ -468,6 +522,100 @@ def _resolve_segmentation(program_id: int, member_identity: dict[str, Any]) -> d
     if reason in {"multiple_or_zero_profile_categories"}:
         return {"segmentation_status": "option_not_mapped", "profile_result": profile_result}
     return {"segmentation_status": "fallback", "reason": reason or "not_matched", "profile_result": profile_result}
+
+
+def _phone_match_key(value: Any) -> str:
+    digits = "".join(char for char in _normalized_text(value) if char.isdigit())
+    if len(digits) < 7:
+        return ""
+    return f"{digits[:3]}_{digits[-4:]}"
+
+
+def _behavior_tier_for_count(message_count: int) -> dict[str, Any]:
+    count = int(message_count or 0)
+    for item in list_supported_behavior_tiers():
+        key = _normalized_text(item.get("tier_code"))
+        if key == "lt_2" and count < 2:
+            return dict(item)
+        if key == "between_2_9" and 2 <= count <= 9:
+            return dict(item)
+        if key == "gte_10" and count >= 10:
+            return dict(item)
+    return dict(list_supported_behavior_tiers()[0])
+
+
+def _behavior_phone_for_member(member_identity: dict[str, Any]) -> tuple[str, str]:
+    phone = _normalized_text(member_identity.get("phone"))
+    if phone:
+        return phone, "member_phone"
+    external_contact_id = _normalized_text(member_identity.get("external_contact_id"))
+    if not external_contact_id:
+        return "", ""
+    submission = get_db().execute(
+        """
+        SELECT mobile_snapshot
+        FROM questionnaire_submissions
+        WHERE external_userid = ?
+          AND NULLIF(mobile_snapshot, '') IS NOT NULL
+        ORDER BY submitted_at DESC, id DESC
+        LIMIT 1
+        """,
+        (external_contact_id,),
+    ).fetchone()
+    mobile = _normalized_text((submission or {}).get("mobile_snapshot"))
+    if mobile:
+        return mobile, "questionnaire_mobile_snapshot"
+    return "", ""
+
+
+def _resolve_behavior_segmentation(member_identity: dict[str, Any], *, audience_code: str) -> dict[str, Any]:
+    phone, phone_source = _behavior_phone_for_member(member_identity)
+    phone_match_key = _phone_match_key(phone)
+    if not phone_match_key:
+        return {"matched": False, "reason": "behavior_phone_missing", "phone_source": phone_source}
+    from .message_activity_client import get_message_activity_db_status, query_message_activity_counts
+
+    status = get_message_activity_db_status()
+    if not bool(status.get("configured")):
+        return {
+            "matched": False,
+            "reason": "message_activity_db_not_configured",
+            "phone_match_key": phone_match_key,
+            "phone_source": phone_source,
+        }
+    try:
+        counts_by_match_key = {
+            _normalized_text(row.get("phone_match_key")): int(row.get("message_count") or 0)
+            for row in query_message_activity_counts()
+            if _normalized_text(row.get("phone_match_key"))
+        }
+    except Exception as exc:
+        return {
+            "matched": False,
+            "reason": _normalized_text(exc) or "message_activity_query_failed",
+            "phone_match_key": phone_match_key,
+            "phone_source": phone_source,
+        }
+    if phone_match_key not in counts_by_match_key and _normalized_text(audience_code) not in {AUDIENCE_OPERATING, AUDIENCE_CONVERTED}:
+        return {
+            "matched": False,
+            "reason": "usage_source_not_found",
+            "phone_match_key": phone_match_key,
+            "phone_source": phone_source,
+        }
+    message_count = int(counts_by_match_key.get(phone_match_key) or 0)
+    tier = _behavior_tier_for_count(message_count)
+    tier_code = _normalized_text(tier.get("tier_code"))
+    return {
+        "matched": bool(tier_code),
+        "behavior_tier_key": tier_code,
+        "behavior_tier_label": _normalized_text(tier.get("label")) or tier_code,
+        "message_count": message_count,
+        "phone_match_key": phone_match_key,
+        "phone_source": phone_source,
+        "source": "message_activity_db" if phone_match_key in counts_by_match_key else "message_activity_db_missing_as_zero",
+        "reason": "",
+    }
 
 
 def resolve_admission_stage(
@@ -529,6 +677,11 @@ def resolve_admission_stage(
                 "cleaning_facts": cleaning_facts,
             }
     segmentation = _resolve_segmentation(int(program_id), member_identity)
+    behavior_segmentation = _resolve_behavior_segmentation(member_identity, audience_code=AUDIENCE_OPERATING)
+    segmentation = {**segmentation, "behavior_result": behavior_segmentation}
+    if bool(behavior_segmentation.get("matched")):
+        segmentation["behavior_tier_key"] = _normalized_text(behavior_segmentation.get("behavior_tier_key"))
+        segmentation["behavior_tier_label"] = _normalized_text(behavior_segmentation.get("behavior_tier_label"))
     return {
         "stage_code": STAGE_OPERATING,
         "audience_code": AUDIENCE_OPERATING,
@@ -693,13 +846,21 @@ def admit_channel_contact_to_program(
             }
         )
         get_db().commit()
-        return {
-            "admission_status": ADMISSION_DUPLICATE_ACTIVE,
-            "accepted": False,
-            "reason": "duplicate_active_member",
-            "program_member": program_member,
-            "admission_attempt": attempt,
-        }
+        hook = _realtime_operation_task_hook(
+            external_contact_id=external_contact_id,
+            operator_id=_normalized_text(trigger_type) or "program_admission",
+            entry_source="program_admission",
+        )
+        return _with_realtime_operation_task_hook(
+            {
+                "admission_status": ADMISSION_DUPLICATE_ACTIVE,
+                "accepted": False,
+                "reason": "duplicate_active_member",
+                "program_member": program_member,
+                "admission_attempt": attempt,
+            },
+            hook,
+        )
     member_mode = "new"
     if existing and not bool(existing.get("in_program")):
         policy = _reentry_policy(program, binding)
@@ -738,6 +899,8 @@ def admit_channel_contact_to_program(
     segmentation = dict(resolved.get("segmentation") or {})
     if _normalized_text(segmentation.get("profile_segment_key")):
         state_payload["profile_segment_key"] = _normalized_text(segmentation.get("profile_segment_key"))
+    if _normalized_text(segmentation.get("behavior_tier_key")):
+        state_payload["behavior_tier_key"] = _normalized_text(segmentation.get("behavior_tier_key"))
     state_payload["admission"] = {
         "last_channel_id": int(channel_id),
         "last_binding_id": int(binding_id),
@@ -805,16 +968,25 @@ def admit_channel_contact_to_program(
         snapshot=snapshot,
     )
     get_db().commit()
-    return {
-        "admission_status": resolved["admission_status"],
-        "accepted": resolved["admission_status"] in {ADMISSION_ACCEPTED, ADMISSION_WAITING, ADMISSION_CONVERTED},
-        "reason": resolved["entry_reason"],
-        "program_member": program_member,
-        "stage_history": stage_history,
-        "admission_attempt": attempt,
-        "legacy_member": legacy_member,
-        "cleaning_result": resolved,
-    }
+    hook = _realtime_operation_task_hook(
+        member_id=int((legacy_member or {}).get("id") or 0),
+        external_contact_id=external_contact_id,
+        operator_id=_normalized_text(trigger_type) or "program_admission",
+        entry_source="program_admission",
+    )
+    return _with_realtime_operation_task_hook(
+        {
+            "admission_status": resolved["admission_status"],
+            "accepted": resolved["admission_status"] in {ADMISSION_ACCEPTED, ADMISSION_WAITING, ADMISSION_CONVERTED},
+            "reason": resolved["entry_reason"],
+            "program_member": program_member,
+            "stage_history": stage_history,
+            "admission_attempt": attempt,
+            "legacy_member": legacy_member,
+            "cleaning_result": resolved,
+        },
+        hook,
+    )
 
 
 def record_standalone_channel_attempt(

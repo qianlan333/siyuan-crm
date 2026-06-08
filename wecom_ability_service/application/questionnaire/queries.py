@@ -3,8 +3,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any
 
-from flask import url_for
-
 from ...domains.admin_console import repo as admin_console_repo
 from ...domains.questionnaire import preflight_service
 from ...domains.questionnaire import service as questionnaire_domain_service
@@ -57,6 +55,14 @@ def _questionnaire_console_paths(slug: str) -> dict[str, str]:
         "public_path": f"/s/{normalized_slug}" if normalized_slug else "",
         "submitted_path": f"/s/{normalized_slug}/submitted" if normalized_slug else "",
     }
+
+
+def _admin_questionnaire_detail_path(questionnaire_id: int) -> str:
+    return f"/admin/questionnaires/{int(questionnaire_id)}"
+
+
+def _admin_questionnaire_external_push_logs_path(questionnaire_id: int) -> str:
+    return f"/admin/questionnaires/{int(questionnaire_id)}/external-push-logs"
 
 
 def _questionnaire_external_push_status_tone(value: str) -> str:
@@ -300,13 +306,9 @@ class GetGlobalQuestionnaireExternalPushLogsQuery:
         global_switch_enabled = questionnaire_domain_service.is_questionnaire_external_push_global_enabled()
 
         for row in normalized_rows:
-            row["questionnaire_path"] = url_for(
-                "api.admin_console_questionnaire_detail",
-                questionnaire_id=int(row.get("questionnaire_id") or 0),
-            )
-            row["questionnaire_logs_path"] = url_for(
-                "api.admin_console_questionnaire_external_push_logs",
-                questionnaire_id=int(row.get("questionnaire_id") or 0),
+            row["questionnaire_path"] = _admin_questionnaire_detail_path(int(row.get("questionnaire_id") or 0))
+            row["questionnaire_logs_path"] = _admin_questionnaire_external_push_logs_path(
+                int(row.get("questionnaire_id") or 0)
             )
 
         return {

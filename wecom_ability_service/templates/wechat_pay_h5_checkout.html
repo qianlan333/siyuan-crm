@@ -110,7 +110,9 @@
       <div class="success-tick">✓</div>
       <div class="success-title">支付成功</div>
       <div class="success-desc" id="successDesc">报名成功</div>
+      {% if page_state.completion_action.type != "redirect" %}
       <button class="qr-reopen-button" id="showLeadQrButton" type="button">查看领取二维码</button>
+      {% endif %}
     </section>
   </main>
 
@@ -215,12 +217,15 @@
       }
 
       async function createOrder() {
-        const body = {
-          product_code: state.product.product_code,
-          order_source: "product_checkout"
-        };
-        if (state.require_mobile) {
-          const mobile = validateMobile();
+      const body = {
+        product_code: state.product.product_code,
+        order_source: "product_checkout"
+      };
+      if (state.context_token) {
+        body.ctx = state.context_token;
+      }
+      if (state.require_mobile) {
+        const mobile = validateMobile();
           if (!mobile) return null;
           body.mobile = mobile;
         }
@@ -237,9 +242,34 @@
         return payload;
       }
 
+      function isSafeRedirectUrl(url) {
+        return /^https:\/\//.test(url) || /^\/(?!\/)[^\s\\]*$/.test(url);
+      }
+
+      function completionActionFromOrder(order) {
+        const action = order && order.completion_action ? order.completion_action : {};
+        const actionUrl = String((action && action.redirect_url) || "");
+        if (action && action.type === "redirect" && actionUrl && isSafeRedirectUrl(actionUrl)) {
+          return { type: "redirect", redirect_url: actionUrl };
+        }
+        const configured = order && order.completion_redirect ? order.completion_redirect : {};
+        const fallbackUrl = String((configured && configured.url) || (order && order.completion_redirect_url) || "");
+        const fallbackEnabled = Boolean((configured && configured.enabled) || (order && order.completion_redirect_enabled));
+        if (fallbackEnabled && fallbackUrl && isSafeRedirectUrl(fallbackUrl)) {
+          return { type: "redirect", redirect_url: fallbackUrl };
+        }
+        return { type: "default", redirect_url: "" };
+      }
+
       function leadQrFromOrder(order) {
+        if (completionActionFromOrder(order).type === "redirect") return {};
         const leadQr = order && order.lead_qr ? order.lead_qr : {};
         return leadQr && leadQr.qr_url ? leadQr : {};
+      }
+
+      function completionRedirectFromOrder(order) {
+        const action = completionActionFromOrder(order);
+        return action.type === "redirect" ? { url: action.redirect_url } : {};
       }
 
       function showLeadQr(order) {
@@ -258,6 +288,12 @@
       function showPaid(order, options) {
         const autoShowQr = !options || options.autoShowQr !== false;
         paidOrder = order || paidOrder || {};
+        const completionAction = completionActionFromOrder(paidOrder);
+        if (completionAction.type === "redirect" && completionAction.redirect_url) {
+          setState("报名成功，正在跳转...", "success");
+          window.location.href = completionAction.redirect_url;
+          return;
+        }
         if (checkoutCard) checkoutCard.style.display = "none";
         if (successBox) successBox.classList.add("show");
         if (successDesc) {
@@ -295,6 +331,12 @@
               throw new Error("支付结果确认中，请稍后刷新查看");
             }
             setState("支付成功", "success");
+            const completionAction = completionActionFromOrder(order);
+            if (completionAction.type === "redirect" && completionAction.redirect_url) {
+              setState("报名成功，正在跳转...", "success");
+              window.location.href = completionAction.redirect_url;
+              return;
+            }
             showPaid(order);
             if (order.success_url && !(order.lead_qr && order.lead_qr.qr_url)) {
               window.location.href = order.success_url;

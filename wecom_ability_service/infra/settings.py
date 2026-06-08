@@ -6,7 +6,7 @@ from ..db import get_db
 
 
 DEFAULT_OPENCLAW_WEBHOOK_URL = "http://claw.youcangogogo.com/webhook"
-DEFAULT_LAOHUANG_CHAT_WEBHOOK_URL = "https://ip.lhbl.com.cn/api/webhook/crm/chat"
+DEFAULT_LAOHUANG_CHAT_WEBHOOK_URL = "https://www.youcangogogo.com/api/webhook/crm/chat"
 DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_DEEPSEEK_ROUTER_MODEL = "deepseek-chat"
 DEFAULT_DEEPSEEK_EXECUTION_MODEL = "deepseek-chat"
@@ -18,6 +18,7 @@ SENSITIVE_KEYS = {
     "AUTOMATION_ACTIVATION_WEBHOOK_TOKEN",
     "DEEPSEEK_API_KEY",
     "MCP_BEARER_TOKEN",
+    "LAOHUANG_CHAT_WEBHOOK_TOKEN",
     "OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TOKEN",
     "QUESTIONNAIRE_SUBMIT_WEBHOOK_TOKEN",
     "SIDEBAR_THIRD_PARTY_API_TOKEN",
@@ -122,9 +123,21 @@ def list_settings_snapshot(config: dict[str, Any]) -> dict[str, str]:
         "WECHAT_PAY_API_BASE",
         "WECHAT_PAY_TIMEOUT_SECONDS",
         "WECHAT_PAY_PRODUCT_CATALOG_JSON",
+        "ALIPAY_ENABLED",
+        "ALIPAY_APP_ID",
+        "ALIPAY_APP_PRIVATE_KEY_PATH",
+        "ALIPAY_PUBLIC_KEY_PATH",
+        "ALIPAY_SERVER_URL",
+        "ALIPAY_SIGN_TYPE",
+        "ALIPAY_NOTIFY_URL",
+        "ALIPAY_RETURN_URL",
+        "ALIPAY_TIMEOUT_EXPRESS",
+        "ALIPAY_TIMEOUT_SECONDS",
+        "ALIPAY_SELLER_ID",
         "AUTOMATION_INTERNAL_API_TOKEN",
         "LAOHUANG_CHAT_ENABLED",
         "LAOHUANG_CHAT_WEBHOOK_URL",
+        "LAOHUANG_CHAT_WEBHOOK_TOKEN",
         "LAOHUANG_CHAT_TIMEOUT_SECONDS",
         "LAOHUANG_CHAT_SEND_CHANNEL",
         "DEEPSEEK_ENABLED",

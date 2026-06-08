@@ -386,7 +386,7 @@ def test_customers_list_uses_database_pagination_for_common_filters(client, app,
 
 
 def test_customer_list_scope_sql_casts_timestamp_sort_columns_for_postgres():
-    sql = customer_repo._customer_list_scope_sql()
+    sql, params = customer_repo._customer_list_scope_sql()
 
     assert "(class_status.updated_at)::timestamp::text" in sql
     assert "(contact.updated_at)::timestamp::text" in sql
@@ -394,6 +394,25 @@ def test_customer_list_scope_sql_casts_timestamp_sort_columns_for_postgres():
     assert "NULLIF(class_status.updated_at, '')" not in sql
     assert "NULLIF(contact.updated_at, '')" not in sql
     assert "NULLIF(binding.updated_at, '')" not in sql
+    assert params == []
+
+
+def test_customer_list_scope_sql_prefilters_owner_and_keyword_candidates():
+    sql, params = customer_repo._customer_list_scope_sql(
+        {
+            "owner_userid": "sales_01",
+            "keyword": "顾问",
+        }
+    )
+
+    assert "JOIN scope ON scope.external_userid = archived_messages.external_userid" in sql
+    assert "SELECT external_userid FROM contacts WHERE" in sql
+    assert "SELECT external_userid FROM class_user_status_current WHERE" in sql
+    assert "SELECT binding.external_userid" in sql
+    assert "JOIN owner_role_map owner_role" in sql
+    assert "LOWER(owner_role.display_name) LIKE ?" in sql
+    assert params.count("sales_01") == 12
+    assert params.count("%顾问%") == 29
 
 
 def test_customer_detail_returns_unified_dto(client, app):

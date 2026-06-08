@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
+
 
 def _insert_segment_with_known_member(app, *, segment_code: str, member_id: int, external_id: str) -> int:
     """造一个最小可用的 segment + automation_member，返回 segment_id。
@@ -268,7 +270,7 @@ def test_pg_bug_192_200_206_scheduler_full_cycle_batch(app):
     # mock 企微 dispatch — 不真发；记录每次调用的 external_userid 数量
     dispatched_calls: list[dict[str, Any]] = []
 
-    def _fake_dispatch(task_type: str, fn_name: str, payload: dict) -> dict:
+    def _fake_dispatch(task_type: str, fn_name: str, payload: dict, **kwargs) -> dict:
         dispatched_calls.append(payload)
         return {"task_id": 42}
 
@@ -280,7 +282,7 @@ def test_pg_bug_192_200_206_scheduler_full_cycle_batch(app):
     import run_broadcast_queue_worker as worker
 
     with patch(
-        "wecom_ability_service.domains.marketing_automation.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         side_effect=_fake_dispatch,
     ):
         scan_result = scheduler.process_due_campaign_members(batch_size=10)
@@ -376,6 +378,127 @@ def test_propose_campaign_segment_sql_carries_external_contact_id(app):
     assert rows[0]["external_contact_id"] == "wm-pc-001"
     assert rows[1]["member_id"] == 888002
     assert rows[1]["external_contact_id"] == "wm-pc-002"
+
+
+def test_campaign_allocation_handles_schema_without_optional_columns(app, monkeypatch):
+    """生产旧表缺少可选列时，allocation 仍要能写入 campaign_members。"""
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+
+    _insert_segment_with_known_member(
+        app,
+        segment_code="seg-optional-column-compat",
+        member_id=888003,
+        external_id="wm-optional-column-compat",
+    )
+    monkeypatch.setattr(
+        campaign_service,
+        "_table_columns",
+        lambda table_name: {
+            "campaign_id",
+            "campaign_segment_id",
+            "segment_id",
+            "member_id",
+            "external_contact_id",
+            "status",
+        },
+    )
+
+    overview = campaign_service.propose_campaign(
+        display_name="optional column compat",
+        intent="验证旧 schema 可选列兼容",
+        segments=[{
+            "segment_code": "seg-optional-column-compat",
+            "priority": 100,
+            "steps": [
+                {"step_index": 0, "day_offset": 0, "send_time": "10:00",
+                 "content_text": "hi", "stop_on_reply": True},
+            ],
+        }],
+        anchor_mode="campaign_start_date",
+    )
+    assert overview["allocation"]["allocated"] == 1, overview["allocation"]
+
+    cur = get_db().cursor()
+    cur.execute(
+        "SELECT member_id, external_contact_id FROM campaign_members WHERE campaign_id = ?",
+        (int(overview["campaign"]["id"]),),
+    )
+    row = dict(cur.fetchone())
+    assert row["member_id"] == 888003
+    assert row["external_contact_id"] == "wm-optional-column-compat"
+
+
+def test_external_campaign_uses_synthetic_member_id_under_global_member_constraint(app):
+    """外部单人 campaign 不应被 automation_member.id 的旧全局唯一约束卡住。"""
+    from aicrm_next.ai_assist.external_campaigns import create_external_campaigns
+    from wecom_ability_service.db import get_db
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_members_member_id_test ON campaign_members (member_id)")
+    try:
+        cur.execute(
+            """
+            INSERT INTO automation_member (id, external_contact_id, phone, current_audience_code, in_pool)
+            VALUES (?, ?, ?, 'operating', ?)
+            ON CONFLICT (id) DO UPDATE SET external_contact_id = excluded.external_contact_id
+            """,
+            (1, "wm-ext-synthetic-target", "17640055555", True),
+        )
+        cur.execute(
+            """
+            INSERT INTO contacts (external_userid, owner_userid, customer_name, remark)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (external_userid) DO UPDATE SET owner_userid = excluded.owner_userid
+            """,
+            ("wm-ext-synthetic-target", "HuangYouCan", "synthetic target", "synthetic target"),
+        )
+        cur.execute(
+            """
+            INSERT INTO campaign_members
+                (campaign_id, campaign_segment_id, segment_id, member_id, external_contact_id, status)
+            VALUES (999001, 999001, 999001, 1, 'wm-occupied-member-id', 'completed')
+            """,
+        )
+        db.commit()
+
+        result = create_external_campaigns(
+            {
+                "owner_userid": "HuangYouCan",
+                "external_userid": "wm-ext-synthetic-target",
+                "scheduled_for": "2099-01-01 10:00",
+                "timezone": "Asia/Shanghai",
+                "message": "hello",
+                "idempotency_key": "synthetic-member-id-test",
+                "group_code": "synthetic-member-id-test",
+                "group_label": "synthetic member id test",
+                "intent": "test synthetic member allocation",
+            }
+        )
+        assert result["created_count"] == 1, result
+
+        campaign_id = int(result["campaigns"][0]["campaign_id"])
+        assert result["campaigns"][0]["review_status"] == "pending_review"
+        assert result["campaigns"][0]["run_status"] == "draft"
+        assert result["campaigns"][0]["scheduled_jobs"] == 0
+        assert result["campaigns"][0]["requires_human_review"] is True
+        cur.execute(
+            "SELECT member_id, external_contact_id FROM campaign_members WHERE campaign_id = ?",
+            (campaign_id,),
+        )
+        row = dict(cur.fetchone())
+        assert row["member_id"] != 1
+        assert row["external_contact_id"] == "wm-ext-synthetic-target"
+        cur.execute(
+            "SELECT review_status, run_status FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        )
+        campaign_row = dict(cur.fetchone())
+        assert campaign_row == {"review_status": "pending_review", "run_status": "draft"}
+    finally:
+        cur.execute("DROP INDEX IF EXISTS uq_campaign_members_member_id_test")
+        db.commit()
 
 
 def test_campaign_dispatch_resolves_source_member_id_before_fk_touch_log(app):
@@ -633,6 +756,74 @@ def test_propose_campaign_group_code_round_trip(app):
     assert standalone["group_label"] == ""
 
 
+def test_cloud_campaign_group_over_500_is_listed_and_batch_started(app):
+    """Admin review surface must not truncate one group at the old 500-row list cap."""
+    import json as _json
+
+    from unittest.mock import patch
+
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+
+    db = get_db()
+    cur = db.cursor()
+    group_code = "grp_over_500_for_admin_review"
+    metadata = _json.dumps({"group_code": group_code, "group_label": "Over 500 group"})
+    rows = [
+        (
+            f"camp-over-500-{idx:03d}",
+            f"Over 500 #{idx:03d}",
+            "bulk over 500",
+            "campaign_start_date",
+            "2026-05-30",
+            "pending_review",
+            "draft",
+            "SenderX",
+            metadata,
+        )
+        for idx in range(505)
+    ]
+    cur.executemany(
+        """
+        INSERT INTO campaigns
+            (campaign_code, display_name, intent, anchor_mode, anchor_date,
+             review_status, run_status, owner_userid, metadata_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        rows,
+    )
+    db.commit()
+
+    listed = campaign_service.list_campaigns(group_code=group_code, limit=1000)
+    assert len(listed) == 505
+    assert {row["group_code"] for row in listed} == {group_code}
+
+    from aicrm_next.main import create_app as create_next_app
+
+    client = TestClient(create_next_app(), raise_server_exceptions=False)
+    response = client.post(
+        "/api/admin/cloud-orchestrator/campaigns/batch-start",
+        json={"group_code": group_code, "operator": "tester"},
+        headers={"Idempotency-Key": "pg-compat-over-500-batch-start"},
+    )
+
+    assert response.status_code == 200
+    assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert response.headers["X-AICRM-Fallback-Used"] == "false"
+    body = response.json()
+    assert body["ok"] is True
+    assert body["source_status"] == "next_command"
+    assert body["route_owner"] == "ai_crm_next"
+    assert body["fallback_used"] is False
+    assert body["real_external_call_executed"] is False
+    assert body["started_count"] == 505
+    assert body["skipped_count"] == 0
+    assert body["failed_count"] == 0
+    assert len(body["campaigns"]) == 505
+    assert body["side_effect_plan"]["adapter_mode"] == "real_blocked"
+    assert body["side_effect_plan"]["real_external_call_executed"] is False
+
+
 def test_pg_bug_200_register_member_reply_clears_next_due(app):
     """``register_member_reply`` 把 next_due_at 清空 —— PR #200 修了 SET = '' 写入。"""
     from wecom_ability_service.db import get_db
@@ -765,12 +956,12 @@ def test_campaign_multi_step_not_blocked_by_own_daily_budget(app):
 
     dispatched: list[dict[str, Any]] = []
 
-    def _fake_dispatch(task_type, fn_name, payload):
+    def _fake_dispatch(task_type, fn_name, payload, **kwargs):
         dispatched.append(payload)
         return {"task_id": 100}
 
     with patch(
-        "wecom_ability_service.domains.marketing_automation.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         side_effect=_fake_dispatch,
     ):
         r1 = scheduler.process_due_campaign_members(batch_size=10)
@@ -798,7 +989,7 @@ def test_campaign_multi_step_not_blocked_by_own_daily_budget(app):
 
     dispatched.clear()
     with patch(
-        "wecom_ability_service.domains.marketing_automation.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         side_effect=_fake_dispatch,
     ):
         # 预排期 job 已存在，直接由 worker 消费（不需要再 process_due_campaign_members）
@@ -886,12 +1077,12 @@ def test_campaign_scheduler_does_not_claim_member_when_open_job_exists(app):
 
     dispatched: list[dict[str, Any]] = []
 
-    def _fake_dispatch(task_type: str, fn_name: str, payload: dict) -> dict:
+    def _fake_dispatch(task_type: str, fn_name: str, payload: dict, **kwargs) -> dict:
         dispatched.append(payload)
         return {"task_id": 960}
 
     with patch(
-        "wecom_ability_service.domains.marketing_automation.service.dispatch_wecom_task",
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
         side_effect=_fake_dispatch,
     ):
         worker_result = worker.run(batch_size=10)
@@ -902,6 +1093,116 @@ def test_campaign_scheduler_does_not_claim_member_when_open_job_exists(app):
     progressed = cur.fetchone()
     assert progressed["status"] == "completed"
     assert int(progressed["current_step_index"]) == 0
+
+
+def test_pause_campaign_cancels_open_campaign_broadcast_jobs(app):
+    """暂停 Campaign 必须同步取消已经预排期的 broadcast_jobs。"""
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+    from wecom_ability_service.domains.cloud_orchestrator import approval_token
+
+    _insert_segment_with_known_member(app, segment_code="seg-pause-cancel", member_id=970, external_id="ext-970")
+    overview = campaign_service.propose_campaign(
+        display_name="pause cancels queue",
+        intent="暂停时取消预排期 job",
+        segments=[{
+            "segment_code": "seg-pause-cancel",
+            "priority": 100,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00", "content_text": "hello"}],
+        }],
+        anchor_mode="campaign_start_date",
+    )
+    camp_id = int(overview["campaign"]["id"])
+    token = approval_token.issue_token(
+        plan_id=overview["campaign"]["campaign_code"],
+        operator="alice",
+        scope="start_campaign",
+    )
+    campaign_service.start_campaign(
+        campaign_id=camp_id,
+        human_approver="alice",
+        approval_token_value=token["token"],
+    )
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        "SELECT COUNT(*) AS c FROM broadcast_jobs WHERE source_type = 'campaign' AND source_id LIKE ? AND status = 'queued'",
+        (f"{camp_id}:%",),
+    )
+    assert int(cur.fetchone()["c"]) == 1
+
+    campaign_service.pause_campaign(campaign_id=camp_id, reason="test pause")
+
+    cur.execute(
+        "SELECT status, cancel_reason FROM broadcast_jobs WHERE source_type = 'campaign' AND source_id LIKE ?",
+        (f"{camp_id}:%",),
+    )
+    row = cur.fetchone()
+    assert row["status"] == "cancelled"
+    assert row["cancel_reason"] == "test pause"
+
+
+def test_claimed_campaign_job_checks_live_pause_before_dispatch(app):
+    """即使 job 已经 claimed，worker 真发前也要按实时 run_status 拦截。"""
+    from wecom_ability_service.db import get_db
+    from wecom_ability_service.domains.broadcast_jobs import handlers
+    from wecom_ability_service.domains.broadcast_jobs import service as queue_service
+    from wecom_ability_service.domains.campaigns import service as campaign_service
+    from wecom_ability_service.domains.cloud_orchestrator import approval_token
+
+    _insert_segment_with_known_member(app, segment_code="seg-claimed-pause", member_id=971, external_id="ext-971")
+    overview = campaign_service.propose_campaign(
+        display_name="claimed pause guard",
+        intent="claimed 后暂停也不能发送",
+        segments=[{
+            "segment_code": "seg-claimed-pause",
+            "priority": 100,
+            "steps": [{"step_index": 0, "day_offset": 0, "send_time": "10:00", "content_text": "hello"}],
+        }],
+        anchor_mode="campaign_start_date",
+    )
+    camp_id = int(overview["campaign"]["id"])
+    token = approval_token.issue_token(
+        plan_id=overview["campaign"]["campaign_code"],
+        operator="alice",
+        scope="start_campaign",
+    )
+    campaign_service.start_campaign(
+        campaign_id=camp_id,
+        human_approver="alice",
+        approval_token_value=token["token"],
+    )
+
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        "UPDATE broadcast_jobs SET scheduled_for = ? WHERE source_type = 'campaign' AND source_id LIKE ?",
+        ("2020-01-01 00:00:00+00:00", f"{camp_id}:%"),
+    )
+    db.commit()
+
+    claimed = queue_service.claim_due_jobs(limit=10)
+    claimed_campaign_jobs = [j for j in claimed if j.get("source_type") == "campaign" and str(j.get("source_id") or "").startswith(f"{camp_id}:")]
+    assert len(claimed_campaign_jobs) == 1
+
+    campaign_service.pause_campaign(campaign_id=camp_id, reason="claimed pause")
+
+    dispatched: list[dict[str, Any]] = []
+
+    def _fake_dispatch(task_type: str, fn_name: str, payload: dict, **kwargs) -> dict:
+        dispatched.append(payload)
+        return {"task_id": 971}
+
+    with patch(
+        "wecom_ability_service.domains.tasks.service.dispatch_wecom_task_with_intent",
+        side_effect=_fake_dispatch,
+    ):
+        result = handlers.execute_job(claimed_campaign_jobs[0])
+
+    assert result["ok"] is False
+    assert result["error"] == "campaign_not_active:paused"
+    assert dispatched == []
 
 
 def test_start_campaign_prequeues_first_step_at_step_timezone(app):

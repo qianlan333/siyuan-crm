@@ -25,6 +25,12 @@ class AppWeComRuntimeClient:
     def update_contact_description(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._client.update_contact_description(payload)
 
+    def transfer_customer(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._client.transfer_customer(payload)
+
+    def transfer_result(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._client.transfer_result(payload)
+
     def list_group_chats(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._client.list_group_chats(payload)
 
@@ -65,6 +71,12 @@ class ContactWeComRuntimeClient:
 
     def update_contact_description(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._client.update_contact_description(payload)
+
+    def transfer_customer(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._client.transfer_customer(payload)
+
+    def transfer_result(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._client.transfer_result(payload)
 
     def create_contact_way(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._client.create_contact_way(payload)

@@ -6,6 +6,7 @@ from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.automation_conversion.customer_acquisition_service import (
     build_customer_acquisition_final_url,
     generate_customer_channel,
+    handle_customer_acquisition_event,
 )
 from wecom_ability_service.domains.callbacks.service import log_external_contact_event
 from wecom_ability_service.routes import _process_external_contact_event
@@ -74,6 +75,61 @@ def test_customer_acquisition_final_url_appends_replaces_and_preserves_fragment(
     assert parse_qs(urlsplit(existing).query) == {"foo": ["1"], "customer_channel": ["wca_abc"]}
 
 
+def test_customer_acquisition_handler_enables_channel_welcome_message(monkeypatch):
+    from wecom_ability_service.domains.automation_conversion import customer_acquisition_service
+
+    captured: dict[str, object] = {}
+
+    class _DummyDb:
+        def commit(self) -> None:
+            captured["committed"] = True
+
+    monkeypatch.setattr(customer_acquisition_service, "get_db", lambda: _DummyDb())
+    monkeypatch.setattr(
+        customer_acquisition_service.repo,
+        "find_customer_acquisition_link_by_channel",
+        lambda *, corp_id, customer_channel: {
+            "id": 11,
+            "automation_channel_id": 22,
+            "status": "active",
+            "channel_status": "active",
+            "initial_audience_code": "operating",
+        },
+    )
+    monkeypatch.setattr(
+        customer_acquisition_service.repo,
+        "find_customer_acquisition_link_by_link_id",
+        lambda *, corp_id, link_id: None,
+    )
+    monkeypatch.setattr(customer_acquisition_service.repo, "touch_customer_acquisition_link_event", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        customer_acquisition_service.repo,
+        "get_channel_by_id",
+        lambda channel_id: {"id": channel_id, "scene_value": "wca_welcome", "welcome_message": "新版欢迎语"},
+    )
+
+    def _capture_channel_enter(**kwargs):
+        captured.update(kwargs)
+        return {"handled": True, "welcome_message": {"sent": True}}
+
+    monkeypatch.setattr(customer_acquisition_service, "handle_channel_enter_from_callback", _capture_channel_enter)
+
+    result = handle_customer_acquisition_event(
+        corp_id="ww-test",
+        event_data={
+            "Event": "customer_acquisition",
+            "State": "wca_welcome",
+            "UserID": "sales_01",
+            "ExternalUserID": "wm_ca_welcome_001",
+            "WelcomeCode": "welcome-ca-001",
+        },
+    )
+
+    assert result["handled"] is True
+    assert captured["send_welcome_message"] is True
+    assert captured["payload_json"]["WelcomeCode"] == "welcome-ca-001"
+
+
 def test_create_customer_acquisition_binding_writes_link_and_channel(app, client):
     app.config["WECOM_CORP_ID"] = "ww-test"
     data = _create_binding(client, link_id="link-create-001")
@@ -131,6 +187,49 @@ def test_customer_acquisition_callback_enters_pool_by_state(app, client):
         assert member["source_type"] == "wecom_customer_acquisition"
         assert int(member["source_channel_id"]) == int(binding["link"]["automation_channel_id"])
         assert member["current_audience_code"] == "operating"
+
+
+def test_customer_acquisition_callback_sends_channel_welcome_message(app, client, monkeypatch):
+    from wecom_ability_service.domains.automation_conversion import member_state_service
+
+    app.config["WECOM_CORP_ID"] = "ww-test"
+    binding = _create_binding(client, link_id="link-welcome-001")
+    channel = binding["link"]["customer_channel"]
+    captured: dict[str, object] = {}
+
+    class _StubClient:
+        def send_welcome_msg(self, payload: dict[str, object]) -> dict[str, object]:
+            captured["payload"] = payload
+            return {"errcode": 0, "errmsg": "ok"}
+
+    monkeypatch.setattr(member_state_service.service_seams, "get_contact_runtime_client", lambda: _StubClient())
+    with app.app_context():
+        get_db().execute(
+            "UPDATE automation_channel SET welcome_message = ? WHERE id = ?",
+            ("新版欢迎语", int(binding["link"]["automation_channel_id"])),
+        )
+        get_db().commit()
+
+    result = _process_customer_acquisition_callback(
+        app,
+        event_key="customer-acquisition-welcome-001",
+        payload={
+            "Event": "customer_acquisition",
+            "ChangeType": "customer_add",
+            "LinkId": "link-welcome-001",
+            "State": channel,
+            "UserID": "sales_01",
+            "ExternalUserID": "wm_ca_welcome_001",
+            "WelcomeCode": "welcome-ca-001",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["customer_acquisition"]["welcome_message"]["sent"] is True
+    assert captured["payload"] == {
+        "welcome_code": "welcome-ca-001",
+        "text": {"content": "新版欢迎语"},
+    }
 
 
 def test_customer_acquisition_callback_enters_pool_by_link_id_fallback(app, client):

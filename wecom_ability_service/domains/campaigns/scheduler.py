@@ -63,28 +63,41 @@ def _due_at_for_step(
     )
 
 
-def _has_inbound_since(*, external_userid: str, since_iso: str) -> bool:
+def _has_inbound_since(
+    *,
+    external_userid: str,
+    since_iso: str,
+    owner_userid: str = "",
+) -> bool:
     """看 archived_messages 里 since_iso 之后这个 external_userid 有没有真实回复。
 
     判定与 reply_monitor._reply_monitor_candidate_message 一致：private 单聊 +
     sender == external_userid（用户作为发送方就是 inbound）+ msgtype 不在系统消息列表。
-    用复合索引 (external_userid, send_time)，扫描代价 O(log N)。
+    owner_userid 非空时必须匹配同一个会话归属，避免 A 账号的 campaign 被 B 账号
+    会话存档里的回复误停。
     """
     if not external_userid or not since_iso:
         return False
     db = get_db()
     cur = db.cursor()
+    owner_filter = ""
+    params: list[Any] = [str(external_userid), str(external_userid), str(since_iso)]
+    normalized_owner = str(owner_userid or "").strip()
+    if normalized_owner:
+        owner_filter = " AND owner_userid = ?"
+        params.append(normalized_owner)
     cur.execute(
-        """
+        f"""
         SELECT 1 FROM archived_messages
         WHERE external_userid = ?
           AND chat_type = 'private'
           AND sender = ?
           AND send_time > ?
+          {owner_filter}
           AND msgtype NOT IN ('event', 'revoke', 'calendar', 'vote')
         LIMIT 1
         """,
-        (str(external_userid), str(external_userid), str(since_iso)),
+        tuple(params),
     )
     return cur.fetchone() is not None
 
@@ -217,6 +230,56 @@ def _load_pending_member_context(*, member_row_id: int) -> dict[str, Any] | None
     )
     row = cur.fetchone()
     return dict(row) if row else None
+
+
+def _load_live_campaign_context(campaign: dict[str, Any]) -> dict[str, Any] | None:
+    campaign_id = int(campaign.get("id") or 0)
+    campaign_code = str(campaign.get("campaign_code") or "").strip()
+    if not campaign_id and not campaign_code:
+        return None
+    db = get_db()
+    cur = db.cursor()
+    if campaign_id:
+        cur.execute(
+            "SELECT id, campaign_code, run_status, owner_userid, trace_id FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        )
+    else:
+        cur.execute(
+            "SELECT id, campaign_code, run_status, owner_userid, trace_id FROM campaigns WHERE campaign_code = ?",
+            (campaign_code,),
+        )
+    row = cur.fetchone()
+    return dict(row) if row else None
+
+
+def _restore_running_members_for_skipped_campaign(members: list[dict[str, Any]]) -> int:
+    member_ids: list[int] = []
+    for item in members:
+        try:
+            cm_id = int(item.get("cm_id") or 0)
+        except (TypeError, ValueError):
+            cm_id = 0
+        if cm_id:
+            member_ids.append(cm_id)
+    if not member_ids:
+        return 0
+    placeholders = ", ".join("?" for _ in member_ids)
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        f"""
+        UPDATE campaign_members
+        SET status = 'pending',
+            last_error_text = ?,
+            updated_at = ?
+        WHERE id IN ({placeholders})
+          AND status = 'running'
+        """,
+        tuple(["campaign_not_active"] + [_now_iso()] + member_ids),
+    )
+    db.commit()
+    return int(cur.rowcount or 0)
 
 
 def _claim_due_member(*, member_row_id: int) -> bool:
@@ -354,15 +417,39 @@ def _dispatch_step_batch(
     return _dispatch_private_message_payload(request_payload=request_payload, recipient_count=len(externals))
 
 
-def _dispatch_private_message_payload(*, request_payload: dict[str, Any], recipient_count: int) -> dict[str, Any]:
+def _dispatch_private_message_payload(
+    *,
+    request_payload: dict[str, Any],
+    recipient_count: int,
+    broadcast_job_id: int | None = None,
+    resume_outbound_task_id: int | None = None,
+    trace_id: str = "",
+) -> dict[str, Any]:
+    if resume_outbound_task_id:
+        return {
+            "ok": True,
+            "task_id": int(resume_outbound_task_id),
+            "recipient_count": int(recipient_count),
+            "resumed": True,
+        }
     from ..marketing_automation.service import dispatch_wecom_task
+    from ..tasks.service import dispatch_wecom_task_with_intent
 
     try:
-        wecom_result = dispatch_wecom_task(
-            "private_message",
-            "create_private_message_task",
-            request_payload,
-        )
+        if broadcast_job_id:
+            wecom_result = dispatch_wecom_task_with_intent(
+                "private_message",
+                "create_private_message_task",
+                request_payload,
+                broadcast_job_id=int(broadcast_job_id),
+                trace_id=trace_id,
+            )
+        else:
+            wecom_result = dispatch_wecom_task(
+                "private_message",
+                "create_private_message_task",
+                request_payload,
+            )
         task_id = int(wecom_result.get("task_id") or 0)
         return {"ok": True, "task_id": task_id, "recipient_count": int(recipient_count)}
     except Exception as exc:
@@ -376,8 +463,26 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
     step = batch_data.get("step") or {}
     members = batch_data.get("members") or []
     request_payload = batch_data.get("request_payload") or {}
+    broadcast_job_id = int(batch_data.get("broadcast_job_id") or 0) or None
+    resume_outbound_task_id = int(batch_data.get("resume_outbound_task_id") or 0) or None
     if not members:
         return {"ok": False, "error": "empty batch"}
+    live_campaign = _load_live_campaign_context(campaign)
+    if not live_campaign:
+        return {"ok": False, "error": "campaign_not_found"}
+    if str(live_campaign.get("run_status") or "") != "active":
+        restored = _restore_running_members_for_skipped_campaign(members)
+        logger.info(
+            "skip campaign batch because campaign is not active: campaign=%s run_status=%s restored_members=%s",
+            live_campaign.get("campaign_code") or campaign.get("campaign_code"),
+            live_campaign.get("run_status"),
+            restored,
+        )
+        return {
+            "ok": False,
+            "error": f"campaign_not_active:{live_campaign.get('run_status')}",
+            "failure_type": "campaign_not_active",
+        }
     # 预排期的 job 没有 request_payload，执行时现场 resolve + claim
     is_pre_scheduled = not request_payload
     if is_pre_scheduled:
@@ -391,7 +496,23 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
         for m in members:
             cm_id = int(m["cm_id"])
             context = _load_pending_member_context(member_row_id=cm_id)
-            if not context or str(context.get("status") or "") != "pending":
+            if not context:
+                continue
+            current_status = str(context.get("status") or "")
+            if resume_outbound_task_id and current_status in {"pending", "running"}:
+                external = str(context.get("external_contact_id") or m.get("external_contact_id") or "")
+                if not external:
+                    continue
+                member_payload = dict(m)
+                member_payload.update({
+                    "member_id": int(context.get("member_id") or 0),
+                    "external_contact_id": external,
+                    "trace_id": str(context.get("trace_id") or m.get("trace_id") or ""),
+                    "campaign_segment_id": int(context.get("campaign_segment_id") or m.get("campaign_segment_id") or 0),
+                })
+                eligible.append(member_payload)
+                continue
+            if current_status != "pending":
                 continue
             due_at = _datetime_from_db(context.get("next_due_at"))
             if due_at and due_at > now:
@@ -403,6 +524,7 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
             if last_sent_dt and external and _has_inbound_since(
                 external_userid=external,
                 since_iso=last_sent_dt.isoformat(),
+                owner_userid=str(campaign.get("owner_userid") or ""),
             ):
                 _mark_member_replied_inline(member_row_id=cm_id)
                 continue
@@ -447,16 +569,23 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
         if not eligible:
             return {"ok": True, "sent_count": 0, "failed_count": 0, "status": "all_members_already_claimed"}
         members = eligible
-        resolved = _resolve_step_payload(campaign=campaign, step=step)
-        if resolved.get("error"):
-            return {"ok": False, "error": resolved["error"]}
-        externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
-        if not externals:
-            return {"ok": False, "error": "no_external_userid"}
-        request_payload = dict(resolved["base_request"])
-        request_payload["external_userid"] = externals
+        if not resume_outbound_task_id:
+            resolved = _resolve_step_payload(campaign=campaign, step=step)
+            if resolved.get("error"):
+                return {"ok": False, "error": resolved["error"]}
+            externals = [m["external_contact_id"] for m in members if m.get("external_contact_id")]
+            if not externals:
+                return {"ok": False, "error": "no_external_userid"}
+            request_payload = dict(resolved["base_request"])
+            request_payload["external_userid"] = externals
 
-    send_res = _dispatch_private_message_payload(request_payload=request_payload, recipient_count=len(members))
+    send_res = _dispatch_private_message_payload(
+        request_payload=request_payload,
+        recipient_count=len(members),
+        broadcast_job_id=broadcast_job_id,
+        resume_outbound_task_id=resume_outbound_task_id,
+        trace_id=str(campaign.get("trace_id") or ""),
+    )
 
     sent_count = 0
     failed_count = 0
@@ -482,6 +611,50 @@ def run_campaign_batch(*, batch_data: dict[str, Any]) -> dict[str, Any]:
         "failed_count": failed_count,
         "outbound_task_id": int(send_res.get("task_id") or 0) or None,
     }
+
+
+def recover_requeued_campaign_job_members(job: dict[str, Any]) -> int:
+    """Reset campaign members claimed by a stale job before any outbound intent.
+
+    This is intentionally limited to jobs that the broadcast queue already proved
+    had no outbound_task_id. Once an outbound intent exists, recovery must either
+    resume local side effects or require manual reconciliation.
+    """
+    if str(job.get("source_type") or "") != CAMPAIGN_QUEUE_SOURCE_TYPE:
+        return 0
+    if int(job.get("outbound_task_id") or 0):
+        return 0
+    payload = job.get("content_payload") or {}
+    members = payload.get("members") or []
+    member_row_ids_set: set[int] = set()
+    for item in members:
+        if not isinstance(item, dict):
+            continue
+        try:
+            cm_id = int(item.get("cm_id") or 0)
+        except (TypeError, ValueError):
+            continue
+        if cm_id:
+            member_row_ids_set.add(cm_id)
+    member_row_ids = sorted(member_row_ids_set)
+    if not member_row_ids:
+        return 0
+    placeholders = ", ".join("?" * len(member_row_ids))
+    db = get_db()
+    cur = db.cursor()
+    cur.execute(
+        f"""
+        UPDATE campaign_members
+        SET status = 'pending',
+            last_error_text = 'recovered stale broadcast job before outbound dispatch',
+            updated_at = ?
+        WHERE id IN ({placeholders})
+          AND status = 'running'
+        """,
+        (_now_iso(), *member_row_ids),
+    )
+    db.commit()
+    return int(cur.rowcount or 0)
 
 
 def _pre_enqueue_next_step(
@@ -802,7 +975,11 @@ def process_due_campaign_members(*, batch_size: int = 200) -> dict[str, Any]:
         # 直接停，不再发，也不走频次预算扣减。第一条 step 不查（last_step_sent_at 为空）。
         last_sent = str(r["last_step_sent_at"] or "").strip()
         external = str(r["external_contact_id"] or "")
-        if last_sent and external and _has_inbound_since(external_userid=external, since_iso=last_sent):
+        if last_sent and external and _has_inbound_since(
+            external_userid=external,
+            since_iso=last_sent,
+            owner_userid=str(r["owner_userid"] or ""),
+        ):
             _mark_member_replied_inline(member_row_id=cm_id)
             skipped_inline_reply += 1
             continue
@@ -1057,6 +1234,7 @@ def register_member_reply(
     *,
     external_contact_id: str = "",
     member_id: int | None = None,
+    owner_userid: str = "",
 ) -> int:
     """reply_monitor 收到 inbound 时调 — 把对应 campaign_member 标记为已回复，停止后续步骤。
 
@@ -1066,29 +1244,52 @@ def register_member_reply(
         return 0
     db = get_db()
     cur = db.cursor()
+    normalized_owner = str(owner_userid or "").strip()
     if member_id is not None:
+        owner_clause = (
+            "AND EXISTS (SELECT 1 FROM campaigns c "
+            "WHERE c.id = campaign_members.campaign_id AND c.owner_userid = ?)"
+            if normalized_owner else ""
+        )
+        params: tuple[Any, ...] = (
+            (_empty_ts(), _now_iso(), int(member_id), normalized_owner)
+            if normalized_owner
+            else (_empty_ts(), _now_iso(), int(member_id))
+        )
         cur.execute(
-            """
+            f"""
             UPDATE campaign_members SET
                 status = 'replied',
                 stop_reason = 'user_replied',
                 next_due_at = ?,
                 updated_at = ?
             WHERE member_id = ? AND status IN ('pending','running')
+              {owner_clause}
             """,
-            (_empty_ts(), _now_iso(), int(member_id)),
+            params,
         )
     else:
+        owner_clause = (
+            "AND EXISTS (SELECT 1 FROM campaigns c "
+            "WHERE c.id = campaign_members.campaign_id AND c.owner_userid = ?)"
+            if normalized_owner else ""
+        )
+        params = (
+            (_empty_ts(), _now_iso(), str(external_contact_id), normalized_owner)
+            if normalized_owner
+            else (_empty_ts(), _now_iso(), str(external_contact_id))
+        )
         cur.execute(
-            """
+            f"""
             UPDATE campaign_members SET
                 status = 'replied',
                 stop_reason = 'user_replied',
                 next_due_at = ?,
                 updated_at = ?
             WHERE external_contact_id = ? AND status IN ('pending','running')
+              {owner_clause}
             """,
-            (_empty_ts(), _now_iso(), str(external_contact_id)),
+            params,
         )
     db.commit()
     return int(cur.rowcount or 0)
@@ -1098,5 +1299,6 @@ __all__ = [
     "ensure_campaign_scheduled_jobs",
     "process_due_campaign_members",
     "progress_member_after_send",
+    "recover_requeued_campaign_job_members",
     "register_member_reply",
 ]

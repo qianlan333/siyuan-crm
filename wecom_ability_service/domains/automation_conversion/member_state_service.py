@@ -709,6 +709,19 @@ def _channel_with_historical_entry_tag(
     }
 
 
+def _all_bindings_rejected_for_archived_program(admission_results: list[dict[str, Any]]) -> bool:
+    if not admission_results:
+        return False
+    for item in admission_results:
+        if item.get("legacy_member"):
+            return False
+        if _normalized_text(item.get("admission_status")) != "rejected":
+            return False
+        if "program_archived" not in _normalized_text(item.get("reason")):
+            return False
+    return True
+
+
 def handle_channel_enter_from_callback(
     *,
     external_contact_id: str,
@@ -721,7 +734,11 @@ def handle_channel_enter_from_callback(
     initial_audience_code: str = "",
     event_action: str = "qrcode_enter",
     send_welcome_message: bool = False,
+    event_log_id: int | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
+    raise RuntimeError("Legacy channel entry is retired. Use aicrm_next.channel_entry.")
+
     channel_scene = ""
     if not channel:
         channel_scene = _extract_channel_scene(payload_json or {})
@@ -826,6 +843,36 @@ def handle_channel_enter_from_callback(
             "admission_results": admission_results,
             "welcome_message": welcome_result,
             "entry_tag": entry_tag_result,
+            "legacy_binding_report": legacy_binding_report,
+        }
+    if (
+        _normalized_text(channel.get("status")) == "active"
+        and _all_bindings_rejected_for_archived_program(admission_results)
+    ):
+        welcome_result = (
+            _send_channel_welcome_message_for_contact(channel=channel, payload_json=payload_json)
+            if send_welcome_message
+            else {"attempted": False, "sent": False, "reason": "disabled"}
+        )
+        entry_tag_result = _apply_channel_entry_tag_for_contact(
+            external_contact_id=external_contact_id,
+            owner_staff_id=owner_staff_id,
+            channel=channel,
+        )
+        return {
+            "handled": True,
+            "mode": "standalone_channel_archived_program_fallback",
+            "reason": "program_archived_fallback_to_channel",
+            "channel": {
+                "id": int(channel["id"]),
+                "scene_value": _normalized_text(channel.get("scene_value")),
+                "matched_scene": _normalized_text(channel_scene),
+            },
+            "channel_contact": channel_contact,
+            "admission_results": admission_results,
+            "welcome_message": welcome_result,
+            "entry_tag": entry_tag_result,
+            "program_member_written": False,
             "legacy_binding_report": legacy_binding_report,
         }
     return {
@@ -944,6 +991,8 @@ def handle_qrcode_enter_from_callback(
     operator_id: str = "",
     follow_user_userid: str = "",
     send_welcome_message: bool = False,
+    event_log_id: int | None = None,
+    dry_run: bool = False,
 ) -> dict[str, Any]:
     return handle_channel_enter_from_callback(
         external_contact_id=external_contact_id,
@@ -954,6 +1003,8 @@ def handle_qrcode_enter_from_callback(
         source_type=SOURCE_TYPE_QRCODE,
         event_action="qrcode_enter",
         send_welcome_message=send_welcome_message,
+        event_log_id=event_log_id,
+        dry_run=dry_run,
     )
 
 

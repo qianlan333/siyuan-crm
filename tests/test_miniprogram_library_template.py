@@ -12,7 +12,7 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-TEMPLATE = ROOT / "wecom_ability_service" / "templates" / "admin_console" / "miniprogram_library.html"
+TEMPLATE = ROOT / "aicrm_next" / "frontend_compat" / "templates" / "admin_console" / "miniprogram_library.html"
 
 
 @pytest.fixture(scope="module")
@@ -57,7 +57,24 @@ def test_create_modal_submits_to_post_endpoint(source: str):
     assert "/api/admin/miniprogram-library" in source
     assert "method: 'POST'" in source
     assert "thumb_image_id: thumbId" in source
-    assert "ImageUploadClient.requestJson" in source
+    assert "requestJSON" in source
+
+
+def test_create_submit_uses_timeout_and_does_not_wait_for_list_before_close(source: str):
+    assert "requestJsonWithTimeout" in source
+    assert "client.requestJsonWithTimeout || client.requestJson" in source
+    success_idx = source.index("setCreateStatus('已新增")
+    refresh_idx = source.index("refreshListInBackground();", success_idx)
+    close_idx = source.index("setTimeout(closeCreateModal, 600)", success_idx)
+    assert success_idx < refresh_idx < close_idx
+    assert "await loadList();\n        setTimeout(closeCreateModal" not in source
+
+
+def test_json_request_helper_falls_back_to_old_upload_client(source: str):
+    """静态资源缓存可能让页面拿到旧 image_upload_client.js，模板不能直接崩。"""
+    assert "function requestJSON" in source
+    assert "client.requestJsonWithTimeout || client.requestJson" in source
+    assert "图片上传客户端未加载" in source
 
 
 def test_create_modal_has_open_close_handlers(source: str):
@@ -144,6 +161,11 @@ def test_edit_modal_save_calls_put_endpoint(source: str):
     """保存按钮必须 PUT 到 /api/admin/miniprogram-library/<id> 带 4 字段。"""
     assert "method: 'PUT'" in source
     assert "/api/admin/miniprogram-library/" in source
+    assert "refreshListInBackground();" in source
+    save_start = source.index("document.getElementById('mp-edit-save')")
+    save_end = source.index("// 启用 / 停用", save_start)
+    save_block = source[save_start:save_end]
+    assert "await loadList();\n        setTimeout(closeEditModal" not in save_block
 
 
 def test_edit_modal_resolve_calls_test_resolve_endpoint(source: str):
@@ -158,11 +180,13 @@ def test_edit_modal_clickaway_and_esc_close(source: str):
 
 # ---------- 缩略图加载逻辑 ---------- #
 
-def test_thumbnail_loader_uses_image_library(source: str):
-    """缩略图通过 thumb_image_id 从 image_library 拉 base64 / source_url。"""
-    assert "/api/admin/image-library/" in source
+def test_thumbnail_loader_uses_variant_urls(source: str):
+    """缩略图直接使用后端列表返回的变体 URL，不再批量拉 image detail 原图。"""
+    assert "thumb_320_url" in source
+    assert "thumb_160_url" in source
+    assert "preview_url" in source
+    assert "/api/admin/image-library/' + imgId" not in source
     assert "thumb_image_id" in source
-    assert "data_base64" in source
 
 
 def test_thumbnail_legacy_fallbacks_kept(source: str):
@@ -171,9 +195,10 @@ def test_thumbnail_legacy_fallbacks_kept(source: str):
     assert "thumb_image_base64" in source
 
 
-def test_thumb_cache_avoids_duplicate_fetch(source: str):
-    """STATE.thumbCache 缓存按 image_id，避免列表 + 编辑 modal 重复请求。"""
-    assert "thumbCache" in source
+def test_thumbnail_img_uses_lazy_responsive_attrs(source: str):
+    assert 'loading="lazy"' in source
+    assert 'decoding="async"' in source
+    assert "srcset" in source
 
 
 # ---------- image_picker 集成 ---------- #

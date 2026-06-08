@@ -340,6 +340,12 @@ class WeComClient:
     def update_contact_description(self, payload: dict) -> dict:
         return self.post("/cgi-bin/externalcontact/remark", payload)
 
+    def transfer_customer(self, payload: dict) -> dict:
+        return self.post("/cgi-bin/externalcontact/transfer_customer", payload)
+
+    def transfer_result(self, payload: dict) -> dict:
+        return self.post("/cgi-bin/externalcontact/transfer_result", payload)
+
     def create_contact_way(self, payload: dict) -> dict:
         return self.post("/cgi-bin/externalcontact/add_contact_way", payload)
 

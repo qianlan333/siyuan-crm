@@ -150,8 +150,20 @@ def admin_delete_wecom_tag(tag_id: str):
         return _admin_tag_error_response(exc, fallback="标签删除失败，请稍后重试。")
 
 
+def admin_sync_wecom_tags():
+    result = tags_service.sync_wecom_tag_catalog(
+        operator=str(request.headers.get("X-Operator-Userid") or request.headers.get("X-Admin-Userid") or "admin_wecom_tags_sync"),
+        record_run=True,
+    )
+    if result.get("ok"):
+        return jsonify({"ok": True, **result})
+    return jsonify({"ok": False, **result, "error": result.get("error_message") or "企微标签同步失败，请检查企微配置或稍后重试。"})
+
+
 def register_routes(bp):
     bp.route("/api/admin/wecom/tags", methods=["GET"])(admin_wecom_tag_management_payload)
+    bp.route("/api/admin/wecom/tags/sync", methods=["POST"])(admin_sync_wecom_tags)
+    bp.route("/api/admin/wecom/tags/sync-due", methods=["POST"])(admin_sync_wecom_tags)
     bp.route("/api/admin/wecom/tag-groups", methods=["POST"])(admin_create_wecom_tag_group)
     bp.route("/api/admin/wecom/tag-groups/<group_id>", methods=["PUT"])(admin_update_wecom_tag_group)
     bp.route("/api/admin/wecom/tag-groups/<group_id>", methods=["DELETE"])(admin_delete_wecom_tag_group)

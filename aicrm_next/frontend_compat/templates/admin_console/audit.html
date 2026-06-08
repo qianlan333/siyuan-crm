@@ -1,0 +1,162 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<section class="admin-card-grid">
+  {% for card in audit_payload.summary_cards %}
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">{{ card.label }}</div>
+    <div class="admin-card-value admin-card-value--compact">{{ card.value }}</div>
+    <p class="admin-card-copy">{{ card.description }}</p>
+  </article>
+  {% endfor %}
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>筛选条件</h2>
+      <p>可以按关键词、模块、操作人和时间查看记录。</p>
+    </div>
+    <div class="admin-toolbar">
+      <a class="admin-button admin-button--secondary" href="{{ audit_payload.shareable_href }}">复制当前筛选链接</a>
+    </div>
+  </div>
+  <form class="admin-filter-bar admin-form-grid admin-form-grid--audit" method="get" action="/admin/audit">
+    <label>
+      <span>全文检索</span>
+      <input type="text" name="q" value="{{ audit_payload.filters.q }}" placeholder="操作人 / 动作 / 对象">
+    </label>
+    <label>
+      <span>模块</span>
+      <select name="target_type">
+        <option value="">全部</option>
+        {% for item in audit_payload.target_type_options %}
+        <option value="{{ item.value }}" {% if audit_payload.filters.target_type == item.value %}selected{% endif %}>{{ item.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>操作</span>
+      <select name="action_type">
+        <option value="">全部</option>
+        {% for item in audit_payload.action_type_options %}
+        <option value="{{ item.value }}" {% if audit_payload.filters.action_type == item.value %}selected{% endif %}>{{ item.label }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>操作人</span>
+      <select name="operator">
+        <option value="">全部</option>
+        {% for item in audit_payload.operator_options %}
+        <option value="{{ item }}" {% if audit_payload.filters.operator == item %}selected{% endif %}>{{ item }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>
+      <span>查看对象</span>
+      <input type="text" name="target_id" value="{{ audit_payload.filters.target_id }}" placeholder="客户编号 / 工具名 / 配置项">
+    </label>
+    <label>
+      <span>每页数量</span>
+      <select name="page_size">
+        {% for size in [10, 20, 50, 100] %}
+        <option value="{{ size }}" {% if audit_payload.filters.page_size == size %}selected{% endif %}>{{ size }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <input type="hidden" name="sort_by" value="{{ audit_payload.filters.sort_by }}">
+    <input type="hidden" name="sort_dir" value="{{ audit_payload.filters.sort_dir }}">
+    <div class="admin-form-actions">
+      <button class="admin-button admin-button--primary" type="submit">应用筛选</button>
+      <a class="admin-button admin-button--ghost" href="/admin/audit">重置</a>
+    </div>
+  </form>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>操作记录列表</h2>
+      <p>点击对象可以跳到对应页面，点击查看详情可查看修改前后内容。</p>
+    </div>
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table admin-table--audit">
+      <thead>
+        <tr>
+          {% for column in audit_payload.sort_columns %}
+          <th>
+            <a class="admin-table-sort-link" href="{{ audit_payload.sort_links[column.key] }}">{{ column.label }}</a>
+          </th>
+          {% endfor %}
+          <th>修改前</th>
+          <th>修改后</th>
+          <th>跳转</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in audit_payload["items"] %}
+        <tr>
+          <td>{{ item.created_at }}</td>
+          <td>{{ item.operator }}</td>
+          <td>{{ item.action_type_label }}</td>
+          <td>{{ item.target_type_label }}</td>
+          <td><code>{{ item.target_id }}</code></td>
+          <td><pre class="admin-json-inline">{{ item.before_preview }}</pre></td>
+          <td><pre class="admin-json-inline">{{ item.after_preview }}</pre></td>
+          <td>
+            <a class="admin-inline-link admin-inline-link--compact" href="{{ item.target_href }}">查看对象</a>
+            <a class="admin-inline-link admin-inline-link--compact" href="{{ item.detail_href }}">查看详情</a>
+          </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="8">当前筛选下没有审计记录</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="admin-pagination">
+    {% if audit_payload.pagination.prev_href %}
+    <a class="admin-button admin-button--ghost" href="{{ audit_payload.pagination.prev_href }}">上一页</a>
+    {% endif %}
+    {% for item in audit_payload.pagination.page_links %}
+    <a class="admin-pagination-link{% if item.active %} is-active{% endif %}" href="{{ item.href }}">{{ item.label }}</a>
+    {% endfor %}
+    {% if audit_payload.pagination.next_href %}
+    <a class="admin-button admin-button--ghost" href="{{ audit_payload.pagination.next_href }}">下一页</a>
+    {% endif %}
+  </div>
+</section>
+
+<section class="admin-split-grid">
+  <article class="admin-card">
+    <div class="admin-card-head">
+      <div>
+        <h2>详情</h2>
+        <p>这里展示单条记录的完整变更内容。</p>
+      </div>
+    </div>
+    {% if audit_payload.selected_entry %}
+    <div class="admin-state admin-state--inline">
+      <strong>#{{ audit_payload.selected_entry.id }} · {{ audit_payload.selected_entry.action_type_label }}</strong>
+      <span>{{ audit_payload.selected_entry.operator }} · {{ audit_payload.selected_entry.created_at }}</span>
+      <span>{{ audit_payload.selected_entry.target_type_label }} / {{ audit_payload.selected_entry.target_id }}</span>
+    </div>
+    <div class="admin-code-panel">
+      <h3>修改前</h3>
+      <pre class="admin-code-block">{{ audit_payload.selected_entry.before_pretty }}</pre>
+    </div>
+    <div class="admin-code-panel">
+      <h3>修改后</h3>
+      <pre class="admin-code-block">{{ audit_payload.selected_entry.after_pretty }}</pre>
+    </div>
+    {% else %}
+    <div class="admin-state admin-state--inline">
+      <strong>尚未选择日志</strong>
+      <span>点击上表中的“查看详情”查看完整修改内容。</span>
+    </div>
+    {% endif %}
+  </article>
+</section>
+{% endblock %}

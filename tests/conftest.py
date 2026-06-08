@@ -155,12 +155,17 @@ _TABLES_TO_TRUNCATE = [
     "questionnaire_questions",
     "questionnaire_score_rules",
     "questionnaires",
+    "external_push_delivery",
+    "external_push_config",
+    "domain_event_outbox",
     "wechat_pay_product_page_slices",
     "wechat_pay_products",
     "wechat_pay_order_export_jobs",
     "wechat_pay_refunds",
     "wechat_pay_order_events",
     "wechat_pay_orders",
+    "alipay_pay_order_events",
+    "alipay_pay_orders",
     # — admin / auth
     "admin_users",
     # admin_wecom_directory_member 不在 PG schema 中（WeCom 目录走 admin_users）
@@ -168,6 +173,8 @@ _TABLES_TO_TRUNCATE = [
     "routing_rule_config",
     "wechat_pay_order_events",
     "wechat_pay_orders",
+    "alipay_pay_order_events",
+    "alipay_pay_orders",
     "app_settings",
     "mcp_tool_settings",
     # — contacts / identity
@@ -178,6 +185,8 @@ _TABLES_TO_TRUNCATE = [
     "wecom_external_contact_follow_users",
     "wecom_external_contact_event_logs",
     "contact_tags",
+    "wecom_corp_tags",
+    "wecom_corp_tag_groups",
     "group_chats",
     # group_chat_members 不在 PG schema 中（成员信息嵌入 group_chats.raw_payload）
     "people",
@@ -204,6 +213,7 @@ _TABLES_TO_TRUNCATE = [
     "message_batch_items",
     "message_batches",
     # — broadcast_jobs
+    "broadcast_job_events",
     "broadcast_jobs",
     # — archive / system
     "archived_messages",
@@ -213,6 +223,9 @@ _TABLES_TO_TRUNCATE = [
     "outbound_webhook_deliveries",
     "outbound_event_outbox",
     "admin_operation_logs",
+    "owner_migration_results",
+    "owner_migration_previews",
+    "owner_migration_import_sessions",
     "user_ops_import_batches",
     # customer_pulse_* / followup_orchestrator_* 表已经被 PR #232 删除——不再列入
     # truncate 清单（之前每个 test 跑 8 次注定失败的 SQL，刷 PG error log 还耗时）。

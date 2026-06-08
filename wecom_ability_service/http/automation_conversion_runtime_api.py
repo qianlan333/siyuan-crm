@@ -88,7 +88,13 @@ def api_admin_automation_conversion_reply_monitor_run_due():
         operator_type="system",
         limit=int(payload.get("limit") or 20),
     )
-    status_code = 200 if result.get("ok") or result.get("status") in {"disabled", "idle", "throttled", "quiet_hours"} else 502
+    status_code = (
+        200
+        if result.get("ok")
+        or result.get("partial_failed")
+        or result.get("status") in {"disabled", "idle", "throttled", "quiet_hours", "partial_failed"}
+        else 502
+    )
     return jsonify(result), status_code
 
 

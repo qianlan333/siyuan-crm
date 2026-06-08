@@ -73,6 +73,15 @@ def _log_startup_config(app: Flask) -> None:
     )
 
 
+def _register_route_owner_headers(app: Flask) -> None:
+    @app.after_request
+    def _write_route_owner_headers(response: Response) -> Response:
+        response.headers.setdefault("X-AICRM-Route-Owner", "legacy_flask")
+        response.headers.setdefault("X-AICRM-App", "ai_crm_legacy_flask")
+        response.headers.setdefault("X-AICRM-Release-SHA", str(app.config.get("RELEASE_SHA") or "unknown"))
+        return response
+
+
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__, instance_relative_config=False)
     explicit_debug_session_api = os.getenv("ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API", "").strip()
@@ -119,6 +128,17 @@ def create_app(test_config: dict | None = None) -> Flask:
         WECHAT_PAY_API_BASE=os.getenv("WECHAT_PAY_API_BASE", "https://api.mch.weixin.qq.com"),
         WECHAT_PAY_TIMEOUT_SECONDS=int(os.getenv("WECHAT_PAY_TIMEOUT_SECONDS", "10")),
         WECHAT_PAY_PRODUCT_CATALOG_JSON=os.getenv("WECHAT_PAY_PRODUCT_CATALOG_JSON", ""),
+        ALIPAY_ENABLED=os.getenv("ALIPAY_ENABLED", "false"),
+        ALIPAY_APP_ID=os.getenv("ALIPAY_APP_ID", ""),
+        ALIPAY_APP_PRIVATE_KEY_PATH=os.getenv("ALIPAY_APP_PRIVATE_KEY_PATH", ""),
+        ALIPAY_PUBLIC_KEY_PATH=os.getenv("ALIPAY_PUBLIC_KEY_PATH", ""),
+        ALIPAY_SERVER_URL=os.getenv("ALIPAY_SERVER_URL", "https://openapi.alipay.com/gateway.do"),
+        ALIPAY_SIGN_TYPE=os.getenv("ALIPAY_SIGN_TYPE", "RSA2"),
+        ALIPAY_NOTIFY_URL=os.getenv("ALIPAY_NOTIFY_URL", ""),
+        ALIPAY_RETURN_URL=os.getenv("ALIPAY_RETURN_URL", ""),
+        ALIPAY_TIMEOUT_EXPRESS=os.getenv("ALIPAY_TIMEOUT_EXPRESS", "30m"),
+        ALIPAY_TIMEOUT_SECONDS=int(os.getenv("ALIPAY_TIMEOUT_SECONDS", "10")),
+        ALIPAY_SELLER_ID=os.getenv("ALIPAY_SELLER_ID", ""),
         ENABLE_DEBUG_QUESTIONNAIRE_SESSION_API=(
             explicit_debug_session_api.lower() in {"1", "true", "yes"} if explicit_debug_session_api else None
         ),
@@ -132,11 +152,11 @@ def create_app(test_config: dict | None = None) -> Flask:
         SIDEBAR_THIRD_PARTY_API_URL=os.getenv("SIDEBAR_THIRD_PARTY_API_URL", ""),
         SIDEBAR_THIRD_PARTY_API_TOKEN=os.getenv("SIDEBAR_THIRD_PARTY_API_TOKEN", ""),
         SIDEBAR_THIRD_PARTY_TIMEOUT_SECONDS=int(os.getenv("SIDEBAR_THIRD_PARTY_TIMEOUT_SECONDS", "10")),
-        SIDEBAR_WORKBENCH_V2_ENABLED=os.getenv("SIDEBAR_WORKBENCH_V2_ENABLED", "true"),
         SIDEBAR_PERSON_DETAIL_URL_TEMPLATE=os.getenv(
             "SIDEBAR_PERSON_DETAIL_URL_TEMPLATE",
             "https://www.youcangogogo.com/person/{person_id}",
         ),
+        SIDEBAR_WORKBENCH_V2_ENABLED=os.getenv("SIDEBAR_WORKBENCH_V2_ENABLED", "true"),
         OPENCLAW_WEBHOOK_URL=openclaw_webhook_url,
         LAOHUANG_CHAT_ENABLED=os.getenv("LAOHUANG_CHAT_ENABLED", "false"),
         LAOHUANG_CHAT_WEBHOOK_URL=os.getenv("LAOHUANG_CHAT_WEBHOOK_URL", DEFAULT_LAOHUANG_CHAT_WEBHOOK_URL),
@@ -172,6 +192,7 @@ def create_app(test_config: dict | None = None) -> Flask:
     _configure_logging(app)
     _log_startup_config(app)
     register_request_observability(app)
+    _register_route_owner_headers(app)
     register_admin_request_guards(app)
 
     _schema_migrated = [False]

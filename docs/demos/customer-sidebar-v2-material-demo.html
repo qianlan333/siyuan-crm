@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang='zh-CN'>
+<head>
+  <meta charset='utf-8'>
+  <meta name='viewport' content='width=device-width, initial-scale=1'>
+  <title>AI-CRM 客户侧边栏 V2 Demo</title>
+  <style>
+    :root{--bg:#edf4ff;--card:#fff;--line:#d8e4f7;--text:#182230;--muted:#667085;--blue:#2563eb;--soft:#eff6ff;--green:#079455;--orange:#dc6803;--shadow:0 12px 32px rgba(16,24,40,.08)}*{box-sizing:border-box}body{margin:0;background:linear-gradient(180deg,#f4f8ff,#edf4ff);font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;color:var(--text)}button,textarea{font-family:inherit}.wrap{max-width:760px;margin:0 auto;padding:16px 14px 28px}.top{position:sticky;top:0;z-index:5;padding-top:8px;background:linear-gradient(180deg,#f4f8ff 0,#f4f8ff 82%,rgba(244,248,255,0))}.profile{background:var(--card);border:1px solid var(--line);border-radius:28px;padding:18px;box-shadow:var(--shadow)}.profile-main{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:12px;align-items:start}.avatar{width:56px;height:56px;border-radius:18px;background:#dfeafe;color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:850}.name-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.name{font-size:22px;font-weight:850;line-height:1.1}.phone-state{display:inline-flex;padding:6px 10px;border-radius:999px;background:#e9fbf1;color:#047857;font-size:13px;font-weight:850;white-space:nowrap}.meta{margin-top:6px;color:#667085;font-size:14px;line-height:1.55;word-break:break-all}.workflow{margin-top:12px;display:inline-flex;max-width:100%;padding:7px 10px;border-radius:999px;background:#f8fafc;border:1px solid #e2e8f0;color:#344054;font-size:13px;font-weight:750}.btn{border:0;border-radius:16px;min-height:42px;padding:10px 14px;font-size:15px;font-weight:850;cursor:pointer;background:#edf4ff;color:#1d4ed8}.btn.primary{background:linear-gradient(135deg,#2563eb,#1d4ed8);color:#fff}.btn.ghost{background:#fff;border:1px solid var(--line);color:#344054}.change{justify-self:end}.tabs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:14px 0}.tab{border:1px solid var(--line);background:#fff;border-radius:16px;min-height:50px;color:#1d2939;font-weight:850;font-size:16px;box-shadow:0 6px 18px rgba(16,24,40,.04);cursor:pointer}.tab.active{background:#2563eb;color:#fff;border-color:#2563eb}.panel{background:#fff;border:1px solid var(--line);border-radius:24px;padding:18px;box-shadow:var(--shadow);margin-bottom:14px}.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px}.head h2{margin:0;font-size:21px}.editor{display:grid;gap:12px}.field{padding:13px;border:1px solid var(--line);background:#fbfdff;border-radius:16px}.field-title{color:#667085;font-size:14px;font-weight:750;margin-bottom:10px}.option-list{display:flex;gap:8px;flex-wrap:wrap}.option{border:1px solid #dbe4f5;background:#fff;color:#344054;border-radius:999px;padding:8px 11px;font-size:14px;font-weight:800;cursor:pointer}.option.active{background:#2563eb;border-color:#2563eb;color:#fff}.textarea{width:100%;border:1px solid #dbe4f5;background:#fff;border-radius:14px;padding:12px;font-size:15px;line-height:1.65;color:#182230;resize:vertical;min-height:92px}.card{border:1px solid var(--line);border-radius:18px;padding:15px;background:#fff;margin-top:10px}.card-title{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}.card h3{margin:0;font-size:17px;line-height:1.35}.mini{margin-top:4px;color:#667085;font-size:13px;font-weight:650;line-height:1.5}.price{font-size:17px;font-weight:900;color:#1d4ed8;white-space:nowrap}.row-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}.row-actions .btn{min-width:104px}.questions{display:none;margin-top:12px;border-top:1px dashed #d0d5dd;padding-top:10px}.card.open .questions{display:block}.question{padding:9px 0;border-bottom:1px solid #eef2f7}.question:last-child{border-bottom:0}.question b{display:block;font-size:13px;margin-bottom:4px}.question em{font-style:normal;color:#475467;font-size:14px;line-height:1.6}.kv{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px;margin-top:10px;font-size:14px}.kv span{color:#667085}.kv strong{font-weight:750}.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:12px}.seg button{border:1px solid var(--line);background:#fff;border-radius:14px;min-height:40px;font-weight:850;color:#475467}.seg button.active{background:#2563eb;border-color:#2563eb;color:#fff}.material{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:12px;align-items:center}.thumb{width:64px;height:64px;border-radius:16px;background:#eff6ff;border:1px solid #dbeafe;color:#1d4ed8;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:900}.thumb.mini-program{background:#f0fdf4;border-color:#dcfce7;color:#047857}.thumb.pdf{background:#fff7ed;border-color:#ffedd5;color:#c2410c}.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}.tag{display:inline-flex;padding:5px 8px;border-radius:999px;background:#eff6ff;color:#1d4ed8;font-size:12px;font-weight:850}.timeline{display:grid;gap:10px}.msg{display:grid;gap:7px;padding:12px;border-radius:16px;border:1px solid var(--line);background:#fbfdff}.msg-meta{display:flex;justify-content:space-between;gap:10px;align-items:center;color:#667085;font-size:12px}.msg-title{font-size:13px;color:#344054;font-weight:800}.txt{line-height:1.65;font-size:14px}.imgmsg{display:flex;gap:10px;align-items:center;padding:10px;border-radius:14px;background:#fff;border:1px solid #e4e7ec}.imgph{width:54px;height:54px;border-radius:12px;background:linear-gradient(135deg,#dbeafe,#bfdbfe);display:flex;align-items:center;justify-content:center;color:#1d4ed8;font-weight:900}.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:#101828;color:#fff;border-radius:999px;padding:10px 14px;font-size:13px;display:none;z-index:20}.toast.show{display:block}@media(max-width:520px){.wrap{padding:10px}.profile{padding:14px;border-radius:22px}.profile-main{grid-template-columns:48px minmax(0,1fr)}.avatar{width:48px;height:48px;border-radius:16px}.change{grid-column:1/3;width:100%}.tabs{grid-template-columns:repeat(2,1fr)}.material{grid-template-columns:52px minmax(0,1fr)}.thumb{width:52px;height:52px}.material .btn{grid-column:1/3;width:100%}}
+  </style>
+</head>
+<body>
+<div class='wrap'>
+  <div class='top'>
+    <section class='profile'>
+      <div class='profile-main'>
+        <div class='avatar'>月</div>
+        <div>
+          <div class='name-row'><div class='name'>月朗</div><span class='phone-state'>手机号已绑定</span></div>
+          <div class='meta'>18210198814 · 外部联系人 wmid_xxx_789</div>
+          <div class='workflow'>暑期阅读转化 SOP</div>
+        </div>
+        <button class='btn change' onclick='toast(&apos;进入更换手机号流程&apos;)'>换手机号</button>
+      </div>
+    </section>
+    <nav class='tabs' id='tabs'></nav>
+  </div>
+  <main id='content'></main>
+</div>
+<div class='toast' id='toast'></div>
+<script>
+const tabs=[['profile','核心画像'],['forms','问卷'],['products','商品'],['orders','订单'],['materials','素材'],['messages','其他客服聊天']];
+const currentStaff='当前客服-小林';
+const data={
+ profile:{
+  sourceOptions:['小蓝咨询群','媛子咨询群','学员转介绍','流量群','公域','其他','公域直播流量'],
+  source:'流量群',
+  industryOptions:['美业','大健康','知识IP','疗愈','教育培训','玄学','服装','保险','其他','餐饮'],
+  industry:'教育培训',
+  industryDesc:'家长端教育培训客户，关注孩子阅读理解、语文成绩稳定性、假期集中训练效果。当前更愿意先了解课程大纲和同龄案例，再决定是否报名。',
+  needs:'需求：提升阅读速度、训练抓重点能力、积累写作素材。卡点：担心孩子坚持困难、担心每天任务太重。跟进状态：已购买诊断课，待发送课程大纲和训练营介绍。'
+ },
+ forms:[
+  {name:'阅读能力测评问卷',time:'2026-05-18 20:41',count:'8/8 题',qs:[['客户来源','流量群'],['行业信息','教育培训'],['具体需求点','阅读理解、抓重点、写作素材'],['孩子年级','三年级升四年级'],['预算区间','500-1000 元/月']]},
+  {name:'家长需求确认问卷',time:'2026-05-17 22:09',count:'6/6 题',qs:[['行业具体描述','家长关注语文成绩稳定性'],['需求、卡点、跟进状态','担心孩子坚持困难，待发送课程大纲'],['主要顾虑','课程是否太重'],['希望收到的资料','课程大纲、家长反馈、试听安排']]},
+  {name:'试听课预约问卷',time:'2026-05-16 19:33',count:'5/5 题',qs:[['预约时间','周六 10:00'],['上课设备','iPad'],['是否陪同','家长会在旁边'],['课前准备','希望提前发阅读材料']]},
+  {name:'购买意向补充问卷',time:'2026-05-15 21:20',count:'4/4 题',qs:[['课程周期','21 天训练营'],['支付方式','微信支付'],['可接受价格','399-699 元'],['下一步','先发商品页，再确认报名']]},
+  {name:'课后反馈问卷',time:'2026-05-12 18:05',count:'3/5 题',qs:[['试听感受','孩子愿意继续听'],['老师反馈','抓重点能力弱'],['家长反馈','希望任务不要太重']]}
+ ],
+ products:[['暑期阅读提升营 · 4 周','¥399'],['1v1 阅读诊断课','¥99'],['写作素材积累专项课','¥699'],['高年级阅读理解专项','¥899'],['阅读打卡小程序包','¥199'],['家庭陪读方法课','¥299']],
+ orders:[
+  {item:'暑期阅读提升营 · 4 周',amount:'¥399',state:'已支付',id:'ORD202605200014',time:'2026-05-20 14:22'},
+  {item:'1v1 阅读诊断课',amount:'¥99',state:'已支付',id:'ORD202605190089',time:'2026-05-19 22:05'},
+  {item:'阅读打卡小程序包',amount:'¥199',state:'待支付',id:'ORD202605180031',time:'2026-05-18 20:30'},
+  {item:'课程资料包',amount:'¥29',state:'已取消',id:'ORD202605170018',time:'2026-05-17 16:12'}
+ ],
+ materials:[
+  {type:'image',title:'暑期阅读提分营课程海报',tags:['课程介绍','朋友圈','首触达']},
+  {type:'image',title:'阅读理解三步法长图',tags:['方法论','阅读理解']},
+  {type:'image',title:'家长反馈截图合集',tags:['案例','信任建立']},
+  {type:'image',title:'21 天阅读打卡模板',tags:['打卡','小程序配套']},
+  {type:'image',title:'课前课后对比图',tags:['效果展示']},
+  {type:'image',title:'朋友圈九宫格素材',tags:['朋友圈','活动']},
+  {type:'mini',title:'试听课预约小程序卡',tags:['预约入口','首次咨询']},
+  {type:'mini',title:'阅读能力测评入口',tags:['测评','问卷']},
+  {type:'mini',title:'课程介绍页小程序',tags:['商品页','支付']},
+  {type:'mini',title:'训练营打卡入口',tags:['打卡','学习任务']},
+  {type:'pdf',title:'21 天阅读训练营课程大纲.pdf',tags:['课程大纲','PDF']},
+  {type:'pdf',title:'阅读能力诊断报告样例.pdf',tags:['报告样例','PDF']},
+  {type:'pdf',title:'报名与售后说明.pdf',tags:['付款说明','PDF']},
+  {type:'pdf',title:'家长陪读方法手册.pdf',tags:['家长手册','PDF']}
+ ],
+ messages:[
+  {time:'2026-05-17 10:12',staff:'张老师',scene:'私聊',sender:'客户月朗',type:'text',content:'老师，我想先了解一下这个阅读训练营适合三年级吗？'},
+  {time:'2026-05-17 10:15',staff:'张老师',scene:'私聊',sender:'张老师',type:'text',content:'适合三到五年级，三年级主要训练读题、抓重点和概括。'},
+  {time:'2026-05-17 10:18',staff:'张老师',scene:'私聊',sender:'张老师',type:'image',content:'发送了课程结构海报'},
+  {time:'2026-05-17 21:09',staff:'王老师',scene:'三年级阅读训练营咨询群',sender:'客户月朗',type:'text',content:'我家孩子阅读题总是漏关键词，这个怎么练？'},
+  {time:'2026-05-17 21:12',staff:'王老师',scene:'三年级阅读训练营咨询群',sender:'王老师',type:'text',content:'先练定位题干，再圈关键词，最后组织答案。'},
+  {time:'2026-05-17 21:14',staff:'王老师',scene:'三年级阅读训练营咨询群',sender:'王老师',type:'image',content:'发送了阅读理解三步法长图'},
+  {time:'2026-05-18 09:26',staff:'当前客服-小林',scene:'私聊',sender:'当前客服-小林',type:'text',content:'这条是当前客服消息，Demo 会过滤掉。'},
+  {time:'2026-05-18 20:41',staff:'陈老师',scene:'私聊',sender:'客户月朗',type:'text',content:'我已经填完测评了，可以帮我看下结果吗？'},
+  {time:'2026-05-18 20:49',staff:'陈老师',scene:'私聊',sender:'陈老师',type:'text',content:'看到了，主要是信息定位和答案组织偏弱，可以先安排一次诊断课。'},
+  {time:'2026-05-19 12:20',staff:'李老师',scene:'三年级阅读训练营咨询群',sender:'李老师',type:'image',content:'发送了家长反馈截图'},
+  {time:'2026-05-19 12:34',staff:'李老师',scene:'三年级阅读训练营咨询群',sender:'客户月朗',type:'text',content:'这个反馈看着还可以，课程每天作业多吗？'},
+  {time:'2026-05-19 12:38',staff:'李老师',scene:'三年级阅读训练营咨询群',sender:'李老师',type:'text',content:'每天 20-30 分钟，重点是连续打卡，不是增加大量作业。'},
+  {time:'2026-05-19 22:05',staff:'张老师',scene:'私聊',sender:'客户月朗',type:'text',content:'我先买诊断课，周六上午可以吗？'},
+  {time:'2026-05-19 22:08',staff:'张老师',scene:'私聊',sender:'张老师',type:'text',content:'可以，周六 10 点给你锁定。'},
+  {time:'2026-05-20 09:02',staff:'王老师',scene:'三年级阅读训练营咨询群',sender:'王老师',type:'text',content:'今天群里会发课前阅读材料，报名同学可以提前看一下。'},
+  {time:'2026-05-20 09:11',staff:'客户月朗',scene:'三年级阅读训练营咨询群',sender:'客户月朗',type:'text',content:'材料在哪里看？'},
+  {time:'2026-05-20 09:15',staff:'王老师',scene:'三年级阅读训练营咨询群',sender:'王老师',type:'image',content:'发送了课前材料二维码'},
+  {time:'2026-05-20 13:30',staff:'陈老师',scene:'私聊',sender:'客户月朗',type:'text',content:'能不能发一下课程大纲？'},
+  {time:'2026-05-20 13:32',staff:'陈老师',scene:'私聊',sender:'陈老师',type:'text',content:'可以，我把 PDF 大纲发你，再发一个同年级案例。'},
+  {time:'2026-05-20 14:36',staff:'张老师',scene:'私聊',sender:'客户月朗',type:'text',content:'我刚刚付了 399，后面怎么进群？'},
+  {time:'2026-05-20 14:38',staff:'张老师',scene:'私聊',sender:'张老师',type:'text',content:'已经看到订单了，我发入群方式和课前准备材料。'}
+ ]
+};
+let active='profile',matType='image';
+function boot(){document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class='tab ${t[0]===active?'active':''}' onclick='switchTab(&apos;${t[0]}&apos;)'>${t[1]}</button>`).join('');render()}
+function switchTab(k){active=k;boot()}
+function toast(t){const el=document.getElementById('toast');el.textContent=t;el.classList.add('show');clearTimeout(window._t);window._t=setTimeout(()=>el.classList.remove('show'),1600)}
+function panel(title,body){return `<section class='panel'><div class='head'><h2>${title}</h2></div>${body}</section>`}
+function render(){const c=document.getElementById('content');if(active==='profile')c.innerHTML=renderProfile();if(active==='forms')c.innerHTML=renderForms();if(active==='products')c.innerHTML=renderProducts();if(active==='orders')c.innerHTML=renderOrders();if(active==='materials')c.innerHTML=renderMaterials();if(active==='messages')c.innerHTML=renderMessages()}
+function optionGroup(options,value,onClick){return `<div class='option-list'>${options.map(x=>`<button class='option ${x===value?'active':''}' onclick='${onClick}(&apos;${x}&apos;)'>${x}</button>`).join('')}</div>`}
+function setSource(v){data.profile.source=v;render()}
+function setIndustry(v){data.profile.industry=v;render()}
+function renderProfile(){const p=data.profile;return panel('核心画像',`<div class='editor'><div class='field'><div class='field-title'>用户来源</div>${optionGroup(p.sourceOptions,p.source,'setSource')}</div><div class='field'><div class='field-title'>行业信息</div>${optionGroup(p.industryOptions,p.industry,'setIndustry')}</div><div class='field'><div class='field-title'>行业具体描述</div><textarea class='textarea' oninput='data.profile.industryDesc=this.value'>${p.industryDesc}</textarea></div><div class='field'><div class='field-title'>需求、卡点、跟进状态</div><textarea class='textarea' oninput='data.profile.needs=this.value'>${p.needs}</textarea></div></div>`)}
+function renderForms(){return panel('问卷',data.forms.map((f,i)=>`<article class='card' id='form${i}'><div class='card-title'><div><h3>${f.name}</h3><div class='mini'>${f.time} · ${f.count}</div></div></div><div class='row-actions'><button class='btn primary' onclick='toggleCard(&apos;form${i}&apos;)'>查看答案</button></div><div class='questions'>${f.qs.map(q=>`<div class='question'><b>${q[0]}</b><em>${q[1]}</em></div>`).join('')}</div></article>`).join(''))}
+function renderProducts(){return panel('商品',data.products.map(p=>`<article class='card'><div class='card-title'><h3>${p[0]}</h3><div class='price'>${p[1]}</div></div><div class='row-actions'><button class='btn primary' onclick='toast(&apos;已模拟发送商品介绍&apos;)'>发送介绍</button><button class='btn ghost' onclick='toast(&apos;打开商品详情&apos;)'>查看详情</button></div></article>`).join(''))}
+function renderOrders(){return panel('订单',data.orders.map(o=>`<article class='card'><div class='card-title'><div><h3>${o.item}</h3><div class='mini'>${o.id}</div></div><div class='price'>${o.amount}</div></div><div class='kv'><span>状态</span><strong>${o.state}</strong><span>时间</span><strong>${o.time}</strong></div><div class='row-actions'><button class='btn primary' onclick='toast(&apos;打开订单详情&apos;)'>查看详情</button></div></article>`).join(''))}
+function renderMaterials(){const label={image:'图片素材',mini:'小程序素材',pdf:'PDF素材'};const thumb={image:'图',mini:'小',pdf:'PDF'};const rows=data.materials.filter(m=>m.type===matType);return panel('素材',`<div class='seg'>${['image','mini','pdf'].map(t=>`<button class='${matType===t?'active':''}' onclick='matType=&apos;${t}&apos;;render()'>${label[t]}</button>`).join('')}</div>${rows.map(m=>`<article class='card material'><div class='thumb ${m.type==='mini'?'mini-program':m.type}'>${thumb[m.type]}</div><div><h3>${m.title}</h3><div class='tags'>${m.tags.map(t=>`<span class='tag'>${t}</span>`).join('')}</div></div><button class='btn primary' onclick='toast(&apos;已模拟发送素材&apos;)'>发给客户</button></article>`).join('')}`)}
+function renderMessages(){const rows=data.messages.filter(m=>m.staff!==currentStaff).sort((a,b)=>a.time.localeCompare(b.time)).slice(-20);return panel('其他客服的聊天记录',`<div class='timeline'>${rows.map(m=>`<article class='msg'><div class='msg-meta'><span>${m.time}</span><span>${m.scene}</span></div><div class='msg-title'>${m.scene==='私聊'?`客户与 ${m.staff} 私聊`:`${m.scene} · ${m.sender}`}</div>${m.type==='image'?`<div class='imgmsg'><div class='imgph'>图</div><div class='txt'>${m.content}</div></div>`:`<div class='txt'>${m.sender}：${m.content}</div>`}</article>`).join('')}</div>`)}
+function toggleCard(id){document.getElementById(id).classList.toggle('open')}boot();
+</script>
+</body>
+</html>

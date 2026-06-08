@@ -77,6 +77,32 @@ def get_workflow_title_for_customer(external_userid: str) -> str:
     return str((row or {}).get("title") or "").strip()
 
 
+def get_contact_snapshot(external_userid: str) -> dict[str, Any] | None:
+    return fetchone_dict(
+        get_db(),
+        """
+        SELECT external_userid, customer_name, owner_userid, remark, description
+        FROM contacts
+        WHERE external_userid = ?
+        """,
+        (str(external_userid or "").strip(),),
+    )
+
+
+def get_external_identity_snapshot(external_userid: str) -> dict[str, Any] | None:
+    return fetchone_dict(
+        get_db(),
+        """
+        SELECT external_userid, follow_user_userid, name, unionid, openid, status
+        FROM wecom_external_contact_identity_map
+        WHERE external_userid = ?
+        ORDER BY updated_at DESC, id DESC
+        LIMIT 1
+        """,
+        (str(external_userid or "").strip(),),
+    )
+
+
 def get_bindable_wechat_pay_order_mobile(external_userid: str) -> dict[str, Any] | None:
     normalized_external_userid = str(external_userid or "").strip()
     if not normalized_external_userid:

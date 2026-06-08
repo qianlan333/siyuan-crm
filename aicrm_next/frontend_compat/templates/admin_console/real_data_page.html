@@ -1,0 +1,61 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+{% set payload = real_data_payload or {} %}
+<section class="admin-card">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2>{{ data_title }}</h2>
+      <p>{{ data_summary }}</p>
+    </div>
+    <span class="admin-chip admin-chip--neutral">{{ payload.source_status }}</span>
+  </div>
+  <section class="admin-card-grid">
+    {% for card in payload.cards or [] %}
+    <article class="admin-card admin-stat-card admin-stat-card--nested">
+      <div class="admin-card-label">{{ card.label }}</div>
+      <div class="admin-card-value admin-card-value--compact">{{ card.value }}</div>
+      <p class="admin-card-copy">{{ card.description }}</p>
+    </article>
+    {% endfor %}
+  </section>
+</section>
+
+{% for section in payload.sections or [] %}
+<section class="admin-card" data-real-data-section="{{ section.title }}">
+  <div class="admin-card-head admin-card-head--tight">
+    <div>
+      <h2>{{ section.title }}</h2>
+      <p>数据来源：{{ payload.source_status }}</p>
+    </div>
+  </div>
+  {% if section.rows %}
+  <div class="admin-table-wrap">
+    <table class="admin-table" data-real-data-table>
+      <thead>
+        <tr>
+          {% for header in section.headers %}
+          <th>{{ header }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in section.rows %}
+        <tr>
+          {% for value in row %}
+          <td>{{ value }}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="admin-state admin-state--inline" data-production-empty-state>
+    <strong>{{ payload.empty_note or "生产数据为空" }}</strong>
+    <span>当前生产表没有可显示记录；页面仍由 Next server-side 查询生产数据源渲染。</span>
+  </div>
+  {% endif %}
+</section>
+{% endfor %}
+{% endblock %}

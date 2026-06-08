@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw Automation Ops Scheduler every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=openclaw-automation-ops-scheduler.service
+
+[Install]
+WantedBy=timers.target

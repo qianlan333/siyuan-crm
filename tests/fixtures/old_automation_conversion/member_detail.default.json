@@ -1,0 +1,34 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "member": {
+      "member_id": "member_002",
+      "person_id": "person_002",
+      "external_userid": "wx_ext_002",
+      "mobile": "13800138001",
+      "customer_name": "黄小璨学员 B",
+      "owner_userid": "owner_002",
+      "current_pool": "unactivated_priority",
+      "current_pool_label": "未激活·重点",
+      "followup_type": "priority",
+      "questionnaire_followup_type": "priority",
+      "manual_followup_type": "",
+      "trial_opened": true,
+      "activated": false,
+      "converted": false,
+      "exited": false,
+      "silent": false,
+      "latest_event_at": "2026-05-20T09:30:00Z",
+      "next_action": {"type": "activation_nudge", "label": "提醒激活"},
+      "can_manual_override": true,
+      "can_confirm_conversion": true,
+      "can_enter_silent": true,
+      "can_exit_marketing": true
+    },
+    "history": [],
+    "customer_context": {},
+    "recent_timeline_events": [],
+    "warnings": []
+  }
+}

@@ -857,17 +857,6 @@ def _automation_group() -> dict:
                 ],
             },
             {
-                "id": "automation-review",
-                "title": "输出评审与发送",
-                "endpoints": [
-                    {"id": "get-auto-review-outputs", "method": "GET", "path": "/api/admin/automation-conversion/review-outputs", "summary": "获取待评审输出", "description": "返回待人工评审的 Agent 话术输出列表。", "auth": "session", "params": [], "request_example": None, "response_example": '{"ok": true, "outputs": [...]}', "curl_example": _curl("GET", "/api/admin/automation-conversion/review-outputs", "session")},
-                    {"id": "post-auto-review-output", "method": "POST", "path": "/api/admin/automation-conversion/review-outputs/<output_id>/review", "summary": "评审输出", "description": "对 Agent 输出进行采用/拒绝评审。", "auth": "session", "params": [{"name": "output_id", "type": "string (path)", "required": True, "description": "输出 ID"}], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/automation-conversion/review-outputs/out_abc/review", "session")},
-                    {"id": "post-auto-send-via-webhook", "method": "POST", "path": "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-webhook", "summary": "通过 Webhook 发送", "description": "将评审通过的输出通过 Webhook 发送。", "auth": "session", "params": [{"name": "output_id", "type": "string (path)", "required": True, "description": "输出 ID"}], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/automation-conversion/review-outputs/out_abc/send-via-webhook", "session")},
-                    {"id": "post-auto-send-via-wecom", "method": "POST", "path": "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-wecom", "summary": "通过企微发送", "description": "将评审通过的输出通过企业微信消息发送给客户。", "auth": "session", "params": [{"name": "output_id", "type": "string (path)", "required": True, "description": "输出 ID"}], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/automation-conversion/review-outputs/out_abc/send-via-wecom", "session")},
-                    {"id": "post-auto-send-via-bazhuayu", "method": "POST", "path": "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-bazhuayu", "summary": "通过八爪鱼发送", "description": "将评审通过的输出通过八爪鱼渠道发送。", "auth": "session", "params": [{"name": "output_id", "type": "string (path)", "required": True, "description": "输出 ID"}], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/automation-conversion/review-outputs/out_abc/send-via-bazhuayu", "session")},
-                ],
-            },
-            {
                 "id": "automation-workflow",
                 "title": "任务流",
                 "endpoints": [
@@ -917,15 +906,6 @@ def _automation_group() -> dict:
                 ],
             },
             {
-                "id": "automation-router",
-                "title": "路由与回调",
-                "endpoints": [
-                    {"id": "get-auto-router-pending", "method": "GET", "path": "/api/admin/automation-conversion/router-pending-callbacks", "summary": "获取待处理路由回调", "description": "返回等待处理的路由回调队列。", "auth": "session", "params": [], "request_example": None, "response_example": '{"ok": true, "callbacks": [...]}', "curl_example": _curl("GET", "/api/admin/automation-conversion/router-pending-callbacks", "session")},
-                    {"id": "post-auto-router-replay", "method": "POST", "path": "/api/admin/automation-conversion/router-callback-replay/<run_id>", "summary": "重放路由回调", "description": "重新执行指定的路由回调。", "auth": "session", "params": [{"name": "run_id", "type": "string (path)", "required": True, "description": "运行 ID"}], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/automation-conversion/router-callback-replay/run_abc", "session")},
-                    {"id": "post-auto-router-check", "method": "POST", "path": "/api/admin/automation-conversion/router-pending-callback-check", "summary": "检查待处理回调", "description": "检查并处理所有待处理的路由回调。", "auth": "session", "params": [], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/automation-conversion/router-pending-callback-check", "session")},
-                ],
-            },
-            {
                 "id": "automation-jobs",
                 "title": "运营任务",
                 "endpoints": [
@@ -965,29 +945,6 @@ def _config_group() -> dict:
             {"id": "put-config-signup-conversion", "method": "PUT", "path": "/api/admin/config/marketing-automation/signup-conversion", "summary": "保存报名转化配置", "description": "更新报名转化的自动化配置。", "auth": "session", "params": [], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("PUT", "/api/admin/config/marketing-automation/signup-conversion", "session")},
             {"id": "get-settings", "method": "GET", "path": "/api/settings", "summary": "获取全局设置", "description": "返回全局应用设置。", "auth": "session", "params": [], "request_example": None, "response_example": '{"ok": true, "settings": {...}}', "curl_example": _curl("GET", "/api/settings", "session")},
             {"id": "put-settings", "method": "PUT", "path": "/api/settings", "summary": "保存全局设置", "description": "更新全局应用设置。", "auth": "session", "params": [], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("PUT", "/api/settings", "session")},
-        ],
-    }
-
-
-def _user_ops_group() -> dict:
-    return {
-        "id": "user-ops",
-        "title": "用户运营",
-        "description": "用户运营管理：批量查询、导入、群发及发送记录。",
-        "endpoints": [
-            {"id": "get-user-ops-overview", "method": "GET", "path": "/api/admin/user-ops/overview", "summary": "获取用户运营概览", "description": "返回用户运营数据概览，支持多维度筛选。", "auth": "session", "params": [{"name": "keyword", "type": "string", "required": False, "description": "关键词搜索"}, {"name": "mobile", "type": "string", "required": False, "description": "手机号搜索"}, {"name": "owner_userid", "type": "string", "required": False, "description": "负责人过滤"}, {"name": "class_term_no", "type": "string", "required": False, "description": "班期号过滤"}], "request_example": None, "response_example": '{"ok": true, "count": 120, "buckets": {...}}', "curl_example": _curl("GET", "/api/admin/user-ops/overview", "session")},
-            {"id": "get-user-ops-list", "method": "GET", "path": "/api/admin/user-ops/list", "summary": "获取用户运营列表", "description": "返回用户运营记录列表（同概览的筛选参数）。", "auth": "session", "params": [{"name": "keyword", "type": "string", "required": False, "description": "关键词搜索"}, {"name": "limit", "type": "int", "required": False, "description": "返回条数"}], "request_example": None, "response_example": '{"ok": true, "records": [...]}', "curl_example": _curl("GET", "/api/admin/user-ops/list?limit=50", "session")},
-            {"id": "get-user-ops-history", "method": "GET", "path": "/api/admin/user-ops/history", "summary": "获取操作历史", "description": "返回用户运营操作历史记录。", "auth": "session", "params": [{"name": "limit", "type": "int", "required": False, "description": "返回条数，默认 100"}], "request_example": None, "response_example": '{"ok": true, "history": [...]}', "curl_example": _curl("GET", "/api/admin/user-ops/history", "session")},
-            {"id": "post-user-ops-import-mobile-class-terms", "method": "POST", "path": "/api/admin/user-ops/import-mobile-class-terms", "summary": "导入手机号班期", "description": "通过文件或粘贴文本批量导入手机号与班期的关联。", "auth": "session", "params": [{"name": "file", "type": "file", "required": False, "description": "Excel/CSV 文件"}, {"name": "pasted_text", "type": "string", "required": False, "description": "粘贴的文本数据"}], "request_example": None, "response_example": '{"ok": true, "imported_count": 25, "results": [...]}', "curl_example": _curl("POST", "/api/admin/user-ops/import-mobile-class-terms", "session")},
-            {"id": "post-user-ops-import-activation", "method": "POST", "path": "/api/admin/user-ops/import-activation-status", "summary": "导入激活状态", "description": "批量导入用户的激活状态。", "auth": "session", "params": [{"name": "file", "type": "file", "required": False, "description": "Excel/CSV 文件"}, {"name": "pasted_text", "type": "string", "required": False, "description": "粘贴的文本数据"}], "request_example": None, "response_example": '{"ok": true, "imported_count": 10}', "curl_example": _curl("POST", "/api/admin/user-ops/import-activation-status", "session")},
-            {"id": "post-user-ops-run-deferred", "method": "POST", "path": "/api/admin/user-ops/run-deferred-jobs", "summary": "执行延迟任务", "description": "执行待处理的用户运营延迟任务。", "auth": "session", "params": [{"name": "limit", "type": "int", "required": False, "description": "批次大小，默认 20"}], "request_example": None, "response_example": '{"ok": true, "processed_count": 5}', "curl_example": _curl("POST", "/api/admin/user-ops/run-deferred-jobs", "session")},
-            {"id": "get-user-ops-export", "method": "GET", "path": "/api/admin/user-ops/export", "summary": "导出用户运营数据", "description": "以 Excel 文件格式导出用户运营数据（同概览的筛选参数）。", "auth": "session", "params": [], "request_example": None, "response_example": "Excel 文件下载 (application/vnd.ms-excel)", "curl_example": _curl("GET", "/api/admin/user-ops/export", "session")},
-            {"id": "post-user-ops-dnd", "method": "POST", "path": "/api/admin/user-ops/do-not-disturb", "summary": "设置免打扰", "description": "设置或取消用户的免打扰状态。", "auth": "session", "params": [{"name": "external_userid", "type": "string", "required": True, "description": "外部联系人 ID"}, {"name": "enabled", "type": "boolean", "required": True, "description": "是否开启免打扰"}], "request_example": None, "response_example": '{"ok": true}', "curl_example": _curl("POST", "/api/admin/user-ops/do-not-disturb", "session", '{"external_userid":"wmXXX","enabled":true}')},
-            {"id": "post-user-ops-batch-send-preview", "method": "POST", "path": "/api/admin/user-ops/batch-send/preview", "summary": "批量发送预览", "description": "预览批量发送的受众范围和内容。", "auth": "session", "params": [{"name": "selection_mode", "type": "string", "required": True, "description": "选择模式"}, {"name": "content", "type": "string", "required": True, "description": "发送内容"}], "request_example": None, "response_example": '{"ok": true, "preview": {...}, "count": 50}', "curl_example": _curl("POST", "/api/admin/user-ops/batch-send/preview", "session", '{"selection_mode":"filter","content":"您好"}')},
-            {"id": "post-user-ops-batch-send-execute", "method": "POST", "path": "/api/admin/user-ops/batch-send/execute", "summary": "执行批量发送", "description": "执行批量发送任务。", "auth": "session", "params": [{"name": "selection_mode", "type": "string", "required": True, "description": "选择模式"}, {"name": "content", "type": "string", "required": True, "description": "发送内容"}], "request_example": None, "response_example": '{"ok": true, "sent_count": 50, "batch_id": 1}', "curl_example": _curl("POST", "/api/admin/user-ops/batch-send/execute", "session", '{"selection_mode":"filter","content":"您好"}')},
-            {"id": "get-user-ops-send-records", "method": "GET", "path": "/api/admin/user-ops/send-records", "summary": "获取发送记录列表", "description": "返回批量发送的历史记录。", "auth": "session", "params": [{"name": "limit", "type": "int", "required": False, "description": "返回条数"}, {"name": "offset", "type": "int", "required": False, "description": "偏移量"}], "request_example": None, "response_example": '{"ok": true, "records": [...], "total": 10}', "curl_example": _curl("GET", "/api/admin/user-ops/send-records", "session")},
-            {"id": "get-user-ops-send-record-detail", "method": "GET", "path": "/api/admin/user-ops/send-records/<int:record_id>", "summary": "获取发送记录详情", "description": "返回单条发送记录的详细信息。", "auth": "session", "params": [{"name": "record_id", "type": "int (path)", "required": True, "description": "记录 ID"}], "request_example": None, "response_example": '{"ok": true, "record": {...}}', "curl_example": _curl("GET", "/api/admin/user-ops/send-records/1", "session")},
-            {"id": "post-user-ops-send-record-refresh", "method": "POST", "path": "/api/admin/user-ops/send-records/<int:record_id>/refresh", "summary": "刷新发送记录状态", "description": "从企业微信更新发送记录的投递状态。", "auth": "session", "params": [{"name": "record_id", "type": "int (path)", "required": True, "description": "记录 ID"}], "request_example": None, "response_example": '{"ok": true, "record": {...}}', "curl_example": _curl("POST", "/api/admin/user-ops/send-records/1/refresh", "session")},
         ],
     }
 
@@ -1110,7 +1067,6 @@ def _api_endpoint_groups() -> list[dict]:
         _questionnaire_group(),
         _automation_group(),
         _config_group(),
-        _user_ops_group(),
         _class_user_group(),
         _sidebar_group(),
         _jobs_group(),

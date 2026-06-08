@@ -2164,65 +2164,6 @@ def test_execution_records_api_exposes_counts_from_execution_items(app, client):
     }
 
 
-def test_agent_config_page_renders_delete_button_for_agent_rows(app, client):
-    _seed_test_agent_config(app, agent_code="custom_delete_agent", display_name="待删 Agent")
-
-    response = client.get("/admin/automation-conversion/shared/agents")
-    html = response.get_data(as_text=True)
-
-    assert response.status_code == 200
-    assert 'data-agent-delete="custom_delete_agent"' in html
-
-
-def test_agent_delete_api_removes_unreferenced_custom_agent(app, client):
-    _seed_test_agent_config(app, agent_code="custom_delete_agent", display_name="待删 Agent")
-    action_token = _admin_action_token(client, "/admin/automation-conversion/shared/agents")
-
-    response = client.delete(
-        "/api/admin/automation-conversion/agents/custom_delete_agent",
-        json={"admin_action_token": action_token},
-    )
-    payload = response.get_json()
-
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["deleted"] is True
-    with app.app_context():
-        row = get_db().execute(
-            "SELECT agent_code FROM automation_agent_config WHERE agent_code = ?",
-            ("custom_delete_agent",),
-        ).fetchone()
-    assert row is None
-
-
-def test_agent_delete_api_blocks_referenced_agent_with_clear_message(app, client):
-    _seed_test_agent_config(app, agent_code="bound_delete_agent", display_name="绑定 Agent")
-    _create_test_workflow(
-        app,
-        workflow_name="引用删除校验任务流",
-        generation_mode="personalized_single",
-        agent_bindings=[
-            {
-                "binding_scope": "personalized",
-                "segment_key": "",
-                "agent_code": "bound_delete_agent",
-            }
-        ],
-    )
-    action_token = _admin_action_token(client, "/admin/automation-conversion/shared/agents")
-
-    response = client.delete(
-        "/api/admin/automation-conversion/agents/bound_delete_agent",
-        json={"admin_action_token": action_token},
-    )
-    payload = response.get_json()
-
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert "当前 Agent 已被任务流引用" in payload["error"]
-    assert "引用删除校验任务流" in payload["error"]
-
-
 def test_create_workflow_node_supports_immediate_trigger_mode(app):
     workflow_bundle = _create_test_workflow(app, workflow_name="即时节点工作流")
     workflow_id = int(((workflow_bundle.get("workflow_bundle") or {}).get("workflow") or {}).get("id") or 0)
@@ -4567,164 +4508,6 @@ def test_unmark_won_falls_back_when_last_active_pool_missing(app, client, monkey
         }
 
 
-def test_generate_default_channel_generates_real_channel_via_wecom_provider(app, client, monkeypatch):
-    captured = {}
-    questionnaire_seed = _seed_settings_questionnaire(app, questionnaire_id=601)
-    program_id = _default_program_id(app)
-
-    class _FakeRuntimeClient:
-        def create_contact_way(self, payload: dict) -> dict:
-            captured["payload"] = payload
-            return {
-                "config_id": "cfg-001",
-                "qr_code": "https://wecom.example/qr/cfg-001",
-            }
-
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.provider.get_contact_runtime_client",
-        lambda: _FakeRuntimeClient(),
-    )
-
-    save_response = client.post(
-        "/api/admin/automation-conversion/settings",
-        json={
-            "enabled": True,
-            "questionnaire_id": questionnaire_seed["questionnaire_id"],
-            "core_threshold": 1,
-            "top_threshold": 1,
-            "quiet_hour_start": 22,
-            "timezone": "Asia/Shanghai",
-            "welcome_message": "欢迎添加，稍后我会主动联系你。",
-            "auto_accept_friend": True,
-            "question_rules": [
-                {
-                    "questionnaire_question_id": questionnaire_seed["choice_question_id"],
-                    "hit_option_ids_json": questionnaire_seed["option_ids"],
-                    "sort_order": 1,
-                }
-            ],
-            "silent_threshold_days_by_pool": {
-                "new_user": 7,
-                "inactive_normal": 7,
-                "inactive_focus": 7,
-                "active_normal": 7,
-                "active_focus": 7,
-            },
-        },
-    )
-    assert save_response.status_code == 200
-
-    response = client.post("/api/admin/automation-conversion/settings/default-channel/generate")
-    payload = response.get_json()
-
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["generated"] is True
-    assert payload["provider_available"] is True
-    assert payload["channel"]["channel_code"] == f"program_{program_id}_default_qrcode"
-    assert payload["channel"]["owner_staff_id"] == "HuangYouCan"
-    assert payload["channel"]["qr_url"] == "https://wecom.example/qr/cfg-001"
-    assert payload["channel"]["qr_ticket"] == "cfg-001"
-    assert payload["channel"]["status"] == "active"
-    assert payload["field_statuses"]["welcome_message"]["status"] == "applied"
-    assert payload["field_statuses"]["auto_accept_friend"]["status"] == "applied"
-    assert payload["channel"]["scene_value"].startswith("aqr_")
-    assert len(payload["channel"]["scene_value"]) <= 30
-    assert captured["payload"]["type"] == 1
-    assert captured["payload"]["scene"] == 2
-    assert captured["payload"]["style"] == 1
-    assert captured["payload"]["skip_verify"] is True
-    assert captured["payload"]["user"] == ["HuangYouCan"]
-    assert captured["payload"]["state"] == payload["channel"]["scene_value"]
-    assert "conclusions" not in captured["payload"]
-    assert len(str(captured["payload"]["state"])) <= 30
-    assert "_" in str(captured["payload"]["state"])
-
-    with app.app_context():
-        db = get_db()
-        row = db.execute(
-            """
-            SELECT channel_code, owner_staff_id, qr_url, qr_ticket, scene_value, status, welcome_message, auto_accept_friend
-            FROM automation_channel
-            WHERE channel_code = ?
-            """,
-            (f"program_{program_id}_default_qrcode",),
-        ).fetchone()
-        assert row is not None
-        assert row["channel_code"] == f"program_{program_id}_default_qrcode"
-        assert row["owner_staff_id"] == "HuangYouCan"
-        assert row["qr_url"] == "https://wecom.example/qr/cfg-001"
-        assert row["qr_ticket"] == "cfg-001"
-        assert str(row["scene_value"]).startswith("aqr_")
-        assert len(str(row["scene_value"])) <= 30
-        assert row["status"] == "active"
-        assert row["welcome_message"] == "欢迎添加，稍后我会主动联系你。"
-        assert bool(row["auto_accept_friend"]) is True
-
-
-def test_default_channel_settings_save_and_readback_welcome_and_auto_accept(app, client):
-    questionnaire_seed = _seed_settings_questionnaire(app, questionnaire_id=602)
-    response = client.post(
-        "/api/admin/automation-conversion/settings",
-        json={
-            "enabled": True,
-            "questionnaire_id": questionnaire_seed["questionnaire_id"],
-            "core_threshold": 1,
-            "top_threshold": 1,
-            "quiet_hour_start": 22,
-            "timezone": "Asia/Shanghai",
-            "welcome_message": "这里是默认渠道欢迎语",
-            "auto_accept_friend": True,
-            "question_rules": [
-                {
-                    "questionnaire_question_id": questionnaire_seed["choice_question_id"],
-                    "hit_option_ids_json": questionnaire_seed["option_ids"],
-                    "sort_order": 1,
-                }
-            ],
-            "silent_threshold_days_by_pool": {
-                "new_user": 7,
-                "inactive_normal": 7,
-                "inactive_focus": 7,
-                "active_normal": 7,
-                "active_focus": 7,
-            },
-        },
-    )
-    payload = response.get_json()
-
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    assert payload["settings"]["default_channel"]["welcome_message"] == "这里是默认渠道欢迎语"
-    assert payload["settings"]["default_channel"]["auto_accept_friend"] is True
-    assert payload["settings"]["default_channel"]["field_statuses"]["welcome_message"]["status"] == "pending"
-    assert payload["settings"]["default_channel"]["field_statuses"]["auto_accept_friend"]["status"] == "pending"
-
-    program_id = _default_program_id(app)
-    settings_page = client.get(
-        f"/admin/automation-conversion/programs/{program_id}/flow-design",
-        query_string={"section": "channel"},
-    )
-    html = settings_page.get_data(as_text=True)
-    assert settings_page.status_code == 200
-    assert "这里是默认渠道欢迎语" in html
-    assert "免验证直接添加好友" in html
-
-    with app.app_context():
-        row = get_db().execute(
-            """
-            SELECT welcome_message, auto_accept_friend, status
-            FROM automation_channel
-            WHERE channel_code = ?
-            """,
-            (f"program_{program_id}_default_qrcode",),
-        ).fetchone()
-        assert row is not None
-        assert row["welcome_message"] == "这里是默认渠道欢迎语"
-        assert bool(row["auto_accept_friend"]) is True
-        assert row["status"] == "configured"
-
-
 def test_default_channel_settings_save_and_readback_entry_tag(app):
     from wecom_ability_service.domains.automation_conversion.service import save_default_channel_settings
 
@@ -4762,63 +4545,6 @@ def test_default_channel_settings_save_and_readback_entry_tag(app):
             "entry_tag_name": "渠道报名",
             "entry_tag_group_name": "渠道来源",
         }
-
-
-def test_generate_default_channel_reports_config_incomplete_when_wecom_config_missing(app, client, monkeypatch):
-    from wecom_ability_service.wecom_client import WeComClientError
-
-    class _BrokenRuntimeClient:
-        def create_contact_way(self, payload: dict) -> dict:
-            raise WeComClientError("WECOM_CORP_ID or WECOM_CONTACT_SECRET is not configured")
-
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.provider.get_contact_runtime_client",
-        lambda: _BrokenRuntimeClient(),
-    )
-
-    response = client.post("/api/admin/automation-conversion/settings/default-channel/generate")
-    payload = response.get_json()
-
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["provider_available"] is True
-    assert payload["generated"] is False
-    assert payload["channel"]["channel_code"] == f"program_{_default_program_id(app)}_default_qrcode"
-    assert payload["channel"]["owner_staff_id"] == "HuangYouCan"
-    assert payload["channel"]["status"] == "config_incomplete"
-    assert payload["error_code"] == "config_incomplete"
-    assert "WECOM_CORP_ID or WECOM_CONTACT_SECRET is not configured" in payload["error"]
-
-
-def test_generate_default_channel_blocks_invalid_state_before_calling_wecom(app, client, monkeypatch):
-    called = {"count": 0}
-
-    class _FakeRuntimeClient:
-        def create_contact_way(self, payload: dict) -> dict:
-            called["count"] += 1
-            return {
-                "config_id": "cfg-002",
-                "qr_code": "https://wecom.example/qr/cfg-002",
-            }
-
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.provider.get_contact_runtime_client",
-        lambda: _FakeRuntimeClient(),
-    )
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.automation_conversion.provider.build_default_channel_state_token",
-        lambda *, now=None: "aqr_invalid_state_token_length_more_than_30",
-    )
-
-    response = client.post("/api/admin/automation-conversion/settings/default-channel/generate")
-    payload = response.get_json()
-
-    assert response.status_code == 400
-    assert payload["ok"] is False
-    assert payload["generated"] is False
-    assert payload["error_code"] == "invalid_state"
-    assert "state 长度不能超过 30 个字符" in payload["error"]
-    assert called["count"] == 0
 
 
 def test_message_activity_sync_updates_activation_follow_type_and_pool(app, monkeypatch):
@@ -5570,6 +5296,12 @@ def test_removed_admin_automation_conversion_routes_are_not_registered(app, clie
         "/admin/automation-conversion/operations/workflows/<int:workflow_id>/nodes",
         "/admin/automation-conversion/operations/executions",
         "/api/admin/automation-conversion/model-infra/settings",
+        "/api/admin/automation-conversion/settings",
+        "/api/admin/automation-conversion/settings/default-channel/generate",
+        "/api/admin/automation-conversion/default-channel-settings",
+        "/api/admin/automation-conversion/default-channel-settings/generate-qr",
+        "/api/admin/automation-conversion/model-settings",
+        "/api/admin/automation-conversion/model-settings/test",
     }
     removed_endpoint_names = {
         "settings",
@@ -5599,10 +5331,8 @@ def test_removed_admin_automation_conversion_routes_are_not_registered(app, clie
         "/admin/automation-conversion/programs/<int:program_id>/flow-design",
         "/admin/automation-conversion/programs/<int:program_id>/member-ops",
         "/admin/automation-conversion/programs/<int:program_id>/member-ops/stage/<stage_key>/send",
-        "/admin/automation-conversion/shared/agents",
         "/admin/automation-conversion/shared/model-infra",
         "/admin/automation-conversion/runtime/debug",
-        "/api/admin/automation-conversion/settings",
         "/api/admin/automation-conversion/sop/config",
         "/api/admin/automation-conversion/stage/<stage_key>/manual-send",
         "/api/admin/automation-conversion/stage/<stage_key>/manual-send/preview",
@@ -5631,6 +5361,12 @@ def test_removed_admin_automation_conversion_routes_are_not_registered(app, clie
         "/admin/automation-conversion/operations/workflows/1/edit",
         "/admin/automation-conversion/operations/workflows/1/nodes",
         "/admin/automation-conversion/operations/executions",
+        "/api/admin/automation-conversion/settings",
+        "/api/admin/automation-conversion/settings/default-channel/generate",
+        "/api/admin/automation-conversion/default-channel-settings",
+        "/api/admin/automation-conversion/default-channel-settings/generate-qr",
+        "/api/admin/automation-conversion/model-settings",
+        "/api/admin/automation-conversion/model-settings/test",
     ]:
         assert client.get(path).status_code == 404
 
@@ -5641,125 +5377,6 @@ def test_removed_admin_automation_conversion_routes_are_not_registered(app, clie
     assert "GET" not in rule_methods[new_stage_send_rule]
     assert client.get(f"/admin/automation-conversion/programs/{program_id}/member-ops/stage/new-user/send").status_code in {404, 405}
     assert client.post("/admin/automation-conversion/stage/new-user/send").status_code in {404, 405}
-
-
-def test_admin_automation_conversion_save_settings_redirects_back_to_current_flow_design_section(app, client, monkeypatch):
-    monkeypatch.setattr("wecom_ability_service.http.automation_conversion.save_settings", lambda payload, program_id=None: payload)
-    monkeypatch.setattr("wecom_ability_service.http.automation_conversion.validate_admin_console_action_token", lambda: "")
-    program_id = _default_program_id(app)
-
-    response = client.post(
-        "/admin/automation-conversion/settings/save",
-        data={"section": "global-rules"},
-    )
-
-    assert response.status_code == 302
-    assert f"/admin/automation-conversion/programs/{program_id}/flow-design" in response.headers["Location"]
-    assert "section=global-rules" in response.headers["Location"]
-    assert "saved=1" in response.headers["Location"]
-
-
-def test_admin_automation_conversion_save_settings_error_keeps_current_flow_design_section(app, client, monkeypatch):
-    monkeypatch.setattr(
-        "wecom_ability_service.http.automation_conversion.save_settings",
-        lambda payload, program_id=None: (_ for _ in ()).throw(ValueError("保存失败")),
-    )
-    monkeypatch.setattr("wecom_ability_service.http.automation_conversion.validate_admin_console_action_token", lambda: "")
-
-    response = client.post(
-        "/admin/automation-conversion/settings/save",
-        data={"section": "channel", "welcome_message": "保留输入"},
-    )
-    html = response.get_data(as_text=True)
-    program_id = _default_program_id(app)
-
-    assert response.status_code == 200
-    assert "保存失败" in html
-    assert "保留输入" in html
-    assert f'href="/admin/automation-conversion/programs/{program_id}/flow-design?section=channel#flow-channel">欢迎语 / 标签 / 二维码</a>' in html
-    assert 'ac-section-link is-active' in html
-
-
-def test_admin_automation_conversion_save_settings_requires_action_token_and_keeps_section(app, client):
-    response = client.post(
-        "/admin/automation-conversion/settings/save",
-        data={"section": "channel", "welcome_message": "未提交成功"},
-    )
-    html = response.get_data(as_text=True)
-    program_id = _default_program_id(app)
-
-    assert response.status_code == 200
-    assert "后台动作令牌无效，请刷新页面后重试" in html
-    assert "未提交成功" in html
-    assert f'href="/admin/automation-conversion/programs/{program_id}/flow-design?section=channel#flow-channel">欢迎语 / 标签 / 二维码</a>' in html
-
-
-def test_admin_generate_default_channel_error_keeps_channel_section(app, client, monkeypatch):
-    monkeypatch.setattr(
-        "wecom_ability_service.http.automation_conversion.generate_default_channel_qr",
-        lambda operator="", program_id=None: {"generated": False, "error": "二维码生成失败"},
-    )
-    monkeypatch.setattr("wecom_ability_service.http.automation_conversion.validate_admin_console_action_token", lambda: "")
-
-    response = client.post("/admin/automation-conversion/settings/default-channel/generate")
-    html = response.get_data(as_text=True)
-    program_id = _default_program_id(app)
-
-    assert response.status_code == 200
-    assert "二维码生成失败" in html
-    assert f'href="/admin/automation-conversion/programs/{program_id}/flow-design?section=channel#flow-channel">欢迎语 / 标签 / 二维码</a>' in html
-    assert 'ac-section-link is-active' in html
-
-
-def test_admin_generate_default_channel_requires_action_token(app, client):
-    response = client.post("/admin/automation-conversion/settings/default-channel/generate")
-    html = response.get_data(as_text=True)
-    program_id = _default_program_id(app)
-
-    assert response.status_code == 200
-    assert "后台动作令牌无效，请刷新页面后重试" in html
-    assert f'href="/admin/automation-conversion/programs/{program_id}/flow-design?section=channel#flow-channel">欢迎语 / 标签 / 二维码</a>' in html
-
-
-def test_model_infra_settings_save_and_mask_deepseek_api_key(app, client):
-    response = client.put(
-        "/api/admin/automation-conversion/model-settings",
-        json={
-            "enabled": True,
-            "api_key": "dsk-automation-secret-12345",
-            "base_url": "https://api.deepseek.com",
-            "router_model": "deepseek-router-x",
-            "execution_model": "deepseek-execution-x",
-            "timeout_seconds": 45,
-        },
-    )
-    payload = response.get_json()
-
-    assert response.status_code == 200
-    assert payload["ok"] is True
-    deepseek = payload["model_infra"]["deepseek"]
-    assert deepseek["enabled"] is True
-    assert deepseek["api_key_configured"] is True
-    assert deepseek["api_key_masked"] == "dsk***45"
-    assert deepseek["base_url"] == "https://api.deepseek.com"
-    assert deepseek["router_model"] == "deepseek-router-x"
-    assert deepseek["execution_model"] == "deepseek-execution-x"
-    assert deepseek["timeout_seconds"] == 45
-    assert deepseek["updated_at"]
-
-    with app.app_context():
-        stored_key = get_db().execute(
-            "SELECT value FROM app_settings WHERE key = 'DEEPSEEK_API_KEY'"
-        ).fetchone()["value"]
-        assert stored_key == "dsk-automation-secret-12345"
-
-    page = client.get("/admin/automation-conversion/shared/model-infra", follow_redirects=True)
-    html = page.get_data(as_text=True)
-
-    assert page.status_code == 200
-    assert "DeepSeek 配置" in html
-    assert "dsk-automation-secret-12345" not in html
-    assert "dsk***45" in html
 
 
 def test_model_infra_prompt_registry_seeds_and_saves_all_agent_prompts(app):
@@ -6340,7 +5957,8 @@ def test_reply_monitor_dispatch_runs_router_shadow_mode_and_applies_async_callba
 def test_reply_monitor_dispatch_posts_laohuang_chat_when_enabled(app, monkeypatch):
     _configure_reply_monitor(app, enabled=True, last_capture_cursor=0, quiet_hours_start="00:00", quiet_hours_end="00:00")
     app.config["LAOHUANG_CHAT_ENABLED"] = "true"
-    app.config["LAOHUANG_CHAT_WEBHOOK_URL"] = "https://ip.lhbl.com.cn/api/webhook/crm/chat"
+    app.config["LAOHUANG_CHAT_WEBHOOK_URL"] = "https://www.youcangogogo.com/api/webhook/crm/chat"
+    app.config["LAOHUANG_CHAT_WEBHOOK_TOKEN"] = "test-chat-token"
     app.config["LAOHUANG_CHAT_TIMEOUT_SECONDS"] = 7
     _seed_contact(app, external_userid="wm_lh_dispatch_001", mobile="13800009201", owner_userid="sales_01", customer_name="lh-dispatch")
     _seed_automation_member(app, external_contact_id="wm_lh_dispatch_001", phone="13900009201", owner_staff_id="sales_01", current_pool="active_focus", follow_type="focus", activation_status="active", questionnaire_status="submitted", decision_source="manual")
@@ -6399,7 +6017,7 @@ def test_reply_monitor_dispatch_posts_laohuang_chat_when_enabled(app, monkeypatc
     assert capture["summary"]["created_queue_items"] == 1
     assert dispatch["ok"] is True
     assert dispatch["laohuang_chat"]["status"] == "accepted"
-    assert captured_requests[0]["url"] == "https://ip.lhbl.com.cn/api/webhook/crm/chat"
+    assert captured_requests[0]["url"] == "https://www.youcangogogo.com/api/webhook/crm/chat?token=test-chat-token"
     assert captured_requests[0]["timeout"] == 7
     assert "headers" not in captured_requests[0]["kwargs"]
     assert request_body["phone"] == "13900009201"
@@ -11287,311 +10905,3 @@ def test_sop_run_due_skips_pool_when_lock_is_held(app, monkeypatch):
     assert result["scanned_pool_count"] == 1
     assert result["created_batch_count"] == 0
     assert batch_total == 0
-
-
-def test_qrcode_callback_creates_member_and_event(app):
-    from wecom_ability_service.domains.automation_conversion.service import handle_qrcode_enter_from_callback
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_channel (
-                channel_code, channel_name, scene_value, owner_staff_id, status, created_at, updated_at
-            )
-            VALUES ('default_qrcode', '默认渠道二维码', 'scene-default', 'HuangYouCan', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """
-        )
-        db.commit()
-
-        result = handle_qrcode_enter_from_callback(
-            external_contact_id="wm_qrcode_001",
-            phone="13800004001",
-            payload_json={"state": "scene-default"},
-            operator_id="callback-user",
-        )
-
-        assert result["handled"] is True
-        member = db.execute(
-            """
-            SELECT external_contact_id, phone, owner_staff_id, in_pool, current_pool, source_type
-            FROM automation_member
-            WHERE external_contact_id = ?
-            """,
-            ("wm_qrcode_001",),
-        ).fetchone()
-        assert dict(member) == {
-            "external_contact_id": "wm_qrcode_001",
-            "phone": "13800004001",
-            "owner_staff_id": "HuangYouCan",
-            "in_pool": 1,
-            "current_pool": "pending_questionnaire",
-            "source_type": "qrcode",
-        }
-        event = db.execute(
-            "SELECT action, operator_type, operator_id FROM automation_event ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        assert dict(event) == {
-            "action": "qrcode_enter",
-            "operator_type": "system",
-            "operator_id": "callback-user",
-        }
-
-def test_qrcode_callback_sends_official_welcome_message(app, monkeypatch):
-    from wecom_ability_service.domains.automation_conversion import service as automation_service
-
-    captured: dict[str, object] = {}
-
-    class _StubClient:
-        def send_welcome_msg(self, payload: dict[str, object]) -> dict[str, object]:
-            captured["payload"] = payload
-            return {"errcode": 0, "errmsg": "ok"}
-
-    monkeypatch.setattr(automation_service, "get_contact_runtime_client", lambda: _StubClient())
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_channel (
-                channel_code, channel_name, scene_value, owner_staff_id, welcome_message, status, created_at, updated_at
-            )
-            VALUES ('default_qrcode', '默认渠道二维码', 'scene-welcome', 'HuangYouCan', '欢迎加入', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """
-        )
-        db.commit()
-
-        result = automation_service.handle_qrcode_enter_from_callback(
-            external_contact_id="wm_qrcode_002",
-            phone="13800004002",
-            payload_json={"state": "scene-welcome", "WelcomeCode": "welcome-001"},
-            operator_id="callback-user",
-            send_welcome_message=True,
-        )
-
-        assert result["handled"] is True
-        assert result["welcome_message"]["sent"] is True
-        assert captured["payload"] == {
-            "welcome_code": "welcome-001",
-            "text": {"content": "欢迎加入"},
-        }
-        events = db.execute(
-            "SELECT action FROM automation_event ORDER BY id DESC LIMIT 2"
-        ).fetchall()
-        assert [str(row["action"]) for row in events] == ["qrcode_welcome_sent", "qrcode_enter"]
-
-
-def test_qrcode_callback_welcome_message_requires_welcome_code(app, monkeypatch):
-    from wecom_ability_service.domains.automation_conversion import service as automation_service
-
-    class _StubClient:
-        def send_welcome_msg(self, payload: dict[str, object]) -> dict[str, object]:
-            raise AssertionError("send_welcome_msg should not be called without welcome_code")
-
-    monkeypatch.setattr(automation_service, "get_contact_runtime_client", lambda: _StubClient())
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_channel (
-                channel_code, channel_name, scene_value, owner_staff_id, welcome_message, status, created_at, updated_at
-            )
-            VALUES ('default_qrcode', '默认渠道二维码', 'scene-no-code', 'HuangYouCan', '欢迎加入', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """
-        )
-        db.commit()
-
-        result = automation_service.handle_qrcode_enter_from_callback(
-            external_contact_id="wm_qrcode_003",
-            phone="13800004003",
-            payload_json={"state": "scene-no-code"},
-            operator_id="callback-user",
-            send_welcome_message=True,
-        )
-
-        assert result["handled"] is True
-        assert result["welcome_message"]["sent"] is False
-        assert result["welcome_message"]["error"] == "missing_welcome_code"
-        event = db.execute(
-            "SELECT action, remark FROM automation_event ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        assert dict(event) == {
-            "action": "qrcode_welcome_failed",
-            "remark": "missing_welcome_code",
-        }
-
-
-def test_qrcode_callback_applies_entry_tag_and_persists_snapshot(app, monkeypatch):
-    from wecom_ability_service.domains.automation_conversion import service as automation_service
-
-    captured: dict[str, object] = {}
-
-    class _StubClient:
-        def mark_external_contact_tags(
-            self,
-            *,
-            external_userid: str,
-            follow_user_userid: str,
-            add_tags: list[str],
-            remove_tags: list[str],
-        ) -> dict[str, object]:
-            captured["payload"] = {
-                "external_userid": external_userid,
-                "follow_user_userid": follow_user_userid,
-                "add_tags": list(add_tags),
-                "remove_tags": list(remove_tags),
-            }
-            return {"errcode": 0, "errmsg": "ok"}
-
-    monkeypatch.setattr(automation_service, "get_app_runtime_client", lambda: _StubClient())
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_channel (
-                channel_code, channel_name, scene_value, owner_staff_id, entry_tag_id, entry_tag_name, entry_tag_group_name, status, created_at, updated_at
-            )
-            VALUES ('default_qrcode', '默认渠道二维码', 'scene-tag', 'HuangYouCan', 'tag-channel-001', '渠道报名', '渠道来源', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            """
-        )
-        db.commit()
-
-        result = automation_service.handle_qrcode_enter_from_callback(
-            external_contact_id="wm_qrcode_tag_001",
-            phone="13800004004",
-            payload_json={"state": "scene-tag"},
-            operator_id="callback-user",
-            follow_user_userid="LinKaiYan",
-        )
-
-        assert result["handled"] is True
-        assert result["entry_tag"]["applied"] is True
-        assert result["entry_tag"]["entry_tag_id"] == "tag-channel-001"
-        assert captured["payload"] == {
-            "external_userid": "wm_qrcode_tag_001",
-            "follow_user_userid": "LinKaiYan",
-            "add_tags": ["tag-channel-001"],
-            "remove_tags": [],
-        }
-
-        snapshot = db.execute(
-            """
-            SELECT external_userid, userid, tag_id, tag_name
-            FROM contact_tags
-            WHERE external_userid = ?
-            LIMIT 1
-            """,
-            ("wm_qrcode_tag_001",),
-        ).fetchone()
-        assert dict(snapshot) == {
-            "external_userid": "wm_qrcode_tag_001",
-            "userid": "LinKaiYan",
-            "tag_id": "tag-channel-001",
-            "tag_name": "渠道报名",
-        }
-        events = db.execute(
-            "SELECT action, remark FROM automation_event ORDER BY id DESC LIMIT 2"
-        ).fetchall()
-        assert [dict(row) for row in events] == [
-            {"action": "qrcode_entry_tag_applied", "remark": "渠道报名"},
-            {"action": "qrcode_enter", "remark": ""},
-        ]
-
-
-def test_qrcode_callback_continues_welcome_and_tag_when_sop_progress_sync_fails(app, monkeypatch):
-    from wecom_ability_service.domains.automation_conversion import service as automation_service
-
-    sent_payloads: dict[str, dict[str, object]] = {}
-
-    class _StubContactClient:
-        def send_welcome_msg(self, payload: dict[str, object]) -> dict[str, object]:
-            sent_payloads["welcome"] = payload
-            return {"errcode": 0, "errmsg": "ok"}
-
-    class _StubAppClient:
-        def mark_external_contact_tags(
-            self,
-            *,
-            external_userid: str,
-            follow_user_userid: str,
-            add_tags: list[str],
-            remove_tags: list[str],
-        ) -> dict[str, object]:
-            sent_payloads["tag"] = {
-                "external_userid": external_userid,
-                "follow_user_userid": follow_user_userid,
-                "add_tags": list(add_tags),
-                "remove_tags": list(remove_tags),
-            }
-            return {"errcode": 0, "errmsg": "ok"}
-
-    monkeypatch.setattr(automation_service, "get_contact_runtime_client", lambda: _StubContactClient())
-    monkeypatch.setattr(automation_service, "get_app_runtime_client", lambda: _StubAppClient())
-    monkeypatch.setattr(
-        automation_service,
-        "_sync_sop_progress_for_transition",
-        lambda before, after: (_ for _ in ()).throw(RuntimeError("sop progress write failed")),
-    )
-
-    with app.app_context():
-        db = get_db()
-        db.execute(
-            """
-            INSERT INTO automation_channel (
-                channel_code, channel_name, scene_value, owner_staff_id, welcome_message,
-                entry_tag_id, entry_tag_name, entry_tag_group_name, status, created_at, updated_at
-            )
-            VALUES (
-                'default_qrcode', '默认渠道二维码', 'scene-non-blocking', 'HuangYouCan', '欢迎加入',
-                'tag-channel-002', '渠道报名', '渠道来源', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-            )
-            """
-        )
-        db.commit()
-
-        result = automation_service.handle_qrcode_enter_from_callback(
-            external_contact_id="wm_qrcode_non_blocking_001",
-            phone="13800004005",
-            payload_json={"state": "scene-non-blocking", "WelcomeCode": "welcome-non-blocking-001"},
-            operator_id="callback-user",
-            send_welcome_message=True,
-        )
-
-        assert result["handled"] is True
-        assert result["welcome_message"]["sent"] is True
-        assert result["entry_tag"]["applied"] is True
-        assert sent_payloads["welcome"] == {
-            "welcome_code": "welcome-non-blocking-001",
-            "text": {"content": "欢迎加入"},
-        }
-        assert sent_payloads["tag"] == {
-            "external_userid": "wm_qrcode_non_blocking_001",
-            "follow_user_userid": "HuangYouCan",
-            "add_tags": ["tag-channel-002"],
-            "remove_tags": [],
-        }
-
-        member = db.execute(
-            """
-            SELECT external_contact_id, owner_staff_id, in_pool, source_type
-            FROM automation_member
-            WHERE external_contact_id = ?
-            """,
-            ("wm_qrcode_non_blocking_001",),
-        ).fetchone()
-        assert dict(member) == {
-            "external_contact_id": "wm_qrcode_non_blocking_001",
-            "owner_staff_id": "HuangYouCan",
-            "in_pool": 1,
-            "source_type": "qrcode",
-        }
-        events = db.execute(
-            "SELECT action FROM automation_event ORDER BY id DESC LIMIT 3"
-        ).fetchall()
-        assert [str(row["action"]) for row in events] == [
-            "qrcode_entry_tag_applied",
-            "qrcode_welcome_sent",
-            "qrcode_enter",
-        ]

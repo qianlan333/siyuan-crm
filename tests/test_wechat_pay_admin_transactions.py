@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from pathlib import Path
 
+from aicrm_next.commerce import admin_transactions
 from wecom_ability_service.db import get_db
 from wecom_ability_service.domains.admin_auth.auth_runtime import (
     ADMIN_CONSOLE_ACTION_TOKEN_SESSION_KEY,
@@ -39,6 +40,7 @@ def _insert_order(
     transaction_id: str = "",
     refunded_amount_total: int = 0,
     mobile_snapshot: str = "13800000000",
+    unionid: str = "unionid_test",
     external_userid: str = "wm_test",
     userid_snapshot: str = "zhangsan",
     payer_name_snapshot: str = "张三",
@@ -52,6 +54,7 @@ def _insert_order(
             "description": product_name or product_code,
             "amount_total": amount_total,
             "payer_openid": "op_test",
+            "unionid": unionid,
             "external_userid": external_userid,
             "userid_snapshot": userid_snapshot,
             "mobile_snapshot": mobile_snapshot,
@@ -102,12 +105,12 @@ def test_wechat_pay_admin_transaction_template_hides_internal_filter_copy():
         encoding="utf-8"
     )
 
-    assert "商品编码" not in source
     assert "mobile_snapshot / mobile" not in source
     assert "userid / external_userid" not in source
     assert "placeholder=\"transaction_id\"" not in source
     assert "row.product_code" not in source
     assert "{{ product.product_name }} / {{ product.product_code }}" not in source
+    assert "导出文件包含订单创建时间、微信单号、手机号、unionid、商品名称、商品编码、金额和状态。" in source
 
 
 def test_wechat_pay_admin_present_order_uses_operator_product_label():
@@ -132,6 +135,28 @@ def test_wechat_pay_admin_present_order_uses_operator_product_label():
     assert presented["product_code"] == "assessment_report_v1"
 
 
+def test_wechat_pay_admin_repairs_utf8_mojibake_payer_name_snapshot():
+    row = {
+        "id": 1,
+        "created_at": "2026-05-20 09:27:39",
+        "transaction_id": "4200003131202605208651604176",
+        "payer_name_snapshot": "æ›¾å¾·é’§",
+        "mobile_snapshot": "18675597381",
+        "userid_snapshot": "HuangYouCan",
+        "external_userid": "",
+        "product_code": "first_month_trial",
+        "product_name": "黄小璨首月体验",
+        "amount_total": 990,
+        "status": "paid",
+        "trade_state": "SUCCESS",
+    }
+
+    presented = wechat_pay_admin_service._present_order(row)
+
+    assert presented["payer_name"] == "曾德钧"
+    assert presented["identity"] == "曾德钧 / 18675597381 / HuangYouCan"
+
+
 def test_wechat_pay_admin_product_filter(app, client):
     _login_admin(client)
     _insert_order(out_trade_no="WXP_PROD_A", product_code="assessment_report_v1", product_name="AI 测评报告")
@@ -143,6 +168,23 @@ def test_wechat_pay_admin_product_filter(app, client):
     payload = response.get_json()
     assert payload["ok"] is True
     assert [item["product_code"] for item in payload["items"]] == ["vip_course"]
+
+
+def test_wechat_pay_admin_product_filter_accepts_current_code_for_aliased_orders(app, client):
+    _login_admin(client)
+    _insert_order(
+        out_trade_no="WXP_ALIAS_PRODUCT",
+        product_code="prd_20260518095708_9f77db",
+        product_name="黄小璨首月体验",
+        transaction_id="420000ALIASPRODUCT",
+    )
+
+    response = client.get("/api/admin/wechat-pay/orders?product_code=subscription_trial_month&limit=20")
+
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["ok"] is True
+    assert [item["product_code"] for item in payload["items"]] == ["subscription_trial_month"]
 
 
 def test_wechat_pay_admin_status_mapping(app):
@@ -252,9 +294,17 @@ def test_wechat_pay_admin_displays_created_at_in_beijing_time(app):
     assert payload["items"][0]["created_at"] == "2026-05-18 19:27:51"
 
 
-def test_wechat_pay_admin_export_job_saves_filters_json(app, client):
+def test_wechat_pay_admin_export_job_saves_filters_json_and_exports_required_fields(app, client):
     token = _login_admin(client)
-    _insert_order(out_trade_no="WXP_EXPORT", product_code="vip_course", product_name="会员课程")
+    _insert_order(
+        out_trade_no="WXP_EXPORT",
+        product_code="vip_course",
+        product_name="会员课程",
+        transaction_id="420000EXPORT",
+        mobile_snapshot="13800138000",
+        unionid="unionid_export",
+        created_at="2026-05-18T12:00:00+08:00",
+    )
 
     response = client.post(
         "/api/admin/wechat-pay/order-exports",
@@ -275,6 +325,95 @@ def test_wechat_pay_admin_export_job_saves_filters_json(app, client):
     ).fetchone()
     assert row["filters_json"]["product_code"] == "vip_course"
     assert row["status"] == "succeeded"
+
+    download = client.get(f"/api/admin/wechat-pay/order-exports/{job_id}/download")
+    csv_text = download.data.decode("utf-8-sig")
+    assert "客户身份" not in csv_text
+    assert csv_text.splitlines()[0] == "订单创建时间,微信单号,手机号,unionid,商品名称,商品编码,金额,状态"
+    assert "420000EXPORT,13800138000,unionid_export,会员课程,vip_course,99.00,待支付" in csv_text
+
+
+def test_wechat_pay_admin_export_uses_current_code_for_aliased_product(app, client):
+    token = _login_admin(client)
+    _insert_order(
+        out_trade_no="WXP_ALIAS_EXPORT",
+        product_code="prd_20260601055439_3c4f56",
+        product_name="黄小璨月度会员私教版",
+        transaction_id="420000ALIASEXPORT",
+        mobile_snapshot="13681984146",
+        unionid="unionid_alias_export",
+        amount_total=6900,
+        created_at="2026-06-03T16:55:42+08:00",
+    )
+
+    response = client.post(
+        "/api/admin/wechat-pay/order-exports",
+        json={
+            "admin_action_token": token,
+            "filters": {
+                "product_code": "premium_monthly_trial",
+                "created_from": "2026-06-01T00:00",
+                "created_to": "2026-06-30T23:59",
+            },
+            "scope": "filtered",
+            "format": "csv",
+            "limit": 20,
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = response.get_json()["job"]["job_id"]
+    download = client.get(f"/api/admin/wechat-pay/order-exports/{job_id}/download")
+    csv_text = download.data.decode("utf-8-sig")
+    assert "prd_20260601055439_3c4f56" not in csv_text
+    assert "420000ALIASEXPORT,13681984146,unionid_alias_export,黄小璨月度会员私教版,premium_monthly_trial,69.00,待支付" in csv_text
+
+
+def test_next_wechat_pay_export_csv_uses_required_fields(monkeypatch):
+    def fake_list_orders(filters, *, limit, offset):
+        return {
+            "items": [
+                {
+                    "created_at": "2026-05-18 19:27:51",
+                    "transaction_id": "420000NEXTEXPORT",
+                    "mobile": "13800138001",
+                    "unionid": "unionid_next_export",
+                    "userid": "zhangsan",
+                    "external_userid": "wm_next",
+                    "product_name": "会员课程",
+                    "product_code": "vip_course",
+                    "amount_yuan": "99.00",
+                    "status_label": "已支付",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(admin_transactions, "list_wechat_admin_orders", fake_list_orders)
+
+    csv_text = admin_transactions.export_orders_csv({"product_code": "vip_course"})
+
+    assert "客户身份" not in csv_text
+    assert csv_text.splitlines()[0] == "订单创建时间,微信单号,手机号,unionid,商品名称,商品编码,金额,状态"
+    assert "420000NEXTEXPORT,13800138001,unionid_next_export,会员课程,vip_course,99.00,已支付" in csv_text
+
+
+def test_next_wechat_pay_present_order_uses_current_code_for_alias():
+    presented = admin_transactions._present_order(
+        {
+            "id": 1,
+            "created_at": "2026-06-03 19:17:21",
+            "transaction_id": "420000NEXTALIAS",
+            "mobile_snapshot": "18108191098",
+            "unionid": "unionid_next_alias",
+            "product_name": "黄小璨首月体验",
+            "product_code": "prd_20260518095708_9f77db",
+            "amount_total": 990,
+            "status": "paid",
+            "trade_state": "SUCCESS",
+        }
+    )
+
+    assert presented["product_code"] == "subscription_trial_month"
 
 
 def test_wechat_pay_admin_list_does_not_return_refund_action(app, client):

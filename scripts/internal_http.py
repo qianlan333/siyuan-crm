@@ -47,7 +47,7 @@ def post_json(
     last_error: Exception | None = None
     for attempt in range(1, attempts + 1):
         try:
-            with urlopen(request, timeout_seconds) as response:
+            with urlopen(request, timeout=timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
             print(exc.read().decode("utf-8", errors="replace"))

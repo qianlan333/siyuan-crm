@@ -120,6 +120,24 @@ def test_claim_due_only_pulls_queued_and_due(app):
             assert j["status"] == "claimed"
 
 
+def test_claim_due_order_is_scheduled_priority_id(app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        later = _enqueue(scheduled_for=now - timedelta(minutes=1), source_id="later", content_payload={"fn_name": "send_text", "wecom_payload": {"content": "later"}})
+        high_priority = _enqueue(scheduled_for=now - timedelta(minutes=3), source_id="high-priority", content_payload={"fn_name": "send_text", "wecom_payload": {"content": "high"}})
+        same_time_first = _enqueue(scheduled_for=now - timedelta(minutes=2), source_id="same-first", content_payload={"fn_name": "send_text", "wecom_payload": {"content": "first"}})
+        same_time_second = _enqueue(scheduled_for=now - timedelta(minutes=2), source_id="same-second", content_payload={"fn_name": "send_text", "wecom_payload": {"content": "second"}})
+        from wecom_ability_service.db import get_db
+
+        get_db().execute("UPDATE broadcast_jobs SET priority = 10 WHERE id = ?", (int(high_priority),))
+        get_db().execute("UPDATE broadcast_jobs SET priority = 1 WHERE id = ?", (int(same_time_second),))
+        get_db().commit()
+
+        claimed = queue_service.claim_due_jobs(limit=10, now=now)
+
+    assert [item["id"] for item in claimed] == [high_priority, same_time_second, same_time_first, later]
+
+
 def test_mark_sent_updates_status_and_records_outbound(app):
     with app.app_context():
         now = datetime.now(timezone.utc)
@@ -142,6 +160,58 @@ def test_mark_failed_records_error(app):
         job = queue_service.get_job(job_id)
         assert job["status"] == "failed"
         assert "wecom api 401" in job["last_error"]
+
+
+def test_recover_stale_claimed_jobs_restores_only_leased_unfinished_claims(app):
+    with app.app_context():
+        now = datetime.now(timezone.utc)
+        stale_id = _enqueue(scheduled_for=now - timedelta(minutes=20), source_id="stale")
+        legacy_id = _enqueue(scheduled_for=now - timedelta(minutes=20), source_id="legacy")
+        fresh_id = _enqueue(scheduled_for=now - timedelta(minutes=1), source_id="fresh")
+        sent_like_id = _enqueue(scheduled_for=now - timedelta(minutes=20), source_id="sent-like")
+        queue_service.claim_due_jobs(
+            limit=10,
+            now=now - timedelta(minutes=20),
+            claim_token="pytest-lease",
+        )
+        from wecom_ability_service.db import get_db
+
+        db = get_db()
+        db.execute(
+            "UPDATE broadcast_jobs SET claimed_at = ? WHERE id IN (?, ?, ?)",
+            (
+                (now - timedelta(minutes=20)).isoformat(),
+                int(stale_id),
+                int(legacy_id),
+                int(sent_like_id),
+            ),
+        )
+        db.execute(
+            "UPDATE broadcast_jobs SET claim_token = '' WHERE id = ?",
+            (int(legacy_id),),
+        )
+        db.commit()
+        queue_service.mark_sent(sent_like_id, outbound_task_id=123, sent_count=1)
+        queue_service.claim_due_jobs(limit=10, now=now)
+
+        recovered = queue_service.recover_stale_claimed_jobs(
+            older_than_seconds=900,
+            now=now,
+            limit=10,
+        )
+
+        requeued_ids = {
+            int(item["id"])
+            for item in recovered["requeued_without_outbound"]
+        }
+        assert stale_id in requeued_ids
+        assert legacy_id not in requeued_ids
+        assert fresh_id not in requeued_ids
+        assert sent_like_id not in requeued_ids
+        assert queue_service.get_job(stale_id)["status"] == "queued"
+        assert queue_service.get_job(legacy_id)["status"] == "claimed"
+        assert queue_service.get_job(fresh_id)["status"] == "claimed"
+        assert queue_service.get_job(sent_like_id)["status"] == "sent"
 
 
 def test_cancel_queued_job_marks_cancelled(app):

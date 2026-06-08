@@ -35,7 +35,7 @@ def test_run_automation_conversion_due_jobs_posts_registered_endpoint(monkeypatc
     module = _load_script_module()
     captured: list[dict[str, object]] = []
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, *, timeout):
         body = json.loads(request.data.decode("utf-8"))
         captured.append(
             {
@@ -100,7 +100,7 @@ def test_run_automation_conversion_due_jobs_respects_job_filter(monkeypatch):
     module = _load_script_module()
     captured: list[str] = []
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, *, timeout):
         captured.append(request.full_url)
         return _FakeResponse(b'{"ok": true}')
 

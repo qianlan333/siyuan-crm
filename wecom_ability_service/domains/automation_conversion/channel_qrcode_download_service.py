@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
 import mimetypes
 import re
 from urllib.parse import urlparse
@@ -12,6 +13,14 @@ def _download_filename(channel: dict) -> str:
     raw = "_".join(part for part in (name, code) if part)
     safe = re.sub(r"[^\w.-]+", "_", raw, flags=re.UNICODE).strip("._") or "channel"
     return f"{safe}.png"
+
+
+def _png_qrcode_bytes(value: str) -> bytes:
+    import segno
+
+    out = BytesIO()
+    segno.make(str(value or ""), error="m").save(out, kind="png", scale=8, border=2)
+    return out.getvalue()
 
 
 def _image_mimetype_from_bytes(content: bytes, fallback: str = "image/png") -> str:
@@ -65,4 +74,11 @@ def build_channel_qrcode_download(channel: dict) -> dict | None:
     if image:
         content, mimetype = image
         return {"content": content, "mimetype": mimetype, "filename": _download_filename(channel)}
-    return None
+    qrcode_value = str(channel.get("scene_value") or channel.get("channel_code") or "").strip()
+    if not qrcode_value:
+        return None
+    return {
+        "content": _png_qrcode_bytes(qrcode_value),
+        "mimetype": "image/png",
+        "filename": _download_filename(channel),
+    }

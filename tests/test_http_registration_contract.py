@@ -21,10 +21,8 @@ HTTP_HELPER_MODULE_FILES = {
     "_routes_helpers.py",
     "admin_support.py",
     "automation_conversion_form_helpers.py",
-    "automation_conversion_render.py",
     "automation_conversion_uploads.py",
     "automation_conversion_compat.py",
-    "automation_conversion_workspaces.py",
     "background_jobs.py",
     "callback_runtime.py",
     "common.py",
@@ -34,12 +32,13 @@ HTTP_HELPER_MODULE_FILES = {
     "sidebar_marketing_support.py",
     "sync_jobs.py",
     "sync_support.py",
+    "wechat_pay_support.py",
 }
 HTTP_LARGE_ROUTE_OWNER_LINE_LIMITS = {
+    "admin_wechat_pay.py": 360,
     "admin_config.py": 350,
     "automation_conversion.py": 350,
-    "automation_conversion_channels.py": 360,
-    "internal_auth.py": 360,
+    "internal_auth.py": 390,
 }
 
 def test_routes_py_has_no_direct_bp_route_decorators():
@@ -68,15 +67,12 @@ def test_http_registration_exports_single_registry_contract():
         "identity",
         "ops",
         "settings",
-        "customer_center",
-        "customer_timeline",
         "archive",
         "contacts",
         "group_chats",
         "callbacks",
         "tasks",
         "tags",
-        "admin_user_ops",
         "admin_class_user",
         "admin_questionnaires",
         "public_questionnaires",
@@ -238,40 +234,50 @@ def test_automation_conversion_controller_stays_a_route_aggregator():
 def test_automation_conversion_support_helpers_stay_layered():
     http_dir = ROOT / "wecom_ability_service" / "http"
     helper_source = (http_dir / "_routes_helpers.py").read_text(encoding="utf-8")
-    render_source = (http_dir / "automation_conversion_render.py").read_text(encoding="utf-8")
-    workspaces_source = (http_dir / "automation_conversion_workspaces.py").read_text(encoding="utf-8")
 
     assert len(helper_source.splitlines()) <= 200
     for forbidden in ("def _build_", "def _render_", "get_overview_payload", "get_settings_payload", "_render_admin_template"):
         assert forbidden not in helper_source
 
-    for forbidden in ("get_overview_payload", "get_settings_payload", "get_stage_detail_payload"):
-        assert forbidden not in render_source
+    for retired_helper in (
+        "automation_conversion_pages.py",
+        "automation_conversion_render.py",
+        "automation_conversion_workspaces.py",
+    ):
+        assert not (http_dir / retired_helper).exists()
 
-    for forbidden in ("_render_admin_template", "ensure_admin_console_action_token", "validate_admin_console_action_token"):
-        assert forbidden not in workspaces_source
 
+def test_cloud_orchestrator_legacy_http_handlers_are_retired_from_flask_registry():
+    from aicrm_next.main import create_app as create_next_app
+    from wecom_ability_service import create_app
 
-def test_cloud_orchestrator_controller_stays_a_route_aggregator():
-    source_path = ROOT / "wecom_ability_service" / "http" / "cloud_orchestrator_endpoint.py"
-    source = source_path.read_text(encoding="utf-8")
-    parsed = ast.parse(source)
+    for file_name in (
+        "cloud_orchestrator_endpoint.py",
+        "cloud_orchestrator_campaigns.py",
+        "cloud_orchestrator_campaign_details.py",
+        "cloud_orchestrator_media.py",
+        "cloud_orchestrator_pages.py",
+        "cloud_orchestrator_plans.py",
+        "cloud_orchestrator_segments.py",
+    ):
+        assert not (ROOT / "wecom_ability_service" / "http" / file_name).exists()
 
-    assert len(source.splitlines()) <= 220
+    legacy_app = create_app({"TESTING": True})
+    legacy_routes = {rule.rule for rule in legacy_app.url_map.iter_rules()}
+    for route in legacy_routes:
+        assert not route.startswith("/admin/cloud-orchestrator")
+        assert not route.startswith("/api/admin/cloud-orchestrator")
 
-    forbidden_imports = {
-        "flask",
-        "wecom_ability_service.domains",
-        "wecom_ability_service.db",
-        "wecom_ability_service.wecom_client",
-    }
-    for node in ast.walk(parsed):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert not any(alias.name == target or alias.name.startswith(f"{target}.") for target in forbidden_imports)
-        if isinstance(node, ast.ImportFrom):
-            module_name = node.module or ""
-            assert not any(module_name == target or module_name.startswith(f"{target}.") for target in forbidden_imports)
+    next_routes = {}
+    for route in create_next_app().routes:
+        route_path = getattr(route, "path", "")
+        if route_path:
+            next_routes.setdefault(route_path, getattr(getattr(route, "endpoint", None), "__module__", ""))
+    assert next_routes["/admin/cloud-orchestrator/campaigns"] == "aicrm_next.cloud_orchestrator.api"
+    assert next_routes["/api/admin/cloud-orchestrator/campaigns"] == "aicrm_next.cloud_orchestrator.api"
+    assert next_routes["/api/admin/cloud-orchestrator/campaigns/run-due/preview"] == "aicrm_next.cloud_orchestrator.api"
+    assert next_routes["/api/admin/cloud-orchestrator/media/upload"] == "aicrm_next.cloud_orchestrator.api"
+    assert next_routes["/api/admin/cloud-orchestrator/observability"] == "aicrm_next.post_legacy_deferred.api"
 
 
 def test_admin_api_docs_controller_stays_a_page_adapter():
@@ -442,13 +448,13 @@ def test_public_questionnaire_oauth_routes_stay_in_child_controller():
         assert route_modules[route] == expected_diagnostics_module
 
 
-def test_admin_auth_login_routes_stay_in_child_controller():
+def test_admin_auth_legacy_module_is_pruned_but_shell_routes_stay_internal():
     from wecom_ability_service import create_app
 
     internal_auth_source = (ROOT / "wecom_ability_service" / "http" / "internal_auth.py").read_text(encoding="utf-8")
-    assert len(internal_auth_source.splitlines()) <= 360
+    assert len(internal_auth_source.splitlines()) <= 390
+    assert not (ROOT / "wecom_ability_service" / "http" / "admin_auth_routes.py").exists()
     for forbidden in (
-        "def admin_login(",
         "def admin_wecom_start(",
         "build_wecom_qr_login_url",
         "login_break_glass_session",
@@ -461,15 +467,14 @@ def test_admin_auth_login_routes_stay_in_child_controller():
         rule.rule: getattr(app.view_functions[rule.endpoint], "__module__", "")
         for rule in app.url_map.iter_rules()
     }
-    expected_module = "wecom_ability_service.http.admin_auth_routes"
 
     for route in {
-        "/login",
-        "/logout",
         "/auth/wecom/start",
         "/auth/wecom/callback",
     }:
-        assert route_modules[route] == expected_module
+        assert route not in route_modules
+    for route in {"/login", "/logout"}:
+        assert route_modules[route] == "wecom_ability_service.http.internal_auth"
 
 
 def test_admin_broadcast_job_routes_stay_in_child_controller():
@@ -495,7 +500,7 @@ def test_admin_broadcast_job_routes_stay_in_child_controller():
         assert route_modules[route] == expected_module
 
 
-def test_admin_questionnaire_push_log_routes_stay_in_child_controller():
+def test_retired_admin_questionnaire_push_log_routes_are_not_registered_in_legacy_flask():
     from wecom_ability_service import create_app
 
     questionnaire_console_source = (
@@ -511,52 +516,38 @@ def test_admin_questionnaire_push_log_routes_stay_in_child_controller():
         assert forbidden not in questionnaire_console_source
 
     app = create_app({"TESTING": True})
-    route_modules = {
-        rule.rule: getattr(app.view_functions[rule.endpoint], "__module__", "")
-        for rule in app.url_map.iter_rules()
-    }
-    expected_module = "wecom_ability_service.http.admin_questionnaire_push_logs"
-
-    for route in {
+    registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
+    retired_routes = {
         "/admin/questionnaires/external-push-logs",
         "/admin/questionnaires/external-push-logs/retry-batch",
         "/admin/questionnaires/external-push-logs/<int:push_log_id>/retry",
         "/admin/questionnaires/<int:questionnaire_id>/external-push-logs",
         "/admin/questionnaires/<int:questionnaire_id>/external-push-logs/<int:push_log_id>/retry",
         "/admin/questionnaires/<int:questionnaire_id>/external-push-logs/retry-batch",
-    }:
-        assert route_modules[route] == expected_module
+    }
+    assert registered_routes.isdisjoint(retired_routes)
 
 
-def test_admin_user_ops_delivery_routes_stay_in_child_controller():
+def test_retired_admin_user_ops_page_routes_are_not_registered():
     from wecom_ability_service import create_app
 
-    user_ops_source = (ROOT / "wecom_ability_service" / "http" / "admin_user_ops.py").read_text(encoding="utf-8")
-    assert len(user_ops_source.splitlines()) <= 260
-    for forbidden in (
-        "MAX_PRIVATE_MESSAGE_IMAGES",
-        "validate_wecom_image_upload",
-        "def admin_user_ops_batch_send_",
-        "def admin_user_ops_send_record",
-    ):
-        assert forbidden not in user_ops_source
-
     app = create_app({"TESTING": True})
-    route_modules = {
-        rule.rule: getattr(app.view_functions[rule.endpoint], "__module__", "")
-        for rule in app.url_map.iter_rules()
-    }
-    expected_module = "wecom_ability_service.http.admin_user_ops_delivery"
-
-    for route in {
+    retired_routes = {
+        "/admin/user-ops/ui",
+        "/api/admin/user-ops/overview",
+        "/api/admin/user-ops/list",
+        "/api/admin/user-ops/history",
+        "/api/admin/user-ops/export",
         "/api/admin/user-ops/do-not-disturb",
         "/api/admin/user-ops/batch-send/preview",
         "/api/admin/user-ops/batch-send/execute",
         "/api/admin/user-ops/send-records",
         "/api/admin/user-ops/send-records/<int:record_id>",
         "/api/admin/user-ops/send-records/<int:record_id>/refresh",
-    }:
-        assert route_modules[route] == expected_module
+    }
+    registered_routes = {rule.rule for rule in app.url_map.iter_rules()}
+
+    assert not (retired_routes & registered_routes)
 
 
 def test_automation_conversion_split_route_modules_stay_owned_by_child_controllers():
@@ -569,39 +560,7 @@ def test_automation_conversion_split_route_modules_stay_owned_by_child_controlle
     }
 
     expected_by_module = {
-        "automation_conversion_pages": {
-            "/admin/automation-conversion",
-            "/admin/automation-conversion/programs",
-            "/admin/automation-conversion/programs/<int:program_id>/setup",
-            "/admin/automation-conversion/programs/<int:program_id>/overview",
-            "/admin/automation-conversion/programs/<int:program_id>/operations",
-            "/admin/automation-conversion/shared/agents",
-            "/admin/automation-conversion/runtime/router",
-            "/admin/automation-conversion/auto-reply",
-        },
-        "automation_conversion_page_actions": {
-            "/admin/automation-conversion/settings/save",
-            "/admin/automation-conversion/settings/default-channel/generate",
-            "/admin/automation-conversion/programs/<int:program_id>/member-ops/stage/<stage_key>/send",
-            "/admin/automation-conversion/programs/<int:program_id>/overview/signup-tag/apply",
-            "/admin/automation-conversion/programs/<int:program_id>/overview/message-activity-sync/run",
-        },
-        "automation_conversion_agent_page_actions": {
-            "/admin/automation-conversion/agent-orchestration/agents/<agent_code>/save-draft",
-            "/admin/automation-conversion/agent-orchestration/outputs/<output_id>/review",
-            "/admin/automation-conversion/agent-orchestration/replay/<run_id>",
-        },
-        "automation_conversion_auto_reply_actions": {
-            "/admin/automation-conversion/auto-reply/reply-monitor/toggle",
-            "/admin/automation-conversion/auto-reply/reply-monitor/capture",
-            "/admin/automation-conversion/auto-reply/reply-monitor/run-due",
-        },
-        "automation_conversion_segments": {
-            "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-search",
-            "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-broadcast",
-        },
         "automation_conversion_member_api": {
-            "/api/admin/automation-conversion/member",
             "/api/admin/automation-conversion/member/put-in-pool",
             "/api/admin/automation-conversion/member/set-focus",
             "/api/admin/automation-conversion/member/push-openclaw",
@@ -615,59 +574,11 @@ def test_automation_conversion_split_route_modules_stay_owned_by_child_controlle
             "/api/admin/automation-conversion/sop/config",
             "/api/admin/automation-conversion/sop/run-due",
         },
-        "automation_conversion_settings": {
-            "/api/admin/automation-conversion/settings",
-            "/api/admin/automation-conversion/default-channel-settings",
-            "/api/admin/automation-conversion/model-settings",
-            "/api/admin/automation-conversion/model-settings/test",
+        "automation_conversion_execution_outbound": {
+            "/api/admin/automation-conversion/execution-items/<int:execution_item_id>/send-via-bazhuayu",
         },
-        "automation_conversion_setup": {
-            "/api/admin/automation-conversion/programs/<int:program_id>/setup",
-            "/api/admin/automation-conversion/programs/<int:program_id>/setup/basic",
-            "/api/admin/automation-conversion/programs/<int:program_id>/publish-entry",
-            "/api/admin/automation-conversion/programs/<int:program_id>/customer-acquisition-links",
-        },
-        "automation_conversion_templates": {
-            "/api/admin/automation-conversion/action-templates",
-            "/api/admin/automation-conversion/action-templates/from-workflow",
-            "/api/admin/automation-conversion/programs/<int:program_id>/actions/from-template",
-            "/api/admin/automation-conversion/profile-segment-templates",
-            "/api/admin/automation-conversion/profile-segment-templates/options",
-        },
-        "automation_conversion_agent_api": {
-            "/api/admin/automation-conversion/agent-outputs",
-            "/api/admin/automation-conversion/agent-outputs/<output_id>",
-            "/api/admin/automation-conversion/agent-runs/<run_id>",
-            "/api/admin/automation-conversion/agent-outputs/export",
-            "/api/admin/automation-conversion/agent-outputs/export/<job_id>",
-            "/api/admin/automation-conversion/agent-replay",
-            "/api/admin/automation-conversion/agent-orchestration/pending-publish",
-            "/api/admin/automation-conversion/agents",
-            "/api/admin/automation-conversion/agents/options",
-            "/api/admin/automation-conversion/agents/<agent_code>",
-            "/api/admin/automation-conversion/agents/<agent_code>/draft",
-            "/api/admin/automation-conversion/agents/<agent_code>/publish",
-        },
-        "automation_conversion_router_callback_api": {
-            "/api/admin/automation-conversion/router-pending-callbacks",
-            "/api/admin/automation-conversion/router-callback-replay/<run_id>",
-            "/api/admin/automation-conversion/router-pending-callback-check",
-        },
-        "automation_conversion_review": {
-            "/api/admin/automation-conversion/review-outputs",
-            "/api/admin/automation-conversion/review-outputs/<output_id>/review",
-            "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-webhook",
-            "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-wecom",
-            "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-bazhuayu",
-        },
-        "automation_conversion_workflows": {
-            "/api/admin/automation-conversion/dashboard",
-            "/api/admin/automation-conversion/workflows",
-            "/api/admin/automation-conversion/workflows/<int:workflow_id>",
-            "/api/admin/automation-conversion/workflows/<int:workflow_id>/nodes",
-            "/api/admin/automation-conversion/workflow-nodes/<int:node_id>",
-            "/api/admin/automation-conversion/executions",
-            "/api/admin/automation-conversion/execution-items/<int:execution_item_id>",
+        "automation_conversion_task_runtime": {
+            "/api/admin/automation-conversion/tasks/run-due",
         },
         "automation_conversion_runtime_api": {
             "/api/admin/automation-conversion/message-activity-sync/run",
@@ -686,7 +597,7 @@ def test_automation_conversion_split_route_modules_stay_owned_by_child_controlle
             assert route_modules[route] == expected_module
 
 
-def test_cloud_orchestrator_split_route_modules_stay_owned_by_child_controllers():
+def test_cloud_orchestrator_split_route_modules_are_removed_from_legacy_registry():
     from wecom_ability_service import create_app
 
     app = create_app({"TESTING": True})
@@ -695,79 +606,86 @@ def test_cloud_orchestrator_split_route_modules_stay_owned_by_child_controllers(
         for rule in app.url_map.iter_rules()
     }
 
-    expected_by_module = {
-        "cloud_orchestrator_pages": {
-            "/admin/cloud-orchestrator",
-            "/admin/cloud-orchestrator/observability",
-            "/admin/cloud-orchestrator/campaigns",
-            "/admin/cloud-orchestrator/integration",
-        },
-        "cloud_orchestrator_media": {
-            "/api/admin/cloud-orchestrator/media/upload",
-        },
-        "cloud_orchestrator_plans": {
-            "/api/admin/cloud-orchestrator/plans",
-            "/api/admin/cloud-orchestrator/plans/<plan_id>",
-            "/api/admin/cloud-orchestrator/plans/<plan_id>/simulate",
-            "/api/admin/cloud-orchestrator/plans/<plan_id>/approve",
-            "/api/admin/cloud-orchestrator/plans/<plan_id>/commit",
-            "/api/admin/cloud-orchestrator/plans/<plan_id>/reject",
-            "/api/admin/cloud-orchestrator/audit",
-            "/api/admin/cloud-orchestrator/observability",
-        },
-        "cloud_orchestrator_segments": {
-            "/api/admin/cloud-orchestrator/segments",
-            "/api/admin/cloud-orchestrator/segments/<segment_code>",
-            "/api/admin/cloud-orchestrator/segments/<segment_code>/preview",
-        },
-        "cloud_orchestrator_campaigns": {
-            "/api/admin/cloud-orchestrator/campaigns",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/approve",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/start",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/pause",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/reject",
-            "/api/admin/cloud-orchestrator/campaigns/batch-start",
-            "/api/admin/cloud-orchestrator/campaigns/run-due",
-        },
-        "cloud_orchestrator_campaign_details": {
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/steps/<step_index>",
-            "/api/admin/cloud-orchestrator/campaigns/<campaign_code>/members",
-        },
+    retired_modules = {
+        "wecom_ability_service.http.cloud_orchestrator_pages",
+        "wecom_ability_service.http.cloud_orchestrator_media",
+        "wecom_ability_service.http.cloud_orchestrator_plans",
+        "wecom_ability_service.http.cloud_orchestrator_segments",
+        "wecom_ability_service.http.cloud_orchestrator_campaigns",
+        "wecom_ability_service.http.cloud_orchestrator_campaign_details",
+        "wecom_ability_service.http.cloud_orchestrator_endpoint",
     }
-
-    for module_name, expected_routes in expected_by_module.items():
-        expected_module = f"wecom_ability_service.http.{module_name}"
-        for route in expected_routes:
-            assert route_modules[route] == expected_module
+    assert not retired_modules.intersection(route_modules.values())
+    assert not any(route.startswith("/admin/cloud-orchestrator") for route in route_modules)
+    assert not any(route.startswith("/api/admin/cloud-orchestrator") for route in route_modules)
 
 
-def test_image_library_create_routes_stay_in_child_controller():
+def test_legacy_media_library_routes_are_retired_after_d1():
     from wecom_ability_service import create_app
 
-    image_library_source = (ROOT / "wecom_ability_service" / "http" / "image_library_endpoint.py").read_text(encoding="utf-8")
-    assert len(image_library_source.splitlines()) <= 210
-    for forbidden in (
-        "def admin_image_library_upload(",
-        "def admin_image_library_create_url(",
-        "def admin_image_library_create_base64(",
-    ):
-        assert forbidden not in image_library_source
+    retired_files = {
+        "image_library_endpoint.py",
+        "image_library_create.py",
+        "attachment_library_endpoint.py",
+        "miniprogram_library_endpoint.py",
+    }
+    http_dir = ROOT / "wecom_ability_service" / "http"
+    for file_name in retired_files:
+        assert not (http_dir / file_name).exists()
+
+    assert not {
+        "image_library",
+        "image_library_create",
+        "attachment_library",
+        "miniprogram_library",
+    } & set(HTTP_ROUTE_MODULES)
+    assert all(key not in {"image_library", "attachment_library", "miniprogram_library"} for key, _ in HTTP_ROUTE_REGISTRARS)
+    assert HTTP_ROUTE_MODULES["image_library_upload"] == "wecom_ability_service.http.image_library_upload"
 
     app = create_app({"TESTING": True})
-    route_modules = {
-        rule.rule: getattr(app.view_functions[rule.endpoint], "__module__", "")
-        for rule in app.url_map.iter_rules()
-    }
-    expected_module = "wecom_ability_service.http.image_library_create"
+    routes = {rule.rule for rule in app.url_map.iter_rules()}
 
     for route in {
-        "/api/admin/image-library/upload",
+        "/admin/image-library",
+        "/api/admin/image-library",
         "/api/admin/image-library/from-url",
         "/api/admin/image-library/from-base64",
+        "/admin/attachment-library",
+        "/api/admin/attachment-library",
+        "/admin/miniprogram-library",
+        "/api/admin/miniprogram-library",
     }:
-        assert route_modules[route] == expected_module
+        assert route not in routes
+    assert "/api/admin/image-library/upload" in routes
+
+
+def test_legacy_customer_read_model_routes_are_retired_after_d3():
+    from wecom_ability_service import create_app
+
+    http_dir = ROOT / "wecom_ability_service" / "http"
+    for file_name in {"customer_center.py", "customer_timeline.py"}:
+        assert not (http_dir / file_name).exists()
+
+    assert not {"customer_center", "customer_timeline"} & set(HTTP_ROUTE_MODULES)
+    assert all(key not in {"customer_center", "customer_timeline"} for key, _ in HTTP_ROUTE_REGISTRARS)
+
+    app = create_app({"TESTING": True})
+    routes = {rule.rule for rule in app.url_map.iter_rules()}
+
+    for route in {
+        "/admin/customers",
+        "/api/customers",
+        "/api/customers/<external_userid>",
+        "/api/customers/<external_userid>/timeline",
+    }:
+        assert route not in routes
+
+    for route in {
+        "/api/messages/<external_userid>",
+        "/api/messages/<external_userid>/recent",
+        "/api/messages/search",
+    }:
+        assert route in routes
 
 
 def test_automation_conversion_legacy_routes_and_endpoints_remain_removed():
@@ -801,6 +719,51 @@ def test_automation_conversion_legacy_routes_and_endpoints_remain_removed():
         "/admin/automation-conversion/reply-monitor/run-due",
         "/admin/automation-conversion/stage/<stage_key>/send",
         "/api/admin/automation-conversion/model-infra/settings",
+        "/admin/automation-conversion",
+        "/admin/automation-conversion/programs/<int:program_id>/overview",
+        "/admin/automation-conversion/programs/<int:program_id>/operations",
+        "/admin/automation-conversion/programs/<int:program_id>/executions",
+        "/admin/automation-conversion/programs/<int:program_id>/flow-design",
+        "/admin/automation-conversion/programs/<int:program_id>/member-ops",
+        "/admin/automation-conversion/programs/<int:program_id>/member-ops/stage/<stage_key>/send",
+        "/api/admin/automation-conversion/dashboard",
+        "/api/admin/automation-conversion/executions",
+        "/api/admin/automation-conversion/executions/<int:execution_id>",
+        "/api/admin/automation-conversion/executions/<int:execution_id>/items",
+        "/api/admin/automation-conversion/execution-items/<int:execution_item_id>",
+        "/admin/automation-conversion/programs/<int:program_id>/overview/signup-tag/apply",
+        "/admin/automation-conversion/programs/<int:program_id>/overview/message-activity-sync/run",
+        "/admin/automation-conversion/auto-reply/reply-monitor/toggle",
+        "/admin/automation-conversion/auto-reply/reply-monitor/capture",
+        "/admin/automation-conversion/auto-reply/reply-monitor/run-due",
+        "/admin/automation-conversion/shared/agents",
+        "/admin/automation-conversion/shared/model-infra",
+        "/admin/automation-conversion/runtime/debug",
+        "/api/admin/automation-conversion/settings",
+        "/api/admin/automation-conversion/settings/default-channel/generate",
+        "/api/admin/automation-conversion/default-channel-settings",
+        "/api/admin/automation-conversion/default-channel-settings/generate-qr",
+        "/api/admin/automation-conversion/model-settings",
+        "/api/admin/automation-conversion/model-settings/test",
+        "/api/admin/automation-conversion/programs/<int:program_id>/setup",
+        "/api/admin/automation-conversion/programs/<int:program_id>/setup/basic",
+        "/api/admin/automation-conversion/programs/<int:program_id>/setup/entry-channel",
+        "/api/admin/automation-conversion/programs/<int:program_id>/setup/segmentation",
+        "/api/admin/automation-conversion/programs/<int:program_id>/setup/audience-entry-rule",
+        "/api/admin/automation-conversion/programs/<int:program_id>/setup/publish-check",
+        "/api/admin/automation-conversion/programs/<int:program_id>/publish-entry",
+        "/api/admin/automation-conversion/programs/<int:program_id>/publish-full",
+        "/api/admin/automation-conversion/programs/<int:program_id>/customer-acquisition-links",
+        "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-search",
+        "/api/admin/automation-conversion/programs/<int:program_id>/members/segment-broadcast",
+        "/api/admin/automation-conversion/router-pending-callbacks",
+        "/api/admin/automation-conversion/router-callback-replay/<run_id>",
+        "/api/admin/automation-conversion/router-pending-callback-check",
+        "/api/admin/automation-conversion/review-outputs",
+        "/api/admin/automation-conversion/review-outputs/<output_id>/review",
+        "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-webhook",
+        "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-wecom",
+        "/api/admin/automation-conversion/review-outputs/<output_id>/send-via-bazhuayu",
     }
     removed_endpoints = {
         "admin_automation_conversion_settings",
@@ -826,24 +789,27 @@ def test_automation_conversion_legacy_routes_and_endpoints_remain_removed():
         "admin_automation_conversion_reply_monitor_run_due",
         "admin_automation_conversion_stage_send",
         "api_admin_automation_conversion_model_infra_settings_save_legacy",
+        "api_admin_automation_program_setup",
+        "api_admin_automation_program_setup_basic",
+        "api_admin_automation_program_setup_entry_channel",
+        "api_admin_automation_program_setup_segmentation",
+        "api_admin_automation_program_setup_audience_entry_rule",
+        "api_admin_automation_program_setup_publish_check",
+        "api_admin_automation_program_publish_entry",
+        "api_admin_automation_program_publish_full",
+        "api_admin_automation_program_customer_acquisition_links",
+        "api_admin_automation_program_member_segment_search",
+        "api_admin_automation_program_member_segment_broadcast",
+        "api_admin_automation_conversion_router_pending_callbacks",
+        "api_admin_automation_conversion_router_callback_replay",
+        "api_admin_automation_conversion_router_pending_callback_check",
+        "api_admin_automation_conversion_review_outputs",
+        "api_admin_automation_conversion_review_output",
+        "api_admin_automation_conversion_review_output_send_via_webhook",
+        "api_admin_automation_conversion_review_output_send_via_wecom",
+        "api_admin_automation_conversion_review_output_send_via_bazhuayu",
     }
     kept_routes = {
-        "/admin/automation-conversion",
-        "/admin/automation-conversion/programs/<int:program_id>/overview",
-        "/admin/automation-conversion/programs/<int:program_id>/operations",
-        "/admin/automation-conversion/programs/<int:program_id>/flow-design",
-        "/admin/automation-conversion/programs/<int:program_id>/member-ops",
-        "/admin/automation-conversion/programs/<int:program_id>/executions",
-        "/admin/automation-conversion/programs/<int:program_id>/member-ops/stage/<stage_key>/send",
-        "/admin/automation-conversion/programs/<int:program_id>/overview/signup-tag/apply",
-        "/admin/automation-conversion/programs/<int:program_id>/overview/message-activity-sync/run",
-        "/admin/automation-conversion/auto-reply/reply-monitor/toggle",
-        "/admin/automation-conversion/auto-reply/reply-monitor/capture",
-        "/admin/automation-conversion/auto-reply/reply-monitor/run-due",
-        "/admin/automation-conversion/shared/agents",
-        "/admin/automation-conversion/shared/model-infra",
-        "/admin/automation-conversion/runtime/debug",
-        "/api/admin/automation-conversion/model-settings",
         "/api/admin/automation-conversion/stage/<stage_key>/manual-send/preview",
         "/api/admin/automation-conversion/stage/<stage_key>/manual-send",
         "/api/admin/automation-conversion/stage/<stage_key>/focus-send-batches",

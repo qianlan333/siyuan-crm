@@ -250,6 +250,66 @@ def test_contract_customer_aggregation_reads(client):
     )
 
 
+def test_contract_customer_list_owner_and_keyword_filters(client):
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO owner_role_map (userid, display_name, role, active)
+        VALUES (?, ?, ?, ?)
+        """,
+        ("sales_01", "顾问一号", "advisor", True),
+    )
+    db.execute(
+        """
+        INSERT INTO contacts (external_userid, customer_name, owner_userid, remark, description)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        ("wm_ext_002", "李蓝", "sales_02", "另一个负责人", "非筛选目标"),
+    )
+    db.execute(
+        """
+        INSERT INTO archived_messages
+        (seq, msgid, chat_type, external_userid, owner_userid, sender, receiver, msgtype, content, send_time, raw_payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            22,
+            "contract-msg-002",
+            "private",
+            "wm_ext_002",
+            "sales_02",
+            "wm_ext_002",
+            "sales_02",
+            "text",
+            "另一条消息",
+            "2026-03-21 12:12:00",
+            "{}",
+        ),
+    )
+    db.commit()
+
+    owner_response = client.get("/api/customers?owner_userid=sales_01&limit=10&offset=0")
+    assert owner_response.status_code == 200
+    owner_payload = owner_response.get_json()
+    assert owner_payload["ok"] is True
+    assert owner_payload["total"] == 1
+    assert [item["external_userid"] for item in owner_payload["items"]] == ["wm_ext_001"]
+
+    owner_display_response = client.get("/api/customers?owner_userid=顾问一号&limit=10&offset=0")
+    assert owner_display_response.status_code == 200
+    owner_display_payload = owner_display_response.get_json()
+    assert owner_display_payload["ok"] is True
+    assert owner_display_payload["total"] == 1
+    assert [item["external_userid"] for item in owner_display_payload["items"]] == ["wm_ext_001"]
+
+    keyword_response = client.get("/api/customers?keyword=顾问一号&limit=10&offset=0")
+    assert keyword_response.status_code == 200
+    keyword_payload = keyword_response.get_json()
+    assert keyword_payload["ok"] is True
+    assert keyword_payload["total"] == 1
+    assert [item["external_userid"] for item in keyword_payload["items"]] == ["wm_ext_001"]
+
+
 def _mcp_call(client, name: str, arguments: dict[str, object]):
     from wecom_ability_service.mcp_adapter import streamable_http_mcp
 

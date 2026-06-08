@@ -92,6 +92,8 @@ class HandleQrcodeEnterFromCallbackCommand:
         operator_id: str = "",
         follow_user_userid: str = "",
         send_welcome_message: bool = False,
+        event_log_id: int | None = None,
+        dry_run: bool = False,
     ) -> dict[str, Any]:
         return automation_conversion_domain_service.handle_qrcode_enter_from_callback(
             external_contact_id=str(external_contact_id or "").strip(),
@@ -100,6 +102,8 @@ class HandleQrcodeEnterFromCallbackCommand:
             operator_id=str(operator_id or "").strip(),
             follow_user_userid=str(follow_user_userid or "").strip(),
             send_welcome_message=bool(send_welcome_message),
+            event_log_id=int(event_log_id or 0) or None,
+            dry_run=bool(dry_run),
         )
 
     execute = __call__

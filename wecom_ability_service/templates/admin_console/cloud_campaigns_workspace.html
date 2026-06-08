@@ -316,6 +316,7 @@
 
   async function loadList() {
     const params = new URLSearchParams();
+    params.set('limit', '5000');
     if (reviewSel.value) params.set('review_status', reviewSel.value);
     if (runSel.value) params.set('run_status', runSel.value);
     const resp = await fetch('/api/admin/cloud-orchestrator/campaigns?' + params.toString());

@@ -274,7 +274,9 @@
       state.tagLimit = Number(payload.tag_limit || 1000);
       state.syncedAt = normalized(payload.synced_at);
       if (!state.selectedGroupKey && state.groups[0]) state.selectedGroupKey = groupKey(state.groups[0]);
-      if (successMessage) setFeedback(successMessage, "success");
+      if (payload.source_status === "cache_fallback") {
+        setFeedback(normalized(payload.sync_error) || "企微远程同步失败，已展示上一次本地缓存。", "error");
+      } else if (successMessage) setFeedback(successMessage, "success");
     } catch (error) {
       state.groups = [];
       state.totalTags = 0;

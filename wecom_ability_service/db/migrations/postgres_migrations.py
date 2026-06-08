@@ -227,6 +227,22 @@ def _ensure_postgres_attachment_library(db) -> None:
     )
 
 
+def _ensure_postgres_sidebar_customer_profile_fields(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sidebar_customer_profile_fields (
+            external_userid TEXT PRIMARY KEY,
+            source TEXT NOT NULL DEFAULT '',
+            industry TEXT NOT NULL DEFAULT '',
+            industry_description TEXT NOT NULL DEFAULT '',
+            needs_blockers_followup TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+
+
 def _ensure_postgres_automation_agent_config_tables(db) -> None:
     db.execute(
         """
@@ -262,6 +278,208 @@ def _ensure_postgres_automation_agent_config_tables(db) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_automation_profile_segment_template_program
         ON automation_profile_segment_template (program_id, enabled, updated_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_agents (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL DEFAULT 0,
+            workflow_id BIGINT NOT NULL DEFAULT 0,
+            node_id BIGINT NOT NULL DEFAULT 0,
+            task_id BIGINT NOT NULL DEFAULT 0,
+            agent_code TEXT NOT NULL,
+            agent_name TEXT NOT NULL DEFAULT '',
+            agent_type TEXT NOT NULL DEFAULT 'assistant',
+            status TEXT NOT NULL DEFAULT 'active',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            archived_at TEXT NOT NULL DEFAULT '',
+            CONSTRAINT uq_automation_agents_workflow_code UNIQUE (workflow_id, agent_code)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_agents_program
+        ON automation_agents (program_id, enabled, sort_order ASC, id ASC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_agents_workflow
+        ON automation_agents (workflow_id, node_id, task_id, sort_order ASC, id ASC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_agent_idempotency (
+            id BIGSERIAL PRIMARY KEY,
+            route_family TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            response_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            resource_type TEXT NOT NULL DEFAULT 'agent',
+            resource_id BIGINT,
+            status TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_automation_agent_idempotency_scope
+                UNIQUE (route_family, operation, operator, idempotency_key)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_agent_audit_log (
+            id BIGSERIAL PRIMARY KEY,
+            route_family TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            resource_type TEXT NOT NULL DEFAULT 'agent',
+            resource_id BIGINT,
+            before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            validation_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+            rollback_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            side_effect_safety JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        INSERT INTO automation_agents (
+            program_id, workflow_id, node_id, task_id, agent_code, agent_name, agent_type,
+            status, sort_order, metadata_json, config_json, enabled, created_by, updated_by
+        )
+        VALUES
+            (0, 0, 0, 0, 'central_router_agent', '中央路由 Agent', 'classifier', 'active', 10, '{"source":"next_default_seed"}'::jsonb, '{}'::jsonb, TRUE, 'system', 'system'),
+            (0, 0, 0, 0, 'welcome_agent', '欢迎接待 Agent', 'assistant', 'active', 20, '{"source":"next_default_seed"}'::jsonb, '{}'::jsonb, TRUE, 'system', 'system'),
+            (0, 0, 0, 0, 'pricing_agent', '价格答疑 Agent', 'assistant', 'active', 30, '{"source":"next_default_seed"}'::jsonb, '{}'::jsonb, TRUE, 'system', 'system'),
+            (0, 0, 0, 0, 'proof_agent', '案例证明 Agent', 'assistant', 'active', 40, '{"source":"next_default_seed"}'::jsonb, '{}'::jsonb, TRUE, 'system', 'system'),
+            (0, 0, 0, 0, 'closing_agent', '成交推进 Agent', 'followup', 'active', 50, '{"source":"next_default_seed"}'::jsonb, '{}'::jsonb, TRUE, 'system', 'system')
+        ON CONFLICT (workflow_id, agent_code) DO UPDATE
+        SET agent_name = EXCLUDED.agent_name,
+            agent_type = EXCLUDED.agent_type,
+            status = EXCLUDED.status,
+            sort_order = EXCLUDED.sort_order,
+            enabled = EXCLUDED.enabled,
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by = 'system'
+        """
+    )
+    db.execute(
+        """
+        INSERT INTO automation_agents (
+            program_id, workflow_id, node_id, task_id, agent_code, agent_name, agent_type,
+            status, sort_order, metadata_json, config_json, enabled, created_by, updated_by
+        )
+        SELECT
+            0,
+            0,
+            0,
+            0,
+            agent_code,
+            COALESCE(NULLIF(display_name, ''), agent_code),
+            'assistant',
+            CASE WHEN COALESCE(enabled, FALSE) IS TRUE THEN 'active' ELSE 'disabled' END,
+            100 + ROW_NUMBER() OVER (ORDER BY updated_at DESC, id DESC),
+            jsonb_build_object('source', 'legacy_automation_agent_config_backfill'),
+            jsonb_build_object('scenario_code', scenario_code),
+            COALESCE(enabled, FALSE),
+            'legacy_backfill',
+            'legacy_backfill'
+        FROM automation_agent_config
+        WHERE COALESCE(agent_code, '') <> ''
+        ON CONFLICT (workflow_id, agent_code) DO UPDATE
+        SET agent_name = COALESCE(NULLIF(EXCLUDED.agent_name, ''), automation_agents.agent_name),
+            status = EXCLUDED.status,
+            config_json = EXCLUDED.config_json,
+            enabled = EXCLUDED.enabled,
+            updated_at = CURRENT_TIMESTAMP,
+            updated_by = 'legacy_backfill'
+        """
+    )
+
+
+def _ensure_postgres_profile_segment_template_companion_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_profile_segment_template_idempotency (
+            id BIGSERIAL PRIMARY KEY,
+            route_family TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            response_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            resource_type TEXT NOT NULL DEFAULT 'profile_segment_template',
+            resource_id BIGINT,
+            status TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_profile_segment_template_idempotency_scope
+                UNIQUE (route_family, operation, operator, idempotency_key)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_profile_segment_template_idempotency_resource
+        ON automation_profile_segment_template_idempotency (resource_type, resource_id, created_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_profile_segment_template_idempotency_status
+        ON automation_profile_segment_template_idempotency (status, updated_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_profile_segment_template_audit_log (
+            id BIGSERIAL PRIMARY KEY,
+            route_family TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            resource_type TEXT NOT NULL DEFAULT 'profile_segment_template',
+            resource_id BIGINT,
+            before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            validation_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+            rollback_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            side_effect_safety JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_profile_segment_template_audit_resource
+        ON automation_profile_segment_template_audit_log (resource_type, resource_id, created_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_profile_segment_template_audit_operator
+        ON automation_profile_segment_template_audit_log (operator, created_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_profile_segment_template_audit_operation
+        ON automation_profile_segment_template_audit_log (operation, created_at)
         """
     )
 
@@ -325,6 +543,78 @@ def _ensure_postgres_automation_operation_templates(db) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_automation_operation_templates_category
         ON automation_operation_templates (category, status, updated_at DESC, id DESC)
+        """
+    )
+
+
+def _ensure_postgres_action_template_companion_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_template_idempotency (
+            id BIGSERIAL PRIMARY KEY,
+            route_family TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            request_hash TEXT NOT NULL,
+            response_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            resource_type TEXT NOT NULL DEFAULT 'action_template',
+            resource_id BIGINT,
+            status TEXT NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_action_template_idempotency_key
+                UNIQUE (route_family, operation, operator, idempotency_key)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_action_template_idempotency_resource
+        ON automation_operation_template_idempotency (resource_type, resource_id, created_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_action_template_idempotency_status
+        ON automation_operation_template_idempotency (status, updated_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_template_audit_log (
+            id BIGSERIAL PRIMARY KEY,
+            route_family TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            operator TEXT NOT NULL,
+            resource_type TEXT NOT NULL DEFAULT 'action_template',
+            resource_id BIGINT,
+            before_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            after_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            validation_result JSONB NOT NULL DEFAULT '{}'::jsonb,
+            rollback_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            side_effect_safety JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_action_template_audit_resource
+        ON automation_operation_template_audit_log (resource_type, resource_id, created_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_action_template_audit_operator
+        ON automation_operation_template_audit_log (operator, created_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_action_template_audit_operation
+        ON automation_operation_template_audit_log (operation, created_at)
         """
     )
 
@@ -469,6 +759,42 @@ def _ensure_postgres_questionnaire_external_push_tables(db) -> None:
         """
         ALTER TABLE IF EXISTS questionnaires
         ADD COLUMN IF NOT EXISTS external_push_url TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ADD COLUMN IF NOT EXISTS external_push_type TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ADD COLUMN IF NOT EXISTS external_push_expires_at_ts BIGINT
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ALTER COLUMN external_push_type SET DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ALTER COLUMN external_push_type SET NOT NULL
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ALTER COLUMN external_push_expires_at_ts DROP DEFAULT
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS questionnaires
+        ALTER COLUMN external_push_expires_at_ts DROP NOT NULL
         """
     )
     db.execute(
@@ -628,6 +954,8 @@ def _ensure_postgres_wechat_pay_tables(db) -> None:
             require_mobile BOOLEAN NOT NULL DEFAULT FALSE,
             lead_program_id BIGINT,
             lead_channel_id BIGINT,
+            completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            completion_redirect_url TEXT NOT NULL DEFAULT '',
             metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -639,6 +967,8 @@ def _ensure_postgres_wechat_pay_tables(db) -> None:
         "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS require_mobile BOOLEAN NOT NULL DEFAULT FALSE",
         "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS lead_program_id BIGINT",
         "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS lead_channel_id BIGINT",
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS completion_redirect_url TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE IF EXISTS wechat_pay_products ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
     ):
         db.execute(stmt)
@@ -852,6 +1182,220 @@ def _ensure_postgres_wechat_pay_tables(db) -> None:
         """
         CREATE INDEX IF NOT EXISTS idx_wechat_pay_order_export_jobs_status
         ON wechat_pay_order_export_jobs (status, created_at DESC, id DESC)
+        """
+    )
+
+
+def _ensure_postgres_external_push_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS external_push_config (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            webhook_url TEXT NOT NULL DEFAULT '',
+            push_type TEXT NOT NULL DEFAULT '',
+            expires_at_ts BIGINT,
+            day INTEGER,
+            frequency INTEGER,
+            remark TEXT NOT NULL DEFAULT '',
+            custom_params JSONB NOT NULL DEFAULT '{}'::jsonb,
+            secret TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_external_push_config_target_event
+        ON external_push_config (tenant_id, target_type, target_id, event_type)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_external_push_config_target
+        ON external_push_config (tenant_id, target_type, target_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_external_push_config_event
+        ON external_push_config (tenant_id, event_type)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS external_push_delivery (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+            config_id BIGINT NOT NULL REFERENCES external_push_config(id) ON DELETE CASCADE,
+            event_type TEXT NOT NULL,
+            delivery_id TEXT NOT NULL UNIQUE,
+            target_type TEXT NOT NULL,
+            target_id TEXT NOT NULL,
+            order_id BIGINT NOT NULL DEFAULT 0,
+            product_id BIGINT NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'sending', 'success', 'failed', 'retrying', 'gave_up', 'skipped')),
+            attempt_count INTEGER NOT NULL DEFAULT 0,
+            request_url TEXT NOT NULL DEFAULT '',
+            request_headers JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_body JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_status INTEGER,
+            response_body TEXT NOT NULL DEFAULT '',
+            error_message TEXT NOT NULL DEFAULT '',
+            next_retry_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_external_push_delivery_config_order_event
+        ON external_push_delivery (config_id, order_id, event_type)
+        WHERE order_id > 0
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_external_push_delivery_order
+        ON external_push_delivery (tenant_id, order_id, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_external_push_delivery_retry
+        ON external_push_delivery (status, next_retry_at)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS domain_event_outbox (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+            event_type TEXT NOT NULL,
+            aggregate_type TEXT NOT NULL,
+            aggregate_id TEXT NOT NULL,
+            payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            status TEXT NOT NULL DEFAULT 'pending'
+                CHECK (status IN ('pending', 'processing', 'success', 'failed', 'gave_up', 'skipped')),
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            next_retry_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_domain_event_outbox_event_aggregate
+        ON domain_event_outbox (tenant_id, event_type, aggregate_type, aggregate_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_domain_event_outbox_status_retry
+        ON domain_event_outbox (status, next_retry_at, id ASC)
+        """
+    )
+
+
+def _ensure_postgres_alipay_pay_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alipay_pay_orders (
+            id BIGSERIAL PRIMARY KEY,
+            out_trade_no TEXT NOT NULL UNIQUE,
+            trade_no TEXT NOT NULL DEFAULT '',
+            order_source TEXT NOT NULL DEFAULT 'h5_alipay_wap',
+            client_order_ref TEXT NOT NULL DEFAULT '',
+            product_code TEXT NOT NULL DEFAULT '',
+            product_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            amount_total INTEGER NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            buyer_id TEXT NOT NULL DEFAULT '',
+            buyer_logon_id TEXT NOT NULL DEFAULT '',
+            mobile_snapshot TEXT NOT NULL DEFAULT '',
+            identity_snapshot TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'created',
+            trade_status TEXT NOT NULL DEFAULT '',
+            success_url TEXT NOT NULL DEFAULT '',
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            return_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            refunded_amount_total INTEGER NOT NULL DEFAULT 0,
+            refund_status TEXT NOT NULL DEFAULT '',
+            last_error TEXT NOT NULL DEFAULT '',
+            expires_at TIMESTAMPTZ,
+            paid_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    for stmt in (
+        "ALTER TABLE IF EXISTS alipay_pay_orders ADD COLUMN IF NOT EXISTS mobile_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS alipay_pay_orders ADD COLUMN IF NOT EXISTS identity_snapshot TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS alipay_pay_orders ADD COLUMN IF NOT EXISTS return_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE IF EXISTS alipay_pay_orders ADD COLUMN IF NOT EXISTS refunded_amount_total INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE IF EXISTS alipay_pay_orders ADD COLUMN IF NOT EXISTS refund_status TEXT NOT NULL DEFAULT ''",
+    ):
+        db.execute(stmt)
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_status_created
+        ON alipay_pay_orders (status, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_product_created
+        ON alipay_pay_orders (product_code, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_mobile_created
+        ON alipay_pay_orders (mobile_snapshot, created_at DESC, id DESC)
+        WHERE mobile_snapshot <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_alipay_pay_orders_trade_no
+        ON alipay_pay_orders (trade_no)
+        WHERE trade_no <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS alipay_pay_order_events (
+            id BIGSERIAL PRIMARY KEY,
+            out_trade_no TEXT NOT NULL REFERENCES alipay_pay_orders(out_trade_no) ON DELETE CASCADE,
+            event_type TEXT NOT NULL DEFAULT '',
+            trade_no TEXT NOT NULL DEFAULT '',
+            trade_status TEXT NOT NULL DEFAULT '',
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_alipay_pay_order_events_order
+        ON alipay_pay_order_events (out_trade_no, created_at DESC, id DESC)
         """
     )
 
@@ -1322,6 +1866,113 @@ def _ensure_postgres_automation_program_tables(db) -> None:
     )
     db.execute(
         """
+        CREATE TABLE IF NOT EXISTS automation_channel_scene_alias (
+            id BIGSERIAL PRIMARY KEY,
+            corp_id TEXT NOT NULL DEFAULT '',
+            channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+            scene_value TEXT NOT NULL,
+            config_id TEXT NOT NULL DEFAULT '',
+            qr_url TEXT NOT NULL DEFAULT '',
+            carrier_type TEXT NOT NULL DEFAULT 'qrcode',
+            provider_name TEXT NOT NULL DEFAULT 'wecom_contact_way',
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'retired', 'revoked')),
+            source TEXT NOT NULL DEFAULT '',
+            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at TIMESTAMPTZ,
+            retired_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_automation_channel_scene_alias_corp_scene UNIQUE (corp_id, scene_value)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_scene_alias_channel_status
+        ON automation_channel_scene_alias (channel_id, status)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_channel_qrcode_asset (
+            id BIGSERIAL PRIMARY KEY,
+            corp_id TEXT NOT NULL DEFAULT '',
+            channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
+            scene_value TEXT NOT NULL,
+            config_id TEXT NOT NULL DEFAULT '',
+            qr_url TEXT NOT NULL DEFAULT '',
+            qr_url_hash TEXT NOT NULL DEFAULT '',
+            provider_name TEXT NOT NULL DEFAULT 'wecom_contact_way',
+            provider_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            status TEXT NOT NULL DEFAULT 'active'
+                CHECK (status IN ('active', 'retired', 'revoked', 'stale', 'quarantined')),
+            generation_source TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '',
+            generated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            retired_at TIMESTAMPTZ,
+            last_callback_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_automation_channel_qrcode_asset_corp_scene UNIQUE (corp_id, scene_value)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_channel_qrcode_asset_corp_config
+        ON automation_channel_qrcode_asset (corp_id, config_id)
+        WHERE config_id <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_qrcode_asset_channel_status
+        ON automation_channel_qrcode_asset (channel_id, status)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_channel_entry_effect_log (
+            id BIGSERIAL PRIMARY KEY,
+            event_log_id BIGINT,
+            channel_id BIGINT REFERENCES automation_channel(id) ON DELETE SET NULL,
+            scene_value TEXT NOT NULL DEFAULT '',
+            external_contact_id TEXT NOT NULL DEFAULT '',
+            owner_staff_id TEXT NOT NULL DEFAULT '',
+            effect_type TEXT NOT NULL,
+            idempotency_key TEXT NOT NULL,
+            status TEXT NOT NULL
+                CHECK (status IN ('skipped', 'attempted', 'success', 'failed')),
+            reason TEXT NOT NULL DEFAULT '',
+            request_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            CONSTRAINT uq_automation_channel_entry_effect_idempotency UNIQUE (effect_type, idempotency_key)
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_entry_effect_channel
+        ON automation_channel_entry_effect_log (channel_id, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_entry_effect_scene
+        ON automation_channel_entry_effect_log (scene_value, created_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_channel_entry_effect_external
+        ON automation_channel_entry_effect_log (external_contact_id, created_at DESC)
+        """
+    )
+    db.execute(
+        """
         CREATE TABLE IF NOT EXISTS automation_channel_contact (
             id BIGSERIAL PRIMARY KEY,
             channel_id BIGINT NOT NULL REFERENCES automation_channel(id) ON DELETE CASCADE,
@@ -1570,6 +2221,264 @@ def _ensure_postgres_automation_program_tables(db) -> None:
     )
 
 
+def _ensure_postgres_broadcast_job_leases(db) -> None:
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS broadcast_jobs
+        ADD COLUMN IF NOT EXISTS claim_token TEXT NOT NULL DEFAULT ''
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS broadcast_jobs
+        ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_broadcast_jobs_lease
+        ON broadcast_jobs (status, claim_token, lease_expires_at, id ASC)
+        WHERE status = 'claimed' AND claim_token <> ''
+        """
+    )
+
+
+def _ensure_postgres_broadcast_queue_platform_hardening(db) -> None:
+    db.execute(
+        """
+        ALTER TABLE IF EXISTS broadcast_jobs
+        ADD COLUMN IF NOT EXISTS business_domain TEXT,
+        ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+        ADD COLUMN IF NOT EXISTS channel TEXT,
+        ADD COLUMN IF NOT EXISTS target_kind TEXT,
+        ADD COLUMN IF NOT EXISTS failure_type TEXT,
+        ADD COLUMN IF NOT EXISTS retry_policy_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb
+        """
+    )
+    db.execute(
+        """
+        UPDATE broadcast_jobs
+        SET business_domain = CASE
+            WHEN source_table = 'automation_group_ops_plans' THEN 'group_ops'
+            WHEN content_payload->>'channel' = 'wecom_customer_group' THEN 'group_ops'
+            WHEN source_type = 'cloud_plan' THEN 'ai_assistant'
+            WHEN source_type IN ('campaign', 'sop', 'workflow', 'operation_task', 'focus_send', 'deferred') THEN 'automation_ops'
+            WHEN source_type = 'manual' THEN 'manual'
+            ELSE 'unknown'
+        END
+        WHERE business_domain IS NULL OR business_domain = ''
+        """
+    )
+    db.execute(
+        """
+        UPDATE broadcast_jobs
+        SET channel = CASE
+            WHEN content_payload->>'channel' = 'wecom_customer_group' THEN 'wecom_customer_group'
+            WHEN source_table = 'automation_group_ops_plans' THEN 'wecom_customer_group'
+            ELSE 'unknown'
+        END
+        WHERE channel IS NULL OR channel = ''
+        """
+    )
+    db.execute(
+        """
+        UPDATE broadcast_jobs
+        SET target_kind = 'unknown'
+        WHERE target_kind IS NULL OR target_kind = ''
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_broadcast_jobs_idempotency_key
+        ON broadcast_jobs (idempotency_key)
+        WHERE idempotency_key IS NOT NULL AND idempotency_key <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS broadcast_job_events (
+            id BIGSERIAL PRIMARY KEY,
+            job_id BIGINT NOT NULL,
+            event_type TEXT NOT NULL,
+            from_status TEXT,
+            to_status TEXT,
+            event_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            actor_type TEXT,
+            actor_id TEXT,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    for stmt in (
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_job_events_job_id ON broadcast_job_events (job_id)",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_job_events_event_type_created_at ON broadcast_job_events (event_type, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_broadcast_job_events_created_at ON broadcast_job_events (created_at)",
+    ):
+        db.execute(stmt)
+
+
+def _ensure_postgres_group_ops_tables(db) -> None:
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_group_ops_plans (
+            id BIGSERIAL PRIMARY KEY,
+            plan_code TEXT NOT NULL DEFAULT '',
+            plan_name TEXT NOT NULL,
+            plan_type TEXT NOT NULL CHECK (plan_type IN ('standard', 'webhook')),
+            owner_userid TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'disabled')),
+            webhook_key TEXT NOT NULL DEFAULT '',
+            webhook_token_hash TEXT NOT NULL DEFAULT '',
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            archived_at TIMESTAMPTZ
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_group_ops_plans_code
+        ON automation_group_ops_plans (plan_code)
+        WHERE plan_code <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_group_ops_plans_webhook_key
+        ON automation_group_ops_plans (webhook_key)
+        WHERE webhook_key <> ''
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_group_ops_plans_list
+        ON automation_group_ops_plans (status, plan_type, updated_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_group_ops_plan_groups (
+            id BIGSERIAL PRIMARY KEY,
+            plan_id BIGINT NOT NULL REFERENCES automation_group_ops_plans(id) ON DELETE CASCADE,
+            chat_id TEXT NOT NULL,
+            group_name_snapshot TEXT NOT NULL DEFAULT '',
+            owner_userid_snapshot TEXT NOT NULL DEFAULT '',
+            internal_member_count_snapshot INTEGER NOT NULL DEFAULT 0,
+            external_member_count_snapshot INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'removed')),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            removed_at TIMESTAMPTZ
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_group_ops_plan_groups_active
+        ON automation_group_ops_plan_groups (plan_id, chat_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_group_ops_plan_groups_chat
+        ON automation_group_ops_plan_groups (chat_id, status, plan_id)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_group_ops_plan_nodes (
+            id BIGSERIAL PRIMARY KEY,
+            plan_id BIGINT NOT NULL REFERENCES automation_group_ops_plans(id) ON DELETE CASCADE,
+            day_index INTEGER NOT NULL DEFAULT 1,
+            trigger_time_label TEXT NOT NULL DEFAULT '',
+            action_title TEXT NOT NULL DEFAULT '',
+            text_content TEXT NOT NULL DEFAULT '',
+            attachments_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            content_package_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('draft', 'active', 'disabled', 'deleted')),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE automation_group_ops_plan_nodes
+        ADD COLUMN IF NOT EXISTS content_package_json JSONB NOT NULL DEFAULT '{}'::jsonb
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_group_ops_plan_nodes_order
+        ON automation_group_ops_plan_nodes (plan_id, status, day_index ASC, sort_order ASC, id ASC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS automation_group_ops_webhook_events (
+            id BIGSERIAL PRIMARY KEY,
+            plan_id BIGINT NOT NULL REFERENCES automation_group_ops_plans(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            normalized_content_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+            scheduled_at TIMESTAMPTZ,
+            status TEXT NOT NULL DEFAULT 'accepted' CHECK (status IN ('accepted', 'queued', 'duplicate', 'rejected', 'failed')),
+            broadcast_job_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    db.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_group_ops_webhook_events_idempotency
+        ON automation_group_ops_webhook_events (plan_id, idempotency_key)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_automation_group_ops_webhook_events_plan_created
+        ON automation_group_ops_webhook_events (plan_id, created_at DESC, id DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE TABLE IF NOT EXISTS wecom_group_chat_snapshots (
+            chat_id TEXT PRIMARY KEY,
+            group_name TEXT NOT NULL DEFAULT '',
+            owner_userid TEXT NOT NULL DEFAULT '',
+            owner_name TEXT NOT NULL DEFAULT '',
+            admin_userids TEXT NOT NULL DEFAULT '[]',
+            internal_member_count INTEGER NOT NULL DEFAULT 0,
+            external_member_count INTEGER NOT NULL DEFAULT 0,
+            synced_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            status TEXT NOT NULL DEFAULT 'active'
+        )
+        """
+    )
+    db.execute(
+        """
+        ALTER TABLE wecom_group_chat_snapshots
+        ADD COLUMN IF NOT EXISTS admin_userids TEXT NOT NULL DEFAULT '[]'
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wecom_group_chat_snapshots_owner
+        ON wecom_group_chat_snapshots (owner_userid, status, synced_at DESC)
+        """
+    )
+    db.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_wecom_group_chat_snapshots_name
+        ON wecom_group_chat_snapshots (group_name)
+        """
+    )
+
+
 def _init_postgres(db) -> None:
     db.execute(
         """
@@ -1770,6 +2679,24 @@ def _init_postgres(db) -> None:
         "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE IF EXISTS outbound_tasks "
         "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS claim_token TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS lease_expires_at TIMESTAMPTZ",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS business_domain TEXT",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS idempotency_key TEXT",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS channel TEXT",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS target_kind TEXT",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS failure_type TEXT",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS retry_policy_json JSONB NOT NULL DEFAULT '{}'::jsonb",
+        "ALTER TABLE IF EXISTS broadcast_jobs "
+        "ADD COLUMN IF NOT EXISTS metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb",
         "ALTER TABLE IF EXISTS automation_touch_delivery_log "
         "ADD COLUMN IF NOT EXISTS trace_id TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE IF EXISTS automation_workflow "
@@ -1833,15 +2760,23 @@ def _init_postgres(db) -> None:
         ON user_ops_deferred_jobs (job_type, tenant_key, status, run_after, id DESC)
         """
     )
+    _ensure_postgres_broadcast_job_leases(db)
+    _ensure_postgres_broadcast_queue_platform_hardening(db)
     _ensure_postgres_questionnaire_external_push_tables(db)
     _ensure_postgres_questionnaire_scrm_apply_log_columns(db)
     _ensure_postgres_wechat_pay_tables(db)
+    _ensure_postgres_external_push_tables(db)
+    _ensure_postgres_alipay_pay_tables(db)
     _ensure_postgres_hxc_dashboard_v6_columns(db)
     _ensure_postgres_user_ops_page_tables(db)
     _ensure_postgres_miniprogram_library_thumb_image_id(db)
     _ensure_postgres_attachment_library(db)
+    _ensure_postgres_sidebar_customer_profile_fields(db)
     _ensure_postgres_automation_agent_config_tables(db)
+    _ensure_postgres_profile_segment_template_companion_tables(db)
     _ensure_postgres_automation_operation_templates(db)
+    _ensure_postgres_action_template_companion_tables(db)
+    _ensure_postgres_group_ops_tables(db)
     db.execute(
         """
         ALTER TABLE IF EXISTS automation_workflow_node
@@ -2150,6 +3085,7 @@ def _init_postgres(db) -> None:
             timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
             target_audience_code TEXT NOT NULL DEFAULT 'operating'
                 CHECK (target_audience_code IN ('pending_questionnaire', 'operating', 'converted')),
+            target_stage_code TEXT NOT NULL DEFAULT '',
             audience_day_offset INTEGER NOT NULL DEFAULT 1,
             behavior_filter TEXT NOT NULL DEFAULT 'none'
                 CHECK (behavior_filter IN ('none', 'lt_2', 'between_2_9', 'gte_10')),
@@ -2170,6 +3106,8 @@ def _init_postgres(db) -> None:
     for stmt in (
         "ALTER TABLE IF EXISTS automation_operation_task "
         "ADD COLUMN IF NOT EXISTS trigger_type TEXT NOT NULL DEFAULT 'scheduled_daily'",
+        "ALTER TABLE IF EXISTS automation_operation_task "
+        "ADD COLUMN IF NOT EXISTS target_stage_code TEXT NOT NULL DEFAULT ''",
         "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_program "
         "ON automation_operation_task (program_id, status, send_time, id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_automation_operation_task_group "

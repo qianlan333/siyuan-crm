@@ -1,0 +1,291 @@
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from typing import Any
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+AUTOMATION_JOBS_RUN_DUE_PATH = "/api/admin/automation-conversion/jobs/run-due"
+AUTOMATION_JOBS_RUN_DUE_PREVIEW_PATH = "/api/admin/automation-conversion/jobs/run-due/preview"
+REPLY_MONITOR_RUN_DUE_PATH = "/api/admin/automation-conversion/reply-monitor/run-due"
+REPLY_MONITOR_CAPTURE_PATH = "/api/admin/automation-conversion/reply-monitor/capture"
+CLOUD_CAMPAIGN_RUN_DUE_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due"
+CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due/preview"
+
+INTERNAL_TIMER_PATHS = frozenset(
+    {
+        AUTOMATION_JOBS_RUN_DUE_PATH,
+        AUTOMATION_JOBS_RUN_DUE_PREVIEW_PATH,
+        REPLY_MONITOR_RUN_DUE_PATH,
+        REPLY_MONITOR_CAPTURE_PATH,
+        CLOUD_CAMPAIGN_RUN_DUE_PATH,
+        CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH,
+    }
+)
+RUN_DUE_EXECUTION_PATHS = frozenset({AUTOMATION_JOBS_RUN_DUE_PATH, CLOUD_CAMPAIGN_RUN_DUE_PATH})
+PREVIEW_PATHS = frozenset({AUTOMATION_JOBS_RUN_DUE_PREVIEW_PATH, CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH})
+
+AUTOMATION_ALLOWLIST_FIELDS = ("allow_task_ids", "allow_workflow_ids", "allow_node_ids")
+CAMPAIGN_ALLOWLIST_FIELDS = ("allow_campaign_ids",)
+
+_SAFE_LOCAL_DB_SENTINELS = ("127.0.0.1:1", "localhost:1")
+_PRODUCTION_ENV_VALUES = {"prod", "production"}
+
+_GUARD_HEADERS = {
+    "X-AICRM-Route-Owner": "ai_crm_next",
+    "X-AICRM-Fallback-Used": "false",
+    "X-AICRM-Real-External-Call-Executed": "false",
+    "X-AICRM-Automation-Runtime-Executed": "false",
+    "X-AICRM-Campaign-Runtime-Executed": "false",
+    "X-AICRM-WeCom-Send-Executed": "false",
+}
+
+
+@dataclass(frozen=True)
+class InternalRunDueGuardResult:
+    response: JSONResponse | None = None
+    status: str = "allowed"
+    reason: str = ""
+
+    @property
+    def blocked(self) -> bool:
+        return self.response is not None
+
+
+def parse_truthy(value: Any) -> bool:
+    if value is True:
+        return True
+    if value in (False, None, ""):
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def is_production_runtime() -> bool:
+    for key in ("AICRM_NEXT_ENV", "ENVIRONMENT", "APP_ENV", "FLASK_ENV"):
+        if str(os.getenv(key) or "").strip().lower() in _PRODUCTION_ENV_VALUES:
+            return True
+    database_url = str(os.getenv("DATABASE_URL") or "").strip()
+    if not database_url:
+        return False
+    return not any(sentinel in database_url for sentinel in _SAFE_LOCAL_DB_SENTINELS)
+
+
+def validate_internal_timer_token(request: Request) -> InternalRunDueGuardResult:
+    expected = str(os.getenv("AUTOMATION_INTERNAL_API_TOKEN") or "").strip()
+    if not expected:
+        return InternalRunDueGuardResult(
+            response=build_timer_token_error_response("automation_internal_token_not_configured", status_code=503),
+            status="blocked",
+            reason="automation_internal_token_not_configured",
+        )
+
+    actual = _request_token(request)
+    if not actual or actual != expected:
+        return InternalRunDueGuardResult(
+            response=build_timer_token_error_response("internal_token_required", status_code=401),
+            status="blocked",
+            reason="internal_token_required",
+        )
+    return InternalRunDueGuardResult()
+
+
+def scheduled_safe_mode_requested(payload: dict[str, Any]) -> bool:
+    return parse_truthy(payload.get("scheduled_safe_mode"))
+
+
+def has_allowlist_for_path(path: str, payload: dict[str, Any]) -> bool:
+    return any(_has_nonempty_value(payload.get(field)) for field in _allowlist_fields(path))
+
+
+def build_timer_token_error_response(error: str, *, status_code: int) -> JSONResponse:
+    return _json_response(
+        {
+            "ok": False,
+            "error": error,
+            "error_code": error,
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "side_effect_executed": False,
+            "real_external_call_executed": False,
+            "automation_runtime_executed": False,
+            "campaign_runtime_executed": False,
+            "wecom_send_executed": False,
+        },
+        status_code=status_code,
+    )
+
+
+def build_scheduled_safe_mode_response(path: str, payload: dict[str, Any], *, idle: bool) -> JSONResponse:
+    if idle:
+        body = {
+            "ok": True,
+            "status": "idle",
+            "scheduled_safe_mode": True,
+            "side_effect_executed": False,
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "real_external_call_executed": False,
+            "automation_runtime_executed": False,
+            "campaign_runtime_executed": False,
+            "wecom_send_executed": False,
+            "preview": _scheduled_preview(path, payload, candidate_status="explicit_none"),
+        }
+        return _json_response(body, status_code=200)
+
+    body = {
+        "ok": True,
+        "status": "blocked_not_executed",
+        "scheduled_safe_mode": True,
+        "manual_action_required": True,
+        "error_code": "active_automation_due_candidates_require_allowlist",
+        "side_effect_executed": False,
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "real_external_call_executed": False,
+        "automation_runtime_executed": False,
+        "campaign_runtime_executed": False,
+        "wecom_send_executed": False,
+        "preview": _scheduled_preview(path, payload, candidate_status=_candidate_status(payload)),
+    }
+    return _json_response(body, status_code=409)
+
+
+def build_allowlist_required_response(path: str) -> JSONResponse:
+    is_campaign = path == CLOUD_CAMPAIGN_RUN_DUE_PATH
+    error = "campaign_run_due_allowlist_required" if is_campaign else "automation_run_due_allowlist_required"
+    body = {
+        "ok": False,
+        "error": error,
+        "error_code": error,
+        "side_effect_executed": False,
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "real_external_call_executed": False,
+        "automation_runtime_executed": False,
+        "campaign_runtime_executed": False,
+        "wecom_send_executed": False,
+        "required_allowlists": list(_allowlist_fields(path)),
+        "preflight_summary": {
+            "allowlist_present": False,
+            "external_call_allowed": False,
+        },
+    }
+    return _json_response(body, status_code=409)
+
+
+def maybe_guard_internal_run_due_request(
+    *,
+    request: Request,
+    payload: dict[str, Any] | None,
+    source_route: str = "",
+    route_kind: str = "",
+) -> JSONResponse | None:
+    path = source_route or request.url.path
+    if request.method.upper() != "POST" or path not in INTERNAL_TIMER_PATHS:
+        return None
+
+    token_result = validate_internal_timer_token(request)
+    if token_result.blocked:
+        return token_result.response
+
+    payload = dict(payload or {})
+    if _is_dry_run_or_preview(request, payload, path):
+        return None
+
+    if path not in RUN_DUE_EXECUTION_PATHS or not is_production_runtime():
+        return None
+
+    if scheduled_safe_mode_requested(payload):
+        if has_allowlist_for_path(path, payload):
+            return None
+        return build_scheduled_safe_mode_response(path, payload, idle=_explicit_due_count_is_zero(payload))
+
+    if not has_allowlist_for_path(path, payload):
+        return build_allowlist_required_response(path)
+    return None
+
+
+def _request_token(request: Request) -> str:
+    auth = str(request.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return str(request.headers.get("x-internal-api-token") or "").strip()
+
+
+def _is_dry_run_or_preview(request: Request, payload: dict[str, Any], path: str) -> bool:
+    if path in PREVIEW_PATHS or parse_truthy(payload.get("preview")):
+        return True
+    if parse_truthy(request.headers.get("x-aicrm-dry-run")):
+        return True
+    if parse_truthy(request.query_params.get("dry_run")):
+        return True
+    return parse_truthy(payload.get("dry_run"))
+
+
+def _allowlist_fields(path: str) -> tuple[str, ...]:
+    if path == CLOUD_CAMPAIGN_RUN_DUE_PATH:
+        return CAMPAIGN_ALLOWLIST_FIELDS
+    return AUTOMATION_ALLOWLIST_FIELDS
+
+
+def _has_nonempty_value(value: Any) -> bool:
+    if value in (None, "", [], (), {}, set()):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return any(_has_nonempty_value(item) for item in value.values())
+    if isinstance(value, (list, tuple, set)):
+        return any(_has_nonempty_value(item) for item in value)
+    return True
+
+
+def _explicit_due_count_is_zero(payload: dict[str, Any]) -> bool:
+    for key in ("expected_due_count", "due_count", "candidate_count", "total_due_count"):
+        if key not in payload:
+            continue
+        try:
+            return int(payload.get(key) or 0) == 0
+        except (TypeError, ValueError):
+            return False
+    candidates = payload.get("candidates")
+    if isinstance(candidates, (list, tuple)):
+        return len(candidates) == 0
+    return False
+
+
+def _candidate_status(payload: dict[str, Any]) -> str:
+    if _explicit_due_count_is_zero(payload):
+        return "explicit_none"
+    for key in ("expected_due_count", "due_count", "candidate_count", "total_due_count"):
+        if key in payload:
+            return "explicit_present"
+    if isinstance(payload.get("candidates"), (list, tuple)):
+        return "explicit_present"
+    return "unknown_guarded"
+
+
+def _scheduled_preview(path: str, payload: dict[str, Any], *, candidate_status: str) -> dict[str, Any]:
+    due_count = 0
+    for key in ("expected_due_count", "due_count", "candidate_count", "total_due_count"):
+        try:
+            due_count = int(payload.get(key) or 0)
+        except (TypeError, ValueError):
+            due_count = 0
+        if key in payload:
+            break
+    return {
+        "path": path,
+        "route_kind": "cloud_campaign_run_due" if path == CLOUD_CAMPAIGN_RUN_DUE_PATH else "automation_jobs_run_due",
+        "candidate_status": candidate_status,
+        "due_count": due_count,
+        "candidate_count": due_count,
+        "source_status": "next_internal_run_due_guard",
+        "real_external_call_executed": False,
+    }
+
+
+def _json_response(payload: dict[str, Any], *, status_code: int) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=_GUARD_HEADERS)

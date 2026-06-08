@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+import os
+import logging
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Iterator, TypedDict
+
+from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.orm import Session, sessionmaker
+
+from aicrm_next.shared.config import Settings, get_settings
+from aicrm_next.shared.runtime import raw_database_url
+
+LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class _EngineCacheKey:
+    database_url: str
+    pool_size: int
+    max_overflow: int
+    pool_timeout: float
+    pool_recycle: int
+    application_name: str
+
+
+_ENGINE_CACHE: dict[_EngineCacheKey, Engine] = {}
+_SESSION_FACTORY_CACHE: dict[_EngineCacheKey, sessionmaker[Session]] = {}
+
+
+class PoolSettings(TypedDict):
+    database_scheme: str
+    is_sqlite: bool
+    application_name: str
+    pool_size: int
+    max_overflow: int
+    pool_timeout: float
+    pool_recycle: int
+
+
+def _env_int(name: str, *, default: int) -> int:
+    value = str(os.getenv(name, "") or "").strip()
+    if not value:
+        return default
+    return int(value)
+
+
+def _env_float(name: str, *, default: float) -> float:
+    value = str(os.getenv(name, "") or "").strip()
+    if not value:
+        return default
+    return float(value)
+
+
+def _raw_configured_database_url(settings: Settings | None = None) -> str:
+    settings = settings or get_settings()
+    return raw_database_url() or settings.database_url
+
+
+def get_sqlalchemy_database_url(database_url: str | None = None, settings: Settings | None = None) -> str:
+    url = str(database_url or _raw_configured_database_url(settings) or "").strip()
+    if url.startswith("postgres://"):
+        return "postgresql+psycopg://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        return "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
+
+
+def _is_sqlite_url(database_url: str) -> bool:
+    return database_url.startswith(("sqlite://", "sqlite+pysqlite://"))
+
+
+def _database_scheme(database_url: str) -> str:
+    return database_url.split("://", 1)[0] if "://" in database_url else ""
+
+
+def _cache_key(database_url: str | None = None, settings: Settings | None = None) -> _EngineCacheKey:
+    return _EngineCacheKey(
+        database_url=get_sqlalchemy_database_url(database_url, settings),
+        pool_size=_env_int("DB_POOL_SIZE", default=5),
+        max_overflow=_env_int("DB_MAX_OVERFLOW", default=0),
+        pool_timeout=_env_float("DB_POOL_TIMEOUT", default=5.0),
+        pool_recycle=_env_int("DB_POOL_RECYCLE", default=1800),
+        application_name=str(os.getenv("DB_APPLICATION_NAME") or "aicrm-next-web").strip() or "aicrm-next-web",
+    )
+
+
+def _pool_settings_from_key(key: _EngineCacheKey) -> PoolSettings:
+    return {
+        "database_scheme": _database_scheme(key.database_url),
+        "is_sqlite": _is_sqlite_url(key.database_url),
+        "application_name": key.application_name,
+        "pool_size": key.pool_size,
+        "max_overflow": key.max_overflow,
+        "pool_timeout": key.pool_timeout,
+        "pool_recycle": key.pool_recycle,
+    }
+
+
+def get_pool_settings(database_url: str | None = None, settings: Settings | None = None) -> PoolSettings:
+    """Return non-sensitive pool settings for diagnostics and tests."""
+
+    return _pool_settings_from_key(_cache_key(database_url, settings))
+
+
+def get_engine(database_url: str | None = None, settings: Settings | None = None) -> Engine:
+    key = _cache_key(database_url, settings)
+    engine = _ENGINE_CACHE.get(key)
+    if engine is not None:
+        return engine
+
+    kwargs: dict[str, object] = {"future": True}
+    if not _is_sqlite_url(key.database_url):
+        kwargs.update(
+            {
+                "pool_pre_ping": True,
+                "pool_size": key.pool_size,
+                "max_overflow": key.max_overflow,
+                "pool_timeout": key.pool_timeout,
+                "pool_recycle": key.pool_recycle,
+                "connect_args": {"application_name": key.application_name},
+            }
+        )
+    pool_settings = _pool_settings_from_key(key)
+    LOGGER.info(
+        "initializing SQLAlchemy engine application_name=%s pool_size=%s max_overflow=%s pool_timeout=%s pool_recycle=%s database_scheme=%s is_sqlite=%s",
+        pool_settings["application_name"],
+        pool_settings["pool_size"],
+        pool_settings["max_overflow"],
+        pool_settings["pool_timeout"],
+        pool_settings["pool_recycle"],
+        pool_settings["database_scheme"],
+        pool_settings["is_sqlite"],
+    )
+    engine = create_engine(key.database_url, **kwargs)
+    _ENGINE_CACHE[key] = engine
+    return engine
+
+
+def get_session_factory(database_url: str | None = None, settings: Settings | None = None) -> sessionmaker[Session]:
+    key = _cache_key(database_url, settings)
+    session_factory = _SESSION_FACTORY_CACHE.get(key)
+    if session_factory is not None:
+        return session_factory
+    session_factory = sessionmaker(bind=get_engine(database_url, settings), future=True)
+    _SESSION_FACTORY_CACHE[key] = session_factory
+    return session_factory
+
+
+@contextmanager
+def session_scope(
+    database_url: str | None = None,
+    settings: Settings | None = None,
+    *,
+    commit: bool = False,
+) -> Iterator[Session]:
+    session = get_session_factory(database_url, settings)()
+    try:
+        yield session
+        if commit:
+            session.commit()
+        else:
+            try:
+                session.rollback()
+            except Exception:
+                LOGGER.warning("failed to rollback SQLAlchemy session after session_scope success", exc_info=True)
+    except Exception:
+        try:
+            session.rollback()
+        except Exception:
+            LOGGER.warning("failed to rollback SQLAlchemy session after session_scope exception", exc_info=True)
+        raise
+    finally:
+        try:
+            session.close()
+        except Exception:
+            LOGGER.warning("failed to close SQLAlchemy session in session_scope", exc_info=True)
+
+
+def get_db() -> Iterator[Session]:
+    session = get_session_factory()()
+    rolled_back = False
+    try:
+        yield session
+    except Exception:
+        try:
+            session.rollback()
+            rolled_back = True
+        except Exception:
+            LOGGER.warning("failed to rollback SQLAlchemy session after get_db exception", exc_info=True)
+        raise
+    finally:
+        if not rolled_back:
+            try:
+                session.rollback()
+            except Exception:
+                LOGGER.warning("failed to rollback SQLAlchemy session in get_db cleanup", exc_info=True)
+        try:
+            session.close()
+        except Exception:
+            LOGGER.warning("failed to close SQLAlchemy session in get_db cleanup", exc_info=True)
+
+
+def reset_engine_cache_for_tests() -> None:
+    for engine in list(_ENGINE_CACHE.values()):
+        engine.dispose()
+    _SESSION_FACTORY_CACHE.clear()
+    _ENGINE_CACHE.clear()

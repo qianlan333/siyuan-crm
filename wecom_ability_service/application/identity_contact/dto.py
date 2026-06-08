@@ -10,6 +10,7 @@ ResolveExternalContactIdentityResultDTO = dict[str, Any] | None
 CountExternalContactIdentityMapsResultDTO = int
 GetPrimaryFollowUserUseridResultDTO = str
 BindExternalContactIdentityResultDTO = dict[str, Any] | None
+BindExternalContactMobileFromIdentitySourcesResultDTO = dict[str, Any]
 UpsertExternalContactIdentityResultDTO = int
 ReplaceFollowUsersResultDTO = None
 RefreshExternalContactIdentityOwnerResultDTO = None
@@ -63,6 +64,14 @@ class BindExternalContactIdentityCommandDTO:
 
 
 @dataclass(slots=True)
+class BindExternalContactMobileFromIdentitySourcesCommandDTO:
+    external_userid: str
+    owner_userid: str = ""
+    bind_by_userid: str = ""
+    force_rebind: bool = False
+
+
+@dataclass(slots=True)
 class UpsertExternalContactIdentityCommandDTO:
     record: dict[str, Any]
 
@@ -100,6 +109,8 @@ class MarkExternalContactFollowUserStatusCommandDTO:
 __all__ = [
     "BindExternalContactIdentityCommandDTO",
     "BindExternalContactIdentityResultDTO",
+    "BindExternalContactMobileFromIdentitySourcesCommandDTO",
+    "BindExternalContactMobileFromIdentitySourcesResultDTO",
     "CountExternalContactIdentityMapsQueryDTO",
     "CountExternalContactIdentityMapsResultDTO",
     "GetContactBindingStatusQueryDTO",

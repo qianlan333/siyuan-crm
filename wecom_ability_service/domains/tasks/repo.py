@@ -17,6 +17,7 @@ def save_outbound_task_record(
     response_payload: dict[str, Any],
     *,
     status: str = "created",
+    trace_id: str = "",
 ) -> int:
     task_id = (
         response_payload.get("msgid")
@@ -27,8 +28,8 @@ def save_outbound_task_record(
     db = get_db()
     row = db.execute(
         """
-        INSERT INTO outbound_tasks (task_type, request_payload, response_payload, wecom_task_id, status)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO outbound_tasks (task_type, request_payload, response_payload, wecom_task_id, status, trace_id)
+        VALUES (?, ?, ?, ?, ?, ?)
         RETURNING id
         """,
         (
@@ -37,6 +38,7 @@ def save_outbound_task_record(
             json.dumps(response_payload, ensure_ascii=False),
             task_id,
             str(status or "").strip() or "created",
+            str(trace_id or ""),
         ),
     )
     result = row.fetchone()
@@ -48,10 +50,25 @@ def save_outbound_task(task_type: str, request_payload: dict[str, Any], response
     return save_outbound_task_record(task_type, request_payload, response_payload, status="created")
 
 
+def create_outbound_task_intent(
+    task_type: str,
+    request_payload: dict[str, Any],
+    *,
+    trace_id: str = "",
+) -> int:
+    return save_outbound_task_record(
+        task_type,
+        request_payload,
+        {},
+        status="pending",
+        trace_id=trace_id,
+    )
+
+
 def get_outbound_task(task_id: int) -> dict[str, Any] | None:
     return _fetchone_dict(
         """
-        SELECT id, task_type, request_payload, response_payload, wecom_task_id, status, created_at
+        SELECT id, task_type, request_payload, response_payload, wecom_task_id, status, created_at, trace_id
         FROM outbound_tasks
         WHERE id = ?
         LIMIT 1
@@ -77,16 +94,24 @@ def update_outbound_task_status(
             (str(status or "").strip() or "created", int(task_id)),
         )
     else:
+        task_id_value = (
+            response_payload.get("msgid")
+            or response_payload.get("jobid")
+            or response_payload.get("task_id")
+            or response_payload.get("moment_id")
+        )
         db.execute(
             """
             UPDATE outbound_tasks
             SET status = ?,
-                response_payload = ?
+                response_payload = ?,
+                wecom_task_id = COALESCE(NULLIF(?, ''), wecom_task_id)
             WHERE id = ?
             """,
             (
                 str(status or "").strip() or "created",
                 json.dumps(response_payload, ensure_ascii=False),
+                str(task_id_value or ""),
                 int(task_id),
             ),
         )

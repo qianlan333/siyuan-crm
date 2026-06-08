@@ -35,7 +35,7 @@ def test_run_automation_sop_posts_to_internal_endpoint(monkeypatch, capsys):
     module = _load_script_module()
     captured: dict[str, object] = {}
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, *, timeout):
         captured["url"] = request.full_url
         captured["timeout"] = timeout
         captured["headers"] = {key.lower(): value for key, value in request.header_items()}
@@ -62,7 +62,7 @@ def test_run_automation_sop_respects_custom_operator_and_omits_missing_token(mon
     module = _load_script_module()
     captured: dict[str, object] = {}
 
-    def fake_urlopen(request, timeout):
+    def fake_urlopen(request, *, timeout):
         captured["headers"] = {key.lower(): value for key, value in request.header_items()}
         captured["body"] = json.loads(request.data.decode("utf-8"))
         return _FakeResponse(b'{"ok": true}')

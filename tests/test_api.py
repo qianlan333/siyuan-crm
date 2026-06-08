@@ -1594,7 +1594,7 @@ def test_class_user_management_list_export_and_ui(client, app, monkeypatch):
     shell_response = client.get("/admin/class-users?tab=class-users")
     shell_text = shell_response.get_data(as_text=True)
     assert shell_response.status_code == 200
-    assert "心流商业客户管理" in shell_text
+    assert "客户管理后台" in shell_text
     assert "运营管理" in shell_text
     assert "班级状态" in shell_text
 
@@ -1621,11 +1621,15 @@ def test_admin_questionnaire_management_page_exists(client):
     text = response.get_data(as_text=True)
 
     assert response.status_code == 200
-    assert "心流商业客户管理" in text
+    assert "客户管理后台" in text
     assert "问卷管理" in text
     assert "创建新问卷" in text
     assert "创建测评问卷模板" in text
-    assert "多维测评按“模板资产”管理" in text
+    assert '<h2>问卷管理</h2>' not in text
+    assert "questionnaire-toolbar" not in text
+    assert "questionnaire-reload-btn" not in text
+    assert 'href="/admin/questionnaires/new"' in text
+    assert 'href="/admin/questionnaires/new?mode=assessment"' in text
     assert "多维测评" in text
     assert "问卷名称" in text
     assert "创建时间" in text
@@ -1633,6 +1637,13 @@ def test_admin_questionnaire_management_page_exists(client):
     assert "还没有问卷" in text
     assert "没有匹配的问卷，请调整搜索词或筛选条件" in text
     assert 'data-action="delete"' in text
+    assert "状态摘要" not in text
+    assert "微信授权" not in text
+    assert "企业微信联系人" not in text
+    assert "企业微信标签" not in text
+    assert "多维测评按“模板资产”管理" not in text
+    assert "列表、搜索、筛选和管理动作统一" not in text
+    assert "只在这里处理列表、搜索、筛选和管理动作" not in text
     assert "questionnaire-name-sub" not in text
     assert '<div class="workspace">' not in text
 
@@ -1670,7 +1681,7 @@ def test_admin_questionnaire_editor_new_page_contains_tag_picker_fallback(client
     assert "重置当前" in text
     assert "题型" in text
     assert "手工填写" in text or "tag_id" in text
-    assert "企微标签加载失败" in text
+    assert "当前未获取到企微标签，可手工填写 tag_id" in text
     assert "多维测评" in text
     assert "添加多维测评模板" in text
     assert "测评维度" in text
@@ -1965,6 +1976,36 @@ def test_questionnaire_preflight_requires_non_default_secret_key(client, app, mo
     data = response.get_json()
     assert response.status_code == 200
     assert data["wechat_oauth_configured"] is False
+
+
+def test_questionnaire_preflight_reads_saved_app_settings(client, app, monkeypatch):
+    app.config.update(
+        WECHAT_MP_APP_ID="",
+        WECHAT_MP_APP_SECRET="",
+        SECRET_KEY="runtime-secret",
+        WECOM_CORP_ID="",
+        WECOM_CONTACT_SECRET="",
+    )
+    with app.app_context():
+        set_settings(
+            {
+                "WECHAT_MP_APP_ID": "wx-saved-app",
+                "WECHAT_MP_APP_SECRET": "wx-saved-secret",
+                "WECOM_CORP_ID": "ww-saved",
+                "WECOM_CONTACT_SECRET": "saved-contact-secret",
+            }
+        )
+    monkeypatch.setattr(
+        "wecom_ability_service.application.questionnaire.queries.ListAvailableWeComTagsQuery.__call__",
+        lambda self, dto=None: [],
+    )
+
+    response = client.get("/api/admin/questionnaires/preflight")
+    data = response.get_json()
+
+    assert response.status_code == 200
+    assert data["wechat_oauth_configured"] is True
+    assert data["wecom_contact_configured"] is True
 
 
 def test_questionnaire_preflight_handles_wecom_tags_error(client, monkeypatch):
@@ -2999,6 +3040,8 @@ def _build_questionnaire_payload(**overrides) -> dict:
         "redirect_url": "https://example.com/next",
         "external_push_enabled": False,
         "external_push_url": "",
+        "external_push_type": "",
+        "external_push_expires_at_ts": "",
         "external_push_day": "",
         "external_push_frequency": "",
         "external_push_remark": "",
@@ -3220,7 +3263,6 @@ def test_questionnaire_sidebar_profile_field_saves_and_admin_reads_while_public_
     payload["questions"][1]["sidebar_profile_field"] = "industry"
 
     create_response = client.post("/api/admin/questionnaires", json=payload)
-
     assert create_response.status_code == 200
     questionnaire = create_response.get_json()["questionnaire"]
     assert questionnaire["questions"][0]["sidebar_profile_field"] == "source"
@@ -3231,7 +3273,24 @@ def test_questionnaire_sidebar_profile_field_saves_and_admin_reads_while_public_
     assert [item["sidebar_profile_field"] for item in detail["questions"]] == ["source", "industry", ""]
 
     public_questionnaire = questionnaire_service.get_public_questionnaire_by_slug(str(questionnaire["slug"]))
-    assert "sidebar_profile_field" not in public_questionnaire["questions"][0]
+    public_question = public_questionnaire["questions"][0]
+    assert "sidebar_profile_field" not in public_question
+
+
+def test_questionnaire_update_rejects_empty_questions_when_existing_questions_would_be_deleted(client):
+    from wecom_ability_service.domains.questionnaire import service as questionnaire_service
+
+    create_response = client.post("/api/admin/questionnaires", json=_build_questionnaire_payload())
+    assert create_response.status_code == 200
+    questionnaire = create_response.get_json()["questionnaire"]
+    payload = _build_questionnaire_payload(slug=str(questionnaire["slug"]))
+    payload["questions"] = []
+
+    update_response = client.put(f"/api/admin/questionnaires/{questionnaire['id']}", json=payload)
+
+    assert update_response.status_code == 400
+    assert "questions cannot be empty" in update_response.get_json()["error"]
+    assert len(questionnaire_service.get_questionnaire_detail(int(questionnaire["id"]))["questions"]) == 3
 
 
 def test_questionnaire_rejects_invalid_sidebar_profile_field(client):
@@ -3736,6 +3795,87 @@ def test_questionnaire_text_mapping_without_external_userid_does_not_write_profi
     with app.app_context():
         count = get_db().execute("SELECT COUNT(*) AS total FROM sidebar_customer_profile_fields").fetchone()["total"]
         assert int(count) == 0
+
+
+def test_questionnaire_mobile_binding_resolves_external_userid_for_sidebar_profile(client, app, monkeypatch):
+    monkeypatch.setattr(
+        "wecom_ability_service.domains.questionnaire.service.apply_questionnaire_submission_tags_to_scrm",
+        lambda submission_id: {"applied": False, "reason": "test"},
+    )
+    with app.app_context():
+        db = get_db()
+        db.execute(
+            """
+            INSERT INTO contacts (external_userid, customer_name, owner_userid, remark, description, updated_at)
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """,
+            ("wm_sidebar_mobile_resolved", "手机号绑定客户", "sales_mobile", "手机号线索", "wm_sidebar_mobile_resolved"),
+        )
+        db.execute(
+            """
+            INSERT INTO people (mobile, third_party_user_id, created_at, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            ("13800139999", "tp-mobile-resolved"),
+        )
+        person_id = db.execute("SELECT id FROM people WHERE mobile = ?", ("13800139999",)).fetchone()["id"]
+        db.execute(
+            """
+            INSERT INTO external_contact_bindings (
+                external_userid, person_id, first_bound_by_userid, first_owner_userid,
+                last_owner_userid, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            ("wm_sidebar_mobile_resolved", person_id, "sales_mobile", "sales_mobile", "sales_mobile"),
+        )
+        db.commit()
+
+    payload = _build_questionnaire_payload_with_mobile(slug="sidebar-mobile-resolved")
+    payload["questions"][2]["sidebar_profile_field"] = "needs_blockers_followup"
+    create_response = client.post("/api/admin/questionnaires", json=payload)
+    questionnaire = create_response.get_json()["questionnaire"]
+    q1 = questionnaire["questions"][0]
+    q3 = questionnaire["questions"][2]
+    mobile_question = questionnaire["questions"][-1]
+
+    response = client.post(
+        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
+        json={
+            "openid": "openid-mobile-resolved",
+            "answers": {
+                str(q1["id"]): q1["options"][0]["id"],
+                str(q3["id"]): "预算待确认，需要后续跟进",
+                str(mobile_question["id"]): "13800139999",
+            },
+        },
+        headers=WECHAT_BROWSER_HEADERS,
+    )
+
+    assert response.status_code == 200
+    with app.app_context():
+        submission = get_db().execute(
+            """
+            SELECT external_userid, mobile_snapshot, matched_by, follow_user_userid
+            FROM questionnaire_submissions
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ).fetchone()
+        profile = get_db().execute(
+            """
+            SELECT needs_blockers_followup, updated_by
+            FROM sidebar_customer_profile_fields
+            WHERE external_userid = ?
+            """,
+            ("wm_sidebar_mobile_resolved",),
+        ).fetchone()
+        assert submission["external_userid"] == "wm_sidebar_mobile_resolved"
+        assert submission["mobile_snapshot"] == "13800139999"
+        assert submission["matched_by"] == "mobile"
+        assert submission["follow_user_userid"] == "sales_mobile"
+        assert profile["needs_blockers_followup"] == "预算待确认，需要后续跟进"
+        assert profile["updated_by"] == "questionnaire_submit"
 
 
 def test_questionnaire_sidebar_profile_mapping_failure_does_not_block_submit(client, monkeypatch):
@@ -4582,8 +4722,10 @@ def test_questionnaire_submit_external_push_success_uses_fixed_payload_and_logs_
         json=_build_questionnaire_payload_with_mobile(
             external_push_enabled=True,
             external_push_url="https://hooks.example.com/questionnaire/apply",
+            external_push_type="subscription",
             external_push_day=20,
             external_push_frequency=20,
+            external_push_expires_at_ts=1809100800,
             external_push_remark="黄小璨 499 用户激活",
             external_push_custom_params=[
                 {"name": "source_name", "value": "黄小璨激活"},
@@ -4626,6 +4768,8 @@ def test_questionnaire_submit_external_push_success_uses_fixed_payload_and_logs_
         "questionnaire_title": "来访测评",
         "submitted_at": push_calls[0]["json"]["submitted_at"],
         "phone_number": "13800138012",
+        "type": "subscription",
+        "expires_at_ts": 1809100800,
         "day": 20,
         "frequency": 20,
         "remark": "黄小璨 499 用户激活",
@@ -4659,6 +4803,8 @@ def test_questionnaire_submit_external_push_success_uses_fixed_payload_and_logs_
         assert row["status"] == "success"
         assert row["failure_reason"] == ""
         assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["phone_number"] == "13800138012"
+        assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["type"] == "subscription"
+        assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["expires_at_ts"] == 1809100800
         assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["day"] == 20
         assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["frequency"] == 20
         assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["remark"] == "黄小璨 499 用户激活"
@@ -4706,6 +4852,8 @@ def test_questionnaire_submit_external_push_without_mobile_question_sends_null_p
     assert response.get_json()["success"] is True
     assert len(push_calls) == 1
     assert push_calls[0]["json"]["phone_number"] == "NULL"
+    assert "type" not in push_calls[0]["json"]
+    assert "expires_at_ts" not in push_calls[0]["json"]
 
     with app.app_context():
         row = get_db().execute(
@@ -4716,7 +4864,10 @@ def test_questionnaire_submit_external_push_without_mobile_question_sends_null_p
             LIMIT 1
             """
         ).fetchone()
-        assert (row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"]))["phone_number"] == "NULL"
+        request_payload = row["request_payload"] if isinstance(row["request_payload"], (dict, list)) else json.loads(row["request_payload"])
+        assert request_payload["phone_number"] == "NULL"
+        assert "type" not in request_payload
+        assert "expires_at_ts" not in request_payload
 
 
 def test_questionnaire_external_push_rejects_invalid_fixed_number_and_reserved_custom_param_name(client):
@@ -4728,6 +4879,67 @@ def test_questionnaire_external_push_rejects_invalid_fixed_number_and_reserved_c
     assert invalid_number_response.get_json() == {
         "ok": False,
         "error": "external_push_day must be an integer",
+    }
+
+    invalid_ts_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_expires_at_ts="abc",
+        ),
+    )
+    assert invalid_ts_response.status_code == 400
+    assert invalid_ts_response.get_json() == {
+        "ok": False,
+        "error": "external_push_expires_at_ts must be an integer",
+    }
+
+    blank_ts_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_expires_at_ts="",
+        ),
+    )
+    assert blank_ts_response.status_code == 200
+    assert blank_ts_response.get_json()["questionnaire"]["external_push_expires_at_ts"] == ""
+
+    blank_type_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_type="",
+        ),
+    )
+    assert blank_type_response.status_code == 200
+    assert blank_type_response.get_json()["questionnaire"]["external_push_type"] == ""
+
+    trial_type_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_type="trial",
+        ),
+    )
+    assert trial_type_response.status_code == 200
+    assert trial_type_response.get_json()["questionnaire"]["external_push_type"] == "trial"
+
+    invalid_type_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_type="unknown",
+        ),
+    )
+    assert invalid_type_response.status_code == 400
+    assert invalid_type_response.get_json() == {
+        "ok": False,
+        "error": "external_push_type must be subscription, premium or trial",
     }
 
     reserved_name_response = client.post(
@@ -4756,6 +4968,34 @@ def test_questionnaire_external_push_rejects_invalid_fixed_number_and_reserved_c
     assert phone_number_reserved_response.get_json() == {
         "ok": False,
         "error": "external_push_custom_params name 'phone_number' is reserved",
+    }
+
+    type_reserved_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_custom_params=[{"name": "type", "value": "bad"}],
+        ),
+    )
+    assert type_reserved_response.status_code == 400
+    assert type_reserved_response.get_json() == {
+        "ok": False,
+        "error": "external_push_custom_params name 'type' is reserved",
+    }
+
+    expires_reserved_response = client.post(
+        "/api/admin/questionnaires",
+        json=_build_questionnaire_payload(
+            external_push_enabled=True,
+            external_push_url="https://hooks.example.com/q",
+            external_push_custom_params=[{"name": "expires_at_ts", "value": "bad"}],
+        ),
+    )
+    assert expires_reserved_response.status_code == 400
+    assert expires_reserved_response.get_json() == {
+        "ok": False,
+        "error": "external_push_custom_params name 'expires_at_ts' is reserved",
     }
 
 
@@ -4960,293 +5200,6 @@ def test_questionnaire_create_auto_dedupes_generated_slug_when_name_collides(cli
     assert first_slug == "ai"
     assert second_slug != first_slug
     assert second_slug.startswith("ai-")
-
-
-def test_questionnaire_external_push_failed_log_can_be_retried_and_reuses_original_payload(client, app, monkeypatch):
-    create_response = client.post(
-        "/api/admin/questionnaires",
-        json=_build_questionnaire_payload_with_mobile(
-            external_push_enabled=True,
-            external_push_url="https://hooks.example.com/questionnaire/apply",
-        ),
-    )
-    questionnaire = create_response.get_json()["questionnaire"]
-    detail = client.get(f"/api/admin/questionnaires/{questionnaire['id']}").get_json()["questionnaire"]
-    q1 = detail["questions"][0]
-    mobile_question = detail["questions"][-1]
-    push_calls: list[dict[str, object]] = []
-    responses = [
-        FakeResponse({"error": "server exploded"}, status_code=500),
-        FakeResponse({"ok": True}, status_code=200),
-    ]
-
-    def fake_push_post(url, json=None, headers=None, timeout=None):
-        push_calls.append({"url": url, "json": json, "headers": dict(headers or {}), "timeout": timeout})
-        return responses.pop(0)
-
-    monkeypatch.setattr("wecom_ability_service.domains.questionnaire.service.requests.post", fake_push_post)
-
-    submit_response = client.post(
-        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
-        json={
-            "unionid": "union-external-push-retry-001",
-            "answers": {
-                str(q1["id"]): q1["options"][0]["id"],
-                str(mobile_question["id"]): "13800138015",
-            },
-        },
-        headers=WECHAT_BROWSER_HEADERS,
-    )
-
-    assert submit_response.status_code == 200
-
-    with app.app_context():
-        original = get_db().execute(
-            """
-            SELECT id, retry_from_log_id, retry_attempt, status, target_url, request_payload
-            FROM questionnaire_external_push_logs
-            ORDER BY id ASC
-            LIMIT 1
-            """
-        ).fetchone()
-        original_id = int(original["id"])
-        original_payload = (original["request_payload"] if isinstance(original["request_payload"], (dict, list)) else json.loads(original["request_payload"]))
-        assert original["status"] == "failed"
-        assert original["retry_from_log_id"] is None
-        assert int(original["retry_attempt"] or 0) == 0
-
-    retry_response = client.post(
-        f"/admin/questionnaires/{questionnaire['id']}/external-push-logs/{original_id}/retry",
-        data={"status": "failed", "limit": "10"},
-        follow_redirects=True,
-    )
-
-    assert retry_response.status_code == 200
-    retry_html = retry_response.get_data(as_text=True)
-    assert "补发已执行，请查看最近结果。" in retry_html
-    assert "补发成功" in retry_html
-    assert len(push_calls) == 2
-    assert push_calls[0]["json"] == push_calls[1]["json"]
-
-    with app.app_context():
-        rows = get_db().execute(
-            """
-            SELECT id, retry_from_log_id, retry_attempt, status, response_status_code, target_url, request_payload
-            FROM questionnaire_external_push_logs
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        assert len(rows) == 2
-        assert rows[1]["retry_from_log_id"] == original_id
-        assert int(rows[1]["retry_attempt"] or 0) == 1
-        assert rows[1]["status"] == "success"
-        assert int(rows[1]["response_status_code"]) == 200
-        assert rows[1]["target_url"] == rows[0]["target_url"]
-        assert (rows[1]["request_payload"] if isinstance(rows[1]["request_payload"], (dict, list)) else json.loads(rows[1]["request_payload"])) == original_payload
-
-
-def test_questionnaire_external_push_failed_log_retry_can_fail_again(client, app, monkeypatch):
-    create_response = client.post(
-        "/api/admin/questionnaires",
-        json=_build_questionnaire_payload_with_mobile(
-            external_push_enabled=True,
-            external_push_url="https://hooks.example.com/questionnaire/apply",
-        ),
-    )
-    questionnaire = create_response.get_json()["questionnaire"]
-    detail = client.get(f"/api/admin/questionnaires/{questionnaire['id']}").get_json()["questionnaire"]
-    q1 = detail["questions"][0]
-    mobile_question = detail["questions"][-1]
-    responses = [
-        FakeResponse({"error": "server exploded"}, status_code=500),
-        FakeResponse({"error": "still broken"}, status_code=502),
-    ]
-
-    def fake_push_post(url, json=None, headers=None, timeout=None):
-        return responses.pop(0)
-
-    monkeypatch.setattr("wecom_ability_service.domains.questionnaire.service.requests.post", fake_push_post)
-
-    submit_response = client.post(
-        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
-        json={
-            "unionid": "union-external-push-retry-002",
-            "answers": {
-                str(q1["id"]): q1["options"][0]["id"],
-                str(mobile_question["id"]): "13800138016",
-            },
-        },
-        headers=WECHAT_BROWSER_HEADERS,
-    )
-    assert submit_response.status_code == 200
-
-    with app.app_context():
-        original = get_db().execute(
-            "SELECT id FROM questionnaire_external_push_logs ORDER BY id ASC LIMIT 1"
-        ).fetchone()
-        original_id = int(original["id"])
-
-    retry_response = client.post(
-        f"/admin/questionnaires/{questionnaire['id']}/external-push-logs/{original_id}/retry",
-        data={"status": "failed", "limit": "10"},
-        follow_redirects=True,
-    )
-    assert retry_response.status_code == 200
-    retry_html = retry_response.get_data(as_text=True)
-    assert "补发仍失败" in retry_html
-    assert "HTTP 502" in retry_html
-
-    with app.app_context():
-        rows = get_db().execute(
-            """
-            SELECT retry_from_log_id, retry_attempt, status, response_status_code, failure_reason
-            FROM questionnaire_external_push_logs
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        assert len(rows) == 2
-        assert rows[1]["retry_from_log_id"] == original_id
-        assert int(rows[1]["retry_attempt"] or 0) == 1
-        assert rows[1]["status"] == "failed"
-        assert int(rows[1]["response_status_code"]) == 502
-        assert rows[1]["failure_reason"] == "HTTP 502"
-
-
-def test_questionnaire_external_push_success_log_cannot_be_retried(client, app, monkeypatch):
-    create_response = client.post(
-        "/api/admin/questionnaires",
-        json=_build_questionnaire_payload_with_mobile(
-            external_push_enabled=True,
-            external_push_url="https://hooks.example.com/questionnaire/apply",
-        ),
-    )
-    questionnaire = create_response.get_json()["questionnaire"]
-    detail = client.get(f"/api/admin/questionnaires/{questionnaire['id']}").get_json()["questionnaire"]
-    q1 = detail["questions"][0]
-    mobile_question = detail["questions"][-1]
-
-    monkeypatch.setattr(
-        "wecom_ability_service.domains.questionnaire.service.requests.post",
-        lambda url, json=None, headers=None, timeout=None: FakeResponse({"ok": True}, status_code=200),
-    )
-
-    submit_response = client.post(
-        f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
-        json={
-            "unionid": "union-external-push-retry-003",
-            "answers": {
-                str(q1["id"]): q1["options"][0]["id"],
-                str(mobile_question["id"]): "13800138017",
-            },
-        },
-        headers=WECHAT_BROWSER_HEADERS,
-    )
-    assert submit_response.status_code == 200
-
-    with app.app_context():
-        row = get_db().execute(
-            "SELECT id FROM questionnaire_external_push_logs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        log_id = int(row["id"])
-
-    retry_response = client.post(
-        f"/admin/questionnaires/{questionnaire['id']}/external-push-logs/{log_id}/retry",
-        data={"status": "", "limit": "10"},
-        follow_redirects=True,
-    )
-
-    assert retry_response.status_code == 200
-    retry_html = retry_response.get_data(as_text=True)
-    assert "only failed external push logs can be retried" in retry_html
-
-    with app.app_context():
-        total = get_db().execute("SELECT COUNT(*) AS total FROM questionnaire_external_push_logs").fetchone()
-        assert int(total["total"] or 0) == 1
-
-
-def test_questionnaire_external_push_failed_logs_can_be_retried_in_batch_with_summary(client, app, monkeypatch):
-    create_response = client.post(
-        "/api/admin/questionnaires",
-        json=_build_questionnaire_payload_with_mobile(
-            external_push_enabled=True,
-            external_push_url="https://hooks.example.com/questionnaire/apply",
-        ),
-    )
-    questionnaire = create_response.get_json()["questionnaire"]
-    detail = client.get(f"/api/admin/questionnaires/{questionnaire['id']}").get_json()["questionnaire"]
-    q1 = detail["questions"][0]
-    mobile_question = detail["questions"][-1]
-    responses = [
-        FakeResponse({"error": "fail-1"}, status_code=500),
-        FakeResponse({"error": "fail-2"}, status_code=502),
-        FakeResponse({"ok": True}, status_code=200),
-        FakeResponse({"error": "still broken"}, status_code=503),
-    ]
-
-    def fake_push_post(url, json=None, headers=None, timeout=None):
-        return responses.pop(0)
-
-    monkeypatch.setattr("wecom_ability_service.domains.questionnaire.service.requests.post", fake_push_post)
-
-    for unionid, mobile in [
-        ("union-external-push-batch-001", "13800138018"),
-        ("union-external-push-batch-002", "13800138019"),
-    ]:
-        response = client.post(
-            f"/api/h5/questionnaires/{questionnaire['slug']}/submit",
-            json={
-                "unionid": unionid,
-                "answers": {
-                    str(q1["id"]): q1["options"][0]["id"],
-                    str(mobile_question["id"]): mobile,
-                },
-            },
-            headers=WECHAT_BROWSER_HEADERS,
-        )
-        assert response.status_code == 200
-
-    with app.app_context():
-        rows = get_db().execute(
-            """
-            SELECT id, status
-            FROM questionnaire_external_push_logs
-            WHERE retry_from_log_id IS NULL
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        failed_ids = [str(row["id"]) for row in rows]
-        assert [row["status"] for row in rows] == ["failed", "failed"]
-
-    retry_response = client.post(
-        f"/admin/questionnaires/{questionnaire['id']}/external-push-logs/retry-batch",
-        data={"status": "failed_current", "limit": "20", "push_log_ids": failed_ids},
-        follow_redirects=True,
-    )
-    retry_html = retry_response.get_data(as_text=True)
-
-    assert retry_response.status_code == 200
-    assert "批量补发已执行：选中 2 条，实际补发 2 条，成功 1 条，失败 1 条。" in retry_html
-    assert "补发成功" in retry_html
-    assert "补发仍失败（待补发）" in retry_html
-
-    with app.app_context():
-        rows = get_db().execute(
-            """
-            SELECT retry_from_log_id, retry_attempt, status, response_status_code, failure_reason
-            FROM questionnaire_external_push_logs
-            ORDER BY id ASC
-            """
-        ).fetchall()
-        assert len(rows) == 4
-        assert rows[2]["retry_from_log_id"] is not None
-        assert rows[3]["retry_from_log_id"] is not None
-        assert int(rows[2]["retry_attempt"] or 0) == 1
-        assert int(rows[3]["retry_attempt"] or 0) == 1
-        assert rows[2]["status"] == "success"
-        assert int(rows[2]["response_status_code"]) == 200
-        assert rows[3]["status"] == "failed"
-        assert int(rows[3]["response_status_code"]) == 503
-        assert rows[3]["failure_reason"] == "HTTP 503"
 
 
 def test_questionnaire_submit_success_sends_identity_webhook(client, app, monkeypatch):
@@ -5885,39 +5838,14 @@ def test_sidebar_page_contains_jssdk_debug_chain(client):
     response = client.get("/sidebar/bind-mobile?v=legacy")
     assert response.status_code == 200
     body = response.get_data(as_text=True)
-    assert "wx.config success" in body
-    assert "wx.agentConfig success" in body
-    assert "getCurExternalContact success" in body
-    assert "/api/sidebar/jssdk-config" in body
-    assert "客户档案绑定" in body
-    assert "debugWrap.classList.toggle('hidden', !debugEnabled);" in body
-    assert "自动化转化操作区" in body
-    assert "是否在自动化转化池" in body
-    assert "当前池子" in body
-    assert "当前阶段" in body
-    assert "当前目标" in body
-    assert "最近 AI 推送时间" in body
-    assert "实时标签" in body
-    assert "已填写问卷及答案" in body
-    assert "放入自动化转化池" in body
-    assert "移除自动化转化池" in body
-    assert "转化为重点跟进" in body
-    assert "转化为普通跟进" in body
-    assert "确认已成交" in body
-    assert "移除已成交" in body
-    assert "一键自动化写话术" in body
-    assert "/api/admin/automation-conversion/member" in body
-    assert "/api/admin/automation-conversion/member/put-in-pool" in body
-    assert "/api/admin/automation-conversion/member/remove-from-pool" in body
-    assert "/api/admin/automation-conversion/member/set-focus" in body
-    assert "/api/admin/automation-conversion/member/set-normal" in body
-    assert "/api/admin/automation-conversion/member/mark-won" in body
-    assert "/api/admin/automation-conversion/member/unmark-won" in body
-    assert "/api/admin/automation-conversion/member/push-openclaw" in body
-    assert "/api/admin/customers/profile/tags" in body
-    assert "/api/admin/customers/profile/questionnaire-answers" in body
-    assert "const singleCustomerAutomationEnabled = true;" in body
-    assert "const legacySidebarCardsEnabled = false;" in body
+    assert 'id="sidebar-workbench-root"' in body
+    assert 'data-workbench-url="/api/sidebar/v2/workbench"' in body
+    assert 'data-jssdk-config-url="/api/sidebar/jssdk-config"' in body
+    assert "/static/sidebar_workbench/sidebar_workbench.js" in body
+    assert "/static/sidebar_workbench/sidebar_workbench.css" in body
+    assert 'id="debug-wrap"' in body
+    assert "自动化转化操作区" not in body
+    assert "/api/admin/automation-conversion/member" not in body
     assert "自动化转化卡片" not in body
     assert "班期快捷设置" not in body
     assert "/api/sidebar/marketing-status" not in body
@@ -5946,8 +5874,9 @@ def test_sidebar_page_hides_debug_and_uses_customer_display_name(client, app):
 
     page_response = client.get("/sidebar/bind-mobile?v=legacy")
     body = page_response.get_data(as_text=True)
-    assert "当前未识别到客户信息，请从企微客户侧边栏重新打开。" in body
-    assert "客户昵称：识别中" in body
+    assert 'id="customer-name">识别中</div>' in body
+    assert 'id="binding-state">加载中...</span>' in body
+    assert 'data-workbench-url="/api/sidebar/v2/workbench"' in body
 
 
 def test_sidebar_bind_mobile_fills_missing_owner_from_contacts(client, app):

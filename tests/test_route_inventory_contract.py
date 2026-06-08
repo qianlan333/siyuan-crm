@@ -48,10 +48,6 @@ def test_core_routes_are_registered_in_url_map():
         ("/logout", "GET"),
         ("/auth/wecom/start", "GET"),
         ("/auth/wecom/callback", "GET"),
-        ("/api/customers", "GET"),
-        ("/api/customers/<external_userid>", "GET"),
-        ("/api/customers/<external_userid>/timeline", "GET"),
-        ("/api/h5/questionnaires/<slug>", "GET"),
         ("/api/h5/questionnaires/<slug>/submit", "POST"),
     }
     for rule, method in required_routes:

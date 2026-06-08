@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from urllib.parse import urlencode
 
 from flask import abort, current_app, jsonify, redirect, render_template, request, session, url_for
 
@@ -17,6 +16,7 @@ from ..domains.wechat_pay import (
     get_product_slices,
     handle_wechat_pay_notification,
 )
+from ..domains.wechat_pay.sidebar_context import resolve_sidebar_order_context
 from ..infra.wechat_oauth import WeChatOAuthRequestError, exchange_wechat_oauth_code, fetch_wechat_userinfo
 from ..infra.settings import get_setting
 from .questionnaire_support import (
@@ -31,6 +31,15 @@ from .questionnaire_support import (
     _wechat_oauth_authorize_url,
     _wechat_oauth_is_configured,
 )
+from .wechat_pay_support import (
+    payment_oauth_callback_url,
+    payment_oauth_start_url,
+    product_path_with_ctx,
+    request_sidebar_product_context,
+    safe_payment_return_url,
+    wechat_pay_oauth_error_page,
+    wechat_pay_oauth_scope,
+)
 
 
 logger = logging.getLogger("wechat_pay")
@@ -38,29 +47,6 @@ logger = logging.getLogger("wechat_pay")
 
 def _normalized_text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _safe_return_url(value: str) -> str:
-    normalized = _normalized_text(value)
-    if not normalized or not normalized.startswith("/") or normalized.startswith("//"):
-        return "/"
-    return normalized
-
-
-def _payment_oauth_callback_url() -> str:
-    return _external_base_url() + url_for("api.h5_wechat_pay_oauth_callback")
-
-
-def _payment_oauth_start_url(return_url: str) -> str:
-    query = urlencode({"return_url": _safe_return_url(return_url)})
-    return f"{url_for('api.h5_wechat_pay_oauth_start')}?{query}"
-
-
-def _wechat_pay_oauth_scope() -> str:
-    return (
-        _normalized_text(get_setting("WECHAT_PAY_OAUTH_SCOPE") or current_app.config.get("WECHAT_PAY_OAUTH_SCOPE"))
-        or "snsapi_userinfo"
-    )
 
 
 def _wechat_h5_identity(*, payment_only: bool = False) -> dict[str, str]:
@@ -84,7 +70,7 @@ def _wechat_h5_identity(*, payment_only: bool = False) -> dict[str, str]:
 def _payment_identity_ready(identity: dict[str, str]) -> bool:
     if not _normalized_text(identity.get("openid")):
         return False
-    if _wechat_pay_oauth_scope() == "snsapi_userinfo" and not _normalized_text(identity.get("payer_name")):
+    if wechat_pay_oauth_scope() == "snsapi_userinfo" and not _normalized_text(identity.get("payer_name")):
         return False
     return True
 
@@ -101,27 +87,38 @@ def h5_wechat_pay_checkout(product_code: str):
     if wechat_gate is not None:
         return wechat_gate
     identity = _wechat_h5_identity(payment_only=True)
+    sidebar_context = request_sidebar_product_context()
+    pay_path = product_path_with_ctx("pay", product_code, sidebar_context["token"])
     page_state = build_checkout_page_state(
         product_code=product_code,
         identity=identity if _payment_identity_ready(identity) else {},
-        oauth_start_url=_payment_oauth_start_url(f"/pay/{product_code}"),
+        oauth_start_url=payment_oauth_start_url(pay_path),
+        context_token=sidebar_context["token"],
+        context_status=sidebar_context["status"],
     )
     return render_template("wechat_pay_h5_checkout.html", page_state=page_state)
 
 
 def h5_wechat_pay_product_page(product_code: str):
+    sidebar_context = request_sidebar_product_context()
     try:
-        page_state = get_public_product_page_state(product_code)
+        page_state = get_public_product_page_state(
+            product_code,
+            context_token=sidebar_context["token"],
+            context_status=sidebar_context["status"],
+        )
     except WeChatPayOrderError:
         abort(404)
     identity = _wechat_h5_identity(payment_only=True)
     if _is_wechat_browser() and not _normalized_text(identity.get("openid")) and _wechat_oauth_is_configured():
-        return redirect(_payment_oauth_start_url(f"/p/{product_code}"), code=302)
+        return redirect(payment_oauth_start_url(product_path_with_ctx("p", product_code, sidebar_context["token"])), code=302)
     if _normalized_text(identity.get("openid")):
         checkout_state = build_checkout_page_state(
             product_code=product_code,
             identity=identity,
-            oauth_start_url=_payment_oauth_start_url(f"/pay/{product_code}"),
+            oauth_start_url=payment_oauth_start_url(product_path_with_ctx("pay", product_code, sidebar_context["token"])),
+            context_token=sidebar_context["token"],
+            context_status=sidebar_context["status"],
         )
         if checkout_state.get("paid_order"):
             return render_template("wechat_pay_h5_checkout.html", page_state=checkout_state)
@@ -130,12 +127,12 @@ def h5_wechat_pay_product_page(product_code: str):
 
 def h5_wechat_pay_oauth_start():
     if not _wechat_oauth_is_configured():
-        return jsonify({"ok": False, "error": "wechat_oauth_not_configured"}), 501
-    return_url = _safe_return_url(request.args.get("return_url", "/"))
+        return wechat_pay_oauth_error_page("当前微信授权配置未完成，请联系管理员。", status_code=501)
+    return_url = safe_payment_return_url(request.args.get("return_url", "/"))
     authorize_url = _wechat_oauth_authorize_url(
         app_id=current_app.config["WECHAT_MP_APP_ID"],
-        redirect_uri=_payment_oauth_callback_url(),
-        scope=_wechat_pay_oauth_scope(),
+        redirect_uri=payment_oauth_callback_url(),
+        scope=wechat_pay_oauth_scope(),
         state=_encode_oauth_state({"return_url": return_url}),
     )
     return redirect(authorize_url)
@@ -143,12 +140,12 @@ def h5_wechat_pay_oauth_start():
 
 def h5_wechat_pay_oauth_callback():
     if not _wechat_oauth_is_configured():
-        return jsonify({"ok": False, "error": "wechat_oauth_not_configured"}), 501
+        return wechat_pay_oauth_error_page("当前微信授权配置未完成，请联系管理员。", status_code=501)
     code = _normalized_text(request.args.get("code"))
     state_payload = _decode_oauth_state(_normalized_text(request.args.get("state")))
-    return_url = _safe_return_url(_normalized_text(state_payload.get("return_url")) or "/")
+    return_url = safe_payment_return_url(_normalized_text(state_payload.get("return_url")) or "/")
     if not code:
-        return jsonify({"ok": False, "error": "code is required"}), 400
+        return wechat_pay_oauth_error_page("授权未完成，请重新进入商品页。", return_url=return_url, status_code=400)
     try:
         oauth_payload = exchange_wechat_oauth_code(
             app_id=current_app.config["WECHAT_MP_APP_ID"],
@@ -157,15 +154,15 @@ def h5_wechat_pay_oauth_callback():
         )
     except WeChatOAuthRequestError as exc:
         logger.exception("wechat pay oauth exchange failed return_url=%s", return_url)
-        return jsonify({"ok": False, "error": f"wechat_oauth_exchange_failed: {exc}"}), 502
+        return wechat_pay_oauth_error_page("授权服务暂不可用，请稍后重试。", return_url=return_url, status_code=502)
     if oauth_payload.get("errcode") not in (None, 0):
         logger.warning("wechat pay oauth exchange returned error payload=%s", oauth_payload)
-        return jsonify({"ok": False, "error": "wechat_oauth_exchange_failed", "wechat_payload": oauth_payload}), 502
+        return wechat_pay_oauth_error_page("授权服务暂不可用，请稍后重试。", return_url=return_url, status_code=502)
     openid = _normalized_text(oauth_payload.get("openid"))
     unionid = _normalized_text(oauth_payload.get("unionid"))
     access_token = _normalized_text(oauth_payload.get("access_token"))
     payer_name = ""
-    if _wechat_pay_oauth_scope() == "snsapi_userinfo" and access_token and openid:
+    if wechat_pay_oauth_scope() == "snsapi_userinfo" and access_token and openid:
         try:
             userinfo = fetch_wechat_userinfo(access_token=access_token, openid=openid)
             if userinfo.get("errcode") in (None, 0):
@@ -200,18 +197,35 @@ def api_h5_wechat_pay_create_jsapi_order():
         return wechat_gate
     payload = request.get_json(silent=True) or {}
     product_code = _normalized_text(payload.get("product_code"))
+    context_token = _normalized_text(payload.get("ctx") or payload.get("context_token"))
     identity = _wechat_h5_identity(payment_only=True)
     if not _payment_identity_ready(identity):
+        pay_path = product_path_with_ctx("pay", product_code, context_token)
         return (
             jsonify(
                 {
                     "ok": False,
                     "error": "openid_required",
-                    "oauth_start_url": _payment_oauth_start_url(f"/pay/{product_code}" if product_code else "/"),
+                    "oauth_start_url": payment_oauth_start_url(pay_path if product_code else "/"),
                 }
             ),
             401,
         )
+    product = get_product(product_code) or {}
+    resolved_context = resolve_sidebar_order_context(
+        context_token=context_token,
+        payment_identity=identity,
+        product=product,
+        payload_mobile=_normalized_text(payload.get("mobile")),
+    )
+    request_meta = _questionnaire_request_meta()
+    request_meta["sidebar_product_context"] = {
+        "context_status": resolved_context.get("context_status"),
+        "context_source": resolved_context.get("context_source"),
+        "external_userid_present": bool(resolved_context.get("external_userid")),
+        "owner_userid_present": bool(resolved_context.get("owner_userid")),
+        "mobile_source": resolved_context.get("mobile_source"),
+    }
     notify_url = _normalized_text(get_setting("WECHAT_PAY_NOTIFY_URL") or current_app.config.get("WECHAT_PAY_NOTIFY_URL")) or (
         _external_base_url() + url_for("api.api_h5_wechat_pay_notify")
     )
@@ -221,13 +235,17 @@ def api_h5_wechat_pay_create_jsapi_order():
             payer_openid=identity.get("openid", ""),
             respondent_key=identity.get("respondent_key", ""),
             unionid=identity.get("unionid", ""),
-            external_userid=identity.get("external_userid", ""),
+            external_userid=_normalized_text(resolved_context.get("external_userid")),
             payer_name=identity.get("payer_name", ""),
             client_order_ref=_normalized_text(payload.get("client_order_ref")),
             order_source=_normalized_text(payload.get("order_source")) or "h5_checkout",
             notify_url=notify_url,
-            mobile=_normalized_text(payload.get("mobile")),
-            request_meta=_questionnaire_request_meta(),
+            mobile=_normalized_text(resolved_context.get("mobile")),
+            request_meta=request_meta,
+            owner_userid=_normalized_text(resolved_context.get("owner_userid")),
+            bind_by_userid=_normalized_text(resolved_context.get("bind_by_userid")),
+            context_source=_normalized_text(resolved_context.get("context_source")),
+            mobile_source=_normalized_text(resolved_context.get("mobile_source")),
         )
         return jsonify({"ok": True, **result})
     except WeChatPayConfigError as exc:
@@ -267,6 +285,7 @@ def register_routes(bp) -> None:
     bp.route("/api/h5/wechat-pay/oauth/start", methods=["GET"])(h5_wechat_pay_oauth_start)
     bp.route("/api/h5/wechat-pay/oauth/callback", methods=["GET"])(h5_wechat_pay_oauth_callback)
     bp.route("/api/h5/wechat-pay/products/<product_code>", methods=["GET"])(api_h5_wechat_pay_product)
+    bp.route("/api/products/<product_code>", methods=["GET"])(api_h5_wechat_pay_product)
     bp.route("/api/h5/wechat-pay/jsapi/orders", methods=["POST"])(api_h5_wechat_pay_create_jsapi_order)
     bp.route("/api/h5/wechat-pay/orders/<out_trade_no>", methods=["GET"])(api_h5_wechat_pay_order_status)
     bp.route("/api/h5/wechat-pay/notify", methods=["POST"])(api_h5_wechat_pay_notify)

@@ -1,31 +1,88 @@
 from __future__ import annotations
 
-from flask import Response, jsonify, redirect, request
+from flask import Response, jsonify, request
 
-from ..domains import sidebar_v2
+from aicrm_next.customer_read_model.sidebar_v2 import (
+    SidebarCommerceReadModel,
+    SidebarMaterialReadModel,
+    SidebarOtherStaffMessagesReadModel,
+    SidebarQuestionnaireReadModel,
+    SidebarWorkbenchReadModel,
+)
+from aicrm_next.shared.errors import NotFoundError
+
+from ..domains import sidebar_v2 as sidebar_v2_writes
 
 
 def _json_error(message: str, status: int = 400):
     return jsonify({"ok": False, "error": message}), status
 
 
-def sidebar_v2_workbench():
+def _sidebar_error(message: str, status: int, *, source_status: str, read_model_status: str):
+    return (
+        jsonify(
+            {
+                "ok": False,
+                "error": message,
+                "source_status": source_status,
+                "read_model_status": read_model_status,
+                "route_owner": "ai_crm_next",
+                "fallback_used": False,
+                "degraded": status >= 500,
+            }
+        ),
+        status,
+    )
+
+
+def _sidebar_input_error(message: str):
+    return _sidebar_error(message, 400, source_status="input_error", read_model_status="input_error")
+
+
+def _sidebar_lookup_error(message: str):
+    return _sidebar_error(message, 404, source_status="not_found", read_model_status="not_found")
+
+
+def _sidebar_read_unavailable(exc: Exception):
+    return _sidebar_error(
+        str(exc).strip() or exc.__class__.__name__,
+        503,
+        source_status="production_unavailable",
+        read_model_status="unavailable",
+    )
+
+
+def _get_limit(default: int, *, maximum: int) -> int:
     try:
-        return jsonify(
-            sidebar_v2.get_sidebar_workbench(
-                external_userid=request.args.get("external_userid", ""),
-                owner_userid=request.args.get("owner_userid", ""),
-            )
+        limit = int(request.args.get("limit") or default)
+    except (TypeError, ValueError):
+        limit = default
+    return max(1, min(limit, maximum))
+
+
+def sidebar_v2_workbench():
+    external_userid = str(request.args.get("external_userid") or "").strip()
+    if not external_userid:
+        return _sidebar_input_error("external_userid is required")
+    try:
+        payload = SidebarWorkbenchReadModel()(
+            external_userid=external_userid,
+            owner_userid=str(request.args.get("owner_userid") or "").strip(),
         )
+    except NotFoundError as exc:
+        return _sidebar_lookup_error(str(exc) or "customer not found")
     except ValueError as exc:
-        return _json_error(str(exc))
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    return jsonify({"ok": True, **payload, "route_owner": "ai_crm_next"})
 
 
 def sidebar_v2_update_profile():
     payload = request.get_json(silent=True) or {}
     try:
         return jsonify(
-            sidebar_v2.update_profile(
+            sidebar_v2_writes.update_profile(
                 external_userid=str(payload.get("external_userid") or ""),
                 source=str(payload.get("source") or ""),
                 industry=str(payload.get("industry") or ""),
@@ -39,34 +96,42 @@ def sidebar_v2_update_profile():
 
 
 def sidebar_v2_questionnaires():
+    external_userid = str(request.args.get("external_userid") or "").strip()
+    if not external_userid:
+        return _sidebar_input_error("external_userid is required")
     try:
-        return jsonify(sidebar_v2.get_questionnaires(external_userid=request.args.get("external_userid", "")))
+        payload = SidebarQuestionnaireReadModel()(external_userid=external_userid)
+    except NotFoundError as exc:
+        return _sidebar_lookup_error(str(exc) or "customer not found")
     except ValueError as exc:
-        return _json_error(str(exc))
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    return jsonify({"ok": True, **payload, "route_owner": "ai_crm_next"})
 
 
 def sidebar_v2_materials():
     try:
-        return jsonify(
-            sidebar_v2.list_materials(
-                material_type=request.args.get("type", ""),
-                limit=request.args.get("limit") or 50,
-            )
+        payload = SidebarMaterialReadModel()(
+            material_type=str(request.args.get("type") or "").strip(),
+            limit=_get_limit(50, maximum=200),
         )
     except ValueError as exc:
-        return _json_error(str(exc))
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    return jsonify({"ok": True, **payload, "route_owner": "ai_crm_next"})
 
 
 def sidebar_v2_image_thumbnail(image_id: int):
     try:
-        payload = sidebar_v2.get_image_thumbnail(image_id)
+        payload = SidebarMaterialReadModel().thumbnail(image_id)
     except LookupError as exc:
-        return _json_error(str(exc), 404)
+        return _sidebar_lookup_error(str(exc) or "image not found")
     except ValueError as exc:
-        return _json_error(str(exc))
-    redirect_url = str(payload.get("redirect_url") or "").strip()
-    if redirect_url:
-        return redirect(redirect_url, code=302)
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
     response = Response(payload.get("body") or b"", mimetype=str(payload.get("mime_type") or "image/png"))
     response.headers["Cache-Control"] = "private, max-age=86400"
     return response
@@ -76,7 +141,7 @@ def sidebar_v2_send_material():
     payload = request.get_json(silent=True) or {}
     try:
         return jsonify(
-            sidebar_v2.send_material(
+            sidebar_v2_writes.send_material(
                 external_userid=str(payload.get("external_userid") or ""),
                 owner_userid=str(payload.get("owner_userid") or ""),
                 material_type=str(payload.get("type") or ""),
@@ -90,30 +155,55 @@ def sidebar_v2_send_material():
 
 
 def sidebar_v2_other_staff_messages():
+    external_userid = str(request.args.get("external_userid") or "").strip()
+    if not external_userid:
+        return _sidebar_input_error("external_userid is required")
     try:
-        return jsonify(
-            sidebar_v2.get_other_staff_messages(
-                external_userid=request.args.get("external_userid", ""),
-                current_userid=request.args.get("current_userid", "") or request.args.get("owner_userid", ""),
-                limit=request.args.get("limit") or 20,
-            )
+        payload = SidebarOtherStaffMessagesReadModel()(
+            external_userid=external_userid,
+            current_userid=str(request.args.get("current_userid") or request.args.get("owner_userid") or "").strip(),
+            limit=_get_limit(20, maximum=100),
         )
     except ValueError as exc:
-        return _json_error(str(exc))
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    return jsonify({"ok": True, **payload, "route_owner": "ai_crm_next"})
 
 
 def sidebar_v2_products():
+    external_userid = str(request.args.get("external_userid") or "").strip()
+    if not external_userid:
+        return _sidebar_input_error("external_userid is required")
     try:
-        return jsonify(sidebar_v2.get_products(external_userid=request.args.get("external_userid", "")))
+        payload = SidebarCommerceReadModel().products(
+            external_userid=external_userid,
+            owner_userid=str(request.args.get("owner_userid") or "").strip(),
+            bind_by_userid=str(request.args.get("bind_by_userid") or "").strip(),
+        )
     except ValueError as exc:
-        return _json_error(str(exc))
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    return jsonify({"ok": True, **payload, "route_owner": "ai_crm_next"})
 
 
 def sidebar_v2_orders():
+    external_userid = str(request.args.get("external_userid") or "").strip()
+    if not external_userid:
+        return _sidebar_input_error("external_userid is required")
     try:
-        return jsonify(sidebar_v2.get_orders(external_userid=request.args.get("external_userid", "")))
+        payload = SidebarCommerceReadModel().orders(
+            external_userid=external_userid,
+            owner_userid=str(request.args.get("owner_userid") or "").strip(),
+        )
+    except NotFoundError as exc:
+        return _sidebar_lookup_error(str(exc) or "customer not found")
     except ValueError as exc:
-        return _json_error(str(exc))
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    return jsonify({"ok": True, **payload, "route_owner": "ai_crm_next"})
 
 
 def register_routes(bp):

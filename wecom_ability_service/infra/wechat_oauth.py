@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .http_client import OutboundHttpError, get_outbound_client
@@ -7,6 +8,19 @@ from .http_client import OutboundHttpError, get_outbound_client
 
 class WeChatOAuthRequestError(RuntimeError):
     pass
+
+
+def _decode_wechat_json(response: Any) -> dict[str, Any]:
+    content = getattr(response, "content", b"")
+    if content:
+        if isinstance(content, str):
+            raw = content
+        else:
+            raw = bytes(content).decode("utf-8")
+        payload = json.loads(raw)
+    else:
+        payload = response.json()
+    return payload if isinstance(payload, dict) else {}
 
 
 def _client(timeout: int):
@@ -33,9 +47,11 @@ def exchange_wechat_oauth_code(*, app_id: str, app_secret: str, code: str, timeo
             },
         )
         response.raise_for_status()
-        return response.json()
+        return _decode_wechat_json(response)
     except OutboundHttpError as exc:
         raise WeChatOAuthRequestError(str(exc)) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WeChatOAuthRequestError("wechat_oauth_response_decode_failed") from exc
 
 
 def fetch_wechat_userinfo(*, access_token: str, openid: str, timeout: int = 15) -> dict[str, Any]:
@@ -49,6 +65,8 @@ def fetch_wechat_userinfo(*, access_token: str, openid: str, timeout: int = 15) 
             },
         )
         response.raise_for_status()
-        return response.json()
+        return _decode_wechat_json(response)
     except OutboundHttpError as exc:
         raise WeChatOAuthRequestError(str(exc)) from exc
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise WeChatOAuthRequestError("wechat_oauth_response_decode_failed") from exc

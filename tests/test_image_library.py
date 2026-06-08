@@ -430,7 +430,7 @@ def test_get_image_returns_new_fields(app):
 # 已经覆盖业务逻辑）。完整 HTTP 集成测试在 PR-B 加（前端要走 client.post）。
 
 def test_endpoint_parse_tags_arg_csv_and_json():
-    from wecom_ability_service.http.image_library_endpoint import _parse_tags_arg
+    from wecom_ability_service.http.image_library_support import _parse_tags_arg
 
     assert _parse_tags_arg("好评,信任") == ["好评", "信任"]
     assert _parse_tags_arg('["好评", "信任"]') == ["好评", "信任"]
@@ -441,7 +441,7 @@ def test_endpoint_parse_tags_arg_csv_and_json():
 
 
 def test_endpoint_parse_bool_arg():
-    from wecom_ability_service.http.image_library_endpoint import _parse_bool_arg
+    from wecom_ability_service.http.image_library_support import _parse_bool_arg
 
     assert _parse_bool_arg("true") is True
     assert _parse_bool_arg("0") is False

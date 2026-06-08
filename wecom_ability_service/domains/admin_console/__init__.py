@@ -6,7 +6,6 @@ from .service import (
     build_questionnaire_index_payload,
     execute_customer_tag_action,
     execute_customer_task_action,
-    execute_operations_action,
     preview_customer_tag_action,
     preview_customer_task_action,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "build_questionnaire_index_payload",
     "execute_customer_tag_action",
     "execute_customer_task_action",
-    "execute_operations_action",
     "preview_customer_tag_action",
     "preview_customer_task_action",
 ]

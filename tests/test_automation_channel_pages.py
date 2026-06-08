@@ -235,6 +235,32 @@ def test_channel_create_and_link_edit_pages_render_type_specific_controls(app, c
     assert re.search(r'data-qrcode-section\s+hidden', edit_html)
 
 
+def test_blank_qrcode_channel_code_gets_unique_code_and_no_fake_download(app, client, monkeypatch):
+    login_admin(client, app, monkeypatch)
+    token = admin_action_token(client)
+
+    create_response = client.post(
+        "/api/admin/channels",
+        json={
+            "admin_action_token": token,
+            "channel_type": "qrcode",
+            "carrier_type": "qrcode",
+            "channel_name": "未填编码普通二维码",
+            "status": "active",
+        },
+    )
+
+    assert create_response.status_code == 201
+    saved = create_response.get_json()["channel"]
+    assert saved["channel_code"].startswith("channel_")
+    assert saved["channel_code"] != "default_qrcode"
+    assert saved["scene_value"] == ""
+
+    download_response = client.get(f"/api/admin/channels/{saved['id']}/qrcode/download")
+    assert download_response.status_code == 404
+    assert download_response.get_json()["reason"] == "qrcode_not_ready"
+
+
 def test_entry_channels_page_displays_two_types_and_filters_active_bound_links(app, client, monkeypatch):
     login_admin(client, app, monkeypatch)
     with app.app_context():
@@ -261,6 +287,15 @@ def test_qrcode_download_is_channel_qrcode_image_attachment_and_link_channel_rej
     login_admin(client, app, monkeypatch)
     with app.app_context():
         ids = _seed_page_channels()
+        no_qr = save_channel_resource(
+            {
+                "channel_code": "CH-NO-QR",
+                "channel_name": "未生成二维码渠道",
+                "channel_type": "qrcode",
+                "carrier_type": "qrcode",
+                "status": "active",
+            }
+        )
 
     direct_qrcode_png = b"\x89PNG\r\n\x1a\nactual-channel-qrcode-image"
 
@@ -282,6 +317,10 @@ def test_qrcode_download_is_channel_qrcode_image_attachment_and_link_channel_rej
     link_response = client.get(f"/api/admin/channels/{ids['bound_link_id']}/qrcode/download")
     assert link_response.status_code == 400
     assert link_response.get_json()["error"] == "link channel does not support qrcode download"
+
+    missing_response = client.get(f"/api/admin/channels/{no_qr['id']}/qrcode/download")
+    assert missing_response.status_code == 404
+    assert missing_response.get_json()["reason"] == "qrcode_not_ready"
 
 
 def _insert_program_member(

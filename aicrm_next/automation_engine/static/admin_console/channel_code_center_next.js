@@ -106,8 +106,22 @@
     return String(base || "").replace(/\/0($|[/?#])/, "/" + id + "$1");
   }
 
+  function parseJsonResponse(response) {
+    const contentType = response.headers.get("content-type") || "";
+    if (!contentType.includes("application/json")) {
+      return response.text().then((text) => ({
+        response,
+        data: {
+          ok: false,
+          detail: text || response.statusText || "non_json_response",
+        },
+      }));
+    }
+    return response.json().then((data) => ({ response, data }));
+  }
+
   function apiJson(url) {
-    return fetch(url, { credentials: "same-origin" }).then((response) => response.json().then((data) => ({ response, data })));
+    return fetch(url, { credentials: "same-origin" }).then(parseJsonResponse);
   }
 
   function postJson(url, payload) {
@@ -116,7 +130,27 @@
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
-    }).then((response) => response.json().then((data) => ({ response, data })));
+    }).then(parseJsonResponse);
+  }
+
+  function errorReason(data) {
+    const detail = data && data.detail;
+    if (typeof detail === "object" && detail) {
+      return detail.reason || detail.detail || detail.error || "";
+    }
+    return (data && (data.reason || data.error || detail)) || "";
+  }
+
+  function qrcodeGenerateMessage(reason) {
+    return {
+      owner_staff_id_required: "请先编辑渠道并选择负责人，再生成二维码",
+      link_channel_does_not_support_qrcode_generate: "企微获客助手链接不支持生成二维码",
+      channel_not_found: "渠道不存在或已删除",
+      qrcode_asset_scene_channel_conflict: "该二维码场景值已绑定其他渠道，请换一个场景值后重试",
+      wecom_adapter_disabled: "企微真实生成未开启，请检查企微运行配置",
+      wecom_credentials_missing: "企微配置缺失，请先补齐企微凭证",
+      wecom_api_error: "企微返回失败，请稍后重试或查看生成日志",
+    }[reason] || reason || "二维码生成失败";
   }
 
   function qrcodeReady(channel) {
@@ -142,12 +176,15 @@
     const bound = channel.bound_program_name
       ? `<span class="channel-pill is-bound">${escapeHtml(channel.bound_program_name)}</span>`
       : '<span class="channel-pill is-standalone">独立使用</span>';
-    const action = link
+    let action = link
       ? `<button class="admin-button admin-button--secondary" type="button" data-copy-channel-link data-copy-text="${escapeHtml(copyText)}">复制链接</button>
          <button class="admin-button admin-button--secondary" type="button" data-share-channel-link data-copy-text="${escapeHtml(copyText)}">分享链接</button>`
       : qrcodeReady(channel)
         ? `<a class="admin-button admin-button--secondary" href="${escapeHtml(downloadUrl)}">下载二维码</a>`
         : `<button class="admin-button admin-button--secondary" type="button" data-generate-channel-qrcode>生成二维码</button>`;
+    if (!link && !qrcodeReady(channel) && !String(channel.owner_staff_id || "").trim()) {
+      action = `<button class="admin-button admin-button--secondary" type="button" data-generate-channel-qrcode data-disabled-reason="owner_staff_id_required">生成二维码</button>`;
+    }
     return `
       <tr data-channel-row data-channel-id="${escapeHtml(channel.id)}" data-search-text="${escapeHtml(searchText)}">
         <td>
@@ -207,6 +244,11 @@
     }
     const generateButton = event.target.closest("[data-generate-channel-qrcode]");
     if (generateButton) {
+      const disabledReason = generateButton.dataset.disabledReason || "";
+      if (disabledReason) {
+        toast(qrcodeGenerateMessage(disabledReason));
+        return;
+      }
       const row = generateButton.closest("[data-channel-row]");
       const channelId = row ? row.dataset.channelId : "";
       if (!channelId) return;
@@ -214,7 +256,7 @@
       generateButton.textContent = "生成中";
       postJson(`/api/admin/channels/${encodeURIComponent(channelId)}/qrcode/generate`, {}).then(({ response, data }) => {
         if (!response.ok || data.ok === false) {
-          throw new Error(data.reason || data.detail?.reason || data.detail || "qrcode_generate_failed");
+          throw new Error(qrcodeGenerateMessage(errorReason(data)));
         }
         toast("二维码已生成");
         window.location.reload();

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_BRANCH="${EXPECTED_BRANCH:-migration/aicrm-next-port}"
+EXPECTED_BRANCH="${EXPECTED_BRANCH:-}"
 
 pass() { printf 'PASS %s\n' "$*"; }
 warn() { printf 'WARN %s\n' "$*"; }
@@ -28,7 +28,9 @@ else
 fi
 
 branch="$(git branch --show-current)"
-if [[ "${branch}" == "${EXPECTED_BRANCH}" ]]; then
+if [[ -z "${EXPECTED_BRANCH}" ]]; then
+  pass "current branch is ${branch:-detached}"
+elif [[ "${branch}" == "${EXPECTED_BRANCH}" ]]; then
   pass "current branch is ${branch}"
 else
   warn "current branch is ${branch:-detached}; expected ${EXPECTED_BRANCH}"

@@ -12,8 +12,10 @@ This note records the blocker fix path for the June 9, 2026 full server staging 
 
 ## Fix Path
 
+This was the pre-closeout rehearsal unblock path. Current startup closeout supersedes it: production schema changes now use `python3 -m alembic upgrade head`, and `app.py` legacy/bootstrap init commands are removed.
+
 - In PostgreSQL runtime, User Ops now resolves to SQLAlchemy/PostgreSQL repository by default unless explicitly configured otherwise for non-production experimentation.
-- `python3 app.py init-next-schema-safe` and `scripts/siyuan_migration/06_safe_next_schema_init.sql` create missing AI-CRM Next customer read-model and User Ops SQL read-model tables/indexes using only safe `CREATE ... IF NOT EXISTS` statements.
+- Historical pre-closeout `python3 app.py init-next-schema-safe` and `scripts/siyuan_migration/06_safe_next_schema_init.sql` created missing AI-CRM Next customer read-model and User Ops SQL read-model tables/indexes using only safe `CREATE ... IF NOT EXISTS` statements.
 - `scripts/siyuan_migration/07_validate_next_blockers.sql` checks whether the blocker tables exist before smoke testing.
 
 ## Alembic Follow-up

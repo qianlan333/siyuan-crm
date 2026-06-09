@@ -35,13 +35,13 @@
 ## 4. Health / Init / Safe Schema Init
 
 - `python3 app.py health`: 200，`route_owner=ai_crm_next`。
-- 第一次使用 `postgresql+psycopg://` 执行 `init-db-legacy` 时，legacy psycopg 连接器不接受 SQLAlchemy scheme；未继续该失败路径。
+- Historical pre-closeout record: 第一次使用 `postgresql+psycopg://` 执行 `init-db-legacy` 时，legacy psycopg 连接器不接受 SQLAlchemy scheme；未继续该失败路径。
 - 改用同一 staging DB 的标准 PostgreSQL URL 后：
   - `python3 app.py health`: 200。
-  - `python3 app.py init-db-legacy`: success。
-  - `python3 app.py init-next-schema-safe`: success，`drop_or_truncate_executed=False`。
+  - Historical pre-closeout `python3 app.py init-db-legacy`: success。
+  - Historical pre-closeout `python3 app.py init-next-schema-safe`: success，`drop_or_truncate_executed=False`。
 
-说明：AI-CRM Next SQLAlchemy 入口可接受标准 PostgreSQL URL 并转换；legacy init 当前需要标准 PostgreSQL URL。
+说明：AI-CRM Next SQLAlchemy 入口可接受标准 PostgreSQL URL 并转换；当前 startup closeout 后 schema 变更只走 `python3 -m alembic upgrade head`。
 
 ## 5. Customer / User Ops Next 表存在性
 
@@ -181,7 +181,7 @@ Safe schema init 后确认以下表均存在：
 仍需人工确认项：
 
 - Next customer read-model projection 表为空；生产切换前需要执行或确认 customer projection backfill/source sync，否则 customer/sidebar 对真实 external_userid 只能返回 not_found/input_error。
-- `init-db-legacy` 当前需要标准 PostgreSQL URL；如果生产 env 使用 SQLAlchemy URL，需要在 runbook 中对 legacy init 使用 normalized CLI URL 或单独修复 legacy connector。
+- Historical pre-closeout `init-db-legacy` URL 限制仅保留为演练记录；当前生产 runbook 不再使用 legacy init。
 - `scripts/siyuan_migration/07_validate_next_blockers.sql` 原版本在 psql autocommit 下会因 `ON COMMIT DROP` 失败；本报告 PR 同步修复为普通临时表并使用 `DELETE` 清空。
 
 ## 12. 是否可以进入生产切换窗口
@@ -195,7 +195,7 @@ Safe schema init 后确认以下表均存在：
 1. 冻结写入入口。
 2. 做最终生产 DB/env/assets 备份。
 3. 恢复最终 dump 到 staging/next DB。
-4. 执行 `init-db-legacy`、`init-next-schema-safe`、channel backfill、customer projection backfill。
+4. 执行 `python3 -m alembic upgrade head`、channel backfill、customer projection backfill。
 5. 跑 smoke test 和 3 个旧 scene diagnosis。
 6. 人工确认 customer/sidebar 至少能读取抽样客户基础信息。
 7. 再切 systemd/nginx 到新 release。

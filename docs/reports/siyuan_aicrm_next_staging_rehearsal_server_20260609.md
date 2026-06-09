@@ -179,7 +179,7 @@
 4. 可以使用生产 `DATABASE_URL` 执行 `pg_dump`。
 5. 可以创建或访问 staging DB `siyuancrm_next`。
 6. 可以对 `siyuancrm_next` 执行 `pg_restore --clean --if-exists --no-owner`。
-7. 可以运行 `python3 app.py health`、`historical deprecated python3 app.py init-db-legacy` 和 `python3 app.py run`。
+7. 可以运行 `python3 app.py health`、`python3 -m alembic upgrade head` 和 `python3 app.py run`；`init-db-legacy` 仅作为 historical deprecated 记录，不再是当前 startup 操作。
 8. 可以只对 staging DB 执行 backfill 和 validate SQL。
 
 ## 14. 生产切换建议

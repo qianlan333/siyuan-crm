@@ -2,7 +2,7 @@ CREATE TEMP TABLE IF NOT EXISTS _siyuan_next_blocker_validation (
     check_name text,
     status text,
     count_value bigint
-) ON COMMIT DROP;
+);
 
 DELETE FROM _siyuan_next_blocker_validation;
 

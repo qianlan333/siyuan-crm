@@ -8,14 +8,18 @@ ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DIR = ROOT / "wecom_ability_service"
 
 
-def test_production_deploy_loads_postgres_env_before_init_db():
+def test_production_deploy_loads_postgres_env_before_alembic_upgrade():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     env_source_index = workflow.index("source /home/ubuntu/.openclaw-wecom-pg.env")
     database_url_guard_index = workflow.index('test -n "${DATABASE_URL:-}"')
-    init_db_index = workflow.index("python3 app.py init-db")
+    alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
 
-    assert env_source_index < database_url_guard_index < init_db_index
+    assert env_source_index < database_url_guard_index < alembic_upgrade_index
+    assert "python3 app.py init-db" not in workflow
+    assert "python app.py init-db" not in workflow
+    assert "init-db-legacy" not in workflow
+    assert "alembic stamp head" not in workflow
 
 
 def test_production_deploy_stashes_dirty_worktree_before_remote_update():
@@ -37,9 +41,9 @@ def test_production_deploy_installs_dependencies_only_when_requirements_change()
     after_sha_index = workflow.index('after_sha="$(git rev-parse HEAD)"')
     requirements_guard_index = workflow.index('git diff --quiet "$before_sha" "$after_sha" -- requirements.txt')
     pip_install_index = workflow.index("pip install -r requirements.txt")
-    init_db_index = workflow.index("python3 app.py init-db")
+    alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
 
-    assert fetch_index < reset_index < after_sha_index < requirements_guard_index < pip_install_index < init_db_index
+    assert fetch_index < reset_index < after_sha_index < requirements_guard_index < pip_install_index < alembic_upgrade_index
     assert "requirements.txt unchanged; skipping pip install" in workflow
 
 

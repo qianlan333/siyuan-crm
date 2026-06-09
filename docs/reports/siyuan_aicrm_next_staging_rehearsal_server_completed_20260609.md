@@ -64,7 +64,7 @@ AI-CRM Next 连接 staging DB 后执行：
 - route_owner：`ai_crm_next`
 - `python3 app.py routes`：成功
 - route inventory count：`594`
-- `python3 app.py init-db-legacy`：成功
+- `historical deprecated python3 app.py init-db-legacy`：成功
 
 关键表存在性：
 
@@ -272,7 +272,7 @@ fixture_repository_blocked_in_production
 - dump 恢复到 `siyuancrm_next` 成功。
 - AI-CRM Next 可连接 staging DB。
 - `/health` 成功。
-- `init-db-legacy` 成功。
+- Historical record: deprecated `init-db-legacy` succeeded during that rehearsal; current startup closeout uses Alembic migrations instead.
 - channel backfill 成功且幂等。
 - validate migration 在应用 PR #46 修复后输出完整。
 - 3 个旧 scene runtime diagnosis 均无 5xx。

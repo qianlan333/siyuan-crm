@@ -35,10 +35,7 @@ EXCLUDED_DIRS = {
 LEGACY_IMPORT_ALLOWLIST = {
     Path("aicrm_next/frontend_compat/legacy_routes.py"),
 }
-WECOM_IMPORT_ALLOWLIST = {
-    Path("app.py"),
-    Path("legacy_flask_app.py"),
-}
+WECOM_IMPORT_ALLOWLIST = set()
 API_SIDE_EFFECT_ALLOWLIST = set()
 SIDE_EFFECT_MARKERS = {
     "dispatch_wecom_task",
@@ -931,6 +928,84 @@ def scan_source_tree(root: Path = ROOT) -> list[Violation]:
             for marker in SIDE_EFFECT_MARKERS:
                 if marker in text:
                     violations.append(Violation("api_direct_external_side_effect", str(rel), marker))
+    return violations
+
+
+def check_startup_legacy_closeout(root: Path = ROOT) -> list[Violation]:
+    violations: list[Violation] = []
+
+    app_path = root / "app.py"
+    legacy_runner = root / "legacy_flask_app.py"
+    checker_path = root / "scripts/check_no_new_legacy.py"
+    deploy_path = root / ".github/workflows/deploy.yml"
+
+    if legacy_runner.exists():
+        violations.append(
+            Violation(
+                "legacy_flask_app_file_remaining",
+                str(legacy_runner.relative_to(root)),
+                "legacy_flask_app.py must not exist after startup compatibility closeout",
+            )
+        )
+
+    app_text = app_path.read_text(encoding="utf-8") if app_path.exists() else ""
+    forbidden_app_markers = {
+        "wecom_ability_service": "app_py_imports_legacy_startup",
+        "run_legacy": "app_py_legacy_command_executes",
+        "init_db_legacy": "app_py_legacy_command_executes",
+        "delete_questionnaire_submissions_legacy": "app_py_legacy_command_executes",
+        "create_app()": "app_py_legacy_command_executes",
+        "init_db()": "app_py_legacy_command_executes",
+        "delete_questionnaire_submissions_by_slug": "app_py_legacy_command_executes",
+    }
+    for marker, code in forbidden_app_markers.items():
+        if marker in app_text:
+            violations.append(Violation(code, "app.py", marker))
+
+    required_app_markers = (
+        'NEXT_APP_IMPORT = "aicrm_next.main:app"',
+        "run_next",
+        "print_next_health",
+        "print_next_routes",
+        "removed_legacy_command",
+        "run-legacy",
+        "init-db",
+        "init-db-legacy",
+    )
+    for marker in required_app_markers:
+        if marker not in app_text:
+            violations.append(Violation("app_py_next_only_marker_missing", "app.py", marker))
+
+    deploy_text = deploy_path.read_text(encoding="utf-8") if deploy_path.exists() else ""
+    forbidden_deploy_markers = (
+        "python3 app.py init-db",
+        "python app.py init-db",
+        "init-db-legacy",
+        "legacy_flask_app",
+        "alembic stamp head",
+    )
+    for marker in forbidden_deploy_markers:
+        if marker in deploy_text:
+            violations.append(Violation("deploy_workflow_uses_legacy_init_db", str(deploy_path.relative_to(root)), marker))
+
+    required_deploy_markers = (
+        "source /home/ubuntu/.openclaw-wecom-pg.env",
+        'test -n "${DATABASE_URL:-}"',
+        "python3 -m alembic upgrade head",
+    )
+    for marker in required_deploy_markers:
+        if marker not in deploy_text:
+            violations.append(Violation("deploy_workflow_missing_alembic_upgrade", str(deploy_path.relative_to(root)), marker))
+
+    checker_text = checker_path.read_text(encoding="utf-8") if checker_path.exists() else ""
+    stale_allowlist_markers = (
+        'Path("' + 'app.py' + '")',
+        'Path("' + 'legacy_flask_app.py' + '")',
+    )
+    for marker in stale_allowlist_markers:
+        if marker in checker_text:
+            violations.append(Violation("startup_wecom_allowlist_not_empty", str(checker_path.relative_to(root)), marker))
+
     return violations
 
 
@@ -6690,6 +6765,7 @@ def check_post_legacy_architecture_freeze(root: Path = ROOT) -> list[Violation]:
 def run_checks(*, strict: bool) -> dict:
     violations = (
         scan_source_tree(ROOT)
+        + check_startup_legacy_closeout(ROOT)
         + check_group_ops_message_content_native(ROOT)
         + check_group_ops_material_resolver_native(ROOT)
         + check_group_ops_scheduler_duplicate_checker_native(ROOT)

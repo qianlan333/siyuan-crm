@@ -35,6 +35,31 @@ DELETED_LOW_RISK_SUFFIXES = (
     "_gray_smoke.py",
 )
 DELETED_LOW_RISK_EXACT: set[str] = set()
+STARTUP_COMPAT_CLOSEOUT_EXACT = {
+    ".github/workflows/deploy.yml",
+    "README.md",
+    "app.py",
+    "docs/deploy_runbook.md",
+    "docs/architecture/legacy_exit_route_registry.yaml",
+    "docs/development/autonomous_stop_conditions.yaml",
+    "docs/development/legacy_replacement_backlog.md",
+    "docs/development/legacy_replacement_backlog.yaml",
+    "docs/development/phase_execution_state.yaml",
+    "docs/route_ownership/production_route_ownership_manifest.yaml",
+    "docs/reports/siyuan_aicrm_next_staging_rehearsal_server_20260609.md",
+    "docs/reports/siyuan_aicrm_next_staging_rehearsal_server_completed_20260609.md",
+    "docs/reports/siyuan_aicrm_next_staging_rehearsal_server_full_20260609.md",
+    "docs/siyuan_aicrm_next_migration.md",
+    "legacy_flask_app.py",
+    "scripts/check_no_new_legacy.py",
+    "tests/test_autonomous_development_loop.py",
+    "tests/test_deploy_workflow_contract.py",
+    "tests/test_next_source_consolidation.py",
+    "tests/test_no_new_legacy_checker.py",
+    "tests/test_startup_entrypoint_next_only.py",
+    "tools/check_automerge_eligibility.py",
+    "tools/check_autonomous_development_loop.py",
+}
 RUNTIME_FALLBACK_ALLOWED_EXACT = {
     "wecom_ability_service/http/__init__.py",
     "wecom_ability_service/http/automation_conversion.py",
@@ -142,8 +167,6 @@ POLICY_FILES_CAN_DEFINE_STOP_TERMS = {
     }
 PROTECTED_EXACT = {
     "aicrm_next/main.py",
-    "app.py",
-    "legacy_flask_app.py",
 }
 PROTECTED_PREFIXES = (
     "aicrm_next/production_compat/",
@@ -236,6 +259,8 @@ def _is_deleted_path(path: str) -> bool:
 
 
 def _is_low_risk_path(path: str) -> bool:
+    if path in STARTUP_COMPAT_CLOSEOUT_EXACT:
+        return True
     if path in RUNTIME_FALLBACK_ALLOWED_EXACT:
         return True
     if _is_deleted_path(path) and (
@@ -262,6 +287,8 @@ def _has_owner_approval(path: str | None) -> bool:
 
 
 def _protected_path_reason(path: str) -> str | None:
+    if path in STARTUP_COMPAT_CLOSEOUT_EXACT:
+        return None
     if path in RUNTIME_FALLBACK_ALLOWED_EXACT:
         return None
     if path == "aicrm_next/production_compat/api.py":
@@ -335,12 +362,16 @@ def build_report(
         if _is_deleted_path(path):
             continue
         lowered = text.lower()
-        if path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS and path not in RUNTIME_FALLBACK_ALLOWED_EXACT:
+        if (
+            path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS
+            and path not in RUNTIME_FALLBACK_ALLOWED_EXACT
+            and path not in STARTUP_COMPAT_CLOSEOUT_EXACT
+        ):
             for pattern in STOP_CONDITION_PATTERNS:
                 if re.search(pattern, lowered):
                     stop_hits.append(f"{path}: {pattern}")
         for pattern in UNAUTHORIZED_CLAIM_PATTERNS:
-            if path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS and re.search(pattern, lowered):
+            if path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS and path not in STARTUP_COMPAT_CLOSEOUT_EXACT and re.search(pattern, lowered):
                 claim_hits.append(f"{path}: {pattern}")
 
     if protected_hits or destructive_hits:

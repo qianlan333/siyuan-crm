@@ -3,6 +3,7 @@ status: legacy_exit_foundation_validated_locked
 notes:
   - Supplements docs/route_ownership/production_route_ownership_manifest.yaml with Legacy Exit specific fields.
   - production_compat empty router has been removed; no production_compat runtime route or fallback remains.
+  - "Startup compatibility closeout completed: app.py is Next-only; legacy_flask_app.py removed; deploy workflow uses Alembic upgrade path; WECOM_IMPORT_ALLOWLIST cleared. wecom_ability_service remains only as non-startup legacy maintenance code until separately archived."
   - Sample lifecycle items are marked sample=true and are excluded from production deletion decisions.
   - Foundation group 1 is validated and locked by docs/architecture/legacy_exit_foundation_closeout.md; do not roll back these guards without a replacement closeout.
 routes:

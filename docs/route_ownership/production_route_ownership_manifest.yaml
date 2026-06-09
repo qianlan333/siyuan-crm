@@ -3,6 +3,7 @@ status: manifest_only_no_runtime_change
 notes:
   - AI-CRM Next is the default FastAPI modular monolith runtime.
   - production_compat empty router has been removed; no production_compat runtime route or fallback remains.
+  - "Startup compatibility closeout completed: app.py is Next-only; legacy_flask_app.py removed; deploy workflow uses Alembic upgrade path; WECOM_IMPORT_ALLOWLIST cleared. wecom_ability_service remains only as non-startup legacy maintenance code until separately archived."
   - Real external side effects remain blocked, fake, guarded, or staging-disabled unless separately approved.
 routes:
   - route_pattern: /health

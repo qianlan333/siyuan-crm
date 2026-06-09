@@ -19,7 +19,7 @@
 2. 新建 `siyuancrm_next` 预发库。
 3. 使用 `pg_restore` 把当前 siyuan 备份恢复到预发库。
 4. 使用 AI-CRM Next 新代码连接预发库。
-5. 运行 `python3 app.py init-db-legacy` 做 legacy schema 初始化/升级。
+5. 运行 `python3 -m alembic upgrade head` 做 AI-CRM Next schema 初始化/升级。
 6. 运行渠道码 backfill，补齐 `automation_channel_scene_alias` 和 `automation_channel_qrcode_asset`。
 7. 校验 admin、channels、sidebar、user-ops、callback diagnosis 等关键入口。
 8. 验证通过后，再按蓝绿方式切换生产。
@@ -31,7 +31,7 @@
 比较结论：
 
 - AI-CRM 的 `app.py` 已经默认使用 FastAPI / `aicrm_next.main:app`，`python3 app.py run` 会通过 uvicorn 启动 AI-CRM Next。
-- AI-CRM 保留 `legacy_flask_app.py`，旧 Flask 只能通过显式 fallback 命令启动。
+- AI-CRM Next startup compatibility 已关闭；旧 Flask startup 命令只作为历史记录，不再是可执行入口。
 - siyuan-crm `main` 迁移前仍以旧 Flask / `wecom_ability_service.create_app()` 为主入口，且没有 `legacy_flask_app.py`。
 - siyuan-crm 的客户侧部署资产和配置说明不能简单覆盖，包括 `.env.example`、`deploy/openclaw-*` systemd/timer 模板、`WW_verify_*.txt` / `MP_verify_*.txt` 验证文件、`xinliushangye.com` 相关回调配置说明，以及“心流商业客户管理”品牌文案。
 - AI-CRM 必须整体带入的新模块包括 `aicrm_next/` FastAPI modular monolith、Next admin shell、admin auth/config/jobs、automation engine、channel entry、customer read model/sidebar v2、commerce/wechat pay/alipay、cloud orchestrator、group_ops、owner migration、radar links、media library、message archive、platform foundation，以及对应 migrations、schema、scripts 和测试契约。
@@ -90,11 +90,10 @@ source scripts/siyuan_migration/lib_db_url.sh
 PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
 
 python3 app.py health
-python3 app.py init-db-legacy
-python3 app.py init-next-schema-safe
+python3 -m alembic upgrade head
 ```
 
-`init-next-schema-safe` 是 Alembic revision graph 治理完成前的预发/生产演练解阻路径。它只执行 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，用于补齐 AI-CRM Next customer read model 与 User Ops SQL read model 缺失表，不会 `DROP`、`TRUNCATE` 或覆盖已有数据。也可以直接执行 SQL 文件：
+历史预发演练曾使用 safe SQL 解阻缺表；当前 startup closeout 后，正式 schema 初始化/升级入口为 Alembic。safe SQL 文件仅保留为人工诊断参考，不是 active deploy command：
 
 ```bash
 psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/06_safe_next_schema_init.sql
@@ -166,10 +165,10 @@ USER_OPS_REPO_BACKEND=sqlalchemy
 如果 `/api/admin/user-ops/overview` 返回 `user_ops_schema_missing`，或 customer/sidebar 接口提示缺少 `customer_detail_snapshot_next` 等 Next 表，请先运行：
 
 ```bash
-python3 app.py init-next-schema-safe
+python3 -m alembic upgrade head
 ```
 
-当前 Alembic revision graph 仍需后续专项治理：本次诊断显示 `0012`、`0016` 存在重复 revision，且 `0014_alipay_pay.py` 引用缺失的 `0013`。在 migration graph 修复前，不要让生产切换依赖 `alembic upgrade head`。
+如果 Alembic 迁移失败，应先修复 migration graph 或具体 revision，不要回退到 legacy Flask `init-db`。
 
 ## 9. 授权配置保留说明
 

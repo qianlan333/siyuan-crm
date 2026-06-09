@@ -611,11 +611,22 @@ def _save_fixture_channel(payload: dict[str, Any], channel_id: int | None = None
     global _NEXT_ID
     existing = _FIXTURE_CHANNELS.get(int(channel_id or 0), {}) if channel_id else {}
     data = _coerce_channel_payload(payload, existing=existing)
+    auto_accept_changed = bool(
+        channel_id
+        and _bool(data.get("auto_accept_friend")) != _bool(existing.get("auto_accept_friend"))
+        and _text(data.get("carrier_type") or existing.get("carrier_type")) != "link"
+    )
     if channel_id is None:
         channel_id = _NEXT_ID
         _NEXT_ID += 1
     now = datetime.now(timezone.utc).isoformat()
     channel = {**existing, **data, "id": int(channel_id), "updated_at": now, "created_at": existing.get("created_at") or now}
+    if auto_accept_changed and isinstance(channel.get("_active_qrcode_asset"), dict):
+        channel["_active_qrcode_asset"] = {
+            **channel["_active_qrcode_asset"],
+            "status": "stale",
+            "stale_reason": "auto_accept_friend_changed",
+        }
     _FIXTURE_CHANNELS[int(channel_id)] = channel
     return _serialize_channel(channel)
 
@@ -653,6 +664,11 @@ def _save_postgres_channel(payload: dict[str, Any], channel_id: int | None = Non
     ]
     values = [Jsonb(data[key]) if key.endswith("_ids") else data[key] for key in columns]
     owner_changed = bool(channel_id and _text((existing or {}).get("owner_staff_id")) and _text(data.get("owner_staff_id")) and _text((existing or {}).get("owner_staff_id")) != _text(data.get("owner_staff_id")))
+    auto_accept_changed = bool(
+        channel_id
+        and _bool(data.get("auto_accept_friend")) != _bool((existing or {}).get("auto_accept_friend"))
+        and _text(data.get("carrier_type") or (existing or {}).get("carrier_type")) != "link"
+    )
     with conn:
         with conn.cursor() as cur:
             if channel_id:
@@ -672,6 +688,8 @@ def _save_postgres_channel(payload: dict[str, Any], channel_id: int | None = Non
         conn.commit()
     if owner_changed:
         channel_entry_repo.mark_qrcode_asset_stale(saved_id, reason="owner_staff_id_changed")
+    if auto_accept_changed:
+        channel_entry_repo.mark_qrcode_asset_stale(saved_id, reason="auto_accept_friend_changed")
     return get_channel_resource(saved_id) or {"id": saved_id, **data}
 
 

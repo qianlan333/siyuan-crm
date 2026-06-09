@@ -68,6 +68,44 @@ def test_download_returns_attachment_for_current_active_asset(monkeypatch):
     assert response.headers["x-aicrm-qr-asset-id"] == "9"
 
 
+def test_auto_accept_change_marks_generated_qrcode_stale(monkeypatch):
+    client = _client(monkeypatch)
+    channel = client.post(
+        "/api/admin/channels",
+        json={"channel_name": "自动通过渠道", "channel_code": "signup", "auto_accept_friend": False},
+    ).json()["channel"]
+    channel_id = int(channel["id"])
+    channels_api._FIXTURE_CHANNELS[channel_id]["scene_value"] = "aqr_current"
+    channels_api._FIXTURE_CHANNELS[channel_id]["qr_url"] = "https://wework.qpic.cn/current"
+    channels_api._FIXTURE_CHANNELS[channel_id]["_active_qrcode_asset"] = {
+        "id": 9,
+        "channel_id": channel_id,
+        "scene_value": "aqr_current",
+        "qr_url": "https://wework.qpic.cn/current",
+        "status": "active",
+    }
+
+    updated = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={
+            "channel_name": "自动通过渠道",
+            "channel_code": "signup",
+            "auto_accept_friend": True,
+        },
+    )
+    status = client.get(f"/api/admin/channels/{channel_id}/qrcode/status")
+    download = client.get(f"/api/admin/channels/{channel_id}/qrcode/download", follow_redirects=False)
+
+    assert updated.status_code == 200
+    assert updated.json()["channel"]["auto_accept_friend"] is True
+    assert updated.json()["channel"]["qrcode_status"] not in {"active", "generated"}
+    assert status.status_code == 200
+    assert status.json()["downloadable"] is False
+    assert status.json()["reason"] == "qrcode_asset_not_downloadable"
+    assert download.status_code == 409
+    assert download.json()["reason"] == "qrcode_asset_not_downloadable"
+
+
 def test_download_rejects_channel_cache_and_asset_mismatch(monkeypatch):
     client = _client(monkeypatch)
     channel = client.post("/api/admin/channels", json={"channel_name": "错配二维码", "channel_code": "signup"}).json()["channel"]

@@ -179,6 +179,30 @@ def get_active_qrcode_asset(channel_id: int) -> dict[str, Any] | None:
         return dict(row) if row else None
 
 
+def resolve_external_contact_customer_name(external_userid: str, *, corp_id: str = "") -> str:
+    external = text(external_userid)
+    if not external:
+        return ""
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT COALESCE(name, '') AS customer_name
+            FROM wecom_external_contact_identity_map
+            WHERE external_userid = %s
+              AND COALESCE(name, '') <> ''
+              AND (%s = '' OR corp_id = %s)
+            ORDER BY CASE WHEN corp_id = %s THEN 0 ELSE 1 END,
+                     last_seen_at DESC NULLS LAST,
+                     updated_at DESC NULLS LAST,
+                     id DESC
+            LIMIT 1
+            """,
+            (external, text(corp_id), text(corp_id), text(corp_id)),
+        )
+        row = cur.fetchone()
+    return text((row or {}).get("customer_name"))
+
+
 def list_channel_qrcode_assets(channel_id: int, limit: int = 20) -> list[dict[str, Any]]:
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(

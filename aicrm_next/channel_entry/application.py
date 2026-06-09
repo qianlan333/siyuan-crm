@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 from typing import Any
 
@@ -27,6 +28,8 @@ from .schemas import (
 )
 from .wecom_adapter import WeComAdapterBlocked, WeComApiError, get_wecom_adapter, wecom_adapter_diagnostics
 from .wecom_crypto import build_encrypted_reply, decrypt_message, parse_callback_xml, verify_signature
+
+CUSTOMER_NAME_PLACEHOLDER_RE = re.compile(r"\{\{\s*客户名\s*\}\}")
 
 
 def callback_config() -> dict[str, str]:
@@ -212,6 +215,25 @@ def _welcome_attachments(channel: dict[str, Any]) -> tuple[list[dict[str, Any]],
     return attachments, ""
 
 
+def _resolve_welcome_customer_name(command: ProcessChannelEntryCommand) -> str:
+    try:
+        return text(
+            repo.resolve_external_contact_customer_name(
+                command.external_contact_id,
+                corp_id=extract_corp_id(command.payload_json),
+            )
+        )
+    except Exception:
+        return ""
+
+
+def _render_welcome_message_template(message: Any, command: ProcessChannelEntryCommand) -> str:
+    rendered = text(message)
+    if not CUSTOMER_NAME_PLACEHOLDER_RE.search(rendered):
+        return rendered
+    return CUSTOMER_NAME_PLACEHOLDER_RE.sub(_resolve_welcome_customer_name(command), rendered)
+
+
 def _send_welcome(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], scene: str) -> dict[str, Any]:
     channel_id = int(channel.get("id") or 0)
     welcome_code = extract_welcome_code(command.payload_json)
@@ -223,7 +245,7 @@ def _send_welcome(command: ProcessChannelEntryCommand, *, channel: dict[str, Any
         result = {"attempted": True, "sent": False, "reason": attachment_error, "attachments": attachments}
         _log_effect(command, effect_type="welcome_message", idempotency_key=key, status="failed", channel_id=channel_id, scene_value=scene, reason=attachment_error, response_json=result)
         return result
-    text_content = text(channel.get("welcome_message"))
+    text_content = _render_welcome_message_template(channel.get("welcome_message"), command)
     if not text_content and not attachments:
         result = {"attempted": False, "sent": False, "reason": "no_welcome_message_configured"}
         _log_effect(command, effect_type="welcome_message", idempotency_key=key, status="skipped", channel_id=channel_id, scene_value=scene, reason=result["reason"], response_json=result)

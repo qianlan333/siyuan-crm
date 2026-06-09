@@ -39,6 +39,38 @@ def test_welcome_supports_text_image_file_miniprogram(monkeypatch):
     assert [item["msgtype"] for item in sent[0]["attachments"]] == ["image", "file", "miniprogram"]
 
 
+def test_welcome_renders_customer_name_placeholder_from_identity_name(monkeypatch):
+    channel = {"id": 10, "scene_value": "scene-a", "status": "active", "owner_staff_id": "sales", "welcome_message": "你好啊，{{客户名}}测试客户名", "entry_tag_id": ""}
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.application.repo.resolve_external_contact_customer_name",
+        lambda external_userid, **kwargs: "刘惠福",
+    )
+    sent, previous = _base(monkeypatch, channel)
+    try:
+        result = process_channel_entry(ProcessChannelEntryCommand(external_contact_id="wm", payload_json={"State": "scene-a", "WelcomeCode": "wc"}, send_welcome_message=True))
+    finally:
+        set_wecom_adapter(previous)
+
+    assert result["welcome_message"]["sent"] is True
+    assert sent[0]["text"]["content"] == "你好啊，刘惠福测试客户名"
+
+
+def test_welcome_customer_name_placeholder_is_empty_when_identity_name_missing(monkeypatch):
+    channel = {"id": 10, "scene_value": "scene-a", "status": "active", "owner_staff_id": "sales", "welcome_message": "你好啊，{{ 客户名 }}", "entry_tag_id": ""}
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.application.repo.resolve_external_contact_customer_name",
+        lambda external_userid, **kwargs: "",
+    )
+    sent, previous = _base(monkeypatch, channel)
+    try:
+        result = process_channel_entry(ProcessChannelEntryCommand(external_contact_id="wm_external_id", payload_json={"State": "scene-a", "WelcomeCode": "wc"}, send_welcome_message=True))
+    finally:
+        set_wecom_adapter(previous)
+
+    assert result["welcome_message"]["sent"] is True
+    assert sent[0]["text"]["content"] == "你好啊，"
+
+
 def test_welcome_attachment_limit_failed(monkeypatch):
     channel = {"id": 10, "scene_value": "scene-a", "status": "active", "owner_staff_id": "sales", "welcome_message": "hello", "entry_tag_id": "", "welcome_image_library_ids": [1, 2, 3, 4], "welcome_attachment_library_ids": [5, 6, 7], "welcome_miniprogram_library_ids": [8, 9, 10]}
     sent, previous = _base(monkeypatch, channel)
@@ -50,4 +82,3 @@ def test_welcome_attachment_limit_failed(monkeypatch):
     assert result["welcome_message"]["sent"] is False
     assert result["welcome_message"]["reason"] == "attachment_limit_exceeded"
     assert sent == []
-

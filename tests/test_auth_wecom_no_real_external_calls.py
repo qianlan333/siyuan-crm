@@ -17,8 +17,8 @@ def test_auth_wecom_exact_routes_do_not_execute_real_oauth_or_wecom(monkeypatch)
         response = client.get(path)
         payload = response.json()
 
-        assert response.status_code in {410, 503}
-        assert payload["adapter_mode"] == "real_blocked"
+        assert response.status_code in {400, 410, 503}
+        assert payload.get("adapter_mode", "blocked") == "blocked"
         assert payload["fallback_used"] is False
         assert payload["real_external_call_executed"] is False
         assert "access_token" not in str(payload)

@@ -25,6 +25,8 @@
 - 最终备份目录可写，且不在 git 仓库内。
 - 企业微信/公众号后台 callback 域名和路径已确认不变，或已准备同步修改方案。
 - 当前生产资产目录已确认，例如 `/home/ubuntu/极简 crm`。
+- 生产 env 已显式设置 `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live`，用于启用 AI-CRM Next 原生企业微信后台登录。
+- `WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`ADMIN_LOGIN_REDIRECT_URI` 均存在，且 `ADMIN_LOGIN_REDIRECT_URI` 与企业微信后台配置的 `/auth/wecom/callback` 回调地址一致。
 
 ## 3. 冻结写入入口
 
@@ -106,6 +108,7 @@ export APP_ENV=production
 export DEPLOY_ENV=production
 export AICRM_NEXT_ENV=production
 export AICRM_NEXT_ALLOW_FIXTURE_REPO_IN_PROD=false
+export AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live
 export USER_OPS_REPO_BACKEND=sqlalchemy
 export CUSTOMER_READ_MODEL_REPO_BACKEND=sqlalchemy
 
@@ -139,6 +142,21 @@ psql "$PG_CLI_TARGET_DATABASE_URL" -f scripts/siyuan_migration/08_validate_custo
 
 `init-db` 当前只是兼容别名，仍建议同时执行 `init-next-schema-safe` 作为明确记录。不要使用 `init-db-legacy`。
 
+企业微信后台登录预检：
+
+```bash
+curl -i "http://127.0.0.1:5001/auth/wecom/callback"
+curl -i "http://127.0.0.1:5001/auth/wecom/callback?code=dummy&state=dummy"
+curl -i "http://127.0.0.1:5001/auth/wecom/start?mode=qr&next=/admin"
+```
+
+预期：
+
+- 缺少 `code` 返回 `400 missing_wecom_code`。
+- dummy `code/state` 返回 `400 invalid_or_expired_state`，不能再出现 `503 external_call_blocked`。
+- live 模式且配置完整时，`/auth/wecom/start` 返回 302 企业微信授权地址。
+- 正式切换窗口必须至少完成一次真实企业微信授权登录，确认可进入 `/admin` 且 session cookie 生效。
+
 ## 7. systemd/nginx 切换检查
 
 本 runbook 只提供 checklist，不自动修改真实文件。
@@ -152,6 +170,7 @@ psql "$PG_CLI_TARGET_DATABASE_URL" -f scripts/siyuan_migration/08_validate_custo
 - `APP_HOST` / `APP_PORT` 保持不变。
 - Nginx upstream 保持不变，或已与 `APP_HOST` / `APP_PORT` 同步调整。
 - 企业微信 callback path 不变。
+- 企业微信后台授权登录回调仍为 `/auth/wecom/callback`，并且企业微信后台配置的可信域名/回调地址与 `ADMIN_LOGIN_REDIRECT_URI` 一致。
 - 公众号 OAuth redirect path 不变。
 - `WW_verify_*.txt` / `MP_verify_*.txt` 可访问。
 - `uploads/`、`static/uploads/`、`instance/`、`*.pem`、`*.key` 已复制或挂载到新 release 的可用路径。
@@ -197,6 +216,7 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - `/api/sidebar/profile`
 - 企业微信 callback GET 校验。
 - 企业微信 callback POST 日志。
+- 企业微信后台登录 `/auth/wecom/start` 和 `/auth/wecom/callback`。
 - 旧渠道码扫码路径。
 - 订单/问卷/侧边栏基础链路，如果当前生产启用。
 
@@ -206,6 +226,10 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - 登录态页面返回 302/401/403 可以接受。
 - 对已 projected 的真实 `external_userid`，customer/sidebar 抽样必须 200。
 - 旧 `scene_value` runtime diagnosis 必须 200 且 `ok=true`。
+- `/auth/wecom/callback` 缺少 `code` 必须返回 400，不得返回 `external_call_blocked`。
+- `/auth/wecom/callback?code=dummy&state=dummy` 必须返回 `400 invalid_or_expired_state`，不得签发 session。
+- `/auth/wecom/start?mode=qr&next=/admin` 在 live 模式下必须 302 到企业微信授权地址。
+- 至少一次真实企业微信后台登录必须成功进入 `/admin`。
 - 报告中所有 `external_userid`、`scene_value`、手机号、unionid、openid 必须脱敏。
 
 ## 9. 观察窗口
@@ -214,6 +238,7 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 
 - 5xx 日志。
 - 企业微信 callback 日志。
+- 企业微信后台登录成功率和重复登录情况。
 - PostgreSQL connection count。
 - `/api/admin/user-ops/overview`。
 - customer/sidebar API。
@@ -259,6 +284,13 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - 至少一个真实但报告脱敏的 customer/sidebar 抽样返回 200。
 - 核心 admin 页面无 5xx。
 - callback path 已确认。
+- `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live`。
+- `WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`ADMIN_LOGIN_REDIRECT_URI` 均存在。
+- `ADMIN_LOGIN_REDIRECT_URI` 与企业微信后台回调配置一致。
+- `/auth/wecom/start?mode=qr&next=/admin` live 模式返回 302 企业微信授权地址。
+- `/auth/wecom/callback` 缺少 code 返回 400。
+- `/auth/wecom/callback?code=dummy&state=dummy` 返回 400 invalid state，不再返回 `external_call_blocked`。
+- 至少一次真实企业微信后台登录回调通过，或由切换负责人在窗口内人工确认并记录。
 - 回滚负责人和旧 release 可用。
 
 ### No-Go
@@ -272,6 +304,11 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - `/api/admin/user-ops/overview` 返回 503。
 - scene diagnosis 失败。
 - 企业微信 callback path 不确定。
+- `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE` 未设为 `live`。
+- 企业微信后台登录配置缺失。
+- `/auth/wecom/callback` 仍返回 `503 external_call_blocked`。
+- `/auth/wecom/start` 无法生成企业微信授权跳转。
+- 真实企业微信后台登录无法进入 `/admin`，且没有被批准的人工缓解方案。
 - 无回滚负责人。
 - 旧 release 不可用。
 

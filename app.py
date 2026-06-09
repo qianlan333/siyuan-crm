@@ -45,6 +45,22 @@ def init_db_next_alias() -> None:
     init_next_schema_safe()
 
 
+def sync_customer_read_model(args: argparse.Namespace) -> int:
+    from aicrm_next.customer_read_model.sync_cli import run_sync
+
+    sync_args: list[str] = []
+    if args.dry_run:
+        sync_args.append("--dry-run")
+    if args.limit is not None:
+        sync_args.extend(["--limit", str(args.limit)])
+    if args.replace:
+        sync_args.append("--replace")
+    for external_userid in args.external_userid or []:
+        sync_args.extend(["--external-userid", external_userid])
+    sync_args.extend(["--source", args.source])
+    return run_sync(sync_args)
+
+
 def print_next_health() -> None:
     from fastapi.testclient import TestClient
 
@@ -93,6 +109,15 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("init-db-legacy", help="Removed legacy Flask database init command.")
     subparsers.add_parser("init-db", help="Deprecated alias for init-next-schema-safe.")
     subparsers.add_parser("init-next-schema-safe", help="Create missing AI-CRM Next schema safely without dropping data.")
+    sync_customer = subparsers.add_parser(
+        "sync-customer-read-model",
+        help="Sync live customer source rows into AI-CRM Next projection tables.",
+    )
+    sync_customer.add_argument("--dry-run", action="store_true")
+    sync_customer.add_argument("--limit", type=int, default=None)
+    sync_customer.add_argument("--replace", action="store_true")
+    sync_customer.add_argument("--external-userid", action="append", default=[])
+    sync_customer.add_argument("--source", choices=["live"], default="live")
     legacy_delete = subparsers.add_parser(
         "delete-questionnaire-submissions-legacy",
         help="Legacy fallback helper for deleting questionnaire submissions by slug.",
@@ -132,6 +157,8 @@ def main(argv: Sequence[str] | None = None) -> None:
     if command == "init-next-schema-safe":
         init_next_schema_safe()
         return
+    if command == "sync-customer-read-model":
+        raise SystemExit(sync_customer_read_model(args))
     if command in {"delete-questionnaire-submissions", "delete-questionnaire-submissions-legacy"}:
         legacy_startup_removed(command)
         return

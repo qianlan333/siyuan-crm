@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, Response
+import requests
 
 from aicrm_next.common_operation_members import search_operation_members
 from aicrm_next.channel_entry import repo as channel_entry_repo
@@ -722,6 +725,36 @@ def get_channel_qrcode_status_resource(channel_id: int) -> dict[str, Any]:
     }
 
 
+def _qrcode_filename(channel_name: str, channel_id: int, content_type: str) -> str:
+    extension = ".png"
+    normalized_type = _text(content_type).split(";", 1)[0].lower()
+    if normalized_type in {"image/jpeg", "image/jpg"}:
+        extension = ".jpg"
+    elif normalized_type == "image/gif":
+        extension = ".gif"
+    elif normalized_type == "image/webp":
+        extension = ".webp"
+    elif normalized_type == "image/svg+xml":
+        extension = ".svg"
+    base = re.sub(r'[\\/:*?"<>|]+', "_", _text(channel_name)) or f"channel-{int(channel_id)}"
+    if not base.endswith("二维码"):
+        base = f"{base}二维码"
+    return f"{base}{extension}"
+
+
+def _download_qrcode_image(qr_url: str) -> tuple[bytes, str]:
+    try:
+        response = requests.get(qr_url, timeout=15)
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail={"reason": "qrcode_provider_download_failed", "detail": str(exc)}) from exc
+    content = bytes(response.content or b"")
+    if not content:
+        raise HTTPException(status_code=502, detail={"reason": "qrcode_provider_empty_response"})
+    content_type = _text(response.headers.get("content-type")) or "image/png"
+    return content, content_type
+
+
 def list_channel_owner_candidates() -> list[dict[str, Any]]:
     # Compatibility wrapper for older channel-code callers. The page-level picker
     # now calls /api/admin/common/operation-members directly.
@@ -893,14 +926,19 @@ def download_channel_qrcode(channel_id: int):
     asset = status.get("active_qrcode_asset") or {}
     qr_url = _text(asset.get("qr_url"))
     if qr_url.startswith(("http://", "https://")):
-        return RedirectResponse(
-            qr_url,
-            status_code=302,
+        content, content_type = _download_qrcode_image(qr_url)
+        filename = _qrcode_filename(status.get("channel_name") or f"channel-{int(channel_id)}", int(channel_id), content_type)
+        ascii_filename = re.sub(r"[^A-Za-z0-9._-]+", "_", filename) or f"channel-{int(channel_id)}-qrcode.png"
+        return Response(
+            content,
+            media_type=content_type,
             headers={
                 "Cache-Control": "no-store",
+                "Content-Disposition": f"attachment; filename=\"{ascii_filename}\"; filename*=UTF-8''{quote(filename)}",
                 "X-AICRM-Channel-ID": str(int(channel_id)),
                 "X-AICRM-QR-Scene": _text(asset.get("scene_value")),
                 "X-AICRM-QR-Asset-ID": str(int(asset.get("id") or 0)),
+                "X-AICRM-QR-Source-URL": qr_url,
             },
         )
     raise HTTPException(status_code=404, detail="qrcode_not_ready")

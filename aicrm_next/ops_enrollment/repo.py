@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from aicrm_next.shared.config import Settings, get_settings
 from aicrm_next.shared.db_session import get_session_factory
 from aicrm_next.shared.repository_provider import assert_repository_allowed
+from aicrm_next.shared.runtime import database_mode
 from aicrm_next.shared.typing import JsonDict
 
 from .models import (
@@ -27,6 +28,7 @@ AUTO_DND_REASON = {
     "reason_text": "已报名正价课",
     "reason_label": "已报名正价课",
 }
+_SQL_REPO_BACKENDS = {"sql", "sqlalchemy", "postgres", "postgresql"}
 
 ACTIVATION_LABELS = {
     "activated": "黄小璨已激活",
@@ -47,6 +49,15 @@ def _iso(value: object) -> str:
     if isinstance(value, datetime):
         return value.isoformat()
     return str(value or "")
+
+
+def resolve_user_ops_repo_backend(settings: Settings | None = None) -> str:
+    settings = settings or get_settings()
+    configured_backend = str(os.getenv("USER_OPS_REPO_BACKEND", "") or "").strip().lower()
+    backend = configured_backend or settings.user_ops_repo_backend.strip().lower()
+    if not configured_backend and database_mode() == "postgres":
+        return "sqlalchemy"
+    return backend
 
 
 def _default_pool_rows() -> list[JsonDict]:
@@ -529,8 +540,8 @@ def build_user_ops_repository(
     engine: Engine | None = None,
 ) -> UserOpsRepository:
     settings = settings or get_settings()
-    backend = os.getenv("USER_OPS_REPO_BACKEND", settings.user_ops_repo_backend).strip().lower()
-    if backend in {"sql", "sqlalchemy", "postgres", "postgresql"}:
+    backend = resolve_user_ops_repo_backend(settings)
+    if backend in _SQL_REPO_BACKENDS:
         if session is not None:
             return assert_repository_allowed(SqlAlchemyUserOpsRepository(session), capability_owner="ops_enrollment")
         owned_session = get_session_factory(settings=settings)() if engine is None else Session(bind=engine, future=True)

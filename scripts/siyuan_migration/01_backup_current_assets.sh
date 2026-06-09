@@ -48,7 +48,11 @@ pass "env backup written to ${env_backup}"
 (
   cd "${app_abs}"
   shopt -s nullglob
-  assets=(WW_verify_*.txt MP_verify_*.txt uploads static/uploads instance *.pem *.key)
+  asset_candidates=(WW_verify_*.txt MP_verify_*.txt uploads static/uploads instance *.pem *.key)
+  assets=()
+  for asset in "${asset_candidates[@]}"; do
+    [[ -e "${asset}" ]] && assets+=("${asset}")
+  done
   if (( ${#assets[@]} > 0 )); then
     tar -czf "${assets_archive}" "${assets[@]}"
     chmod 600 "${assets_archive}"

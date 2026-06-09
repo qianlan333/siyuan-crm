@@ -91,6 +91,8 @@ PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
 
 python3 app.py health
 python3 app.py init-next-schema-safe
+python3 app.py sync-customer-read-model --dry-run
+python3 app.py sync-customer-read-model
 ```
 
 `init-next-schema-safe` 是 Alembic revision graph 治理完成前的预发/生产演练解阻路径。它只执行 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，用于补齐 AI-CRM Next customer read model 与 User Ops SQL read model 缺失表，不会 `DROP`、`TRUNCATE` 或覆盖已有数据。也可以直接执行 SQL 文件：
@@ -105,6 +107,7 @@ psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/06_safe_next_schema_init
 psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
 psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
 psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/07_validate_next_blockers.sql
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/08_validate_customer_projection.sql
 ```
 
 启动服务后 smoke test：
@@ -114,9 +117,56 @@ BASE_URL=http://127.0.0.1:5001 \
 SAMPLE_SCENE_VALUE='旧渠道码scene_value' \
 SAMPLE_EXTERNAL_USERID='脱敏记录对应的旧external_userid' \
 scripts/siyuan_migration/05_smoke_test.sh
+
+BASE_URL=http://127.0.0.1:5001 \
+SAMPLE_EXTERNAL_USERID='真实请求值，报告中必须脱敏' \
+scripts/siyuan_migration/09_smoke_customer_projection.sh
 ```
 
-## 7. 渠道码迁移说明
+## 7. Customer Read Model Projection Backfill
+
+`init-next-schema-safe` 只保证 Next customer read-model 表存在，不会自动把 siyuan 旧源表同步为 projection。生产切换前必须把 `contacts`、`external_contact_bindings`、`people` 等现有源数据同步到：
+
+- `customer_list_index_next`
+- `customer_detail_snapshot_next`
+- `customer_timeline_event_next`
+- `customer_recent_message_next`
+
+推荐流程：
+
+```bash
+export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next'
+export APP_ENV=production
+export DEPLOY_ENV=production
+export AICRM_NEXT_ENV=production
+export AICRM_NEXT_ALLOW_FIXTURE_REPO_IN_PROD=false
+export CUSTOMER_READ_MODEL_REPO_BACKEND=sqlalchemy
+
+python3 app.py sync-customer-read-model --dry-run
+python3 app.py sync-customer-read-model
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/08_validate_customer_projection.sql
+```
+
+安全边界：
+
+- 默认同步只对 Next projection 表按 `external_userid` 做幂等 upsert/merge。
+- 不修改 `contacts`、`external_contact_bindings`、`people` 等源表。
+- 不执行 `DROP`、`TRUNCATE`。
+- 如需全量重建 projection，必须显式传 `--replace`，且 `--replace` 只作用于 Next projection 表。
+- 输出只包含计数、原因和脱敏样本，不应记录 raw `external_userid`、手机号、unionid、openid。
+
+验收要求：
+
+- `customer_detail_snapshot_next.count > 0`，前提是源表存在外部联系人数据。
+- `projection_coverage_against_contacts` 和 `projection_coverage_against_bindings` 与预期一致。
+- 至少一个真实但报告脱敏的 `external_userid` 通过：
+  - `/api/customers/{external_userid}`
+  - `/api/customers/{external_userid}/timeline`
+  - `/api/sidebar/customer-context`
+  - `/api/sidebar/profile`
+- 如果没有 timeline/message 源数据，timeline 和 recent messages 可以为空列表，但不能 500/503。
+
+## 8. 渠道码迁移说明
 
 AI-CRM Next 的企业微信回调解析不只依赖旧 `automation_channel.scene_value`。为了支持历史二维码、二维码资产状态、回调诊断和后续重新生成二维码，需要补齐：
 
@@ -151,7 +201,7 @@ curl 'http://127.0.0.1:5001/api/admin/channels/runtime-diagnosis?scene_value=旧
 - `WECOM_CALLBACK_TOKEN` 和 `WECOM_CALLBACK_AES_KEY` 与平台后台一致。
 - 切换前不要删除旧 release 和旧数据库。
 
-## 8. Next schema 和生产仓库说明
+## 9. Next schema 和生产仓库说明
 
 AI-CRM Next 的 `CUSTOMER_READ_MODEL_REPO_BACKEND` 与 `USER_OPS_REPO_BACKEND` 在 PostgreSQL runtime 下必须使用 SQL/PostgreSQL backend。推荐显式设置：
 
@@ -170,7 +220,7 @@ python3 app.py init-next-schema-safe
 
 当前 Alembic revision graph 仍需后续专项治理：本次诊断显示 `0012`、`0016` 存在重复 revision，且 `0014_alipay_pay.py` 引用缺失的 `0013`。在 migration graph 修复前，不要让生产切换依赖 `alembic upgrade head`。
 
-## 9. 授权配置保留说明
+## 10. 授权配置保留说明
 
 以下配置必须从 siyuan 生产 env 迁移或核对，不能从 AI-CRM 仓库复制真实值：
 
@@ -197,7 +247,7 @@ python3 app.py init-next-schema-safe
 - 如需覆盖，可设置 `AICRM_ADMIN_BRAND_NAME` 或 `ADMIN_BRAND_NAME`。
 - 不建议在模板里硬编码多个互相冲突的品牌名。
 
-## 10. 生产切换建议
+## 11. 生产切换建议
 
 推荐蓝绿切换：
 
@@ -211,7 +261,7 @@ python3 app.py init-next-schema-safe
 
 Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保留 siyuan 原模板，`deploy/aicrm-next/` 只是 AI-CRM 模板参考，需要人工合并差异。
 
-## 11. 回滚方案
+## 12. 回滚方案
 
 如果新版本出现不可接受问题：
 
@@ -226,7 +276,7 @@ Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保
    - 企业微信 callback POST 日志
    - 旧渠道码二维码扫码链路
 
-## 12. 验收清单
+## 13. 验收清单
 
 - `/health` 正常。
 - `/admin` 正常，允许 302/401/403 登录态拦截，但不能 5xx。
@@ -235,6 +285,8 @@ Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保
 - `automation_channel_scene_alias` 覆盖旧 scene。
 - `automation_channel_qrcode_asset` 覆盖旧二维码资产。
 - 侧边栏用户基础数据存在。
+- `customer_detail_snapshot_next` 已有 projection 数据。
+- 至少一个脱敏记录对应的真实 `external_userid` customer/sidebar 抽样通过。
 - `contacts` / `external_contact_bindings` / `people` 等基础表数据未丢。
 - 后台管理员还能登录。
 - 企微 token/aes key 配置未丢。
@@ -244,7 +296,7 @@ Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保
 - 无 5xx。
 - 无 fixture mode 泄漏到生产。
 
-## 12. 禁止事项
+## 14. 禁止事项
 
 - 不提交真实 `.env` 文件。
 - 不提交数据库 dump。

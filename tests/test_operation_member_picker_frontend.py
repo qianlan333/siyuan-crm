@@ -178,6 +178,7 @@ def test_channel_center_list_keeps_edit_links_and_nonblocking_clicks():
     template = _read(CHANNEL_CENTER_TEMPLATE)
 
     assert "channel_code_center_next.js" in template
+    assert "channel_code_center_next.js?v=visible-feedback-20260609" in template
     assert "搜索渠道名称" in template
     assert "渠道编码 / 场景值" not in template
     assert '"/api/admin/channels?limit=300"' in source

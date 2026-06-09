@@ -19,7 +19,7 @@
 2. 新建 `siyuancrm_next` 预发库。
 3. 使用 `pg_restore` 把当前 siyuan 备份恢复到预发库。
 4. 使用 AI-CRM Next 新代码连接预发库。
-5. 运行 `python3 app.py init-next-schema-safe` 做 AI-CRM Next safe schema 初始化。
+5. 运行 `python3 app.py init-db` 和 `python3 app.py init-next-schema-safe` 做 AI-CRM Next safe schema 初始化。
 6. 运行渠道码 backfill，补齐 `automation_channel_scene_alias` 和 `automation_channel_qrcode_asset`。
 7. 校验 admin、channels、sidebar、user-ops、callback diagnosis 等关键入口。
 8. 验证通过后，再按蓝绿方式切换生产。
@@ -77,7 +77,7 @@ scripts/siyuan_migration/01_backup_current_assets.sh
 
 ```bash
 DUMP_FILE=/home/ubuntu/backups/siyuan-aicrm-migration/siyuan-current-YYYYMMDD-HHMMSS.dump \
-STAGING_DATABASE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next' \
+STAGING_DATABASE_URL='<APP_STAGING_DATABASE_URL>' \
 CLEAN=true \
 scripts/siyuan_migration/02_restore_to_staging_db.sh
 ```
@@ -85,15 +85,18 @@ scripts/siyuan_migration/02_restore_to_staging_db.sh
 连接预发库并初始化/升级 schema：
 
 ```bash
-export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next'
+export DATABASE_URL='<APP_STAGING_DATABASE_URL>'
 source scripts/siyuan_migration/lib_db_url.sh
 PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
 
 python3 app.py health
+python3 app.py init-db
 python3 app.py init-next-schema-safe
 python3 app.py sync-customer-read-model --dry-run
 python3 app.py sync-customer-read-model
 ```
+
+`init-db` 当前是兼容别名，仍建议显式执行 `init-next-schema-safe` 作为切换记录。`init-db-legacy` 已移除，不再作为迁移或生产 runbook 执行命令。
 
 `init-next-schema-safe` 是 Alembic revision graph 治理完成前的预发/生产演练解阻路径。它只执行 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，用于补齐 AI-CRM Next customer read model 与 User Ops SQL read model 缺失表，不会 `DROP`、`TRUNCATE` 或覆盖已有数据。也可以直接执行 SQL 文件：
 
@@ -135,7 +138,7 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 推荐流程：
 
 ```bash
-export DATABASE_URL='postgresql+psycopg://USER:PASSWORD@127.0.0.1:5432/siyuancrm_next'
+export DATABASE_URL='<APP_STAGING_DATABASE_URL>'
 export APP_ENV=production
 export DEPLOY_ENV=production
 export AICRM_NEXT_ENV=production
@@ -248,6 +251,8 @@ python3 app.py init-next-schema-safe
 - 不建议在模板里硬编码多个互相冲突的品牌名。
 
 ## 11. 生产切换建议
+
+生产切换窗口请使用独立 runbook：[siyuan AI-CRM Next 生产切换 Runbook](runbooks/siyuan_aicrm_next_production_cutover.md)。本文只保留迁移背景和预发演练步骤；最终备份、新生产库恢复、systemd/nginx checklist、Go / No-Go、回滚和切换报告模板以 runbook 为准。
 
 推荐蓝绿切换：
 

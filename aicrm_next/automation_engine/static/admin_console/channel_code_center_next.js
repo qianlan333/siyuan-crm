@@ -49,11 +49,28 @@
     return channel.copy_text || channel.share_url || channel.final_url || channel.link_url || "";
   }
 
-  function toast(message) {
+  function ensureFeedback() {
+    let node = root.querySelector("[data-channel-center-feedback]");
+    if (node) return node;
+    node = document.createElement("div");
+    node.className = "channel-save-feedback";
+    node.setAttribute("role", "status");
+    node.setAttribute("aria-live", "polite");
+    node.setAttribute("data-channel-center-feedback", "");
+    const metrics = root.querySelector("[data-channel-metrics]");
+    root.insertBefore(node, metrics ? metrics.nextSibling : root.firstChild);
+    return node;
+  }
+
+  function toast(message, tone = "success") {
     root.dataset.lastToast = message;
     if (window.AdminConsole && typeof window.AdminConsole.showToast === "function") {
       window.AdminConsole.showToast(message);
     }
+    const feedback = ensureFeedback();
+    feedback.textContent = String(message || "");
+    feedback.hidden = false;
+    feedback.classList.toggle("is-error", tone === "error");
   }
 
   function fallbackCopy(text) {
@@ -71,14 +88,14 @@
       ok = false;
     }
     input.remove();
-    toast(ok ? "链接已复制" : "请手动复制链接");
+    toast(ok ? "链接已复制" : "请手动复制链接", ok ? "success" : "error");
     return ok;
   }
 
   function copyText(text) {
     const value = String(text || "").trim();
     if (!value) {
-      toast("没有可复制链接");
+      toast("没有可复制链接", "error");
       return Promise.resolve(false);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -246,7 +263,7 @@
     if (generateButton) {
       const disabledReason = generateButton.dataset.disabledReason || "";
       if (disabledReason) {
-        toast(qrcodeGenerateMessage(disabledReason));
+        toast(qrcodeGenerateMessage(disabledReason), "error");
         return;
       }
       const row = generateButton.closest("[data-channel-row]");
@@ -263,7 +280,7 @@
       }).catch((error) => {
         generateButton.disabled = false;
         generateButton.textContent = "生成二维码";
-        toast(error.message || "二维码生成失败");
+        toast(error.message || "二维码生成失败", "error");
       });
       return;
     }

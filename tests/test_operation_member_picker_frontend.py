@@ -190,4 +190,8 @@ def test_channel_center_list_keeps_edit_links_and_nonblocking_clicks():
     assert "data-open-channel-drawer" in source
     assert "data-copy-channel-link" in source
     assert "data-share-channel-link" in source
+    assert "data-disabled-reason=\"owner_staff_id_required\"" in source
+    assert "请先编辑渠道并选择负责人，再生成二维码" in source
+    assert "parseJsonResponse" in source
+    assert "content-type" in source
     assert "preventDefault" not in source

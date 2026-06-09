@@ -94,3 +94,17 @@ def test_generate_qrcode_route_is_next_channel_entry_owned(monkeypatch):
     assert response.json()["source"] == "aicrm_next.channel_entry"
     paths = {route.path: route.endpoint.__module__ for route in client.app.routes if hasattr(route, "endpoint")}
     assert paths["/api/admin/channels/{channel_id:int}/qrcode/generate"] == "aicrm_next.channel_entry.api"
+
+
+def test_generate_qrcode_route_returns_owner_required_reason(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.api.generate_channel_qrcode",
+        lambda command: (_ for _ in ()).throw(ValueError("owner_staff_id_required")),
+    )
+
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    response = client.post("/api/admin/channels/7/qrcode/generate", json={})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "owner_staff_id_required"

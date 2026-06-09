@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
@@ -49,6 +50,8 @@ from .service import (
     refresh_expired_silent_members,
     resolve_member_questionnaire_truth,
 )
+
+CUSTOMER_NAME_PLACEHOLDER_RE = re.compile(r"\{\{\s*客户名\s*\}\}")
 
 
 def _resolve_existing_member(external_contact_id: str = "", phone: str = "") -> dict[str, Any] | None:
@@ -451,6 +454,41 @@ def _extract_welcome_code(payload_json: dict[str, Any]) -> str:
     return ""
 
 
+def _resolve_welcome_customer_name(
+    *,
+    member: dict[str, Any] | None = None,
+    external_contact_id: str = "",
+    phone: str = "",
+) -> str:
+    serialized_member = _serialize_member(member or {})
+    context = service_seams._build_live_context(
+        _normalized_text(external_contact_id) or serialized_member.get("external_contact_id"),
+        _normalized_text(phone) or serialized_member.get("phone"),
+    )
+    profile = context.get("profile") or {}
+    return _normalized_text(profile.get("customer_name"))
+
+
+def _render_welcome_message_template(
+    welcome_message: str,
+    *,
+    member: dict[str, Any] | None = None,
+    external_contact_id: str = "",
+    phone: str = "",
+) -> str:
+    rendered_message = _normalized_text(welcome_message)
+    if not rendered_message:
+        return ""
+    if not CUSTOMER_NAME_PLACEHOLDER_RE.search(rendered_message):
+        return rendered_message
+    customer_name = _resolve_welcome_customer_name(
+        member=member,
+        external_contact_id=external_contact_id,
+        phone=phone,
+    )
+    return CUSTOMER_NAME_PLACEHOLDER_RE.sub(customer_name, rendered_message)
+
+
 def _send_channel_welcome_message(
     *,
     member: dict[str, Any],
@@ -458,7 +496,7 @@ def _send_channel_welcome_message(
     payload_json: dict[str, Any] | None = None,
     operator_id: str = "",
 ) -> dict[str, Any]:
-    welcome_message = _normalized_text(channel.get("welcome_message"))
+    welcome_message = _render_welcome_message_template(channel.get("welcome_message"), member=member)
     welcome_code = _extract_welcome_code(payload_json or {})
     serialized_member = _serialize_member(member)
     if not welcome_message:
@@ -629,8 +667,14 @@ def _send_channel_welcome_message_for_contact(
     *,
     channel: dict[str, Any],
     payload_json: dict[str, Any] | None = None,
+    external_contact_id: str = "",
+    phone: str = "",
 ) -> dict[str, Any]:
-    welcome_message = _normalized_text(channel.get("welcome_message"))
+    welcome_message = _render_welcome_message_template(
+        channel.get("welcome_message"),
+        external_contact_id=external_contact_id,
+        phone=phone,
+    )
     welcome_code = _extract_welcome_code(payload_json or {})
     if not welcome_message:
         return {"attempted": False, "sent": False, "reason": "not_configured"}
@@ -784,7 +828,12 @@ def handle_channel_enter_from_callback(
             trigger_payload={**dict(payload_json or {}), "source_type": source_type},
         )
         welcome_result = (
-            _send_channel_welcome_message_for_contact(channel=channel, payload_json=payload_json)
+            _send_channel_welcome_message_for_contact(
+                channel=channel,
+                payload_json=payload_json,
+                external_contact_id=external_contact_id,
+                phone=phone,
+            )
             if send_welcome_message
             else {"attempted": False, "sent": False, "reason": "disabled"}
         )
@@ -850,7 +899,12 @@ def handle_channel_enter_from_callback(
         and _all_bindings_rejected_for_archived_program(admission_results)
     ):
         welcome_result = (
-            _send_channel_welcome_message_for_contact(channel=channel, payload_json=payload_json)
+            _send_channel_welcome_message_for_contact(
+                channel=channel,
+                payload_json=payload_json,
+                external_contact_id=external_contact_id,
+                phone=phone,
+            )
             if send_welcome_message
             else {"attempted": False, "sent": False, "reason": "disabled"}
         )

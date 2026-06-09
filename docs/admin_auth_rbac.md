@@ -40,8 +40,8 @@
 
 ## 会话机制
 
-- 后台页面使用 Flask session 保存登录态
-- session 至少包含：
+- AI-CRM Next 后台页面使用签名 admin session cookie 保存登录态
+- session payload 至少包含：
   - `admin_user_id`
   - `wecom_userid`
   - `role list`

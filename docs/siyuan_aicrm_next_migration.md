@@ -240,6 +240,12 @@ python3 app.py init-next-schema-safe
 - `WECHAT_MP_APP_ID`
 - `WECHAT_MP_APP_SECRET`
 - `ADMIN_LOGIN_REDIRECT_URI`
+  - AI-CRM Next 企业微信后台登录回调应指向 `/auth/wecom/callback`，并与企业微信后台配置保持一致。
+- `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE`
+  - 默认 `blocked`，生产切换启用企业微信后台 SSO 前必须显式设置为 `live`。
+- `AICRM_NEXT_WECOM_ADMIN_AUTH_TIMEOUT_SECONDS`
+- `AICRM_NEXT_ADMIN_SESSION_COOKIE_SECURE`
+  - 留空时按请求 scheme/生产环境判断；本地测试可设为 `false`。
 - `CRM_API_TOKEN`
 - `MCP_BEARER_TOKEN`
 - `SIDEBAR_THIRD_PARTY_API_TOKEN`
@@ -263,6 +269,18 @@ python3 app.py init-next-schema-safe
 5. 验收通过后，人工修改 systemd 指向新 release。
 6. reload systemd 并重启服务。
 7. 观察 `/health`、`/admin`、`/admin/channels`、企业微信 callback 日志和 5xx。
+
+生产切换前还必须验证企业微信后台登录：
+
+```bash
+export AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live
+
+curl -i "http://127.0.0.1:5001/auth/wecom/callback"
+curl -i "http://127.0.0.1:5001/auth/wecom/callback?code=dummy&state=dummy"
+curl -i "http://127.0.0.1:5001/auth/wecom/start?mode=qr&next=/admin"
+```
+
+预期：缺少 `code` 为 400，dummy state 为 `400 invalid_or_expired_state`，live 配置完整时 start 为 302 企业微信授权地址；正式窗口需要至少一次真实企业微信授权登录进入 `/admin`。不要在报告中写真实 code、session cookie、userid 或 secret。
 
 Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保留 siyuan 原模板，`deploy/aicrm-next/` 只是 AI-CRM 模板参考，需要人工合并差异。
 

@@ -17,6 +17,7 @@ from aicrm_next.ops_enrollment.models import (
     user_ops_send_records_next,
 )
 from aicrm_next.shared.db_session import get_engine
+from aicrm_next.auth_wecom.service import ensure_admin_sso_state_schema
 
 SAFE_NEXT_SCHEMA_TABLES = (
     customer_list_index_next,
@@ -46,10 +47,12 @@ def init_next_schema_safe(engine: Engine | None = None, *, prefer_sql_file: bool
         with engine.begin() as connection:
             for statement in _sql_statements(sql):
                 connection.execute(text(statement))
+        ensure_admin_sso_state_schema()
         return [table.name for table in SAFE_NEXT_SCHEMA_TABLES]
 
     for table in SAFE_NEXT_SCHEMA_TABLES:
         table.create(bind=engine, checkfirst=True)
         for index in table.indexes:
             index.create(bind=engine, checkfirst=True)
+    ensure_admin_sso_state_schema()
     return [table.name for table in SAFE_NEXT_SCHEMA_TABLES]

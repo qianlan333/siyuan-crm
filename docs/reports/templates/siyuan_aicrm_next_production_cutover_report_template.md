@@ -71,11 +71,25 @@
 | `/api/customers/{external_userid}/timeline` |  | external_userid 必须脱敏 |
 | `/api/sidebar/customer-context` |  | external_userid 必须脱敏 |
 | `/api/sidebar/profile` |  | external_userid 必须脱敏 |
+| `/auth/wecom/callback` 缺少 code |  | 预期 400 missing_wecom_code |
+| `/auth/wecom/callback?code=dummy&state=dummy` |  | 预期 400 invalid_or_expired_state，不得签发 session |
+| `/auth/wecom/start?mode=qr&next=/admin` |  | live 模式预期 302 企业微信授权地址 |
+| 真实企业微信后台登录 |  | 记录是否进入 /admin，不写 code/cookie/userid |
 | 旧渠道码扫码路径 |  | scene 必须脱敏 |
 | 订单/问卷/侧边栏基础链路 |  | 如启用 |
 
 ## 7. Callback 验证结果
 
+- `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live`：
+- `WECOM_CORP_ID` present：
+- `WECOM_AGENT_ID` present：
+- `WECOM_SECRET` present：
+- `ADMIN_LOGIN_REDIRECT_URI` present：
+- `ADMIN_LOGIN_REDIRECT_URI` 是否匹配企业微信后台 `/auth/wecom/callback`：
+- `/auth/wecom/start` live 授权跳转：
+- `/auth/wecom/callback` dummy invalid state：
+- 真实企业微信后台登录：
+- session cookie 是否生效（不写 cookie 值）：
 - 企业微信 callback GET 校验：
 - 企业微信 callback POST 日志：
 - 公众号 OAuth redirect：

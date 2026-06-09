@@ -142,3 +142,13 @@ CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_mobile ON user_ops_do_not_distur
 CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_active_reason ON user_ops_do_not_disturb_next (is_active, reason_code);
 CREATE INDEX IF NOT EXISTS ix_user_ops_send_records_next_created_at ON user_ops_send_records_next (created_at);
 CREATE INDEX IF NOT EXISTS ix_user_ops_send_records_next_status ON user_ops_send_records_next (status);
+
+CREATE TABLE IF NOT EXISTS admin_sso_states (
+    state_token TEXT PRIMARY KEY,
+    login_kind TEXT NOT NULL DEFAULT 'wecom_qr',
+    next_path TEXT NOT NULL DEFAULT '/admin',
+    expires_at TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_admin_sso_states_expires ON admin_sso_states (expires_at);

@@ -7,7 +7,7 @@ TRUNCATE siyuan_migration_validation;
 
 DO $$
 DECLARE
-  table_name text;
+  tbl_name text;
   table_count bigint;
   scene_count bigint := 0;
   covered_count bigint := 0;
@@ -31,13 +31,13 @@ DECLARE
     'user_ops_send_records'
   ];
 BEGIN
-  FOREACH table_name IN ARRAY tables LOOP
-    IF to_regclass('public.' || table_name) IS NULL THEN
-      INSERT INTO siyuan_migration_validation(metric, value) VALUES (table_name, 'table_missing')
+  FOREACH tbl_name IN ARRAY tables LOOP
+    IF to_regclass('public.' || tbl_name) IS NULL THEN
+      INSERT INTO siyuan_migration_validation(metric, value) VALUES (tbl_name, 'table_missing')
       ON CONFLICT (metric) DO UPDATE SET value = EXCLUDED.value;
     ELSE
-      EXECUTE format('SELECT count(*) FROM %I', table_name) INTO table_count;
-      INSERT INTO siyuan_migration_validation(metric, value) VALUES (table_name, table_count::text)
+      EXECUTE format('SELECT count(*) FROM %I', tbl_name) INTO table_count;
+      INSERT INTO siyuan_migration_validation(metric, value) VALUES (tbl_name, table_count::text)
       ON CONFLICT (metric) DO UPDATE SET value = EXCLUDED.value;
     END IF;
   END LOOP;

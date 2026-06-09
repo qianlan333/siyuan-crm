@@ -194,4 +194,7 @@ def test_channel_center_list_keeps_edit_links_and_nonblocking_clicks():
     assert "请先编辑渠道并选择负责人，再生成二维码" in source
     assert "parseJsonResponse" in source
     assert "content-type" in source
+    assert "data-channel-center-feedback" in source
+    assert 'feedback.hidden = false' in source
+    assert 'toast(qrcodeGenerateMessage(disabledReason), "error")' in source
     assert "preventDefault" not in source

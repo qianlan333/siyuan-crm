@@ -91,6 +91,13 @@ PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
 
 python3 app.py health
 python3 app.py init-db-legacy
+python3 app.py init-next-schema-safe
+```
+
+`init-next-schema-safe` 是 Alembic revision graph 治理完成前的预发/生产演练解阻路径。它只执行 `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`，用于补齐 AI-CRM Next customer read model 与 User Ops SQL read model 缺失表，不会 `DROP`、`TRUNCATE` 或覆盖已有数据。也可以直接执行 SQL 文件：
+
+```bash
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/06_safe_next_schema_init.sql
 ```
 
 执行渠道码 backfill 和校验：
@@ -98,6 +105,7 @@ python3 app.py init-db-legacy
 ```bash
 psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
 psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
+psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/07_validate_next_blockers.sql
 ```
 
 启动服务后 smoke test：
@@ -105,6 +113,7 @@ psql "$PG_CLI_DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sq
 ```bash
 BASE_URL=http://127.0.0.1:5001 \
 SAMPLE_SCENE_VALUE='旧渠道码scene_value' \
+SAMPLE_EXTERNAL_USERID='脱敏记录对应的旧external_userid' \
 scripts/siyuan_migration/05_smoke_test.sh
 ```
 
@@ -143,7 +152,26 @@ curl 'http://127.0.0.1:5001/api/admin/channels/runtime-diagnosis?scene_value=旧
 - `WECOM_CALLBACK_TOKEN` 和 `WECOM_CALLBACK_AES_KEY` 与平台后台一致。
 - 切换前不要删除旧 release 和旧数据库。
 
-## 8. 授权配置保留说明
+## 8. Next schema 和生产仓库说明
+
+AI-CRM Next 的 `CUSTOMER_READ_MODEL_REPO_BACKEND` 与 `USER_OPS_REPO_BACKEND` 在 PostgreSQL runtime 下必须使用 SQL/PostgreSQL backend。推荐显式设置：
+
+```bash
+CUSTOMER_READ_MODEL_REPO_BACKEND=sqlalchemy
+USER_OPS_REPO_BACKEND=sqlalchemy
+```
+
+也可以使用 `postgres` / `postgresql` / `sql`。生产演练不应通过 `AICRM_NEXT_ALLOW_FIXTURE_REPO_IN_PROD=true` 放行 fixture 仓库。
+
+如果 `/api/admin/user-ops/overview` 返回 `user_ops_schema_missing`，或 customer/sidebar 接口提示缺少 `customer_detail_snapshot_next` 等 Next 表，请先运行：
+
+```bash
+python3 app.py init-next-schema-safe
+```
+
+当前 Alembic revision graph 仍需后续专项治理：本次诊断显示 `0012`、`0016` 存在重复 revision，且 `0014_alipay_pay.py` 引用缺失的 `0013`。在 migration graph 修复前，不要让生产切换依赖 `alembic upgrade head`。
+
+## 9. 授权配置保留说明
 
 以下配置必须从 siyuan 生产 env 迁移或核对，不能从 AI-CRM 仓库复制真实值：
 
@@ -170,7 +198,7 @@ curl 'http://127.0.0.1:5001/api/admin/channels/runtime-diagnosis?scene_value=旧
 - 如需覆盖，可设置 `AICRM_ADMIN_BRAND_NAME` 或 `ADMIN_BRAND_NAME`。
 - 不建议在模板里硬编码多个互相冲突的品牌名。
 
-## 9. 生产切换建议
+## 10. 生产切换建议
 
 推荐蓝绿切换：
 
@@ -184,7 +212,7 @@ curl 'http://127.0.0.1:5001/api/admin/channels/runtime-diagnosis?scene_value=旧
 
 Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保留 siyuan 原模板，`deploy/aicrm-next/` 只是 AI-CRM 模板参考，需要人工合并差异。
 
-## 10. 回滚方案
+## 11. 回滚方案
 
 如果新版本出现不可接受问题：
 
@@ -199,7 +227,7 @@ Nginx/systemd 的真实生产配置不在本 PR 中修改。当前 `deploy/` 保
    - 企业微信 callback POST 日志
    - 旧渠道码二维码扫码链路
 
-## 11. 验收清单
+## 12. 验收清单
 
 - `/health` 正常。
 - `/admin` 正常，允许 302/401/403 登录态拦截，但不能 5xx。

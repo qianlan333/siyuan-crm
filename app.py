@@ -43,6 +43,13 @@ def init_db_legacy() -> None:
     print("Legacy Flask database initialized.")
 
 
+def init_next_schema_safe() -> None:
+    from aicrm_next.schema_init import init_next_schema_safe as run_safe_init
+
+    table_names = run_safe_init()
+    print({"ok": True, "initialized_tables": table_names, "drop_or_truncate_executed": False})
+
+
 def delete_questionnaire_submissions_legacy(slug: str) -> None:
     from wecom_ability_service import create_app
     from wecom_ability_service.services import delete_questionnaire_submissions_by_slug
@@ -94,6 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("run-legacy", help="Run legacy Flask fallback explicitly.")
     subparsers.add_parser("init-db-legacy", help="Initialize the legacy Flask database explicitly.")
     subparsers.add_parser("init-db", help="Deprecated alias for init-db-legacy.")
+    subparsers.add_parser("init-next-schema-safe", help="Create missing AI-CRM Next schema safely without dropping data.")
     legacy_delete = subparsers.add_parser(
         "delete-questionnaire-submissions-legacy",
         help="Legacy fallback helper for deleting questionnaire submissions by slug.",
@@ -126,6 +134,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         return
     if command in {"init-db", "init-db-legacy"}:
         init_db_legacy()
+        return
+    if command == "init-next-schema-safe":
+        init_next_schema_safe()
         return
     if command in {"delete-questionnaire-submissions", "delete-questionnaire-submissions-legacy"}:
         delete_questionnaire_submissions_legacy(args.slug)

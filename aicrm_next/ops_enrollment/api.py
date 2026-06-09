@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
@@ -24,6 +26,11 @@ from .application import (
 from .dto import BatchSendRequest, BroadcastPreviewRequest, DoNotDisturbRequest, ExportPreviewRequest, UserOpsFilters, UserOpsListRequest
 
 router = APIRouter()
+
+
+def _response_with_status(payload: dict) -> JSONResponse:
+    status_code = int(payload.pop("status_code", 200) or 200)
+    return JSONResponse(jsonable_encoder(payload), status_code=status_code)
 
 
 def _filters_from_query(
@@ -58,8 +65,8 @@ def user_ops_overview(
     mobile: str = "",
     owner_userid: str = "",
     tag: str = "",
-) -> dict:
-    return GetUserOpsOverviewQuery()(
+) -> JSONResponse:
+    return _response_with_status(GetUserOpsOverviewQuery()(
         UserOpsListRequest(
             filters=_filters_from_query(
                 wecom_status,
@@ -72,7 +79,7 @@ def user_ops_overview(
                 tag,
             )
         )
-    )
+    ))
 
 
 @router.get("/api/admin/user-ops/cards")

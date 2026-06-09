@@ -52,8 +52,7 @@ remaining_runtime_fallback_tracks:
   handling_rule: migrate only when the related product capability is actively being developed
 
 protected_runtime_boundaries:
-  - app.py
-  - legacy_flask_app.py
+  - app.py Next-only startup entry
   - aicrm_next/main.py
   - aicrm_next/production_compat/api.py high-risk and retained fallback entries only
   - wecom_ability_service runtime

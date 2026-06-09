@@ -137,7 +137,7 @@ createdb: error: connection to server on socket "/var/run/postgresql/.s.PGSQL.54
 
 - `python3 app.py health`
 - `python3 app.py routes`
-- `python3 app.py init-db-legacy`
+- `historical deprecated python3 app.py init-db-legacy`
 
 原因：`siyuancrm_next` 未创建，AI-CRM Next 不能连接 staging DB 验证。
 

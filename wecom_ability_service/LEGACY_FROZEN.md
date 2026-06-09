@@ -6,9 +6,7 @@
 
 - Default runtime entry has moved to AI-CRM Next.
 - `python3 app.py run` starts `aicrm_next.main:app`.
-- Legacy Flask is available only through explicit fallback commands:
-  - `python3 app.py run-legacy`
-  - `python3 legacy_flask_app.py run`
+- Legacy Flask startup compatibility has been removed. Historical fallback commands such as `python3 app.py run-legacy` and `python3 legacy_flask_app.py run` are no longer executable startup paths.
 
 ## Allowed Changes
 

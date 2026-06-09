@@ -45,12 +45,74 @@ from scripts.check_no_new_legacy import (
     check_questionnaire_oauth_next_adapter,
     check_sidebar_readonly_closeout_lock,
     check_sidebar_jssdk_next_adapter,
+    check_startup_compatibility_legacy_removed,
     check_user_ops_next_native_preview,
     check_wecom_tag_live_mutation_next_commandbus,
     check_final_legacy_exit_cleanup,
     check_wecom_tag_read_next_native,
     scan_source_tree,
 )
+
+
+def _write_startup_closeout_files(
+    root: Path,
+    *,
+    app_text: str | None = None,
+    checker_text: str = "WECOM_IMPORT_ALLOWLIST = set()\n",
+    legacy_runner: bool = False,
+) -> None:
+    root.joinpath("scripts").mkdir(parents=True, exist_ok=True)
+    root.joinpath("app.py").write_text(
+        app_text
+        or (
+            'NEXT_APP_IMPORT = "aicrm_next.main:app"\n'
+            "def run_next():\n"
+            "    uvicorn.run(NEXT_APP_IMPORT)\n"
+            "def init_next_schema_safe():\n"
+            "    pass\n"
+            "def init_db_next_alias():\n"
+            "    init_next_schema_safe()\n"
+            "REMOVED = 'Legacy Flask runtime has been removed from startup compatibility'\n"
+            "COMMAND = 'init-next-schema-safe'\n"
+        ),
+        encoding="utf-8",
+    )
+    root.joinpath("scripts/check_no_new_legacy.py").write_text(checker_text, encoding="utf-8")
+    if legacy_runner:
+        root.joinpath("legacy_flask_app.py").write_text("print('legacy')\n", encoding="utf-8")
+
+
+def test_startup_closeout_checker_flags_legacy_runner_file(tmp_path: Path) -> None:
+    _write_startup_closeout_files(tmp_path, legacy_runner=True)
+
+    codes = {violation.code for violation in check_startup_compatibility_legacy_removed(tmp_path)}
+
+    assert "startup_legacy_flask_runner_remaining" in codes
+
+
+def test_startup_closeout_checker_flags_app_legacy_import(tmp_path: Path) -> None:
+    _write_startup_closeout_files(tmp_path, app_text="from wecom_ability_service import create_app\n")
+
+    codes = {violation.code for violation in check_startup_compatibility_legacy_removed(tmp_path)}
+
+    assert "startup_app_legacy_import" in codes
+
+
+def test_startup_closeout_checker_flags_stale_startup_allowlist(tmp_path: Path) -> None:
+    _write_startup_closeout_files(
+        tmp_path,
+        checker_text='from pathlib import Path\nWECOM_IMPORT_ALLOWLIST = {Path("legacy_flask_app.py")}\n',
+    )
+
+    codes = {violation.code for violation in check_startup_compatibility_legacy_removed(tmp_path)}
+
+    assert "startup_wecom_allowlist_stale" in codes
+
+
+def test_startup_closeout_checker_accepts_next_only_state(tmp_path: Path) -> None:
+    _write_startup_closeout_files(tmp_path)
+
+    assert check_startup_compatibility_legacy_removed(tmp_path) == []
 
 
 def _write_group_ops_message_content_files(

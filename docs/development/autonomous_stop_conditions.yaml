@@ -62,7 +62,6 @@ protected_paths:
   - systemd/
   - nginx/
   - app.py
-  - legacy_flask_app.py
 
 low_risk_allowed_paths:
   - docs/development/

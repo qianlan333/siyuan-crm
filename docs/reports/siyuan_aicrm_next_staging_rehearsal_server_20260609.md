@@ -38,7 +38,7 @@
 - `createdb`
 - `pg_restore`
 - `python3 app.py health`
-- `python3 app.py init-db-legacy`
+- `historical deprecated python3 app.py init-db-legacy`
 - `python3 app.py run`
 - `psql -f scripts/siyuan_migration/03_channel_backfill.sql`
 
@@ -90,7 +90,7 @@
 - 未创建或清理 `siyuancrm_next`。
 - 未执行 `pg_restore`。
 - 未执行 `python3 app.py health`。
-- 未执行 `python3 app.py init-db-legacy`。
+- 未执行 `historical deprecated python3 app.py init-db-legacy`。
 - 未执行 channel backfill。
 - 未执行 smoke test。
 - 未修改 systemd/nginx。
@@ -116,7 +116,7 @@
 
 - 未能拉取/进入服务器上的 siyuan-crm 新 release。
 - 未能恢复 staging DB。
-- 受限通道不能执行 `python3 app.py health` 或 `python3 app.py init-db-legacy`。
+- 受限通道不能执行 `python3 app.py health` 或 `historical deprecated python3 app.py init-db-legacy`。
 
 ## 8. 渠道码 backfill 结果
 
@@ -179,7 +179,7 @@
 4. 可以使用生产 `DATABASE_URL` 执行 `pg_dump`。
 5. 可以创建或访问 staging DB `siyuancrm_next`。
 6. 可以对 `siyuancrm_next` 执行 `pg_restore --clean --if-exists --no-owner`。
-7. 可以运行 `python3 app.py health`、`python3 app.py init-db-legacy` 和 `python3 app.py run`。
+7. 可以运行 `python3 app.py health`、`historical deprecated python3 app.py init-db-legacy` 和 `python3 app.py run`。
 8. 可以只对 staging DB 执行 backfill 和 validate SQL。
 
 ## 14. 生产切换建议

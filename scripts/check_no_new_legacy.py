@@ -35,10 +35,7 @@ EXCLUDED_DIRS = {
 LEGACY_IMPORT_ALLOWLIST = {
     Path("aicrm_next/frontend_compat/legacy_routes.py"),
 }
-WECOM_IMPORT_ALLOWLIST = {
-    Path("app.py"),
-    Path("legacy_flask_app.py"),
-}
+WECOM_IMPORT_ALLOWLIST = set()
 API_SIDE_EFFECT_ALLOWLIST = set()
 SIDE_EFFECT_MARKERS = {
     "dispatch_wecom_task",
@@ -931,6 +928,56 @@ def scan_source_tree(root: Path = ROOT) -> list[Violation]:
             for marker in SIDE_EFFECT_MARKERS:
                 if marker in text:
                     violations.append(Violation("api_direct_external_side_effect", str(rel), marker))
+    return violations
+
+
+def check_startup_compatibility_legacy_removed(root: Path = ROOT) -> list[Violation]:
+    violations: list[Violation] = []
+
+    app_path = root / "app.py"
+    legacy_runner = root / "legacy_flask_app.py"
+    checker_path = root / "scripts/check_no_new_legacy.py"
+
+    if legacy_runner.exists():
+        violations.append(
+            Violation(
+                "startup_legacy_flask_runner_remaining",
+                str(legacy_runner.relative_to(root)),
+                "legacy_flask_app.py must not exist after startup compatibility closeout",
+            )
+        )
+
+    app_text = app_path.read_text(encoding="utf-8") if app_path.exists() else ""
+    forbidden_app_markers = {
+        "wecom_ability_service": "startup_app_legacy_import",
+        "create_app()": "startup_app_legacy_flask_create_app",
+        "init_db_legacy": "startup_app_legacy_init_remaining",
+        "delete_questionnaire_submissions_legacy": "startup_app_legacy_delete_remaining",
+    }
+    for marker, code in forbidden_app_markers.items():
+        if marker in app_text:
+            violations.append(Violation(code, "app.py", marker))
+
+    required_app_markers = (
+        'NEXT_APP_IMPORT = "aicrm_next.main:app"',
+        "uvicorn.run(NEXT_APP_IMPORT",
+        "init-next-schema-safe",
+        "init_db_next_alias",
+        "Legacy Flask runtime has been removed from startup compatibility",
+    )
+    for marker in required_app_markers:
+        if marker not in app_text:
+            violations.append(Violation("startup_app_next_only_marker_missing", "app.py", marker))
+
+    checker_text = checker_path.read_text(encoding="utf-8") if checker_path.exists() else ""
+    stale_allowlist_markers = (
+        'Path("' + 'app.py' + '")',
+        'Path("' + 'legacy_flask_app.py' + '")',
+    )
+    for marker in stale_allowlist_markers:
+        if marker in checker_text:
+            violations.append(Violation("startup_wecom_allowlist_stale", str(checker_path.relative_to(root)), marker))
+
     return violations
 
 
@@ -6690,6 +6737,7 @@ def check_post_legacy_architecture_freeze(root: Path = ROOT) -> list[Violation]:
 def run_checks(*, strict: bool) -> dict:
     violations = (
         scan_source_tree(ROOT)
+        + check_startup_compatibility_legacy_removed(ROOT)
         + check_group_ops_message_content_native(ROOT)
         + check_group_ops_material_resolver_native(ROOT)
         + check_group_ops_scheduler_duplicate_checker_native(ROOT)

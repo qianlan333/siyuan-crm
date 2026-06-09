@@ -19,7 +19,7 @@
 2. 新建 `siyuancrm_next` 预发库。
 3. 使用 `pg_restore` 把当前 siyuan 备份恢复到预发库。
 4. 使用 AI-CRM Next 新代码连接预发库。
-5. 运行 `python3 app.py init-db-legacy` 做 legacy schema 初始化/升级。
+5. 运行 `python3 app.py init-next-schema-safe` 做 AI-CRM Next safe schema 初始化。
 6. 运行渠道码 backfill，补齐 `automation_channel_scene_alias` 和 `automation_channel_qrcode_asset`。
 7. 校验 admin、channels、sidebar、user-ops、callback diagnosis 等关键入口。
 8. 验证通过后，再按蓝绿方式切换生产。
@@ -31,7 +31,7 @@
 比较结论：
 
 - AI-CRM 的 `app.py` 已经默认使用 FastAPI / `aicrm_next.main:app`，`python3 app.py run` 会通过 uvicorn 启动 AI-CRM Next。
-- AI-CRM 保留 `legacy_flask_app.py`，旧 Flask 只能通过显式 fallback 命令启动。
+- AI-CRM Next startup compatibility 已关闭；旧 Flask startup 命令只作为历史记录，不再是可执行入口。
 - siyuan-crm `main` 迁移前仍以旧 Flask / `wecom_ability_service.create_app()` 为主入口，且没有 `legacy_flask_app.py`。
 - siyuan-crm 的客户侧部署资产和配置说明不能简单覆盖，包括 `.env.example`、`deploy/openclaw-*` systemd/timer 模板、`WW_verify_*.txt` / `MP_verify_*.txt` 验证文件、`xinliushangye.com` 相关回调配置说明，以及“心流商业客户管理”品牌文案。
 - AI-CRM 必须整体带入的新模块包括 `aicrm_next/` FastAPI modular monolith、Next admin shell、admin auth/config/jobs、automation engine、channel entry、customer read model/sidebar v2、commerce/wechat pay/alipay、cloud orchestrator、group_ops、owner migration、radar links、media library、message archive、platform foundation，以及对应 migrations、schema、scripts 和测试契约。
@@ -90,7 +90,6 @@ source scripts/siyuan_migration/lib_db_url.sh
 PG_CLI_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
 
 python3 app.py health
-python3 app.py init-db-legacy
 python3 app.py init-next-schema-safe
 ```
 

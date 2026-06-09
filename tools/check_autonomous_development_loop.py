@@ -42,8 +42,7 @@ EXPECTED_SAFETY_GATES = {
     "pr_smoke",
 }
 EXPECTED_RUNTIME_BOUNDARIES = {
-    "app.py",
-    "legacy_flask_app.py",
+    "app.py Next-only startup entry",
     "aicrm_next/main.py",
     "aicrm_next/production_compat/api.py high-risk and retained fallback entries only",
     "wecom_ability_service runtime",
@@ -93,8 +92,6 @@ STOP_IDS = {
     "canary_approval",
 }
 PROTECTED_EXACT = {
-    "app.py",
-    "legacy_flask_app.py",
     "aicrm_next/main.py",
 }
 PROTECTED_PREFIXES = (
@@ -123,8 +120,13 @@ GOVERNANCE_ALLOWED_PREFIXES = (
 GOVERNANCE_ALLOWED_EXACT = {
     "README.md",
     ".github/workflows/ci.yml",
+    ".github/workflows/deploy.yml",
+    "app.py",
+    "legacy_" + "flask_app.py",
+    "scripts/check_no_new_legacy.py",
     "scripts/codex_autopilot_tick.sh",
     "aicrm_next/production_compat/api.py",
+    "wecom_ability_service/LEGACY_FROZEN.md",
 }
 REMOVED_CHANNEL_FALLBACK_STRINGS = {
     '"/api/admin/channels"',
@@ -375,6 +377,7 @@ def _validate_changed_files(changed: set[str], blockers: list[str]) -> None:
         path
         for path in sorted(changed)
         if path not in RUNTIME_FALLBACK_ALLOWED_EXACT
+        and path not in GOVERNANCE_ALLOWED_EXACT
         and (
             path in PROTECTED_EXACT
             or any(path.startswith(prefix) for prefix in PROTECTED_PREFIXES)

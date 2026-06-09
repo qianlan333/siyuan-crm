@@ -13,9 +13,11 @@ def test_production_deploy_loads_postgres_env_before_init_db():
 
     env_source_index = workflow.index("source /home/ubuntu/.openclaw-wecom-pg.env")
     database_url_guard_index = workflow.index('test -n "${DATABASE_URL:-}"')
-    init_db_index = workflow.index("python3 app.py init-db")
+    health_index = workflow.index("python3 app.py health")
+    schema_init_index = workflow.index("python3 app.py init-next-schema-safe")
 
-    assert env_source_index < database_url_guard_index < init_db_index
+    assert env_source_index < database_url_guard_index < health_index < schema_init_index
+    assert "python3 app.py init-db" not in workflow
 
 
 def test_production_deploy_stashes_dirty_worktree_before_remote_update():
@@ -37,9 +39,9 @@ def test_production_deploy_installs_dependencies_only_when_requirements_change()
     after_sha_index = workflow.index('after_sha="$(git rev-parse HEAD)"')
     requirements_guard_index = workflow.index('git diff --quiet "$before_sha" "$after_sha" -- requirements.txt')
     pip_install_index = workflow.index("pip install -r requirements.txt")
-    init_db_index = workflow.index("python3 app.py init-db")
+    schema_init_index = workflow.index("python3 app.py init-next-schema-safe")
 
-    assert fetch_index < reset_index < after_sha_index < requirements_guard_index < pip_install_index < init_db_index
+    assert fetch_index < reset_index < after_sha_index < requirements_guard_index < pip_install_index < schema_init_index
     assert "requirements.txt unchanged; skipping pip install" in workflow
 
 

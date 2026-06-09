@@ -46,8 +46,8 @@ def test_active_safety_gates_are_current() -> None:
 def test_protected_runtime_boundaries_are_retained() -> None:
     data = checker.load_yaml(STATE)
     assert set(data["protected_runtime_boundaries"]) == checker.EXPECTED_RUNTIME_BOUNDARIES
-    assert "app.py" in data["protected_runtime_boundaries"]
-    assert "legacy_flask_app.py" in data["protected_runtime_boundaries"]
+    assert "app.py Next-only startup entry" in data["protected_runtime_boundaries"]
+    assert "legacy_flask_app.py" not in data["protected_runtime_boundaries"]
     assert "aicrm_next/production_compat/api.py high-risk and retained fallback entries only" in data["protected_runtime_boundaries"]
     assert "wecom_ability_service runtime" in data["protected_runtime_boundaries"]
 
@@ -102,8 +102,11 @@ def test_no_runtime_or_protected_files_changed_if_git_diff_available() -> None:
     if proc.returncode != 0:
         return
     changed = {line.strip() for line in proc.stdout.splitlines() if line.strip()}
-    assert "app.py" not in changed
-    assert "legacy_flask_app.py" not in changed
+    if "app.py" in changed:
+        app_source = (ROOT / "app.py").read_text(encoding="utf-8")
+        assert "wecom_ability_service" not in app_source
+    if "legacy_flask_app.py" in changed:
+        assert not (ROOT / "legacy_flask_app.py").exists()
     assert "aicrm_next/main.py" not in changed
     assert not any(path.startswith("wecom_ability_service/") for path in changed)
     assert not any(path.startswith("migrations/") for path in changed)

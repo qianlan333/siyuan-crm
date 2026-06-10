@@ -39,6 +39,18 @@ def test_questionnaire_admin_new_page_is_readonly_shell_without_write_execution(
     assert "initialQuestionnaireId: null" in response.text
 
 
+def test_questionnaire_admin_editor_exposes_other_option_controls() -> None:
+    response = TestClient(create_app()).get("/admin/questionnaires/new")
+
+    assert response.status_code == 200
+    html = response.text
+    assert "设为其它选项" in html
+    assert "data-option-field=\"is_other\"" in html
+    assert "data-option-field=\"other_placeholder\"" in html
+    assert "data-option-field=\"other_max_length\"" in html
+    assert "validateOtherOptionsBeforeSave" in html
+
+
 def test_questionnaire_admin_detail_page_uses_next_read_model_editor_payload() -> None:
     response = TestClient(create_app()).get("/admin/questionnaires/1")
 

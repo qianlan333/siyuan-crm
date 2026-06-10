@@ -696,6 +696,22 @@
       border-color: rgba(157, 99, 48, 0.5);
       box-shadow: 0 0 0 3px rgba(157, 99, 48, 0.12);
     }
+    .option-other-config {
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: #f7fbff;
+      border: 1px solid rgba(20, 86, 240, 0.12);
+    }
+    .option-other-config .field {
+      margin-bottom: 8px;
+    }
+    .option-other-config .field:last-child {
+      margin-bottom: 0;
+    }
+    .option-other-config.hidden {
+      display: none;
+    }
     .rule-nav-list {
       display: grid;
       gap: 10px;
@@ -2714,6 +2730,12 @@
       });
     }
 
+    function normalizeOtherMaxLength(value, fallback = 80) {
+      if (value === '' || value === null || value === undefined) return fallback;
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+
     function createOption(option = {}, index = 0) {
       return {
         id: option.id ?? null,
@@ -2722,6 +2744,9 @@
         score: option.score ?? 0,
         assessment_type_key: option.assessment_type_key || '',
         tag_codes: normalizeTagIds(option.tag_codes || []),
+        is_other: Boolean(option.is_other),
+        other_placeholder: option.other_placeholder || '',
+        other_max_length: normalizeOtherMaxLength(option.other_max_length),
         sort_order: option.sort_order ?? (index + 1),
       };
     }
@@ -3034,6 +3059,9 @@
               score: Number(option.score || 0),
               assessment_type_key: option.assessment_type_key || '',
               tag_codes: normalizeTagIds(option.tag_codes),
+              is_other: Boolean(option.is_other),
+              other_placeholder: option.other_placeholder || '',
+              other_max_length: normalizeOtherMaxLength(option.other_max_length),
               sort_order: Number(option.sort_order || (optionIndex + 1)),
             }));
           }
@@ -4189,6 +4217,7 @@
                   `),
                 ].join('')
               : '<option value="">先选择测评维度</option>';
+            const otherMaxLength = normalizeOtherMaxLength(option.other_max_length);
             return `
               <div class="option-editor" data-option-key="${escapeHtml(option.local_key)}" draggable="true">
               <div class="option-editor-head">
@@ -4210,6 +4239,36 @@
                   <select data-option-field="assessment_type_key" data-option-key="${escapeHtml(option.local_key)}" ${selectedDimension ? '' : 'disabled'}>
                     ${optionTypeOptionsHtml}
                   </select>
+                </label>
+              </div>
+              <label class="field" style="margin-bottom:8px;">
+                <input
+                  data-option-field="is_other"
+                  data-option-key="${escapeHtml(option.local_key)}"
+                  type="checkbox"
+                  ${option.is_other ? 'checked' : ''}
+                > 设为其它选项
+              </label>
+              <div class="option-other-config${option.is_other ? '' : ' hidden'}">
+                <label class="field">输入框提示文案
+                  <input
+                    data-option-field="other_placeholder"
+                    data-option-key="${escapeHtml(option.local_key)}"
+                    type="text"
+                    value="${escapeHtml(option.other_placeholder || '')}"
+                    placeholder="请填写其它内容"
+                  >
+                </label>
+                <label class="field">最多输入字数
+                  <input
+                    data-option-field="other_max_length"
+                    data-option-key="${escapeHtml(option.local_key)}"
+                    type="number"
+                    min="1"
+                    max="200"
+                    step="1"
+                    value="${escapeHtml(String(otherMaxLength))}"
+                  >
                 </label>
               </div>
               <div class="tag-picker-host" data-option-tag-host="${escapeHtml(option.local_key)}"></div>
@@ -4324,7 +4383,22 @@
         const updateOptionField = (event) => {
           const option = question.options.find((item) => item.local_key === event.target.dataset.optionKey);
           if (!option) return;
-          option[event.target.dataset.optionField] = event.target.value;
+          const field = event.target.dataset.optionField;
+          if (field === 'is_other') {
+            option.is_other = event.target.checked;
+            if (option.is_other) {
+              question.options.forEach((item) => {
+                if (item.local_key !== option.local_key) item.is_other = false;
+              });
+              if (!option.option_text) option.option_text = '其它';
+              if (!option.other_max_length) option.other_max_length = 80;
+            }
+            renderWorkspace();
+            return;
+          }
+          option[field] = field === 'other_max_length'
+            ? (event.target.value === '' ? '' : Number(event.target.value))
+            : event.target.value;
           renderPreview();
         };
         input.addEventListener('input', updateOptionField);
@@ -5794,8 +5868,26 @@
       validateUrlField(builder.final_recommendation?.course_url, '尾部集中推荐课程链接');
     }
 
+    function validateOtherOptionsBeforeSave() {
+      (state.questionnaire?.questions || []).forEach((question, questionIndex) => {
+        if (['textarea', 'mobile'].includes(question.type)) return;
+        const title = question.title || `题目 ${questionIndex + 1}`;
+        const otherOptions = (question.options || []).filter((option) => Boolean(option.is_other));
+        if (otherOptions.length > 1) {
+          throw new Error(`题目“${title}”最多只能设置一个其它选项`);
+        }
+        otherOptions.forEach((option) => {
+          const maxLength = normalizeOtherMaxLength(option.other_max_length);
+          if (!Number.isFinite(maxLength) || maxLength < 1 || maxLength > 200) {
+            throw new Error(`题目“${title}”的其它选项最多输入字数必须在 1 到 200 之间`);
+          }
+        });
+      });
+    }
+
     async function saveQuestionnaire() {
       validateAssessmentConfigBeforeSave();
+      validateOtherOptionsBeforeSave();
       const wasEditing = Boolean(state.currentId);
       const payload = serializePayload();
       const url = state.currentId ? `/api/admin/questionnaires/${state.currentId}` : '/api/admin/questionnaires';

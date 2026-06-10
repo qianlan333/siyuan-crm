@@ -65,8 +65,14 @@ def test_sidebar_workbench_static_contract_has_demo_approved_surface_only():
     assert "badge" not in combined.lower()
     assert "phone-state loading" in template
     assert "加载中..." in template
-    assert "20260605-product-card-send" in template
-    assert "20260605-product-card-send" in next_template
+    assert "20260610-wecom-sdk" in template
+    assert "20260610-wecom-sdk" in next_template
+    assert "https://res.wx.qq.com/wwopen/js/jsapi/jweixin-1.0.0.js" in template
+    assert "https://res.wx.qq.com/wwopen/js/jsapi/jweixin-1.0.0.js" in next_template
+    assert "https://res.wx.qq.com/open/js/jweixin-1.6.0.js" not in combined
+    assert "function getWeComSdk()" in script
+    assert "window.jWeixin || window.wx || null" in script
+    assert "window.wx = sdk;" in script
     assert "customer-avatar" not in combined
     assert "class=\"avatar\"" not in combined
     assert ".avatar" not in css

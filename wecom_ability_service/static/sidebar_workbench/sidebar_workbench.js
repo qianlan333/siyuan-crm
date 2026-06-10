@@ -89,6 +89,14 @@
     console.log(line);
   }
 
+  function getWeComSdk() {
+    const sdk = window.jWeixin || window.wx || null;
+    if (sdk && window.wx !== sdk) {
+      window.wx = sdk;
+    }
+    return sdk;
+  }
+
   function customerContextQuery() {
     return {
       external_userid: state.external_userid,
@@ -667,7 +675,8 @@
   }
 
   async function initWeComSdk() {
-    if (!window.wx) return { ok: false, status: WORKBENCH_STATES.sdk_unavailable, reason: "wx_missing" };
+    const wxSdk = getWeComSdk();
+    if (!wxSdk) return { ok: false, status: WORKBENCH_STATES.sdk_unavailable, reason: "wx_missing" };
     let configPayload;
     try {
       const currentUrl = window.location.href.split("#")[0];
@@ -687,7 +696,7 @@
           resolve({ ok, status: ok ? WORKBENCH_STATES.identifying_customer : WORKBENCH_STATES.sdk_unavailable, reason: reason || "" });
         }
       };
-      window.wx.config({
+      wxSdk.config({
         beta: true,
         debug: false,
         appId: configPayload.corp_id,
@@ -696,13 +705,13 @@
         signature: configPayload.config.signature,
         jsApiList: ["getContext", "sendChatMessage"],
       });
-      window.wx.ready(function () {
+      wxSdk.ready(function () {
         writeDebug("wx.config success", { url: configPayload.config.url });
-        if (typeof window.wx.agentConfig !== "function") {
+        if (typeof wxSdk.agentConfig !== "function") {
           finish(false, "agentConfig_missing");
           return;
         }
-        window.wx.agentConfig({
+        wxSdk.agentConfig({
           corpid: configPayload.corp_id,
           agentid: String(configPayload.agent_id),
           timestamp: Number(configPayload.agent_config.timestamp),
@@ -719,7 +728,7 @@
           },
         });
       });
-      window.wx.error(function (err) {
+      wxSdk.error(function (err) {
         writeDebug("wx.config fail", err || {});
         finish(false, "wx_config_failed");
       });

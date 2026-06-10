@@ -78,7 +78,10 @@ class QuestionnaireRespondentIdentityService:
             cookie_value = build_questionnaire_h5_identity_cookie(
                 {"respondent_key": identity["respondent_key"], "slug": slug, "anonymous": True}
             )
-        elif bool(cookie_identity.get("anonymous")) and identity.get("respondent_key") == cookie_identity.get("respondent_key"):
+        elif (
+            bool(cookie_identity.get("anonymous"))
+            and identity.get("respondent_key") == cookie_identity.get("respondent_key")
+        ) or _text(identity.get("respondent_key")).startswith("anon_"):
             anonymous = True
         return {
             "ok": True,

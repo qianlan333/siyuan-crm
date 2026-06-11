@@ -60,6 +60,52 @@ class WeComTagLiveGateway:
             return self._post("/cgi-bin/externalcontact/get_corp_tag_list", {})
         return dict(client.list_wecom_tags_live() if hasattr(client, "list_wecom_tags_live") else client.list_tags({}) or {})
 
+    def create_tag_group_live(self, *, group_name: str, tag_names: list[str]) -> Json:
+        client = self._build_client()
+        payload = {"group_name": group_name, "tag": [{"name": item} for item in tag_names]}
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/add_corp_tag", payload)
+        return dict(client.create_tag_group_live(group_name=group_name, tag_names=tag_names) if hasattr(client, "create_tag_group_live") else client.create_tag(payload) or {})
+
+    def create_tag_live(self, *, group_id: str = "", group_name: str = "", tag_name: str) -> Json:
+        client = self._build_client()
+        payload: Json = {"tag": [{"name": tag_name}]}
+        if group_id:
+            payload["group_id"] = group_id
+        else:
+            payload["group_name"] = group_name
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/add_corp_tag", payload)
+        return dict(client.create_tag_live(group_id=group_id, group_name=group_name, tag_name=tag_name) if hasattr(client, "create_tag_live") else client.create_tag(payload) or {})
+
+    def update_tag_group_live(self, *, group_id: str, group_name: str) -> Json:
+        client = self._build_client()
+        payload = {"id": group_id, "name": group_name}
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/edit_corp_tag", payload)
+        return dict(client.update_tag_group_live(group_id=group_id, group_name=group_name) if hasattr(client, "update_tag_group_live") else client.update_tag_group(payload) or {})
+
+    def delete_tag_group_live(self, *, group_id: str) -> Json:
+        client = self._build_client()
+        payload = {"group_id": [group_id]}
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/del_corp_tag", payload)
+        return dict(client.delete_tag_group_live(group_id=group_id) if hasattr(client, "delete_tag_group_live") else client.delete_tag_group(payload) or {})
+
+    def update_tag_live(self, *, tag_id: str, tag_name: str) -> Json:
+        client = self._build_client()
+        payload = {"id": tag_id, "name": tag_name}
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/edit_corp_tag", payload)
+        return dict(client.update_tag_live(tag_id=tag_id, tag_name=tag_name) if hasattr(client, "update_tag_live") else client.update_tag(payload) or {})
+
+    def delete_tag_live(self, *, tag_id: str) -> Json:
+        client = self._build_client()
+        payload = {"tag_id": [tag_id]}
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/del_corp_tag", payload)
+        return dict(client.delete_tag_live(tag_id=tag_id) if hasattr(client, "delete_tag_live") else client.delete_tag(payload) or {})
+
     def mark_tags_live(self, *, external_userid: str, tag_ids: list[str], operator: str) -> Json:
         client = self._build_client()
         payload = {"userid": operator, "external_userid": external_userid, "add_tag": list(tag_ids)}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+import aicrm_next.customer_tags.admin_write as admin_write
 from aicrm_next.customer_tags.admin_write import (
     get_wecom_tag_write_audit_events,
     get_wecom_tag_write_projection_events,
@@ -94,3 +95,72 @@ def test_wecom_tag_write_validation_errors_are_controlled(monkeypatch) -> None:
     assert bad_create.json()["error_code"] == "input_error"
     assert missing.status_code == 404
     assert missing.json()["error_code"] == "not_found"
+
+
+def test_wecom_tag_crud_live_switch_calls_wecom_and_refreshes_catalog(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "wecom-tag-write-live-command-test")
+    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://prod_user:prod_pass@db.internal:5432/prod_crm")
+    monkeypatch.setenv("AICRM_WECOM_TAG_CRUD_LIVE_ENABLED", "1")
+
+    calls: list[tuple[str, dict]] = []
+
+    class FakeGateway:
+        def create_tag_live(self, *, group_id: str = "", group_name: str = "", tag_name: str):
+            calls.append(("create_tag", {"group_id": group_id, "group_name": group_name, "tag_name": tag_name}))
+            return {"errcode": 0, "tag_group": {"group_id": group_id, "tag": [{"id": "tag_live_created", "name": tag_name}]}}
+
+        def list_wecom_tags_live(self):
+            calls.append(("list_tags", {}))
+            return {
+                "errcode": 0,
+                "tag_group": [
+                    {
+                        "group_id": "group_live",
+                        "group_name": "真实标签组",
+                        "tag": [{"id": "tag_live_created", "name": "真实新增"}],
+                    }
+                ],
+            }
+
+    def fake_refresh(*, operator: str = "", gateway=None, repository=None):
+        assert operator == "admin_user"
+        assert gateway is not None
+        payload = gateway.list_wecom_tags_live()
+        return {
+            "ok": True,
+            "source_status": "next_live_remote_synced",
+            "sync_model_status": "test_projection",
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "real_external_call_executed": True,
+            "sync_executed": True,
+            "fetched_groups": len(payload["tag_group"]),
+            "fetched_tags": len(payload["tag_group"][0]["tag"]),
+            "sync_run_id": 9,
+        }
+
+    monkeypatch.setattr(admin_write, "build_wecom_tag_live_gateway", lambda: FakeGateway())
+    monkeypatch.setattr(admin_write, "execute_wecom_tag_catalog_sync", fake_refresh)
+
+    response = TestClient(create_app(), raise_server_exceptions=False).post(
+        "/api/admin/wecom/tags",
+        json={"group_id": "group_live", "tag_name": "真实新增", "actor_id": "admin_user"},
+        headers={"Idempotency-Key": "tag-live-create"},
+    )
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["source_status"] == "next_command"
+    assert payload["write_model_status"] == "live_wecom_executed"
+    assert payload["adapter_mode"] == "real_live"
+    assert payload["local_only"] is False
+    assert payload["real_external_call_executed"] is True
+    assert payload["sync_executed"] is True
+    assert payload["target_id"] == "tag_live_created"
+    assert payload["side_effect_plan"]["adapter_mode"] == "real_live"
+    assert payload["side_effect_plan"]["status"] == "executed"
+    assert calls == [
+        ("create_tag", {"group_id": "group_live", "group_name": "", "tag_name": "真实新增"}),
+        ("list_tags", {}),
+    ]

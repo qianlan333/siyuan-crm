@@ -354,6 +354,7 @@ def _build_external_contact_detail(
     external_userid: str,
     owner_userid: str,
     customer_name: str = "回调客户",
+    description: str | None = None,
     follow_user_tags: list[dict[str, str]] | None = None,
 ) -> dict[str, object]:
     return {
@@ -367,7 +368,7 @@ def _build_external_contact_detail(
             {
                 "userid": owner_userid,
                 "remark": "",
-                "description": external_userid,
+                "description": external_userid if description is None else description,
                 "tags": list(follow_user_tags or []),
             }
         ],
@@ -3259,6 +3260,41 @@ def test_external_contact_event_add_external_contact_creates_deferred_verify_job
         assert job["status"] == "pending"
         assert str(job["run_after"] or "").strip() != ""
         assert dispatched[0][0] == "user_ops_auto_assign_class_term"
+
+
+def test_external_contact_event_updates_empty_description_to_external_userid(app, monkeypatch):
+    detail = _build_external_contact_detail(
+        external_userid="wm_auto_assign_description_001",
+        owner_userid="sales_01",
+        description="",
+    )
+    client = _FakeCallbackContactClient(detail)
+    monkeypatch.setattr("wecom_ability_service.routes._contact_client", lambda: client)
+    monkeypatch.setattr("wecom_ability_service.routes._dispatch_background_task", lambda *args, **kwargs: None)
+
+    with app.app_context():
+        logged = log_external_contact_event(
+            corp_id="ww-test",
+            event_type="change_external_contact",
+            change_type="add_external_contact",
+            external_userid="wm_auto_assign_description_001",
+            user_id="sales_01",
+            event_time=1775000003,
+            event_key="event-auto-assign-description-001",
+            payload_xml="<xml></xml>",
+            payload_json={"ChangeType": "add_external_contact"},
+        )
+        result = _process_external_contact_event(int(logged["id"]))
+
+        assert result["ok"] is True
+        row = get_db().execute(
+            "SELECT owner_userid, description FROM contacts WHERE external_userid = ?",
+            ("wm_auto_assign_description_001",),
+        ).fetchone()
+        assert dict(row) == {
+            "owner_userid": "sales_01",
+            "description": "wm_auto_assign_description_001",
+        }
 
 
 def test_external_contact_event_for_other_owner_also_creates_deferred_job(app, monkeypatch):

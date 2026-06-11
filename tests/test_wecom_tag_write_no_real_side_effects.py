@@ -31,7 +31,6 @@ def test_wecom_tag_write_sources_do_not_call_legacy_or_real_wecom() -> None:
         "X-AICRM-Compatibility-Facade",
         "requests.",
         "httpx.",
-        "WeComTagLiveGateway",
         "list_wecom_tags_live",
         "mark_tags_live",
         "mark_external_contact_tags",
@@ -77,4 +76,20 @@ def test_wecom_tag_write_blocks_production_fixture_claims(monkeypatch) -> None:
     assert response.status_code == 503
     assert response.json()["source_status"] == "production_unavailable"
     assert response.json()["fallback_used"] is False
+    assert response.json()["real_external_call_executed"] is False
+
+
+def test_wecom_tag_write_live_crud_requires_explicit_switch(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "wecom-tag-write-live-switch")
+    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://prod_user:prod_pass@db.internal:5432/prod_crm")
+    monkeypatch.delenv("AICRM_WECOM_TAG_CRUD_LIVE_ENABLED", raising=False)
+
+    response = TestClient(create_app(), raise_server_exceptions=False).post(
+        "/api/admin/wecom/tags",
+        json={"group_id": "group_live", "tag_name": "生产阻断"},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["source_status"] == "production_unavailable"
     assert response.json()["real_external_call_executed"] is False

@@ -143,6 +143,138 @@ CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_active_reason ON user_ops_do_not
 CREATE INDEX IF NOT EXISTS ix_user_ops_send_records_next_created_at ON user_ops_send_records_next (created_at);
 CREATE INDEX IF NOT EXISTS ix_user_ops_send_records_next_status ON user_ops_send_records_next (status);
 
+CREATE TABLE IF NOT EXISTS automation_event_v2 (
+    id BIGSERIAL PRIMARY KEY,
+    event_uid TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    program_id BIGINT,
+    channel_id BIGINT,
+    binding_id BIGINT,
+    external_userid TEXT,
+    phone TEXT,
+    person_id BIGINT,
+    source_type TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL,
+    raw_occurred_at TIMESTAMPTZ,
+    payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    idempotency_key TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_event_v2_source UNIQUE (source_type, source_id),
+    CONSTRAINT uq_automation_event_v2_idempotency UNIQUE (idempotency_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_event_v2_program_event ON automation_event_v2 (program_id, event_type, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_automation_event_v2_external ON automation_event_v2 (external_userid);
+
+CREATE TABLE IF NOT EXISTS automation_membership_v2 (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL,
+    external_userid TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    person_id BIGINT,
+    source_channel_id BIGINT,
+    source_binding_id BIGINT,
+    status TEXT NOT NULL DEFAULT 'active',
+    current_stage TEXT NOT NULL DEFAULT 'pending_questionnaire',
+    current_stage_entry_id BIGINT,
+    joined_at TIMESTAMPTZ NOT NULL,
+    exited_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_membership_v2_program_external UNIQUE (program_id, external_userid)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_membership_v2_program_stage ON automation_membership_v2 (program_id, current_stage, status);
+
+CREATE TABLE IF NOT EXISTS automation_stage_entry_v2 (
+    id BIGSERIAL PRIMARY KEY,
+    membership_id BIGINT NOT NULL,
+    program_id BIGINT NOT NULL,
+    stage_code TEXT NOT NULL,
+    entered_at TIMESTAMPTZ NOT NULL,
+    exited_at TIMESTAMPTZ,
+    source_event_id BIGINT NOT NULL,
+    entry_reason TEXT NOT NULL,
+    snapshot_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_automation_stage_entry_v2_source UNIQUE (membership_id, stage_code, source_event_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_automation_stage_entry_v2_program_stage ON automation_stage_entry_v2 (program_id, stage_code, entered_at);
+
+CREATE TABLE IF NOT EXISTS automation_task_plan_v2 (
+    id BIGSERIAL PRIMARY KEY,
+    program_id BIGINT NOT NULL,
+    task_id BIGINT NOT NULL,
+    membership_id BIGINT NOT NULL,
+    event_id BIGINT,
+    stage_entry_id BIGINT,
+    schedule_key TEXT NOT NULL DEFAULT '',
+    trigger_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'planned',
+    skip_reason TEXT NOT NULL DEFAULT '',
+    diagnostics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    rendered_content_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    broadcast_job_id BIGINT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_task_plan_v2_event ON automation_task_plan_v2 (task_id, membership_id, event_id) WHERE event_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_task_plan_v2_stage ON automation_task_plan_v2 (task_id, membership_id, stage_entry_id) WHERE stage_entry_id IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_task_plan_v2_schedule ON automation_task_plan_v2 (task_id, membership_id, schedule_key) WHERE schedule_key <> '';
+CREATE INDEX IF NOT EXISTS idx_automation_task_plan_v2_program_status ON automation_task_plan_v2 (program_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS wechat_shop_refunds (
+    id BIGSERIAL PRIMARY KEY,
+    order_id TEXT NOT NULL DEFAULT '',
+    transaction_id TEXT NOT NULL DEFAULT '',
+    out_refund_no TEXT NOT NULL UNIQUE,
+    aftersale_id TEXT NOT NULL DEFAULT '',
+    refund_amount_total INTEGER NOT NULL DEFAULT 0,
+    order_amount_total INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    status TEXT NOT NULL DEFAULT 'requested',
+    reason TEXT NOT NULL DEFAULT '',
+    requested_by TEXT NOT NULL DEFAULT '',
+    operator TEXT NOT NULL DEFAULT '',
+    request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_message TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_shop_refunds_order ON wechat_shop_refunds (order_id, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_wechat_shop_refunds_status ON wechat_shop_refunds (status, created_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_wechat_shop_refunds_aftersale ON wechat_shop_refunds (aftersale_id) WHERE aftersale_id <> '';
+
+CREATE TABLE IF NOT EXISTS wechat_shop_sync_runs (
+    id BIGSERIAL PRIMARY KEY,
+    sync_type TEXT NOT NULL DEFAULT '',
+    time_mode TEXT NOT NULL DEFAULT '',
+    range_start TIMESTAMPTZ,
+    range_end TIMESTAMPTZ,
+    status TEXT NOT NULL DEFAULT 'running',
+    scanned_count INTEGER NOT NULL DEFAULT 0,
+    synced_count INTEGER NOT NULL DEFAULT 0,
+    failed_count INTEGER NOT NULL DEFAULT 0,
+    next_key TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    operator TEXT NOT NULL DEFAULT '',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_wechat_shop_sync_runs_started ON wechat_shop_sync_runs (started_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_wechat_shop_sync_runs_type_status ON wechat_shop_sync_runs (sync_type, status, range_end DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS admin_sso_states (
     state_token TEXT PRIMARY KEY,
     login_kind TEXT NOT NULL DEFAULT 'wecom_qr',

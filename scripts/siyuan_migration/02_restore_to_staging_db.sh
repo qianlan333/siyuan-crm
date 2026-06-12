@@ -21,9 +21,9 @@ fi
 pass "STAGING_DATABASE_URL is available for PostgreSQL CLI tools"
 
 if [[ "${CLEAN}" == "true" ]]; then
-  pg_restore --clean --if-exists --no-owner --dbname="${PG_CLI_STAGING_DATABASE_URL}" "${DUMP_FILE}"
+  pg_restore --clean --if-exists --no-owner --no-acl --dbname="${PG_CLI_STAGING_DATABASE_URL}" "${DUMP_FILE}"
 else
-  pg_restore --no-owner --dbname="${PG_CLI_STAGING_DATABASE_URL}" "${DUMP_FILE}"
+  pg_restore --no-owner --no-acl --dbname="${PG_CLI_STAGING_DATABASE_URL}" "${DUMP_FILE}"
 fi
 
 pass "restored ${DUMP_FILE} to explicit staging database"

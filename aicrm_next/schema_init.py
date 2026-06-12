@@ -28,6 +28,14 @@ SAFE_NEXT_SCHEMA_TABLES = (
     user_ops_do_not_disturb_next,
     user_ops_send_records_next,
 )
+SAFE_NEXT_SCHEMA_EXTRA_TABLE_NAMES = (
+    "automation_event_v2",
+    "automation_membership_v2",
+    "automation_stage_entry_v2",
+    "automation_task_plan_v2",
+    "wechat_shop_refunds",
+    "wechat_shop_sync_runs",
+)
 SAFE_NEXT_SCHEMA_SQL = Path(__file__).resolve().parents[1] / "scripts" / "siyuan_migration" / "06_safe_next_schema_init.sql"
 
 
@@ -38,6 +46,7 @@ def _sql_statements(sql: str) -> list[str]:
 def init_next_schema_safe(engine: Engine | None = None, *, prefer_sql_file: bool | None = None) -> list[str]:
     """Create missing AI-CRM Next read-model tables and indexes without dropping data."""
 
+    explicit_engine = engine is not None
     engine = engine or get_engine()
     if prefer_sql_file is None:
         prefer_sql_file = engine.dialect.name == "postgresql"
@@ -47,12 +56,30 @@ def init_next_schema_safe(engine: Engine | None = None, *, prefer_sql_file: bool
         with engine.begin() as connection:
             for statement in _sql_statements(sql):
                 connection.execute(text(statement))
-        ensure_admin_sso_state_schema()
-        return [table.name for table in SAFE_NEXT_SCHEMA_TABLES]
+        if not explicit_engine:
+            ensure_admin_sso_state_schema()
+        return [table.name for table in SAFE_NEXT_SCHEMA_TABLES] + list(SAFE_NEXT_SCHEMA_EXTRA_TABLE_NAMES)
 
     for table in SAFE_NEXT_SCHEMA_TABLES:
         table.create(bind=engine, checkfirst=True)
         for index in table.indexes:
             index.create(bind=engine, checkfirst=True)
-    ensure_admin_sso_state_schema()
+    if explicit_engine:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS admin_sso_states (
+                        state_token TEXT PRIMARY KEY,
+                        login_kind TEXT NOT NULL DEFAULT 'wecom_qr',
+                        next_path TEXT NOT NULL DEFAULT '/admin',
+                        expires_at TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    )
+                    """
+                )
+            )
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_admin_sso_states_expires_at ON admin_sso_states (expires_at)"))
+    else:
+        ensure_admin_sso_state_schema()
     return [table.name for table in SAFE_NEXT_SCHEMA_TABLES]

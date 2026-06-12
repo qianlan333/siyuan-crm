@@ -42,6 +42,7 @@
 
   const bootstrapNode = root.querySelector("[data-channel-bootstrap]");
   const bootstrap = bootstrapNode ? JSON.parse(bootstrapNode.textContent || "{}") : {};
+  const bootstrapChannel = bootstrap.channel || {};
   const adminToken = root.dataset.adminToken || "";
 
   function bySelector(selector, scope) {
@@ -325,6 +326,7 @@
     if (miniprogramIds.length + imageIds.length + attachmentIds.length > 9) {
       throw new Error("欢迎语素材最多选择 9 个");
     }
+    const assignment = assignmentPayload();
     const payload = {
       admin_action_token: adminToken,
       channel_type: isLink ? "wecom_customer_acquisition" : "qrcode",
@@ -342,7 +344,10 @@
       entry_tag_id: entryTagId,
       entry_tag_name: entryTagName,
       entry_tag_group_name: entryTagGroupName,
-      owner_staff_id: data.owner_staff_id || "",
+      owner_staff_id: assignment.owner_staff_id || data.owner_staff_id || "",
+      assignment_mode: assignment.assignment_mode,
+      assignment_strategy: assignment.assignment_strategy,
+      assignees: assignment.assignees,
       status: data.status || "active",
     };
     if (isLink) {
@@ -350,6 +355,255 @@
       payload.customer_channel = data.customer_channel || data.scene_value || "";
     }
     return payload;
+  }
+
+  const assignmentState = {
+    strategy: "ratio",
+    assignees: [],
+    errors: [],
+  };
+
+  function normalizeAssignee(raw, index) {
+    const staffId = String((raw || {}).staff_id || (raw || {}).user_id || "").trim();
+    const displayName = String((raw || {}).display_name || (raw || {}).display_name_snapshot || staffId).trim();
+    return {
+      staff_id: staffId,
+      display_name: displayName || staffId,
+      ratio_percent: Number((raw || {}).ratio_percent || 0) || (index === 0 ? 100 : 0),
+      max_scans_24h: Number((raw || {}).max_scans_24h || 0) || 100,
+      status: String((raw || {}).status || "active").trim() || "active",
+    };
+  }
+
+  function visibleAssignees() {
+    return assignmentState.assignees.filter((item) => item.status === "active");
+  }
+
+  function ratioTotal() {
+    return visibleAssignees().reduce((sum, item) => sum + Number(item.ratio_percent || 0), 0);
+  }
+
+  function validateAssignment() {
+    const errors = [];
+    const assignees = visibleAssignees();
+    if (!assignees.length) errors.push("至少添加 1 个客服。");
+    if (assignees.length > 5) errors.push("最多只能添加 5 个客服。");
+    if (assignmentState.strategy === "ratio") {
+      const total = ratioTotal();
+      if (total !== 100) errors.push("比例合计必须等于 100%，当前为 " + total + "%。");
+      assignees.forEach((item) => {
+        if (Number(item.ratio_percent || 0) <= 0) errors.push((item.display_name || item.staff_id) + " 的比例必须大于 0%。");
+      });
+    } else {
+      assignees.forEach((item) => {
+        if (Number(item.max_scans_24h || 0) <= 0) errors.push((item.display_name || item.staff_id) + " 的 24h 上限必须大于 0。");
+      });
+    }
+    assignmentState.errors = errors;
+    return errors;
+  }
+
+  function assignmentPayload() {
+    const errors = validateAssignment();
+    if (errors.length) throw new Error(errors[0]);
+    const assignees = visibleAssignees();
+    return {
+      assignment_mode: "multi_staff",
+      assignment_strategy: assignmentState.strategy,
+      owner_staff_id: assignees[0] ? assignees[0].staff_id : "",
+      assignees: assignees.map((item, index) => ({
+        staff_id: item.staff_id,
+        display_name: item.display_name,
+        priority: index + 1,
+        ratio_percent: assignmentState.strategy === "ratio" ? Number(item.ratio_percent || 0) : null,
+        max_scans_24h: assignmentState.strategy === "cap_switch" ? Number(item.max_scans_24h || 0) : null,
+        status: "active",
+      })),
+    };
+  }
+
+  function setSaveButtonAvailability() {
+    const button = root.querySelector("[data-save-channel]");
+    if (button) button.disabled = assignmentState.errors.length > 0;
+  }
+
+  function renderAssignmentStrategies() {
+    bySelector("[data-strategy-card]").forEach((card) => {
+      const active = card.dataset.strategyCard === assignmentState.strategy;
+      card.classList.toggle("is-active", active);
+      const input = card.querySelector("[data-assignment-strategy]");
+      if (input) input.checked = active;
+    });
+    const title = root.querySelector("[data-assignee-mode-title]");
+    if (title) title.textContent = assignmentState.strategy === "ratio" ? "客服比例" : "客服 24h 上限";
+  }
+
+  function renderAssignees() {
+    const list = root.querySelector("[data-assignee-list]");
+    const count = root.querySelector("[data-assignee-count]");
+    const addButton = root.querySelector("[data-add-channel-assignee]");
+    const assignees = visibleAssignees();
+    const ratioMode = assignmentState.strategy === "ratio";
+    if (count) count.textContent = assignees.length + " / 5";
+    if (addButton) addButton.disabled = assignees.length >= 5;
+    if (!list) return;
+    if (!assignees.length) {
+      list.innerHTML = '<div class="assignee-empty">请添加企微客服。</div>';
+      return;
+    }
+    list.innerHTML = assignees.map((item, index) => {
+      const field = ratioMode
+        ? '<label class="field"><span>分配比例</span><input type="number" min="1" max="100" value="' + escapeHtml(item.ratio_percent) + '" data-assignee-field="ratio_percent" data-index="' + index + '"></label>'
+        : '<label class="field"><span>24h 上限人数</span><input type="number" min="1" max="99999" value="' + escapeHtml(item.max_scans_24h) + '" data-assignee-field="max_scans_24h" data-index="' + index + '"></label>';
+      return '<div class="assignee-row">' +
+        '<div class="assignee-name"><strong>' + escapeHtml(item.display_name || item.staff_id) + '</strong><small>' + escapeHtml(item.staff_id) + '</small></div>' +
+        field +
+        '<div class="assignee-row-actions">' +
+        '<button class="button small" type="button" data-assignee-move-up="' + index + '" ' + (index === 0 ? "disabled" : "") + '>上移</button>' +
+        '<button class="button small ghost" type="button" data-assignee-remove="' + index + '" ' + (assignees.length <= 1 ? "disabled" : "") + '>删除</button>' +
+        '</div></div>';
+    }).join("");
+  }
+
+  function renderAssignmentValidation() {
+    const errors = validateAssignment();
+    const bar = root.querySelector("[data-assignment-validation]");
+    const text = root.querySelector("[data-assignment-validation-text]");
+    const pill = root.querySelector("[data-assignment-validation-pill]");
+    if (bar) bar.classList.toggle("is-error", errors.length > 0);
+    if (assignmentState.strategy === "ratio") {
+      const total = ratioTotal();
+      if (text) text.textContent = errors.length ? errors[0] : "比例合计 100%，可以保存。";
+      if (pill) {
+        pill.textContent = total + "%";
+        pill.className = "pill " + (total === 100 ? "green" : "red");
+      }
+    } else {
+      if (text) text.textContent = errors.length ? errors[0] : "按列表顺序承接；达到 24h 上限后切换下一个客服。";
+      if (pill) {
+        pill.textContent = "满额切换";
+        pill.className = "pill blue";
+      }
+    }
+    setSaveButtonAvailability();
+  }
+
+  function renderAssignment() {
+    renderAssignmentStrategies();
+    renderAssignees();
+    renderAssignmentValidation();
+    const ownerInput = root.querySelector("[data-channel-owner-staff-id]");
+    const first = visibleAssignees()[0];
+    if (ownerInput) ownerInput.value = first ? first.staff_id : "";
+  }
+
+  function setupChannelAssignees() {
+    const assignmentRoot = root.querySelector("[data-channel-assignment]");
+    if (!assignmentRoot) return;
+    assignmentState.strategy = String(bootstrapChannel.assignment_strategy || "ratio").trim() || "ratio";
+    if (!["ratio", "cap_switch"].includes(assignmentState.strategy)) assignmentState.strategy = "ratio";
+    const initialAssignees = Array.isArray(bootstrapChannel.assignees) ? bootstrapChannel.assignees : [];
+    assignmentState.assignees = initialAssignees
+      .filter((item) => String((item || {}).status || "active") === "active")
+      .map(normalizeAssignee)
+      .filter((item) => item.staff_id)
+      .slice(0, 5);
+    const ownerStaffId = String(bootstrapChannel.owner_staff_id || root.querySelector("[data-channel-owner-staff-id]")?.value || "").trim();
+    if (!assignmentState.assignees.length && ownerStaffId) {
+      assignmentState.assignees = [normalizeAssignee({ staff_id: ownerStaffId, display_name: ownerStaffId, ratio_percent: 100, max_scans_24h: 100 }, 0)];
+      if (window.OperationMemberPicker && typeof window.OperationMemberPicker.resolve === "function") {
+        window.OperationMemberPicker.resolve(ownerStaffId, { scope: "channel_code", page_size: 100 }).then((member) => {
+          if (!member || !assignmentState.assignees[0] || assignmentState.assignees[0].staff_id !== ownerStaffId) return;
+          assignmentState.assignees[0].display_name = member.display_name || member.user_id || ownerStaffId;
+          renderAssignment();
+        }).catch(() => undefined);
+      }
+    }
+    renderAssignment();
+
+    assignmentRoot.addEventListener("change", (event) => {
+      const strategyInput = event.target.closest("[data-assignment-strategy]");
+      if (strategyInput) {
+        assignmentState.strategy = strategyInput.value === "cap_switch" ? "cap_switch" : "ratio";
+        renderAssignment();
+        return;
+      }
+      const field = event.target.closest("[data-assignee-field]");
+      if (field) {
+        const index = Number(field.dataset.index || 0);
+        const key = field.dataset.assigneeField;
+        const assignees = visibleAssignees();
+        if (assignees[index] && key) assignees[index][key] = Number(field.value || 0);
+        renderAssignment();
+      }
+    });
+    assignmentRoot.addEventListener("input", (event) => {
+      const field = event.target.closest("[data-assignee-field]");
+      if (!field) return;
+      const index = Number(field.dataset.index || 0);
+      const key = field.dataset.assigneeField;
+      const assignees = visibleAssignees();
+      if (assignees[index] && key) assignees[index][key] = Number(field.value || 0);
+      renderAssignmentValidation();
+    });
+    assignmentRoot.addEventListener("click", (event) => {
+      const strategyCard = event.target.closest("[data-strategy-card]");
+      if (strategyCard) {
+        assignmentState.strategy = strategyCard.dataset.strategyCard === "cap_switch" ? "cap_switch" : "ratio";
+        renderAssignment();
+        return;
+      }
+      const remove = event.target.closest("[data-assignee-remove]");
+      if (remove) {
+        const index = Number(remove.dataset.assigneeRemove || 0);
+        if (assignmentState.assignees.length > 1) assignmentState.assignees.splice(index, 1);
+        renderAssignment();
+        return;
+      }
+      const moveUp = event.target.closest("[data-assignee-move-up]");
+      if (moveUp) {
+        const index = Number(moveUp.dataset.assigneeMoveUp || 0);
+        if (index > 0) {
+          const previous = assignmentState.assignees[index - 1];
+          assignmentState.assignees[index - 1] = assignmentState.assignees[index];
+          assignmentState.assignees[index] = previous;
+        }
+        renderAssignment();
+        return;
+      }
+      if (event.target.closest("[data-add-channel-assignee]")) {
+        if (!window.OperationMemberPicker || typeof window.OperationMemberPicker.open !== "function") {
+          toast("企微客服选择器加载失败，请刷新页面后重试");
+          return;
+        }
+        const current = visibleAssignees();
+        window.OperationMemberPicker.open({
+          multiple: true,
+          max: Math.max(1, 5 - current.length),
+          selectedMembers: [],
+          disabledUserIds: current.map((item) => item.staff_id),
+          title: "选择企微客服",
+          scope: "channel_code",
+          page_size: 100,
+          onConfirm: (members) => {
+            const existing = new Set(visibleAssignees().map((item) => item.staff_id));
+            (Array.isArray(members) ? members : []).forEach((member) => {
+              const staffId = String(member.user_id || "").trim();
+              if (!staffId || existing.has(staffId) || visibleAssignees().length >= 5) return;
+              existing.add(staffId);
+              assignmentState.assignees.push(normalizeAssignee({
+                staff_id: staffId,
+                display_name: member.display_name || staffId,
+                ratio_percent: assignmentState.strategy === "ratio" ? 0 : null,
+                max_scans_24h: 100,
+                status: "active",
+              }, assignmentState.assignees.length));
+            });
+            renderAssignment();
+          },
+        });
+      }
+    });
   }
 
   function setupChannelForm() {
@@ -401,44 +655,9 @@
         setSaveFeedback(error.message || "保存失败", "error");
       }).finally(() => {
         if (saveButton) {
-          saveButton.disabled = false;
           saveButton.textContent = "保存渠道";
         }
-      });
-    });
-  }
-
-  function setupChannelOwnerPicker() {
-    const ownerStaffInput = root.querySelector("[data-channel-owner-staff-id]");
-    const ownerCurrent = root.querySelector("[data-channel-owner-current]");
-    const renderOwner = (member, fallbackUserId) => {
-      const userId = (member && member.user_id) || fallbackUserId || "";
-      const label = window.OperationMemberPicker && member
-        ? window.OperationMemberPicker.memberLabel(member)
-        : userId;
-      if (ownerCurrent) {
-        ownerCurrent.innerHTML = "<strong>" + escapeHtml(label || "未选择负责人") + "</strong><small>" + escapeHtml(userId || "从企业微信通讯录或后台成员中选择") + "</small>";
-      }
-    };
-    const currentOwner = ownerStaffInput ? ownerStaffInput.value : "";
-    if (currentOwner && window.OperationMemberPicker && typeof window.OperationMemberPicker.resolve === "function") {
-      window.OperationMemberPicker.resolve(currentOwner).then((member) => {
-        if (member && (!ownerStaffInput || ownerStaffInput.value === currentOwner)) renderOwner(member, currentOwner);
-      }).catch(() => undefined);
-    }
-    root.querySelector("[data-channel-owner-picker-open]")?.addEventListener("click", () => {
-      if (!window.OperationMemberPicker) {
-        toast("人员加载失败，请稍后重试");
-        return;
-      }
-      window.OperationMemberPicker.open({
-        value: ownerStaffInput ? ownerStaffInput.value : "",
-        title: "选择运营人员",
-        onSelect: (member) => {
-          if (ownerStaffInput) ownerStaffInput.value = member.user_id || "";
-          renderOwner(member, member.user_id || "");
-          toast("已选择负责人：" + (window.OperationMemberPicker.memberLabel(member) || member.user_id || ""));
-        },
+        setSaveButtonAvailability();
       });
     });
   }
@@ -449,6 +668,7 @@
     const imageInput = root.querySelector("[data-image-ids]");
     const attachmentInput = root.querySelector("[data-attachment-ids]");
     const summary = root.querySelector("[data-welcome-content-summary]");
+    const materialSummary = root.querySelector("[data-welcome-material-summary]");
     if (!root.querySelector("[data-open-welcome-composer]")) return;
 
     const currentPackage = () => welcomeFieldsToContentPackage({
@@ -462,7 +682,13 @@
       const contentPackage = currentPackage();
       const text = String(contentPackage.content_text || "").trim();
       const textSummary = text ? (text.length > 60 ? text.slice(0, 60) + "..." : text) : "未配置话术";
-      if (summary) {
+      if (summary) summary.textContent = textSummary;
+      if (materialSummary) {
+        materialSummary.innerHTML =
+          '<span class="pill">图片 ' + contentPackage.image_library_ids.length + '</span>' +
+          '<span class="pill">小程序 ' + contentPackage.miniprogram_library_ids.length + '</span>' +
+          '<span class="pill">附件 ' + contentPackage.attachment_library_ids.length + '</span>';
+      } else if (summary) {
         summary.innerHTML =
           '<strong>话术：</strong><span>' + escapeHtml(textSummary) + '</span>' +
           '<strong>素材：</strong><span>图片 ' + contentPackage.image_library_ids.length +
@@ -543,8 +769,8 @@
         const tagName = String(tagNameInput?.value || "").trim();
         const groupName = String(tagGroupInput?.value || "").trim();
         tagSelected.innerHTML = tagId
-          ? '<button type="button" class="channel-material-chip" data-remove-picked="tag">' + escapeHtml((groupName ? groupName + " / " : "") + (tagName || "已选择标签")) + ' ×</button>'
-          : '<span class="channel-muted">暂未选择标签</span>';
+          ? '<button type="button" class="pill" data-remove-picked="tag">' + escapeHtml((groupName ? groupName + " / " : "") + (tagName || "已选择标签")) + ' ×</button>'
+          : '暂未选择标签';
       }
     };
 
@@ -711,7 +937,7 @@
   safeInit("CopyShare", setupCopyShare);
   safeInit("ChannelDrawer", setupChannelDrawer);
   safeInit("ChannelForm", setupChannelForm);
-  safeInit("ChannelOwnerPicker", setupChannelOwnerPicker);
+  safeInit("ChannelAssignees", setupChannelAssignees);
   safeInit("WelcomeComposer", setupWelcomeComposer);
   safeInit("EntryTagPicker", setupEntryTagPicker);
   safeInit("BindModal", setupBindModal);

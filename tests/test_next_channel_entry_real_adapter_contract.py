@@ -30,6 +30,10 @@ def test_channel_entry_logs_real_call_disabled_without_fake_success(monkeypatch)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_entry_effect_log", lambda **kwargs: effects.append(kwargs) or kwargs)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.list_active_bindings_for_channel", lambda channel_id: [])
     monkeypatch.setattr("aicrm_next.channel_entry.repo.save_tag_snapshot", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        "aicrm_next.automation_runtime_v2.bridge.process_channel_entry_event",
+        lambda **kwargs: {"processed": [], "reason": "channel_without_active_binding"},
+    )
 
     result = process_channel_entry(
         ProcessChannelEntryCommand(

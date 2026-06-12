@@ -64,7 +64,7 @@ routes:
     notes: Common operation member picker API.
   - route_id: channel_entry_admin_channels_family
     path_pattern: /api/admin/channels*
-    methods: [GET, POST, PATCH]
+    methods: [GET, POST, PATCH, PUT]
     capability_owner: aicrm_next.automation_engine
     runtime_owner: next_native
     legacy_fallback_allowed: false

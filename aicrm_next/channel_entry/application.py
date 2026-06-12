@@ -322,7 +322,15 @@ def _admit(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], scen
     bindings = repo.list_active_bindings_for_channel(channel_id)
     if not bindings:
         if not command.dry_run:
-            return [{"admission_status": "standalone_channel", "reason": "channel_without_active_binding"}], False, "no_active_binding"
+            from aicrm_next.automation_runtime_v2.bridge import process_channel_entry_event
+
+            runtime_v2 = process_channel_entry_event(
+                channel_id=channel_id,
+                external_userid=command.external_contact_id,
+                event_log_id=command.event_log_id,
+                payload_json={**dict(command.payload_json or {}), "source_type": command.source_type, "scene_value": scene},
+            )
+            return [{"admission_status": "standalone_channel", "reason": "channel_without_active_binding", "runtime_v2": runtime_v2}], False, "no_active_binding"
         return [{"admission_status": "planned", "reason": "dry_run_no_active_binding"}], False, "no_active_binding"
     results: list[dict[str, Any]] = []
     member_written = False
@@ -350,20 +358,37 @@ def _admit(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], scen
             reason = "planned"
             continue
         try:
-            admission = _admit_program_binding(
-                program_id=program_id,
+            from aicrm_next.automation_runtime_v2.bridge import process_channel_entry_event
+
+            runtime_v2 = process_channel_entry_event(
                 channel_id=channel_id,
-                binding_id=binding_id,
-                external_contact_id=command.external_contact_id,
-                follow_user_userid=command.follow_user_userid,
-                trigger_payload={
+                external_userid=command.external_contact_id,
+                event_log_id=command.event_log_id,
+                payload_json={
                     **dict(command.payload_json or {}),
                     "event_log_id": command.event_log_id,
                     "source_type": command.source_type,
                     "scene_value": scene,
+                    "trigger_type": command.event_action,
+                    "follow_user_userid": command.follow_user_userid,
                 },
-                trigger_type=command.event_action,
             )
+            processed = list(runtime_v2.get("processed") or [])
+            current = next((item for item in processed if int(((item.get("membership") or {}).get("program_id") or 0)) == program_id), processed[0] if processed else {})
+            admission = {
+                "admission_status": "accepted" if current.get("membership") else "rejected",
+                "accepted": bool(current.get("membership")),
+                "reason": "automation_runtime_v2_processed" if current.get("membership") else text(runtime_v2.get("reason")) or "automation_runtime_v2_skipped",
+                "program_member": (current.get("legacy_projection") or {}),
+                "legacy_member": (current.get("legacy_projection") or {}),
+                "audience_entry_id": int((current.get("legacy_projection") or {}).get("audience_entry_id") or 0),
+                "audience_code": text(((current.get("membership") or {}).get("current_stage"))),
+                "entry_reason": text(((current.get("stage_entry") or {}).get("entry_reason"))),
+                "realtime_task_hook": {"runtime": "automation_runtime_v2", "ok": True, "counts": current.get("counts") or {}},
+                "realtime_operation_tasks_ran": int((current.get("counts") or {}).get("planned") or 0),
+                "realtime_operation_tasks_enqueued_count": int((current.get("counts") or {}).get("enqueued") or 0),
+                "runtime_v2": runtime_v2,
+            }
         except Exception as exc:
             admission = {
                 "admission_status": "failed",
@@ -410,8 +435,25 @@ def process_channel_entry(command: ProcessChannelEntryCommand) -> dict[str, Any]
         _log_effect(command, effect_type="channel_contact", idempotency_key=f"{corp_id}:{command.external_contact_id}:{scene}:not_found", status="failed", channel_id=None, scene_value=scene, reason=reason, response_json={"scene_match": match})
         return {"handled": False, "mode": "channel_not_found", "reason": reason, "scene_match": match}
 
-    command.follow_user_userid = text(command.follow_user_userid) or text(channel.get("owner_staff_id")) or "HuangYouCan"
     channel_id = int(channel["id"])
+    assignment_result: dict[str, Any] = {}
+    if not text(command.follow_user_userid) and text(channel.get("assignment_mode")) == "multi_staff":
+        try:
+            assignment_result = repo.choose_channel_assignee(
+                channel_id,
+                external_contact_id=command.external_contact_id,
+                wecom_user_id="",
+                write_event=not command.dry_run,
+                source_payload=command.payload_json,
+            )
+        except Exception as exc:
+            assignment_result = {"ok": False, "reason": text(str(exc)) or "assignment_failed"}
+    command.follow_user_userid = (
+        text(command.follow_user_userid)
+        or text(assignment_result.get("assignee_staff_id"))
+        or text(channel.get("owner_staff_id"))
+        or "HuangYouCan"
+    )
     if not channel_enabled(channel):
         for effect_type, response in {
             "channel_contact": {"attempted": False, "reason": "channel_disabled"},
@@ -470,6 +512,7 @@ def process_channel_entry(command: ProcessChannelEntryCommand) -> dict[str, Any]
         "channel_contact": channel_contact,
         "welcome_message": welcome,
         "entry_tag": tag,
+        "assignment": assignment_result,
     }
 
 
@@ -491,6 +534,9 @@ def process_wecom_external_contact_event(command: ProcessWeComExternalContactEve
         identity_sync = sync_external_contact_identity_for_event(event, corp_id=command.corp_id)
         result["identity_sync"] = identity_sync
         if text(event.get("Event")) == "change_external_contact" and text(event.get("ChangeType")) in ENTRY_CHANGE_TYPES:
+            if text(identity_sync.get("status")) != "success":
+                reason = text(identity_sync.get("reason")) or text(identity_sync.get("status")) or "identity_sync_failed"
+                raise RuntimeError(f"identity_sync_failed:{reason}")
             entry = process_channel_entry(
                 ProcessChannelEntryCommand(
                     external_contact_id=text(event.get("ExternalUserID")),
@@ -600,18 +646,23 @@ def generate_channel_qrcode(command: GenerateChannelQrCodeCommand) -> dict[str, 
     if text(channel.get("carrier_type")) == "link" or text(channel.get("channel_type")) == "wecom_customer_acquisition":
         raise ValueError("link_channel_does_not_support_qrcode_generate")
     owner_staff_id = text(command.owner_staff_id) or text(channel.get("owner_staff_id"))
-    if not owner_staff_id:
+    payload_user_ids: list[str] = []
+    if text(channel.get("assignment_mode")) == "multi_staff":
+        payload_user_ids = [text(item.get("staff_id")) for item in repo.list_channel_assignees(int(command.channel_id), active_only=True) if text(item.get("staff_id"))]
+    if not payload_user_ids and owner_staff_id:
+        payload_user_ids = [owner_staff_id]
+    if not payload_user_ids:
         raise ValueError("owner_staff_id_required")
     scene_value = text(command.scene_value) or _generated_scene_value()
     previous_scene = text(channel.get("scene_value"))
     corp_id = callback_config().get("corp_id", "")
     payload = {
-        "type": 1,
+        "type": 2 if len(payload_user_ids) > 1 else 1,
         "scene": 2,
         "style": 1,
         "skip_verify": bool(command.skip_verify if command.skip_verify is not None else channel.get("auto_accept_friend")),
         "state": scene_value,
-        "user": [owner_staff_id],
+        "user": payload_user_ids,
     }
     try:
         wecom_result = get_wecom_adapter().create_contact_way(payload)
@@ -738,6 +789,7 @@ def generate_channel_qrcode(command: GenerateChannelQrCodeCommand) -> dict[str, 
         "qr_url": qr_url,
         "alias_id": int(alias.get("id") or 0),
         "qrcode_asset_id": int(asset.get("id") or 0),
+        "provider_payload_user_count": len(payload_user_ids),
         "channel": channel_payload(updated or {**channel, "scene_value": scene_value, "qr_url": qr_url, "qr_ticket": config_id}),
         "source": "aicrm_next.channel_entry",
         "route_owner": "ai_crm_next",

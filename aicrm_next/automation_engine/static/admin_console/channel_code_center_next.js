@@ -49,28 +49,11 @@
     return channel.copy_text || channel.share_url || channel.final_url || channel.link_url || "";
   }
 
-  function ensureFeedback() {
-    let node = root.querySelector("[data-channel-center-feedback]");
-    if (node) return node;
-    node = document.createElement("div");
-    node.className = "channel-save-feedback";
-    node.setAttribute("role", "status");
-    node.setAttribute("aria-live", "polite");
-    node.setAttribute("data-channel-center-feedback", "");
-    const metrics = root.querySelector("[data-channel-metrics]");
-    root.insertBefore(node, metrics ? metrics.nextSibling : root.firstChild);
-    return node;
-  }
-
-  function toast(message, tone = "success") {
+  function toast(message) {
     root.dataset.lastToast = message;
     if (window.AdminConsole && typeof window.AdminConsole.showToast === "function") {
       window.AdminConsole.showToast(message);
     }
-    const feedback = ensureFeedback();
-    feedback.textContent = String(message || "");
-    feedback.hidden = false;
-    feedback.classList.toggle("is-error", tone === "error");
   }
 
   function fallbackCopy(text) {
@@ -88,14 +71,14 @@
       ok = false;
     }
     input.remove();
-    toast(ok ? "链接已复制" : "请手动复制链接", ok ? "success" : "error");
+    toast(ok ? "链接已复制" : "请手动复制链接");
     return ok;
   }
 
   function copyText(text) {
     const value = String(text || "").trim();
     if (!value) {
-      toast("没有可复制链接", "error");
+      toast("没有可复制链接");
       return Promise.resolve(false);
     }
     if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -123,51 +106,42 @@
     return String(base || "").replace(/\/0($|[/?#])/, "/" + id + "$1");
   }
 
-  function parseJsonResponse(response) {
-    const contentType = response.headers.get("content-type") || "";
-    if (!contentType.includes("application/json")) {
-      return response.text().then((text) => ({
-        response,
-        data: {
-          ok: false,
-          detail: text || response.statusText || "non_json_response",
-        },
-      }));
-    }
-    return response.json().then((data) => ({ response, data }));
-  }
-
   function apiJson(url) {
-    return fetch(url, { credentials: "same-origin" }).then(parseJsonResponse);
+    return fetch(url, { credentials: "same-origin" }).then((response) => response.json().then((data) => ({ response, data })));
   }
 
-  function postJson(url, payload) {
-    return fetch(url, {
+  function apiErrorMessage(data, fallback) {
+    const detail = data && data.detail;
+    if (data && typeof data.reason === "string" && data.reason) return data.reason;
+    if (data && typeof data.error === "string" && data.error) return data.error;
+    if (typeof detail === "string" && detail) return detail;
+    if (detail && typeof detail === "object") {
+      return detail.reason || detail.error || detail.error_code || detail.message || fallback;
+    }
+    return fallback;
+  }
+
+  function postJson(url, payload, options) {
+    const timeoutMs = Number((options || {}).timeoutMs || 0);
+    const controller = timeoutMs > 0 && window.AbortController ? new AbortController() : null;
+    const timer = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : null;
+    const request = fetch(url, {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload || {}),
-    }).then(parseJsonResponse);
+      signal: controller ? controller.signal : undefined,
+    }).then((response) => response.json().catch(() => ({})).then((data) => ({ response, data })));
+    return timer ? request.finally(() => window.clearTimeout(timer)) : request;
   }
 
-  function errorReason(data) {
-    const detail = data && data.detail;
-    if (typeof detail === "object" && detail) {
-      return detail.reason || detail.detail || detail.error || "";
-    }
-    return (data && (data.reason || data.error || detail)) || "";
-  }
-
-  function qrcodeGenerateMessage(reason) {
-    return {
-      owner_staff_id_required: "请先编辑渠道并选择负责人，再生成二维码",
-      link_channel_does_not_support_qrcode_generate: "企微获客助手链接不支持生成二维码",
-      channel_not_found: "渠道不存在或已删除",
-      qrcode_asset_scene_channel_conflict: "该二维码场景值已绑定其他渠道，请换一个场景值后重试",
-      wecom_adapter_disabled: "企微真实生成未开启，请检查企微运行配置",
-      wecom_credentials_missing: "企微配置缺失，请先补齐企微凭证",
-      wecom_api_error: "企微返回失败，请稍后重试或查看生成日志",
-    }[reason] || reason || "二维码生成失败";
+  function patchJson(url, payload) {
+    return fetch(url, {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    }).then((response) => response.json().then((data) => ({ response, data })));
   }
 
   function qrcodeReady(channel) {
@@ -184,31 +158,65 @@
     }
   }
 
+  function truncateChannelName(name, maxLength = 20) {
+    const value = String(name || "-");
+    return value.length > maxLength ? `${value.slice(0, maxLength)}····` : value;
+  }
+
+  function statusClass(value) {
+    const normalized = String(value || "").toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    return normalized ? `is-status-${normalized}` : "is-status-unknown";
+  }
+
+  function statusActionButtons(channel) {
+    const status = String(channel.status || "");
+    const deleteButton = '<button class="admin-button admin-button--ghost" type="button" data-channel-status-action data-next-status="archived" data-action-label="删除">删除</button>';
+    if (status === "active") {
+      return `<button class="admin-button admin-button--ghost" type="button" data-channel-status-action data-next-status="inactive" data-action-label="下架">下架</button>${deleteButton}`;
+    }
+    if (status === "inactive") {
+      return `<button class="admin-button admin-button--ghost" type="button" data-channel-status-action data-next-status="active" data-action-label="启用">启用</button>${deleteButton}`;
+    }
+    return "";
+  }
+
+  function statusSuccessMessage(nextStatus) {
+    return {
+      active: "渠道已启用",
+      inactive: "渠道已下架",
+      archived: "渠道已删除",
+    }[nextStatus] || "渠道状态已更新";
+  }
+
+  function confirmStatusAction(nextStatus) {
+    if (nextStatus !== "archived") return true;
+    return window.confirm("删除后会归档渠道并保留历史用户、二维码、绑定和入渠记录。确认删除？");
+  }
+
   function renderRow(channel) {
     const link = isLink(channel);
+    const channelName = String(channel.channel_name || "-");
+    const displayChannelName = truncateChannelName(channelName);
     const searchText = String(channel.channel_name || "").toLowerCase();
     const typeText = link ? "企微获客助手链接" : "普通二维码";
     const downloadUrl = channel.qr_download_url || `/api/admin/channels/${encodeURIComponent(channel.id)}/qrcode/download`;
     const copyText = channelLinkText(channel);
     const bound = channel.bound_program_name
-      ? `<span class="channel-pill is-bound">${escapeHtml(channel.bound_program_name)}</span>`
+      ? '<span class="channel-pill is-bound">已绑定</span>'
       : '<span class="channel-pill is-standalone">独立使用</span>';
-    let action = link
+    const action = link
       ? `<button class="admin-button admin-button--secondary" type="button" data-copy-channel-link data-copy-text="${escapeHtml(copyText)}">复制链接</button>
          <button class="admin-button admin-button--secondary" type="button" data-share-channel-link data-copy-text="${escapeHtml(copyText)}">分享链接</button>`
       : qrcodeReady(channel)
         ? `<a class="admin-button admin-button--secondary" href="${escapeHtml(downloadUrl)}">下载二维码</a>`
         : `<button class="admin-button admin-button--secondary" type="button" data-generate-channel-qrcode>生成二维码</button>`;
-    if (!link && !qrcodeReady(channel) && !String(channel.owner_staff_id || "").trim()) {
-      action = `<button class="admin-button admin-button--secondary" type="button" data-generate-channel-qrcode data-disabled-reason="owner_staff_id_required">生成二维码</button>`;
-    }
     return `
       <tr data-channel-row data-channel-id="${escapeHtml(channel.id)}" data-search-text="${escapeHtml(searchText)}">
         <td>
-          <strong>${escapeHtml(channel.channel_name || "-")}</strong>
+          <strong class="channel-name" title="${escapeHtml(channelName)}">${escapeHtml(displayChannelName)}</strong>
         </td>
         <td><span class="channel-pill ${link ? "is-link" : "is-qrcode"}">${typeText}</span></td>
-        <td><span class="channel-pill is-status">${escapeHtml(statusLabel(channel.status))}</span></td>
+        <td><span class="channel-pill is-status ${statusClass(channel.status)}">${escapeHtml(statusLabel(channel.status))}</span></td>
         <td>
           <span class="channel-pill ${channel.welcome_message_configured ? "is-ok" : ""}">${channel.welcome_message_configured ? "欢迎语" : "无欢迎语"}</span>
           <span class="channel-pill">${escapeHtml(channel.welcome_attachment_count || 0)} 素材</span>
@@ -221,6 +229,7 @@
             ${action}
             <button class="admin-button admin-button--ghost" type="button" data-open-channel-drawer>查看</button>
             <a class="admin-button admin-button--ghost" href="/admin/channels/${encodeURIComponent(channel.id)}/edit">编辑</a>
+            ${statusActionButtons(channel)}
           </div>
         </td>
       </tr>`;
@@ -261,26 +270,45 @@
     }
     const generateButton = event.target.closest("[data-generate-channel-qrcode]");
     if (generateButton) {
-      const disabledReason = generateButton.dataset.disabledReason || "";
-      if (disabledReason) {
-        toast(qrcodeGenerateMessage(disabledReason), "error");
-        return;
-      }
       const row = generateButton.closest("[data-channel-row]");
       const channelId = row ? row.dataset.channelId : "";
       if (!channelId) return;
       generateButton.disabled = true;
       generateButton.textContent = "生成中";
-      postJson(`/api/admin/channels/${encodeURIComponent(channelId)}/qrcode/generate`, {}).then(({ response, data }) => {
+      postJson(`/api/admin/channels/${encodeURIComponent(channelId)}/qrcode/generate`, {}, { timeoutMs: 30000 }).then(({ response, data }) => {
         if (!response.ok || data.ok === false) {
-          throw new Error(qrcodeGenerateMessage(errorReason(data)));
+          throw new Error(apiErrorMessage(data, "二维码生成失败"));
         }
         toast("二维码已生成");
         window.location.reload();
       }).catch((error) => {
         generateButton.disabled = false;
         generateButton.textContent = "生成二维码";
-        toast(error.message || "二维码生成失败", "error");
+        toast(error.name === "AbortError" ? "二维码生成超时，请稍后刷新确认或重试" : (error.message || "二维码生成失败"));
+      });
+      return;
+    }
+    const statusButton = event.target.closest("[data-channel-status-action]");
+    if (statusButton) {
+      const row = statusButton.closest("[data-channel-row]");
+      const channelId = row ? row.dataset.channelId : "";
+      const nextStatus = statusButton.dataset.nextStatus || "";
+      if (!channelId || !nextStatus || !confirmStatusAction(nextStatus)) return;
+      statusButton.disabled = true;
+      const originalText = statusButton.textContent;
+      statusButton.textContent = "处理中";
+      patchJson(`/api/admin/channels/${encodeURIComponent(channelId)}`, { status: nextStatus }).then(({ response, data }) => {
+        if (!response.ok || data.ok === false) {
+          throw new Error(data.detail || data.error || data.reason || "channel_status_update_failed");
+        }
+        if (row && data.channel) {
+          row.outerHTML = renderRow(data.channel);
+        }
+        toast(statusSuccessMessage(nextStatus));
+      }).catch((error) => {
+        statusButton.disabled = false;
+        statusButton.textContent = originalText || statusButton.dataset.actionLabel || "操作";
+        toast(error.message || "渠道状态更新失败");
       });
       return;
     }

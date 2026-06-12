@@ -14,6 +14,21 @@ def _patch_repo(monkeypatch, *, channel_status="active", bindings=None):
     monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_entry_effect_log", lambda **kwargs: {"ok": True})
     monkeypatch.setattr("aicrm_next.channel_entry.repo.save_tag_snapshot", lambda *args, **kwargs: None)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.list_active_bindings_for_channel", lambda channel_id: list(bindings or []))
+    def fake_runtime_event(**kwargs):
+        calls.append("member")
+        return {
+            "processed": [
+                {
+                    "membership": {"program_id": 30, "current_stage": "operating"},
+                    "legacy_projection": {"id": 99, "audience_entry_id": 299},
+                    "stage_entry": {"entry_reason": "audience_entry_rule_passed"},
+                    "counts": {"planned": 1, "enqueued": 1},
+                }
+            ],
+            "reason": "processed",
+        }
+
+    monkeypatch.setattr("aicrm_next.automation_runtime_v2.bridge.process_channel_entry_event", fake_runtime_event)
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application._admit_program_binding",
         lambda **kwargs: calls.append("member")

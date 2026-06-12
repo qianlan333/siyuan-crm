@@ -108,6 +108,30 @@ def test_safe_next_schema_init_creates_customer_detail_snapshot_table(tmp_path) 
     assert first == second
 
 
+def test_safe_next_schema_sql_covers_runtime_schema_without_destructive_statements() -> None:
+    from aicrm_next.schema_init import SAFE_NEXT_SCHEMA_SQL, _sql_statements
+
+    sql = SAFE_NEXT_SCHEMA_SQL.read_text(encoding="utf-8")
+    statements = _sql_statements(sql)
+
+    for table_name in [
+        "automation_event_v2",
+        "automation_membership_v2",
+        "automation_stage_entry_v2",
+        "automation_task_plan_v2",
+        "wechat_shop_refunds",
+        "wechat_shop_sync_runs",
+    ]:
+        assert f"CREATE TABLE IF NOT EXISTS {table_name}" in sql
+
+    destructive_prefixes = ("DROP ", "TRUNCATE ", "DELETE ", "UPDATE ")
+    assert not [
+        statement
+        for statement in statements
+        if statement.lstrip().upper().startswith(destructive_prefixes)
+    ]
+
+
 def test_customer_sidebar_routes_do_not_503_after_safe_schema_init(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     from aicrm_next.customer_read_model import application as customer_application
     from aicrm_next.main import create_app

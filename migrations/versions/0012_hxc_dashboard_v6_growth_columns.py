@@ -1,15 +1,15 @@
 """hxc_dashboard_v6_growth_columns — 激活漏斗看板 V6 成长能力字段.
 
-Revision ID: 0012
-Revises: 0011
+Revision ID: 0012_hxc_growth_cols
+Revises: 0012
 """
 from __future__ import annotations
 
 from alembic import op
 
 
-revision = "0012"
-down_revision = "0011"
+revision = "0012_hxc_growth_cols"
+down_revision = "0012"
 branch_labels = None
 depends_on = None
 

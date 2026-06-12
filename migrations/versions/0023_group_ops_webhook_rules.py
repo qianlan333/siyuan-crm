@@ -191,7 +191,7 @@ def upgrade() -> None:
             1,
             'module',
             'builtin:has_used_core_feature',
-            '{"lookback_days":{"type":"integer","default":30,"label":"观察窗口"},"feature_codes":{"type":"array","default":["crm_task_publish","group_activation","ai_followup"],"label":"核心功能列表"},"min_usage_count":{"type":"integer","default":1,"label":"最小使用次数"},"high_intent_chat_count":{"type":"integer","default":3,"label":"高意向聊天次数"}}'::jsonb,
+            '{"lookback_days":{"type":"integer","default": 30,"label":"观察窗口"},"feature_codes":{"type":"array","default":["crm_task_publish","group_activation","ai_followup"],"label":"核心功能列表"},"min_usage_count":{"type":"integer","default": 1,"label":"最小使用次数"},"high_intent_chat_count":{"type":"integer","default": 3,"label":"高意向聊天次数"}}'::jsonb,
             '{"user_id":"string","external_user_id":"string","layer_key":"string","score":"number","reason":"string","computed_at":"datetime","rule_version":"integer"}'::jsonb,
             '{"mode":"manual_or_cron","cron":"0 */2 * * *","timezone":"Asia/Shanghai"}'::jsonb,
             'active',

@@ -6,7 +6,7 @@ from alembic import op
 
 
 revision = "0025_radar_pdf_preview_assets"
-down_revision = "0024_cloud_plan_recipient_approval"
+down_revision = "0024_cloud_plan_approval"
 branch_labels = None
 depends_on = None
 

@@ -1,15 +1,15 @@
 """wecom corp tag catalog cache.
 
-Revision ID: 0016
-Revises: 0015
+Revision ID: 0016_wecom_corp_tag_catalog
+Revises: 0016
 """
 from __future__ import annotations
 
 from alembic import op
 
 
-revision = "0016"
-down_revision = "0015"
+revision = "0016_wecom_corp_tag_catalog"
+down_revision = "0016"
 branch_labels = None
 depends_on = None
 

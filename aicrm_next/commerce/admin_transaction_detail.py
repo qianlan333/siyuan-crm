@@ -196,6 +196,7 @@ def _present(provider: str, row: dict[str, Any], *, events: list[dict[str, Any]]
         **status,
         "raw_status": _text(row.get("status") or row.get("payment_status")),
         "provider_status": _text(row.get("trade_state") or row.get("trade_status")),
+        "refund_status": _text(row.get("refund_status")),
         "refunded_amount_total": refunded,
         "refunded_amount_yuan": _money_yuan(refunded),
         "active_refund_amount_total": active_refunding,

@@ -2414,6 +2414,48 @@ routes:
     checker: tests/test_checkout_orders_registry_lifecycle.py
     rollback_owner: ""
     notes: Legacy rollback removed; status polling is a Next local repository read with fallback_used=false.
+  - route_id: external_orders_list_next_native
+    path_pattern: /api/external/orders
+    methods: [GET]
+    capability_owner: aicrm_next.commerce
+    runtime_owner: next_native
+    legacy_fallback_allowed: false
+    legacy_source: ""
+    external_side_effect_risk: none
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    checker: tests/test_external_orders_api.py
+    rollback_owner: ""
+    notes: PR-2 external orders list reads local unified order read-models only; bearer token required, fallback_used=false, no payment/refund/order creation/WeChat Shop active sync/WeCom active sync.
+  - route_id: external_orders_detail_next_native
+    path_pattern: /api/external/orders/{order_no}
+    methods: [GET]
+    capability_owner: aicrm_next.commerce
+    runtime_owner: next_native
+    legacy_fallback_allowed: false
+    legacy_source: ""
+    external_side_effect_risk: none
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    checker: tests/test_external_orders_api.py
+    rollback_owner: ""
+    notes: PR-2 external order detail reads unified order detail projection only; product_name is stripped, fallback_used=false, no payment/refund/order creation/sync side effects.
+  - route_id: external_users_resolve_next_native
+    path_pattern: /api/external/users/resolve
+    methods: [GET]
+    capability_owner: aicrm_next.commerce
+    runtime_owner: next_native
+    legacy_fallback_allowed: false
+    legacy_source: ""
+    external_side_effect_risk: none
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    checker: tests/test_external_orders_api.py
+    rollback_owner: ""
+    notes: PR-2 external user resolve reads local identity/customer read models only; bearer token required, fallback_used=false, no active WeCom sync.
   - route_id: checkout_unknown_next_blocked
     path_pattern: /api/checkout/{path:path}
     methods: [GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS]

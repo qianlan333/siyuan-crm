@@ -227,6 +227,8 @@ def _group_id_for(path: str) -> str:
         or path.startswith("/api/orders/")
         or path.startswith("/api/wechat-pay/")
         or path.startswith("/api/alipay/")
+        or path.startswith("/api/external/orders")
+        or path.startswith("/api/external/users/resolve")
     ):
         return "commerce"
     if (
@@ -369,6 +371,16 @@ def _response_example(path: str) -> str:
         return "HTTP 200 text/html 商品页"
     if path in {"/login", "/logout"} or path.startswith("/auth/wecom/"):
         return "HTTP 302 → 目标页面"
+    if path.startswith("/api/external/orders") or path.startswith("/api/external/users/resolve"):
+        return json.dumps(
+            {
+                "ok": True,
+                "route_owner": "ai_crm_next",
+                "source_status": "external_orders",
+                "fallback_used": False,
+            },
+            ensure_ascii=False,
+        )
     return json.dumps({"ok": True, "route_owner": "ai_crm_next"}, ensure_ascii=False)
 
 
@@ -427,6 +439,8 @@ def _auth_for(method: str, path: str, route: APIRoute) -> str:
         return "session"
     if path == "/mcp":
         return "bearer"
+    if path.startswith("/api/external/orders") or path.startswith("/api/external/users/resolve"):
+        return "bearer"
     if (
         path.startswith("/api/h5/questionnaires")
         or path.startswith("/api/h5/wechat/oauth")
@@ -449,7 +463,13 @@ def _endpoint_from_route(route: APIRoute, method: str, path: str) -> dict[str, A
     summary = _summary_for(method, path, route)
     description = (route.description or "").strip()
     if not description:
-        description = f"{group.title}接口：{summary}。数据来自当前 AI-CRM Next FastAPI 路由注册表。"
+        if path.startswith("/api/external/orders") or path.startswith("/api/external/users/resolve"):
+            description = (
+                f"{group.title}接口：{summary}。只读读取本地订单、客户和身份 read-model，"
+                "不创建订单、不发起支付或退款、不主动同步外部平台。"
+            )
+        else:
+            description = f"{group.title}接口：{summary}。数据来自当前 AI-CRM Next FastAPI 路由注册表。"
     return {
         "id": f"{method.lower()}-{_slug(path)}",
         "method": method,

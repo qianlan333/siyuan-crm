@@ -1780,6 +1780,48 @@ routes:
     delete_status: deletion_locked
     replacement_status: locked
     notes: Public order read/status APIs are Next-owned; unknown child paths return controlled 410 and production_compat rollback is removed.
+  - route_pattern: /api/external/orders
+    methods: [GET]
+    capability_owner: aicrm_next.commerce
+    current_runtime_owner: next_native
+    production_behavior: next_external_orders_read
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: none
+    delete_ready: true
+    checker: tests/test_external_orders_api.py
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    notes: PR-2 external orders list API is read-only over local unified order read-models; bearer token required, fallback_used=false, no order creation, payment, refund, WeChat Shop active sync, or WeCom active sync.
+  - route_pattern: /api/external/orders/{order_no}
+    methods: [GET]
+    capability_owner: aicrm_next.commerce
+    current_runtime_owner: next_native
+    production_behavior: next_external_order_detail
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: none
+    delete_ready: true
+    checker: tests/test_external_orders_api.py
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    notes: PR-2 external order detail API is read-only over unified order detail projection; product_name is not exposed, fallback_used=false, and no payment/refund/sync side effects are executed.
+  - route_pattern: /api/external/users/resolve
+    methods: [GET]
+    capability_owner: aicrm_next.commerce
+    current_runtime_owner: next_native
+    production_behavior: next_external_user_basic
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: none
+    delete_ready: true
+    checker: tests/test_external_orders_api.py
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    notes: PR-2 external user resolve API is read-only over local identity and customer read models; bearer token required, fallback_used=false, and no active WeCom sync is executed.
   - route_pattern: /api/checkout*
     methods: [POST, OPTIONS, GET, PUT, PATCH, DELETE, HEAD]
     capability_owner: aicrm_next.commerce

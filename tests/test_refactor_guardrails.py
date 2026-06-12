@@ -14,12 +14,9 @@ CLASS_USER_CALLER_CUTOVER_FILES = [
     ROOT / "wecom_ability_service" / "domains" / "user_ops" / "service.py",
 ]
 
-# Historical exception that still exists before Wave 1 Step 2/3.
-# The guardrail here is "no new controller requests dependency".
+# Historical exception retained for helper-only support modules.
+# Deleted PR-9 legacy HTTP route owners are no longer allowlisted here.
 HTTP_REQUESTS_ALLOWLIST = {
-    "wecom_ability_service/http/automation_conversion.py",
-    # 阶段 7.1 #221 抽出来的 helpers 模块；它是 automation_conversion.py 的私有
-    # _helpers，整体复制了主文件的 import header（含 requests）。允许同等待遇。
     "wecom_ability_service/http/_routes_helpers.py",
 }
 
@@ -378,25 +375,6 @@ def test_questionnaire_http_callers_do_not_bypass_application_owner():
 
 def test_automation_http_callers_do_not_bypass_application_owner():
     target_files = {
-        "wecom_ability_service/http/customer_automation.py": {
-            "required_fragments": ["application.automation_engine"],
-            "forbidden_service_symbols": {
-                "list_outbound_webhook_deliveries",
-                "retry_outbound_webhook_delivery",
-                "run_due_outbound_webhook_retries",
-                "apply_activation_webhook",
-                "list_signup_conversion_batches",
-                "get_signup_conversion_batch",
-                "record_conversion_feedback",
-                "ack_conversion_batch",
-                "sync_member_activation",
-            },
-            "forbidden_modules": {
-                "domains.automation_conversion.service",
-                "domains.marketing_automation.service",
-                "domains.outbound_webhook.service",
-            },
-        },
         "wecom_ability_service/http/admin_config_marketing_automation.py": {
             "required_fragments": ["application.automation_engine"],
             "forbidden_service_symbols": {

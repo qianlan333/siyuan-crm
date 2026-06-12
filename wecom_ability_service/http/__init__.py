@@ -27,11 +27,9 @@ from .admin_wechat_pay import register_routes as register_admin_wechat_pay_route
 from .admin_wecom_tags import register_routes as register_admin_wecom_tags_routes
 from .common_operation_members import register_routes as register_common_operation_members_routes
 from .wecom_customer_acquisition import register_routes as register_wecom_customer_acquisition_routes
-from .automation_conversion import register_routes as register_automation_conversion_routes
 from .archive import register_routes as register_archive_routes
 from .callbacks import register_routes as register_callback_routes
 from .contacts import register_routes as register_contacts_routes
-from .customer_automation import register_routes as register_customer_automation_routes
 from .group_chats import register_routes as register_group_chat_routes
 from .identity import register_routes as register_identity_routes
 from .ops import register_routes as register_ops_routes
@@ -66,13 +64,6 @@ HTTP_ROUTE_MODULES = {
     "settings": "wecom_ability_service.http.settings_ops",
     "internal_auth": "wecom_ability_service.http.internal_auth",
     "sidebar_marketing": "wecom_ability_service.http.sidebar_marketing",
-    "customer_automation": "wecom_ability_service.http.customer_automation",
-    "automation_conversion": "wecom_ability_service.http.automation_conversion",
-    "automation_conversion_delivery": "wecom_ability_service.http.automation_conversion_delivery",
-    "automation_conversion_member_api": "wecom_ability_service.http.automation_conversion_member_api",
-    "automation_conversion_task_runtime": "wecom_ability_service.http.automation_conversion_task_runtime",
-    "automation_conversion_runtime_api": "wecom_ability_service.http.automation_conversion_runtime_api",
-    "automation_conversion_execution_outbound": "wecom_ability_service.http.automation_conversion_execution_outbound",
     "archive": "wecom_ability_service.http.archive",
     "contacts": "wecom_ability_service.http.contacts",
     "group_chats": "wecom_ability_service.http.group_chats",
@@ -116,7 +107,7 @@ HTTP_ROUTE_PLACEMENT = {
         "sidebar_v2.py for /api/sidebar/v2* workbench, profile fields, materials, and lightweight read/write facades",
         "sidebar_lead_pool.py for /api/sidebar/lead-pool* user-ops handlers registered by sidebar.py",
         "sidebar_marketing.py for /api/sidebar/marketing-status* automation-engine handlers",
-        "customer_automation.py for /api/customers/automation/signup-conversion/batches*",
+        "retired legacy customer automation HTTP handlers; current owner is aicrm_next.automation_engine.api/customer_webhooks",
         "D3 retired legacy customer read-model owner; AI-CRM Next owns /api/customers* and /api/customers/<external_userid>/timeline",
         "contacts.py and identity.py for contact binding / identity resolution",
         "archive.py for archive health/sync and /api/messages* customer conversation history endpoints",
@@ -142,12 +133,7 @@ HTTP_ROUTE_PLACEMENT = {
         "admin_config_login_access.py for /admin/config/login-access* pages and account-management actions",
         "admin_config_marketing_automation.py for /admin/marketing-automation* and signup-conversion config compatibility APIs",
         "image_library_upload.py for multipart /api/admin/image-library/upload used by product slices and image pickers",
-        "automation_conversion.py for legacy automation write/external/runtime fallback only; D6 retired core Automation readonly page/API/alias GET ownership",
-        "automation_conversion_delivery.py for focus-send and SOP v1 delivery handlers registered by automation_conversion.py",
-        "automation_conversion_member_api.py for member actions and manual-send JSON handlers registered by automation_conversion.py",
-        "automation_conversion_task_runtime.py for operation-task due-runner handlers registered by automation_conversion.py",
-        "automation_conversion_runtime_api.py for internal runtime triggers and callback endpoints registered by automation_conversion.py",
-        "automation_conversion_execution_outbound.py for execution-item outbound send handlers registered by automation_conversion.py",
+        "retired legacy automation-conversion HTTP aggregator and split route child modules; current owner is aicrm_next.automation_engine API/admin pages",
         "aicrm_next.channel_entry.api owns channel runtime diagnosis, dry-run, and repair routes",
         "admin_dashboard.py for /api/admin/dashboard/* shell status",
         "admin_class_user.py for /api/admin/class-user-management*",
@@ -204,8 +190,6 @@ HTTP_ROUTE_REGISTRARS = (
     ("common_operation_members", register_common_operation_members_routes),
     ("wecom_customer_acquisition", register_wecom_customer_acquisition_routes),
     ("admin_questionnaires", register_admin_questionnaires_routes),
-    ("automation_conversion", register_automation_conversion_routes),
-    ("customer_automation", register_customer_automation_routes),
     ("public_questionnaires", register_public_questionnaire_routes),
     ("public_questionnaire_diagnostics", register_public_questionnaire_diagnostics_routes),
     ("public_questionnaire_oauth", register_public_questionnaire_oauth_routes),

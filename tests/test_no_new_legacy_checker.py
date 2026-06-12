@@ -1153,6 +1153,7 @@ def test_post_legacy_architecture_freeze_guard_flags_deleted_handler_registratio
     )
     (docs / "post_legacy_legacy_module_prune_inventory.md").write_text(
         "legacy module / package | 替代 Next 模块 | 删除决策\n"
+        "deleted_in_pr9\n"
         "`wecom_ability_service/http/admin_hxc_dashboard.py` | next | `deleted`\n"
         "`wecom_ability_service/http/admin_auth_routes.py` | next | `deleted`\n"
         "`wecom_ability_service/http/cloud_orchestrator_campaigns.py` | next | `deleted`\n"
@@ -1162,12 +1163,14 @@ def test_post_legacy_architecture_freeze_guard_flags_deleted_handler_registratio
         "`wecom_ability_service/http/cloud_orchestrator_pages.py` | next | `deleted`\n"
         "`wecom_ability_service/http/cloud_orchestrator_plans.py` | next | `deleted`\n"
         "`wecom_ability_service/http/cloud_orchestrator_segments.py` | next | `deleted`\n"
-        "`wecom_ability_service/http/automation_conversion.py` | next | keep_temporarily_historical\n"
-        "`wecom_ability_service/http/automation_conversion_runtime_api.py` | next | keep_temporarily_historical\n"
-        "`wecom_ability_service/http/automation_conversion_task_runtime.py` | next | keep_temporarily_historical\n"
-        "`wecom_ability_service/http/automation_conversion_execution_outbound.py` | next | keep_temporarily_historical\n"
-        "`wecom_ability_service/http/automation_conversion_member_api.py` | next | keep_temporarily_historical\n"
-        "`wecom_ability_service/http/customer_automation.py` | next | keep_temporarily_historical\n",
+        "`wecom_ability_service/http/automation_conversion.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/automation_conversion_runtime_api.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/automation_conversion_task_runtime.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/automation_conversion_execution_outbound.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/automation_conversion_member_api.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/automation_conversion_compat.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/automation_conversion_delivery.py` | next | `deleted`\n"
+        "`wecom_ability_service/http/customer_automation.py` | next | `deleted`\n",
         encoding="utf-8",
     )
     (http / "__init__.py").write_text("from .admin_auth_routes import register_routes\n", encoding="utf-8")

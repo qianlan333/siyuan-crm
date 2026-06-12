@@ -22,7 +22,6 @@ HTTP_HELPER_MODULE_FILES = {
     "admin_support.py",
     "automation_conversion_form_helpers.py",
     "automation_conversion_uploads.py",
-    "automation_conversion_compat.py",
     "background_jobs.py",
     "callback_runtime.py",
     "common.py",
@@ -37,7 +36,6 @@ HTTP_HELPER_MODULE_FILES = {
 HTTP_LARGE_ROUTE_OWNER_LINE_LIMITS = {
     "admin_wechat_pay.py": 360,
     "admin_config.py": 350,
-    "automation_conversion.py": 350,
     "internal_auth.py": 390,
 }
 
@@ -210,25 +208,9 @@ def test_http_package_contains_no_direct_third_party_runtime_calls():
         assert "WeComClient.from_contact_app(" not in source, f"{path} must not instantiate WeComClient.from_contact_app() directly"
 
 
-def test_automation_conversion_controller_stays_a_route_aggregator():
+def test_automation_conversion_controller_is_pruned_after_next_cutover():
     source_path = ROOT / "wecom_ability_service" / "http" / "automation_conversion.py"
-    source = source_path.read_text(encoding="utf-8")
-    parsed = ast.parse(source)
-
-    assert len(source.splitlines()) <= 350
-
-    forbidden_imports = {
-        "flask",
-        "wecom_ability_service.domains",
-        "wecom_ability_service.http._routes_helpers",
-    }
-    for node in ast.walk(parsed):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert not any(alias.name == target or alias.name.startswith(f"{target}.") for target in forbidden_imports)
-        if isinstance(node, ast.ImportFrom):
-            module_name = node.module or ""
-            assert not any(module_name == target or module_name.startswith(f"{target}.") for target in forbidden_imports)
+    assert not source_path.exists()
 
 
 def test_automation_conversion_support_helpers_stay_layered():
@@ -550,7 +532,7 @@ def test_retired_admin_user_ops_page_routes_are_not_registered():
     assert not (retired_routes & registered_routes)
 
 
-def test_automation_conversion_split_route_modules_stay_owned_by_child_controllers():
+def test_automation_conversion_split_route_modules_are_removed_from_legacy_registry():
     from wecom_ability_service import create_app
 
     app = create_app({"TESTING": True})
@@ -559,42 +541,29 @@ def test_automation_conversion_split_route_modules_stay_owned_by_child_controlle
         for rule in app.url_map.iter_rules()
     }
 
-    expected_by_module = {
-        "automation_conversion_member_api": {
-            "/api/admin/automation-conversion/member/put-in-pool",
-            "/api/admin/automation-conversion/member/set-focus",
-            "/api/admin/automation-conversion/member/push-openclaw",
-            "/api/admin/automation-conversion/stage/<stage_key>/manual-send/preview",
-            "/api/admin/automation-conversion/stage/<stage_key>/manual-send",
-            "/api/admin/automation-conversion/stage/<stage_key>/focus-send-batches",
-        },
-        "automation_conversion_delivery": {
-            "/api/admin/automation-conversion/focus-send-batches/<batch_id>",
-            "/api/admin/automation-conversion/focus-send-batches/run-due",
-            "/api/admin/automation-conversion/sop/config",
-            "/api/admin/automation-conversion/sop/run-due",
-        },
-        "automation_conversion_execution_outbound": {
-            "/api/admin/automation-conversion/execution-items/<int:execution_item_id>/send-via-bazhuayu",
-        },
-        "automation_conversion_task_runtime": {
-            "/api/admin/automation-conversion/tasks/run-due",
-        },
-        "automation_conversion_runtime_api": {
-            "/api/admin/automation-conversion/message-activity-sync/run",
-            "/api/admin/automation-conversion/reply-monitor/capture",
-            "/api/admin/automation-conversion/reply-monitor/run-due",
-            "/api/internal/automation-conversion/lobster-results",
-            "/api/internal/automation-conversion/laohuang-chat-results",
-            "/api/internal/automation-conversion/router-test-dispatch",
-            "/api/admin/automation-conversion/jobs/run-due",
-        },
+    retired_routes = {
+        "/api/admin/automation-conversion/member/put-in-pool",
+        "/api/admin/automation-conversion/member/set-focus",
+        "/api/admin/automation-conversion/member/push-openclaw",
+        "/api/admin/automation-conversion/stage/<stage_key>/manual-send/preview",
+        "/api/admin/automation-conversion/stage/<stage_key>/manual-send",
+        "/api/admin/automation-conversion/stage/<stage_key>/focus-send-batches",
+        "/api/admin/automation-conversion/focus-send-batches/<batch_id>",
+        "/api/admin/automation-conversion/focus-send-batches/run-due",
+        "/api/admin/automation-conversion/sop/config",
+        "/api/admin/automation-conversion/sop/run-due",
+        "/api/admin/automation-conversion/execution-items/<int:execution_item_id>/send-via-bazhuayu",
+        "/api/admin/automation-conversion/tasks/run-due",
+        "/api/admin/automation-conversion/message-activity-sync/run",
+        "/api/admin/automation-conversion/reply-monitor/capture",
+        "/api/admin/automation-conversion/reply-monitor/run-due",
+        "/api/internal/automation-conversion/lobster-results",
+        "/api/internal/automation-conversion/laohuang-chat-results",
+        "/api/internal/automation-conversion/router-test-dispatch",
+        "/api/admin/automation-conversion/jobs/run-due",
     }
 
-    for module_name, expected_routes in expected_by_module.items():
-        expected_module = f"wecom_ability_service.http.{module_name}"
-        for route in expected_routes:
-            assert route_modules[route] == expected_module
+    assert route_modules.keys().isdisjoint(retired_routes)
 
 
 def test_cloud_orchestrator_split_route_modules_are_removed_from_legacy_registry():
@@ -809,14 +778,7 @@ def test_automation_conversion_legacy_routes_and_endpoints_remain_removed():
         "api_admin_automation_conversion_review_output_send_via_wecom",
         "api_admin_automation_conversion_review_output_send_via_bazhuayu",
     }
-    kept_routes = {
-        "/api/admin/automation-conversion/stage/<stage_key>/manual-send/preview",
-        "/api/admin/automation-conversion/stage/<stage_key>/manual-send",
-        "/api/admin/automation-conversion/stage/<stage_key>/focus-send-batches",
-        "/api/admin/automation-conversion/message-activity-sync/run",
-        "/api/admin/automation-conversion/reply-monitor/capture",
-        "/api/admin/automation-conversion/reply-monitor/run-due",
-    }
+    kept_routes: set[str] = set()
 
     restored_routes = removed_routes & rules
     missing_routes = kept_routes - rules

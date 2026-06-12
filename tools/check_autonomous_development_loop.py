@@ -105,8 +105,6 @@ RUNTIME_FALLBACK_ALLOWED_EXACT = {
     "aicrm_next/customer_read_model/api.py",
     "aicrm_next/automation_engine/api.py",
     "wecom_ability_service/http/__init__.py",
-    "wecom_ability_service/http/automation_conversion.py",
-    "wecom_ability_service/http/automation_conversion_channels.py",
     "wecom_ability_service/templates/admin_console/channel_code_center.html",
     "wecom_ability_service/templates/admin_console/channel_code_form.html",
     "wecom_ability_service/static/admin_console/channel_admission_pages.js",

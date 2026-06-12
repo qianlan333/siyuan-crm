@@ -568,3 +568,26 @@ def app(tmp_path) -> Iterator[Any]:
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture
+def next_pg_schema():
+    _ensure_pg_url()
+    from tests.automation_runtime_v2_test_helpers import ensure_runtime_v2_base_tables
+
+    ensure_runtime_v2_base_tables()
+    return True
+
+
+@pytest.fixture
+def next_app():
+    from aicrm_next.main import create_app
+
+    return create_app()
+
+
+@pytest.fixture
+def next_client(next_app):
+    from fastapi.testclient import TestClient
+
+    return TestClient(next_app)

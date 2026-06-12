@@ -18,8 +18,38 @@ router = APIRouter()
 
 _FIXTURE_CHANNELS: dict[int, dict[str, Any]] = {}
 _FIXTURE_PROGRAM_BINDINGS: dict[int, dict[str, Any]] = {}
+_FIXTURE_WE_COM_LINKS: list[dict[str, Any]] = []
 _NEXT_ID = 1
 _NEXT_BINDING_ID = 1
+_NEXT_WE_COM_LINK_ID = 1
+
+
+def reset_wecom_customer_acquisition_link_fixture_state() -> None:
+    global _FIXTURE_WE_COM_LINKS, _NEXT_WE_COM_LINK_ID
+    _NEXT_WE_COM_LINK_ID = 1
+    now = datetime.now(timezone.utc).isoformat()
+    _FIXTURE_WE_COM_LINKS = [
+        {
+            "id": 1,
+            "link_id": "next_fixture_link",
+            "link_name": "Next Fixture",
+            "name": "Next Fixture",
+            "description": "safe-mode local fixture",
+            "link_url": "https://work.weixin.qq.com/ca/next-fixture",
+            "customer_channel": "wca_next_fixture",
+            "final_url": "https://work.weixin.qq.com/ca/next-fixture?customer_channel=wca_next_fixture",
+            "program_id": None,
+            "workflow_id": None,
+            "initial_audience_code": "pending_questionnaire",
+            "status": "active",
+            "adapter_mode": "real_blocked",
+            "wecom_api_called": False,
+            "real_external_call_executed": False,
+            "created_at": now,
+            "updated_at": now,
+        }
+    ]
+    _NEXT_WE_COM_LINK_ID = 2
 
 
 def _psycopg_url(url: str) -> str:

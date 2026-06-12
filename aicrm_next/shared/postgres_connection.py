@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
 from flask import current_app, g, has_app_context
 
 from aicrm_next.shared.runtime import raw_database_url
+
+_scoped_db: ContextVar["PostgresConnection | None"] = ContextVar("next_scoped_db", default=None)
 
 
 def _strip_tz(value: Any) -> Any:
@@ -133,4 +138,25 @@ def get_db() -> PostgresConnection:
         if "next_db" not in g:
             g.next_db = _connect()
         return g.next_db
+    scoped = _scoped_db.get()
+    if scoped is not None:
+        return scoped
     return _connect()
+
+
+@contextmanager
+def db_session() -> Iterator[PostgresConnection]:
+    if has_app_context():
+        yield get_db()
+        return
+    existing = _scoped_db.get()
+    if existing is not None:
+        yield existing
+        return
+    conn = _connect()
+    token = _scoped_db.set(conn)
+    try:
+        yield conn
+    finally:
+        _scoped_db.reset(token)
+        conn.close()

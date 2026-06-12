@@ -73,19 +73,19 @@ entries:
     route_pattern: "/admin/customers"
     methods: ["GET"]
     capability_owner: "aicrm_next.customer_read_model"
-    current_runtime_owner: "frontend_compat"
+    current_runtime_owner: "next_native"
     production_behavior: "next_read_model_only"
     legacy_fallback_allowed: false
     fixture_allowed_in_production: false
     external_side_effect_risk: "none"
-    checker: "tools/check_next_production_runtime_gaps.py"
-    replacement_phase: "keep_guarded_until_adapter_ready"
-    replacement_category: "blocked_or_guarded"
+    checker: "tests/test_customer_admin_list_pages_native.py"
+    replacement_phase: "pr1_core_next_baseline_sync"
+    replacement_category: "next_native"
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
     replacement_owner: "aicrm_next.customer_read_model"
-    replacement_strategy: "Treat this as a frontend_compat page-shell migration candidate only; business APIs remain Next-owned. Do not classify it as legacy Flask fallback."
+    replacement_strategy: "PR-1 core baseline sync renders this page from aicrm_next.customer_read_model.admin_pages before frontend_compat; business APIs remain Next-owned."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
@@ -249,19 +249,19 @@ entries:
     route_pattern: "/admin/user-ops*"
     methods: ["GET"]
     capability_owner: "aicrm_next.ops_enrollment"
-    current_runtime_owner: "frontend_compat"
+    current_runtime_owner: "next_native"
     production_behavior: "next_read_model_only"
     legacy_fallback_allowed: false
     fixture_allowed_in_production: false
     external_side_effect_risk: "none"
-    checker: "tests/test_user_ops_registry_lifecycle.py"
-    replacement_phase: "keep_guarded_until_adapter_ready"
-    replacement_category: "blocked_or_guarded"
+    checker: "tests/test_user_ops_admin_pages_native.py"
+    replacement_phase: "pr1_core_next_baseline_sync"
+    replacement_category: "next_native"
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
     replacement_owner: "aicrm_next.ops_enrollment"
-    replacement_strategy: "Treat this as a frontend_compat page-shell migration candidate only; business APIs remain Next-owned. Do not classify it as legacy Flask fallback."
+    replacement_strategy: "PR-1 core baseline sync renders /admin/user-ops and /admin/user-ops/ui from aicrm_next.ops_enrollment.admin_pages before frontend_compat."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
@@ -271,19 +271,19 @@ entries:
     route_pattern: "/admin/user-ops"
     methods: ["GET"]
     capability_owner: "aicrm_next.ops_enrollment"
-    current_runtime_owner: "frontend_compat"
+    current_runtime_owner: "next_native"
     production_behavior: "next_read_model_only"
     legacy_fallback_allowed: false
     fixture_allowed_in_production: false
     external_side_effect_risk: "none"
-    checker: "tests/test_user_ops_registry_lifecycle.py"
-    replacement_phase: "keep_guarded_until_adapter_ready"
-    replacement_category: "blocked_or_guarded"
+    checker: "tests/test_user_ops_admin_pages_native.py"
+    replacement_phase: "pr1_core_next_baseline_sync"
+    replacement_category: "next_native"
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
     replacement_owner: "aicrm_next.ops_enrollment"
-    replacement_strategy: "Treat this as a frontend_compat page-shell migration candidate only; business APIs remain Next-owned. Do not classify it as legacy Flask fallback."
+    replacement_strategy: "PR-1 core baseline sync renders this page from aicrm_next.ops_enrollment.admin_pages before frontend_compat."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
@@ -3284,20 +3284,20 @@ entries:
   - id: "LRB-150"
     route_pattern: "/sidebar/bind-mobile"
     methods: ["GET", "HEAD"]
-    capability_owner: "aicrm_next.frontend_compat"
-    current_runtime_owner: "next"
+    capability_owner: "aicrm_next.identity_contact"
+    current_runtime_owner: "next_native"
     production_behavior: "readonly_facade"
     legacy_fallback_allowed: false
     fixture_allowed_in_production: false
     external_side_effect_risk: "none"
-    checker: "tools/check_sidebar_profile_next_owner_readiness.py"
-    replacement_phase: "phase_3_readonly"
-    replacement_category: "shell_or_navigation"
+    checker: "tests/test_identity_application_contract.py"
+    replacement_phase: "pr1_core_next_baseline_sync"
+    replacement_category: "next_native"
     priority: "P0"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
-    replacement_owner: "aicrm_next.frontend_compat"
-    replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
+    replacement_owner: "aicrm_next.identity_contact"
+    replacement_strategy: "PR-1 core baseline sync renders this exact page from aicrm_next.identity_contact.admin_pages before frontend_compat. Do not add legacy fallback."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
@@ -4296,25 +4296,47 @@ entries:
   - id: "LRB-196"
     route_pattern: "/api/admin/class-user-management/export"
     methods: ["GET", "POST", "OPTIONS"]
-    capability_owner: "aicrm_next.post_legacy_deferred"
-    current_runtime_owner: "next"
+    capability_owner: "aicrm_next.class_user_management"
+    current_runtime_owner: "next_native"
     production_behavior: "next_export"
     legacy_fallback_allowed: false
     fixture_allowed_in_production: false
     external_side_effect_risk: "none"
-    checker: "tests/test_post_legacy_deferred_api_routes.py"
-    replacement_phase: "keep_guarded_until_adapter_ready"
-    replacement_category: "blocked_or_guarded"
+    checker: "tests/test_class_user_management_export.py"
+    replacement_phase: "pr1_core_next_baseline_sync"
+    replacement_category: "next_native"
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
-    replacement_owner: "aicrm_next.post_legacy_deferred"
-    replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
+    replacement_owner: "aicrm_next.class_user_management"
+    replacement_strategy: "PR-1 core baseline sync registers aicrm_next.class_user_management before post_legacy_deferred. Keep local CSV export no-storage/no-external-call semantics."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
-    recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "route owner drift guard"]
-    notes: "Post-Legacy deferred closeout for the operations page export button. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
+    recommended_verification: ["tests/test_class_user_management_export.py", "route owner drift guard"]
+    notes: "PR-1 core baseline sync owns the operations page export button in aicrm_next.class_user_management. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
+  - id: "LRB-196A"
+    route_pattern: "/api/automation-runtime/v2/*"
+    methods: ["POST", "OPTIONS"]
+    capability_owner: "aicrm_next.automation_runtime_v2"
+    current_runtime_owner: "next_native"
+    production_behavior: "guarded_runtime_or_controlled_degraded"
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: "guarded"
+    checker: "tests/test_automation_runtime_v2_runtime_check.py"
+    replacement_phase: "pr1_core_next_baseline_sync"
+    replacement_category: "next_native"
+    priority: "P2"
+    daily_business_critical: true
+    business_continuity_requirement: "Runtime routes must not regress to 404, bare 500, fixture/local_contract success in production, or accidental external side effects."
+    replacement_owner: "aicrm_next.automation_runtime_v2"
+    replacement_strategy: "PR-1 core baseline sync registers automation_runtime_v2 in aicrm_next.main; schema graph closeout remains deferred to PR-3 and production gaps must return controlled degraded states."
+    fallback_required_until: "No legacy fallback is required or allowed for this manifest entry."
+    rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
+    delete_condition: "Keep route owner and degraded-state checks current; migration graph closeout is deferred to PR-3."
+    recommended_verification: ["tests/test_automation_runtime_v2_runtime_check.py", "tests/test_smoke_automation_runtime_v2_script.py", "route owner drift guard"]
+    notes: "PR-1 imports automation_runtime_v2 code and routes without declaring production Alembic graph readiness."
   - id: "LRB-197"
     route_pattern: "/api/admin/cloud-orchestrator/audit"
     methods: ["GET", "OPTIONS"]

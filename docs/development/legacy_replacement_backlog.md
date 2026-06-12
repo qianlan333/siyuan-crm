@@ -148,7 +148,7 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `LRB-001` `/health`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.platform_foundation`
 - `LRB-002` `/api/system/health`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.platform_foundation`
 - `LRB-003` `/admin`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.admin_shell`
-- `LRB-004` `/admin/customers`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
+- `LRB-004` `/admin/customers`: `P2` / `pr1_core_next_baseline_sync` / `next_native` / owner `aicrm_next.customer_read_model`
 - `LRB-005` `/admin/questionnaires`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.questionnaire`
 - `LRB-006` `/admin/questionnaires/new`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.questionnaire`
 - `LRB-007` `/admin/questionnaires/{questionnaire_id}`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.questionnaire`
@@ -156,8 +156,8 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `LRB-009` `/admin/automation-conversion/{path:path}`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.automation_engine`
 - `LRB-010` `/admin/jobs`: `P3` / `phase_6_timer_automation` / `timer_or_automation_execution` / owner `aicrm_next.admin_jobs`
 - `LRB-011` `/admin/broadcast-jobs`: `P3` / `phase_6_timer_automation` / `timer_or_automation_execution` / owner `aicrm_next.admin_jobs`
-- `LRB-012` `/admin/user-ops*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.ops_enrollment`
-- `LRB-013` `/admin/user-ops`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.ops_enrollment`
+- `LRB-012` `/admin/user-ops*`: `P2` / `pr1_core_next_baseline_sync` / `next_native` / owner `aicrm_next.ops_enrollment`
+- `LRB-013` `/admin/user-ops`: `P2` / `pr1_core_next_baseline_sync` / `next_native` / owner `aicrm_next.ops_enrollment`
 - `LRB-014` `/api/admin/user-ops*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.ops_enrollment`
 - `LRB-015` `/api/admin/user-ops/overview`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.ops_enrollment`
 - `LRB-016` `/api/admin/user-ops/cards`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.ops_enrollment`
@@ -294,7 +294,7 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `LRB-147` `/api/admin/image-library/upload`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.media_library`
 - `LRB-148` `/api/admin/attachment-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
 - `LRB-149` `/api/admin/miniprogram-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
-- `LRB-150` `/sidebar/bind-mobile`: `P0` / `phase_3_readonly` / `shell_or_navigation` / owner `aicrm_next.frontend_compat`
+- `LRB-150` `/sidebar/bind-mobile`: `P0` / `pr1_core_next_baseline_sync` / `next_native` / owner `aicrm_next.identity_contact`
 - `LRB-151` `/api/sidebar/contact-binding-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.identity_contact`
 - `LRB-152` `/api/sidebar/binding-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.identity_contact`
 - `LRB-153` `/api/sidebar/customer-context`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
@@ -340,7 +340,8 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `LRB-193` `/api/admin/hxc-dashboard/broadcast`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
 - `LRB-194` `/api/admin/hxc-dashboard/{unknown_path}`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
 - `LRB-195` `/mcp`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.integration_gateway`
-- `LRB-196` `/api/admin/class-user-management/export`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.post_legacy_deferred`
+- `LRB-196` `/api/admin/class-user-management/export`: `P2` / `pr1_core_next_baseline_sync` / `next_native` / owner `aicrm_next.class_user_management`
+- `LRB-196A` `/api/automation-runtime/v2/*`: `P2` / `pr1_core_next_baseline_sync` / `next_native` / owner `aicrm_next.automation_runtime_v2`
 - `LRB-197` `/api/admin/cloud-orchestrator/audit`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
 - `LRB-198` `/api/admin/cloud-orchestrator/observability`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
 - `LRB-199` `/api/admin/wecom-customer-acquisition-links`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`

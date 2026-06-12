@@ -94,7 +94,7 @@ routes:
     path_pattern: /admin/channels*
     methods: [GET]
     capability_owner: aicrm_next.frontend_compat
-    runtime_owner: frontend_compat
+    runtime_owner: next_native
     legacy_fallback_allowed: false
     legacy_source: ""
     external_side_effect_risk: none
@@ -423,7 +423,7 @@ routes:
     adapter_mode: none
     delete_status: deletion_locked
     replacement_status: locked
-    checker: tests/test_customer_read_model_next_primary.py
+    checker: tests/test_customer_admin_list_pages_native.py
     rollback_owner: aicrm_next.customer_read_model
     notes: Customer read legacy facade removed; Next read model is the only production read path. Missing production read model data returns production_unavailable.
   - route_id: customer_detail_api
@@ -598,16 +598,16 @@ routes:
     path_pattern: /admin/customers*
     methods: [GET]
     capability_owner: aicrm_next.customer_read_model
-    runtime_owner: frontend_compat
+    runtime_owner: next_native
     legacy_fallback_allowed: false
     legacy_source: ""
     external_side_effect_risk: none
     adapter_mode: none
     delete_status: deletion_locked
     replacement_status: locked
-    checker: tests/test_customer_read_model_next_primary.py
+    checker: tests/test_customer_admin_list_pages_native.py
     rollback_owner: aicrm_next.customer_read_model
-    notes: Admin customer pages render through frontend compatibility templates over the Next read model; customer read legacy facade removed. Missing production read model data returns production_unavailable.
+    notes: PR-1 core baseline sync renders admin customer pages from aicrm_next.customer_read_model.admin_pages before frontend_compat; customer read legacy facade removed. Missing production read model data returns production_unavailable.
   - route_id: user_ops_admin_api_family
     path_pattern: /api/admin/user-ops*
     methods: [GET, POST, OPTIONS]
@@ -752,30 +752,30 @@ routes:
     path_pattern: /admin/user-ops*
     methods: [GET]
     capability_owner: aicrm_next.ops_enrollment
-    runtime_owner: frontend_compat
-    legacy_fallback_allowed: false
-    legacy_source: ""
-    external_side_effect_risk: none
-    adapter_mode: none
-    delete_status: active
-    replacement_status: validating
-    checker: tests/test_user_ops_registry_lifecycle.py
-    rollback_owner: aicrm_next.ops_enrollment
-    notes: User Ops admin page family documents the frontend_compat shell; exact /admin/user-ops is deletion_locked below. Other User Ops UI variants remain out of scope.
-  - route_id: user_ops_admin_page
-    path_pattern: /admin/user-ops
-    methods: [GET]
-    capability_owner: aicrm_next.ops_enrollment
-    runtime_owner: frontend_compat
+    runtime_owner: next_native
     legacy_fallback_allowed: false
     legacy_source: ""
     external_side_effect_risk: none
     adapter_mode: none
     delete_status: deletion_locked
     replacement_status: locked
-    checker: tests/test_user_ops_registry_lifecycle.py
+    checker: tests/test_user_ops_admin_pages_native.py
     rollback_owner: aicrm_next.ops_enrollment
-    notes: User Ops admin page opens through frontend compatibility templates over Next-native APIs, stays 200, and must not redirect to the HXC dashboard or production_compat fallback.
+    notes: PR-1 core baseline sync renders /admin/user-ops and /admin/user-ops/ui from aicrm_next.ops_enrollment.admin_pages before frontend_compat.
+  - route_id: user_ops_admin_page
+    path_pattern: /admin/user-ops
+    methods: [GET]
+    capability_owner: aicrm_next.ops_enrollment
+    runtime_owner: next_native
+    legacy_fallback_allowed: false
+    legacy_source: ""
+    external_side_effect_risk: none
+    adapter_mode: none
+    delete_status: deletion_locked
+    replacement_status: locked
+    checker: tests/test_user_ops_admin_pages_native.py
+    rollback_owner: aicrm_next.ops_enrollment
+    notes: User Ops admin page opens through native aicrm_next.ops_enrollment.admin_pages over Next-native APIs, stays 200, and must not redirect to the HXC dashboard or production_compat fallback.
   - route_id: identity_resolve_api
     path_pattern: /api/identity/resolve
     methods: [GET]
@@ -2571,7 +2571,7 @@ routes:
   - route_id: post_legacy_class_user_management_export
     path_pattern: /api/admin/class-user-management/export
     methods: [GET, POST, OPTIONS]
-    capability_owner: aicrm_next.post_legacy_deferred
+    capability_owner: aicrm_next.class_user_management
     runtime_owner: next_native
     legacy_fallback_allowed: false
     legacy_source: ""
@@ -2579,9 +2579,23 @@ routes:
     adapter_mode: none
     delete_status: deletion_locked
     replacement_status: locked
-    checker: tests/test_post_legacy_deferred_api_routes.py
-    rollback_owner: aicrm_next.post_legacy_deferred
-    notes: Post-Legacy deferred closeout; local CSV export only, external_storage_executed=false, no production_compat fallback.
+    checker: tests/test_class_user_management_export.py
+    rollback_owner: aicrm_next.class_user_management
+    notes: PR-1 core baseline sync registers aicrm_next.class_user_management before post_legacy_deferred; local CSV export only, external_storage_executed=false, no production_compat fallback.
+  - route_id: automation_runtime_v2_api_family
+    path_pattern: /api/automation-runtime/v2/*
+    methods: [POST, OPTIONS]
+    capability_owner: aicrm_next.automation_runtime_v2
+    runtime_owner: next_native
+    legacy_fallback_allowed: false
+    legacy_source: ""
+    external_side_effect_risk: guarded
+    adapter_mode: real_blocked
+    delete_status: active
+    replacement_status: locked
+    checker: tests/test_automation_runtime_v2_runtime_check.py
+    rollback_owner: aicrm_next.automation_runtime_v2
+    notes: PR-1 core baseline sync registers automation_runtime_v2 API routes in aicrm_next.main; DB/schema gaps must return controlled degraded or production_unavailable states, not bare 500.
   - route_id: post_legacy_cloud_orchestrator_audit
     path_pattern: /api/admin/cloud-orchestrator/audit
     methods: [GET, OPTIONS]

@@ -17,6 +17,22 @@ owner_approval_required: false
 runtime_behavior_changed: false
 delete_ready: false
 
+pr1_core_next_baseline_sync:
+  status: in_progress_pr
+  branch: codex/siyuan-pr1-core-next-baseline-sync
+  scope:
+    - automation_runtime_v2_routes
+    - class_user_management_export
+    - customer_admin_pages
+    - user_ops_admin_pages
+    - identity_bind_mobile_page
+  deferred:
+    - commerce_external_orders_pr2
+    - alembic_graph_closeout_pr3
+    - hxc_cloud_commerce_api_docs_native_closeout_later
+  production_cutover: false
+  deploy_systemd_nginx_env_changed: false
+
 cleanup_closeout:
   global_non_runtime_cleanup: complete
   low_medium_admin_runtime_fallback_migration: complete_enough_for_product_development
@@ -38,6 +54,9 @@ completed_runtime_fallback_tracks:
   - media_material_libraries_next_ownership
   - sidebar_customer_broad_fallback_narrowing
   - sidebar_customer_readonly_cleanup
+  - pr1_core_next_baseline_sync_customer_user_ops_identity_pages
+  - pr1_core_next_baseline_sync_class_user_export
+  - pr1_core_next_baseline_sync_automation_runtime_v2_routes
 
 remaining_runtime_fallback_tracks:
   product_specific_migration_required:

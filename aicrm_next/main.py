@@ -16,9 +16,12 @@ from .admin_jobs.repository import reset_admin_jobs_fixture_state
 from .admin_jobs.routes import router as admin_jobs_router
 from .automation_engine.admin_pages import router as automation_admin_pages_router
 from .automation_engine.api import router as automation_router
+from .automation_runtime_v2.api import router as automation_runtime_v2_router
 from .automation_engine.channel_admin_pages import router as channel_admin_pages_router
 from .automation_engine.channels_api import router as automation_channels_router
+from .automation_engine.channels_api import reset_wecom_customer_acquisition_link_fixture_state
 from .channel_entry.api import router as channel_entry_router
+from .class_user_management.api import router as class_user_management_router
 from .automation_engine.group_ops.admin_pages import router as group_ops_admin_pages_router
 from .automation_engine.group_ops.repo import reset_group_ops_fixture_state
 from .automation_engine.customer_webhooks import reset_customer_webhook_fixture_state
@@ -38,11 +41,13 @@ from .customer_tags.api import write_router as customer_tags_write_router
 from .customer_tags.admin_pages import router as customer_tags_admin_pages_router
 from .customer_tags.admin_write import reset_wecom_tag_write_fixture_state
 from .customer_tags.live_mutation import reset_wecom_tag_live_mutation_fixture_state
+from .customer_read_model.admin_pages import router as customer_admin_pages_router
 from .customer_read_model.api import router as customer_router
 from .frontend_compat.legacy_routes import router as frontend_compat_router
 from .hxc_dashboard.api import router as hxc_dashboard_router
 from .hxc_dashboard.repo import reset_hxc_dashboard_fixture_state
 from .hxc_dashboard.safe_mode import reset_hxc_safe_mode_fixture_state
+from .identity_contact.admin_pages import router as identity_admin_pages_router
 from .identity_contact.api import router as identity_router
 from .identity_contact.sidebar_jssdk import router as sidebar_jssdk_router
 from .integration_gateway.wecom_jssdk_adapter import reset_sidebar_jssdk_attempts
@@ -51,6 +56,7 @@ from .media_library.admin_pages import router as media_library_admin_pages_route
 from .media_library.api import router as media_library_router
 from .media_library.repo import reset_media_library_fixture_state
 from .message_archive.api import router as message_archive_router
+from .ops_enrollment.admin_pages import router as user_ops_admin_pages_router
 from .ops_enrollment.application import reset_user_ops_fixture_state
 from .ops_enrollment.api import router as user_ops_router
 from .owner_migration.api import router as owner_migration_router
@@ -99,6 +105,7 @@ def create_app() -> FastAPI:
         reset_campaign_read_fixture_state()
         reset_campaign_write_fixture_state()
         reset_sidebar_write_fixture_state()
+        reset_wecom_customer_acquisition_link_fixture_state()
         reset_post_legacy_deferred_fixture_state()
         reset_admin_auth_fixture_state()
         reset_questionnaire_admin_write_fixture_state()
@@ -151,6 +158,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_auth_router)
     app.include_router(admin_shell_router)
     app.include_router(admin_config_router)
+    app.include_router(class_user_management_router)
     app.include_router(post_legacy_deferred_router)
     app.include_router(common_operation_members_router)
     app.include_router(channel_entry_router)
@@ -163,10 +171,13 @@ def create_app() -> FastAPI:
     app.include_router(customer_tags_write_router)
     app.include_router(cloud_orchestrator_router)
     app.include_router(customer_router)
+    app.include_router(customer_admin_pages_router)
     app.include_router(customer_tags_router)
     app.include_router(user_ops_router)
+    app.include_router(user_ops_admin_pages_router)
     app.include_router(mcp_router)
     app.include_router(identity_router)
+    app.include_router(identity_admin_pages_router)
     app.include_router(message_archive_router)
     app.include_router(questionnaire_admin_pages_router)
     app.include_router(questionnaire_router)
@@ -178,6 +189,7 @@ def create_app() -> FastAPI:
     app.include_router(channel_admin_pages_router)
     app.include_router(customer_tags_admin_pages_router)
     app.include_router(automation_router)
+    app.include_router(automation_runtime_v2_router)
     app.include_router(commerce_router)
     app.include_router(media_library_router)
     app.include_router(media_library_admin_pages_router)

@@ -25,7 +25,7 @@ REPRESENTATIVE_NEXT_ROUTES = {
     "/api/admin/cloud-orchestrator/campaigns": "aicrm_next.cloud_orchestrator.api",
     "/api/admin/cloud-orchestrator/campaigns/run-due/preview": "aicrm_next.cloud_orchestrator.api",
     "/api/admin/cloud-orchestrator/media/upload": "aicrm_next.cloud_orchestrator.api",
-    "/api/admin/cloud-orchestrator/observability": "aicrm_next.post_legacy_deferred.api",
+    "/api/admin/cloud-orchestrator/observability": "aicrm_next.cloud_orchestrator.api",
 }
 
 

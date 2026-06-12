@@ -11,23 +11,11 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 ensure_repo_root_on_path()
 
-from wecom_ability_service import create_app
-from wecom_ability_service.db import init_db
-from wecom_ability_service.domains.automation_conversion import automation_member_backfill_service
-
-
-def _text(value: object) -> str:
-    return str(value or "").strip()
+from aicrm_next.background_jobs.automation_member_backfill import run_automation_member_backfill
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description=(
-            "Register sidebar-bound external contacts as Campaign-ready automation members. "
-            "Hourly cron example: 0 * * * * cd /opt/crm && "
-            "python3 scripts/run_automation_member_backfill.py --limit 5000"
-        )
-    )
+    parser = argparse.ArgumentParser(description="Run Next-native automation member backfill.")
     parser.add_argument("--external-userid", default="")
     parser.add_argument("--limit", type=int, default=5000)
     parser.add_argument("--offset", type=int, default=0)
@@ -42,29 +30,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
-    app = create_app()
-    try:
-        with app.app_context():
-            init_db()
-            external_userid = _text(args.external_userid)
-            if external_userid:
-                output = automation_member_backfill_service.ensure_campaign_member_from_sidebar_binding(
-                    external_userid,
-                    dry_run=bool(args.dry_run),
-                    commit=True,
-                )
-            else:
-                output = automation_member_backfill_service.refresh_campaign_members_from_sidebar_bindings(
-                    limit=int(args.limit),
-                    offset=int(args.offset),
-                    dry_run=bool(args.dry_run),
-                    commit=True,
-                )
-            print_json(output)
-            return 0 if output.get("ok") else 1
-    except Exception as exc:  # pragma: no cover - operator entrypoint
-        print_json({"ok": False, "error": str(exc)})
-        return 1
+    payload = run_automation_member_backfill(
+        limit=int(args.limit),
+        offset=int(args.offset),
+        external_userid=str(args.external_userid or ""),
+        dry_run=bool(args.dry_run),
+    )
+    print_json(payload)
+    return 0 if payload.get("ok") else 1
 
 
 if __name__ == "__main__":

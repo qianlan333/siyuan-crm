@@ -22,7 +22,7 @@ Search evidence:
 - `aicrm_next/customer_read_model/api.py` owns `GET /api/messages/{external_userid}/recent`.
 - `aicrm_next/production_compat/api.py` no longer contains `@wildcard_router.api_route("/api/messages/{path:path}")`.
 - `aicrm_next/message_archive/api.py` owns the new exact archive list/search routes plus explicit deprecated/blocked routes listed above.
-- `aicrm_next/frontend_compat/api_docs_view_model.py` only groups `/api/messages/` paths for API docs display.
+- `aicrm_next/admin_config/api_docs_view_model.py` only groups `/api/messages/` paths for API docs display.
 - `tests/test_api.py`, `tests/contract/test_crm_contract.py`, and `tests/test_http_registration_contract.py` reference `GET /api/messages/{external_userid}`, `GET /api/messages/{external_userid}/recent`, and `GET /api/messages/search`.
 - `tests/test_messages_*.py` and `tests/test_route_registry_foundation.py` are validation coverage for this inventory and route registry behavior.
 - `docs/development/legacy_replacement_backlog.md` and `.yaml` contain historical backlog entries for recent and broad wildcard; this inventory supersedes their operational decision for this group.

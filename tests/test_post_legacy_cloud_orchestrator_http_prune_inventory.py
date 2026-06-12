@@ -56,7 +56,6 @@ def test_cloud_orchestrator_inventory_records_next_replacements_and_validation()
     for phrase in [
         "aicrm_next.cloud_orchestrator.api",
         "aicrm_next.cloud_orchestrator.media_upload",
-        "aicrm_next.post_legacy_deferred.api",
         "Next `TestClient` batch-start command",
         "production_compat_route_count",
         "legacy_fallback_routes_count",

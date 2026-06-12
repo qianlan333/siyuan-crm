@@ -34,7 +34,7 @@ def test_class_user_management_export_returns_controlled_local_csv(client: TestC
     assert response.headers["X-AICRM-External-Storage-Executed"] == "false"
     assert "route_owner,fallback_used,real_external_call_executed,export_generated" in response.text
     assert "ai_crm_next,false,false,local_only" in response.text
-    assert "Post Legacy Local" in response.text
+    assert "Class User Local" in response.text
 
 
 @pytest.mark.parametrize("method", ("GET", "POST", "OPTIONS"))

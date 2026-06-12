@@ -259,7 +259,7 @@ def test_cloud_orchestrator_legacy_http_handlers_are_retired_from_flask_registry
     assert next_routes["/api/admin/cloud-orchestrator/campaigns"] == "aicrm_next.cloud_orchestrator.api"
     assert next_routes["/api/admin/cloud-orchestrator/campaigns/run-due/preview"] == "aicrm_next.cloud_orchestrator.api"
     assert next_routes["/api/admin/cloud-orchestrator/media/upload"] == "aicrm_next.cloud_orchestrator.api"
-    assert next_routes["/api/admin/cloud-orchestrator/observability"] == "aicrm_next.post_legacy_deferred.api"
+    assert next_routes["/api/admin/cloud-orchestrator/observability"] == "aicrm_next.cloud_orchestrator.api"
 
 
 def test_admin_api_docs_controller_stays_a_page_adapter():

@@ -24,6 +24,7 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `aicrm_next.admin_shell`: 1 routes; P2=1
 - `aicrm_next.ai_assist`: 3 routes; P0=1, P2=1, P3=1
 - `aicrm_next.automation_engine`: 40 routes; P0=4, P1=4, P2=27, P3=5
+- `aicrm_next.automation_engine.channels_api`: 3 routes; P2=3
 - `aicrm_next.automation_runtime_v2`: 1 routes; P2=1
 - `aicrm_next.channel_entry`: 6 routes; P1=3, P2=3
 - `aicrm_next.class_user_management`: 1 routes; P2=1
@@ -39,7 +40,6 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `aicrm_next.ops_enrollment`: 12 routes; P2=12
 - `aicrm_next.owner_migration`: 8 routes; P0=2, P1=1, P2=5
 - `aicrm_next.platform_foundation`: 2 routes; P0=2
-- `aicrm_next.post_legacy_deferred`: 3 routes; P2=3
 - `aicrm_next.public_product`: 3 routes; P2=3
 - `aicrm_next.questionnaire`: 25 routes; P2=25
 - `aicrm_next.sidebar_write`: 8 routes; P2=8
@@ -348,6 +348,6 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `LRB-200` `/api/automation-runtime/v2/*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.automation_runtime_v2`
 - `LRB-201` `/api/admin/cloud-orchestrator/audit`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
 - `LRB-202` `/api/admin/cloud-orchestrator/observability`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
-- `LRB-203` `/api/admin/wecom-customer-acquisition-links`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
-- `LRB-204` `/api/admin/wecom-customer-acquisition-links/{link_id}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
-- `LRB-205` `/api/admin/wecom-customer-acquisition-links/{link_id}/{action}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
+- `LRB-203` `/api/admin/wecom-customer-acquisition-links`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.automation_engine.channels_api`
+- `LRB-204` `/api/admin/wecom-customer-acquisition-links/{link_id}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.automation_engine.channels_api`
+- `LRB-205` `/api/admin/wecom-customer-acquisition-links/{link_id}/{action}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.automation_engine.channels_api`

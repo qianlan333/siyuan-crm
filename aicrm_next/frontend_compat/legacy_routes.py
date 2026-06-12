@@ -10,7 +10,7 @@ from aicrm_next.admin_read_model.application import (
     GetAdminProductsPageQuery,
     page_row_count,
 )
-from aicrm_next.frontend_compat.api_docs_view_model import build_api_docs_view_model
+from aicrm_next.admin_config.api_docs_view_model import build_api_docs_view_model
 from aicrm_next.admin_shell import (
     admin_path_for as _admin_path_for,
     shell_context as _shell_context,
@@ -21,15 +21,7 @@ _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 _ALL_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
 
-LEGACY_FRONTEND_ROUTES = [
-    "/admin/hxc-dashboard",
-    "/admin/hxc-send-config",
-    "/admin/cloud-orchestrator",
-    "/admin/cloud-orchestrator/campaigns",
-    "/admin/cloud-orchestrator/observability",
-    "/admin/wechat-pay/products",
-    "/admin/api-docs",
-]
+LEGACY_FRONTEND_ROUTES: list[str] = []
 
 
 def _real_data_context(context: dict, *, payload: dict, title: str, summary: str) -> dict:

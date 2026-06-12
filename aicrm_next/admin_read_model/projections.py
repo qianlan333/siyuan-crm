@@ -277,7 +277,7 @@ def config_payload(repo: AdminReadRepository) -> dict[str, Any]:
 
 
 def api_docs_payload(repo: AdminReadRepository) -> dict[str, Any]:
-    from aicrm_next.frontend_compat.api_docs_view_model import build_api_docs_view_model
+    from aicrm_next.admin_config.api_docs_view_model import build_api_docs_view_model
 
     view_model = build_api_docs_view_model()
     routes = [

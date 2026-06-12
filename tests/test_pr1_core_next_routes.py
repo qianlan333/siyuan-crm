@@ -37,11 +37,6 @@ def test_pr1_automation_runtime_v2_and_class_user_routes_are_mounted() -> None:
 
 
 def test_pr1_frontend_compat_does_not_preempt_native_exact_routes() -> None:
-    from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
-
-    assert "/admin/customers" not in LEGACY_FRONTEND_ROUTES
-    assert "/admin/user-ops" not in LEGACY_FRONTEND_ROUTES
-    assert "/admin/user-ops/ui" not in LEGACY_FRONTEND_ROUTES
     assert _first_route_module("/admin/customers") == "aicrm_next.customer_read_model.admin_pages"
     assert _first_route_module("/admin/customers/{external_userid}") == "aicrm_next.customer_read_model.admin_pages"
     assert _first_route_module("/admin/user-ops") == "aicrm_next.ops_enrollment.admin_pages"

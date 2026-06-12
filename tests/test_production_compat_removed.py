@@ -21,7 +21,7 @@ def test_app_startup_no_longer_imports_or_includes_production_compat() -> None:
 
 
 def test_api_docs_router_sources_do_not_include_production_compat() -> None:
-    source = (ROOT / "aicrm_next/frontend_compat/api_docs_view_model.py").read_text(encoding="utf-8")
+    source = (ROOT / "aicrm_next/admin_config/api_docs_view_model.py").read_text(encoding="utf-8")
 
     assert COMPAT_ROUTER not in source
     assert COMPAT_WILDCARD_ROUTER not in source

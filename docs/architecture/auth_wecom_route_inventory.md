@@ -20,7 +20,7 @@ Missing search directories: `static`, `templates`, and `frontend` do not exist a
 | `/api/h5/wechat/oauth/unknown` | `GET`, `OPTIONS` | No active production caller; smoke probe required by group 11 | `next_native` exact response | `next_native` exact response | Historical unknown H5 OAuth subpath | medium / guarded | Explicit deprecated response, replacement `/api/h5/wechat/oauth/start` | `deletion_locked` | `tests/test_auth_wecom_deprecated_routes.py`, `tests/test_auth_wecom_registry_lifecycle.py` |
 | `/auth/wecom/unknown` | `GET`, `OPTIONS` | No active production caller; smoke probe required by group 11 | `next_native` exact response | `next_native` exact response | Historical unknown admin auth subpath | medium / guarded | Explicit deprecated response, replacement `/auth/wecom/start` | `deletion_locked` | `tests/test_auth_wecom_deprecated_routes.py`, `tests/test_auth_wecom_registry_lifecycle.py` |
 | `/api/h5/wechat/oauth/{path:path}` | all | production compatibility wildcard in `aicrm_next/production_compat/api.py`; docs/tests inventory | deleted wildcard | deleted wildcard | Unknown H5 OAuth subpaths | medium / guarded | Wildcard runtime fallback removed; exact routes own known surfaces | `legacy_deleted`, locked | `tests/test_auth_wecom_registry_lifecycle.py` |
-| `/auth/wecom/{path:path}` | all | production compatibility wildcard in `aicrm_next/production_compat/api.py`; API docs classifier in `aicrm_next/frontend_compat/api_docs_view_model.py` | deleted wildcard | deleted wildcard | Unknown admin auth subpaths | high / real_blocked | Wildcard runtime fallback removed; exact blocked/deprecated routes own known surfaces | `legacy_deleted`, locked | `tests/test_auth_wecom_registry_lifecycle.py` |
+| `/auth/wecom/{path:path}` | all | production compatibility wildcard in `aicrm_next/production_compat/api.py`; API docs classifier in `aicrm_next/admin_config/api_docs_view_model.py` | deleted wildcard | deleted wildcard | Unknown admin auth subpaths | high / real_blocked | Wildcard runtime fallback removed; exact blocked/deprecated routes own known surfaces | `legacy_deleted`, locked | `tests/test_auth_wecom_registry_lifecycle.py` |
 
 ## A. Already Locked
 
@@ -40,7 +40,7 @@ Missing search directories: `static`, `templates`, and `frontend` do not exist a
 ## C. Deprecated / Blocked
 
 - `/api/h5/wechat/oauth/unknown` and `/auth/wecom/unknown` are explicit probe/deprecated responses.
-- They return `410`, `error_code=auth_route_deprecated`, replacement route guidance, and no external call.
+- They return `410`, `error_code=auth_route_deprecated`, replacement route guidance, and no external call; no `external_call_blocked` facade fallback is restored.
 - After group 11 validation, these deprecated exact routes are `deletion_locked`.
 
 ## D. Wildcard Deleted

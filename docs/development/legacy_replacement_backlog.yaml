@@ -4380,7 +4380,7 @@ entries:
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_class_user_management_export.py", "route owner drift guard"]
-    notes: "PR-1 core baseline sync registers aicrm_next.class_user_management before post_legacy_deferred for the operations page export button. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
+    notes: "PR-11 keeps this export on aicrm_next.class_user_management while removing post_legacy_deferred from the runtime router. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
   - id: "LRB-200"
     route_pattern: "/api/automation-runtime/v2/*"
     methods: ["POST", "OPTIONS"]
@@ -4450,7 +4450,7 @@ entries:
   - id: "LRB-203"
     route_pattern: "/api/admin/wecom-customer-acquisition-links"
     methods: ["GET", "POST", "OPTIONS"]
-    capability_owner: "aicrm_next.post_legacy_deferred"
+    capability_owner: "aicrm_next.automation_engine.channels_api"
     current_runtime_owner: "next_command"
     production_behavior: "next_wecom_customer_acquisition"
     legacy_fallback_allowed: false
@@ -4462,17 +4462,17 @@ entries:
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
-    replacement_owner: "aicrm_next.post_legacy_deferred"
+    replacement_owner: "aicrm_next.automation_engine.channels_api"
     replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
-    notes: "Post-Legacy deferred closeout for WeCom customer acquisition link management. Read/create is safe-mode local and plan-only; wecom_api_called=false."
+    notes: "PR-11 moves WeCom customer acquisition link management from post_legacy_deferred into automation_engine.channels_api. Read/create is safe-mode local and plan-only; wecom_api_called=false."
   - id: "LRB-204"
     route_pattern: "/api/admin/wecom-customer-acquisition-links/{link_id}"
     methods: ["GET", "PATCH", "DELETE", "OPTIONS"]
-    capability_owner: "aicrm_next.post_legacy_deferred"
+    capability_owner: "aicrm_next.automation_engine.channels_api"
     current_runtime_owner: "next_command"
     production_behavior: "next_wecom_customer_acquisition"
     legacy_fallback_allowed: false
@@ -4484,17 +4484,17 @@ entries:
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
-    replacement_owner: "aicrm_next.post_legacy_deferred"
+    replacement_owner: "aicrm_next.automation_engine.channels_api"
     replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
-    notes: "Safe-mode local detail/update/disable for WeCom customer acquisition links; no real WeCom API calls and no production_compat fallback."
+    notes: "PR-11 moves safe-mode local detail/update/disable for WeCom customer acquisition links into automation_engine.channels_api; no real WeCom API calls and no production_compat fallback."
   - id: "LRB-205"
     route_pattern: "/api/admin/wecom-customer-acquisition-links/{link_id}/{action}"
     methods: ["POST", "OPTIONS"]
-    capability_owner: "aicrm_next.post_legacy_deferred"
+    capability_owner: "aicrm_next.automation_engine.channels_api"
     current_runtime_owner: "next_command"
     production_behavior: "next_wecom_customer_acquisition"
     legacy_fallback_allowed: false
@@ -4506,10 +4506,10 @@ entries:
     priority: "P2"
     daily_business_critical: true
     business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
-    replacement_owner: "aicrm_next.post_legacy_deferred"
+    replacement_owner: "aicrm_next.automation_engine.channels_api"
     replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
     fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
-    notes: "Safe-mode enable/disable/sync action route for WeCom customer acquisition links; unknown actions return controlled 410, wecom_api_called=false."
+    notes: "PR-11 moves safe-mode enable/disable/sync action route for WeCom customer acquisition links into automation_engine.channels_api; unknown actions return controlled 410, wecom_api_called=false."

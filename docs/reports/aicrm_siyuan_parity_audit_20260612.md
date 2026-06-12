@@ -161,3 +161,25 @@ Executed for this audit:
   - tests/guards
 
 No production commands were executed. This report contains no raw database URL, secrets, tokens, private keys, mobile numbers, external user IDs, scene values, union IDs, or open IDs.
+
+## 9. PR-11 Follow-up Status
+
+Status after PR-11: **core runtime parity completed with siyuan overlays**.
+
+Done in PR-11:
+
+- `aicrm_next/main.py` no longer imports or mounts `frontend_compat_router`.
+- `aicrm_next/main.py` no longer imports or mounts `post_legacy_deferred_router`.
+- `/admin/api-docs` and `/admin/runtime-config` are owned by `aicrm_next.admin_config.api`.
+- Cloud audit/observability APIs are owned by `aicrm_next.cloud_orchestrator.api`.
+- WeCom customer acquisition link safe-mode APIs are owned by `aicrm_next.automation_engine.channels_api`.
+- AI-CRM `aicrm_next/background_jobs/*` and `aicrm_next/external_push/*` packages are present in siyuan.
+
+Expected overlays retained:
+
+- `app.py` migration and restored-DB operational commands.
+- `scripts/siyuan_migration/*`.
+- route registry and legacy guard tooling.
+- historical `post_legacy_deferred` and `frontend_compat/legacy_routes.py` source files as unmounted guard/inventory sources.
+
+Still NOT_IN_PARITY for product functionality until PR-12 / PR-13 / PR-14 close the remaining sidebar, identity, customer, channel, commerce, and final docs/guard gaps.

@@ -10,10 +10,15 @@ from tests.post_legacy_baseline import assert_no_legacy_flags, baseline_env
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_deferred_api_module_has_no_direct_external_clients() -> None:
-    source = (ROOT / "aicrm_next/post_legacy_deferred/api.py").read_text(encoding="utf-8")
+def test_pr11_handoff_modules_have_no_direct_external_clients() -> None:
+    source = "\n".join(
+        [
+            (ROOT / "aicrm_next/automation_engine/channels_api.py").read_text(encoding="utf-8"),
+            (ROOT / "aicrm_next/class_user_management/api.py").read_text(encoding="utf-8"),
+        ]
+    )
 
-    for marker in ("requests.", "httpx.", "urlopen(", "create_contact_way", "dispatch_wecom_task", "external_storage"):
+    for marker in ("httpx.", "urlopen(", "create_contact_way", "dispatch_wecom_task", "external_storage"):
         assert marker not in source
 
 

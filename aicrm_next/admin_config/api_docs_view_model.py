@@ -43,6 +43,7 @@ _PATH_LABELS = {
     "logout": "退出登录",
     "callback": "回调",
     "events": "事件接收",
+    "links": "身份链路",
     "customers": "客户",
     "timeline": "时间线",
     "messages": "消息",
@@ -80,6 +81,8 @@ _PATH_LABELS = {
     "sync": "同步",
     "run-due": "执行到期任务",
     "webhooks": "Webhook",
+    "business-profile": "客户商业档案",
+    "commerce-summary": "商业摘要",
     "wecom": "企微",
     "tags": "标签",
     "tag-groups": "标签组",
@@ -93,6 +96,9 @@ _PATH_LABELS = {
     "alipay": "支付宝",
     "products": "商品",
     "orders": "订单",
+    "payments": "支付",
+    "refunds": "退款",
+    "exports": "数据导出",
     "checkout": "下单",
     "notify": "支付通知",
     "ai-assist": "AI 助手",
@@ -196,9 +202,15 @@ def _group_id_for(path: str) -> str:
         or path.startswith("/api/messages/")
         or path.startswith("/api/sidebar/")
         or path.startswith("/api/identity/")
+        or path.startswith("/api/admin/identity/")
+        or path.startswith("/api/admin/customers/")
         or path.startswith("/api/admin/customers/profile")
     ):
         return "customer-identity-sidebar"
+    if path.startswith("/api/admin/webhooks"):
+        return "auth-callback"
+    if path.startswith("/api/admin/exports"):
+        return "system-mcp"
     if path.startswith("/api/admin/channels") or path.startswith("/api/admin/channel-welcome-materials"):
         return "channels"
     if path.startswith("/api/admin/questionnaires") or path.startswith("/api/h5/questionnaires") or path.startswith("/api/h5/wechat/oauth"):
@@ -220,6 +232,9 @@ def _group_id_for(path: str) -> str:
     if (
         path.startswith("/api/admin/wechat-pay")
         or path.startswith("/api/admin/alipay")
+        or path.startswith("/api/admin/orders")
+        or path.startswith("/api/admin/payments")
+        or path.startswith("/api/admin/refunds")
         or path.startswith("/api/products")
         or path.startswith("/p/")
         or path.startswith("/pay/")
@@ -227,8 +242,6 @@ def _group_id_for(path: str) -> str:
         or path.startswith("/api/orders/")
         or path.startswith("/api/wechat-pay/")
         or path.startswith("/api/alipay/")
-        or path.startswith("/api/external/orders")
-        or path.startswith("/api/external/users/resolve")
     ):
         return "commerce"
     if (
@@ -371,16 +384,6 @@ def _response_example(path: str) -> str:
         return "HTTP 200 text/html 商品页"
     if path in {"/login", "/logout"} or path.startswith("/auth/wecom/"):
         return "HTTP 302 → 目标页面"
-    if path.startswith("/api/external/orders") or path.startswith("/api/external/users/resolve"):
-        return json.dumps(
-            {
-                "ok": True,
-                "route_owner": "ai_crm_next",
-                "source_status": "external_orders",
-                "fallback_used": False,
-            },
-            ensure_ascii=False,
-        )
     return json.dumps({"ok": True, "route_owner": "ai_crm_next"}, ensure_ascii=False)
 
 
@@ -439,8 +442,8 @@ def _auth_for(method: str, path: str, route: APIRoute) -> str:
         return "session"
     if path == "/mcp":
         return "bearer"
-    if path.startswith("/api/external/orders") or path.startswith("/api/external/users/resolve"):
-        return "bearer"
+    if path.startswith("/api/admin/webhooks"):
+        return "session"
     if (
         path.startswith("/api/h5/questionnaires")
         or path.startswith("/api/h5/wechat/oauth")
@@ -463,13 +466,7 @@ def _endpoint_from_route(route: APIRoute, method: str, path: str) -> dict[str, A
     summary = _summary_for(method, path, route)
     description = (route.description or "").strip()
     if not description:
-        if path.startswith("/api/external/orders") or path.startswith("/api/external/users/resolve"):
-            description = (
-                f"{group.title}接口：{summary}。只读读取本地订单、客户和身份 read-model，"
-                "不创建订单、不发起支付或退款、不主动同步外部平台。"
-            )
-        else:
-            description = f"{group.title}接口：{summary}。数据来自当前 AI-CRM Next FastAPI 路由注册表。"
+        description = f"{group.title}接口：{summary}。数据来自当前 AI-CRM Next FastAPI 路由注册表。"
     return {
         "id": f"{method.lower()}-{_slug(path)}",
         "method": method,
@@ -624,7 +621,7 @@ def build_api_docs_view_model(*, frontend_router: APIRouter | None = None) -> di
         "markdown_data": markdown_data,
         "endpoint_count": len(quick_reference),
         "markdown_size_label": _size_label(markdown_data["full"]),
-        "source_status": "fastapi_route_registry",
+        "source_status": "fastapi_route_map",
     }
 
 

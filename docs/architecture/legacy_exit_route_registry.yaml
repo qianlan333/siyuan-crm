@@ -2623,7 +2623,7 @@ routes:
     replacement_status: locked
     checker: tests/test_class_user_management_export.py
     rollback_owner: aicrm_next.class_user_management
-    notes: PR-1 core baseline sync registers aicrm_next.class_user_management before post_legacy_deferred; local CSV export only, external_storage_executed=false, no production_compat fallback.
+    notes: PR-11 keeps this export on aicrm_next.class_user_management while removing post_legacy_deferred from the runtime router; local CSV export only, external_storage_executed=false, no production_compat fallback.
   - route_id: automation_runtime_v2_api_family
     path_pattern: /api/automation-runtime/v2/*
     methods: [POST, OPTIONS]
@@ -2669,7 +2669,7 @@ routes:
   - route_id: post_legacy_wecom_customer_acquisition_links_read_write
     path_pattern: /api/admin/wecom-customer-acquisition-links
     methods: [GET, POST, OPTIONS]
-    capability_owner: aicrm_next.post_legacy_deferred
+    capability_owner: aicrm_next.automation_engine.channels_api
     runtime_owner: next_command
     legacy_fallback_allowed: false
     legacy_source: ""
@@ -2678,12 +2678,12 @@ routes:
     delete_status: deletion_locked
     replacement_status: locked
     checker: tests/test_post_legacy_deferred_api_routes.py
-    rollback_owner: aicrm_next.post_legacy_deferred
-    notes: Post-Legacy deferred closeout; safe-mode local WeCom customer acquisition link read/create, wecom_api_called=false.
+    rollback_owner: aicrm_next.automation_engine.channels_api
+    notes: PR-11 moves this safe-mode local WeCom customer acquisition link read/create contract from post_legacy_deferred into automation_engine.channels_api; wecom_api_called=false.
   - route_id: post_legacy_wecom_customer_acquisition_links_detail
     path_pattern: /api/admin/wecom-customer-acquisition-links/{link_id}
     methods: [GET, PATCH, DELETE, OPTIONS]
-    capability_owner: aicrm_next.post_legacy_deferred
+    capability_owner: aicrm_next.automation_engine.channels_api
     runtime_owner: next_command
     legacy_fallback_allowed: false
     legacy_source: ""
@@ -2692,12 +2692,12 @@ routes:
     delete_status: deletion_locked
     replacement_status: locked
     checker: tests/test_post_legacy_deferred_api_routes.py
-    rollback_owner: aicrm_next.post_legacy_deferred
-    notes: Post-Legacy deferred closeout; safe-mode local detail/update/disable, no real WeCom API.
+    rollback_owner: aicrm_next.automation_engine.channels_api
+    notes: PR-11 moves this safe-mode local detail/update/disable contract from post_legacy_deferred into automation_engine.channels_api; no real WeCom API.
   - route_id: post_legacy_wecom_customer_acquisition_links_actions
     path_pattern: /api/admin/wecom-customer-acquisition-links/{link_id}/{action}
     methods: [POST, OPTIONS]
-    capability_owner: aicrm_next.post_legacy_deferred
+    capability_owner: aicrm_next.automation_engine.channels_api
     runtime_owner: next_command
     legacy_fallback_allowed: false
     legacy_source: ""
@@ -2706,8 +2706,8 @@ routes:
     delete_status: deletion_locked
     replacement_status: locked
     checker: tests/test_post_legacy_deferred_api_routes.py
-    rollback_owner: aicrm_next.post_legacy_deferred
-    notes: Post-Legacy deferred closeout for enable/disable/sync and controlled 410 for unknown actions; wecom_api_called=false.
+    rollback_owner: aicrm_next.automation_engine.channels_api
+    notes: PR-11 moves enable/disable/sync safe-mode actions from post_legacy_deferred into automation_engine.channels_api; unknown actions remain controlled 410 and wecom_api_called=false.
 lifecycle_items:
   - legacy_item_id: sample_customer_sidebar_readonly
     capability_owner: aicrm_next.customer_read_model

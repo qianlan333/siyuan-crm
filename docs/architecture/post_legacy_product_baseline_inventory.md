@@ -84,12 +84,12 @@ These routes were auto-discovered from the FastAPI app after #1040/#1042. They a
 | WeCom tag live mutation | POST | `/api/admin/wecom/tags/live/mark` | `aicrm_next.customer_tags` | 200/400 controlled | real-blocked by default |
 | Media libraries | GET | `/api/admin/image-library`, `/api/admin/attachment-library`, `/api/admin/miniprogram-library` | `aicrm_next.media_library` | 200 | local/fake storage by default |
 | Cloud campaigns | GET/POST | `/api/admin/cloud-orchestrator/campaigns`, `/api/admin/cloud-orchestrator/campaigns/run-due/preview`, `/api/admin/cloud-orchestrator/campaigns/run-due` | `aicrm_next.cloud_orchestrator` | 200 | preview/planned side effects only by default |
-| Cloud observability | GET | `/api/admin/cloud-orchestrator/audit`, `/api/admin/cloud-orchestrator/observability` | `aicrm_next.post_legacy_deferred` | 200 | local read-only contract; no external observability service |
+| Cloud observability | GET | `/api/admin/cloud-orchestrator/audit`, `/api/admin/cloud-orchestrator/observability` | `aicrm_next.cloud_orchestrator.api` | 200 | local read-only contract; no external observability service |
 | Automation timer/member actions | POST | `/api/admin/automation-conversion/jobs/run-due/preview`, `/api/admin/automation-conversion/member/put-in-pool` | `aicrm_next.automation_engine` | 200 | planned/blocked side effects by default |
 | Customer activation webhook | POST | `/api/customers/automation/activation-webhook` | `aicrm_next.automation_engine` | 200/400 controlled | real external call blocked by default |
 | HXC dashboard | GET/POST | `/api/admin/hxc-dashboard`, `/api/admin/hxc-dashboard/refresh` | `aicrm_next.hxc_dashboard` | 200 | blocked side-effect plan by default |
-| Class-user export | GET/POST | `/api/admin/class-user-management/export` | `aicrm_next.post_legacy_deferred` | 200 | local CSV export; no external storage |
-| WeCom customer acquisition links | GET/POST/PATCH/DELETE | `/api/admin/wecom-customer-acquisition-links`, `/api/admin/wecom-customer-acquisition-links/{link_id}`, `/api/admin/wecom-customer-acquisition-links/{link_id}/{action}` | `aicrm_next.post_legacy_deferred` | 200/404/410 controlled | safe-mode local fixture; real WeCom blocked |
+| Class-user export | GET/POST | `/api/admin/class-user-management/export` | `aicrm_next.class_user_management.api` | 200 | local CSV export; no external storage |
+| WeCom customer acquisition links | GET/POST/PATCH/DELETE | `/api/admin/wecom-customer-acquisition-links`, `/api/admin/wecom-customer-acquisition-links/{link_id}`, `/api/admin/wecom-customer-acquisition-links/{link_id}/{action}` | `aicrm_next.automation_engine.channels_api` | 200/404/410 controlled | safe-mode local fixture; real WeCom blocked |
 | Checkout | POST | `/api/checkout/wechat` | `aicrm_next.commerce` | 200 | fake checkout/no real payment by default |
 | Order read | GET | `/api/orders/smoke` | `aicrm_next.commerce` | 404 controlled | none |
 | Provider notify | POST | `/api/wechat-pay/notify` | `aicrm_next.commerce` | 200/400/422 controlled | no legacy forward |

@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = ROOT / "migrations" / "versions"
 NUMERIC_BIND_PATTERN = re.compile(r"(?<![:\\]):(?:30|3|1)(?![0-9])")
 ALEMBIC_VERSION_NUM_LENGTH = 128
+EXPECTED_HEAD_REVISION = "0037_channel_multi_staff_assignment"
 PLACEHOLDER_REVISIONS = (
     "0032_miniprogram_only_resend_20260611",
     "0033_complete_miniprogram_only_resend_20260611",
@@ -92,7 +93,7 @@ def test_all_revisions_are_unique_and_down_revisions_exist() -> None:
 def test_alembic_graph_has_single_head() -> None:
     revisions = _migration_revisions()
 
-    assert _heads(revisions) == ["0036_wechat_shop_sync_runs"]
+    assert _heads(revisions) == [EXPECTED_HEAD_REVISION]
 
 
 def test_low_revision_closeout_bridge_and_canonical_ids() -> None:
@@ -125,6 +126,7 @@ def test_pr3_schema_revision_chain() -> None:
     assert revisions["0034_reset_miniprogram_only_material_jobs_20260611"]["down_revision"] == "0033_complete_miniprogram_only_resend_20260611"
     assert revisions["0035_wechat_shop_refunds"]["down_revision"] == "0034_reset_miniprogram_only_material_jobs_20260611"
     assert revisions["0036_wechat_shop_sync_runs"]["down_revision"] == "0035_wechat_shop_refunds"
+    assert revisions["0037_channel_multi_staff_assignment"]["down_revision"] == "0036_wechat_shop_sync_runs"
 
     if "0036_channel_multi_staff_assignment" in revisions:
         assert revisions["0036_channel_multi_staff_assignment"]["down_revision"] == "0035_wechat_shop_refunds"
@@ -202,4 +204,4 @@ def test_alembic_commands_can_walk_revision_graph() -> None:
         assert "KeyError" not in result.stderr
         if args == ("heads",):
             heads = [line for line in result.stdout.splitlines() if "(head)" in line]
-            assert heads == ["0036_wechat_shop_sync_runs (head)"]
+            assert heads == [f"{EXPECTED_HEAD_REVISION} (head)"]

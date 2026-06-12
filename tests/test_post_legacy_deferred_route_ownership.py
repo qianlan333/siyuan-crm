@@ -12,12 +12,12 @@ REGISTRY = ROOT / "docs/architecture/legacy_exit_route_registry.yaml"
 MANIFEST = ROOT / "docs/route_ownership/production_route_ownership_manifest.yaml"
 
 EXPECTED = {
-    "/api/admin/class-user-management/export": ("next_export", ("GET", "POST", "OPTIONS")),
-    "/api/admin/cloud-orchestrator/audit": ("next_cloud_observability", ("GET", "OPTIONS")),
-    "/api/admin/cloud-orchestrator/observability": ("next_cloud_observability", ("GET", "OPTIONS")),
-    "/api/admin/wecom-customer-acquisition-links": ("next_wecom_customer_acquisition", ("GET", "POST", "OPTIONS")),
-    "/api/admin/wecom-customer-acquisition-links/{link_id}": ("next_wecom_customer_acquisition", ("GET", "PATCH", "DELETE", "OPTIONS")),
-    "/api/admin/wecom-customer-acquisition-links/{link_id}/{action}": ("next_wecom_customer_acquisition", ("POST", "OPTIONS")),
+    "/api/admin/class-user-management/export": ("next_export", ("GET", "POST", "OPTIONS"), "aicrm_next.class_user_management.api"),
+    "/api/admin/cloud-orchestrator/audit": ("next_cloud_observability", ("GET", "OPTIONS"), "aicrm_next.cloud_orchestrator.api"),
+    "/api/admin/cloud-orchestrator/observability": ("next_cloud_observability", ("GET", "OPTIONS"), "aicrm_next.cloud_orchestrator.api"),
+    "/api/admin/wecom-customer-acquisition-links": ("next_wecom_customer_acquisition", ("GET", "POST", "OPTIONS"), "aicrm_next.automation_engine.channels_api"),
+    "/api/admin/wecom-customer-acquisition-links/{link_id}": ("next_wecom_customer_acquisition", ("GET", "PATCH", "DELETE", "OPTIONS"), "aicrm_next.automation_engine.channels_api"),
+    "/api/admin/wecom-customer-acquisition-links/{link_id}/{action}": ("next_wecom_customer_acquisition", ("POST", "OPTIONS"), "aicrm_next.automation_engine.channels_api"),
 }
 
 
@@ -35,7 +35,7 @@ def test_deferred_closeout_routes_are_registered_in_manifest_and_registry() -> N
     manifest = _manifest_records()
     registry = _registry_records()
 
-    for route, (behavior, methods) in EXPECTED.items():
+    for route, (behavior, methods, _module) in EXPECTED.items():
         assert route in manifest
         assert route in registry
         manifest_record = manifest[route]
@@ -54,20 +54,20 @@ def test_deferred_closeout_routes_resolve_outside_production_compat(monkeypatch)
     baseline_env(monkeypatch)
     app = create_app()
     samples = (
-        ("GET", "/api/admin/class-user-management/export"),
-        ("GET", "/api/admin/cloud-orchestrator/audit"),
-        ("GET", "/api/admin/cloud-orchestrator/observability"),
-        ("GET", "/api/admin/wecom-customer-acquisition-links"),
-        ("POST", "/api/admin/wecom-customer-acquisition-links"),
-        ("GET", "/api/admin/wecom-customer-acquisition-links/1"),
-        ("PATCH", "/api/admin/wecom-customer-acquisition-links/1"),
-        ("DELETE", "/api/admin/wecom-customer-acquisition-links/1"),
-        ("POST", "/api/admin/wecom-customer-acquisition-links/1/sync"),
+        ("GET", "/api/admin/class-user-management/export", "aicrm_next.class_user_management.api"),
+        ("GET", "/api/admin/cloud-orchestrator/audit", "aicrm_next.cloud_orchestrator.api"),
+        ("GET", "/api/admin/cloud-orchestrator/observability", "aicrm_next.cloud_orchestrator.api"),
+        ("GET", "/api/admin/wecom-customer-acquisition-links", "aicrm_next.automation_engine.channels_api"),
+        ("POST", "/api/admin/wecom-customer-acquisition-links", "aicrm_next.automation_engine.channels_api"),
+        ("GET", "/api/admin/wecom-customer-acquisition-links/1", "aicrm_next.automation_engine.channels_api"),
+        ("PATCH", "/api/admin/wecom-customer-acquisition-links/1", "aicrm_next.automation_engine.channels_api"),
+        ("DELETE", "/api/admin/wecom-customer-acquisition-links/1", "aicrm_next.automation_engine.channels_api"),
+        ("POST", "/api/admin/wecom-customer-acquisition-links/1/sync", "aicrm_next.automation_engine.channels_api"),
     )
 
-    for method, path in samples:
+    for method, path, expected_module in samples:
         route = first_matching_route(app, method, path)
         assert route is not None
         endpoint_module = getattr(getattr(route, "endpoint", None), "__module__", "")
         assert endpoint_module != "aicrm_next.production_compat.api"
-        assert "aicrm_next.post_legacy_deferred" in endpoint_module
+        assert endpoint_module == expected_module

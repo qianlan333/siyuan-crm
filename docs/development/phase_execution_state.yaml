@@ -12,10 +12,42 @@ autopilot:
 current_phase: post_phase7_cleanup_closeout
 last_merged_pr: "#878"
 last_merged_cleanup_wave: sidebar_customer_readonly_track3b
-recommended_next_pr: product_development_or_targeted_runtime_migration
+recommended_next_pr: pr12_sidebar_identity_customer_parity
 owner_approval_required: false
 runtime_behavior_changed: false
 delete_ready: false
+
+pr11_core_runtime_parity:
+  status: complete_with_overlays
+  branch: codex/siyuan-pr11-core-runtime-parity
+  ai_crm_baseline_sha: 6feb8c9daa7170ef4b260cb1610f15ef6510e1e6
+  siyuan_baseline_sha: 511bfc25715436548c019c5bd0e894e5d640b997
+  runtime_router_changes:
+    - frontend_compat_router_unmounted_from_main
+    - post_legacy_deferred_router_unmounted_from_main
+    - admin_api_docs_moved_to_admin_config
+    - runtime_config_moved_to_admin_config
+    - cloud_observability_moved_to_cloud_orchestrator
+    - wecom_customer_acquisition_links_moved_to_channels_api
+  synced_runtime_packages:
+    - aicrm_next/background_jobs
+    - aicrm_next/external_push
+  retained_siyuan_overlays:
+    - app_py_init_next_schema_safe
+    - app_py_sync_customer_read_model
+    - app_py_init_db_alias
+    - scripts/siyuan_migration
+    - route_registry_guard_tooling
+    - check_no_new_legacy_guard
+  deferred:
+    - physical_post_legacy_guard_source_retirement
+    - physical_frontend_compat_template_adapter_retirement
+    - sidebar_identity_customer_parity_pr12
+    - channel_multi_staff_qr_actions_pr13
+    - commerce_admin_external_docs_guard_pr14
+  production_cutover: false
+  production_db_writes: false
+  deploy_systemd_nginx_env_changed: false
 
 legacy_prune_pr9:
   status: complete

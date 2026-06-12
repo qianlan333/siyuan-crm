@@ -5,7 +5,7 @@ from __future__ import annotations
 from alembic import op
 
 
-revision = "0028_owner_migration_excel_sessions"
+revision = "0028_owner_excel_sessions"
 down_revision = "0027_group_ops_admin_userids"
 branch_labels = None
 depends_on = None

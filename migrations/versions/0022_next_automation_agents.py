@@ -5,7 +5,7 @@ from __future__ import annotations
 from alembic import op
 
 revision = "0022_next_automation_agents"
-down_revision = "0021_broadcast_queue_platform_hardening"
+down_revision = "0021"
 branch_labels = None
 depends_on = None
 

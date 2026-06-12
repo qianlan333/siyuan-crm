@@ -4,10 +4,14 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
+from sqlalchemy.engine import Connection
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+
+ALEMBIC_VERSION_NUM_LENGTH = 128
 
 
 def _get_database_url() -> str:
@@ -44,9 +48,33 @@ def run_migrations_online() -> None:
     connectable = create_engine(url)
 
     with connectable.connect() as connection:
+        _ensure_wide_alembic_version_table(connection)
         context.configure(connection=connection, target_metadata=None)
         with context.begin_transaction():
             context.run_migrations()
+
+
+def _ensure_wide_alembic_version_table(connection: Connection) -> None:
+    """Keep Alembic's version table wide enough for deployed revision IDs."""
+
+    if connection.dialect.name != "postgresql":
+        return
+
+    with connection.begin():
+        connection.exec_driver_sql(
+            f"""
+            CREATE TABLE IF NOT EXISTS alembic_version (
+                version_num VARCHAR({ALEMBIC_VERSION_NUM_LENGTH}) NOT NULL,
+                CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
+            )
+            """
+        )
+        connection.exec_driver_sql(
+            f"""
+            ALTER TABLE alembic_version
+            ALTER COLUMN version_num TYPE VARCHAR({ALEMBIC_VERSION_NUM_LENGTH})
+            """
+        )
 
 
 if context.is_offline_mode():

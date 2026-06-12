@@ -16,26 +16,10 @@ concurrency:
 
 jobs:
   pr-smoke:
-    # PR 阶段只跑 broadcast queue 相关 smoke，
+    # PR 阶段只跑 broadcast queue 纯业务 smoke，
     # 全量 PG 回归留给 nightly 和手动触发。
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,36 +36,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run PR smoke tests (PG-only, targeted)
+      - name: Run PR smoke tests (business-only, no PG)
         run: |
           python -m pytest \
             tests/test_broadcast_jobs_service.py \
             tests/test_run_broadcast_queue_worker.py \
             tests/test_broadcast_jobs_wecom_private_dispatch.py \
-            -n auto --dist=loadfile -q --tb=short --timeout=120 --timeout-method=thread
-        timeout-minutes: 15
+            -q --tb=short --timeout=120 --timeout-method=thread
+        timeout-minutes: 2
 
   main-smoke:
-    # main push 只跑 broadcast queue 关键路径 smoke，避免每次部署都被全量回归卡 6-8 分钟。
+    # main push 只跑 broadcast queue 关键路径纯业务 smoke，避免每次部署都被全量回归卡住。
     # 全量 ``pytest tests/`` 仍由 nightly / workflow_dispatch 负责。
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://test:test@localhost:5432/test
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -98,14 +66,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run main smoke tests (PG-only, targeted)
+      - name: Run main smoke tests (business-only, no PG)
         run: |
           python -m pytest \
             tests/test_broadcast_jobs_service.py \
             tests/test_run_broadcast_queue_worker.py \
             tests/test_broadcast_jobs_wecom_private_dispatch.py \
-            -n auto --dist=loadfile -q --tb=short --timeout=120 --timeout-method=thread
-        timeout-minutes: 15
+            -q --tb=short --timeout=120 --timeout-method=thread
+        timeout-minutes: 2
 
   full-test:
     # 跑全量 pytest 在真 PG 上。2026-05 砍 SQLite 后所有测试统一用 PG。

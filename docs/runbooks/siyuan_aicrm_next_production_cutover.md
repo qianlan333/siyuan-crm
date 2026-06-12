@@ -13,7 +13,8 @@
 
 切换窗口开始前，必须确认：
 
-- PR #53 已完成并合并，真实 staging rehearsal 已通过 customer projection blocker。
+- PR #77 restored staging rehearsal 已完成并合并，结论为 `PASS_WITH_NOTES`。
+- PR #77 报告中的 restored staging DB 已完成 backup/restore/Alembic/safe init/customer projection/channel backfill/runtime schema/HTTP smoke。
 - 最新 `main` 包含 `sync-customer-read-model`、`init-next-schema-safe` 和相关 validation/smoke 脚本。
 - 有普通 SSH shell，不是只读诊断通道。
 - `/home/ubuntu/.openclaw-wecom-pg.env` 存在，且由授权人员管理。
@@ -26,7 +27,9 @@
 - 企业微信/公众号后台 callback 域名和路径已确认不变，或已准备同步修改方案。
 - 当前生产资产目录已确认，例如 `/home/ubuntu/极简 crm`。
 - 生产 env 已显式设置 `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live`，用于启用 AI-CRM Next 原生企业微信后台登录。
-- `WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`ADMIN_LOGIN_REDIRECT_URI` 均存在，且 `ADMIN_LOGIN_REDIRECT_URI` 与企业微信后台配置的 `/auth/wecom/callback` 回调地址一致。
+- 企业微信 corp/agent/credential key 组与 `ADMIN_LOGIN_REDIRECT_URI` 均存在，且 `ADMIN_LOGIN_REDIRECT_URI` 与企业微信后台配置的 `/auth/wecom/callback` 回调地址一致。
+- external orders 生产启用前，授权人员必须配置 internal automation API token；如果 cutover 时暂不启用 external orders，则必须明确接受 `/api/external/orders` 返回受控 `503 internal_token_not_configured`。
+- customer read model 和 user ops 的生产 repo backend 必须显式设为 SQL backend，或由 operator 在 cutover 前确认默认值安全。
 
 ## 3. 冻结写入入口
 
@@ -94,7 +97,7 @@ scripts/siyuan_migration/01_backup_current_assets.sh
 
 ## 6. 新生产库恢复与初始化命令
 
-以下命令模板用于策略 A。`DATABASE_URL` 应指向目标新生产库，不是旧生产库。应用 URL 可以是 `postgresql+psycopg://...`；PostgreSQL CLI URL 通过 helper 转换，禁止在报告中打印完整 URL。
+以下命令模板用于策略 A。应用的 DB URL 应指向目标新生产库，不是旧生产库。PostgreSQL CLI URL 通过 helper 转换，禁止在报告中打印完整 URL。
 
 ```bash
 cd /home/ubuntu/releases/siyuan-crm-aicrm-next-rehearsal-20260609
@@ -103,7 +106,8 @@ set -a
 source /home/ubuntu/.openclaw-wecom-pg.env
 set +a
 
-export DATABASE_URL='<APP_TARGET_DATABASE_URL_FOR_NEW_PROD_DB>'
+# 由授权 operator 在 shell 中设置应用 DB URL，目标必须是新生产库。
+# 不要在终端记录或报告中打印该值。
 export APP_ENV=production
 export DEPLOY_ENV=production
 export AICRM_NEXT_ENV=production
@@ -113,17 +117,19 @@ export USER_OPS_REPO_BACKEND=sqlalchemy
 export CUSTOMER_READ_MODEL_REPO_BACKEND=sqlalchemy
 
 source scripts/siyuan_migration/lib_db_url.sh
-PG_CLI_TARGET_DATABASE_URL="$(normalize_pg_cli_url "$DATABASE_URL")"
+PG_CLI_TARGET_DB_URL="$(normalize_pg_cli_url "$APP_TARGET_DB_URL")"
 ```
 
 恢复最终 dump 到目标新生产库：
 
 ```bash
-DUMP_FILE=/home/ubuntu/backups/siyuan-aicrm-cutover-final/siyuan-current-YYYYMMDD-HHMMSS.dump \
-STAGING_DATABASE_URL="$DATABASE_URL" \
-CLEAN=true \
+export DUMP_FILE=/home/ubuntu/backups/siyuan-aicrm-cutover-final/siyuan-current-YYYYMMDD-HHMMSS.dump
+export APP_TARGET_DB_URL='<set-by-authorized-operator-without-printing>'
+export CLEAN=true
 scripts/siyuan_migration/02_restore_to_staging_db.sh
 ```
+
+The restore helper uses `pg_restore --no-owner --no-acl` so source-role ACL statements from the dump do not block restore into the target database.
 
 初始化和同步：
 
@@ -134,13 +140,22 @@ python3 app.py init-next-schema-safe
 python3 app.py sync-customer-read-model --dry-run
 python3 app.py sync-customer-read-model
 
-psql "$PG_CLI_TARGET_DATABASE_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
-psql "$PG_CLI_TARGET_DATABASE_URL" -f scripts/siyuan_migration/04_validate_migration.sql
-psql "$PG_CLI_TARGET_DATABASE_URL" -f scripts/siyuan_migration/07_validate_next_blockers.sql
-psql "$PG_CLI_TARGET_DATABASE_URL" -f scripts/siyuan_migration/08_validate_customer_projection.sql
+psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
+psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/04_validate_migration.sql
+psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/07_validate_next_blockers.sql
+psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/08_validate_customer_projection.sql
 ```
 
 `init-db` 当前只是兼容别名，仍建议同时执行 `init-next-schema-safe` 作为明确记录。不要使用 `init-db-legacy`。
+
+`init-next-schema-safe` now includes the runtime v2 and commerce audit safety guard tables validated in PR #77:
+
+- `automation_event_v2`
+- `automation_membership_v2`
+- `automation_stage_entry_v2`
+- `automation_task_plan_v2`
+- `wechat_shop_refunds`
+- `wechat_shop_sync_runs`
 
 企业微信后台登录预检：
 
@@ -166,7 +181,8 @@ curl -i "http://127.0.0.1:5001/auth/wecom/start?mode=qr&next=/admin"
 - systemd `ExecStart` 指向新 release。
 - systemd `WorkingDirectory` 指向新 release。
 - env 文件路径仍为 `/home/ubuntu/.openclaw-wecom-pg.env`，或已人工确认新 env 路径。
-- env 中 `DATABASE_URL` 指向目标新生产库。
+- env 中应用 DB URL 指向目标新生产库。
+- external orders token decision 已明确：配置 token 后启用，或批准 cutover 时 external orders 暂保持受控不可用。
 - `APP_HOST` / `APP_PORT` 保持不变。
 - Nginx upstream 保持不变，或已与 `APP_HOST` / `APP_PORT` 同步调整。
 - 企业微信 callback path 不变。
@@ -217,6 +233,7 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - 企业微信 callback GET 校验。
 - 企业微信 callback POST 日志。
 - 企业微信后台登录 `/auth/wecom/start` 和 `/auth/wecom/callback`。
+- external orders missing-token 或 authorized-token 行为，取决于 cutover 前 token decision。
 - 旧渠道码扫码路径。
 - 订单/问卷/侧边栏基础链路，如果当前生产启用。
 
@@ -254,14 +271,14 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 ### 快速回滚
 
 1. systemd 切回旧 release。
-2. env 切回旧 `DATABASE_URL`。
+2. env 切回旧应用 DB URL。
 3. restart 服务。
 4. 验证 `/health`、`/admin`、企业微信 callback。
 5. 冻结写入直到确认旧链路稳定。
 
 ### 数据回滚
 
-- 如果采用新生产库切换，优先只切回旧 `DATABASE_URL`，通常不需要恢复旧库。
+- 如果采用新生产库切换，优先只切回旧应用 DB URL，通常不需要恢复旧库。
 - 如果已经写过原生产库，使用最终 cutover dump 恢复。
 - 回滚后继续冻结写入，避免新旧库双写差异扩大。
 - 回滚报告必须记录切回时间、旧/新 DB 标识、恢复命令结果和未回补数据窗口。
@@ -278,19 +295,20 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - `python3 app.py sync-customer-read-model` 成功。
 - `customer_detail_snapshot_next > 0`。
 - projection coverage against contacts 为 100%，或有明确解释和业务确认。
-- `scene_alias_coverage=3/3`，或不低于 PR #53 staging rehearsal。
-- `qrcode_asset_coverage=3/3`，或不低于 PR #53 staging rehearsal。
+- `scene_alias_coverage` 不低于 PR #77 restored staging rehearsal。
+- `qrcode_asset_coverage` 不低于 PR #77 restored staging rehearsal。
 - `/api/admin/user-ops/overview` 返回 200。
 - 至少一个真实但报告脱敏的 customer/sidebar 抽样返回 200。
 - 核心 admin 页面无 5xx。
 - callback path 已确认。
 - `AICRM_NEXT_WECOM_ADMIN_AUTH_MODE=live`。
-- `WECOM_CORP_ID`、`WECOM_AGENT_ID`、`WECOM_SECRET`、`ADMIN_LOGIN_REDIRECT_URI` 均存在。
+- 企业微信 corp/agent/credential key 组与 `ADMIN_LOGIN_REDIRECT_URI` 均存在。
 - `ADMIN_LOGIN_REDIRECT_URI` 与企业微信后台回调配置一致。
 - `/auth/wecom/start?mode=qr&next=/admin` live 模式返回 302 企业微信授权地址。
 - `/auth/wecom/callback` 缺少 code 返回 400。
 - `/auth/wecom/callback?code=dummy&state=dummy` 返回 400 invalid state，不再返回 `external_call_blocked`。
 - 至少一次真实企业微信后台登录回调通过，或由切换负责人在窗口内人工确认并记录。
+- external orders 如需立即启用，则 internal automation API token 已配置；否则业务已批准 external orders 暂时以受控 503 不可用。
 - 回滚负责人和旧 release 可用。
 
 ### No-Go

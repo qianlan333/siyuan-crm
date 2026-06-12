@@ -7,6 +7,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = ROOT / "migrations" / "versions"
@@ -124,6 +127,42 @@ def test_user_ops_production_tables_migration_is_parent_of_wechat_unionid_index(
 
     assert revisions["0029_user_ops_prod_tables"]["down_revision"] == "0028_owner_excel_sessions"
     assert revisions["0030_wechat_pay_unionid_idx"]["down_revision"] == "0029_user_ops_prod_tables"
+
+
+def test_siyuan_production_channel_assignment_revision_is_locatable() -> None:
+    revisions = _migration_revisions()
+    revision_id = "0037_channel_multi_staff_assignment"
+    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+
+    assert revision_id in revisions
+    assert revisions[revision_id]["path"].name == "0037_channel_multi_staff_assignment.py"
+    assert revisions[revision_id]["down_revision"] == "0036_wechat_shop_sync_runs"
+    assert script.get_revision(revision_id).revision == revision_id
+
+
+def test_siyuan_production_channel_assignment_revision_can_upgrade_to_head() -> None:
+    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+    upgrade_steps = script._upgrade_revs("heads", "0037_channel_multi_staff_assignment")
+    upgrade_revision_ids = {step.revision.revision for step in upgrade_steps}
+
+    assert "0038_merge_duplicate_channel_wechat_shop_heads" in upgrade_revision_ids
+    assert "0037_channel_multi_staff_assignment" in _parents(
+        _migration_revisions()["0038_merge_duplicate_channel_wechat_shop_heads"]["down_revision"]
+    )
+
+
+def test_siyuan_channel_assignment_migration_is_idempotent_overlay() -> None:
+    source = (VERSIONS / "0037_channel_multi_staff_assignment.py").read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS assignment_mode" in source
+    assert "ADD COLUMN IF NOT EXISTS assignment_strategy" in source
+    assert "ADD COLUMN IF NOT EXISTS overflow_policy" in source
+    assert "ADD COLUMN IF NOT EXISTS assignment_config_json" in source
+    assert "CREATE TABLE IF NOT EXISTS automation_channel_assignee" in source
+    assert "CREATE TABLE IF NOT EXISTS automation_channel_assignment_event" in source
+    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignee_active" in source
+    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignment_24h" in source
+    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignment_external" in source
 
 
 def test_siyuan_placeholders_do_not_import_ai_crm_production_data() -> None:

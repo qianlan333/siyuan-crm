@@ -94,6 +94,7 @@ python3 app.py health
 # AI-CRM Next safe schema init（幂等；不 DROP/TRUNCATE）:
 python3 app.py init-next-schema-safe
 python3 -m alembic upgrade head
+python3 scripts/ensure_channel_multi_staff_schema.py
 sudo systemctl restart openclaw-wecom-postgres.service
 curl -sS http://127.0.0.1:5001/health
 curl -sS http://127.0.0.1:5001/api/admin/channels?limit=1

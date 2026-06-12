@@ -40,6 +40,8 @@ jobs:
             python3 app.py init-next-schema-safe
             # 2) Alembic migration（真实执行 DDL；不要 stamp 跳过 schema 变更）
             python3 -m alembic upgrade head
+            # 3) 修复历史 stamp head 导致版本已到 head 但渠道多客服 DDL 未落库的环境
+            python3 scripts/ensure_channel_multi_staff_schema.py
             sudo systemctl restart openclaw-wecom-postgres.service
             for _ in $(seq 1 20); do
               if curl -sSf http://127.0.0.1:5001/health; then

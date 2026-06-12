@@ -168,7 +168,7 @@ class PostgresIdentityBridgeRepository:
                 name, type, avatar, gender, status, raw_profile,
                 first_seen_at, last_seen_at, created_at, updated_at
             ) VALUES (
-                ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''),
+                ?, ?, NULLIF(?, ''), COALESCE(NULLIF(?, ''), ''), NULLIF(?, ''),
                 NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?::jsonb,
                 NOW(), NOW(), NOW(), NOW()
             )
@@ -389,7 +389,7 @@ class PostgresIdentityBridgeRepository:
                 SELECT
                     CASE
                         WHEN LENGTH(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')) = 13
-                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%'
+                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%%'
                         THEN SUBSTRING(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') FROM 3)
                         ELSE regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')
                     END AS mobile,
@@ -408,7 +408,7 @@ class PostgresIdentityBridgeRepository:
                 SELECT
                     CASE
                         WHEN LENGTH(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')) = 13
-                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%'
+                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%%'
                         THEN SUBSTRING(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') FROM 3)
                         ELSE regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')
                     END AS mobile,
@@ -641,7 +641,7 @@ class PostgresIdentityBridgeRepository:
                   AND (
                     CASE
                         WHEN LENGTH(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')) = 13
-                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%'
+                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%%'
                         THEN SUBSTRING(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') FROM 3)
                         ELSE regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')
                     END = ?

@@ -30,6 +30,7 @@ def test_route_matrix_declares_future_next_owners_and_guarded_writes():
             "production_compat legacy_forward",
             "exact compatibility facade",
             "next exact readonly",
+            "next command",
             "missing Next exact owner",
             "blocked",
         }

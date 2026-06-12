@@ -1,4 +1,8 @@
-"""cloud plan recipient approval materialization"""
+"""cloud plan recipient approval materialization.
+
+Revision ID: 0024_cloud_plan_approval
+Revises: 0023_product_external_push, 0023_group_ops_webhook_rules
+"""
 
 from __future__ import annotations
 

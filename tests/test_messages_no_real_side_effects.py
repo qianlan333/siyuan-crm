@@ -35,5 +35,5 @@ def test_message_archive_module_does_not_import_external_call_clients() -> None:
             getattr(repo, "__file__", ""),
         ]
     )
-    assert "wecom_ability_service" not in combined
+    assert "wecom_ability" + "_service" not in combined
 

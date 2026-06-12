@@ -623,6 +623,69 @@ class QuestionnaireSubmitSideEffectGateway:
             )
         return self._push_adapter.push_submission_event(questionnaire_id=questionnaire_id, submission_id=submission_id, webhook_url=webhook_url, payload_summary=payload_summary)
 
+    def bind_mobile(self, *, submission: dict[str, Any], questionnaire: dict[str, Any]) -> Json:
+        external_userid = str(submission.get("external_userid") or "").strip()
+        mobile = str(submission.get("mobile") or "").strip()
+        if not external_userid or not mobile:
+            return self.record_side_effect_audit(
+                operation="bind_mobile",
+                target={
+                    "questionnaire_id": questionnaire.get("id"),
+                    "submission_id": submission.get("submission_id"),
+                    "external_userid": external_userid,
+                    "mobile_present": bool(mobile),
+                },
+                result={"skipped": True, "reason": "missing_external_userid_or_mobile"},
+            )
+        from aicrm_next.identity_contact.application import BindMobileToExternalContactCommand
+        from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest
+
+        target = {
+            "questionnaire_id": questionnaire.get("id"),
+            "submission_id": submission.get("submission_id"),
+            "external_userid": external_userid,
+            "mobile_present": True,
+        }
+        try:
+            result = BindMobileToExternalContactCommand()(
+                BindMobileToExternalContactRequest(
+                    external_userid=external_userid,
+                    mobile=mobile,
+                    owner_userid=str(submission.get("owner_userid") or submission.get("follow_user_userid") or "").strip(),
+                    bind_by_userid="questionnaire_submit",
+                    customer_name=str(submission.get("customer_name") or "问卷提交用户").strip(),
+                    force_rebind=True,
+                )
+            )
+        except Exception as exc:
+            return self.record_side_effect_audit(
+                operation="bind_mobile",
+                target=target,
+                result={"skipped": False, "reason": "bind_failed", "error": str(exc)},
+                error_code="mobile_bind_failed",
+            )
+        idempotency_key = make_idempotency_key(operation="bind_mobile", payload={"target": target, "result": result})
+        audit = record_audit_event(
+            adapter=self.adapter_name,
+            operation="bind_mobile",
+            mode="fake",
+            idempotency_key=idempotency_key,
+            side_effect_executed=bool(result.get("side_effect_executed")),
+            status="ok",
+        )
+        payload = _base_result(
+            ok=True,
+            adapter=self.adapter_name,
+            mode="fake",
+            operation="bind_mobile",
+            idempotency_key=idempotency_key,
+            target=target,
+            result=result,
+            audit_id=audit["audit_id"],
+        )
+        payload["side_effect_executed"] = bool(result.get("side_effect_executed"))
+        return payload
+
     def emit_automation_questionnaire_result(self, *, questionnaire: dict[str, Any], submission: dict[str, Any], final_tags: list[str]) -> Json:
         from aicrm_next.automation_engine.application import ApplyQuestionnaireResultCommand
         from aicrm_next.automation_engine.dto import ApplyQuestionnaireResultRequest
@@ -687,6 +750,7 @@ class QuestionnaireSubmitSideEffectGateway:
             "real_oauth_executed": False,
             "real_wecom_tag_executed": False,
             "real_external_webhook_executed": False,
+            "real_mobile_binding_executed": False,
             "side_effect_executed": False,
         }
 

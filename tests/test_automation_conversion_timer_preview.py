@@ -9,13 +9,14 @@ from aicrm_next.main import create_app
 def test_jobs_preview_lists_candidates_without_plan(monkeypatch):
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_timer_fixture_state()
     client = TestClient(create_app(), raise_server_exceptions=False)
 
     response = client.post(
         "/api/admin/automation-conversion/jobs/run-due/preview",
         json={"job_codes": "job_a,job_b", "batch_size": 2},
-        headers={"Idempotency-Key": "timer-jobs-preview"},
+        headers={"Idempotency-Key": "timer-jobs-preview", "Authorization": "Bearer timer-token"},
     )
 
     assert response.status_code == 200

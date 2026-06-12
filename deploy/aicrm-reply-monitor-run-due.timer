@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AI-CRM Reply Monitor due planner every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=aicrm-reply-monitor-run-due.service
+
+[Install]
+WantedBy=timers.target

@@ -105,17 +105,35 @@ def test_questionnaire_admin_write_routes_execute_next_commandbus(client: TestCl
     _assert_command(enable.json(), "questionnaire.admin.enable", "enabled")
     assert enable.json()["questionnaire"]["is_disabled"] is False
 
+    active_delete = client.delete(
+        f"/api/admin/questionnaires/{questionnaire_id}",
+        headers={"Idempotency-Key": "qw-active-delete"},
+    )
+    assert active_delete.status_code == 400
+    assert active_delete.json()["source_status"] == "input_error"
+    assert active_delete.json()["fallback_used"] is False
+
+    disable_again = client.post(
+        f"/api/admin/questionnaires/{questionnaire_id}/disable",
+        json={},
+        headers={"Idempotency-Key": "qw-disable-before-delete"},
+    )
+    assert disable_again.status_code == 200
+    _assert_command(disable_again.json(), "questionnaire.admin.disable", "disabled")
+
     delete = client.delete(
         f"/api/admin/questionnaires/{questionnaire_id}",
         headers={"Idempotency-Key": "qw-delete"},
     )
     assert delete.status_code == 200
-    _assert_command(delete.json(), "questionnaire.admin.delete", "soft_deleted")
-    assert delete.json()["delete_mode"] == "soft_delete_disable"
+    _assert_command(delete.json(), "questionnaire.admin.delete", "deleted")
+    assert delete.json()["delete_mode"] == "hard_delete"
+    refreshed = client.get(f"/api/admin/questionnaires/{questionnaire_id}")
+    assert refreshed.status_code == 404
 
     audit_events = get_questionnaire_admin_write_audit_events()
     command_ids = {event["command_id"] for event in audit_events}
-    for response in [create, update, duplicate, publish, disable, enable, delete]:
+    for response in [create, update, duplicate, publish, disable, enable, disable_again, delete]:
         assert response.json()["command_id"] in command_ids
 
 
@@ -147,7 +165,6 @@ def test_questionnaire_admin_write_production_uses_next_commandbus(
         client.put(f"/api/admin/questionnaires/{questionnaire_id}", json=_payload("生产更新")),
         client.post(f"/api/admin/questionnaires/{questionnaire_id}/publish", json={}),
         client.post(f"/api/admin/questionnaires/{questionnaire_id}/disable", json={}),
-        client.post(f"/api/admin/questionnaires/{questionnaire_id}/enable", json={}),
         client.delete(f"/api/admin/questionnaires/{questionnaire_id}"),
     ]
     for response in responses:
@@ -231,8 +248,7 @@ def test_questionnaire_admin_lifecycle_production_mode_acceptance(
 
     delete = client.delete(f"/api/admin/questionnaires/{questionnaire_id}")
     assert delete.status_code == 200
-    assert delete.json()["delete_mode"] == "soft_delete_disable"
+    assert delete.json()["delete_mode"] == "hard_delete"
     list_response = client.get("/api/admin/questionnaires")
     assert list_response.status_code == 200
-    list_item = next(item for item in list_response.json()["questionnaires"] if item["id"] == questionnaire_id)
-    assert list_item["is_disabled"] is True
+    assert all(item["id"] != questionnaire_id for item in list_response.json()["questionnaires"])

@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy.exc import SQLAlchemyError
-
 from aicrm_next.integration_gateway.user_ops_adapters import (
     UserOpsBatchSendGateway,
     UserOpsDeferredJobGateway,
@@ -62,7 +60,8 @@ def reset_user_ops_fixture_state() -> None:
 
 
 def _user_ops_repo_cache_enabled() -> bool:
-    return resolve_user_ops_repo_backend(get_settings()) not in {"sql", "sqlalchemy", "postgres", "postgresql"}
+    backend = resolve_user_ops_repo_backend(get_settings())
+    return backend not in {"sql", "sqlalchemy", "postgres", "postgresql"}
 
 
 def _default_repo() -> UserOpsRepository:
@@ -94,26 +93,6 @@ def _readonly_meta() -> JsonDict:
         "fallback_used": False,
         "runtime_owner": "next_native",
         "real_external_call_executed": False,
-    }
-
-
-def _is_schema_missing_error(exc: Exception) -> bool:
-    if not isinstance(exc, SQLAlchemyError):
-        return False
-    message = str(exc).lower()
-    return any(marker in message for marker in ("undefinedtable", "does not exist", "no such table")) and "user_ops_" in message
-
-
-def _user_ops_schema_missing_payload(exc: Exception) -> JsonDict:
-    return {
-        "ok": False,
-        **_readonly_meta(),
-        "degraded": True,
-        "source_status": "schema_missing",
-        "read_model_status": "schema_missing",
-        "error_code": "user_ops_schema_missing",
-        "page_error": "User Ops SQL tables are missing. Run python3 app.py init-next-schema-safe, then retry the rehearsal smoke test.",
-        "status_code": 503,
     }
 
 
@@ -304,10 +283,6 @@ class GetUserOpsOverviewQuery:
                 "generated_at": _now_iso(),
                 "class_term_options": sorted({row["class_term_no"] for row in base_rows if row.get("class_term_no")}),
             }
-        except Exception as exc:
-            if _is_schema_missing_error(exc):
-                return _user_ops_schema_missing_payload(exc)
-            raise
         finally:
             if _should_close_repo(self._repo):
                 _close_repository(repo)

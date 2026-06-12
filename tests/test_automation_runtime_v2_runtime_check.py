@@ -1,20 +1,8 @@
 from __future__ import annotations
 
-import os
-
-import pytest
-
 from aicrm_next.automation_runtime_v2.runtime_check import check_task_runtime
 
-from tests.automation_runtime_v2_test_helpers import ensure_runtime_v2_base_tables, seed_agent, seed_program, seed_task
-
-
-@pytest.fixture
-def next_pg_schema():
-    if not os.environ.get("DATABASE_URL", "").strip():
-        pytest.skip("DATABASE_URL is required for automation_runtime_v2 PG schema tests")
-    ensure_runtime_v2_base_tables()
-    return True
+from tests.automation_runtime_v2_test_helpers import seed_agent, seed_program, seed_task
 
 
 def test_runtime_check_reports_blocked_reasons_and_ok_paths(next_pg_schema):

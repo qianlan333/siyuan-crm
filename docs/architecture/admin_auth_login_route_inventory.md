@@ -27,11 +27,10 @@ Legacy Exit group 26 replaces `/login` and `/logout` with Next-owned admin auth 
 - No password is printed or echoed.
 - `real_external_call_executed=false` and `wecom_token_exchange_executed=false` are exposed on route headers/diagnostics.
 
-## Legacy Deletion Lock
+## Current Next Ownership
 
-- Removed `production_compat` decorators for `/login` and `/logout`.
-- `scripts/check_no_new_legacy.py` blocks `/login` and `/logout` from returning to `production_compat`.
-- Registry and manifest lock `/login` and `/logout` with `legacy_fallback_allowed=false`, `delete_status=deletion_locked`, and `replacement_status=locked`.
+- `/login` and `/logout` are served by `aicrm_next.admin_auth.api`.
+- Existing admin auth business tests cover page rendering, break-glass login, logout, safe redirect handling, and WeCom SSO blocked defaults.
 
 ## Explicit Non-Goals
 

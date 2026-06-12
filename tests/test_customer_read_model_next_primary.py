@@ -109,6 +109,22 @@ class ClosableNextCustomerReadRepository(FakeNextCustomerReadRepository):
         self.closed = True
 
 
+class EmptyClosableNextCustomerReadRepository(ClosableNextCustomerReadRepository):
+    def list_customers(self, filters=None, *, limit=None, offset=0):
+        self.list_calls += 1
+        self.list_args.append((dict(filters or {}), limit, offset))
+        return []
+
+    def count_customers(self, filters=None):
+        self.count_args.append(dict(filters or {}))
+        return 0
+
+    def get_customer(self, external_userid: str):
+        return None
+
+    get_customer_detail = get_customer
+
+
 class MissingClosableCustomerReadRepository(ClosableNextCustomerReadRepository):
     def get_customer(self, external_userid: str):
         return None
@@ -363,6 +379,49 @@ def test_next_repository_unavailable_uses_live_source_fallback(monkeypatch):
     assert detail["customer"]["external_userid"] == "wx_ext_001"
     assert timeline["timeline"]["items"][0]["event_id"] == "evt-1"
     assert messages["messages"][0]["msgid"] == "msg-1"
+
+
+def test_empty_primary_customer_list_uses_live_source_fallback_when_source_has_rows(monkeypatch):
+    from aicrm_next.customer_read_model.application import ListCustomersQuery
+
+    _production_env(monkeypatch)
+    primary_repo = EmptyClosableNextCustomerReadRepository()
+    live_source_repo = ClosableLiveSourceCustomerReadRepository()
+    _patch_next_repo(monkeypatch, primary_repo)
+    _patch_live_source_repo(monkeypatch, live_source_repo)
+
+    payload = ListCustomersQuery()(ListCustomersRequest(limit=10))
+
+    assert payload["ok"] is True
+    assert payload["source_status"] == "live_source_fallback"
+    assert payload["read_model_status"] == "fallback"
+    assert payload["fallback_used"] is True
+    assert payload["customers"][0]["external_userid"] == "wx_ext_001"
+    assert "primary returned 0" in payload["fallback_reason"]
+    assert primary_repo.closed is True
+    assert live_source_repo.closed is True
+    assert "legacy_production_facade" not in str(payload)
+
+
+def test_empty_primary_customer_list_stays_empty_when_live_source_has_no_match(monkeypatch):
+    from aicrm_next.customer_read_model.application import ListCustomersQuery
+
+    _production_env(monkeypatch)
+    primary_repo = EmptyClosableNextCustomerReadRepository()
+    live_source_repo = ClosableLiveSourceCustomerReadRepository()
+    _patch_next_repo(monkeypatch, primary_repo)
+    _patch_live_source_repo(monkeypatch, live_source_repo)
+
+    payload = ListCustomersQuery()(ListCustomersRequest(mobile="19900000000", limit=10))
+
+    assert payload["ok"] is True
+    assert payload["source_status"] == "next_read_model"
+    assert payload["read_model_status"] == "primary"
+    assert payload["fallback_used"] is False
+    assert payload["customers"] == []
+    assert payload["total"] == 0
+    assert primary_repo.closed is True
+    assert live_source_repo.closed is True
 
 
 def test_customer_list_live_source_fallback_uses_limit_offset_and_count(monkeypatch):

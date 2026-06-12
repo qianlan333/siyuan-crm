@@ -8,9 +8,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from aicrm_next.admin_read_model.application import GetAdminConfigPageQuery, page_row_count
 from aicrm_next.admin_jobs.routes import ensure_admin_action_token, validate_admin_action_token
 from aicrm_next.admin_shell import admin_path_for, shell_context
 
+from .api_docs_view_model import build_api_docs_view_model
 from .application import (
     AdminConfigReadService,
     AdminConfigWriteCommand,
@@ -72,6 +74,20 @@ def _config_context(
     return context
 
 
+def _real_data_context(context: dict, *, payload: dict, title: str, summary: str) -> dict:
+    context.update(
+        {
+            "real_data_payload": payload,
+            "data_title": title,
+            "data_summary": summary,
+            "real_data_row_count": page_row_count(payload),
+        }
+    )
+    if payload.get("page_error"):
+        context["page_error"] = payload["page_error"]
+    return context
+
+
 def _redirect(url: str, **query: Any) -> RedirectResponse:
     if query:
         separator = "&" if "?" in url else "?"
@@ -99,20 +115,88 @@ async def _token_error_from_form(request: Request) -> tuple[str, dict[str, Any]]
     return validate_admin_action_token(_text(form.get("admin_action_token"))), form
 
 
+def _token_error_from_payload(request: Request, payload: dict[str, Any]) -> str:
+    token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
+    return validate_admin_action_token(token)
+
+
+def _category_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, KeyError):
+        return JSONResponse({"ok": False, "error": "config category not found"}, status_code=404)
+    return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
 @router.get("/admin/config", name="api.admin_config", response_class=HTMLResponse)
 def admin_config_home(request: Request):
     payload = AdminConfigReadService().build_home_payload()
     return templates.TemplateResponse(
         request,
-        "admin_console/config_overview.html",
+        "admin_console/config_center.html",
         _config_context(
             request,
             active_tab="overview",
-            page_title="配置中心",
-            page_summary="在这里维护渠道与分配规则、标签班期规则、系统设置，以及登录与权限。",
-            overview_cards=payload["cards"],
+            page_title="系统配置",
+            page_summary="查看配置类目的生效状态，进入配置页维护明细。",
+            config_categories=payload["categories"],
         ),
     )
+
+
+@router.get("/admin/config/detail/{category_key}", name="api.admin_config_category_detail")
+def admin_config_category_detail(request: Request, category_key: str):
+    try:
+        detail = AdminConfigReadService().get_config_category_detail(category_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="config category not found") from exc
+    category = detail["category"]
+    return templates.TemplateResponse(
+        request,
+        "admin_console/config_category_detail.html",
+        _config_context(
+            request,
+            active_tab="overview",
+            page_title=_text(category.get("label")) or "配置明细",
+            page_summary="配置明细",
+            config_category_detail=detail,
+        ),
+    )
+
+
+@router.get("/admin/runtime-config", name="api.admin_runtime_config", response_class=HTMLResponse)
+def admin_runtime_config(request: Request):
+    context = shell_context(
+        request=request,
+        page_title="运行配置",
+        page_summary="查看 Next 运行时、发布和外部回调预检状态。",
+        active_endpoint="api.admin_runtime_config",
+    )
+    _real_data_context(
+        context,
+        payload=GetAdminConfigPageQuery()(),
+        title="运行配置",
+        summary="展示数据库模式、release、callback fallback、OAuth、企微和支付配置预检状态；不展示 secrets。",
+    )
+    return templates.TemplateResponse(request, "admin_console/real_data_page.html", context)
+
+
+@router.get("/admin/api-docs", name="api.admin_api_docs", response_class=HTMLResponse)
+def admin_api_docs(request: Request):
+    context = shell_context(
+        request=request,
+        page_title="API 文档",
+        page_summary="查看 AI-CRM 后台和外部集成 API 文档。",
+        active_endpoint="api.admin_api_docs",
+    )
+    context.update(
+        {
+            "breadcrumbs": [
+                {"label": "客户管理后台", "href": request.url_for("api.admin_console_dashboard")},
+                {"label": "API 文档"},
+            ],
+            **build_api_docs_view_model(),
+        }
+    )
+    return templates.TemplateResponse(request, "admin_console/api_docs.html", context)
 
 
 @router.get("/admin/config/wecom-tags", name="api.admin_config_wecom_tags", response_class=HTMLResponse)
@@ -164,6 +248,106 @@ async def admin_config_save_app_settings(request: Request):
 @router.get("/api/admin/config/overview", name="api.admin_config_overview")
 def api_admin_config_overview() -> dict[str, Any]:
     return {"ok": True, "overview": AdminConfigReadService().build_home_payload(), "source_status": "next_read_model", "fallback_used": False}
+
+
+@router.get("/api/admin/config/categories", name="api.admin_config_categories")
+def api_admin_config_categories() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "config": AdminConfigReadService().list_config_categories(),
+        "source_status": "next_read_model",
+        "fallback_used": False,
+    }
+
+
+@router.get("/api/admin/config/categories/{category_key}", name="api.admin_config_category")
+def api_admin_config_category(category_key: str):
+    try:
+        detail = AdminConfigReadService().get_config_category_detail(category_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="config category not found") from exc
+    return {
+        "ok": True,
+        "config": detail,
+        "source_status": "next_read_model",
+        "fallback_used": False,
+    }
+
+
+@router.put("/api/admin/config/categories/{category_key}/enabled", name="api.admin_config_category_enabled")
+async def api_admin_config_category_enabled(category_key: str, request: Request):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "payload must be an object"}, status_code=400)
+    token_error = _token_error_from_payload(request, payload)
+    if token_error:
+        return JSONResponse({"ok": False, "error": token_error}, status_code=400)
+    try:
+        saved = AdminConfigWriteCommand().set_category_enabled(
+            category_key,
+            _bool(payload.get("enabled")),
+            operator=_operator_from_request(request, payload=payload),
+        )
+    except (KeyError, ValueError) as exc:
+        return _category_error(exc)
+    return {
+        "ok": True,
+        "item": saved,
+        "config": AdminConfigReadService().get_config_category_detail(category_key)["category"],
+        "source_status": "next_command",
+        "fallback_used": False,
+        "real_external_call_executed": False,
+    }
+
+
+@router.put("/api/admin/config/categories/{category_key}/settings", name="api.admin_config_category_settings")
+async def api_admin_config_category_settings(category_key: str, request: Request):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "payload must be an object"}, status_code=400)
+    settings = payload.get("settings") or {}
+    if not isinstance(settings, dict):
+        return JSONResponse({"ok": False, "error": "settings must be an object"}, status_code=400)
+    token_error = _token_error_from_payload(request, payload)
+    if token_error:
+        return JSONResponse({"ok": False, "error": token_error}, status_code=400)
+    try:
+        changed = AdminConfigWriteCommand().save_category_settings(
+            category_key,
+            settings,
+            operator=_operator_from_request(request, payload=payload),
+        )
+        detail = AdminConfigReadService().get_config_category_detail(category_key)
+    except (KeyError, ValueError) as exc:
+        return _category_error(exc)
+    return {
+        "ok": True,
+        "changed": changed,
+        "changed_count": len(changed),
+        "config": detail,
+        "source_status": "next_command",
+        "fallback_used": False,
+        "real_external_call_executed": False,
+    }
+
+
+@router.post("/api/admin/config/categories/{category_key}/check", name="api.admin_config_category_check")
+async def api_admin_config_category_check(category_key: str, request: Request):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "payload must be an object"}, status_code=400)
+    try:
+        result = AdminConfigWriteCommand().check_category(
+            category_key,
+            operator=_operator_from_request(request, payload=payload),
+        )
+    except (KeyError, ValueError) as exc:
+        return _category_error(exc)
+    return {
+        **result,
+        "source_status": "next_command",
+        "fallback_used": False,
+    }
 
 
 @router.get("/api/admin/config/app-settings", name="api.admin_config_app_settings_resource")

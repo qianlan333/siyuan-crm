@@ -1,0 +1,66 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/config_center.css') }}?v=config-center-shell-20260611">
+{% endblock %}
+
+{% block content %}
+<section class="cc-page" data-config-center data-admin-action-token="{{ admin_action_token }}">
+  <div class="cc-alert" data-config-alert hidden></div>
+
+  <div class="cc-card">
+    <div class="cc-card-h">
+      <h2>配置类目</h2>
+    </div>
+
+    <div class="cc-table-wrap">
+      <table class="cc-table cc-category-table">
+        <thead>
+          <tr>
+            <th>类目</th>
+            <th style="width:120px">是否生效</th>
+            <th style="width:110px">生效开关</th>
+            <th style="width:96px">配置</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for category in config_categories %}
+          <tr data-category-row="{{ category.key }}">
+            <td>
+              <span class="cc-cat-name">{{ category.label }}</span>
+            </td>
+            <td>
+              <span class="cc-state{% if category.enabled %} is-on{% endif %}" data-category-status>
+                {{ "已生效" if category.enabled else "未生效" }}
+              </span>
+            </td>
+            <td>
+              <label class="cc-switch">
+                <input
+                  type="checkbox"
+                  data-category-enabled
+                  data-category-key="{{ category.key }}"
+                  {% if category.enabled %}checked{% endif %}
+                >
+                <span class="cc-slider"></span>
+              </label>
+            </td>
+            <td>
+              <a class="cc-btn" href="{{ category.detail_href }}">配置</a>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td colspan="4">暂无配置类目</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="{{ url_for('static', filename='admin_console/config_center.js') }}?v=config-center-shell-20260611"></script>
+{% endblock %}

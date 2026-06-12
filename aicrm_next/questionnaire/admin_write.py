@@ -94,6 +94,9 @@ class QuestionnaireAdminRepository:
     def set_enabled(self, questionnaire_id: int, enabled: bool) -> dict[str, Any] | None:
         return self._repository.set_enabled(questionnaire_id, enabled)
 
+    def delete_questionnaire(self, questionnaire_id: int) -> bool:
+        return self._repository.delete_questionnaire(questionnaire_id)
+
 
 class QuestionnaireAuditWriter:
     def record(self, command: Command, result: CommandResult) -> None:
@@ -540,13 +543,18 @@ def _handle_delete(command: Command) -> dict[str, Any]:
     existing = admin_repo.get_questionnaire(questionnaire_id)
     if not existing:
         raise NotFoundError("questionnaire not found")
-    item = admin_repo.set_enabled(questionnaire_id, False)
+    existing_disabled = bool(existing.get("is_disabled")) or not bool(existing.get("enabled", True))
+    if not existing_disabled:
+        raise ContractError("questionnaire must be disabled before deletion")
+    deleted = admin_repo.delete_questionnaire(questionnaire_id)
+    if not deleted:
+        raise NotFoundError("questionnaire not found")
     return {
         "questionnaire_id": questionnaire_id,
-        "questionnaire": summary_projection(item or existing),
+        "questionnaire": summary_projection(existing),
         "deleted": True,
-        "delete_mode": "soft_delete_disable",
-        "write_model_status": "soft_deleted",
+        "delete_mode": "hard_delete",
+        "write_model_status": "deleted",
     }
 
 

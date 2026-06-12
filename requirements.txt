@@ -9,8 +9,6 @@ requests==2.32.3
 pytest==8.3.5
 cryptography==44.0.2
 psycopg[binary]==3.2.6
-lark-oapi==1.4.22
-PyMySQL==1.1.1
 alembic==1.18.4
 alipay-sdk-python==3.7.1160
 anthropic>=0.40.0

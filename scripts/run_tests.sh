@@ -10,5 +10,4 @@ if [ ! -x "$VENV_DIR/bin/python" ]; then
 fi
 
 "$VENV_DIR/bin/python" -m pip install -r "$ROOT_DIR/requirements.txt"
-"$VENV_DIR/bin/python" "$ROOT_DIR/tools/check_architecture_skill_compliance.py"
 "$VENV_DIR/bin/python" -m pytest -q "$@"

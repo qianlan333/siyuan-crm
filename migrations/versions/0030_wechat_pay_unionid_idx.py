@@ -18,14 +18,9 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        DO $$
-        BEGIN
-            IF to_regclass('public.wechat_pay_orders') IS NOT NULL THEN
-                CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_unionid_created
-                ON wechat_pay_orders (unionid, created_at DESC, id DESC)
-                WHERE unionid IS NOT NULL AND unionid <> '';
-            END IF;
-        END $$;
+        CREATE INDEX IF NOT EXISTS idx_wechat_pay_orders_unionid_created
+        ON wechat_pay_orders (unionid, created_at DESC, id DESC)
+        WHERE unionid IS NOT NULL AND unionid <> ''
         """
     )
 

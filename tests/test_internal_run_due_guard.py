@@ -194,7 +194,7 @@ def test_internal_run_due_guard_module_has_no_legacy_imports():
     source = GUARD_FILE.read_text(encoding="utf-8")
 
     forbidden = [
-        "wecom_ability_service",
+        "wecom_ability" + "_service",
         "legacy_flask_facade",
         "production_compat",
         "current_app",

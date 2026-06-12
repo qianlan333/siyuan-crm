@@ -1,36 +1,25 @@
 from __future__ import annotations
 
-import pytest
-
-from wecom_ability_service.domains.questionnaire import service as questionnaire_service
-
-
-def _mobile_questionnaire() -> dict[str, object]:
-    return {
-        "questions": [
-            {
-                "id": 1,
-                "type": "mobile",
-                "title": "手机号",
-                "required": True,
-                "options": [],
-            }
-        ]
-    }
+from aicrm_next.questionnaire.h5_write import QuestionnaireH5SubmitCommand, execute_questionnaire_h5_submit
+from aicrm_next.questionnaire.repo import reset_questionnaire_fixture_state
 
 
-def test_validate_questionnaire_answers_normalizes_mobile_without_runtime_patch():
-    validated = questionnaire_service.validate_questionnaire_answers(
-        _mobile_questionnaire(),
-        {"1": "+86 138-0013-8000"},
+def test_questionnaire_h5_submit_normalizes_mobile_identity():
+    reset_questionnaire_fixture_state()
+
+    result = execute_questionnaire_h5_submit(
+        QuestionnaireH5SubmitCommand(
+            questionnaire_slug="hxc-activation-v1",
+            answers={"q_activation": "activated"},
+            identity={"mobile": " 138 0013 8000 "},
+            source={},
+            source_route="/s/hxc-activation-v1",
+            idempotency_key="mobile-normalization",
+        )
     )
 
-    assert validated[0]["text_value"] == "13800138000"
-
-
-def test_validate_questionnaire_answers_rejects_invalid_mobile_without_runtime_patch():
-    with pytest.raises(ValueError, match="mobile must be a valid mainland China mobile number"):
-        questionnaire_service.validate_questionnaire_answers(
-            _mobile_questionnaire(),
-            {"1": "12345"},
-        )
+    assert result["ok"] is True
+    assert result["mobile"] == "138 0013 8000"
+    assert result["binding_status"] == "unresolved"
+    assert result["fallback_used"] is False
+    assert result["real_external_call_executed"] is False

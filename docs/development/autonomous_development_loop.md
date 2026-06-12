@@ -28,8 +28,6 @@ Every autopilot iteration must read and follow:
 
 - `docs/development/ai_crm_next_architecture_skill.md`
 - `skills/ai-crm-next-architecture/SKILL.md`
-- `docs/route_ownership/production_route_ownership_manifest.yaml`
-- `docs/development/legacy_replacement_backlog.yaml`
 - `docs/development/phase_execution_state.yaml`
 - `docs/development/autonomous_stop_conditions.yaml`
 
@@ -39,12 +37,11 @@ The loop may run every 15 minutes. Each run must:
 
 1. Fetch latest `origin/main`.
 2. Read `phase_execution_state.yaml`.
-3. Confirm `active_candidate` exists in the route ownership manifest and legacy replacement backlog.
-4. Select only one bounded low-risk work package from `next_allowed_actions`.
-5. Stop if the selected action or current diff matches any stop condition.
-6. Create a PR only for low-risk docs/checker/test/protocol work.
-7. Run task-specific checkers and `tools/check_automerge_eligibility.py`.
-8. Allow low-risk admin merge only when GitHub required checks are green, the eligibility gate says `eligible: true`, no stop condition exists, and the diff remains docs/tools/tests/checker/state only.
+3. Select only one bounded low-risk work package from `next_allowed_actions`.
+4. Stop if the selected action or current diff matches any stop condition.
+5. Create a PR only for low-risk docs/checker/test/protocol work.
+6. Run task-specific checkers and `tools/check_automerge_eligibility.py`.
+7. Allow low-risk admin merge only when GitHub required checks are green, the eligibility gate says `eligible: true`, no stop condition exists, and the diff remains docs/tools/tests/checker/state only.
 
 ## Low-Risk Autopilot Actions
 

@@ -212,13 +212,6 @@ def list_external_orders(
         )
     except ValueError as exc:
         return _error(error_code="invalid_request", message=str(exc), status_code=400, source_status=SOURCE_STATUS_LIST)
-    except Exception as exc:
-        return _error(
-            error_code="order_read_model_unavailable",
-            message=str(exc),
-            status_code=503,
-            source_status="production_unavailable",
-        )
     items = [_project_order(dict(item)) for item in payload.get("items", [])]
     response_payload = {
         "ok": True,
@@ -251,13 +244,6 @@ def get_external_order(
         return _error(error_code="not_found", message="order not found", status_code=404, source_status=SOURCE_STATUS_DETAIL)
     except ValueError as exc:
         return _error(error_code="invalid_request", message=str(exc), status_code=400, source_status=SOURCE_STATUS_DETAIL)
-    except Exception as exc:
-        return _error(
-            error_code="order_read_model_unavailable",
-            message=str(exc),
-            status_code=503,
-            source_status="production_unavailable",
-        )
     response_payload = {
         "ok": True,
         "order": _project_detail_order(payload.get("order") or {}),
@@ -269,15 +255,9 @@ def get_external_order(
 
 
 def _project_detail_order(order: dict[str, Any]) -> dict[str, Any]:
-    return _strip_product_name(dict(order))
-
-
-def _strip_product_name(value: Any) -> Any:
-    if isinstance(value, dict):
-        return {key: _strip_product_name(item) for key, item in value.items() if key != "product_name"}
-    if isinstance(value, list):
-        return [_strip_product_name(item) for item in value]
-    return value
+    projected = dict(order)
+    projected.pop("product_name", None)
+    return projected
 
 
 def _model_dump(value: Any) -> dict[str, Any]:
@@ -368,24 +348,16 @@ def resolve_external_user_basic(
             source_status=SOURCE_STATUS_USER_BASIC,
         )
 
-    try:
-        identity = _model_dump(
-            ResolvePersonIdentityQuery()(
-                ResolvePersonIdentityRequest(
-                    external_userid=external_userid,
-                    mobile=mobile,
-                    openid=openid,
-                    unionid=unionid,
-                )
+    identity = _model_dump(
+        ResolvePersonIdentityQuery()(
+            ResolvePersonIdentityRequest(
+                external_userid=external_userid,
+                mobile=mobile,
+                openid=openid,
+                unionid=unionid,
             )
         )
-    except Exception as exc:
-        return _error(
-            error_code="identity_read_model_unavailable",
-            message=str(exc),
-            status_code=503,
-            source_status="production_unavailable",
-        )
+    )
     if not _text(identity.get("matched_by")):
         identity["matched_by"] = _matched_by_from_request(
             unionid=unionid,
@@ -393,15 +365,7 @@ def resolve_external_user_basic(
             mobile=mobile,
             openid=openid,
         )
-    try:
-        customer = _customer_detail(_text(identity.get("external_userid") or external_userid))
-    except Exception as exc:
-        return _error(
-            error_code="customer_read_model_unavailable",
-            message=str(exc),
-            status_code=503,
-            source_status="production_unavailable",
-        )
+    customer = _customer_detail(_text(identity.get("external_userid") or external_userid))
     if not identity and not customer:
         return _error(error_code="not_found", message="user not found", status_code=404, source_status=SOURCE_STATUS_USER_BASIC)
 

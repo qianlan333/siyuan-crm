@@ -83,9 +83,9 @@ def test_postgres_questionnaire_submit_writes_submission_and_answer_snapshots(mo
 
     submission_params = connection.calls[0][1]
     assert submission_params[0] == 499
-    assert submission_params[7] == "13770938680"
-    assert submission_params[8] == "h5"
-    assert submission_params[12] == ["activated"]
+    assert submission_params[8] == "13770938680"
+    assert submission_params[9] == "h5"
+    assert submission_params[13] == ["activated"]
 
     mobile_answer_params = connection.calls[1][1]
     assert mobile_answer_params[1] == 11

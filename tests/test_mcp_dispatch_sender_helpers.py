@@ -1,30 +1,47 @@
-from wecom_ability_service.application.integration_gateway import mcp_dispatch
+from __future__ import annotations
+
+import pytest
+
+from aicrm_next.integration_gateway.dispatch import DispatchGateway, McpToolDispatcher
+from aicrm_next.shared.errors import ContractError
 
 
-def test_sender_argument_prefers_userid_and_normalizes_lists():
-    assert mcp_dispatch._sender_argument({"userid": [" sales_01 ", "", "sales_02"], "sender": "ignored"}) == [
-        "sales_01",
-        "sales_02",
-    ]
+class FakeBlockedWeComAdapter:
+    def send_private_message(self, *, owner_userid, external_userids, content, media_refs):
+        return {
+            "ok": False,
+            "adapter": "fake_blocked_wecom",
+            "error_code": "real_external_call_blocked",
+            "error_message": "blocked by test fake",
+            "result": {},
+        }
 
 
-def test_sender_argument_accepts_sender_alias():
-    assert mcp_dispatch._sender_argument({"sender": (" sales_01 ", "sales_01", "sales_02")}) == [
-        "sales_01",
-        "sales_02",
-    ]
+def test_dispatcher_prefers_explicit_external_userid() -> None:
+    dispatcher = McpToolDispatcher()
+
+    assert dispatcher.resolve_external_userid({"external_userid": " wx_ext_001 ", "customer_ref": "ignored"}) == "wx_ext_001"
 
 
-def test_resolve_sender_userids_uses_explicit_sender_list_before_owner_fallback():
-    customers = [{"customer": {"owner_userid": "owner_01"}}]
+def test_dispatcher_requires_customer_reference() -> None:
+    dispatcher = McpToolDispatcher()
 
-    assert mcp_dispatch._resolve_sender_userids(customers, [" sales_a ", "sales_b"]) == ["sales_a", "sales_b"]
+    with pytest.raises(ContractError, match="customer_ref or external_userid is required"):
+        dispatcher.resolve_external_userid({})
 
 
-def test_masked_mobile_customer_ref_helpers():
-    assert mcp_dispatch._normalize_customer_ref("176xxxx5555") == "176xxxx5555"
-    assert mcp_dispatch._normalize_customer_ref("176****5555") == "176****5555"
-    assert mcp_dispatch._normalize_customer_ref("+86 176****5555") == "176****5555"
-    assert mcp_dispatch._masked_mobile_parts("176xxxx5555") == ("176", "5555")
-    assert mcp_dispatch._masked_mobile_parts("176****5555") == ("176", "5555")
-    assert mcp_dispatch._masked_mobile_parts("17612345555") is None
+def test_dispatch_gateway_returns_blocked_summary_without_real_send() -> None:
+    gateway = DispatchGateway(adapter=FakeBlockedWeComAdapter())
+
+    payload = gateway.dispatch_user_ops_private_message_batch(
+        owner_bucket={"sender_userid": "sales_01", "external_userids": ["wx_ext_001"]},
+        content="hello",
+        images=[{"id": "image_1"}],
+    )
+
+    assert payload["status"] == "blocked"
+    assert payload["dispatch_adapter"] == "fake_blocked_wecom"
+    assert payload["sender_userid"] == "sales_01"
+    assert payload["external_userids"] == ["wx_ext_001"]
+    assert payload["target_count"] == 1
+    assert payload["image_count"] == 1

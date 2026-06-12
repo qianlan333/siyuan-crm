@@ -35,16 +35,16 @@ def production_environment() -> bool:
     return bool(values & {"prod", "production"})
 
 
-def legacy_production_facade_enabled() -> bool:
-    if _env_flag("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE"):
-        return False
-    if _env_flag("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE"):
-        return True
+def production_repository_required() -> bool:
     return database_mode() == "postgres" or production_environment()
 
 
+def production_data_mode_enabled() -> bool:
+    return database_mode() == "postgres"
+
+
 def production_data_ready() -> bool:
-    return database_mode() == "postgres" and legacy_production_facade_enabled()
+    return production_data_mode_enabled()
 
 
 def runtime_health_state() -> dict:
@@ -65,8 +65,14 @@ def runtime_health_state() -> dict:
         "database_mode": mode,
         "fixture_mode": fixture,
         "production_data_ready": data_ready,
+        "production_data_mode": production_data_mode_enabled(),
+        "repository_policy": (
+            "production_repositories_required"
+            if production_repository_required()
+            else "fixture_repositories_allowed"
+        ),
         "runtime_owner": "ai_crm_next",
-        "legacy_production_facade_enabled": legacy_production_facade_enabled(),
+        "legacy_runtime_enabled": False,
         "warning": warning,
     }
 

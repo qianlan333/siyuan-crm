@@ -64,7 +64,7 @@ def evaluate_repository(repository: object, *, capability_owner: str) -> Reposit
         error_code = "fixture_repository_blocked_in_production"
         message = (
             f"{capability_owner} repository provider blocked {name}; "
-            "production_data_ready=true must use production/postgres/legacy facade data."
+            "production_data_ready=true must use production/postgres repository data."
         )
     return RepositoryProviderDecision(
         capability_owner=capability_owner,

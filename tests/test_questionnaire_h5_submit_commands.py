@@ -107,6 +107,35 @@ def test_h5_submit_uses_oauth_cookie_identity_when_payload_has_no_identity(clien
     assert body["external_userid"] == "wm_cookie_identity_001"
 
 
+def test_h5_submit_persists_when_identity_resolution_is_unavailable(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    class FailingIdentityQuery:
+        def __call__(self, query):
+            raise RuntimeError("column b.id does not exist")
+
+    monkeypatch.setattr("aicrm_next.questionnaire.h5_write.ResolvePersonIdentityQuery", lambda: FailingIdentityQuery())
+
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={
+            "answers": {"q_activation": "activated"},
+            "identity": {
+                "external_userid": "wm_identity_resolution_down_001",
+                "openid": "openid-identity-resolution-down-001",
+                "unionid": "unionid-identity-resolution-down-001",
+                "mobile": "13800138099",
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_next_command(body, "questionnaire.h5.submit")
+    assert body["success"] is True
+    assert body["external_userid"] == "wm_identity_resolution_down_001"
+    assert body["mobile"] == "13800138099"
+    assert body["binding_status"] == "identity_resolution_unavailable"
+
+
 def test_h5_submit_rejects_repeated_identity(client: TestClient) -> None:
     payload = {
         "answers": {"q_activation": "activated"},

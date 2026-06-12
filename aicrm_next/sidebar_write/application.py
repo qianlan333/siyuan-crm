@@ -18,7 +18,7 @@ from .commands import (
     UpdateSidebarProfileCommand,
     UpsertLeadPoolClassTermCommand,
 )
-from .repo import SidebarWriteRepository
+from .repo import PostgresSidebarWriteRepository, SidebarWriteRepository
 
 
 class SidebarWriteInputError(ValueError):
@@ -26,6 +26,10 @@ class SidebarWriteInputError(ValueError):
 
 
 class SidebarWriteNotFoundError(LookupError):
+    pass
+
+
+class SidebarWriteConflictError(RuntimeError):
     pass
 
 
@@ -82,7 +86,7 @@ def get_sidebar_write_projection_events() -> list[dict[str, Any]]:
 
 def execute_sidebar_write(command: SidebarWriteCommand) -> dict[str, Any]:
     _validate_command(command)
-    if production_data_ready():
+    if production_data_ready() and not isinstance(command, BindMobileCommand):
         raise SidebarWriteProductionUnavailableError("sidebar write model is not production-ready for command execution")
     platform_command = Command(
         command_name=command.command_name,
@@ -101,7 +105,9 @@ def execute_sidebar_write(command: SidebarWriteCommand) -> dict[str, Any]:
     if result.status == "failed":
         if "customer not found" in result.error:
             raise SidebarWriteNotFoundError("customer not found")
-        if "is required" in result.error:
+        if "already bound" in result.error:
+            raise SidebarWriteConflictError(result.error)
+        if "is required" in result.error or "must be" in result.error:
             raise SidebarWriteInputError(result.error)
         raise SidebarWriteProductionUnavailableError(result.error)
     payload = dict(result.payload)
@@ -128,11 +134,27 @@ def _validate_command(command: SidebarWriteCommand) -> None:
 
 
 def _handle_bind_mobile(command: Command) -> dict[str, Any]:
-    mobile = str(command.payload.get("payload", {}).get("mobile") or "").strip()
+    payload = dict(command.payload.get("payload") or {})
+    mobile = str(payload.get("mobile") or "").strip()
     if not mobile:
         raise SidebarWriteInputError("mobile is required")
-    write = _repo.bind_mobile(command_id=command.command_id, external_userid=str(command.payload["external_userid"]), mobile=mobile)
-    return {"write_model_status": "updated", "write": write}
+    if production_data_ready():
+        write = PostgresSidebarWriteRepository().bind_mobile(
+            command_id=command.command_id,
+            external_userid=str(command.payload["external_userid"]),
+            mobile=mobile,
+            owner_userid=str(payload.get("owner_userid") or ""),
+            bind_by_userid=str(payload.get("bind_by_userid") or command.context.actor_id or ""),
+            force_rebind=_as_bool(payload.get("force_rebind"), default=False),
+        )
+    else:
+        write = _repo.bind_mobile(command_id=command.command_id, external_userid=str(command.payload["external_userid"]), mobile=mobile)
+    response: dict[str, Any] = {"write_model_status": "updated", "write": write}
+    if write.get("binding"):
+        response["binding"] = write.get("binding")
+    if write.get("lead_pool_merge"):
+        response["lead_pool_merge"] = write.get("lead_pool_merge")
+    return response
 
 
 def _handle_upsert_lead_pool(command: Command) -> dict[str, Any]:

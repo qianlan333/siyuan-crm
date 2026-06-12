@@ -4,7 +4,8 @@ Scope: Legacy Exit group 6 moves User Ops read and preview surfaces to Next-nati
 
 | Route | Methods | Current owner | Runtime owner | Capability | Legacy fallback | Side effect | Status | Checker |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `/admin/user-ops` | GET | `aicrm_next.frontend_compat` | frontend_compat over Next APIs | admin page shell | none | none | deletion_locked / locked | `tests/test_user_ops_next_queries.py` |
+| `/admin/user-ops/ui` | GET | `aicrm_next.ops_enrollment.admin_pages` | next_native page shell | real-data entry page | none | none | deletion_locked / locked | `tests/test_user_ops_admin_pages_native.py` |
+| `/admin/user-ops` | GET | `aicrm_next.ops_enrollment.admin_pages` | next_native page shell | admin page shell | none | none | deletion_locked / locked | `tests/test_user_ops_admin_pages_native.py` |
 | `/api/admin/user-ops/overview` | GET | `aicrm_next.ops_enrollment` | next_native | readonly overview | none | none | deletion_locked / locked | `tests/test_user_ops_next_queries.py` |
 | `/api/admin/user-ops/cards` | GET | `aicrm_next.ops_enrollment` | next_native | readonly cards | none | none | deletion_locked / locked | `tests/test_user_ops_cards_next_native.py` |
 | `/api/admin/user-ops/customers` | GET | `aicrm_next.ops_enrollment` | next_native | readonly customer list | none | none | deletion_locked / locked | `tests/test_user_ops_next_queries.py` |

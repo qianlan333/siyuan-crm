@@ -3,11 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .application import GetSystemHealthQuery
-from .route_registry.router import router as route_registry_router
 from aicrm_next.shared.runtime import runtime_route_map_state
 
 router = APIRouter()
-router.include_router(route_registry_router)
 
 
 @router.get("/health")

@@ -183,17 +183,11 @@ def list_orders(
     items: list[dict[str, Any]] = []
     total = 0
     for provider_name in selected:
-        try:
-            payload = CommerceAdminTransactionListReadModel(provider_name).execute(
-                normalized_filters,
-                limit=query_limit,
-                offset=0 if normalized_provider == "all" else page_offset,
-            )
-        except NotFoundError:
-            if provider_name == "wechat_shop":
-                payload = {"items": [], "total": 0, "limit": query_limit, "offset": 0, "has_more": False, "next_offset": None}
-            else:
-                raise
+        payload = CommerceAdminTransactionListReadModel(provider_name).execute(
+            normalized_filters,
+            limit=query_limit,
+            offset=0 if normalized_provider == "all" else page_offset,
+        )
         payload_items = list(payload.get("items", []))
         provider_items = [_normalize_order_item(dict(item)) for item in payload.get("items", [])]
         provider_items = _post_filter(provider_items, normalized_filters)
@@ -236,12 +230,8 @@ def get_order(order_no: str, *, provider: str = "auto") -> dict[str, Any]:
                 "source_status": "next_admin_order_detail",
                 "fallback_used": False,
             }
-        except NotFoundError as exc:
+        except Exception as exc:
             last_error = exc
-        except ValueError as exc:
-            last_error = exc
-        except Exception:
-            raise
     raise NotFoundError(str(last_error) if last_error else "order not found")
 
 

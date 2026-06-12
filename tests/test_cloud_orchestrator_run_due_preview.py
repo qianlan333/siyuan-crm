@@ -10,6 +10,7 @@ from aicrm_next.main import create_app
 def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_campaign_read_fixture_state()
     reset_run_due_fixture_state()
     return TestClient(create_app(), raise_server_exceptions=False)
@@ -18,7 +19,10 @@ def _client(monkeypatch) -> TestClient:
 def test_preview_accepts_query_params_and_does_not_execute_runtime(monkeypatch):
     client = _client(monkeypatch)
 
-    response = client.post("/api/admin/cloud-orchestrator/campaigns/run-due/preview?batch_size=1&dry_run=false")
+    response = client.post(
+        "/api/admin/cloud-orchestrator/campaigns/run-due/preview?batch_size=1&dry_run=false",
+        headers={"Authorization": "Bearer timer-token"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -35,7 +39,10 @@ def test_preview_accepts_query_params_and_does_not_execute_runtime(monkeypatch):
 def test_run_due_missing_body_uses_controlled_default(monkeypatch):
     client = _client(monkeypatch)
 
-    response = client.post("/api/admin/cloud-orchestrator/campaigns/run-due")
+    response = client.post(
+        "/api/admin/cloud-orchestrator/campaigns/run-due",
+        headers={"Authorization": "Bearer timer-token"},
+    )
 
     assert response.status_code == 200
     body = response.json()
@@ -47,7 +54,11 @@ def test_run_due_missing_body_uses_controlled_default(monkeypatch):
 def test_invalid_batch_size_returns_400_input_error(monkeypatch):
     client = _client(monkeypatch)
 
-    response = client.post("/api/admin/cloud-orchestrator/campaigns/run-due", json={"batch_size": 0})
+    response = client.post(
+        "/api/admin/cloud-orchestrator/campaigns/run-due",
+        json={"batch_size": 0},
+        headers={"Authorization": "Bearer timer-token"},
+    )
 
     assert response.status_code == 400
     body = response.json()

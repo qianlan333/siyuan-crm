@@ -17,6 +17,8 @@ def client():
 
 
 def _connect():
+    if not os.environ.get("DATABASE_URL"):
+        pytest.skip("DATABASE_URL is required for program member statistics PG contract")
     return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row)
 
 

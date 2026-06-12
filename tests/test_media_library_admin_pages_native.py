@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
-from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
 from aicrm_next.main import create_app
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 MEDIA_LIBRARY_PAGES = (
@@ -35,7 +38,6 @@ def test_media_library_admin_pages_render_from_native_shell() -> None:
 
 
 def test_media_library_admin_pages_removed_from_frontend_compat_inventory() -> None:
-    legacy_routes = set(LEGACY_FRONTEND_ROUTES)
-
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
     for path, _title in MEDIA_LIBRARY_PAGES:
-        assert path not in legacy_routes
+        assert _endpoint_module(path) == "aicrm_next.media_library.admin_pages"

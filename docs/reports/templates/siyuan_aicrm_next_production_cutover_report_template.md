@@ -29,10 +29,9 @@
 | 命令 | 结果 | 备注 |
 | --- | --- | --- |
 | `python3 app.py health` |  |  |
-| `python3 app.py init-db` |  |  |
-| `python3 app.py init-next-schema-safe` |  |  |
-| `python3 app.py sync-customer-read-model --dry-run` |  |  |
-| `python3 app.py sync-customer-read-model` |  |  |
+| `psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/06_safe_next_schema_init.sql` |  |  |
+| `python3 scripts/siyuan_migration/sync_customer_read_model.py --dry-run` |  |  |
+| `python3 scripts/siyuan_migration/sync_customer_read_model.py --execute` |  |  |
 
 ## 4. Projection Sync 结果
 

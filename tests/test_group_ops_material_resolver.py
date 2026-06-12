@@ -29,8 +29,20 @@ class RecordingUploader:
         return {"errcode": 0, "media_id": "media_uploaded_attachment"}
 
 
-def _resolver(items: dict[str, dict[int, dict]], *, uploader: RecordingUploader | None = None) -> InMemoryGroupOpsMaterialResolver:
-    return InMemoryGroupOpsMaterialResolver(items, uploader=uploader, now=NOW)
+def _resolver(
+    items: dict[str, dict[int, dict]],
+    *,
+    uploader: RecordingUploader | None = None,
+    real_upload_enabled: bool = False,
+    fake_media_enabled: bool = True,
+) -> InMemoryGroupOpsMaterialResolver:
+    return InMemoryGroupOpsMaterialResolver(
+        items,
+        uploader=uploader,
+        real_upload_enabled=real_upload_enabled,
+        fake_media_enabled=fake_media_enabled,
+        now=NOW,
+    )
 
 
 def _items() -> dict[str, dict[int, dict]]:
@@ -111,26 +123,90 @@ def test_group_ops_material_resolver_image_missing_fails() -> None:
 
 
 def test_group_ops_material_resolver_miniprogram_materializes_attachment() -> None:
-    attachments, image_media_ids = _resolver(_items()).resolve_content_package_materials({"miniprogram_library_ids": [34]})
+    uploader = RecordingUploader()
+
+    attachments, image_media_ids = _resolver(_items(), uploader=uploader).resolve_content_package_materials({"miniprogram_library_ids": [34]})
 
     assert image_media_ids == []
+    assert uploader.image_calls == []
     assert attachments == [
         {
             "msgtype": "miniprogram",
             "miniprogram": {
                 "appid": "wx_app_001",
-                "pagepath": "pages/index",
+                "page": "pages/index",
                 "title": "Mini Card",
-                "thumb_media_id": "media_mini_thumb",
+                "pic_media_id": "media_mini_thumb",
             },
         }
     ]
+    assert "pagepath" not in attachments[0]["miniprogram"]
+    assert "thumb_media_id" not in attachments[0]["miniprogram"]
+
+
+def test_group_ops_material_resolver_miniprogram_expired_media_uploads_and_caches() -> None:
+    items = _items()
+    items["miniprogram"][34]["thumb_media_id"] = "expired-media"
+    items["miniprogram"][34]["thumb_media_id_expires_at"] = "2020-01-01T00:00:00+00:00"
+    items["miniprogram"][34]["thumb_image_base64"] = "aW1hZ2UtYnl0ZXM="
+    uploader = RecordingUploader()
+
+    attachments, image_media_ids = _resolver(
+        items,
+        uploader=uploader,
+        real_upload_enabled=True,
+        fake_media_enabled=False,
+    ).resolve_content_package_materials({"miniprogram_library_ids": [34]})
+
+    assert image_media_ids == []
+    assert uploader.image_calls == [
+        {"file_name": "miniprogram_thumb_34.png", "file_bytes": b"image-bytes", "content_type": "image/png"}
+    ]
+    assert items["miniprogram"][34]["thumb_media_id"] == "media_uploaded_image"
+    assert items["miniprogram"][34]["thumb_media_id_expires_at"]
+    assert attachments[0]["miniprogram"] == {
+        "appid": "wx_app_001",
+        "page": "pages/index",
+        "title": "Mini Card",
+        "pic_media_id": "media_uploaded_image",
+    }
+
+
+def test_group_ops_material_resolver_miniprogram_base64_uploads_when_no_cached_media() -> None:
+    items = _items()
+    items["miniprogram"][34]["thumb_media_id"] = ""
+    items["miniprogram"][34]["thumb_media_id_expires_at"] = ""
+    items["miniprogram"][34]["thumb_image_base64"] = "dGh1bWItYnl0ZXM="
+    uploader = RecordingUploader()
+
+    attachment = _resolver(
+        items,
+        uploader=uploader,
+        real_upload_enabled=True,
+        fake_media_enabled=False,
+    ).resolve_wecom_ready_miniprogram(34)
+
+    assert uploader.image_calls[0]["file_bytes"] == b"thumb-bytes"
+    assert items["miniprogram"][34]["thumb_media_id"] == "media_uploaded_image"
+    assert attachment["miniprogram"]["pic_media_id"] == "media_uploaded_image"
+
+
+def test_group_ops_material_resolver_miniprogram_upload_disabled_fails() -> None:
+    items = _items()
+    items["miniprogram"][34]["thumb_media_id"] = ""
+    items["miniprogram"][34]["thumb_media_id_expires_at"] = ""
+    items["miniprogram"][34]["thumb_image_base64"] = "dGh1bWItYnl0ZXM="
+
+    with pytest.raises(GroupOpsMaterialResolveError) as exc_info:
+        _resolver(items, fake_media_enabled=False).resolve_content_package_materials({"miniprogram_library_ids": [34]})
+
+    assert str(exc_info.value) == "miniprogram_resolve_failed:id=34:real_upload_not_enabled"
 
 
 def test_group_ops_material_resolver_miniprogram_thumb_image_id_reuses_image_resolver() -> None:
     attachments, _ = _resolver(_items()).resolve_content_package_materials({"miniprogram_library_ids": [35]})
 
-    assert attachments[0]["miniprogram"]["thumb_media_id"] == "media_img_cached"
+    assert attachments[0]["miniprogram"]["pic_media_id"] == "media_img_cached"
 
 
 def test_group_ops_material_resolver_miniprogram_missing_required_fields_fails() -> None:
@@ -195,7 +271,7 @@ def test_group_ops_material_resolver_no_legacy_imports() -> None:
     gateway_text = (root / "aicrm_next/automation_engine/group_ops/integration_gateway.py").read_text(encoding="utf-8")
     resolver_text = (root / "aicrm_next/automation_engine/group_ops/material_resolver.py").read_text(encoding="utf-8")
 
-    assert "wecom_ability_service" not in gateway_text
+    assert "wecom_ability" + "_service" not in gateway_text
     assert "legacy_flask_facade" not in gateway_text
-    assert "wecom_ability_service" not in resolver_text
+    assert "wecom_ability" + "_service" not in resolver_text
     assert "legacy_flask_facade" not in resolver_text

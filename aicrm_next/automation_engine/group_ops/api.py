@@ -218,6 +218,7 @@ def update_group_ops_plan(plan_id: int | str, payload: GroupOpsPlanUpdateRequest
         _raise_http(exc)
 
 
+@router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/enable")
 @router.post("/api/automation/group-ops/plans/{plan_id}/enable")
 def enable_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:
@@ -226,6 +227,7 @@ def enable_group_ops_plan(plan_id: int | str) -> JSONResponse:
         _raise_http(exc)
 
 
+@router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/disable")
 @router.post("/api/automation/group-ops/plans/{plan_id}/disable")
 def disable_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:
@@ -234,6 +236,7 @@ def disable_group_ops_plan(plan_id: int | str) -> JSONResponse:
         _raise_http(exc)
 
 
+@router.delete("/api/admin/automation-conversion/group-ops/plans/{plan_id}")
 @router.delete("/api/automation/group-ops/plans/{plan_id}")
 def archive_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:

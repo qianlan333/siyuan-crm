@@ -4,7 +4,7 @@ from typing import Any
 
 
 CONTENT_MODES = {"unified", "profile_layered", "behavior_layered", "agent"}
-TRIGGER_TYPES = {"scheduled_daily", "audience_entered"}
+TRIGGER_TYPES = {"scheduled_daily", "audience_entered", "on_event", "on_enter_stage", "scheduled", "webhook_push"}
 TASK_STATUSES = {"draft", "active", "paused", "archived"}
 BEHAVIOR_FILTERS = {"none", "lt_2", "between_2_9", "gte_10"}
 BEHAVIOR_SEGMENT_KEYS = ("lt_2", "between_2_9", "gte_10")

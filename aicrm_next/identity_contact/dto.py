@@ -10,6 +10,15 @@ class ResolvePersonIdentityRequest(BaseModel):
     unionid: str | None = None
 
 
+class BindMobileToExternalContactRequest(BaseModel):
+    external_userid: str
+    mobile: str
+    owner_userid: str | None = None
+    bind_by_userid: str | None = None
+    customer_name: str | None = None
+    force_rebind: bool = False
+
+
 class ContactPoint(BaseModel):
     type: str
     value: str

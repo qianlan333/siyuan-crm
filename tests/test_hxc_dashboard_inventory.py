@@ -23,9 +23,8 @@ def test_inventory_lists_hxc_route_family_and_side_effect_boundaries() -> None:
     ):
         assert route in source
 
-    assert "legacy_fallback_allowed=false" in source
-    assert "deletion_locked" in source
-    assert "replacement_status=locked" in source
+    assert "Current Next Ownership" in source
+    assert "Existing HXC dashboard business tests cover" in source
     assert "real_external_call_executed=false" in source
     assert "hxc_refresh_executed=false" in source
     assert "directory_sync_executed=false" in source

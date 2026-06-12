@@ -115,16 +115,25 @@ check_script scripts/siyuan_migration/01_backup_current_assets.sh
 check_script scripts/siyuan_migration/02_restore_to_staging_db.sh
 check_script scripts/siyuan_migration/03_channel_backfill.sql
 check_script scripts/siyuan_migration/04_validate_migration.sql
+check_script scripts/siyuan_migration/06_safe_next_schema_init.sql
 check_script scripts/siyuan_migration/07_validate_next_blockers.sql
 check_script scripts/siyuan_migration/08_validate_customer_projection.sql
 check_script scripts/siyuan_migration/09_smoke_customer_projection.sh
+check_script scripts/siyuan_migration/sync_customer_read_model.py
 
 if python3 app.py --help >/tmp/siyuan_cutover_app_help.$$ 2>&1; then
-  for command_name in health run init-db init-next-schema-safe sync-customer-read-model; do
+  for command_name in health routes run; do
     if grep -q "$command_name" /tmp/siyuan_cutover_app_help.$$; then
       pass "app_command_present ${command_name}"
     else
       fail "app_command_missing ${command_name}"
+    fi
+  done
+  for removed_command_name in init-db init-next-schema-safe sync-customer-read-model; do
+    if grep -q "$removed_command_name" /tmp/siyuan_cutover_app_help.$$; then
+      warn "legacy_or_siyuan_init_command_still_exposed ${removed_command_name}"
+    else
+      pass "legacy_or_siyuan_init_command_not_exposed ${removed_command_name}"
     fi
   done
 else

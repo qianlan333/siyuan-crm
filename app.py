@@ -9,10 +9,6 @@ from collections.abc import Sequence
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = "5001"
 NEXT_APP_IMPORT = "aicrm_next.main:app"
-LEGACY_STARTUP_REMOVED_MESSAGE = (
-    "Legacy Flask runtime has been removed from startup compatibility. "
-    "Use `python3 app.py run` for AI-CRM Next."
-)
 
 
 def _host() -> str:
@@ -29,36 +25,12 @@ def run_next() -> None:
     uvicorn.run(NEXT_APP_IMPORT, host=_host(), port=_port())
 
 
-def legacy_startup_removed(command: str) -> None:
-    raise SystemExit(f"{command}: {LEGACY_STARTUP_REMOVED_MESSAGE}")
-
-
-def init_next_schema_safe() -> None:
-    from aicrm_next.schema_init import init_next_schema_safe as run_safe_init
-
-    table_names = run_safe_init()
-    print({"ok": True, "initialized_tables": table_names, "drop_or_truncate_executed": False})
-
-
-def init_db_next_alias() -> None:
-    print("init-db is deprecated; running init-next-schema-safe for AI-CRM Next.")
-    init_next_schema_safe()
-
-
-def sync_customer_read_model(args: argparse.Namespace) -> int:
-    from aicrm_next.customer_read_model.sync_cli import run_sync
-
-    sync_args: list[str] = []
-    if args.dry_run:
-        sync_args.append("--dry-run")
-    if args.limit is not None:
-        sync_args.extend(["--limit", str(args.limit)])
-    if args.replace:
-        sync_args.append("--replace")
-    for external_userid in args.external_userid or []:
-        sync_args.extend(["--external-userid", external_userid])
-    sync_args.extend(["--source", args.source])
-    return run_sync(sync_args)
+def removed_legacy_command(command: str) -> None:
+    raise SystemExit(
+        f"{command} has been removed. AI-CRM now starts with Next runtime only. "
+        "Use `python app.py run`, `python app.py health`, or `python app.py routes`. "
+        "For database schema changes use Alembic migrations."
+    )
 
 
 def print_next_health() -> None:
@@ -107,17 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("routes", help="Print AI-CRM Next route inventory.")
     subparsers.add_parser("run-legacy", help="Removed legacy Flask startup command.")
     subparsers.add_parser("init-db-legacy", help="Removed legacy Flask database init command.")
-    subparsers.add_parser("init-db", help="Deprecated alias for init-next-schema-safe.")
-    subparsers.add_parser("init-next-schema-safe", help="Create missing AI-CRM Next schema safely without dropping data.")
-    sync_customer = subparsers.add_parser(
-        "sync-customer-read-model",
-        help="Sync live customer source rows into AI-CRM Next projection tables.",
-    )
-    sync_customer.add_argument("--dry-run", action="store_true")
-    sync_customer.add_argument("--limit", type=int, default=None)
-    sync_customer.add_argument("--replace", action="store_true")
-    sync_customer.add_argument("--external-userid", action="append", default=[])
-    sync_customer.add_argument("--source", choices=["live"], default="live")
+    subparsers.add_parser("init-db", help="Removed legacy Flask database init command.")
     legacy_delete = subparsers.add_parser(
         "delete-questionnaire-submissions-legacy",
         help="Legacy fallback helper for deleting questionnaire submissions by slug.",
@@ -146,21 +108,13 @@ def main(argv: Sequence[str] | None = None) -> None:
         print_next_routes()
         return
     if command == "run-legacy":
-        legacy_startup_removed(command)
+        removed_legacy_command(command)
         return
-    if command == "init-db":
-        init_db_next_alias()
+    if command in {"init-db", "init-db-legacy"}:
+        removed_legacy_command(command)
         return
-    if command == "init-db-legacy":
-        legacy_startup_removed(command)
-        return
-    if command == "init-next-schema-safe":
-        init_next_schema_safe()
-        return
-    if command == "sync-customer-read-model":
-        raise SystemExit(sync_customer_read_model(args))
     if command in {"delete-questionnaire-submissions", "delete-questionnaire-submissions-legacy"}:
-        legacy_startup_removed(command)
+        removed_legacy_command(command)
         return
 
     parser.print_help()

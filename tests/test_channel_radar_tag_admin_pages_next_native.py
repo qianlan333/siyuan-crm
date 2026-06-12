@@ -5,7 +5,6 @@ from pathlib import Path
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
-from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
 from aicrm_next.main import create_app
 
 
@@ -116,18 +115,7 @@ def test_channel_radar_and_tag_pages_keep_existing_static_and_api_contracts(monk
 
 
 def test_channel_radar_and_tag_pages_are_removed_from_frontend_compat_inventory() -> None:
-    migrated_routes = {
-        "/admin/channels",
-        "/admin/channels/new",
-        "/admin/channels/{channel_id}/edit",
-        "/admin/radar-links",
-        "/admin/radar-links/new",
-        "/admin/radar-links/{link_id}/edit",
-        "/admin/radar-links/{link_id}/detail",
-        "/admin/wecom-tags",
-    }
-
-    assert migrated_routes.isdisjoint(LEGACY_FRONTEND_ROUTES)
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
 
 
 def test_channel_radar_and_tag_templates_and_static_are_native_owned() -> None:

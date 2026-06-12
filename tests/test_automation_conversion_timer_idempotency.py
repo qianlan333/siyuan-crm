@@ -9,9 +9,10 @@ from aicrm_next.main import create_app
 def test_jobs_run_due_idempotency_key_reuses_planned_result(monkeypatch):
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_timer_fixture_state()
     client = TestClient(create_app(), raise_server_exceptions=False)
-    headers = {"Idempotency-Key": "same-automation-timer-key"}
+    headers = {"Idempotency-Key": "same-automation-timer-key", "Authorization": "Bearer timer-token"}
 
     first = client.post("/api/admin/automation-conversion/jobs/run-due", json={"jobs": ["job_a"]}, headers=headers)
     second = client.post("/api/admin/automation-conversion/jobs/run-due", json={"jobs": ["job_b"]}, headers=headers)

@@ -1,0 +1,13 @@
+[Unit]
+Description=AI-CRM Reply Monitor Run Due Next-native timer
+After=network.target openclaw-wecom-postgres.service
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+Environment=APP_HOST=127.0.0.1
+Environment=APP_PORT=5001
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python -m scripts.run_reply_monitor_run_due'

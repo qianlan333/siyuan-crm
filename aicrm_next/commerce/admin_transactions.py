@@ -9,6 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from aicrm_next.shared.runtime import database_mode
+from aicrm_next.shared.text_encoding import repair_utf8_mojibake
 
 from .repo import build_commerce_repository
 from .application import GetTransactionQuery, ListProductsQuery, ListTransactionsQuery
@@ -165,7 +166,7 @@ def _present_order(row: dict[str, Any]) -> dict[str, Any]:
     refunded = max(0, _int_value(row.get("refunded_amount_total")))
     active_refunding = max(0, _int_value(row.get("active_refund_amount_total")))
     refundable = max(0, amount_total - refunded - active_refunding)
-    payer_name = str(row.get("payer_name_snapshot") or row.get("payer_name") or "未记录付款人").strip()
+    payer_name = repair_utf8_mojibake(row.get("payer_name_snapshot") or row.get("payer_name")) or "未记录付款人"
     mobile = str(row.get("mobile_snapshot") or row.get("buyer_mobile") or "").strip()
     userid = str(row.get("userid_snapshot") or "").strip()
     external_userid = str(row.get("external_userid") or "").strip()

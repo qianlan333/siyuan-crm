@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_customer_detail_frontend_wires_member_action_urls_to_next_exact_routes():
     template = (ROOT / "aicrm_next/frontend_compat/templates/admin_console/customer_detail.html").read_text(encoding="utf-8")
-    routes = (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").read_text(encoding="utf-8")
+    routes = (ROOT / "aicrm_next/customer_read_model/admin_pages.py").read_text(encoding="utf-8")
     script = (ROOT / "aicrm_next/frontend_compat/static/admin_console/customer_profile_automation.js").read_text(encoding="utf-8")
 
     assert "data-automation-member-url" in template

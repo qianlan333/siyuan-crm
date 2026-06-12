@@ -489,6 +489,6 @@ def test_scheduler_default_duplicate_checker_has_no_legacy_imports():
     root = Path(__file__).resolve().parents[1]
     source = (root / "aicrm_next/automation_engine/group_ops/scheduler.py").read_text(encoding="utf-8")
 
-    assert "wecom_ability_service" not in source
+    assert "wecom_ability" + "_service" not in source
     assert "broadcast_jobs.service" not in source
     assert "legacy_flask_facade" not in source

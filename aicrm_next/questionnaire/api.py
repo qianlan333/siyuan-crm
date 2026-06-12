@@ -273,11 +273,13 @@ def _h5_write_error(
     source_status: str,
     write_model_status: str,
     degraded: bool = False,
+    error_code: str | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         {
             "ok": False,
             "error": message,
+            "error_code": error_code or source_status,
             "source_status": source_status,
             "write_model_status": write_model_status,
             "route_owner": "ai_crm_next",
@@ -305,6 +307,50 @@ def _h5_submit_identity_payload(payload: dict[str, Any], request: Request) -> di
     identity = _questionnaire_identity_from_request(request)
     identity.update(_h5_identity_payload(payload))
     return identity
+
+
+def _h5_submit_answers_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    for field_name in ("answers", "answer_items", "responses"):
+        if field_name not in payload:
+            continue
+        raw = payload.get(field_name)
+        if isinstance(raw, dict):
+            if not raw:
+                raise QuestionnaireH5WriteInputError("answers is required")
+            return dict(raw)
+        if isinstance(raw, list):
+            answers = _h5_answer_items_to_answers(raw)
+            if not answers:
+                raise QuestionnaireH5WriteInputError("answers is required")
+            return answers
+        raise QuestionnaireH5WriteInputError("answers must be an object")
+    raise QuestionnaireH5WriteInputError("answers is required")
+
+
+def _h5_answer_items_to_answers(items: list[Any]) -> dict[str, Any]:
+    answers: dict[str, Any] = {}
+    for index, item in enumerate(items):
+        if not isinstance(item, dict):
+            raise QuestionnaireH5WriteInputError(f"answer item {index} must be an object")
+        question_id = str(
+            item.get("question_id")
+            or item.get("question_key")
+            or item.get("id")
+            or item.get("key")
+            or ""
+        ).strip()
+        if not question_id:
+            raise QuestionnaireH5WriteInputError(f"answer item {index} question_id is required")
+        value_missing = object()
+        value = value_missing
+        for value_key in ("value", "answer", "selected_option_ids", "option_ids", "text_value"):
+            if value_key in item:
+                value = item.get(value_key)
+                break
+        if value is value_missing:
+            raise QuestionnaireH5WriteInputError(f"answer item {index} value is required")
+        answers[question_id] = value
+    return answers
 
 
 def _h5_source_payload(payload: dict[str, Any], request: Request) -> dict[str, Any]:
@@ -342,7 +388,7 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
         submit_identity.update(_h5_identity_payload(payload))
         command = QuestionnaireH5SubmitCommand(
             questionnaire_slug=slug,
-            answers=dict(payload.get("answers") or {}),
+            answers=_h5_submit_answers_payload(payload),
             identity=submit_identity,
             source=_h5_source_payload(payload, request),
             command_id=str(payload.get("command_id") or uuid4().hex),
@@ -356,7 +402,13 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
         response = execute_questionnaire_h5_submit(command)
         return JSONResponse(jsonable_encoder(response), status_code=200)
     except QuestionnaireH5WriteInputError as exc:
-        return _h5_write_error(str(exc), status_code=400, source_status="input_error", write_model_status="input_error")
+        return _h5_write_error(
+            str(exc),
+            status_code=400,
+            source_status="input_error",
+            write_model_status="input_error",
+            error_code="invalid_questionnaire_submission",
+        )
     except QuestionnaireH5AlreadySubmittedError as exc:
         return _h5_write_error(str(exc), status_code=409, source_status="already_submitted", write_model_status="already_submitted")
     except QuestionnaireH5WriteNotFoundError as exc:

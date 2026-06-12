@@ -1,193 +1,51 @@
 from __future__ import annotations
 
-import sys
-import types
+from fastapi.testclient import TestClient
 
-from flask import Flask
-
-from wecom_ability_service.domains.questionnaire import service as questionnaire_service
-from wecom_ability_service.domains.questionnaire import _service_helpers as questionnaire_helpers
+from aicrm_next.main import create_app
+from aicrm_next.questionnaire.repo import reset_questionnaire_fixture_state
 
 
-def test_questionnaire_identity_resolution_prefers_unionid_then_openid_then_external_userid(monkeypatch):
-    app = Flask(__name__)
-    app.config["WECOM_CORP_ID"] = "ww-test"
-    calls: list[tuple[str, str]] = []
-
-    class FakeResolveExternalContactIdentityQuery:
-        def __call__(self, dto):
-            if dto.unionid:
-                calls.append(("unionid", dto.unionid))
-                return None
-            if dto.openid:
-                calls.append(("openid", dto.openid))
-                return {"external_userid": "wm_ext_001", "openid": dto.openid}
-            if dto.external_userid:
-                calls.append(("external_userid", dto.external_userid))
-                return {"external_userid": dto.external_userid}
-            return None
-
-    monkeypatch.setattr(
-        questionnaire_helpers,
-        "ResolveExternalContactIdentityQuery",
-        FakeResolveExternalContactIdentityQuery,
-    )
-
-    with app.app_context():
-        resolved = questionnaire_service.resolve_questionnaire_submit_identity(
-            openid="openid-001",
-            unionid="union-001",
-            external_userid="wm_ext_001",
-        )
-
-    assert calls == [("unionid", "union-001"), ("openid", "openid-001")]
-    assert resolved["external_userid"] == "wm_ext_001"
-    assert resolved["matched_by"] == "openid"
+def _client() -> TestClient:
+    reset_questionnaire_fixture_state()
+    return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def test_apply_questionnaire_mobile_binding_routes_through_application_command(monkeypatch):
-    app = Flask(__name__)
-    app.config["WECOM_CORP_ID"] = "ww-test"
-    calls: dict[str, object] = {}
+def test_questionnaire_h5_submit_resolves_identity_into_result_contract():
+    client = _client()
 
-    class FakeBindExternalContactIdentityCommand:
-        def __call__(self, dto):
-            calls["bind_dto"] = dto
-            return {"person_id": 101, "external_userid": dto.external_userid, "mobile": dto.mobile}
-
-    class FakeResolvePersonIdentityQuery:
-        def __call__(self, dto):
-            calls["resolve_dto"] = dto
-            return {"person_id": 101, "is_bound": True}
-
-    def fake_backfill_questionnaire_submissions_for_mobile_binding(**kwargs):
-        calls["backfill"] = kwargs
-        return {"updated_count": 0, "skipped": True}
-
-    monkeypatch.setattr(
-        questionnaire_helpers,
-        "BindExternalContactIdentityCommand",
-        FakeBindExternalContactIdentityCommand,
-    )
-    monkeypatch.setattr(
-        questionnaire_helpers,
-        "ResolvePersonIdentityQuery",
-        FakeResolvePersonIdentityQuery,
-    )
-    monkeypatch.setattr(
-        questionnaire_service,
-        "backfill_questionnaire_submissions_for_mobile_binding",
-        fake_backfill_questionnaire_submissions_for_mobile_binding,
-    )
-
-    with app.app_context():
-        payload = questionnaire_service.apply_questionnaire_mobile_binding(
-            {
-                "id": 88,
-                "mobile_snapshot": "13800138000",
-                "external_userid": "wm_ext_questionnaire_001",
-                "follow_user_userid": "sales_01",
-            }
-        )
-
-    bind_dto = calls["bind_dto"]
-    resolve_dto = calls["resolve_dto"]
-    assert bind_dto.external_userid == "wm_ext_questionnaire_001"
-    assert bind_dto.owner_userid == "sales_01"
-    assert bind_dto.bind_by_userid == "questionnaire_submit"
-    assert bind_dto.mobile == "13800138000"
-    assert bind_dto.force_rebind is True
-    assert resolve_dto.external_userid == "wm_ext_questionnaire_001"
-    assert calls["backfill"] == {
-        "external_userid": "wm_ext_questionnaire_001",
-        "mobile": "13800138000",
-        "follow_user_userid": "sales_01",
-    }
-    assert payload["bound"] is True
-    assert payload["binding"]["person_id"] == 101
-
-
-def test_resolve_questionnaire_respondent_identity_prefers_session_then_request_hints():
-    sys.modules.setdefault("imghdr", types.ModuleType("imghdr"))
-
-    from wecom_ability_service.application.questionnaire.queries import (
-        ResolveQuestionnaireRespondentIdentityQuery,
-    )
-
-    resolved = ResolveQuestionnaireRespondentIdentityQuery()(
-        session_identity={
-            "respondent_key": "respondent-session-001",
-            "openid": "openid-session-001",
-            "unionid": "union-session-001",
-        },
-        request_identity={
-            "respondent_key": "respondent-request-001",
-            "openid": "openid-request-001",
-            "external_userid": "wm_ext_request_001",
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={
+            "answers": {"q_activation": "activated", "q_interest": ["ai_tools"], "q_note": "Next fixture"},
+            "respondent_identity": {"mobile": "13800138000", "external_userid": "wx_ext_001"},
+            "meta": {"source": "next-test"},
         },
     )
 
-    assert resolved == {
-        "respondent_key": "respondent-session-001",
-        "openid": "openid-session-001",
-        "unionid": "union-session-001",
-        "external_userid": "wm_ext_request_001",
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
+    assert payload["route_owner"] == "ai_crm_next"
+    assert payload["fallback_used"] is False
+    assert payload["real_external_call_executed"] is False
+    assert payload["external_userid"] == "wx_ext_001"
+    assert payload["mobile"] == "13800138000"
+
+    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{payload['submission_id']}")
+    assert result.status_code == 200
+    assert result.json()["result"]["submission_id"] == payload["submission_id"]
+
+
+def test_questionnaire_repeat_submission_is_blocked_by_identity():
+    client = _client()
+    body = {
+        "answers": {"q_activation": "activated"},
+        "respondent_identity": {"mobile": "13800138000", "external_userid": "wx_ext_001"},
     }
 
+    assert client.post("/api/h5/questionnaires/hxc-activation-v1/submit", json=body).status_code == 200
+    duplicate = client.post("/api/h5/questionnaires/hxc-activation-v1/submit", json=body)
 
-def test_complete_questionnaire_oauth_callback_builds_session_identity_and_redirect_target():
-    sys.modules.setdefault("imghdr", types.ModuleType("imghdr"))
-
-    from wecom_ability_service.application.questionnaire.commands import (
-        CompleteQuestionnaireOauthCallbackCommand,
-    )
-
-    calls: dict[str, object] = {}
-
-    def fake_exchange_oauth_code(*, app_id: str, app_secret: str, code: str):
-        calls["exchange"] = {
-            "app_id": app_id,
-            "app_secret": app_secret,
-            "code": code,
-        }
-        return {
-            "openid": "openid-userinfo-001",
-            "access_token": "access-token-001",
-        }
-
-    def fake_fetch_wechat_userinfo(*, access_token: str, openid: str):
-        calls["userinfo"] = {
-            "access_token": access_token,
-            "openid": openid,
-        }
-        return {
-            "unionid": "union-userinfo-001",
-        }
-
-    result = CompleteQuestionnaireOauthCallbackCommand()(
-        code="oauth-code-001",
-        state_payload={
-            "slug": "questionnaire-slug-001",
-            "source_channel": "朋友圈",
-            "campaign_id": "cmp-001",
-        },
-        app_id="wx-test-appid",
-        app_secret="wx-test-secret",
-        oauth_scope="snsapi_userinfo",
-        exchange_oauth_code=fake_exchange_oauth_code,
-        fetch_wechat_userinfo_fn=fake_fetch_wechat_userinfo,
-    )
-
-    assert calls["exchange"] == {
-        "app_id": "wx-test-appid",
-        "app_secret": "wx-test-secret",
-        "code": "oauth-code-001",
-    }
-    assert calls["userinfo"] == {
-        "access_token": "access-token-001",
-        "openid": "openid-userinfo-001",
-    }
-    assert result["session_identity"]["openid"] == "openid-userinfo-001"
-    assert result["session_identity"]["unionid"] == "union-userinfo-001"
-    assert result["session_identity"]["respondent_key"] == "union-userinfo-001"
-    assert result["redirect_target"] == "/s/questionnaire-slug-001?source_channel=%E6%9C%8B%E5%8F%8B%E5%9C%88&campaign_id=cmp-001"
+    assert duplicate.status_code == 409
+    assert duplicate.json()["fallback_used"] is False

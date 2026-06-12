@@ -18,7 +18,6 @@ from aicrm_next.admin_read_model.errors import AdminReadModelError
 
 
 FRONTEND_ADMIN_REAL_DATA = ROOT / "aicrm_next" / "frontend_compat" / "admin_real_data.py"
-FRONTEND_LEGACY_ROUTES = ROOT / "aicrm_next" / "frontend_compat" / "legacy_routes.py"
 ADMIN_REPO = ROOT / "aicrm_next" / "admin_read_model" / "repo.py"
 
 DIRECT_SQL_PATTERN = re.compile(r"SELECT\s+|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM|psycopg|dict_row|\.connect\(", re.I)
@@ -122,17 +121,12 @@ def run_check() -> dict[str, Any]:
     warnings: list[str] = []
 
     admin_real_data = _read(FRONTEND_ADMIN_REAL_DATA)
-    legacy_routes = _read(FRONTEND_LEGACY_ROUTES)
     admin_repo = _read(ADMIN_REPO)
 
     if "psycopg" in admin_real_data:
         blockers.append("frontend_compat_admin_real_data_imports_psycopg")
     if DIRECT_SQL_PATTERN.search(admin_real_data):
         blockers.append("frontend_compat_admin_real_data_contains_sql_or_db_driver")
-    if DIRECT_SQL_PATTERN.search(legacy_routes):
-        blockers.append("frontend_compat_legacy_routes_contains_direct_sql")
-    if "admin_read_model.application" not in legacy_routes:
-        blockers.append("legacy_routes_does_not_call_admin_read_model_application")
     if "psycopg" not in admin_repo:
         blockers.append("admin_read_model_repo_missing_psycopg_boundary")
 
@@ -145,7 +139,6 @@ def run_check() -> dict[str, Any]:
         "warnings": warnings,
         "checks": {
             "frontend_compat_admin_real_data_no_psycopg": "frontend_compat_admin_real_data_imports_psycopg" not in blockers,
-            "frontend_compat_legacy_routes_no_direct_sql": "frontend_compat_legacy_routes_contains_direct_sql" not in blockers,
             "admin_read_model_repo_is_db_boundary": "admin_read_model_repo_missing_psycopg_boundary" not in blockers,
             "production_sql_failure_degrades": not any(blocker.startswith("production_sql_failure") for blocker in blockers),
             "production_success_no_local_contract": "production_success_contains_local_contract_marker" not in blockers,

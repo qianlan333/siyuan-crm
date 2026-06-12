@@ -11,20 +11,11 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 ROOT = REPO_ROOT
 PYTHON_TARGETS = [
-    "wecom_ability_service/db",
-    "wecom_ability_service/infra/settings.py",
-    "wecom_ability_service/domains/admin_config/service.py",
-    "wecom_ability_service/domains/admin_dashboard/service.py",
-    "wecom_ability_service/http/admin_console.py",
-    "wecom_ability_service/domains/admin_console/customer_profile_service.py",
-    "wecom_ability_service/http/admin_customers.py",
     "scripts/run_lint.py",
     "scripts/run_typecheck.py",
-    "scripts/run_build.py",
     "scripts/script_runtime.py",
 ]
 SCAN_ROOTS = [
-    ROOT / "wecom_ability_service",
     ROOT / "tests",
     ROOT / "scripts",
 ]

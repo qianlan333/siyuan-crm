@@ -6,6 +6,7 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
+from aicrm_next.automation_engine.group_ops.message_content import normalize_miniprogram_attachment_payload
 from aicrm_next.integration_gateway.wecom_media_upload_client import build_wecom_media_upload_client
 from aicrm_next.media_library.postgres_repo import PostgresMediaLibraryRepository
 from aicrm_next.send_content.repo import InMemorySendContentRepository
@@ -109,6 +110,9 @@ class GroupOpsMaterialResolver(Protocol):
     ) -> tuple[list[dict[str, Any]], list[str]]:
         ...
 
+    def resolve_wecom_ready_miniprogram(self, material_id: int) -> dict[str, Any]:
+        ...
+
 
 class _BaseGroupOpsMaterialResolver:
     def __init__(
@@ -142,6 +146,9 @@ class _BaseGroupOpsMaterialResolver:
             attachments.append(self._resolve_file_attachment(attachment_id))
 
         return attachments, image_media_ids
+
+    def resolve_wecom_ready_miniprogram(self, material_id: int) -> dict[str, Any]:
+        return self._resolve_miniprogram_attachment(int(material_id))
 
     def _now_utc(self) -> datetime:
         return self._now or datetime.now(timezone.utc)
@@ -224,6 +231,8 @@ class _BaseGroupOpsMaterialResolver:
                 thumb_media_id = self._resolve_image_media_id(int(item.get("thumb_image_id") or 0))
             except Exception as exc:
                 raise self._error("miniprogram_resolve_failed", miniprogram_id, exc) from exc
+            if thumb_media_id:
+                self._cache_miniprogram_thumb_media_id(miniprogram_id, thumb_media_id, _expiry(now))
         if not thumb_media_id and _text(item.get("thumb_image_base64")):
             thumb_media_id = self._upload_miniprogram_thumb(miniprogram_id, item, now)
         if not thumb_media_id and _text(item.get("thumb_image_url")):
@@ -233,31 +242,34 @@ class _BaseGroupOpsMaterialResolver:
 
         return {
             "msgtype": "miniprogram",
-            "miniprogram": {
-                "appid": appid,
-                "pagepath": pagepath,
-                "title": title,
-                "thumb_media_id": thumb_media_id,
-            },
+            "miniprogram": normalize_miniprogram_attachment_payload(
+                {
+                    "appid": appid,
+                    "pagepath": pagepath,
+                    "title": title,
+                    "thumb_media_id": thumb_media_id,
+                }
+            ),
         }
 
     def _upload_miniprogram_thumb(self, miniprogram_id: int, item: JsonDict, now: datetime) -> str:
         if self._fake_media_enabled:
-            return _fake_media_id("miniprogram_thumb", miniprogram_id, item)
-        if not self._real_upload_enabled:
-            raise self._error("miniprogram_resolve_failed", miniprogram_id, "real_upload_not_enabled")
-        payload = _decode_base64(item.get("thumb_image_base64"))
-        if not payload:
-            raise self._error("miniprogram_resolve_failed", miniprogram_id, "missing_thumb_image_data")
-        try:
-            uploaded = self._uploader_client().upload_image(
-                f"miniprogram_thumb_{miniprogram_id}.png",
-                payload,
-                "image/png",
-            )
-            media_id = _text(uploaded.get("media_id"))
-        except Exception as exc:
-            raise self._error("miniprogram_resolve_failed", miniprogram_id, exc) from exc
+            media_id = _fake_media_id("miniprogram_thumb", miniprogram_id, item)
+        else:
+            if not self._real_upload_enabled:
+                raise self._error("miniprogram_resolve_failed", miniprogram_id, "real_upload_not_enabled")
+            payload = _decode_base64(item.get("thumb_image_base64"))
+            if not payload:
+                raise self._error("miniprogram_resolve_failed", miniprogram_id, "missing_thumb_image_data")
+            try:
+                uploaded = self._uploader_client().upload_image(
+                    f"miniprogram_thumb_{miniprogram_id}.png",
+                    payload,
+                    "image/png",
+                )
+                media_id = _text(uploaded.get("media_id"))
+            except Exception as exc:
+                raise self._error("miniprogram_resolve_failed", miniprogram_id, exc) from exc
         if not media_id:
             raise self._error("miniprogram_resolve_failed", miniprogram_id, "empty_thumb_media_id")
         self._cache_miniprogram_thumb_media_id(miniprogram_id, media_id, _expiry(now))

@@ -10,7 +10,7 @@ Scope: backend questionnaire admin write replacement only. Public H5 submit, OAu
 | --- | --- | --- | --- |
 | `/api/admin/questionnaires` | `POST` | Admin create wrote through legacy facade in production and fixture command locally. | Replaced with `questionnaire.admin.create` on Next CommandBus. |
 | `/api/admin/questionnaires/{questionnaire_id}` | `PUT` | Admin update wrote through legacy facade in production and fixture command locally. | Replaced with `questionnaire.admin.update` on Next CommandBus. |
-| `/api/admin/questionnaires/{questionnaire_id}` | `DELETE` | Admin delete wrote through legacy facade in production and hard-deleted fixture locally. | Replaced with `questionnaire.admin.delete` soft-delete/disable command. |
+| `/api/admin/questionnaires/{questionnaire_id}` | `DELETE` | Admin delete wrote through legacy facade in production and hard-deleted fixture locally. | Replaced with `questionnaire.admin.delete` hard-delete command; API requires the questionnaire to be disabled first. |
 | `/api/admin/questionnaires/{questionnaire_id}/enable` | `POST` | Admin enable wrote through legacy facade in production and fixture command locally. | Replaced with `questionnaire.admin.enable` on Next CommandBus. |
 | `/api/admin/questionnaires/{questionnaire_id}/disable` | `POST` | Admin disable wrote through legacy facade in production and fixture command locally. | Replaced with `questionnaire.admin.disable` on Next CommandBus. |
 | `/api/admin/questionnaires/{questionnaire_id}/export` | `GET` | Export generated/downloaded data directly, using legacy facade in production. | Replaced with `questionnaire.admin.export_download`; returns a CSV response stream without creating a server-side file or storage side effect. |
@@ -38,7 +38,7 @@ Responses include:
 
 ## Production Boundary
 
-When production data is ready, create/update/duplicate/publish/enable/disable/delete/export-preview execute through the Next questionnaire admin CommandBus and Postgres questionnaire repository. The legacy Flask questionnaire admin write rollback has been removed; fixture data is not used as production data.
+When production data is ready, create/update/duplicate/publish/enable/disable/delete/export-preview execute through the Next questionnaire admin CommandBus and Postgres questionnaire repository. Delete is only accepted after the questionnaire has been disabled and then removes the questionnaire row through the repository. The legacy Flask questionnaire admin write rollback has been removed; fixture data is not used as production data.
 
 The active Next handler owns the route surface in both production and fixture/local mode. No production fallback remains for admin persistence commands; duplicate/publish/export preview/export download remain guarded Next commands with `legacy rollback removed`.
 

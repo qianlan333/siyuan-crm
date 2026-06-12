@@ -61,6 +61,7 @@ ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
         "api.admin_wechat_pay_transactions_page",
         "/admin/wechat-pay/transactions",
     ),
+    "api.admin_orders_page": AdminRoute("api.admin_orders_page", "/admin/orders"),
     "api.admin_wechat_pay_products_page": AdminRoute(
         "api.admin_wechat_pay_products_page",
         "/admin/wechat-pay/products",
@@ -106,6 +107,8 @@ def admin_path_for(name: str, **path_params: object) -> str:
         return "/admin/automation-conversion/group-ops/plans/" + str(path_params.get("plan_id", "")).strip()
     if name == "api.admin_wechat_pay_transaction_detail_page":
         return "/admin/wechat-pay/transactions/" + str(path_params.get("order_id", "")).strip()
+    if name == "api.admin_wechat_shop_transaction_detail_page":
+        return "/admin/wechat-shop/transactions/" + str(path_params.get("order_id", "")).strip()
     if name == "api.admin_console_questionnaire_detail":
         return "/admin/questionnaires/" + str(path_params.get("questionnaire_id", "")).strip()
 
@@ -155,7 +158,7 @@ ADMIN_NAV_GROUPS: list[dict[str, Any]] = [
     {
         "title": "交易",
         "items": [
-            {"key": "wechat_pay_transactions", "label": "交易管理", "endpoint": "api.admin_wechat_pay_transactions_page"},
+            {"key": "wechat_pay_transactions", "label": "交易管理", "endpoint": "api.admin_orders_page"},
             {"key": "wechat_pay_products", "label": "商品管理", "endpoint": "api.admin_wechat_pay_products_page"},
         ],
     },

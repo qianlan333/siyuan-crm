@@ -18,8 +18,9 @@ def test_public_pay_landing_remains_display_only_and_out_of_scope(monkeypatch) -
 
     assert response.status_code == 200
     assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
-    assert 'data-payment-request-executed="false"' in response.text
-    assert 'data-order-create-executed="false"' in response.text
+    assert 'data-route-owner="ai_crm_next"' in response.text
+    assert 'data-fallback-used="false"' in response.text
+    assert "确认报名信息" in response.text
     assert "/api/checkout/wechat" not in response.text
     assert "/api/checkout/alipay" not in response.text
 

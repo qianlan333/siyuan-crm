@@ -4,7 +4,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
 from aicrm_next.main import create_app
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,13 +35,7 @@ def test_group_ops_admin_pages_render_from_next_native_bundle(monkeypatch) -> No
 
 
 def test_group_ops_admin_routes_are_removed_from_frontend_compat() -> None:
-    retired_routes = {
-        "/admin/automation-conversion/group-ops/ui",
-        "/admin/automation-conversion/group-ops/plans/{plan_id}",
-        "/admin/automation-conversion/group-ops/groups/ui",
-    }
-
-    assert retired_routes.isdisjoint(set(LEGACY_FRONTEND_ROUTES))
+    assert not (FRONTEND_COMPAT / "legacy_routes.py").exists()
     assert (GROUP_OPS_BUNDLE / "admin_pages.py").exists()
     assert (GROUP_OPS_BUNDLE / "templates/admin_console/group_ops.html").exists()
     assert (GROUP_OPS_BUNDLE / "static/admin_console/group_ops.css").exists()
@@ -50,8 +43,3 @@ def test_group_ops_admin_routes_are_removed_from_frontend_compat() -> None:
     assert not (FRONTEND_COMPAT / "templates/admin_console/group_ops.html").exists()
     assert not (FRONTEND_COMPAT / "static/admin_console/group_ops.css").exists()
     assert not (FRONTEND_COMPAT / "static/admin_console/group_ops.js").exists()
-
-    legacy_source = (FRONTEND_COMPAT / "legacy_routes.py").read_text(encoding="utf-8")
-    assert "def admin_group_ops_ui" not in legacy_source
-    assert "def admin_group_ops_plan_detail" not in legacy_source
-    assert "def admin_group_ops_groups_ui" not in legacy_source

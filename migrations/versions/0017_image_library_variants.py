@@ -1,7 +1,7 @@
 """image_library variants for thumbnails and previews
 
 Revision ID: 0017
-Revises: 0016
+Revises: 0016_wecom_corp_tag_catalog
 Create Date: 2026-05-26
 
 Store generated image variants in the database first, while keeping the

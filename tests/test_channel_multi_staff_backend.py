@@ -65,7 +65,7 @@ def _cap_assignees(first: int = 1, second: int = 1) -> list[dict]:
 
 
 def test_channel_multi_staff_migration_contains_required_schema():
-    source = Path("migrations/versions/0037_channel_multi_staff_assignment.py").read_text()
+    source = Path("migrations/versions/0036_channel_multi_staff_assignment.py").read_text()
 
     for token in (
         "assignment_mode",

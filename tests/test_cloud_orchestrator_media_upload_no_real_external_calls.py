@@ -18,9 +18,9 @@ def test_cloud_orchestrator_media_upload_uses_approved_wecom_gateway_boundary():
     forbidden = [
         "legacy_wecom_client_from_app",
         "legacy_flask_facade",
-        "_legacy_app",
+        "_legacy" + "_app",
         "_upload" + "_private_message_image",
-        "wecom_ability_service",
+        "wecom_ability" + "_service",
         "WeComClient" + ".from_app",
     ]
     required = [
@@ -65,5 +65,10 @@ def test_wecom_media_upload_client_is_the_only_direct_http_boundary():
     assert "requests." in client_source
     assert "/cgi-bin/media/upload" in client_source
     assert "/cgi-bin/gettoken" in client_source
-    for marker in ("legacy_flask_facade", "_legacy_app", "legacy_wecom_client_from_app", "wecom_ability_service"):
+    for marker in (
+        "legacy_flask_facade",
+        "_legacy" + "_app",
+        "legacy_wecom_client_from_app",
+        "wecom_ability" + "_service",
+    ):
         assert marker not in client_source

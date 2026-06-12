@@ -25,12 +25,12 @@ ROUTE_MATRIX: list[dict[str, Any]] = [
         "probe_method": "GET",
         "probe_path": "/sidebar/bind-mobile",
         "current_owner": "next exact readonly",
-        "future_next_owner": "frontend_compat",
-        "data_source": "frontend_compat readonly page",
+        "future_next_owner": "identity_contact",
+        "data_source": "identity_contact readonly page",
         "access": "readonly_page",
         "write_guard": "n/a",
         "expected_facade": "",
-        "expected_endpoint_module": "aicrm_next.frontend_compat.legacy_routes",
+        "expected_endpoint_module": "aicrm_next.identity_contact.admin_pages",
         "next_exact_owner_status": "next exact readonly",
     },
     {
@@ -64,13 +64,14 @@ ROUTE_MATRIX: list[dict[str, Any]] = [
         "probe_method": "POST",
         "probe_path": "/api/sidebar/bind-mobile",
         "probe_json": {},
-        "current_owner": "production_compat legacy_forward",
+        "current_owner": "next command",
         "future_next_owner": "identity_contact",
         "data_source": "identity_contact",
         "access": "write_identity_mobile_binding",
         "write_guard": "guarded_invalid_payload_probe_only",
-        "expected_facade": "legacy_flask_facade",
-        "next_exact_owner_status": "missing Next exact owner",
+        "expected_facade": "",
+        "expected_endpoint_module": "aicrm_next.sidebar_write.api",
+        "next_exact_owner_status": "next command",
     },
     {
         "route_pattern": "/api/sidebar/lead-pool/*",
@@ -141,7 +142,7 @@ ROUTE_MATRIX: list[dict[str, Any]] = [
         "route_pattern": "/api/admin/automation-conversion/member",
         "probe_method": "GET",
         "probe_path": "/api/admin/automation-conversion/member",
-        "current_owner": "next",
+        "current_owner": "next exact readonly",
         "future_next_owner": "automation_engine",
         "data_source": "next automation read model",
         "access": "readonly_automation_member_detail",
@@ -153,13 +154,13 @@ ROUTE_MATRIX: list[dict[str, Any]] = [
         "route_pattern": "/api/admin/automation-conversion/member/*",
         "probe_method": "OPTIONS",
         "probe_path": "/api/admin/automation-conversion/member/put-in-pool",
-        "current_owner": "production_compat legacy_forward",
+        "current_owner": "next command",
         "future_next_owner": "automation_engine",
-        "data_source": "production postgres via legacy facade",
+        "data_source": "automation_engine command adapter",
         "access": "write_automation_member_state",
         "write_guard": "guarded_invalid_payload_probe_only",
-        "expected_facade": "legacy_flask_facade",
-        "next_exact_owner_status": "missing Next exact owner",
+        "expected_facade": "",
+        "next_exact_owner_status": "next command",
     },
 ]
 
@@ -176,8 +177,8 @@ def production_sidebar_probe_env():
     }
     os.environ["AICRM_NEXT_ENV"] = "production"
     os.environ.setdefault("DATABASE_URL", "postgresql://sidebar:sidebar@127.0.0.1:1/aicrm_sidebar_probe")
-    os.environ["AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE"] = "1"
-    os.environ.pop("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", None)
+    os.environ.pop("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", None)
+    os.environ["AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE"] = "1"
     os.environ.setdefault("SECRET_KEY", "sidebar-profile-next-owner-readiness")
     os.environ.setdefault("AUTOMATION_INTERNAL_API_TOKEN", "sidebar-profile-next-owner-readiness")
     try:
@@ -254,6 +255,7 @@ def _validate_matrix() -> list[str]:
         "production_compat legacy_forward",
         "exact compatibility facade",
         "next exact readonly",
+        "next command",
         "missing Next exact owner",
         "blocked",
     }

@@ -31,9 +31,8 @@ Search evidence:
 
 - `aicrm_next/customer_read_model/api.py` owns customer context, profile, tags, lead-pool status, signup-tag status, and marketing status readonly routes.
 - `aicrm_next/identity_contact/api.py` owns contact-binding-status and binding-status readonly routes.
-- `aicrm_next/production_compat/api.py` has been removed; sidebar write paths, JSSDK signing, v2 profile writes, and material send writes are not owned by production_compat.
-- `aicrm_next/customer_read_model/api.py` does not import the old sidebar read facade for the group 4 readonly routes.
-- `scripts/check_no_new_legacy.py --strict` now blocks readonly route production_compat fallback, legacy sidebar facade use, compatibility facade headers, `fallback_used=true`, and registry/manifest legacy fallback regressions.
+- Sidebar readonly business tests cover customer context, profile, tags, binding status, lead-pool status, signup-tag status, and marketing status read paths.
+- JSSDK signing, sidebar write paths, v2 profile writes, and material send writes remain separate business capability areas.
 
 Non-goals:
 

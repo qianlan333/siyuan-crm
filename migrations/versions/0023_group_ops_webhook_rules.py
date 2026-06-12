@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+
+import sqlalchemy as sa
 from alembic import op
 
 revision = "0023_group_ops_webhook_rules"
@@ -11,6 +14,35 @@ depends_on = None
 
 
 def upgrade() -> None:
+    params_schema = {
+        "lookback_days": {"type": "integer", "default": 30, "label": "观察窗口"},
+        "feature_codes": {
+            "type": "array",
+            "default": ["crm_task_publish", "group_activation", "ai_followup"],
+            "label": "核心功能列表",
+        },
+        "min_usage_count": {"type": "integer", "default": 1, "label": "最小使用次数"},
+        "high_intent_chat_count": {
+            "type": "integer",
+            "default": 3,
+            "label": "高意向聊天次数",
+        },
+    }
+    output_schema = {
+        "user_id": "string",
+        "external_user_id": "string",
+        "layer_key": "string",
+        "score": "number",
+        "reason": "string",
+        "computed_at": "datetime",
+        "rule_version": "integer",
+    }
+    refresh_policy = {
+        "mode": "manual_or_cron",
+        "cron": "0 */2 * * *",
+        "timezone": "Asia/Shanghai",
+    }
+
     for column_sql in (
         "ALTER TABLE automation_group_ops_plans ADD COLUMN IF NOT EXISTS default_action_type TEXT NOT NULL DEFAULT 'record_only'",
         "ALTER TABLE automation_group_ops_plans ADD COLUMN IF NOT EXISTS allow_no_sop BOOLEAN NOT NULL DEFAULT TRUE",
@@ -182,24 +214,35 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        """
+        sa.text(
+            """
         INSERT INTO audience_rule_version (
             rule_id, version, executor_type, code_or_sql, params_schema, output_schema, refresh_policy, status, published_at
         )
         SELECT
             id,
-            1,
-            'module',
-            'builtin:has_used_core_feature',
-            '{"lookback_days":{"type":"integer","default": 30,"label":"观察窗口"},"feature_codes":{"type":"array","default":["crm_task_publish","group_activation","ai_followup"],"label":"核心功能列表"},"min_usage_count":{"type":"integer","default": 1,"label":"最小使用次数"},"high_intent_chat_count":{"type":"integer","default": 3,"label":"高意向聊天次数"}}'::jsonb,
-            '{"user_id":"string","external_user_id":"string","layer_key":"string","score":"number","reason":"string","computed_at":"datetime","rule_version":"integer"}'::jsonb,
-            '{"mode":"manual_or_cron","cron":"0 */2 * * *","timezone":"Asia/Shanghai"}'::jsonb,
-            'active',
+            :version,
+            :executor_type,
+            :code_or_sql,
+            CAST(:params_schema AS jsonb),
+            CAST(:output_schema AS jsonb),
+            CAST(:refresh_policy AS jsonb),
+            :status,
             CURRENT_TIMESTAMP
         FROM audience_rule
-        WHERE rule_key = 'has_used_core_feature'
+        WHERE rule_key = :rule_key
         ON CONFLICT (rule_id, version) DO NOTHING
         """
+        ).bindparams(
+            version=1,
+            executor_type="module",
+            code_or_sql="builtin:has_used_core_feature",
+            params_schema=json.dumps(params_schema, ensure_ascii=False),
+            output_schema=json.dumps(output_schema, ensure_ascii=False),
+            refresh_policy=json.dumps(refresh_policy, ensure_ascii=False),
+            status="active",
+            rule_key="has_used_core_feature",
+        )
     )
 
 

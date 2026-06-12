@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any, Callable, ContextManager
+
+from aicrm_next.shared.postgres_connection import db_session
 
 from .domain import ENTRY_CHANGE_TYPES, text
-from .identity_bridge_repo import IdentityBridgeRepository, build_identity_bridge_repository
+from .identity_bridge_repo import IdentityBridgeRepository, PostgresIdentityBridgeRepository, build_identity_bridge_repository
 from .wecom_adapter import WeComAdapterBlocked, WeComApiError, get_wecom_adapter
 
 SIDEBAR_IDENTITY_REFRESH_INTERVAL_SECONDS = 60
@@ -69,6 +72,11 @@ class IdentityBridgeService:
         self.repository = repository or build_identity_bridge_repository()
         self._adapter_factory = adapter_factory
 
+    def _repository_session(self) -> ContextManager[Any]:
+        if isinstance(self.repository, PostgresIdentityBridgeRepository):
+            return db_session()
+        return nullcontext()
+
     def identity_bridge_state(self, external_userid: str) -> dict[str, Any]:
         state = dict(self.repository.identity_bridge_state(text(external_userid)) or {})
         state["age_seconds"] = _age_seconds(state.get("updated_at"))
@@ -85,66 +93,56 @@ class IdentityBridgeService:
         if not external:
             return {"status": "skipped", "reason": "external_userid_missing"}
 
-        existing = dict(self.repository.get_contact_binding_status(external, owner_userid) or {})
-        candidate = self.repository.get_unique_mobile_candidate_from_identity_sources(external)
-        if existing.get("is_bound"):
-            if candidate and text(candidate.get("mobile")) and text(candidate.get("mobile")) != text(existing.get("mobile")) and not force_rebind:
-                return {
-                    "status": "conflict",
-                    "reason": "external_userid already bound to another mobile",
-                    "mobile": text(candidate.get("mobile")),
-                    "binding": existing,
-                }
-            return {"status": "already_bound", "mobile": text(existing.get("mobile")), "binding": existing}
+        with self._repository_session():
+            existing = dict(self.repository.get_contact_binding_status(external, owner_userid) or {})
+            candidate = self.repository.get_unique_mobile_candidate_from_identity_sources(external)
+            if existing.get("is_bound"):
+                if candidate and text(candidate.get("mobile")) and text(candidate.get("mobile")) != text(existing.get("mobile")) and not force_rebind:
+                    return {
+                        "status": "conflict",
+                        "reason": "external_userid already bound to another mobile",
+                        "mobile": text(candidate.get("mobile")),
+                        "binding": existing,
+                    }
+                return {"status": "already_bound", "mobile": text(existing.get("mobile")), "binding": existing}
 
-        if not candidate:
-            return {"status": "skipped", "reason": "no_single_candidate"}
+            if not candidate:
+                return {"status": "skipped", "reason": "no_single_candidate"}
 
-        mobile = text(candidate.get("mobile"))
-        owner = self.repository.resolve_binding_owner_userid(external, owner_userid)
-        person_id, normalized_mobile = self.repository.get_or_create_person_for_mobile(mobile)
-        binding = self.repository.upsert_external_contact_binding_record(
-            external_userid=external,
-            person_id=person_id,
-            bind_by_userid=text(bind_by_userid) or owner or "wecom_external_contact_callback",
-            owner_userid=owner,
-            force_rebind=force_rebind,
-        )
-        lead_pool_merge = self.repository.merge_lead_pool_after_mobile_bind(
-            external_userid=external,
-            mobile=normalized_mobile,
-            owner_userid=owner,
-        )
-        return {
-            "status": "bound",
-            "mobile": normalized_mobile,
-            "candidate": dict(candidate),
-            "binding": binding,
-            "lead_pool_merge": lead_pool_merge,
-        }
+            mobile = text(candidate.get("mobile"))
+            owner = self.repository.resolve_binding_owner_userid(external, owner_userid)
+            person_id, normalized_mobile = self.repository.get_or_create_person_for_mobile(mobile)
+            binding = self.repository.upsert_external_contact_binding_record(
+                external_userid=external,
+                person_id=person_id,
+                bind_by_userid=text(bind_by_userid) or owner or "wecom_external_contact_callback",
+                owner_userid=owner,
+                force_rebind=force_rebind,
+            )
+            lead_pool_merge = self.repository.merge_lead_pool_after_mobile_bind(
+                external_userid=external,
+                mobile=normalized_mobile,
+                owner_userid=owner,
+            )
+            return {
+                "status": "bound",
+                "mobile": normalized_mobile,
+                "candidate": dict(candidate),
+                "binding": binding,
+                "lead_pool_merge": lead_pool_merge,
+            }
 
-    def sync_external_contact_identity_for_event(self, event: dict[str, Any], *, corp_id: str = "") -> dict[str, Any]:
-        if text(event.get("Event")) != "change_external_contact" or text(event.get("ChangeType")) not in ENTRY_CHANGE_TYPES:
-            return {"status": "skipped", "reason": "unsupported_event"}
-        external_userid = text(event.get("ExternalUserID"))
-        owner_userid = text(event.get("UserID"))
-        if not external_userid:
-            return {"status": "skipped", "reason": "external_userid_missing"}
-
-        try:
-            adapter = self._adapter_factory()
-            detail_loader = getattr(adapter, "get_external_contact_detail", None)
-            if not callable(detail_loader):
-                return {"status": "skipped", "reason": "adapter_missing_get_external_contact_detail"}
-            detail = detail_loader(external_userid)
-            if int((detail or {}).get("errcode") or 0) != 0:
-                return {"status": "failed", "reason": "wecom_api_error", "wecom_result": dict(detail or {})}
-            detail_payload = dict(detail or {})
-            owner_userid = _preferred_owner_userid(owner_userid, detail_payload)
-            effective_corp_id = text(corp_id) or text(os.getenv("WECOM_CORP_ID"))
-
+    def _sync_external_contact_identity_for_detail(
+        self,
+        *,
+        detail_payload: dict[str, Any],
+        external_userid: str,
+        owner_userid: str,
+        corp_id: str,
+    ) -> dict[str, Any]:
+        with self._repository_session():
             record = self.repository.normalize_external_contact_identity(
-                effective_corp_id,
+                corp_id,
                 detail_payload,
                 owner_userid,
                 status="active",
@@ -154,12 +152,12 @@ class IdentityBridgeService:
 
             identity_map_id = self.repository.upsert_external_contact_identity(record)
             self.repository.replace_external_contact_follow_users(
-                effective_corp_id,
+                corp_id,
                 external_userid,
                 list((detail_payload or {}).get("follow_user") or []),
                 preferred_userid=owner_userid,
             )
-            self.repository.refresh_external_contact_identity_owner(effective_corp_id, external_userid)
+            self.repository.refresh_external_contact_identity_owner(corp_id, external_userid)
             mobile_binding = self.bind_mobile_from_identity_sources(
                 external_userid,
                 owner_userid=owner_userid,
@@ -180,6 +178,32 @@ class IdentityBridgeService:
                 "mobile_binding": mobile_binding,
                 "questionnaire_backfill": questionnaire_backfill,
             }
+
+    def sync_external_contact_identity_for_event(self, event: dict[str, Any], *, corp_id: str = "") -> dict[str, Any]:
+        if text(event.get("Event")) != "change_external_contact" or text(event.get("ChangeType")) not in ENTRY_CHANGE_TYPES:
+            return {"status": "skipped", "reason": "unsupported_event"}
+        external_userid = text(event.get("ExternalUserID"))
+        owner_userid = text(event.get("UserID"))
+        if not external_userid:
+            return {"status": "skipped", "reason": "external_userid_missing"}
+
+        try:
+            adapter = self._adapter_factory()
+            detail_loader = getattr(adapter, "get_external_contact_detail", None)
+            if not callable(detail_loader):
+                return {"status": "skipped", "reason": "adapter_missing_get_external_contact_detail"}
+            detail = detail_loader(external_userid)
+            if int((detail or {}).get("errcode") or 0) != 0:
+                return {"status": "failed", "reason": "wecom_api_error", "wecom_result": dict(detail or {})}
+            detail_payload = dict(detail or {})
+            owner_userid = _preferred_owner_userid(owner_userid, detail_payload)
+            effective_corp_id = text(corp_id) or text(os.getenv("WECOM_CORP_ID"))
+            return self._sync_external_contact_identity_for_detail(
+                detail_payload=detail_payload,
+                external_userid=external_userid,
+                owner_userid=owner_userid,
+                corp_id=effective_corp_id,
+            )
         except Exception as exc:
             reason, failure = _adapter_failure(exc)
             return {"status": "failed", "reason": reason, **failure}

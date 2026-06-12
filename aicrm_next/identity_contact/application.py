@@ -6,9 +6,9 @@ from aicrm_next.integration_gateway.customer_sync_adapters import build_identity
 from aicrm_next.shared.runtime import production_data_ready
 from aicrm_next.shared.typing import JsonDict
 
-from .domain import normalize_identity_request
-from .dto import IdentityResolution, ResolvePersonIdentityRequest
-from .repo import FixtureIdentityRepository, PostgresIdentityRepository
+from .domain import normalize_identity_request, normalize_mobile_binding_request
+from .dto import BindMobileToExternalContactRequest, IdentityResolution, ResolvePersonIdentityRequest
+from .repo import FixtureIdentityRepository, IdentityBindingRepository, PostgresIdentityRepository, build_identity_binding_repository
 
 
 class ResolvePersonIdentityQuery:
@@ -232,6 +232,24 @@ class UpsertIdentityMappingCommand:
             person_id=person_id,
             corp_id=corp_id,
             idempotency_key=idempotency_key,
+        )
+
+    __call__ = execute
+
+
+class BindMobileToExternalContactCommand:
+    def __init__(self, repo: IdentityBindingRepository | None = None) -> None:
+        self._repo = repo or build_identity_binding_repository()
+
+    def execute(self, request: BindMobileToExternalContactRequest) -> JsonDict:
+        normalized = normalize_mobile_binding_request(request)
+        return self._repo.bind_mobile_to_external_contact(
+            external_userid=normalized.external_userid,
+            mobile=normalized.mobile,
+            owner_userid=normalized.owner_userid or "",
+            bind_by_userid=normalized.bind_by_userid or "",
+            customer_name=normalized.customer_name or "",
+            force_rebind=normalized.force_rebind,
         )
 
     __call__ = execute

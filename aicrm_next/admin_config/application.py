@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aicrm_next.admin_jobs.routes import ensure_admin_action_token
 
+from .category_registry import CONFIG_CATEGORIES, ConfigCategory, ConfigCategoryField, get_config_category
 from .definitions import APP_SETTING_DEFINITIONS
 from .repository import AdminConfigRepository
 from .schema import CONFIG_SCHEMA, build_config_checklist, validate_config
@@ -14,6 +15,7 @@ from .settings import SENSITIVE_KEYS, mask_value
 
 
 TARGET_APP_SETTING = "app_setting"
+TARGET_CONFIG_CATEGORY_ENABLED = "config_category_enabled"
 TARGET_ADMIN_USER = "admin_user"
 TARGET_MCP_TOOL_SETTING = "mcp_tool_setting"
 TARGET_MARKETING_AUTOMATION_CONFIG = "marketing_automation_config"
@@ -49,6 +51,123 @@ MCP_TOOL_GROUP_LABELS = {
     "config": "配置规则",
     "ops": "同步任务",
     "misc": "其他",
+}
+HTTP_URL_SETTING_KEYS = {
+    "ADMIN_LOGIN_REDIRECT_URI",
+    "WECOM_API_BASE",
+    "DEEPSEEK_BASE_URL",
+    "OPENCLAW_WEBHOOK_URL",
+    "LAOHUANG_CHAT_WEBHOOK_URL",
+    "QUESTIONNAIRE_SUBMIT_WEBHOOK_URL",
+    "WECHAT_PAY_NOTIFY_URL",
+    "WECHAT_PAY_API_BASE",
+    "ALIPAY_SERVER_URL",
+    "ALIPAY_NOTIFY_URL",
+    "ALIPAY_RETURN_URL",
+    "WECHAT_SHOP_API_BASE",
+}
+JSON_SETTING_KEYS = {"WECHAT_PAY_PRODUCT_CATALOG_JSON"}
+EXTRA_SETTING_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "SIDEBAR_PRODUCT_CONTEXT_TOKEN_TTL_SECONDS": {
+        "key": "SIDEBAR_PRODUCT_CONTEXT_TOKEN_TTL_SECONDS",
+        "label": "侧边栏商品上下文有效期",
+        "mode": "editable",
+        "input_type": "number",
+        "type": "integer",
+        "description": "侧边栏商品签名上下文 token 有效期（秒）。",
+        "min": 1,
+    },
+    "SIDEBAR_CONTEXT_TOKEN_TTL_SECONDS": {
+        "key": "SIDEBAR_CONTEXT_TOKEN_TTL_SECONDS",
+        "label": "侧边栏上下文兼容有效期",
+        "mode": "editable",
+        "input_type": "number",
+        "type": "integer",
+        "description": "旧侧边栏上下文 token 有效期兼容配置（秒）。",
+        "min": 1,
+    },
+    "AICRM_SIDEBAR_JSSDK_ADAPTER_MODE": {
+        "key": "AICRM_SIDEBAR_JSSDK_ADAPTER_MODE",
+        "label": "侧边栏 JSSDK Adapter 模式",
+        "mode": "editable",
+        "input_type": "text",
+        "type": "string",
+        "description": "默认安全模式；仅显式 real_enabled 且真实开关打开时才允许真实 JSSDK 调用。",
+    },
+    "AICRM_SIDEBAR_JSSDK_REAL_ENABLED": {
+        "key": "AICRM_SIDEBAR_JSSDK_REAL_ENABLED",
+        "label": "侧边栏 JSSDK 真实调用开关",
+        "mode": "editable",
+        "input_type": "text",
+        "type": "boolean",
+        "description": "填写 true / false 或 1 / 0。",
+    },
+    "AICRM_SIDEBAR_JSSDK_SECRET": {
+        "key": "AICRM_SIDEBAR_JSSDK_SECRET",
+        "label": "侧边栏 JSSDK Secret",
+        "mode": "masked",
+        "input_type": "password",
+        "type": "secret",
+        "description": "侧边栏 JSSDK 专用密钥；留空表示保持原值。",
+    },
+    "AICRM_SIDEBAR_JSSDK_TIMEOUT_SECONDS": {
+        "key": "AICRM_SIDEBAR_JSSDK_TIMEOUT_SECONDS",
+        "label": "侧边栏 JSSDK 超时时间",
+        "mode": "editable",
+        "input_type": "number",
+        "type": "integer",
+        "description": "侧边栏 JSSDK 请求超时时间（秒）。",
+        "min": 1,
+    },
+    "WECHAT_SHOP_ENABLED": {
+        "key": "WECHAT_SHOP_ENABLED",
+        "label": "微信小店已启用",
+        "mode": "editable",
+        "input_type": "text",
+        "type": "boolean",
+        "description": "配置中心中的微信小店开关；不会在本次改造中新增业务拦截。",
+    },
+    "WECHAT_SHOP_APPID": {
+        "key": "WECHAT_SHOP_APPID",
+        "label": "微信小店 AppID",
+        "mode": "editable",
+        "input_type": "text",
+        "type": "string",
+        "description": "微信小店接口使用的 AppID。",
+    },
+    "WECHAT_SHOP_APPSECRET": {
+        "key": "WECHAT_SHOP_APPSECRET",
+        "label": "微信小店 AppSecret",
+        "mode": "masked",
+        "input_type": "password",
+        "type": "secret",
+        "description": "微信小店接口密钥；留空表示保持原值。",
+    },
+    "WECHAT_SHOP_API_BASE": {
+        "key": "WECHAT_SHOP_API_BASE",
+        "label": "微信小店 API Base",
+        "mode": "editable",
+        "input_type": "url",
+        "type": "string",
+        "description": "默认 https://api.weixin.qq.com。",
+    },
+    "WECHAT_SHOP_CALLBACK_TOKEN": {
+        "key": "WECHAT_SHOP_CALLBACK_TOKEN",
+        "label": "微信小店 Callback Token",
+        "mode": "masked",
+        "input_type": "password",
+        "type": "secret",
+        "description": "微信小店回调签名 token；留空表示保持原值。",
+    },
+    "WECHAT_SHOP_HTTP_TIMEOUT_SECONDS": {
+        "key": "WECHAT_SHOP_HTTP_TIMEOUT_SECONDS",
+        "label": "微信小店请求超时",
+        "mode": "editable",
+        "input_type": "number",
+        "type": "integer",
+        "description": "微信小店接口请求超时时间（秒）。",
+        "min": 1,
+    },
 }
 
 
@@ -126,6 +245,115 @@ def _validate_known_setting(key: str, value: str) -> str:
         except ValueError as exc:
             raise ValueError("WECHAT_PAY_PRODUCT_CATALOG_JSON 必须是合法 JSON") from exc
     return normalized
+
+
+def _input_type_for_schema_type(field_type: str) -> str:
+    if field_type == "integer":
+        return "number"
+    if field_type == "secret":
+        return "password"
+    return "text"
+
+
+def _schema_setting_metadata() -> dict[str, dict[str, Any]]:
+    metadata: dict[str, dict[str, Any]] = {}
+    for group in CONFIG_SCHEMA.values():
+        for key, field in group["fields"].items():
+            field_type = _text(field.get("type")) or "string"
+            metadata[key] = {
+                "key": key,
+                "label": _text(field.get("label")) or key,
+                "mode": "masked" if field_type == "secret" or key in SENSITIVE_KEYS else "editable",
+                "input_type": _input_type_for_schema_type(field_type),
+                "type": field_type,
+                "description": _text(field.get("help")),
+                "required": bool(field.get("required")),
+                "default": _text(field.get("default")),
+                "min": field.get("min"),
+                "max": field.get("max"),
+            }
+    return metadata
+
+
+def _setting_metadata_map() -> dict[str, dict[str, Any]]:
+    metadata = _schema_setting_metadata()
+    for item in APP_SETTING_DEFINITIONS:
+        key = _text(item.get("key"))
+        if not key:
+            continue
+        merged = {**metadata.get(key, {}), **dict(item)}
+        merged.setdefault("type", "secret" if merged.get("mode") == "masked" else "string")
+        merged.setdefault("required", False)
+        merged.setdefault("description", "")
+        metadata[key] = merged
+    for key, item in EXTRA_SETTING_DEFINITIONS.items():
+        metadata[key] = {**metadata.get(key, {}), **dict(item)}
+    for category in CONFIG_CATEGORIES:
+        if category.enabled_key.startswith("CONFIG_CATEGORY_"):
+            metadata.setdefault(
+                category.enabled_key,
+                {
+                    "key": category.enabled_key,
+                    "label": f"{category.label}生效开关",
+                    "mode": "editable",
+                    "input_type": "text",
+                    "type": "boolean",
+                    "description": "仅控制配置中心类目展示状态，不接入业务拦截。",
+                    "required": False,
+                },
+            )
+    return metadata
+
+
+def _metadata_for_setting(key: str) -> dict[str, Any]:
+    normalized_key = _text(key)
+    metadata = _setting_metadata_map().get(normalized_key, {})
+    if metadata:
+        return dict(metadata)
+    return {
+        "key": normalized_key,
+        "label": normalized_key,
+        "mode": "masked" if normalized_key in SENSITIVE_KEYS else "editable",
+        "input_type": "password" if normalized_key in SENSITIVE_KEYS else "text",
+        "type": "secret" if normalized_key in SENSITIVE_KEYS else "string",
+        "description": "",
+        "required": False,
+    }
+
+
+def _is_boolean_setting(key: str, metadata: dict[str, Any]) -> bool:
+    return _text(metadata.get("type")) == "boolean" or _text(key).endswith("_ENABLED")
+
+
+def _is_integer_setting(metadata: dict[str, Any]) -> bool:
+    return _text(metadata.get("type")) == "integer" or _text(metadata.get("input_type")) == "number"
+
+
+def _normalize_boolean_text(value: Any) -> str:
+    return "true" if _bool(value) else "false"
+
+
+def _validate_category_setting(key: str, value: Any, metadata: dict[str, Any]) -> str:
+    normalized_key = _text(key)
+    normalized = _text(value)
+    if _is_boolean_setting(normalized_key, metadata):
+        return _normalize_boolean_text(normalized)
+    if _is_integer_setting(metadata):
+        minimum = metadata.get("min")
+        maximum = metadata.get("max")
+        minimum_int = int(minimum) if minimum is not None else 1
+        number = _normalize_int(normalized or "0", field_name=normalized_key, minimum=minimum_int)
+        if maximum is not None and number > int(maximum):
+            raise ValueError(f"{normalized_key} 不能大于 {maximum}")
+        return str(number)
+    if normalized_key in HTTP_URL_SETTING_KEYS and normalized and not normalized.startswith(("http://", "https://")):
+        raise ValueError(f"{normalized_key} 必须以 http:// 或 https:// 开头")
+    if normalized_key in JSON_SETTING_KEYS and normalized:
+        try:
+            json.loads(normalized)
+        except ValueError as exc:
+            raise ValueError(f"{normalized_key} 必须是合法 JSON") from exc
+    return _validate_known_setting(normalized_key, normalized)
 
 
 def _json_loads(value: Any, *, default: Any) -> Any:
@@ -288,22 +516,20 @@ class AdminConfigReadService:
             )
 
     def build_home_payload(self) -> dict[str, Any]:
-        app_rows = self.list_app_settings(query="", scope="")
+        categories = self.list_config_categories()["rows"]
         return {
             "cards": [
                 {
-                    "label": "系统设置",
-                    "value": len(app_rows["rows"]),
-                    "description": "维护渠道、Webhook 与其他系统级参数",
-                    "href": "/admin/config/app-settings",
-                },
-                {
-                    "label": "登录与权限",
-                    "value": self.repo.count_admin_users(),
-                    "description": "维护企微成员授权、角色分配、启停状态与登录审计",
-                    "href": "/admin/config/login-access",
-                },
-            ]
+                    "label": row["label"],
+                    "value": row["status_label"],
+                    "description": row["group_label"],
+                    "href": row["detail_href"],
+                    "key": row["key"],
+                    "enabled": row["enabled"],
+                }
+                for row in categories
+            ],
+            "categories": categories,
         }
 
     def list_app_settings(self, *, query: str, scope: str) -> dict[str, Any]:
@@ -339,6 +565,65 @@ class AdminConfigReadService:
                 {"label": "已配置", "value": configured_count, "description": "当前已经配置完成的设置项"},
             ],
             "audit_entries": self._recent_audit_entries(TARGET_APP_SETTING, limit=10),
+        }
+
+    def _category_enabled(self, category: ConfigCategory) -> bool:
+        value, _source = self._setting_value_source(category.enabled_key)
+        if not value and category.enabled_key.startswith("CONFIG_CATEGORY_"):
+            return True
+        return _bool(value)
+
+    def _serialize_category_summary(self, category: ConfigCategory) -> dict[str, Any]:
+        enabled = self._category_enabled(category)
+        return {
+            "key": category.key,
+            "label": category.label,
+            "group_label": category.group_label,
+            "enabled": enabled,
+            "status_label": "已生效" if enabled else "未生效",
+            "detail_href": category.detail_href,
+            "check_supported": category.check_supported,
+            "sort_order": category.sort_order,
+        }
+
+    def list_config_categories(self) -> dict[str, Any]:
+        rows = [self._serialize_category_summary(category) for category in sorted(CONFIG_CATEGORIES, key=lambda item: item.sort_order)]
+        return {"rows": rows}
+
+    def _serialize_category_field(self, ref: ConfigCategoryField) -> dict[str, Any]:
+        metadata = _metadata_for_setting(ref.key)
+        value, source = self._setting_value_source(ref.key)
+        sensitive = ref.key in SENSITIVE_KEYS or metadata.get("mode") == "masked" or metadata.get("type") == "secret"
+        display_value = mask_value(ref.key, value) if sensitive else value
+        return {
+            **metadata,
+            "key": ref.key,
+            "value": "" if sensitive else value,
+            "display_value": display_value,
+            "configured": bool(value),
+            "source": source,
+            "sensitive": sensitive,
+            "readonly": bool(ref.readonly),
+            "block_title": ref.block_title,
+        }
+
+    def get_config_category_detail(self, category_key: str) -> dict[str, Any]:
+        category = get_config_category(category_key)
+        if not category:
+            raise KeyError("config category not found")
+        blocks_by_title: dict[str, list[dict[str, Any]]] = {}
+        for ref in category.fields:
+            field_row = self._serialize_category_field(ref)
+            blocks_by_title.setdefault(ref.block_title, []).append(field_row)
+        return {
+            "category": {
+                **self._serialize_category_summary(category),
+                "enabled_key": category.enabled_key,
+            },
+            "blocks": [
+                {"title": title, "fields": fields}
+                for title, fields in blocks_by_title.items()
+            ],
         }
 
     def list_mcp_tool_settings(self, *, query: str, enabled_only: bool) -> dict[str, Any]:
@@ -640,6 +925,169 @@ class AdminConfigWriteCommand:
             )
             changed.append(after)
         return changed
+
+    def _category_or_error(self, category_key: str) -> ConfigCategory:
+        category = get_config_category(category_key)
+        if not category:
+            raise KeyError("config category not found")
+        return category
+
+    def set_category_enabled(self, category_key: str, enabled: bool, *, operator: str) -> dict[str, Any]:
+        category = self._category_or_error(category_key)
+        normalized_value = _normalize_boolean_text(enabled)
+        before = self.repo.get_app_setting(category.enabled_key)
+        if _text((before or {}).get("value")) == normalized_value:
+            return {
+                "key": category.key,
+                "enabled_key": category.enabled_key,
+                "enabled": _bool(normalized_value),
+                "changed": False,
+            }
+        after = self.repo.upsert_app_setting(key=category.enabled_key, value=normalized_value)
+        self.repo.insert_audit_log(
+            operator=operator,
+            action_type="update" if before else "create",
+            target_type=TARGET_CONFIG_CATEGORY_ENABLED,
+            target_id=category.key,
+            before=before or {},
+            after=after,
+        )
+        return {
+            "key": category.key,
+            "enabled_key": category.enabled_key,
+            "enabled": _bool(after.get("value")),
+            "changed": True,
+        }
+
+    def save_category_settings(self, category_key: str, settings: dict[str, Any], *, operator: str) -> list[dict[str, Any]]:
+        category = self._category_or_error(category_key)
+        allowed_refs = {ref.key: ref for ref in category.fields}
+        submitted_keys = {_text(key) for key in settings if _text(key)}
+        unknown_keys = sorted(key for key in submitted_keys if key not in allowed_refs)
+        if unknown_keys:
+            raise ValueError(f"setting key is not in category: {', '.join(unknown_keys)}")
+        changed: list[dict[str, Any]] = []
+        for raw_key, raw_value in settings.items():
+            key = _text(raw_key)
+            if not key:
+                continue
+            ref = allowed_refs[key]
+            if ref.readonly:
+                raise ValueError(f"{key} is readonly")
+            metadata = _metadata_for_setting(key)
+            if (key in SENSITIVE_KEYS or metadata.get("mode") == "masked") and _text(raw_value) == "":
+                continue
+            validated = _validate_category_setting(key, raw_value, metadata)
+            before = self.repo.get_app_setting(key)
+            if _text((before or {}).get("value")) == validated:
+                continue
+            after = self.repo.upsert_app_setting(key=key, value=validated)
+            self.repo.insert_audit_log(
+                operator=operator,
+                action_type="update" if before else "create",
+                target_type=TARGET_APP_SETTING,
+                target_id=key,
+                before=before or {},
+                after=after,
+            )
+            changed.append(after)
+        return changed
+
+    def check_category(self, category_key: str, *, operator: str) -> dict[str, Any]:
+        del operator
+        read_service = AdminConfigReadService(self.repo)
+        detail = read_service.get_config_category_detail(category_key)
+        category = self._category_or_error(category_key)
+        checks: list[dict[str, Any]] = []
+        for block in detail["blocks"]:
+            for field in block["fields"]:
+                key = _text(field.get("key"))
+                label = _text(field.get("label")) or key
+                value, source = read_service._setting_value_source(key)
+                configured = bool(value)
+                severity = "error" if field.get("required") else "warning"
+                if field.get("required") and not configured:
+                    checks.append(
+                        {
+                            "key": key,
+                            "label": label,
+                            "check": "required",
+                            "status": "failed",
+                            "severity": severity,
+                            "message": "必填项未配置",
+                        }
+                    )
+                if field.get("sensitive") and not configured:
+                    checks.append(
+                        {
+                            "key": key,
+                            "label": label,
+                            "check": "sensitive_configured",
+                            "status": "warning",
+                            "severity": "warning",
+                            "message": "敏感字段尚未配置",
+                        }
+                    )
+                if configured:
+                    try:
+                        _validate_category_setting(key, value, field)
+                    except ValueError as exc:
+                        checks.append(
+                            {
+                                "key": key,
+                                "label": label,
+                                "check": "format",
+                                "status": "failed",
+                                "severity": "error",
+                                "message": str(exc),
+                            }
+                        )
+                    else:
+                        checks.append(
+                            {
+                                "key": key,
+                                "label": label,
+                                "check": "format",
+                                "status": "passed",
+                                "severity": "info",
+                                "message": f"配置值格式有效（source={source}）",
+                            }
+                        )
+        adapter_preview: dict[str, Any] | None = None
+        if category.key == "wechat_pay":
+            adapter_preview = {
+                "adapter": "wechat_pay",
+                "mode": _text(os.getenv("AICRM_NEXT_WECHAT_PAY_MODE")) or "fake",
+                "real_external_call_executed": False,
+            }
+        elif category.key == "alipay":
+            adapter_preview = {
+                "adapter": "alipay",
+                "mode": _text(os.getenv("AICRM_NEXT_ALIPAY_MODE")) or "fake",
+                "real_external_call_executed": False,
+            }
+        elif category.key == "wechat_shop":
+            token_value, _source = read_service._setting_value_source("WECHAT_SHOP_CALLBACK_TOKEN")
+            adapter_preview = {
+                "adapter": "wechat_shop",
+                "callback_token_configured": bool(token_value),
+                "real_external_call_executed": False,
+                "test_order_id_required_for_order_sync": True,
+            }
+        failed_count = sum(1 for item in checks if item["status"] == "failed")
+        warning_count = sum(1 for item in checks if item["status"] == "warning")
+        return {
+            "ok": failed_count == 0,
+            "category": detail["category"],
+            "checks": checks,
+            "summary": {
+                "total": len(checks),
+                "failed": failed_count,
+                "warnings": warning_count,
+            },
+            "adapter_preview": adapter_preview,
+            "real_external_call_executed": False,
+        }
 
 
 class SetupWizardStateService:

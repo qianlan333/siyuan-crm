@@ -1,4 +1,8 @@
-"""owner migration excel sessions and execution results"""
+"""owner migration excel sessions and execution results.
+
+Revision ID: 0028_owner_excel_sessions
+Revises: 0027_group_ops_admin_userids
+"""
 
 from __future__ import annotations
 

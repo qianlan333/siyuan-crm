@@ -43,15 +43,6 @@ def test_frontend_compat_admin_real_data_has_no_psycopg_or_sql_boundary():
     assert "FROM " not in source
 
 
-def test_legacy_routes_calls_admin_read_model_application_without_direct_sql():
-    source = (ROOT / "aicrm_next" / "frontend_compat" / "legacy_routes.py").read_text(encoding="utf-8")
-
-    assert "admin_read_model.application" in source
-    assert "psycopg" not in source
-    assert "SELECT " not in source
-    assert "FROM " not in source
-
-
 def test_production_sql_failure_returns_degraded_payload_not_empty_success():
     payload = GetAdminProductsPageQuery(FailingProductionRepo())()
 

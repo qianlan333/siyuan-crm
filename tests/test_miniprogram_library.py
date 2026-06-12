@@ -1,303 +1,109 @@
-"""miniprogram 群发能力的核心单元测试。
-
-覆盖：
-- private_message normalize 对 miniprogram 的字段校验
-- miniprogram_library service：CRUD、resolve_thumb_media_id 缓存命中/过期重传
-- expand_attachments_with_library：library_id 占位 → 完整 attachment
-"""
 from __future__ import annotations
 
-import base64
-from datetime import datetime, timedelta, timezone
+from io import BytesIO
 
-import pytest
+from fastapi.testclient import TestClient
 
-from wecom_ability_service.domains import miniprogram_library
-from wecom_ability_service.domains.tasks.private_message import (
-    MAX_PRIVATE_MESSAGE_ATTACHMENTS,
-    SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES,
-    build_private_message_request_payload,
-    normalize_private_message_attachments,
+from aicrm_next.main import create_app
+from aicrm_next.media_library.repo import reset_media_library_fixture_state
+
+
+TINY_PNG = (
+    b"\x89PNG\r\n\x1a\n"
+    b"\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
+    b"\x08\x04\x00\x00\x00\xb5\x1c\x0c\x02"
+    b"\x00\x00\x00\x0bIDATx\xdac`\x00\x01\x00\x00\x07\x00\x01\xe9\x15\x08-"
+    b"\x00\x00\x00\x00IEND\xaeB`\x82"
 )
-from wecom_ability_service.domains.wecom_media_limits import WECOM_IMAGE_MAX_BYTES
 
 
-@pytest.fixture()
-def app(tmp_path):
-    from tests.conftest import build_pg_test_app
-
-    with build_pg_test_app(
-        tmp_path,
-        MCP_BEARER_TOKEN="mcp-token",
-        AUTOMATION_INTERNAL_API_TOKEN="internal-token",
-    ) as app:
-        yield app
+def make_client(monkeypatch) -> TestClient:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("SECRET_KEY", "next-miniprogram-library-test")
+    reset_media_library_fixture_state()
+    return TestClient(create_app())
 
 
-def test_supported_msgtypes_include_miniprogram():
-    assert "miniprogram" in SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES
-    assert "file" in SUPPORTED_PRIVATE_MESSAGE_ATTACHMENT_TYPES
+def assert_json_contract(payload: dict, *, ok: bool = True) -> None:
+    assert payload["ok"] is ok
+    assert payload["route_owner"] == "ai_crm_next"
+    assert payload["fallback_used"] is False
+    assert payload["real_external_call_executed"] is False
 
 
-def test_normalize_miniprogram_attachment_full_payload_pass():
-    payload = {
-        "attachments": [
-            {
-                "msgtype": "miniprogram",
-                "miniprogram": {
-                    "appid": "wxabc123",
-                    "pagepath": "pages/index?from=crm",
-                    "title": "体验课卡片",
-                    "thumb_media_id": "media-xxx",
-                },
-            }
-        ]
-    }
-    result = normalize_private_message_attachments(payload)
-    assert len(result) == 1
-    assert result[0]["msgtype"] == "miniprogram"
-    assert result[0]["miniprogram"]["appid"] == "wxabc123"
-    assert result[0]["miniprogram"]["page"] == "pages/index?from=crm"
-    assert result[0]["miniprogram"]["pic_media_id"] == "media-xxx"
-    assert "pagepath" not in result[0]["miniprogram"]
-    assert "thumb_media_id" not in result[0]["miniprogram"]
+def test_miniprogram_library_crud_uses_next_media_fixture(monkeypatch) -> None:
+    client = make_client(monkeypatch)
+
+    created = client.post(
+        "/api/admin/miniprogram-library",
+        json={
+            "name": "trial card",
+            "app_id": "wx-card",
+            "page_path": "pages/trial/index",
+            "title": "Trial Card",
+            "thumb_media_id": "test_thumb_media_id",
+            "resolve_thumb_media": False,
+        },
+    ).json()
+    assert_json_contract(created)
+    assert created["source_status"] == "local_repository_write"
+    assert created["item"]["appid"] == "wx-card"
+    assert created["item"]["page_path"] == "pages/trial/index"
+    assert created["item"]["thumb_media_id"] == "test_thumb_media_id"
+    item_id = created["item"]["id"]
+
+    listed = client.get("/api/admin/miniprogram-library?enabled_only=false&q=trial").json()
+    assert_json_contract(listed)
+    assert item_id in {item["id"] for item in listed["items"]}
+
+    updated = client.put(
+        f"/api/admin/miniprogram-library/{item_id}",
+        json={"title": "Trial Card Updated", "enabled": False, "resolve_thumb_media": False},
+    ).json()
+    assert_json_contract(updated)
+    assert updated["item"]["title"] == "Trial Card Updated"
+    assert updated["item"]["enabled"] is False
+
+    deleted = client.delete(f"/api/admin/miniprogram-library/{item_id}").json()
+    assert_json_contract(deleted)
+    assert deleted["deleted"] is True
 
 
-def test_normalize_miniprogram_attachment_accepts_wecom_template_fields():
-    payload = {
-        "attachments": [
-            {
-                "msgtype": "miniprogram",
-                "miniprogram": {
-                    "appid": "wxabc123",
-                    "page": "pages/index?from=crm",
-                    "title": "体验课卡片",
-                    "pic_media_id": "media-xxx",
-                },
-            }
-        ]
-    }
-    result = normalize_private_message_attachments(payload)
-    assert result == [
-        {
-            "msgtype": "miniprogram",
-            "miniprogram": {
-                "appid": "wxabc123",
-                "page": "pages/index?from=crm",
-                "title": "体验课卡片",
-                "pic_media_id": "media-xxx",
-            },
-        }
-    ]
+def test_miniprogram_thumb_media_resolve_uses_fake_adapter(monkeypatch) -> None:
+    client = make_client(monkeypatch)
+
+    image = client.post(
+        "/api/admin/image-library/upload",
+        files={"image": ("thumb.png", BytesIO(TINY_PNG), "image/png")},
+    ).json()["item"]
+    mini = client.post(
+        "/api/admin/miniprogram-library",
+        json={
+            "name": "resolve card",
+            "appid": "wx-resolve",
+            "pagepath": "pages/resolve/index",
+            "title": "Resolve Card",
+            "thumb_image_id": image["id"],
+            "resolve_thumb_media": False,
+        },
+    ).json()["item"]
+
+    resolved = client.post(f"/api/admin/miniprogram-library/{mini['id']}/test-resolve").json()
+    assert_json_contract(resolved)
+    assert resolved["source_status"] == "wecom_media_plan_or_cache"
+    assert resolved["adapter_result"]["side_effect_executed"] is False
+    assert resolved["item"]["thumb_media_id"].startswith("fake_wecom_media_")
 
 
-@pytest.mark.parametrize(
-    "missing_field",
-    ["appid", "pagepath", "title", "thumb_media_id"],
-)
-def test_normalize_miniprogram_missing_required_field(missing_field):
-    base = {
-        "appid": "wxabc",
-        "pagepath": "pages/x",
-        "title": "卡片",
-        "thumb_media_id": "media-1",
-    }
-    base[missing_field] = ""
-    payload = {"attachments": [{"msgtype": "miniprogram", "miniprogram": base}]}
-    with pytest.raises(ValueError):
-        normalize_private_message_attachments(payload)
+def test_miniprogram_library_rejects_missing_required_fields(monkeypatch) -> None:
+    client = make_client(monkeypatch)
 
+    response = client.post(
+        "/api/admin/miniprogram-library",
+        json={"name": "broken", "appid": "wx-broken", "resolve_thumb_media": False},
+    )
 
-def test_normalize_attachments_rejects_more_than_wecom_limit():
-    payload = {
-        "attachments": [
-            {"msgtype": "file", "file": {"media_id": f"file-{idx}"}}
-            for idx in range(MAX_PRIVATE_MESSAGE_ATTACHMENTS + 1)
-        ]
-    }
-    with pytest.raises(ValueError, match="at most 9 attachments"):
-        normalize_private_message_attachments(payload)
-
-
-def test_build_private_message_rejects_total_attachments_over_wecom_limit():
-    payload = {
-        "content": "hello",
-        "attachments": [
-            {"msgtype": "file", "file": {"media_id": f"file-{idx}"}}
-            for idx in range(MAX_PRIVATE_MESSAGE_ATTACHMENTS - 1)
-        ],
-        "image_media_ids": ["image-a", "image-b"],
-    }
-    with pytest.raises(ValueError, match="at most 9 attachments"):
-        build_private_message_request_payload(payload)
-
-
-def test_build_private_message_rejects_binary_image_over_wecom_limit_before_upload():
-    oversized_png = b"\x89PNG\r\n\x1a\n" + (b"0" * WECOM_IMAGE_MAX_BYTES)
-    called = []
-    payload = {
-        "content": "hello",
-        "images": [
-            {
-                "file_name": "too-large.png",
-                "mime_type": "image/png",
-                "data_base64": base64.b64encode(oversized_png).decode("ascii"),
-            }
-        ],
-    }
-
-    def _upload(*args):
-        called.append(args)
-        return "should-not-upload"
-
-    with pytest.raises(ValueError, match="max 2MB"):
-        build_private_message_request_payload(payload, upload_image=_upload)
-    assert called == []
-
-
-def test_miniprogram_library_create_and_get(app):
-    with app.app_context():
-        item = miniprogram_library.create_miniprogram(
-            {
-                "name": "卡片1",
-                "appid": "wx-1",
-                "pagepath": "pages/a",
-                "title": "测试卡片",
-                "thumb_image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAEAAAcAAekVCC0AAAAASUVORK5CYII=",
-            }
-        )
-        assert item["id"] > 0
-        assert item["appid"] == "wx-1"
-        fetched = miniprogram_library.get_miniprogram(item["id"])
-        assert fetched["title"] == "测试卡片"
-
-
-def test_resolve_thumb_media_id_uses_cache_when_valid(app):
-    with app.app_context():
-        item = miniprogram_library.create_miniprogram(
-            {
-                "appid": "wx-2",
-                "pagepath": "pages/x",
-                "title": "缓存命中",
-                "thumb_image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAEAAAcAAekVCC0AAAAASUVORK5CYII=",
-            }
-        )
-        future = datetime.now(tz=timezone.utc) + timedelta(days=1)
-        from wecom_ability_service.domains.miniprogram_library import _persist_thumb_media_id
-
-        _persist_thumb_media_id(item["id"], "cached-media", future)
-
-        called = []
-
-        def _fail(*args, **kwargs):
-            called.append(args)
-            return "should-not-be-called"
-
-        media_id = miniprogram_library.resolve_thumb_media_id(item["id"], upload_image=_fail)
-        assert media_id == "cached-media"
-        assert called == []
-
-
-def test_resolve_thumb_media_id_re_uploads_when_expired(app):
-    with app.app_context():
-        item = miniprogram_library.create_miniprogram(
-            {
-                "appid": "wx-3",
-                "pagepath": "pages/y",
-                "title": "缓存过期",
-                "thumb_image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAEAAAcAAekVCC0AAAAASUVORK5CYII=",
-            }
-        )
-        from wecom_ability_service.domains.miniprogram_library import _persist_thumb_media_id
-
-        past = datetime.now(tz=timezone.utc) - timedelta(days=4)
-        _persist_thumb_media_id(item["id"], "stale-media", past)
-
-        upload_calls = []
-
-        def _fake_upload(file_name, file_bytes, content_type):
-            upload_calls.append((file_name, len(file_bytes), content_type))
-            return "fresh-media"
-
-        media_id = miniprogram_library.resolve_thumb_media_id(
-            item["id"], upload_image=_fake_upload
-        )
-        assert media_id == "fresh-media"
-        assert len(upload_calls) == 1
-        refreshed = miniprogram_library.get_miniprogram(item["id"])
-        assert refreshed["thumb_media_id"] == "fresh-media"
-
-
-def test_expand_attachments_with_library_substitutes_placeholder(app):
-    with app.app_context():
-        item = miniprogram_library.create_miniprogram(
-            {
-                "appid": "wx-4",
-                "pagepath": "pages/default",
-                "title": "默认标题",
-                "thumb_image_base64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkAAEAAAcAAekVCC0AAAAASUVORK5CYII=",
-            }
-        )
-
-        def _fake_upload(file_name, file_bytes, content_type):
-            return "media-from-test"
-
-        attachments = [
-            {
-                "msgtype": "miniprogram",
-                "miniprogram": {
-                    "library_id": item["id"],
-                    "pagepath": "pages/override?x=1",
-                },
-            },
-            {"msgtype": "file", "file": {"media_id": "file-1"}},
-        ]
-        expanded = miniprogram_library.expand_attachments_with_library(
-            attachments, upload_image=_fake_upload
-        )
-        assert expanded[0]["msgtype"] == "miniprogram"
-        assert expanded[0]["miniprogram"]["appid"] == "wx-4"
-        assert expanded[0]["miniprogram"]["pagepath"] == "pages/override?x=1"
-        assert expanded[0]["miniprogram"]["title"] == "默认标题"
-        assert expanded[0]["miniprogram"]["thumb_media_id"] == "media-from-test"
-        assert expanded[1] == {"msgtype": "file", "file": {"media_id": "file-1"}}
-
-
-def test_expand_attachments_passes_through_already_resolved(app):
-    with app.app_context():
-        attachments = [
-            {
-                "msgtype": "miniprogram",
-                "miniprogram": {
-                    "appid": "wx-explicit",
-                    "pagepath": "pages/x",
-                    "title": "已展开",
-                    "thumb_media_id": "explicit-media",
-                },
-            }
-        ]
-        expanded = miniprogram_library.expand_attachments_with_library(attachments)
-        assert expanded == attachments
-
-
-def test_update_miniprogram_invalidates_thumb_cache(app):
-    with app.app_context():
-        item = miniprogram_library.create_miniprogram(
-            {
-                "appid": "wx-5",
-                "pagepath": "pages/z",
-                "title": "测试更新",
-                "thumb_image_url": "https://example.com/old.png",
-            }
-        )
-        future = datetime.now(tz=timezone.utc) + timedelta(days=1)
-        from wecom_ability_service.domains.miniprogram_library import _persist_thumb_media_id
-
-        _persist_thumb_media_id(item["id"], "old-media", future)
-        miniprogram_library.update_miniprogram(
-            item["id"],
-            {"thumb_image_url": "https://example.com/new.png"},
-        )
-        refreshed = miniprogram_library.get_miniprogram(item["id"])
-        assert refreshed["thumb_media_id"] == ""
-        assert refreshed["thumb_media_id_expires_at"] == ""
+    assert response.status_code == 400
+    payload = response.json()
+    assert_json_contract(payload, ok=False)
+    assert "missing" in payload["error"].lower() or "缺少" in payload["error"]

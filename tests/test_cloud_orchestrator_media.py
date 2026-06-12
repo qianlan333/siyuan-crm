@@ -1,57 +1,30 @@
 from __future__ import annotations
 
-import pytest
+import base64
 
-from wecom_ability_service.domains.cloud_orchestrator import media
-from wecom_ability_service.wecom_client import WeComClientError
+from fastapi.testclient import TestClient
+
+from aicrm_next.main import create_app
 
 
-def test_upload_cloud_orchestrator_image_validates_and_uploads_to_wecom(monkeypatch):
-    uploaded: dict[str, object] = {}
+PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+)
 
-    class _FakeWeComClient:
-        def _upload_private_message_image(self, file_name: str, file_bytes: bytes, content_type: str) -> str:
-            uploaded.update(
-                {
-                    "file_name": file_name,
-                    "file_bytes": file_bytes,
-                    "content_type": content_type,
-                }
-            )
-            return "media-cloud-001"
 
-    monkeypatch.setattr(media.WeComClient, "from_app", staticmethod(lambda: _FakeWeComClient()))
+def test_cloud_orchestrator_media_upload_fake_mode_has_no_real_external_call(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_NEXT_CLOUD_ORCHESTRATOR_MEDIA_UPLOAD_MODE", "fake")
+    client = TestClient(create_app(), raise_server_exceptions=False)
 
-    file_bytes = b"\x89PNG\r\n\x1a\nvalid"
-    result = media.upload_cloud_orchestrator_image(
-        file_name="campaign.png",
-        file_bytes=file_bytes,
-        content_type="image/png",
+    response = client.post(
+        "/api/admin/cloud-orchestrator/media/upload",
+        files={"image": ("probe.png", PNG_BYTES, "image/png")},
     )
 
-    assert uploaded == {
-        "file_name": "campaign.png",
-        "file_bytes": file_bytes,
-        "content_type": "image/png",
-    }
-    assert result == {
-        "media_id": "media-cloud-001",
-        "file_name": "campaign.png",
-        "content_type": "image/png",
-        "size": len(file_bytes),
-    }
-
-
-def test_upload_cloud_orchestrator_image_wraps_wecom_upload_errors(monkeypatch):
-    class _FakeWeComClient:
-        def _upload_private_message_image(self, file_name: str, file_bytes: bytes, content_type: str) -> str:
-            raise WeComClientError("token expired")
-
-    monkeypatch.setattr(media.WeComClient, "from_app", staticmethod(lambda: _FakeWeComClient()))
-
-    with pytest.raises(media.CloudOrchestratorMediaUploadError, match="wecom upload failed: token expired"):
-        media.upload_cloud_orchestrator_image(
-            file_name="campaign.png",
-            file_bytes=b"\x89PNG\r\n\x1a\nvalid",
-            content_type="image/png",
-        )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["route_owner"] == "ai_crm_next"
+    assert body["fallback_used"] is False
+    assert body["adapter_mode"] == "fake"
+    assert body["real_external_call_executed"] is False
+    assert body["wecom_media_upload_executed"] is False

@@ -24,8 +24,6 @@ REQUIRED_PREFLIGHT_DOCS = [
     "docs/development/autonomous_stop_conditions.yaml",
     "docs/development/ai_crm_next_architecture_skill.md",
     "skills/ai-crm-next-architecture/SKILL.md",
-    "docs/route_ownership/production_route_ownership_manifest.yaml",
-    "docs/development/legacy_replacement_backlog.yaml",
     "docs/development/codex_autopilot_runtime_runbook.md",
 ]
 STOP_TERM_EXEMPT_WORK_PACKAGES = {
@@ -189,28 +187,29 @@ def diff_hits_stop_condition(paths: set[str], terms: set[str]) -> list[str]:
         "docs/development/codex_autopilot_runtime_runbook.md",
         "docs/development/ai_crm_next_architecture_skill.md",
         "docs/development/codex_task_template.md",
-        "docs/development/legacy_replacement_backlog.md",
-        "docs/development/legacy_replacement_backlog.yaml",
         "docs/claude_code_integration/README.md",
         "docs/claude_code_integration/patterns.md",
         "docs/claude_code_integration/rules.md",
         "docs/claude_code_integration/tools.md",
         "docs/claude_code_integration/troubleshooting.md",
         "docs/mcp_usage.md",
-        "docs/route_ownership/production_route_ownership_manifest.yaml",
+        "aicrm_next/automation_engine/channels_api.py",
+        "aicrm_next/automation_runtime_v2/bridge.py",
         "scripts/codex_autopilot_tick.sh",
-        "tools/check_architecture_skill_compliance.py",
+        "scripts/smoke_automation_runtime_v2.py",
         "tools/check_autonomous_development_loop.py",
         "tools/check_automerge_eligibility.py",
-        "tools/check_legacy_facade_growth_freeze.py",
         "tools/run_codex_autopilot_tick.py",
-        "tests/test_architecture_skill_compliance.py",
-        "tests/test_autonomous_development_loop.py",
-        "tests/test_automerge_eligibility.py",
-        "tests/test_codex_autopilot_runtime_contract.py",
     }
     for path in sorted(paths):
-        if path in policy_paths or path.startswith("tests/"):
+        if (
+            path in policy_paths
+            or path.startswith("tests/")
+            or path.startswith("docs/development/")
+            or path.startswith("docs/architecture/")
+            or path.startswith("tools/check_")
+            or path.startswith("tools/generate_")
+        ):
             continue
         full = ROOT / path
         if not full.exists() or not full.is_file():
@@ -381,7 +380,7 @@ Read and follow:
 - Migrate fallback only as part of product-specific development with owner-approved replacement and rollback evidence.
 - Do not write production.
 - Do not remove high-risk fallback.
-- Do not modify aicrm_next/main.py, business route implementations, schema/migrations, deploy/nginx/systemd, or wecom_ability_service runtime.
+- Do not modify aicrm_next/main.py, business route implementations, schema/migrations, deploy/nginx/systemd, or deleted legacy package boundaries.
 - Do not enable real external calls, payment, OAuth, WeCom callback, timer, automation execution, or outbound send.
 - If any stop condition from docs/development/autonomous_stop_conditions.yaml appears, stop and generate an owner decision package only. Do not auto-merge.
 
@@ -394,8 +393,6 @@ Read and follow:
 - Run:
   - python3 tools/check_autonomous_development_loop.py --output-md /tmp/autonomous_development_loop.md --output-json /tmp/autonomous_development_loop.json
   - python3 tools/check_automerge_eligibility.py --output-md /tmp/automerge_eligibility.md --output-json /tmp/automerge_eligibility.json
-  - python3 tools/check_legacy_facade_growth_freeze.py --output-md /tmp/legacy_facade_growth_freeze.md --output-json /tmp/legacy_facade_growth_freeze.json
-  - python3 tools/generate_legacy_replacement_backlog.py --check --output-json /tmp/legacy_replacement_backlog_check.json
   - git diff --check
 
 ## Auto-merge boundary

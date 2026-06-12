@@ -11,12 +11,6 @@ from tools import check_admin_pages_real_data_binding as checker
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _legacy_frontend_routes() -> list[str]:
-    from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
-
-    return list(LEGACY_FRONTEND_ROUTES)
-
-
 def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
@@ -168,7 +162,7 @@ def test_customer_page_uses_native_read_model_when_data_is_available(monkeypatch
 
 
 def test_questionnaire_page_uses_next_native_admin_pages(monkeypatch):
-    assert "/admin/customers" not in _legacy_frontend_routes()
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
 
     response = _client(monkeypatch).get("/admin/questionnaires")
 
@@ -194,7 +188,7 @@ def test_questionnaire_external_push_log_routes_use_next_native_handlers(monkeyp
     assert '"/admin/questionnaires/external-push-logs"' in source
     assert "QuestionnaireExternalPushLogReadService" in source
     assert "QuestionnaireExternalPushRetryService" in source
-    assert "/admin/questionnaires/external-push-logs" not in _legacy_frontend_routes()
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
 
 
 def test_wechat_pay_transactions_page_does_not_use_frontend_compat_router(monkeypatch):
@@ -212,8 +206,7 @@ def test_wechat_pay_transaction_detail_does_not_use_frontend_compat_router(monke
 
 
 def test_questionnaire_page_no_longer_depends_on_frontend_compat_legacy_items(monkeypatch):
-    assert "/admin/customers" not in _legacy_frontend_routes()
-    assert "/admin/user-ops" not in _legacy_frontend_routes()
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
 
     response = _client(monkeypatch).get("/admin/questionnaires")
 

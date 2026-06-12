@@ -181,6 +181,8 @@ _LEGACY_GROUP_LABEL_SQL = "COALESCE(MAX(NULLIF(c.metadata_json->>'group_label', 
 _CAMPAIGN_QUEUE_SOURCE_TYPE = "campaign"
 _CAMPAIGN_QUEUE_SOURCE_TABLE = "campaign_members"
 _CAMPAIGN_QUEUE_CONTENT_TYPE = "private_message"
+_CAMPAIGN_QUEUE_CHANNEL = "wecom_private"
+_CAMPAIGN_QUEUE_TARGET_KIND = "external_userid"
 _CAMPAIGN_OPEN_JOB_STATUSES = ["waiting_approval", "queued", "claimed"]
 _CLOUD_HAS_MATCHING_LEGACY_GROUP_SQL = f"""
 EXISTS (
@@ -206,6 +208,44 @@ def _campaign_job_source_id(*, campaign_id: int, campaign_segment_id: int, step_
 
 def _legacy_campaign_job_source_id(*, campaign_id: int, step_index: int) -> str:
     return f"{int(campaign_id)}:{int(step_index)}"
+
+
+def _campaign_private_broadcast_payload(*, campaign: dict[str, Any], step: dict[str, Any], members: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "channel": _CAMPAIGN_QUEUE_CHANNEL,
+        "target_kind": _CAMPAIGN_QUEUE_TARGET_KIND,
+        "campaign": campaign,
+        "step": step,
+        "members": members,
+    }
+
+
+def _broadcast_job_columns(conn: Any) -> set[str]:
+    try:
+        rows = conn.execute(
+            """
+            SELECT column_name
+            FROM information_schema.columns
+            WHERE table_schema = ANY(current_schemas(false))
+              AND table_name = 'broadcast_jobs'
+            """
+        ).fetchall()
+    except Exception:
+        return set()
+    return {_text(row.get("column_name")) for row in rows if _text(row.get("column_name"))}
+
+
+def _campaign_private_broadcast_job_extra_fields(available_columns: set[str]) -> tuple[list[str], list[str], list[Any]]:
+    fields: list[tuple[str, Any]] = []
+    if "business_domain" in available_columns:
+        fields.append(("business_domain", "automation_ops"))
+    if "channel" in available_columns:
+        fields.append(("channel", _CAMPAIGN_QUEUE_CHANNEL))
+    if "target_kind" in available_columns:
+        fields.append(("target_kind", _CAMPAIGN_QUEUE_TARGET_KIND))
+    if not fields:
+        return [], [], []
+    return [field for field, _value in fields], ["%s"] * len(fields), [value for _field, value in fields]
 
 
 class PostgresCloudPlanRepository:
@@ -416,6 +456,10 @@ class PostgresCloudPlanRepository:
                         "campaign_segment_id": int(row["campaign_segment_id"]),
                     }
                 )
+        broadcast_columns = _broadcast_job_columns(conn)
+        extra_columns, extra_placeholders, extra_params = _campaign_private_broadcast_job_extra_fields(broadcast_columns)
+        extra_columns_sql = (", " + ", ".join(extra_columns)) if extra_columns else ""
+        extra_values_sql = (", " + ", ".join(extra_placeholders)) if extra_placeholders else ""
         enqueued = 0
         for source_id, group in groups.items():
             members = group["members"]
@@ -442,12 +486,12 @@ class PostgresCloudPlanRepository:
                 """
                 INSERT INTO broadcast_jobs (
                     source_type, source_id, source_table, scheduled_for, priority, batch_key,
-                    idempotency_key, status, requires_approval,
+                    idempotency_key""" + extra_columns_sql + """, status, requires_approval,
                     target_external_userids, target_count, target_summary,
                     content_type, content_payload, content_summary, trace_id, created_by
                 ) VALUES (
                     %s, %s, %s, %s::timestamptz, 100, %s,
-                    %s, 'queued', FALSE,
+                    %s""" + extra_values_sql + """, 'queued', FALSE,
                     %s::jsonb, %s, %s,
                     %s, %s::jsonb, %s, %s, %s
                 )
@@ -462,11 +506,12 @@ class PostgresCloudPlanRepository:
                     group["scheduled_for"],
                     normalized_plan_id,
                     f"campaign_member_step:{source_id}",
+                    *extra_params,
                     _json_dump(target_external_userids),
                     len(target_external_userids),
                     f"campaign={campaign.get('campaign_code')} step={step.get('step_index')}",
                     _CAMPAIGN_QUEUE_CONTENT_TYPE,
-                    _json_dump({"campaign": campaign, "step": step, "members": members}),
+                    _json_dump(_campaign_private_broadcast_payload(campaign=campaign, step=step, members=members)),
                     _text(step.get("content_text"))[:200],
                     _text(campaign.get("trace_id")),
                     _text(operator) or "crm_console",
@@ -557,7 +602,7 @@ class PostgresCloudPlanRepository:
               AND EXISTS (
                   SELECT 1
                   FROM unnest(%s::int[]) AS campaign_id
-                  WHERE bj.source_id LIKE (campaign_id::text || ':%')
+                  WHERE bj.source_id LIKE (campaign_id::text || ':%%')
               )
             RETURNING bj.id
             """,

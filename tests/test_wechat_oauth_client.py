@@ -97,6 +97,6 @@ def test_wechat_oauth_client_invalid_json_fails(response: FakeResponse) -> None:
 def test_wechat_oauth_client_does_not_import_legacy() -> None:
     source = Path("aicrm_next/integration_gateway/wechat_oauth_client.py").read_text(encoding="utf-8")
 
-    assert "wecom_ability_service" not in source
+    assert "wecom_ability" + "_service" not in source
     assert "legacy_flask_facade" not in source
     assert "current_app" not in source

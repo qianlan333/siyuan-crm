@@ -62,11 +62,9 @@ def test_questionnaire_admin_detail_page_uses_next_read_model_editor_payload() -
 
 
 def test_questionnaire_admin_pages_are_removed_from_frontend_compat_routes() -> None:
-    from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
+    root = Path(__file__).resolve().parents[1]
 
-    assert "/admin/questionnaires" not in LEGACY_FRONTEND_ROUTES
-    assert "/admin/questionnaires/new" not in LEGACY_FRONTEND_ROUTES
-    assert "/admin/questionnaires/{questionnaire_id}" not in LEGACY_FRONTEND_ROUTES
+    assert not (root / "aicrm_next/frontend_compat/legacy_routes.py").exists()
 
 
 def test_questionnaire_admin_templates_live_in_questionnaire_bundle() -> None:

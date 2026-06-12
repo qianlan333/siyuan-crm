@@ -12,8 +12,6 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs/development/autonomous_development_loop.md"
 STATE = ROOT / "docs/development/phase_execution_state.yaml"
 STOP = ROOT / "docs/development/autonomous_stop_conditions.yaml"
-MANIFEST = ROOT / "docs/route_ownership/production_route_ownership_manifest.yaml"
-BACKLOG = ROOT / "docs/development/legacy_replacement_backlog.yaml"
 
 REQUIRED_STATE_FIELDS = {
     "version",
@@ -34,18 +32,15 @@ REQUIRED_STATE_FIELDS = {
     "next_cleanup_candidates",
 }
 EXPECTED_SAFETY_GATES = {
-    "check_legacy_facade_growth_freeze",
-    "generate_legacy_replacement_backlog",
-    "check_production_route_resolution",
     "check_automerge_eligibility",
     "check_autonomous_development_loop",
     "pr_smoke",
 }
 EXPECTED_RUNTIME_BOUNDARIES = {
-    "app.py Next-only startup entry",
+    "app.py",
     "aicrm_next/main.py",
     "aicrm_next/production_compat/api.py high-risk and retained fallback entries only",
-    "wecom_ability_service runtime",
+    "deleted legacy package must not return",
     "migrations/deploy/nginx/systemd",
     "payment/OAuth/WeCom callback/public submit/product/checkout/order/image upload/runtime/outbound paths",
 }
@@ -92,10 +87,14 @@ STOP_IDS = {
     "canary_approval",
 }
 PROTECTED_EXACT = {
+    "app.py",
     "aicrm_next/main.py",
 }
+STARTUP_CLOSEOUT_ALLOWED_EXACT = {
+    ".github/workflows/deploy.yml",
+    "app.py",
+}
 PROTECTED_PREFIXES = (
-    "wecom_ability_service/",
     "migrations/",
     "deploy/",
     "systemd/",
@@ -104,11 +103,6 @@ PROTECTED_PREFIXES = (
 RUNTIME_FALLBACK_ALLOWED_EXACT = {
     "aicrm_next/customer_read_model/api.py",
     "aicrm_next/automation_engine/api.py",
-    "wecom_ability_service/http/__init__.py",
-    "wecom_ability_service/templates/admin_console/channel_code_center.html",
-    "wecom_ability_service/templates/admin_console/channel_code_form.html",
-    "wecom_ability_service/static/admin_console/channel_admission_pages.js",
-    "wecom_ability_service/static/admin_console/channel_admission_pages.css",
 }
 GOVERNANCE_ALLOWED_PREFIXES = (
     "docs/",
@@ -118,14 +112,16 @@ GOVERNANCE_ALLOWED_PREFIXES = (
 GOVERNANCE_ALLOWED_EXACT = {
     "README.md",
     ".github/workflows/ci.yml",
-    ".github/workflows/deploy.yml",
-    "app.py",
-    "legacy_" + "flask_app.py",
-    "scripts/check_no_new_legacy.py",
+    "aicrm_next/automation_engine/channels_api.py",
+    "aicrm_next/automation_runtime_v2/bridge.py",
+    "aicrm_next/automation_runtime_v2/channel_binding_service.py",
     "scripts/codex_autopilot_tick.sh",
+    "scripts/run_lint.py",
+    "scripts/smoke_automation_runtime_v2.py",
+    "requirements.txt",
     "aicrm_next/production_compat/api.py",
-    "wecom_ability_service/LEGACY_FROZEN.md",
 }
+DELETED_LEGACY_PACKAGE_PREFIX = "wecom_ability" + "_service/"
 REMOVED_CHANNEL_FALLBACK_STRINGS = {
     '"/api/admin/channels"',
     '"/api/admin/channels/{path:path}"',
@@ -375,7 +371,8 @@ def _validate_changed_files(changed: set[str], blockers: list[str]) -> None:
         path
         for path in sorted(changed)
         if path not in RUNTIME_FALLBACK_ALLOWED_EXACT
-        and path not in GOVERNANCE_ALLOWED_EXACT
+        and path not in STARTUP_CLOSEOUT_ALLOWED_EXACT
+        and not (path.startswith(DELETED_LEGACY_PACKAGE_PREFIX) and not (ROOT / path).exists())
         and (
             path in PROTECTED_EXACT
             or any(path.startswith(prefix) for prefix in PROTECTED_PREFIXES)

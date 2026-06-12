@@ -27,6 +27,7 @@ class FakeExternalCampaignRepository:
         self.calls: list[str] = []
         self.write_calls: list[str] = []
         self.cleanup_calls: list[int] = []
+        self.steps: list[dict[str, Any]] = []
         self.commits = 0
         self.rollbacks = 0
         self.real_outbound_send_called = False
@@ -173,6 +174,7 @@ class FakeExternalCampaignRepository:
     def add_step_to_campaign(self, **kwargs: Any) -> dict[str, Any]:
         self.calls.append("add_step_to_campaign")
         self.write_calls.append("add_step_to_campaign")
+        self.steps.append(dict(kwargs))
         return {"campaign_segment_id": kwargs["campaign_segment_id"], "step_index": kwargs["step_index"]}
 
     def allocate_campaign_members(self, campaign_id: int) -> dict[str, Any]:
@@ -279,6 +281,48 @@ def test_external_campaign_create_single_recipient_success() -> None:
         "submit_campaign_for_review",
     ]
     assert repo.real_outbound_send_called is False
+
+
+def test_external_campaign_allows_attachment_only_step() -> None:
+    repo = _repo_with_target()
+    payload = _payload(
+        message="",
+        steps=[
+            {
+                "scheduled_for": "2026-06-09 10:30",
+                "content_payload": {"miniprogram_library_ids": [17]},
+            }
+        ],
+    )
+
+    result = service.create_external_campaigns(payload, repo=repo)
+
+    assert result["created_count"] == 1
+    assert repo.steps[0]["content_text"] == ""
+    assert repo.steps[0]["content_payload"] == {"miniprogram_library_ids": [17]}
+
+
+def test_campaign_private_broadcast_job_fields_are_complete() -> None:
+    from aicrm_next.cloud_orchestrator.repository import (
+        _campaign_private_broadcast_job_extra_fields,
+        _campaign_private_broadcast_payload,
+    )
+
+    columns, placeholders, params = _campaign_private_broadcast_job_extra_fields(
+        {"business_domain", "channel", "target_kind"}
+    )
+    payload = _campaign_private_broadcast_payload(
+        campaign={"owner_userid": "owner_1"},
+        step={"content_text": "", "content_payload_json": {"miniprogram_library_ids": [17]}},
+        members=[{"external_contact_id": "ext_1"}],
+    )
+
+    assert columns == ["business_domain", "channel", "target_kind"]
+    assert placeholders == ["%s", "%s", "%s"]
+    assert params == ["automation_ops", "wecom_private", "external_userid"]
+    assert payload["channel"] == "wecom_private"
+    assert payload["target_kind"] == "external_userid"
+    assert payload["step"]["content_payload_json"] == {"miniprogram_library_ids": [17]}
 
 
 def test_external_campaign_idempotent_existing_campaign() -> None:

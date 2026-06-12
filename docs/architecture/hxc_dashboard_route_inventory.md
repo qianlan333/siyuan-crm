@@ -19,15 +19,13 @@ The old Flask module remains only as historical reference. Runtime traffic for t
 | `/api/admin/hxc-dashboard/send-config` | POST/OPTIONS | `aicrm_next.hxc_dashboard.api` | Send-config save form | `UpsertHxcSendConfigCommand` | Local safe-mode config mutation only | `legacy_fallback_allowed=false`, `deletion_locked` |
 | `/api/admin/hxc-dashboard/send-config/{sender_userid}` | DELETE/OPTIONS | `aicrm_next.hxc_dashboard.api` | Send-config delete button | `DeleteHxcSendConfigCommand` | Local safe-mode config mutation only | `legacy_fallback_allowed=false`, `deletion_locked` |
 | `/api/admin/hxc-dashboard/broadcast` | POST/OPTIONS | `aicrm_next.hxc_dashboard.api` | Legacy callers only; dashboard UI uses `/broadcast-tasks` | `PlanHxcBroadcastCommand` | Creates blocked `SideEffectPlan` and blocked `ExternalCallAttempt`; `hxc_broadcast_executed=false`, `wecom_send_executed=false` | `legacy_fallback_allowed=false`, `deletion_locked` |
-| `/api/admin/hxc-dashboard/broadcast-tasks` | POST | `aicrm_next.hxc_dashboard.api` | Dashboard composer | Existing Next-native broadcast task creation | Creates internal task/preview only; no legacy Flask fallback | Existing Next route remains unchanged |
+| `/api/admin/hxc-dashboard/broadcast-tasks` | POST | `aicrm_next.hxc_dashboard.api` | Dashboard composer | Existing Next-native broadcast task creation | Creates internal task/preview only; no deleted fallback path | Existing Next route remains unchanged |
 | `/api/admin/hxc-dashboard/{unknown_path}` | GET/POST/OPTIONS | `aicrm_next.hxc_dashboard.api` | Unknown clients | Controlled 404 payload | No external calls | `legacy_fallback_allowed=false`, `deletion_locked` |
 
-## Legacy Deletion Lock
+## Current Next Ownership
 
-- Removed exact `production_compat` fallback routes for `/admin/hxc-dashboard`, `/admin/hxc-send-config`, `/api/admin/hxc-dashboard`, and `/api/admin/hxc-dashboard/{path:path}`.
-- Removed wildcard `production_compat` fallback routes for `/api/admin/hxc-dashboard` and `/api/admin/hxc-dashboard/{path:path}`.
-- Route registry and production route ownership manifest set `legacy_fallback_allowed=false`, `delete_status=deletion_locked`, and `replacement_status=locked`.
-- `scripts/check_no_new_legacy.py` blocks reintroducing HXC `production_compat` routes or direct calls to the legacy refresh, directory sync, or broadcast functions.
+- `/admin/hxc-dashboard`, `/admin/hxc-send-config`, and `/api/admin/hxc-dashboard*` are served by `aicrm_next.hxc_dashboard.api`.
+- Existing HXC dashboard business tests cover page rendering, dashboard payloads, safe-mode refresh/directory sync/broadcast planning, and config mutations.
 
 ## Explicit Non-Goals
 

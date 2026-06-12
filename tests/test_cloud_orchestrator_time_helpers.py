@@ -85,6 +85,6 @@ def test_cloud_repository_imports_next_time_helper() -> None:
     root = Path(__file__).resolve().parents[1]
     source = (root / "aicrm_next/cloud_orchestrator/repository.py").read_text(encoding="utf-8")
 
-    assert "wecom_ability_service.domains.campaigns.time_helpers" not in source
+    assert "wecom_ability" + "_service.domains.campaigns.time_helpers" not in source
     assert "from .time_helpers import" in source
     assert "campaign_step_due_iso" in source

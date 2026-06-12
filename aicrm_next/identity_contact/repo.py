@@ -1,8 +1,25 @@
 from __future__ import annotations
 
-from aicrm_next.shared.runtime import raw_database_url
+import json
+from datetime import datetime
+from typing import Any, Protocol
+
+from aicrm_next.shared.runtime import database_mode, raw_database_url
 
 from .dto import ContactPoint, IdentityResolution, ResolvePersonIdentityRequest
+
+
+class IdentityBindingRepository(Protocol):
+    def bind_mobile_to_external_contact(
+        self,
+        *,
+        external_userid: str,
+        mobile: str,
+        owner_userid: str = "",
+        bind_by_userid: str = "",
+        customer_name: str = "",
+        force_rebind: bool = False,
+    ) -> dict[str, Any]: ...
 
 
 class FixtureIdentityRepository:
@@ -54,6 +71,42 @@ class FixtureIdentityRepository:
         return None
 
 
+class FixtureIdentityBindingRepository:
+    source_status = "fixture_identity_binding"
+
+    def __init__(self) -> None:
+        self._bindings: dict[str, dict[str, Any]] = {}
+
+    def bind_mobile_to_external_contact(
+        self,
+        *,
+        external_userid: str,
+        mobile: str,
+        owner_userid: str = "",
+        bind_by_userid: str = "",
+        customer_name: str = "",
+        force_rebind: bool = False,
+    ) -> dict[str, Any]:
+        person_id = f"fixture_person_{mobile[-4:]}"
+        self._bindings[external_userid] = {
+            "person_id": person_id,
+            "external_userid": external_userid,
+            "mobile": mobile,
+            "owner_userid": owner_userid,
+            "bind_by_userid": bind_by_userid,
+            "customer_name": customer_name,
+        }
+        return {
+            "ok": True,
+            "source_status": self.source_status,
+            "external_userid": external_userid,
+            "mobile": mobile,
+            "person_id": person_id,
+            "binding_status": "bound",
+            "side_effect_executed": False,
+        }
+
+
 def _text(value) -> str:
     return "" if value is None else str(value).strip()
 
@@ -62,6 +115,12 @@ def _psycopg_url(url: str) -> str:
     if url.startswith("postgresql+psycopg://"):
         return "postgresql://" + url[len("postgresql+psycopg://") :]
     return url
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
 
 
 class PostgresIdentityRepository:
@@ -118,7 +177,7 @@ class PostgresIdentityRepository:
                     JOIN external_contact_bindings b ON b.person_id = p.id
                     LEFT JOIN wecom_external_contact_identity_map im ON im.external_userid = b.external_userid
                     WHERE p.mobile = %s
-                    ORDER BY b.updated_at DESC, b.id DESC
+                    ORDER BY b.updated_at DESC NULLS LAST, b.external_userid DESC
                     LIMIT 1
                     """,
                     (mobile,),
@@ -154,3 +213,249 @@ class PostgresIdentityRepository:
             matched_by=matched_by,
             contact_points=contact_points,
         )
+
+
+class PostgresIdentityBindingRepository:
+    source_status = "production_postgres_identity_binding"
+
+    def __init__(self, database_url: str | None = None) -> None:
+        self._database_url = _psycopg_url(str(database_url or raw_database_url()).strip())
+
+    def _connect(self):
+        import psycopg
+        from psycopg.rows import dict_row
+
+        return psycopg.connect(self._database_url, row_factory=dict_row)
+
+    def bind_mobile_to_external_contact(
+        self,
+        *,
+        external_userid: str,
+        mobile: str,
+        owner_userid: str = "",
+        bind_by_userid: str = "",
+        customer_name: str = "",
+        force_rebind: bool = False,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                person_id = self._get_or_create_person(cur, mobile=mobile, external_userid=external_userid)
+                existing = self._fetch_binding(cur, external_userid=external_userid)
+                if existing and int(existing["person_id"]) != int(person_id) and not force_rebind:
+                    raise ValueError("external contact already bound to another person")
+                self._upsert_binding(
+                    cur,
+                    external_userid=external_userid,
+                    person_id=person_id,
+                    owner_userid=owner_userid,
+                    bind_by_userid=bind_by_userid,
+                    customer_name=customer_name,
+                )
+                contact = self._fetch_contact_profile(cur, external_userid=external_userid)
+                resolved_owner = owner_userid or _text(contact.get("owner_userid")) if contact else owner_userid
+                resolved_name = customer_name or _text(contact.get("customer_name")) if contact else customer_name
+                self._merge_lead_pool(
+                    cur,
+                    external_userid=external_userid,
+                    mobile=mobile,
+                    person_id=person_id,
+                    owner_userid=resolved_owner,
+                    customer_name=resolved_name,
+                    operator=bind_by_userid,
+                )
+            conn.commit()
+        return {
+            "ok": True,
+            "source_status": self.source_status,
+            "external_userid": external_userid,
+            "mobile": mobile,
+            "person_id": str(person_id),
+            "owner_userid": resolved_owner,
+            "customer_name": resolved_name,
+            "binding_status": "bound",
+            "side_effect_executed": True,
+        }
+
+    def _get_or_create_person(self, cur, *, mobile: str, external_userid: str) -> int:
+        row = cur.execute(
+            """
+            INSERT INTO people (mobile, third_party_user_id, created_at, updated_at)
+            VALUES (%s, %s, NOW(), NOW())
+            ON CONFLICT (mobile) DO UPDATE SET updated_at = people.updated_at
+            RETURNING id
+            """,
+            (mobile, external_userid),
+        ).fetchone()
+        return int(row["id"])
+
+    def _fetch_binding(self, cur, *, external_userid: str) -> dict[str, Any] | None:
+        return cur.execute(
+            """
+            SELECT external_userid, person_id, last_owner_userid
+            FROM external_contact_bindings
+            WHERE external_userid = %s
+            LIMIT 1
+            """,
+            (external_userid,),
+        ).fetchone()
+
+    def _upsert_binding(
+        self,
+        cur,
+        *,
+        external_userid: str,
+        person_id: int,
+        owner_userid: str,
+        bind_by_userid: str,
+        customer_name: str,
+    ) -> None:
+        cur.execute(
+            """
+            INSERT INTO external_contact_bindings (
+                external_userid, person_id, first_bound_by_userid,
+                first_owner_userid, last_owner_userid, created_at, updated_at
+            )
+            VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
+            ON CONFLICT (external_userid) DO UPDATE SET
+                person_id = EXCLUDED.person_id,
+                last_owner_userid = COALESCE(NULLIF(EXCLUDED.last_owner_userid, ''), external_contact_bindings.last_owner_userid),
+                updated_at = NOW()
+            """,
+            (external_userid, person_id, bind_by_userid, owner_userid, owner_userid),
+        )
+
+    def _fetch_contact_profile(self, cur, *, external_userid: str) -> dict[str, Any] | None:
+        return cur.execute(
+            """
+            SELECT external_userid, owner_userid, customer_name, remark
+            FROM contacts
+            WHERE external_userid = %s
+            LIMIT 1
+            """,
+            (external_userid,),
+        ).fetchone()
+
+    def _merge_lead_pool(
+        self,
+        cur,
+        *,
+        external_userid: str,
+        mobile: str,
+        person_id: int,
+        owner_userid: str,
+        customer_name: str,
+        operator: str,
+    ) -> None:
+        rows = list(
+            cur.execute(
+                """
+                SELECT *
+                FROM user_ops_lead_pool_current
+                WHERE mobile = %s OR external_userid = %s
+                ORDER BY
+                    CASE WHEN mobile = %s THEN 0 ELSE 1 END,
+                    updated_at DESC,
+                    id DESC
+                """,
+                (mobile, external_userid, mobile),
+            ).fetchall()
+        )
+        if not rows:
+            cur.execute(
+                """
+                INSERT INTO user_ops_lead_pool_current (
+                    mobile, external_userid, customer_name, owner_userid, is_wecom_added, is_mobile_bound,
+                    huangxiaocan_activation_state, class_term_no, class_term_label,
+                    first_entry_source, last_entry_source, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, TRUE, TRUE, 'unknown', NULL, '', 'mobile_bind', 'mobile_bind', NOW(), NOW())
+                """,
+                (mobile, external_userid, customer_name, owner_userid),
+            )
+            self._write_lead_pool_history(
+                cur,
+                mobile=mobile,
+                external_userid=external_userid,
+                action_type="mobile_bind_insert",
+                before=None,
+                after={"external_userid": external_userid, "mobile": mobile},
+                operator=operator,
+            )
+            return
+
+        target = dict(rows[0])
+        before = dict(target)
+        cur.execute(
+            """
+            UPDATE user_ops_lead_pool_current
+            SET external_userid = %s,
+                mobile = %s,
+                owner_userid = COALESCE(NULLIF(%s, ''), owner_userid),
+                customer_name = COALESCE(NULLIF(%s, ''), customer_name),
+                is_wecom_added = TRUE,
+                is_mobile_bound = TRUE,
+                last_entry_source = 'mobile_bind',
+                updated_at = NOW()
+            WHERE id = %s
+            """,
+            (external_userid, mobile, owner_userid, customer_name, target["id"]),
+        )
+        duplicate_ids = [int(row["id"]) for row in rows[1:] if row.get("id") is not None]
+        if duplicate_ids:
+            cur.execute("DELETE FROM user_ops_lead_pool_current WHERE id = ANY(%s)", (duplicate_ids,))
+        after = {
+            **target,
+            "external_userid": external_userid,
+            "mobile": mobile,
+            "owner_userid": owner_userid or target.get("owner_userid"),
+            "customer_name": customer_name or target.get("customer_name"),
+            "merged_duplicate_ids": duplicate_ids,
+        }
+        self._write_lead_pool_history(
+            cur,
+            mobile=mobile,
+            external_userid=external_userid,
+            action_type="mobile_bind_merge" if duplicate_ids else "mobile_bind_update",
+            before=before,
+            after=after,
+            operator=operator,
+        )
+
+    def _write_lead_pool_history(
+        self,
+        cur,
+        *,
+        mobile: str,
+        external_userid: str,
+        action_type: str,
+        before: dict[str, Any] | None,
+        after: dict[str, Any],
+        operator: str,
+    ) -> None:
+        cur.execute(
+            """
+            INSERT INTO user_ops_lead_pool_history (
+                mobile, external_userid, action_type, source_type, operator,
+                before_json, after_json, remark, created_at
+            )
+            VALUES (%s, %s, %s, 'mobile_bind', %s, %s::jsonb, %s::jsonb, %s, NOW())
+            """,
+            (
+                mobile,
+                external_userid,
+                action_type,
+                operator,
+                json.dumps(before or {}, ensure_ascii=False, default=_json_default),
+                json.dumps(after, ensure_ascii=False, default=_json_default),
+                f"bind mobile external_userid={external_userid}",
+            ),
+        )
+
+
+_DEFAULT_BINDING_REPO = FixtureIdentityBindingRepository()
+
+
+def build_identity_binding_repository() -> IdentityBindingRepository:
+    if database_mode() == "postgres":
+        return PostgresIdentityBindingRepository()
+    return _DEFAULT_BINDING_REPO

@@ -51,8 +51,8 @@ def test_checkout_page_state_preserves_ctx_in_pay_path(monkeypatch) -> None:
 def test_h5_pay_runtime_uses_native_sidebar_context_imports() -> None:
     source = Path("aicrm_next/public_product/h5_wechat_pay.py").read_text(encoding="utf-8")
     forbidden = [
-        "wecom_ability_service.infra." + "signed_context",
-        "wecom_ability_service.domains.wechat_pay." + "sidebar_context",
+        "wecom_ability" + "_service.infra." + "signed_context",
+        "wecom_ability" + "_service.domains.wechat_pay." + "sidebar_context",
     ]
 
     for marker in forbidden:

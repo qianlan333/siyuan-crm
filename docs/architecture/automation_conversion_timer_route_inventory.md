@@ -18,9 +18,22 @@ This inventory locks the reply monitor and registered jobs timer family to Next 
 ## Operation Task Runtime Contract
 
 - Next `/api/admin/automation-conversion/jobs/run-due` is a planning route only. Even when `jobs=["operation_task"]`, it must return `jobs_run_due_executed=false`, `operation_tasks_executed=0`, `actual_enqueued_count=0`, and `blocked_reason=next_plan_only_route`.
-- The actual operation-task due runner remains `wecom_ability_service.domains.automation_conversion.due_jobs_service.run_registered_due_jobs(job_codes=["operation_task"])`, reached only through an approved internal/script execution path.
+- The legacy operation-task due runner has been retired with the legacy package body. Active automation scheduling now runs through Next-native background job and automation engine owners.
 - `scripts/run_automation_conversion_due_jobs.py` can select `AUTOMATION_CONVERSION_DUE_JOBS=operation_task`, but the default scheduled set stays `sop,conversion_workflow` until the runbook allowlist and worker coverage are explicitly approved.
 - `scripts/run_broadcast_queue_worker.py` is the separate consumer for `broadcast_jobs.source_type=operation_task`; timer success must not be treated as send success unless the worker dispatch result is observed.
+
+## Reply Monitor Timer Contract
+
+- `deploy/aicrm-reply-monitor-capture.service` calls `scripts/run_reply_monitor_capture.py`, not a bare curl command.
+- `deploy/aicrm-reply-monitor-capture.timer` owns the three-minute capture cadence and overwrites the previously observed production-only stale unit on deploy.
+- The capture runner posts JSON to `/api/admin/automation-conversion/reply-monitor/capture` with `Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN`, `operator=reply_monitor_capture_timer`, `limit=500`, and `dry_run=true` by default.
+- If `AUTOMATION_INTERNAL_API_TOKEN` is missing, the capture runner emits structured skipped diagnostics and does not call the route.
+- The capture route keeps the path unchanged and must return a controlled non-400 safe plan for a valid internal-token timer request with an empty or safe payload.
+- `deploy/aicrm-reply-monitor-run-due.service` calls `scripts/run_reply_monitor_run_due.py`, not a bare curl command.
+- The runner posts JSON to `/api/admin/automation-conversion/reply-monitor/run-due` with `Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN`, `operator=reply_monitor_run_due_timer`, `limit=20`, and `dry_run=true` by default.
+- If `AUTOMATION_INTERNAL_API_TOKEN` is missing, the runner emits structured skipped diagnostics and does not call the route.
+- The route must reject missing/invalid internal tokens with structured 401 diagnostics and must return a controlled non-400 safe plan for a valid timer request with no body or no due work.
+- The timer contract is plan-only and keeps `real_external_call_executed=false`, `automation_runtime_executed=false`, `wecom_send_executed=false`, and `fallback_used=false`.
 
 ## Adjacent Workspace Routes
 

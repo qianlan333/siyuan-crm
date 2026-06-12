@@ -123,6 +123,17 @@ def _bool_value(value: object, *, default: bool = False) -> bool:
     return default
 
 
+def _has_content_package_materials(value: object) -> bool:
+    if not isinstance(value, dict):
+        return False
+    for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids"):
+        items = value.get(key)
+        if isinstance(items, list) and any(_text(item) for item in items):
+            return True
+    attachments = value.get("attachments")
+    return isinstance(attachments, list) and bool(attachments)
+
+
 def _slug(value: object, *, fallback: str = "external_campaign") -> str:
     text = _text(value).lower()
     text = re.sub(r"[^a-z0-9_]+", "_", text)
@@ -212,10 +223,11 @@ def _normalize_step_list(raw_steps: Any, payload: JsonDict, recipient: JsonDict,
     for index, item in enumerate(source_steps):
         if not isinstance(item, dict):
             raise ExternalCampaignError("steps items must be objects")
+        content_payload = item.get("content_payload") if isinstance(item.get("content_payload"), dict) else {}
         content = _text(item.get("content_text")) or _text(item.get("message"))
         if not content:
             content = _text(recipient.get("content_text")) or _text(recipient.get("message"))
-        if not content:
+        if not content and not _has_content_package_materials(content_payload):
             raise ExternalCampaignError(f"steps[{index}].content_text is required")
 
         scheduled_value = item.get("scheduled_for") or item.get("scheduled_at") or item.get("send_at")
@@ -244,7 +256,7 @@ def _normalize_step_list(raw_steps: Any, payload: JsonDict, recipient: JsonDict,
                 "timezone": _text(item.get("timezone")) or timezone_name,
                 "scheduled_for": scheduled_dt.isoformat(),
                 "content_text": content,
-                "content_payload": item.get("content_payload") if isinstance(item.get("content_payload"), dict) else {},
+                "content_payload": content_payload,
                 "stop_on_reply": _bool_value(
                     item.get("stop_on_reply", payload.get("stop_on_reply")),
                     default=True,

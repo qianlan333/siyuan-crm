@@ -36,6 +36,7 @@ Scope: Legacy Exit group 12 moves WeCom tag and tag-group read surfaces to a Nex
 ## C. Selector Surfaces
 
 - Questionnaire editor, channel admission, automation agent config, and WeCom tag management selectors already read `/api/admin/wecom/tags`.
+- Automation agent config uses `automation_agent_config_tag_picker.js` with the shared tag picker contract.
 - No separate sidebar tag catalog selector route was found. `/api/sidebar/signup-tags/status` is a customer read-model status route and remains unchanged.
 
 ## D. Write Out Of Scope

@@ -38,7 +38,7 @@ def _extract_text(payload: dict[str, Any]) -> str:
     return _normalize_str(payload.get("content"))
 
 
-def _normalize_miniprogram_payload(attachment_payload: dict[str, Any]) -> dict[str, str]:
+def normalize_miniprogram_attachment_payload(attachment_payload: dict[str, Any]) -> dict[str, str]:
     appid = _normalize_str(attachment_payload.get("appid")).strip()
     page = _normalize_str(attachment_payload.get("page") or attachment_payload.get("pagepath")).strip()
     title = _normalize_str(attachment_payload.get("title")).strip()
@@ -76,7 +76,7 @@ def _normalize_attachment(item: Any) -> dict[str, Any]:
         if not media_id:
             raise ValueError("file attachments must include media_id")
         return {"msgtype": "file", "file": {"media_id": media_id}}
-    return {"msgtype": "miniprogram", "miniprogram": _normalize_miniprogram_payload(attachment_payload)}
+    return {"msgtype": "miniprogram", "miniprogram": normalize_miniprogram_attachment_payload(attachment_payload)}
 
 
 def build_group_ops_private_message_request_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], int]:

@@ -220,6 +220,23 @@ def _count_customers(repo: CustomerReadRepository, filters: JsonDict, page: list
     return len(repo.list_customers(filters, limit=None, offset=0))
 
 
+def _live_source_has_matching_customers(
+    query: ListCustomersRequest,
+    *,
+    repo: CustomerReadRepository | None = None,
+) -> bool:
+    if not _customer_read_model_live_source_fallback_enabled():
+        return False
+    owned_repo = repo is None
+    repo = repo or build_customer_live_source_repository()
+    try:
+        filters = _list_filters(query)
+        return _count_customers(repo, filters, [], limit=query.limit, offset=query.offset) > 0
+    finally:
+        if owned_repo:
+            _close_repository(repo)
+
+
 def _list_customers_live_source_payload(query: ListCustomersRequest, exc: Exception, repo: CustomerReadRepository | None = None) -> JsonDict:
     if not _customer_read_model_live_source_fallback_enabled():
         raise exc
@@ -378,6 +395,8 @@ class ListCustomersQuery:
                     filters = _list_filters(query)
                     page = [list_item_projection(item) for item in repo.list_customers(filters, limit=query.limit, offset=query.offset)]
                     total = _count_customers(repo, filters, page, limit=query.limit, offset=query.offset)
+                    if total == 0 and not page and _live_source_has_matching_customers(query, repo=self._live_source_repo):
+                        raise RuntimeError("customer read model stale: primary returned 0 while live source has matching customers")
                 finally:
                     if self._repo is None:
                         _close_repository(repo)

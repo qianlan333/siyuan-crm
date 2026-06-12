@@ -18,6 +18,28 @@ def test_domain_validates_group_owner_match(group_ops_repo):
         assert_group_owned_by_plan(group=other_group, plan=plan)
 
 
+def test_group_ops_plan_actions_disable_enable_and_archive(group_ops_repo):
+    from aicrm_next.automation_engine.group_ops.application import (
+        ArchiveGroupOpsPlanCommand,
+        DisableGroupOpsPlanCommand,
+        EnableGroupOpsPlanCommand,
+    )
+
+    disabled = DisableGroupOpsPlanCommand(repo=group_ops_repo)(1)
+    assert disabled["item"]["status"] == "disabled"
+
+    enabled = EnableGroupOpsPlanCommand(repo=group_ops_repo)(1)
+    assert enabled["item"]["status"] == "active"
+
+    disabled_again = DisableGroupOpsPlanCommand(repo=group_ops_repo)(1)
+    assert disabled_again["item"]["status"] == "disabled"
+
+    archived = ArchiveGroupOpsPlanCommand(repo=group_ops_repo)(1)
+    assert archived["archived"] is True
+    assert archived["item"]["status"] == "disabled"
+    assert group_ops_repo.get_plan(1) is None
+
+
 def test_domain_reuses_unified_attachment_validation():
     from aicrm_next.automation_engine.group_ops.domain import normalize_message_content
     from aicrm_next.shared.errors import ContractError

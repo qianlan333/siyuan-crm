@@ -183,7 +183,7 @@ def upgrade() -> None:
             campaign_segment_id BIGINT NOT NULL,
             step_index INTEGER NOT NULL DEFAULT 0,
             day_offset INTEGER NOT NULL DEFAULT 0,
-            send_time TEXT NOT NULL DEFAULT '09:00',
+            send_time TEXT NOT NULL DEFAULT '09\\:00',
             timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
             content_text TEXT NOT NULL DEFAULT '',
             content_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,

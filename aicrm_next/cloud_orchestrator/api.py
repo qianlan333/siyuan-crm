@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, File, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from aicrm_next.admin_jobs.routes import (
@@ -13,7 +13,7 @@ from aicrm_next.admin_jobs.routes import (
     _request_payload,
     ensure_admin_action_token,
 )
-from aicrm_next.admin_shell import shell_context
+from aicrm_next.admin_shell import admin_path_for, shell_context
 from aicrm_next.platform_foundation.internal_run_due_guard import maybe_guard_internal_run_due_request
 
 from .application import (
@@ -90,6 +90,11 @@ _RUN_DUE_HEADERS = {
     "X-AICRM-Automation-Runtime-Executed": "false",
     "X-AICRM-WeCom-Send-Executed": "false",
 }
+_OBSERVABILITY_HEADERS = {
+    "X-AICRM-Route-Owner": "ai_crm_next",
+    "X-AICRM-Fallback-Used": "false",
+    "X-AICRM-Real-External-Call-Executed": "false",
+}
 
 
 def _raise(exc: Exception) -> None:
@@ -144,6 +149,30 @@ def _campaign_write_error(error: str, *, status_code: int = 400) -> JSONResponse
         status_code=status_code,
         headers=_CAMPAIGN_WRITE_HEADERS,
     )
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _observability_payload(source_status: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "source_status": source_status,
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "real_external_call_executed": False,
+    }
+
+
+def _observability_json(payload: dict[str, Any], *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=_OBSERVABILITY_HEADERS)
+
+
+def _observability_options(source_status: str) -> JSONResponse:
+    payload = _observability_payload(source_status)
+    payload.update({"allowed": True})
+    return _observability_json(payload)
 
 
 async def _write_context(request: Request) -> tuple[dict[str, Any], str | None]:
@@ -278,6 +307,17 @@ def _run_due_response(command) -> JSONResponse:
 
 
 @router.get(
+    "/admin/cloud-orchestrator",
+    name="api.admin_cloud_orchestrator_workspace",
+)
+def admin_cloud_orchestrator(request: Request):
+    return RedirectResponse(
+        url=admin_path_for("api.admin_cloud_orchestrator_plans_workspace"),
+        status_code=302,
+    )
+
+
+@router.get(
     "/admin/cloud-orchestrator/plans",
     response_class=HTMLResponse,
     name="api.admin_cloud_orchestrator_plans_workspace",
@@ -333,6 +373,78 @@ def admin_cloud_campaigns(request: Request):
         }
     )
     return templates.TemplateResponse(request, "admin_console/cloud_campaigns_workspace.html", context)
+
+
+@router.get(
+    "/admin/cloud-orchestrator/observability",
+    response_class=HTMLResponse,
+    name="api.admin_cloud_orchestrator_observability",
+)
+def admin_cloud_orchestrator_observability(request: Request):
+    context = shell_context(
+        request=request,
+        page_title="Cloud Orchestrator · 可观察性",
+        page_summary="工单、审计、漏斗与 Tool 调用统计按 trace_id 串联排查。",
+        active_endpoint="api.admin_cloud_orchestrator_workspace",
+    )
+    context["breadcrumbs"] = [
+        {"label": "客户管理后台", "href": request.url_for("api.admin_console_dashboard")},
+        {"label": "AI 助手", "href": request.url_for("api.admin_cloud_orchestrator_workspace")},
+        {"label": "可观察性"},
+    ]
+    context["page_actions"] = [
+        {
+            "label": "返回助手",
+            "href": request.url_for("api.admin_cloud_orchestrator_campaigns_workspace"),
+            "variant": "primary",
+        },
+    ]
+    return templates.TemplateResponse(request, "admin_console/cloud_observability.html", context)
+
+
+@router.api_route("/api/admin/cloud-orchestrator/audit", methods=["GET", "OPTIONS"])
+async def api_cloud_orchestrator_audit(request: Request) -> JSONResponse:
+    if request.method.upper() == "OPTIONS":
+        return _observability_options("next_cloud_orchestrator_audit")
+
+    payload = _observability_payload("next_cloud_orchestrator_audit")
+    payload.update(
+        {
+            "items": [],
+            "audit": [],
+            "count": 0,
+            "limit": int(request.query_params.get("limit") or 100),
+            "cursor": _text(request.query_params.get("cursor")),
+            "campaign_code": _text(request.query_params.get("campaign_code")),
+            "trace_id": _text(request.query_params.get("trace_id")),
+            "session_id": _text(request.query_params.get("session_id")),
+            "degraded": False,
+            "warnings": [],
+        }
+    )
+    return _observability_json(payload)
+
+
+@router.api_route("/api/admin/cloud-orchestrator/observability", methods=["GET", "OPTIONS"])
+async def api_cloud_orchestrator_observability(request: Request) -> JSONResponse:
+    if request.method.upper() == "OPTIONS":
+        return _observability_options("next_cloud_orchestrator_observability")
+
+    payload = _observability_payload("next_cloud_orchestrator_observability")
+    payload.update(
+        {
+            "health": {"status": "ok", "source": "local_contract"},
+            "metrics": {},
+            "recent_runs": [],
+            "plan_funnel_7d": {},
+            "audit_status_1d": {},
+            "tool_stats_1d": [],
+            "recent_errors": [],
+            "degraded": False,
+            "warnings": [],
+        }
+    )
+    return _observability_json(payload)
 
 
 @router.options("/api/admin/cloud-orchestrator/media/upload")

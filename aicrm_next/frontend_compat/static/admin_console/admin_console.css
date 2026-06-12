@@ -2534,6 +2534,241 @@ body.admin-shell {
   border-color: #d7dbe0;
 }
 
+.config-center,
+.config-detail .admin-card {
+  border-radius: 12px;
+}
+
+.config-center-alert {
+  margin-bottom: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 800;
+}
+
+.config-center-alert.is-success {
+  color: #18563b;
+  border-color: rgba(47, 122, 86, 0.22);
+  background: #eef8f2;
+}
+
+.config-center-alert.is-error {
+  color: #8a402c;
+  border-color: rgba(173, 80, 55, 0.28);
+  background: #fff2ee;
+}
+
+.config-center-table {
+  min-width: 620px;
+}
+
+.config-center-table th,
+.config-center-table td {
+  height: 46px;
+  padding: 8px 12px;
+  vertical-align: middle;
+}
+
+.config-center-table th:nth-child(2),
+.config-center-table th:nth-child(3),
+.config-center-table th:nth-child(4),
+.config-center-table td:nth-child(2),
+.config-center-table td:nth-child(3),
+.config-center-table td:nth-child(4) {
+  width: 120px;
+}
+
+.config-center-category-name {
+  color: #172033;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.config-center-state {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 58px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid #d8dee8;
+  border-radius: 999px;
+  color: #667085;
+  background: #f2f4f7;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.config-center-state.is-on {
+  color: #128a4b;
+  border-color: #b9e8cb;
+  background: #e8f8ef;
+}
+
+.config-center-switch {
+  position: relative;
+  display: inline-block;
+  width: 50px;
+  height: 28px;
+  vertical-align: middle;
+}
+
+.config-center-switch input {
+  display: none;
+}
+
+.config-center-slider {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  background: #c8d0dd;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.config-center-slider::before {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.22);
+  transition: transform 0.15s ease;
+}
+
+.config-center-switch input:checked + .config-center-slider {
+  background: #2f66ff;
+}
+
+.config-center-switch input:checked + .config-center-slider::before {
+  transform: translateX(22px);
+}
+
+.config-center-switch input:disabled + .config-center-slider {
+  cursor: progress;
+  opacity: 0.7;
+}
+
+.config-center-action {
+  min-height: 34px;
+  padding: 6px 14px;
+  border-radius: 8px;
+}
+
+.config-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.config-detail-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  padding: 10px 12px;
+}
+
+.config-detail-title {
+  color: #172033;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.config-detail-status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.config-detail-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.config-detail-block {
+  padding: 0;
+  overflow: hidden;
+}
+
+.config-detail-block-head {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(251, 252, 255, 0.86);
+}
+
+.config-detail-block-head h2 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 900;
+}
+
+.config-detail-table {
+  min-width: 520px;
+}
+
+.config-detail-table th,
+.config-detail-table td {
+  height: 42px;
+  padding: 7px 12px;
+  vertical-align: middle;
+}
+
+.config-detail-table th {
+  width: 180px;
+  color: #344054;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.config-detail-table input,
+.config-detail-table textarea {
+  width: 100%;
+  min-height: 32px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #101828;
+  outline: none;
+}
+
+.config-detail-table textarea {
+  min-height: 58px;
+  line-height: 1.4;
+  resize: vertical;
+}
+
+.config-detail-table input:focus,
+.config-detail-table textarea:focus {
+  border-color: #2f66ff;
+  box-shadow: 0 0 0 3px rgba(47, 102, 255, 0.1);
+}
+
+.config-detail-readonly {
+  color: #667085 !important;
+  background: #f8fafc !important;
+}
+
+.config-detail-bottom {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 12px;
+}
+
 @media (max-width: 1100px) {
   .admin-auth-grid,
   .config-editor-layout {
@@ -2569,5 +2804,14 @@ body.admin-shell {
   .admin-inline-editor__panel {
     left: 0;
     right: auto;
+  }
+
+  .config-detail-top {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .config-detail-table th {
+    width: 120px;
   }
 }

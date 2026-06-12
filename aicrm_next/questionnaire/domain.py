@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from aicrm_next.shared.errors import ContractError
@@ -260,6 +261,37 @@ def validate_required_answers(questionnaire: dict[str, Any], answers: dict[str, 
         other_max_length = int(other_options[0].get("other_max_length") or 80)
         if len(other_text.strip()) > other_max_length:
             raise ContractError(f"question {_question_label(question)} other_text length must be <= {other_max_length}")
+
+
+def normalize_mobile_answer(value: Any) -> str:
+    if isinstance(value, list):
+        value = value[0] if value else ""
+    digits = re.sub(r"\D+", "", str(value or ""))
+    if len(digits) == 13 and digits.startswith("86"):
+        digits = digits[2:]
+    if re.fullmatch(r"1\d{10}", digits):
+        return digits
+    return ""
+
+
+def extract_submission_mobile(questionnaire: dict[str, Any], answers: dict[str, Any], respondent_identity: dict[str, Any]) -> str:
+    identity_mobile = normalize_mobile_answer((respondent_identity or {}).get("mobile"))
+    if identity_mobile:
+        return identity_mobile
+    for question in normalize_questionnaire(questionnaire)["questions"]:
+        field = str(question.get("sidebar_profile_field") or "").strip().lower()
+        q_type = str(question.get("type") or "").strip().lower()
+        title = str(question.get("title") or "").strip()
+        if field not in {"mobile", "phone", "phone_number"} and q_type != "mobile" and "手机号" not in title:
+            continue
+        mobile = normalize_mobile_answer(answers.get(str(question["id"])))
+        if mobile:
+            return mobile
+    for value in (answers or {}).values():
+        mobile = normalize_mobile_answer(value)
+        if mobile:
+            return mobile
+    return ""
 
 
 def score_and_tags(questionnaire: dict[str, Any], answers: dict[str, Any]) -> tuple[int, list[str]]:

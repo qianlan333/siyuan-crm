@@ -11,26 +11,23 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 ensure_repo_root_on_path()
 
-from wecom_ability_service import create_app
-from wecom_ability_service.domains.external_push import service as external_push_service
+from aicrm_next.external_push import service as external_push_service
 
 DEFAULT_BATCH_SIZE = 50
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run due external push webhook jobs.")
     parser.add_argument("--limit", type=int, default=read_int_env("EXTERNAL_PUSH_WORKER_BATCH_SIZE", DEFAULT_BATCH_SIZE))
     parser.add_argument("--skip-events", action="store_true")
     parser.add_argument("--skip-retries", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
-    app = create_app()
-    with app.app_context():
-        payload: dict[str, object] = {"ok": True}
-        if not args.skip_events:
-            payload["events"] = external_push_service.run_due_external_push_events(limit=args.limit)
-        if not args.skip_retries:
-            payload["retries"] = external_push_service.run_due_external_push_retries(limit=args.limit)
+    payload: dict[str, object] = {"ok": True}
+    if not args.skip_events:
+        payload["events"] = external_push_service.run_due_external_push_events(limit=args.limit)
+    if not args.skip_retries:
+        payload["retries"] = external_push_service.run_due_external_push_retries(limit=args.limit)
     print(json.dumps(payload, ensure_ascii=False, default=str))
     return 0
 

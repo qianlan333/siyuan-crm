@@ -118,7 +118,9 @@ def test_active_guardrail_routes_still_require_internal_token(monkeypatch):
     assert response.status_code == 401
 
 
-def test_checker_returns_ok_and_keeps_local_sentinel_stable():
+def test_checker_returns_ok_and_keeps_local_sentinel_stable(monkeypatch):
+    monkeypatch.setattr(checker, "production_config_modified", lambda: False)
+
     result = checker.run_check()
 
     assert result["ok"] is True

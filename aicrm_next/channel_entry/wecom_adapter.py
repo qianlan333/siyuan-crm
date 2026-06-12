@@ -63,6 +63,12 @@ class GuardedWeComAdapter:
     def create_contact_way(self, payload: dict[str, Any]) -> dict[str, Any]:
         raise WeComAdapterBlocked(self.contact_way_reason, missing_config=self.missing_config)
 
+    def list_follow_users(self) -> list[str]:
+        raise WeComAdapterBlocked(self.detail_reason, missing_config=self.missing_config)
+
+    def list_contacts(self, owner_userid: str) -> list[str]:
+        raise WeComAdapterBlocked(self.detail_reason, missing_config=self.missing_config)
+
     def get_external_contact_detail(self, external_userid: str) -> dict[str, Any]:
         raise WeComAdapterBlocked(self.detail_reason, missing_config=self.missing_config)
 
@@ -168,6 +174,14 @@ class ProductionWeComAdapter:
 
     def create_contact_way(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/cgi-bin/externalcontact/add_contact_way", json_payload=payload)
+
+    def list_follow_users(self) -> list[str]:
+        payload = self._request("GET", "/cgi-bin/externalcontact/get_follow_user_list")
+        return [text(userid) for userid in list(payload.get("follow_user") or []) if text(userid)]
+
+    def list_contacts(self, owner_userid: str) -> list[str]:
+        payload = self._request("GET", "/cgi-bin/externalcontact/list", params={"userid": text(owner_userid)})
+        return [text(external_userid) for external_userid in list(payload.get("external_userid") or []) if text(external_userid)]
 
     def get_external_contact_detail(self, external_userid: str) -> dict[str, Any]:
         return self._request("GET", "/cgi-bin/externalcontact/get", params={"external_userid": text(external_userid)})

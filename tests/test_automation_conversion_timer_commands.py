@@ -15,8 +15,13 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_timer_fixture_state()
     return TestClient(create_app(), raise_server_exceptions=False)
+
+
+def _headers(idempotency_key: str) -> dict[str, str]:
+    return {"Idempotency-Key": idempotency_key, "Authorization": "Bearer timer-token"}
 
 
 def _assert_safe_contract(body: dict) -> None:
@@ -38,7 +43,7 @@ def test_reply_monitor_capture_returns_blocked_plan(monkeypatch):
     response = client.post(
         "/api/admin/automation-conversion/reply-monitor/capture",
         json={"limit": 5},
-        headers={"Idempotency-Key": "timer-capture-plan"},
+        headers=_headers("timer-capture-plan"),
     )
 
     assert response.status_code == 200
@@ -62,7 +67,7 @@ def test_reply_monitor_run_due_returns_blocked_plan(monkeypatch):
     response = client.post(
         "/api/admin/automation-conversion/reply-monitor/run-due",
         json={"limit": 5},
-        headers={"Idempotency-Key": "timer-reply-run-due-plan"},
+        headers=_headers("timer-reply-run-due-plan"),
     )
 
     assert response.status_code == 200
@@ -82,7 +87,7 @@ def test_jobs_run_due_returns_blocked_plan_with_job_codes(monkeypatch):
     response = client.post(
         "/api/admin/automation-conversion/jobs/run-due",
         json={"jobs": ["job_a", "job_b"], "batch_size": 2},
-        headers={"Idempotency-Key": "timer-jobs-run-due-plan"},
+        headers=_headers("timer-jobs-run-due-plan"),
     )
 
     assert response.status_code == 200
@@ -105,7 +110,7 @@ def test_options_and_invalid_limit(monkeypatch):
     assert body["allowed_methods"] == ["POST", "OPTIONS"]
     assert body["automation_runtime_executed"] is False
 
-    invalid = client.post("/api/admin/automation-conversion/jobs/run-due", json={"limit": 0})
+    invalid = client.post("/api/admin/automation-conversion/jobs/run-due", json={"limit": 0}, headers=_headers("timer-invalid"))
     assert invalid.status_code == 400
     invalid_body = invalid.json()
     assert invalid_body["ok"] is False

@@ -39,6 +39,8 @@
     plan: (id) => `/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}`,
     apiPlans: "/api/admin/automation-conversion/group-ops/plans",
     apiPlan: (id) => `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}`,
+    apiPlanEnable: (id) => `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/enable`,
+    apiPlanDisable: (id) => `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/disable`,
     apiPlanGroups: (id) => `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/groups`,
     apiPlanGroup: (id, chatId) =>
       `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/groups/${encodeURIComponent(chatId)}`,
@@ -384,7 +386,9 @@
     if (action === "cancel-create-plan") return cancelCreatePlan();
     if (action === "save-plan") return savePlan();
     if (action === "refresh-owner-groups") return refreshOwnerGroups();
+    if (action === "enable-plan") return enablePlan(event.currentTarget.dataset.planId);
     if (action === "disable-plan") return disablePlan(event.currentTarget.dataset.planId);
+    if (action === "delete-plan") return deletePlan(event.currentTarget.dataset.planId);
     if (action === "bind-group") return bindGroup(event.currentTarget.dataset.chatId);
     if (action === "open-group-picker") return openGroupPicker();
     if (action === "close-group-picker") return closeGroupPicker();
@@ -481,18 +485,23 @@
   }
 
   async function disablePlan(planId) {
+    if (!planId) return;
+    await requestJson(routes.apiPlanDisable(planId), { method: "POST" });
+    loadListPage();
+  }
+
+  async function enablePlan(planId) {
+    if (!planId) return;
+    await requestJson(routes.apiPlanEnable(planId), { method: "POST" });
+    loadListPage();
+  }
+
+  async function deletePlan(planId) {
+    if (!planId) return;
     const current = state.plans.find((item) => Number(item.id) === Number(planId));
-    if (!current) return;
-    await requestJson(routes.apiPlan(planId), {
-      method: "PUT",
-      body: {
-        plan_name: current.plan_name,
-        plan_code: current.plan_code,
-        plan_type: current.plan_type,
-        owner_userid: current.owner_userid,
-        status: "disabled",
-      },
-    });
+    const label = current && current.plan_name ? `「${current.plan_name}」` : "该计划";
+    if (!window.confirm(`确认删除${label}？删除后列表将不再显示。`)) return;
+    await requestJson(routes.apiPlan(planId), { method: "DELETE" });
     loadListPage();
   }
 
@@ -729,7 +738,12 @@
           <td>
             <div class="group-ops__row-actions">
               <a class="group-ops__button group-ops__button--primary" href="${escapeHtml(routes.plan(plan.id))}">编辑</a>
-              <button class="group-ops__button group-ops__button--danger" type="button" data-action="disable-plan" data-plan-id="${escapeHtml(plan.id)}">停用 / 删除</button>
+              ${
+                plan.status === "active"
+                  ? `<button class="group-ops__button" type="button" data-action="disable-plan" data-plan-id="${escapeHtml(plan.id)}">停用</button>`
+                  : `<button class="group-ops__button" type="button" data-action="enable-plan" data-plan-id="${escapeHtml(plan.id)}">启用</button>`
+              }
+              <button class="group-ops__button group-ops__button--danger" type="button" data-action="delete-plan" data-plan-id="${escapeHtml(plan.id)}">删除</button>
             </div>
           </td>
         </tr>`,

@@ -2,18 +2,16 @@
 
 Scope: Legacy Exit group 16 deletion closeout locks the media library admin pages, API routes, storage adapter boundary, and route precedence after PR #1007 and the #1009 no-real-external hardening. Media Library production_compat rollback is removed, `legacy_fallback_allowed=false`, real external object storage is not enabled, and real WeCom media upload is not executed.
 
-Route precedence check:
+Current Next coverage:
 
-- `aicrm_next.main.create_app()` no longer registers production_compat, and `aicrm_next/production_compat/api.py` has been removed; media-library requests resolve to Next routes without compatibility fallback.
-- `media_library_router` is registered before `frontend_compat_router` and `production compatibility wildcard router`.
-- `tools/check_production_route_resolution.py` samples every media library API family plus the three admin pages; `tests/test_production_route_resolution.py` asserts they resolve to `aicrm_next.media_library.api` or `aicrm_next.frontend_compat.legacy_routes`, not production_compat.
-- `scripts/check_no_new_legacy.py --strict` now treats any Media Library production_compat route, direct HTTP/storage client, or `legacy_fallback_allowed=true` lifecycle drift as a violation.
+- `media_library_router` and `media_library_admin_pages_router` are registered as Next-native routers.
+- Media library business tests cover list/detail/facets/upload/import/update/delete/thumbnail/variant behavior and no-real-external defaults.
 
 Closeout lock status:
 
 | Route family | Runtime owner | delete_status | replacement_status | legacy_fallback_allowed | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `/admin/*-library` | `frontend_compat over Next APIs` | `deletion_locked` | `locked` | `false` | Page templates remain frontend_compat shells, but they call Next APIs and no production_compat rollback route is retained. |
+| `/admin/*-library` | `next_native_page_shell` | `deletion_locked` | `locked` | `false` | Page routes are served by `aicrm_next.media_library.admin_pages`; templates/static remain shared assets and no frontend_compat runtime router is retained. |
 | `/api/admin/image-library*` GET | `next_native` | `deletion_locked` | `locked` | `false` | list/detail/facets/thumbnail/variant resolve to `aicrm_next.media_library.api`. |
 | `/api/admin/image-library*` POST/PUT/DELETE/OPTIONS | `next_storage_adapter` | `deletion_locked` | `locked` | `false` | create/upload/from-url/from-base64/update/delete stay guarded and local/fake/real_blocked. |
 | `/api/admin/attachment-library*` GET | `next_native` | `deletion_locked` | `locked` | `false` | list/detail resolve to `aicrm_next.media_library.api`. |

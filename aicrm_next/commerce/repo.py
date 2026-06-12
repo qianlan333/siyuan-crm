@@ -1071,3 +1071,9 @@ def build_commerce_repository() -> CommerceRepository:
 def reset_commerce_fixture_state() -> None:
     global _GLOBAL_REPO
     _GLOBAL_REPO = InMemoryCommerceRepository()
+    try:
+        from .wechat_shop_service import reset_wechat_shop_fixture_state
+
+        reset_wechat_shop_fixture_state()
+    except Exception:
+        pass

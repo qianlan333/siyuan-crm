@@ -190,11 +190,7 @@ def test_group_sync_binding_owner_mismatch_is_rejected(group_ops_api_client, mon
 
 
 def test_group_sync_default_disabled_blocks_without_real_wecom(group_ops_api_client, monkeypatch):
-    def fail_if_called():
-        raise AssertionError("real WeCom client must not be constructed")
-
     monkeypatch.delenv("AICRM_WECOM_GROUP_ADAPTER_MODE", raising=False)
-    monkeypatch.setattr("wecom_ability_service.wecom_client.WeComClient.from_app", fail_if_called)
 
     response = group_ops_api_client.post(
         "/api/admin/automation-conversion/group-ops/groups/sync",
@@ -208,18 +204,15 @@ def test_group_sync_default_disabled_blocks_without_real_wecom(group_ops_api_cli
     assert body["synced_count"] == 0
 
 
-def test_group_sync_fake_adapter_data_is_stable(monkeypatch):
+def test_group_sync_fake_adapter_data_is_stable():
     from aicrm_next.integration_gateway.wecom_group_adapter import WeComGroupAssetAdapter
-
-    def fail_if_called():
-        raise AssertionError("real WeCom client must not be constructed")
-
-    monkeypatch.setattr("wecom_ability_service.wecom_client.WeComClient.from_app", fail_if_called)
 
     owner_001 = WeComGroupAssetAdapter(mode="fake").list_group_chats(owner_userid="owner_001", limit=100)
     owner_002 = WeComGroupAssetAdapter(mode="fake").list_group_chats(owner_userid="owner_002", limit=100)
 
     assert owner_001["ok"] is True
     assert owner_002["ok"] is True
+    assert owner_001["side_effect_executed"] is False
+    assert owner_002["side_effect_executed"] is False
     assert len(owner_001["groups"]) >= 2
     assert len(owner_002["groups"]) >= 1

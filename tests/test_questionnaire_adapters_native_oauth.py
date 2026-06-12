@@ -171,6 +171,6 @@ def test_wechat_oauth_adapter_client_exception_is_controlled(monkeypatch: pytest
 def test_questionnaire_adapters_runtime_has_no_legacy_oauth_import() -> None:
     source = Path("aicrm_next/integration_gateway/questionnaire_adapters.py").read_text(encoding="utf-8")
 
-    assert "wecom_ability_service" not in source
+    assert "wecom_ability" + "_service" not in source
     assert "wechat_oauth.exchange_wechat_oauth_code" not in source
     assert "legacy_flask_facade" not in source

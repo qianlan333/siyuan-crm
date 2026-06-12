@@ -12,7 +12,7 @@ from aicrm_next.shared.repository_provider import RepositoryProviderError, block
 from aicrm_next.shared.runtime import production_data_ready
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
-from .domain import admin_detail_projection, score_and_tags, summary_projection, validate_required_answers
+from .domain import admin_detail_projection, extract_submission_mobile, score_and_tags, summary_projection, validate_required_answers
 from .dto import OAuthCallbackRequest, OAuthStartRequest, QuestionnaireSubmitRequest, QuestionnaireUpsertRequest
 from .oauth import QuestionnaireOAuthAdapter, build_questionnaire_oauth_adapter
 from .public_access import (
@@ -356,9 +356,10 @@ class SubmitQuestionnaireCommand:
         if not bool(item.get("enabled", True)):
             raise NotFoundError("questionnaire disabled")
         validate_required_answers(item, payload.answers)
+        resolved_mobile = extract_submission_mobile(item, payload.answers, payload.respondent_identity)
         identity = self._identity_query(
             ResolvePersonIdentityRequest(
-                mobile=payload.respondent_identity.get("mobile"),
+                mobile=resolved_mobile or payload.respondent_identity.get("mobile"),
                 external_userid=payload.respondent_identity.get("external_userid"),
                 openid=payload.respondent_identity.get("openid"),
                 unionid=payload.respondent_identity.get("unionid"),
@@ -373,12 +374,13 @@ class SubmitQuestionnaireCommand:
                 "respondent_identity": dict(payload.respondent_identity),
                 "person_id": identity.person_id if identity else None,
                 "external_userid": (identity.external_userid if identity else payload.respondent_identity.get("external_userid")) or "",
-                "mobile": (identity.mobile if identity else payload.respondent_identity.get("mobile")) or "",
+                "mobile": (identity.mobile if identity else resolved_mobile or payload.respondent_identity.get("mobile")) or "",
                 "binding_status": identity.binding_status if identity else "unresolved",
                 "score": score,
                 "final_tags": final_tags,
             }
         )
+        bind_result = self._side_effect_gateway.bind_mobile(questionnaire=item, submission=submission)
         tag_result = self._side_effect_gateway.apply_tags(
             questionnaire_id=item["id"],
             submission_id=submission["submission_id"],
@@ -420,6 +422,7 @@ class SubmitQuestionnaireCommand:
             "automation_event": automation_event,
             "side_effect_safety": self._side_effect_gateway.side_effect_safety(),
             "side_effects": {
+                "mobile_binding": bind_result,
                 "wecom_tag": tag_result,
                 "external_push": push_result,
                 "automation": automation_gateway_result,

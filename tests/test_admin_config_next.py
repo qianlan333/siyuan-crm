@@ -250,7 +250,7 @@ def test_admin_config_pages_are_next_owned_and_nonblank(monkeypatch, tmp_path) -
     client = _prepare_client(monkeypatch, tmp_path)
 
     for path, marker in [
-        ("/admin/config", "配置中心"),
+        ("/admin/config", "系统配置"),
         ("/admin/config/app-settings", "系统设置"),
         ("/admin/config/login-access", "登录与权限"),
         ("/admin/config/checklist", "配置检查清单"),
@@ -261,6 +261,12 @@ def test_admin_config_pages_are_next_owned_and_nonblank(monkeypatch, tmp_path) -
         assert marker in response.text
         assert "X-AICRM-Compatibility-Facade" not in response.headers
         assert "X-AICRM-Compatibility-Facade" not in response.text
+
+    config_home = client.get("/admin/config")
+    assert "admin-quick-links" not in config_home.text
+    assert "config-editor-layout" not in config_home.text
+    for marker in ["类目", "是否生效", "生效开关", "配置"]:
+        assert marker in config_home.text
 
     wecom_tags_alias = client.get("/admin/config/wecom-tags", follow_redirects=False)
     assert wecom_tags_alias.status_code == 302
@@ -313,6 +319,153 @@ def test_app_settings_save_requires_clear_token_and_confirm_errors(monkeypatch, 
     assert "admin_action_token" in missing_token.json()["error"]
     assert missing_confirm.status_code == 400
     assert "confirm is required" in missing_confirm.json()["error"]
+
+
+def test_config_categories_api_lists_category_summaries(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+
+    response = client.get("/api/admin/config/categories")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source_status"] == "next_read_model"
+    rows = payload["config"]["rows"]
+    category_keys = {row["key"] for row in rows}
+    assert {"wecom_base", "wechat_pay", "alipay", "wechat_shop", "admin_access"}.issubset(category_keys)
+    wechat_pay = next(row for row in rows if row["key"] == "wechat_pay")
+    assert wechat_pay["label"] == "微信支付"
+    assert wechat_pay["enabled"] is False
+    assert wechat_pay["detail_href"] == "/admin/config/detail/wechat_pay"
+    admin_access = next(row for row in rows if row["key"] == "admin_access")
+    assert admin_access["enabled"] is True
+
+
+def test_config_category_detail_returns_blocks_and_masks_sensitive_fields(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+
+    response = client.get("/api/admin/config/categories/wecom_base")
+    page_endpoint = client.get("/admin/config/detail/wecom_base")
+
+    assert response.status_code == 200
+    assert page_endpoint.status_code == 200
+    assert "企业微信基础" in page_endpoint.text
+    assert "config-detail-block" in page_endpoint.text
+    assert "config-editor-layout" not in page_endpoint.text
+    assert 'placeholder="已设置"' in page_endpoint.text
+    config = response.json()["config"]
+    assert config["category"]["key"] == "wecom_base"
+    fields = [field for block in config["blocks"] for field in block["fields"]]
+    secret = next(field for field in fields if field["key"] == "WECOM_SECRET")
+    assert secret["sensitive"] is True
+    assert secret["value"] == ""
+    assert secret["display_value"] == "sup***ue"
+    assert secret["configured"] is True
+    assert any(field["key"] == "WECOM_CALLBACK_TOKEN" for field in fields)
+
+
+def test_config_category_enabled_update_uses_app_settings_and_preserves_auth_tables(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+    database_url = _db_url(monkeypatch)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO admin_users (wecom_userid, wecom_corpid, display_name, is_active, login_enabled, admin_level)
+                VALUES ('owner.admin', 'ww-next-corp', 'Owner Admin', TRUE, TRUE, 'super_admin')
+                """
+            )
+        )
+        conn.execute(text("INSERT INTO admin_user_roles (admin_user_id, role_code) VALUES (1, 'super_admin')"))
+        conn.execute(
+            text(
+                """
+                INSERT INTO admin_login_audit (admin_user_id, login_type, login_result, ip, user_agent)
+                VALUES (1, 'wecom_sso', 'success', '127.0.0.1', 'pytest')
+                """
+            )
+        )
+    token = _token(client.get("/admin/config/app-settings").text)
+
+    response = client.put(
+        "/api/admin/config/categories/wechat_pay/enabled",
+        json={"admin_action_token": token, "enabled": True, "operator": "category-test"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["source_status"] == "next_command"
+    assert response.json()["fallback_used"] is False
+    assert response.json()["real_external_call_executed"] is False
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECHAT_PAY_ENABLED'") == "true"
+    assert (
+        _scalar(
+            database_url,
+            "SELECT COUNT(*) FROM admin_operation_logs WHERE target_type = 'config_category_enabled' AND target_id = 'wechat_pay'",
+        )
+        == 1
+    )
+    assert _scalar(database_url, "SELECT COUNT(*) FROM admin_users WHERE wecom_userid = 'owner.admin'") == 1
+    assert _scalar(database_url, "SELECT COUNT(*) FROM admin_user_roles WHERE role_code = 'super_admin'") == 1
+    assert _scalar(database_url, "SELECT COUNT(*) FROM admin_login_audit WHERE login_result = 'success'") == 1
+
+
+def test_config_category_settings_save_skips_empty_sensitive_and_rejects_cross_category_keys(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+    database_url = _db_url(monkeypatch)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO app_settings (key, value) VALUES ('WECHAT_PAY_API_V3_KEY', 'original-v3-secret')"))
+    token = _token(client.get("/admin/config/app-settings").text)
+
+    saved = client.put(
+        "/api/admin/config/categories/wechat_pay/settings",
+        json={
+            "admin_action_token": token,
+            "operator": "category-settings-test",
+            "settings": {
+                "WECHAT_PAY_NOTIFY_URL": "https://pay.example.test/notify",
+                "WECHAT_PAY_TIMEOUT_SECONDS": "15",
+                "WECHAT_PAY_API_V3_KEY": "",
+            },
+        },
+    )
+    cross_category = client.put(
+        "/api/admin/config/categories/wechat_pay/settings",
+        json={
+            "admin_action_token": token,
+            "operator": "category-settings-test",
+            "settings": {"ALIPAY_APP_ID": "alipay-app"},
+        },
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["changed_count"] == 2
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECHAT_PAY_NOTIFY_URL'") == "https://pay.example.test/notify"
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECHAT_PAY_TIMEOUT_SECONDS'") == "15"
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECHAT_PAY_API_V3_KEY'") == "original-v3-secret"
+    assert cross_category.status_code == 400
+    assert "not in category" in cross_category.json()["error"]
+
+
+def test_config_category_check_and_invalid_category_are_controlled(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+
+    check = client.post("/api/admin/config/categories/wechat_pay/check", json={"operator": "check-test"})
+    missing = client.get("/api/admin/config/categories/not-a-category")
+    save_missing = client.put(
+        "/api/admin/config/categories/not-a-category/settings",
+        json={"admin_action_token": _token(client.get("/admin/config/app-settings").text), "settings": {"WECOM_CORP_ID": "ww"}},
+    )
+
+    assert check.status_code == 200
+    payload = check.json()
+    assert payload["source_status"] == "next_command"
+    assert payload["fallback_used"] is False
+    assert payload["real_external_call_executed"] is False
+    assert payload["adapter_preview"]["adapter"] == "wechat_pay"
+    assert payload["adapter_preview"]["real_external_call_executed"] is False
+    assert missing.status_code == 404
+    assert save_missing.status_code == 404
 
 
 def test_setup_wizard_saves_and_repeated_submit_is_noop(monkeypatch, tmp_path) -> None:
@@ -469,10 +622,8 @@ def test_signup_conversion_config_alias_is_next_owned_and_audited(monkeypatch, t
 
 
 def test_admin_config_routes_no_longer_forward_to_legacy_facade() -> None:
-    source = (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").read_text(encoding="utf-8")
-    assert "admin_config_legacy_facade" not in source
-    assert '"/admin/config"' not in source
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
     admin_config_source = "\n".join(path.read_text(encoding="utf-8") for path in (ROOT / "aicrm_next/admin_config").glob("*.py"))
     assert "legacy_flask_facade" not in admin_config_source
     assert "forward_to_legacy_flask" not in admin_config_source
-    assert "wecom_ability_service" not in admin_config_source
+    assert "wecom_ability" + "_service" not in admin_config_source

@@ -55,15 +55,14 @@ def test_h5_write_source_has_no_real_external_call_markers() -> None:
 
 
 def test_public_h5_read_source_has_no_legacy_public_identity_helpers() -> None:
-    combined = "\n".join(
-        Path(path).read_text(encoding="utf-8")
-        for path in [
-            "aicrm_next/questionnaire/api.py",
-            "aicrm_next/questionnaire/application.py",
-            "aicrm_next/questionnaire/public_access.py",
-            "aicrm_next/integration_gateway/legacy_flask_facade.py",
-        ]
-    )
+    source_paths = [
+        Path("aicrm_next/questionnaire/api.py"),
+        Path("aicrm_next/questionnaire/application.py"),
+        Path("aicrm_next/questionnaire/public_access.py"),
+    ]
+    removed_facade = Path("aicrm_next/integration_gateway/legacy_flask_facade.py")
+    assert not removed_facade.exists()
+    combined = "\n".join(path.read_text(encoding="utf-8") for path in source_paths)
     assert not (Path("aicrm_next/integration_gateway") / "legacy_questionnaire_facade.py").exists()
     for marker in [
         "get_public_questionnaire_from_legacy",

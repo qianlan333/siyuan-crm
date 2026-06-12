@@ -24,8 +24,8 @@ def test_messages_inventory_covers_known_repository_paths() -> None:
     ]:
         assert path in text
 
-    assert "tests/test_api.py" in text
-    assert "tests/contract/test_crm_contract.py" in text
+    assert "tests/test_customer_read_model_next_primary.py" in text
+    assert "tests/test_messages_exact_routes.py" in text
     assert "aicrm_next/production_compat/api.py" in text
     assert "deleted and locked" in text
     assert "no legacy forward" in text
@@ -45,9 +45,8 @@ def test_messages_inventory_search_references_are_explained() -> None:
 
     for required in [
         "aicrm_next/customer_read_model/api.py",
-        "tests/test_api.py",
-        "tests/contract/test_crm_contract.py",
-        "tests/test_http_registration_contract.py",
+        "tests/test_customer_read_model_next_primary.py",
+        "tests/test_messages_exact_routes.py",
         "docs/crm_sensitive_routes.md",
     ]:
         assert required in referenced_files

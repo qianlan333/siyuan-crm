@@ -104,6 +104,17 @@ class FixtureCustomerReadRepository:
                     "stage_key": "trial/activated_focus",
                     "recommended_action": "跟进正式课报名",
                     "signals": ["recent_reply", "high_intent_tag"],
+                    "matched_questions": [
+                        {
+                            "questionnaire_id": "questionnaire_fixture_001",
+                            "questionnaire_title": "黄小璨报名问卷",
+                            "submission_id": "submission_fixture_001",
+                            "submitted_at": "2026-05-18T09:30:00+08:00",
+                            "question_id": "q_goal",
+                            "question": "孩子当前英语学习目标是什么？",
+                            "answer": "希望提升表达自信",
+                        }
+                    ],
                 },
                 "contact": {
                     "external_userid": "wx_ext_001",
@@ -436,45 +447,6 @@ class FixtureCustomerReadRepository:
 
     seed = replace_all
 
-    def merge_projection(
-        self,
-        *,
-        customers: list[JsonDict],
-        timeline_by_external_userid: dict[str, list[JsonDict]] | None = None,
-        messages_by_external_userid: dict[str, list[JsonDict]] | None = None,
-        replace: bool = False,
-    ) -> JsonDict:
-        timeline_by_external_userid = timeline_by_external_userid or {}
-        messages_by_external_userid = messages_by_external_userid or {}
-        incoming_external_userids = {
-            str(customer.get("external_userid") or "").strip()
-            for customer in customers
-            if str(customer.get("external_userid") or "").strip()
-        }
-        if replace:
-            self.replace_all(
-                customers=customers,
-                timeline_by_external_userid=timeline_by_external_userid,
-                messages_by_external_userid=messages_by_external_userid,
-            )
-        else:
-            self._customers = [
-                item for item in self._customers if str(item.get("external_userid") or "").strip() not in incoming_external_userids
-            ] + [deepcopy(item) for item in customers]
-            for external_userid in incoming_external_userids:
-                self._timeline[external_userid] = [
-                    deepcopy(item) for item in timeline_by_external_userid.get(external_userid, [])
-                ]
-                self._messages[external_userid] = [
-                    deepcopy(item) for item in messages_by_external_userid.get(external_userid, [])
-                ]
-        return {
-            "projected_customer_count": len(incoming_external_userids),
-            "detail_snapshot_count": len(incoming_external_userids),
-            "timeline_event_count": sum(len(items) for items in timeline_by_external_userid.values()),
-            "recent_message_count": sum(len(items) for items in messages_by_external_userid.values()),
-        }
-
     def get_customer(self, external_userid: str) -> JsonDict | None:
         item = next((item for item in self._customers if item.get("external_userid") == external_userid), None)
         return deepcopy(item) if item else None
@@ -543,149 +515,6 @@ class SqlAlchemyCustomerReadModelRepository:
             messages_by_external_userid=messages_by_external_userid,
         )
         self._session.commit()
-
-    def merge_projection(
-        self,
-        *,
-        customers: list[JsonDict],
-        timeline_by_external_userid: dict[str, list[JsonDict]] | None = None,
-        messages_by_external_userid: dict[str, list[JsonDict]] | None = None,
-        replace: bool = False,
-    ) -> JsonDict:
-        """Merge live source rows into Next projection tables without touching source tables."""
-
-        timeline_by_external_userid = timeline_by_external_userid or {}
-        messages_by_external_userid = messages_by_external_userid or {}
-        valid_customers = [
-            customer
-            for customer in customers
-            if str(customer.get("external_userid") or "").strip()
-        ]
-        if replace:
-            self.clear()
-
-        projected_customer_count = 0
-        timeline_event_count = 0
-        recent_message_count = 0
-        for customer in valid_customers:
-            external_userid = str(customer.get("external_userid") or "").strip()
-            self._replace_projection_customer(customer)
-            self._replace_projection_timeline(
-                customer,
-                timeline_by_external_userid.get(external_userid, []),
-            )
-            self._replace_projection_recent_messages(
-                customer,
-                messages_by_external_userid.get(external_userid, []),
-            )
-            projected_customer_count += 1
-            timeline_event_count += len(timeline_by_external_userid.get(external_userid, []))
-            recent_message_count += len(messages_by_external_userid.get(external_userid, []))
-
-        self._session.commit()
-        return {
-            "projected_customer_count": projected_customer_count,
-            "detail_snapshot_count": projected_customer_count,
-            "timeline_event_count": timeline_event_count,
-            "recent_message_count": recent_message_count,
-        }
-
-    def _replace_projection_customer(self, customer: JsonDict) -> None:
-        external_userid = str(customer.get("external_userid") or "").strip()
-        created_at = _coerce_datetime(customer.get("created_at") or customer.get("updated_at"))
-        updated_at = _coerce_datetime(customer.get("updated_at"))
-        binding = dict(customer.get("binding") or {})
-        self._session.execute(
-            delete(customer_list_index_next).where(customer_list_index_next.c.external_userid == external_userid)
-        )
-        self._session.execute(
-            delete(customer_detail_snapshot_next).where(customer_detail_snapshot_next.c.external_userid == external_userid)
-        )
-        self._session.execute(
-            insert(customer_list_index_next).values(
-                person_id=customer.get("person_id") or "",
-                external_userid=external_userid,
-                customer_name=customer.get("customer_name") or "",
-                owner_userid=customer.get("owner_userid") or "",
-                owner_display_name=customer.get("owner_display_name") or "",
-                remark=customer.get("remark") or "",
-                description=customer.get("description") or "",
-                mobile=customer.get("mobile") or "",
-                is_bound=bool(binding.get("is_bound")),
-                binding_status=binding.get("binding_status") or customer.get("binding_status") or "unbound",
-                tags_json=list(customer.get("tags") or []),
-                class_user_status_json=dict(customer.get("class_user_status") or {}),
-                last_message_at=_coerce_optional_datetime(customer.get("last_message_at")),
-                last_touch_at=_coerce_optional_datetime(customer.get("last_touch_at")),
-                updated_at=updated_at,
-                created_at=created_at,
-            )
-        )
-        self._session.execute(
-            insert(customer_detail_snapshot_next).values(
-                person_id=customer.get("person_id") or "",
-                external_userid=external_userid,
-                customer_json=dict(customer),
-                binding_json=dict(customer.get("binding") or {}),
-                identity_json=dict(customer.get("identity") or {}),
-                follow_users_json=list(customer.get("follow_users") or []),
-                marketing_summary_json=dict(customer.get("marketing_summary") or {}),
-                marketing_profile_json=dict(customer.get("marketing_profile") or {}),
-                contact_json=dict(customer.get("contact") or {}),
-                sidebar_context_json=dict(customer.get("sidebar_context") or {}),
-                updated_at=updated_at,
-                created_at=created_at,
-            )
-        )
-
-    def _replace_projection_timeline(self, customer: JsonDict, items: list[JsonDict]) -> None:
-        external_userid = str(customer.get("external_userid") or "").strip()
-        created_at = _coerce_datetime(customer.get("created_at") or customer.get("updated_at"))
-        self._session.execute(
-            delete(customer_timeline_event_next).where(customer_timeline_event_next.c.external_userid == external_userid)
-        )
-        for event_index, item in enumerate(items, start=1):
-            self._session.execute(
-                insert(customer_timeline_event_next).values(
-                    event_id=item.get("event_id") or f"evt_{external_userid}_{event_index}",
-                    person_id=customer.get("person_id") or "",
-                    external_userid=external_userid,
-                    event_type=item.get("event_type") or "",
-                    event_time=_coerce_datetime(item.get("event_time")),
-                    title=item.get("title") or "",
-                    summary=item.get("summary") or "",
-                    source_table=item.get("source_table") or "",
-                    source_id=item.get("source_id") or "",
-                    metadata_json=dict(item.get("metadata") or {}),
-                    created_at=created_at,
-                )
-            )
-
-    def _replace_projection_recent_messages(self, customer: JsonDict, items: list[JsonDict]) -> None:
-        external_userid = str(customer.get("external_userid") or "").strip()
-        created_at = _coerce_datetime(customer.get("created_at") or customer.get("updated_at"))
-        self._session.execute(
-            delete(customer_recent_message_next).where(customer_recent_message_next.c.external_userid == external_userid)
-        )
-        for message_index, item in enumerate(items, start=1):
-            metadata = {
-                key: value
-                for key, value in item.items()
-                if key not in {"msgid", "external_userid", "msgtype", "content", "send_time", "owner_userid", "chat_type"}
-            }
-            self._session.execute(
-                insert(customer_recent_message_next).values(
-                    msgid=item.get("msgid") or f"msg_{external_userid}_{message_index}",
-                    external_userid=external_userid,
-                    msgtype=item.get("msgtype") or "text",
-                    content=item.get("content") or "",
-                    send_time=_coerce_datetime(item.get("send_time")),
-                    owner_userid=item.get("owner_userid") or "",
-                    chat_type=item.get("chat_type") or "single",
-                    metadata_json=metadata,
-                    created_at=created_at,
-                )
-            )
 
     def seed_from_fixture(self, fixture: FixtureCustomerReadRepository | None = None) -> None:
         fixture = fixture or FixtureCustomerReadRepository()

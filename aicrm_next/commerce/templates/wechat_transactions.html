@@ -207,7 +207,7 @@
           <h2>订单详情</h2>
           <p>展示{{ payment_provider_label }}订单号、客户、金额、状态和回调摘要。</p>
         </div>
-        <a class="admin-button admin-button--ghost" href="{{ '/admin/alipay/transactions' if payment_provider == 'alipay' else '/admin/wechat-pay/transactions' }}">返回列表</a>
+        <a class="admin-button admin-button--ghost" href="{{ list_page_url }}">返回列表</a>
       </div>
       <div class="commerce-card-body">
         <div class="commerce-kv">
@@ -245,7 +245,7 @@
         </div>
       </div>
     </section>
-    {% if payment_provider == "wechat" %}
+    {% if payment_provider in ["wechat", "wechat_shop"] %}
     <section class="admin-card">
       <div class="admin-card-head">
         <div>
@@ -255,10 +255,10 @@
       </div>
       <div class="commerce-card-body">
         {% if detail_order.can_refund %}
-        <form class="commerce-refund-form" id="refundForm" data-order-id="{{ detail_order.id }}" data-max-refund-total="{{ detail_order.refundable_amount_total }}">
+        <form class="commerce-refund-form" id="refundForm" data-provider="{{ payment_provider }}" data-order-id="{{ detail_order.merchant_order_no if payment_provider == 'wechat_shop' else detail_order.id }}" data-order-no="{{ detail_order.merchant_order_no }}" data-max-refund-total="{{ detail_order.refundable_amount_total }}">
           <label class="commerce-field" for="refundAmount">
             <span>退款金额</span>
-            <input id="refundAmount" inputmode="decimal" placeholder="最多 {{ detail_order.refundable_amount_yuan }}" required>
+            <input id="refundAmount" inputmode="decimal" placeholder="最多 {{ detail_order.refundable_amount_yuan }}" value="{{ detail_order.refundable_amount_yuan if payment_provider == 'wechat_shop' else '' }}" {% if payment_provider == "wechat_shop" %}readonly{% endif %} required>
           </label>
           <label class="commerce-field" for="refundReason">
             <span>退款原因</span>
@@ -271,10 +271,10 @@
             </select>
           </label>
           <label class="commerce-field" for="transactionConfirm">
-            <span>再次完整输入微信单号</span>
+            <span>再次完整输入{{ "微信小店订单号" if payment_provider == "wechat_shop" else "微信单号" }}</span>
             <input id="transactionConfirm" autocomplete="off" required>
           </label>
-          <label class="commerce-checkline"><input id="refundChecked" type="checkbox"><span>已核对付款人、商品、金额和微信单号</span></label>
+          <label class="commerce-checkline"><input id="refundChecked" type="checkbox"><span>已核对付款人、商品、金额和{{ "微信小店订单号" if payment_provider == "wechat_shop" else "微信单号" }}</span></label>
           <div class="admin-form-actions"><button class="admin-button admin-button--primary" type="submit">提交退款申请</button></div>
         </form>
         <div class="commerce-toast" id="refundResult"></div>
@@ -354,6 +354,7 @@
 <script>
   const listApiUrl = {{ list_api_url|tojson }};
   const exportApiUrl = {{ export_api_url|tojson }};
+  const fixedProvider = {{ fixed_provider|tojson }};
   const state = {offset: 0, total: 0, limit: 20};
   const $ = (id) => document.getElementById(id);
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -374,15 +375,24 @@
         result.textContent = `退款金额不能超过可退款金额 ¥${(maxRefundTotal / 100).toFixed(2)}`;
         return;
       }
-      const response = await fetch(`/api/admin/wechat-pay/orders/${encodeURIComponent(refundForm.dataset.orderId)}/refunds`, {
-        method: "POST",
-        headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({
+      const provider = refundForm.dataset.provider || "wechat";
+      const endpoint = provider === "wechat_shop" ? "/api/admin/refunds" : `/api/admin/wechat-pay/orders/${encodeURIComponent(refundForm.dataset.orderId)}/refunds`;
+      const body = provider === "wechat_shop" ? {
+          provider: "wechat_shop",
+          order_no: refundForm.dataset.orderNo,
+          reason: $("refundReason").value,
+          order_no_confirmation: $("transactionConfirm").value,
+          checked: $("refundChecked").checked
+        } : {
           refund_amount_total: refundAmountTotal,
           reason: $("refundReason").value,
           transaction_id_confirmation: $("transactionConfirm").value,
           checked: $("refundChecked").checked
-        })
+        };
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
       });
       const data = await response.json();
       if (!data.ok) {
@@ -405,6 +415,7 @@
     }
     function params() {
       const out = new URLSearchParams();
+      if (fixedProvider) out.set("provider", fixedProvider);
       Object.entries(filters()).forEach(([key, value]) => { if (String(value || "").trim()) out.set(key, value); });
       out.set("limit", $("limit").value || "20");
       out.set("offset", String(state.offset));
@@ -456,9 +467,18 @@
     $("nextBtn").addEventListener("click", () => { state.offset += state.limit; load(); });
     if ($("exportBtn") && exportApiUrl) $("exportBtn").addEventListener("click", async () => {
       $("notice").textContent = "正在生成导出文件...";
-      const response = await fetch(exportApiUrl, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({filters: filters(), format: "csv"})});
+      const response = await fetch(exportApiUrl, {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify({resource: "orders", filters: {...filters(), provider: fixedProvider}, format: "csv"})});
       if (!response.ok) { $("notice").textContent = "导出失败"; return; }
-      const blob = await response.blob();
+      let blob;
+      if (exportApiUrl === "/api/admin/exports") {
+        const data = await response.json();
+        if (!data.ok) { $("notice").textContent = data.message || "导出失败"; return; }
+        const result = await fetch(data.job.download_url);
+        const exported = await result.json();
+        blob = new Blob([exported.content_text || ""], {type: "text/csv;charset=utf-8"});
+      } else {
+        blob = await response.blob();
+      }
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url; link.download = "wechat-pay-orders.csv"; link.click();

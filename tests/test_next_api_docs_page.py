@@ -2,8 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.frontend_compat.api_docs_view_model import build_api_docs_view_model
-from aicrm_next.frontend_compat.legacy_routes import router as frontend_compat_router
+from aicrm_next.admin_config.api_docs_view_model import build_api_docs_view_model
 from aicrm_next.main import create_app
 
 
@@ -27,11 +26,11 @@ def _endpoint_paths(view_model: dict) -> set[tuple[str, str]]:
 
 
 def test_api_docs_view_model_scans_current_fastapi_routes() -> None:
-    view_model = build_api_docs_view_model(frontend_router=frontend_compat_router)
+    view_model = build_api_docs_view_model()
     paths = _endpoint_paths(view_model)
     group_titles = {group["title"] for group in view_model["endpoint_groups"]}
 
-    assert view_model["source_status"] == "fastapi_route_registry"
+    assert view_model["source_status"] == "fastapi_route_map"
     assert view_model["endpoint_count"] > 80
     assert {
         "系统 / MCP",

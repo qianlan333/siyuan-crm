@@ -4,7 +4,6 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
 from aicrm_next.main import create_app
 
 
@@ -50,22 +49,7 @@ def test_automation_project_pages_are_served_by_next_native_bundle(monkeypatch) 
 
 
 def test_automation_project_routes_are_removed_from_frontend_compat_inventory() -> None:
-    migrated_routes = {
-        "/admin/automation-conversion",
-        "/admin/automation-conversion/programs/{program_id}/setup",
-        "/admin/automation-conversion/programs/{program_id}/overview",
-        "/admin/automation-conversion/programs/{program_id}/members",
-        "/admin/automation-conversion/programs/{program_id}/copy",
-        "/admin/automation-conversion/programs/{program_id}/entry-channels",
-    }
-    migrated_group_ops_routes = {
-        "/admin/automation-conversion/group-ops/ui",
-        "/admin/automation-conversion/group-ops/plans/{plan_id}",
-        "/admin/automation-conversion/group-ops/groups/ui",
-    }
-
-    assert migrated_routes.isdisjoint(LEGACY_FRONTEND_ROUTES)
-    assert migrated_group_ops_routes.isdisjoint(LEGACY_FRONTEND_ROUTES)
+    assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
 
 
 def test_automation_project_templates_and_static_are_owned_by_automation_engine() -> None:

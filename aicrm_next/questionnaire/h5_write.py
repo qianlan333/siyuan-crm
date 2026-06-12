@@ -208,6 +208,8 @@ def _validate_submit_command(command: QuestionnaireH5SubmitCommand) -> None:
         raise QuestionnaireH5WriteInputError("source_route is required")
     if not isinstance(command.answers, dict):
         raise QuestionnaireH5WriteInputError("answers must be an object")
+    if not command.answers:
+        raise QuestionnaireH5WriteInputError("answers is required")
 
 
 def _validate_diagnostics_command(command: QuestionnaireClientDiagnosticsCommand) -> None:
@@ -250,20 +252,25 @@ def _handle_submit(command: Command) -> dict[str, Any]:
             mobile_answer = _mobile_answer_from_questions(item, answers)
             if mobile_answer:
                 identity_payload["mobile"] = mobile_answer
-        identity = ResolvePersonIdentityQuery()(
-            ResolvePersonIdentityRequest(
-                mobile=identity_payload.get("mobile"),
-                external_userid=identity_payload.get("external_userid"),
-                openid=identity_payload.get("openid"),
-                unionid=identity_payload.get("unionid"),
+        identity_resolution_error = ""
+        try:
+            identity = ResolvePersonIdentityQuery()(
+                ResolvePersonIdentityRequest(
+                    mobile=identity_payload.get("mobile"),
+                    external_userid=identity_payload.get("external_userid"),
+                    openid=identity_payload.get("openid"),
+                    unionid=identity_payload.get("unionid"),
+                )
             )
-        )
+        except Exception as exc:
+            identity = None
+            identity_resolution_error = str(exc)
         resolved_identity = {
             **identity_payload,
             "person_id": identity.person_id if identity else None,
             "external_userid": (identity.external_userid if identity else identity_payload.get("external_userid")) or "",
             "mobile": (identity.mobile if identity else identity_payload.get("mobile")) or "",
-            "binding_status": identity.binding_status if identity else "unresolved",
+            "binding_status": identity.binding_status if identity else ("identity_resolution_unavailable" if identity_resolution_error else "unresolved"),
             "identity_map_id": identity.identity_map_id if identity else None,
             "follow_user_userid": (identity.follow_user_userid if identity else identity_payload.get("follow_user_userid")) or "",
             "matched_by": (identity.matched_by if identity else identity_payload.get("matched_by")) or "",
@@ -289,7 +296,9 @@ def _handle_submit(command: Command) -> dict[str, Any]:
                 "answers_json": answers,
                 "result_json": result,
                 "source_json": source_payload,
-                "diagnostics_json": {},
+                "diagnostics_json": {
+                    "identity_resolution_error": identity_resolution_error,
+                } if identity_resolution_error else {},
                 "respondent_identity": identity_payload,
                 "person_id": resolved_identity.get("person_id"),
                 "binding_status": resolved_identity.get("binding_status") or "unresolved",

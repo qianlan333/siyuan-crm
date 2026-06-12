@@ -88,13 +88,9 @@ def test_user_ops_admin_page_routes_are_owned_by_native_module() -> None:
 
 
 def test_user_ops_pages_removed_from_frontend_compat_inventory() -> None:
-    from aicrm_next.frontend_compat.legacy_routes import LEGACY_FRONTEND_ROUTES
-
     response = _client().get("/api/frontend-compat/legacy-routes")
 
-    assert response.status_code == 200
-    assert "/admin/user-ops" not in LEGACY_FRONTEND_ROUTES
-    assert "/admin/user-ops/ui" not in LEGACY_FRONTEND_ROUTES
+    assert response.status_code == 404
 
 
 def test_user_ops_write_like_routes_remain_no_real_side_effect() -> None:

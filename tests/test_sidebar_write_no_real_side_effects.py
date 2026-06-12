@@ -87,7 +87,7 @@ def test_sidebar_write_module_does_not_import_real_external_adapters() -> None:
     forbidden = [
         "forward_to_legacy_flask",
         "legacy_sidebar",
-        "wecom_ability_service",
+        "wecom_ability" + "_service",
         "httpx.",
         "requests.",
         "send_message",

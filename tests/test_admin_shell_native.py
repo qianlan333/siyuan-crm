@@ -76,7 +76,7 @@ def test_admin_logout_legacy_url_redirects_to_canonical_logout(monkeypatch) -> N
     assert "X-AICRM-Compatibility-Facade" not in response.headers
 
 
-def test_admin_shell_removed_from_frontend_compat_legacy_inventory(monkeypatch) -> None:
-    routes = _client(monkeypatch).get("/api/frontend-compat/legacy-routes").json()["routes"]
+def test_frontend_compat_legacy_inventory_endpoint_removed(monkeypatch) -> None:
+    response = _client(monkeypatch).get("/api/frontend-compat/legacy-routes")
 
-    assert "/admin" not in routes
+    assert response.status_code == 404

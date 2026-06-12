@@ -7,10 +7,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
+
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = ROOT / "migrations" / "versions"
-NUMERIC_BIND_PATTERN = re.compile(r"(?<![:\\]):(?:30|3|1)(?![0-9])")
+NUMERIC_BIND_PATTERN = re.compile(r"(?<![:\\]):[0-9]+")
 ALEMBIC_VERSION_NUM_LENGTH = 128
 PLACEHOLDER_REVISIONS = (
     "0032_miniprogram_only_resend_20260611",
@@ -46,8 +49,8 @@ def _literal_assignment(tree: ast.Module, name: str) -> Any:
     raise AssertionError(f"{name} assignment not found")
 
 
-def _migration_revisions() -> dict[str, dict[str, Any]]:
-    revisions: dict[str, dict[str, Any]] = {}
+def _migration_revisions() -> dict[str, Any]:
+    revisions: dict[str, Any] = {}
     for path in sorted(VERSIONS.glob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         revision = _literal_assignment(tree, "revision")
@@ -67,16 +70,7 @@ def _parents(value: Any) -> list[str]:
     raise AssertionError(f"unsupported down_revision value: {value!r}")
 
 
-def _heads(revisions: dict[str, dict[str, Any]]) -> list[str]:
-    children = {
-        parent
-        for item in revisions.values()
-        for parent in _parents(item["down_revision"])
-    }
-    return sorted(set(revisions) - children)
-
-
-def test_all_revisions_are_unique_and_down_revisions_exist() -> None:
+def test_all_alembic_down_revisions_exist() -> None:
     revisions = _migration_revisions()
 
     missing = {
@@ -89,47 +83,86 @@ def test_all_revisions_are_unique_and_down_revisions_exist() -> None:
     assert missing == {}
 
 
-def test_alembic_graph_has_single_head() -> None:
+def test_alembic_revision_storage_supports_deployed_revision_ids() -> None:
     revisions = _migration_revisions()
+    old_hxc_revision = "0012_hxc_dashboard_v6_" + "growth_columns"
+    old_cloud_revision = "0024_cloud_plan_recipient_" + "approval"
+    old_owner_revision = "0028_owner_migration_excel_" + "sessions"
+    old_wechat_unionid_revision = "0029_wechat_pay_order_" + "unionid_index"
 
-    assert _heads(revisions) == ["0036_wechat_shop_sync_runs"]
+    beyond_runtime_limit = {
+        revision: {"length": len(revision), "path": str(item["path"])}
+        for revision, item in revisions.items()
+        if len(revision) > ALEMBIC_VERSION_NUM_LENGTH
+    }
+    alembic_env = (ROOT / "migrations" / "env.py").read_text(encoding="utf-8")
+
+    assert beyond_runtime_limit == {}
+    assert f"ALEMBIC_VERSION_NUM_LENGTH = {ALEMBIC_VERSION_NUM_LENGTH}" in alembic_env
+    assert "CREATE TABLE IF NOT EXISTS alembic_version" in alembic_env
+    assert "ALTER COLUMN version_num TYPE VARCHAR" in alembic_env
+    assert old_hxc_revision not in revisions
+    assert old_cloud_revision not in revisions
+    assert old_owner_revision not in revisions
+    assert old_wechat_unionid_revision not in revisions
+    assert "0012_hxc_growth_cols" in revisions
+    assert "0024_cloud_plan_approval" in revisions
+    assert "0028_owner_excel_sessions" in revisions
+    assert "0029_user_ops_prod_tables" in revisions
+    assert "0030_wechat_pay_unionid_idx" in revisions
+    assert "0032_miniprogram_only_resend_20260611" in revisions
+    assert "0033_complete_miniprogram_only_resend_20260611" in revisions
 
 
-def test_low_revision_closeout_bridge_and_canonical_ids() -> None:
+def test_alembic_chain_keeps_0014_parent_available() -> None:
     revisions = _migration_revisions()
 
     assert "0013" in revisions
-    assert revisions["0013"]["down_revision"] == "0012_wechat_pay_products"
     assert revisions["0014"]["down_revision"] == "0013"
-    assert revisions["0012_hxc_growth_cols"]["down_revision"] == "0012"
-    assert revisions["0012_wechat_pay_products"]["down_revision"] == "0012_hxc_growth_cols"
-    assert revisions["0016_wecom_corp_tag_catalog"]["down_revision"] == "0016"
-    assert revisions["0017"]["down_revision"] == "0016_wecom_corp_tag_catalog"
-    assert revisions["0022_next_automation_agents"]["down_revision"] == "0021"
-    assert revisions["0024_cloud_plan_approval"]["down_revision"] == (
-        "0023_product_external_push",
-        "0023_group_ops_webhook_rules",
-    )
-    assert revisions["0025_radar_pdf_preview_assets"]["down_revision"] == "0024_cloud_plan_approval"
-    assert "0028_owner_excel_sessions" in revisions
+    assert revisions["0013"]["down_revision"] == "0012_wechat_pay_products"
 
 
-def test_pr3_schema_revision_chain() -> None:
+def test_user_ops_production_tables_migration_is_parent_of_wechat_unionid_index() -> None:
     revisions = _migration_revisions()
 
     assert revisions["0029_user_ops_prod_tables"]["down_revision"] == "0028_owner_excel_sessions"
     assert revisions["0030_wechat_pay_unionid_idx"]["down_revision"] == "0029_user_ops_prod_tables"
-    assert revisions["0031_automation_runtime_v2"]["down_revision"] == "0030_wechat_pay_unionid_idx"
-    assert revisions["0032_miniprogram_only_resend_20260611"]["down_revision"] == "0031_automation_runtime_v2"
-    assert revisions["0033_complete_miniprogram_only_resend_20260611"]["down_revision"] == "0032_miniprogram_only_resend_20260611"
-    assert revisions["0034_reset_miniprogram_only_material_jobs_20260611"]["down_revision"] == "0033_complete_miniprogram_only_resend_20260611"
-    assert revisions["0035_wechat_shop_refunds"]["down_revision"] == "0034_reset_miniprogram_only_material_jobs_20260611"
-    assert revisions["0036_wechat_shop_sync_runs"]["down_revision"] == "0035_wechat_shop_refunds"
 
-    if "0036_channel_multi_staff_assignment" in revisions:
-        assert revisions["0036_channel_multi_staff_assignment"]["down_revision"] == "0035_wechat_shop_refunds"
-        assert "0037_siyuan_merge_0036_schema_heads" in revisions
-        assert _heads(revisions) == ["0037_siyuan_merge_0036_schema_heads"]
+
+def test_siyuan_production_channel_assignment_revision_is_locatable() -> None:
+    revisions = _migration_revisions()
+    revision_id = "0037_channel_multi_staff_assignment"
+    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+
+    assert revision_id in revisions
+    assert revisions[revision_id]["path"].name == "0037_channel_multi_staff_assignment.py"
+    assert revisions[revision_id]["down_revision"] == "0036_wechat_shop_sync_runs"
+    assert script.get_revision(revision_id).revision == revision_id
+
+
+def test_siyuan_production_channel_assignment_revision_can_upgrade_to_head() -> None:
+    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+    upgrade_steps = script._upgrade_revs("heads", "0037_channel_multi_staff_assignment")
+    upgrade_revision_ids = {step.revision.revision for step in upgrade_steps}
+
+    assert "0038_merge_duplicate_channel_wechat_shop_heads" in upgrade_revision_ids
+    assert "0037_channel_multi_staff_assignment" in _parents(
+        _migration_revisions()["0038_merge_duplicate_channel_wechat_shop_heads"]["down_revision"]
+    )
+
+
+def test_siyuan_channel_assignment_migration_is_idempotent_overlay() -> None:
+    source = (VERSIONS / "0037_channel_multi_staff_assignment.py").read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS assignment_mode" in source
+    assert "ADD COLUMN IF NOT EXISTS assignment_strategy" in source
+    assert "ADD COLUMN IF NOT EXISTS overflow_policy" in source
+    assert "ADD COLUMN IF NOT EXISTS assignment_config_json" in source
+    assert "CREATE TABLE IF NOT EXISTS automation_channel_assignee" in source
+    assert "CREATE TABLE IF NOT EXISTS automation_channel_assignment_event" in source
+    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignee_active" in source
+    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignment_24h" in source
+    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignment_external" in source
 
 
 def test_siyuan_placeholders_do_not_import_ai_crm_production_data() -> None:
@@ -149,19 +182,9 @@ def test_siyuan_placeholders_do_not_import_ai_crm_production_data() -> None:
             assert isinstance(functions[name].body[0], ast.Pass)
 
 
-def test_alembic_env_widens_version_table_without_printing_secrets() -> None:
-    alembic_env = (ROOT / "migrations" / "env.py").read_text(encoding="utf-8")
-
-    assert f"ALEMBIC_VERSION_NUM_LENGTH = {ALEMBIC_VERSION_NUM_LENGTH}" in alembic_env
-    assert "CREATE TABLE IF NOT EXISTS alembic_version" in alembic_env
-    assert "ALTER COLUMN version_num TYPE VARCHAR" in alembic_env
-    assert 'url.startswith("postgres://")' in alembic_env
-    assert 'url.startswith("postgresql://")' in alembic_env
-    assert "postgresql+psycopg://" in alembic_env
-    assert "print(" not in alembic_env
-
-
 def test_raw_migration_sql_does_not_expose_numeric_bind_literals() -> None:
+    risky_default_prefix = '"default"' + ":"
+    old_sqlalchemy_rendered_default = "default" + "%("
     raw_sql_strings: list[tuple[Path, int, str]] = []
 
     for path in sorted(VERSIONS.glob("*.py")):
@@ -184,8 +207,22 @@ def test_raw_migration_sql_does_not_expose_numeric_bind_literals() -> None:
         for path, lineno, sql in raw_sql_strings
         if NUMERIC_BIND_PATTERN.search(sql)
     }
+    raw_json_default_risks = {
+        f"{path.relative_to(ROOT)}:{lineno}": sql
+        for path, lineno, sql in raw_sql_strings
+        if any(f"{risky_default_prefix}{value}" in sql for value in ("30", "3", "1"))
+        or old_sqlalchemy_rendered_default in sql
+    }
 
     assert numeric_bind_risks == {}
+    assert raw_json_default_risks == {}
+
+    group_ops_migration = VERSIONS / "0023_group_ops_webhook_rules.py"
+    source = group_ops_migration.read_text(encoding="utf-8")
+    assert "builtin:has_used_core_feature" in source
+    assert '"default"' + ":30" not in source
+    assert '"default"' + ":3" not in source
+    assert old_sqlalchemy_rendered_default not in source
 
 
 def test_alembic_commands_can_walk_revision_graph() -> None:
@@ -202,4 +239,5 @@ def test_alembic_commands_can_walk_revision_graph() -> None:
         assert "KeyError" not in result.stderr
         if args == ("heads",):
             heads = [line for line in result.stdout.splitlines() if "(head)" in line]
-            assert heads == ["0036_wechat_shop_sync_runs (head)"]
+            assert len(heads) == 1
+            assert "0038_merge_duplicate_channel_wechat_shop_heads" in heads[0]

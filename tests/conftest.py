@@ -13,18 +13,16 @@ CI 上 service container 自动起 PG 并设 DATABASE_URL。
 superuser，开箱即用）。
 
 提供的 fixture：
-- ``app``：每个 test 一个干净 Flask app + truncate 关键表
-- ``client``：``app.test_client()``
-
-老测试以前自己用 ``tmp_path / "test.sqlite3"`` + ``DATABASE_PATH`` 起 SQLite，
-迁移到这个顶层 fixture 后只需 ``def test_xxx(app, client):`` 即可。
+- ``next_app`` / ``next_client``：Next FastAPI 默认测试入口
+- ``next_pg_schema``：显式 opt-in 的 Next/Alembic PG schema 测试入口
+- ``app`` / ``client``：默认指向 Next FastAPI，测试层不再提供 legacy Flask bridge
 """
 from __future__ import annotations
 
 import os
 import sys
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 import pytest
@@ -82,6 +80,10 @@ _TABLES_TO_TRUNCATE = [
     "automation_touch_delivery_log",
     "automation_frequency_consumption",
     "automation_frequency_budget",
+    "automation_task_plan_v2",
+    "automation_stage_entry_v2",
+    "automation_membership_v2",
+    "automation_event_v2",
     "automation_workflow_execution_item",
     "automation_workflow_execution",
     "automation_member_audience_entry",
@@ -89,12 +91,15 @@ _TABLES_TO_TRUNCATE = [
     "automation_program_admission_attempt",
     "automation_program_member",
     "automation_channel_contact",
+    "automation_channel_assignment_event",
+    "automation_channel_assignee",
     "automation_program_channel_binding",
     "automation_workflow_node_content_variant",
     "automation_workflow_node_content",
     "automation_workflow_node_transition",
     "automation_workflow_node",
     "automation_workflow_goal",
+    "automation_operation_task",
     "automation_operation_templates",
     "automation_workflow",
     "automation_event",
@@ -110,6 +115,7 @@ _TABLES_TO_TRUNCATE = [
     "automation_sop_template",
     "automation_agent_run",
     "automation_agent_output",
+    "automation_agent_llm_call_log",
     "automation_focus_send_batch_item",
     "automation_focus_send_batch",
     "automation_agent_skill_call_audit",
@@ -118,7 +124,6 @@ _TABLES_TO_TRUNCATE = [
     "automation_workflow_agent_binding",
     "automation_agent_config",
     "automation_agent_output_export_job",
-    "automation_agent_llm_call_log",
     "automation_agent_router_config",
     "automation_laohuang_chat_job",
     "automation_reply_monitor_queue",
@@ -244,76 +249,6 @@ def _ensure_pg_url() -> str:
     return url
 
 
-def build_pg_test_app(tmp_path, **extra_config: Any):
-    """老测试兼容 helper：起 PG 模式 app，允许传 extra_config 覆盖默认。
-
-    用法（替换老 SQLite fixture）：
-
-        @pytest.fixture
-        def app(tmp_path):
-            from tests.conftest import build_pg_test_app
-            with build_pg_test_app(tmp_path, MCP_BEARER_TOKEN="mcp-token") as app:
-                yield app
-    """
-    return _build_app_context(tmp_path, extra_config)
-
-
-class _AppContextManager:
-    """支持 with-statement，自动 truncate 隔离。"""
-
-    def __init__(self, tmp_path, extra_config):
-        self.tmp_path = tmp_path
-        self.extra_config = extra_config
-        self._app = None
-        self._ctx = None
-
-    def __enter__(self):
-        database_url = _ensure_pg_url()
-        private_key = self.tmp_path / "wecom_private_key.pem"
-        sdk_lib = self.tmp_path / "libWeWorkFinanceSdk_C.so"
-        private_key.write_text("fake-key", encoding="utf-8")
-        sdk_lib.write_text("fake-so", encoding="utf-8")
-
-        from wecom_ability_service import create_app
-        from wecom_ability_service.db import close_db, init_db
-
-        config = {
-            "TESTING": True,
-            "DATABASE_URL": database_url,
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-        config.update(self.extra_config)
-
-        self._app = create_app(test_config=config)
-        self._ctx = self._app.app_context()
-        self._ctx.push()
-
-        # session 级 ``_ensure_schema_once`` 已经建好 schema；这里只跑 init_db 做
-        # ALTER 补丁 + seed。autouse ``_truncate_before_each_test`` 已经清完表。
-        init_db()
-        close_db()
-        _truncate_cached_tables_once()
-        return self._app
-
-    def __exit__(self, *args):
-        if self._ctx is not None:
-            self._ctx.pop()
-
-
-def _build_app_context(tmp_path, extra_config):
-    return _AppContextManager(tmp_path, extra_config)
-
-
 # 缓存：session 起点 query 出 _TABLES_TO_TRUNCATE 中**真正存在**于当前 worker DB
 # 的表名（按原顺序）。每个 test 起点拼成单条 ``TRUNCATE t1, t2, ... CASCADE`` 一次
 # round-trip 全部清掉——之前是 N 张表 N 次 round-trip + 不存在表抛 ERROR + 单连接每
@@ -392,12 +327,313 @@ def _truncate_cached_tables_once() -> None:
             conn.close()
 
 
+def _run_next_alembic_upgrade(url: str) -> None:
+    from alembic import command
+    from alembic.config import Config
+
+    _bootstrap_next_test_baseline_schema(url)
+    previous_url = os.environ.get("DATABASE_URL")
+    os.environ["DATABASE_URL"] = url
+    try:
+        config = Config(str(_ROOT / "alembic.ini"))
+        config.set_main_option("sqlalchemy.url", url)
+        command.upgrade(config, "head")
+    finally:
+        if previous_url is None:
+            os.environ.pop("DATABASE_URL", None)
+        else:
+            os.environ["DATABASE_URL"] = previous_url
+
+
+def _bootstrap_next_test_baseline_schema(url: str) -> None:
+    """Create the minimal post-legacy baseline that Alembic 0001 assumes exists.
+
+    The production migration chain starts with a no-op 0001 baseline because
+    production databases already had these tables when Alembic was introduced.
+    CI test databases are empty, so tests need a tiny Next-owned bootstrap
+    before running later Alembic revisions. Keep this local to tests and do not
+    read or import the retired legacy schema runner.
+    """
+    import psycopg
+
+    statements = [
+        """
+        CREATE TABLE IF NOT EXISTS conversion_dispatch_log (
+            id BIGSERIAL PRIMARY KEY,
+            external_userid TEXT NOT NULL DEFAULT '',
+            dispatched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_member (
+            id BIGSERIAL PRIMARY KEY,
+            external_contact_id TEXT NOT NULL DEFAULT '',
+            phone TEXT NOT NULL DEFAULT '',
+            owner_staff_id TEXT NOT NULL DEFAULT '',
+            in_pool BOOLEAN NOT NULL DEFAULT FALSE,
+            current_pool TEXT NOT NULL DEFAULT 'removed',
+            follow_type TEXT NOT NULL DEFAULT '',
+            current_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire',
+            questionnaire_status TEXT NOT NULL DEFAULT '',
+            joined_at TEXT NOT NULL DEFAULT '',
+            last_ai_push_at TEXT NOT NULL DEFAULT '',
+            ai_cooldown_until TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_channel (
+            id BIGSERIAL PRIMARY KEY,
+            channel_type TEXT NOT NULL DEFAULT 'qrcode',
+            carrier_type TEXT NOT NULL DEFAULT 'qrcode',
+            channel_name TEXT NOT NULL DEFAULT '',
+            channel_code TEXT NOT NULL DEFAULT '',
+            scene_value TEXT NOT NULL DEFAULT '',
+            qr_url TEXT NOT NULL DEFAULT '',
+            qr_ticket TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active',
+            owner_staff_id TEXT NOT NULL DEFAULT '',
+            customer_channel TEXT NOT NULL DEFAULT '',
+            link_url TEXT NOT NULL DEFAULT '',
+            final_url TEXT NOT NULL DEFAULT '',
+            welcome_message TEXT NOT NULL DEFAULT '',
+            welcome_image_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            auto_accept_friend BOOLEAN NOT NULL DEFAULT FALSE,
+            entry_tag_id TEXT NOT NULL DEFAULT '',
+            entry_tag_name TEXT NOT NULL DEFAULT '',
+            entry_tag_group_name TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_ai_push_log (
+            id BIGSERIAL PRIMARY KEY,
+            member_id BIGINT NOT NULL DEFAULT 0,
+            pushed_at TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_touch_delivery_log (
+            id BIGSERIAL PRIMARY KEY,
+            member_id BIGINT NOT NULL DEFAULT 0,
+            trace_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '',
+            sent_at TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS outbound_tasks (
+            id BIGSERIAL PRIMARY KEY,
+            trace_id TEXT NOT NULL DEFAULT ''
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_agent_run (
+            id BIGSERIAL PRIMARY KEY,
+            trace_id TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_agent_config (
+            id BIGSERIAL PRIMARY KEY,
+            agent_code TEXT NOT NULL DEFAULT '',
+            display_name TEXT NOT NULL DEFAULT '',
+            scenario_code TEXT NOT NULL DEFAULT '',
+            enabled BOOLEAN NOT NULL DEFAULT TRUE,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_workflow (
+            id BIGSERIAL PRIMARY KEY,
+            review_status TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_workflow_execution_item (
+            id BIGSERIAL PRIMARY KEY
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_sop_template (
+            id BIGSERIAL PRIMARY KEY
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS radar_links (
+            id BIGSERIAL PRIMARY KEY,
+            code TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            target_type TEXT NOT NULL DEFAULT 'link',
+            media_item_id TEXT NOT NULL DEFAULT '',
+            deleted_at TIMESTAMPTZ
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS group_chats (
+            chat_id TEXT PRIMARY KEY,
+            group_name TEXT NOT NULL DEFAULT '',
+            owner_userid TEXT NOT NULL DEFAULT '',
+            notice TEXT NOT NULL DEFAULT '',
+            member_count INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'active',
+            create_time TEXT NOT NULL DEFAULT '',
+            dismissed_at TEXT NOT NULL DEFAULT '',
+            raw_payload TEXT NOT NULL DEFAULT '{}',
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_products (
+            id BIGSERIAL PRIMARY KEY,
+            product_code TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL DEFAULT '',
+            amount_total INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            status TEXT NOT NULL DEFAULT 'draft',
+            enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            cta_text TEXT NOT NULL DEFAULT '立即报名',
+            require_mobile BOOLEAN NOT NULL DEFAULT FALSE,
+            lead_program_id BIGINT,
+            lead_channel_id BIGINT,
+            completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+            completion_redirect_url TEXT NOT NULL DEFAULT '',
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        ALTER TABLE wechat_pay_products
+        ADD COLUMN IF NOT EXISTS completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE
+        """,
+        """
+        ALTER TABLE wechat_pay_products
+        ADD COLUMN IF NOT EXISTS completion_redirect_url TEXT NOT NULL DEFAULT ''
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_orders (
+            id BIGSERIAL PRIMARY KEY,
+            out_trade_no TEXT NOT NULL DEFAULT '',
+            transaction_id TEXT NOT NULL DEFAULT '',
+            order_source TEXT NOT NULL DEFAULT '',
+            client_order_ref TEXT NOT NULL DEFAULT '',
+            product_code TEXT NOT NULL DEFAULT '',
+            product_name TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            amount_total INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            payer_openid TEXT NOT NULL DEFAULT '',
+            respondent_key TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
+            external_userid TEXT NOT NULL DEFAULT '',
+            userid_snapshot TEXT NOT NULL DEFAULT '',
+            mobile_snapshot TEXT NOT NULL DEFAULT '',
+            payer_name_snapshot TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'created',
+            trade_state TEXT NOT NULL DEFAULT '',
+            prepay_id TEXT NOT NULL DEFAULT '',
+            bank_type TEXT NOT NULL DEFAULT '',
+            payer_total INTEGER NOT NULL DEFAULT 0,
+            success_url TEXT NOT NULL DEFAULT '',
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            last_error TEXT NOT NULL DEFAULT '',
+            expires_at TIMESTAMPTZ,
+            paid_at TIMESTAMPTZ,
+            refunded_amount_total INTEGER NOT NULL DEFAULT 0,
+            refund_status TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_refunds (
+            id BIGSERIAL PRIMARY KEY,
+            order_id BIGINT NOT NULL DEFAULT 0,
+            out_trade_no TEXT NOT NULL DEFAULT '',
+            transaction_id TEXT NOT NULL DEFAULT '',
+            out_refund_no TEXT NOT NULL DEFAULT '',
+            refund_id TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            refund_amount_total INTEGER NOT NULL DEFAULT 0,
+            order_amount_total INTEGER NOT NULL DEFAULT 0,
+            currency TEXT NOT NULL DEFAULT 'CNY',
+            status TEXT NOT NULL DEFAULT '',
+            requested_by TEXT NOT NULL DEFAULT '',
+            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            error_message TEXT NOT NULL DEFAULT '',
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wechat_pay_order_events (
+            id BIGSERIAL PRIMARY KEY,
+            out_trade_no TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL DEFAULT '',
+            transaction_id TEXT NOT NULL DEFAULT '',
+            trade_state TEXT NOT NULL DEFAULT '',
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS automation_operation_task (
+            id BIGSERIAL PRIMARY KEY,
+            program_id BIGINT NOT NULL DEFAULT 0,
+            task_name TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT '',
+            trigger_type TEXT NOT NULL DEFAULT '',
+            send_time TEXT NOT NULL DEFAULT '',
+            timezone TEXT NOT NULL DEFAULT 'Asia/Shanghai',
+            target_audience_code TEXT NOT NULL DEFAULT '',
+            target_stage_code TEXT NOT NULL DEFAULT '',
+            audience_day_offset INTEGER NOT NULL DEFAULT 0,
+            behavior_filter TEXT NOT NULL DEFAULT '',
+            content_mode TEXT NOT NULL DEFAULT 'unified',
+            unified_content_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            segment_contents_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+            agent_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_by TEXT NOT NULL DEFAULT '',
+            updated_by TEXT NOT NULL DEFAULT '',
+            published_at TIMESTAMPTZ,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+    ]
+    conn = psycopg.connect(url, autocommit=True)
+    try:
+        cur = conn.cursor()
+        try:
+            for statement in statements:
+                cur.execute(statement)
+        finally:
+            cur.close()
+    finally:
+        conn.close()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_schema_once():
-    """Session 起点（每个 xdist worker 各跑一次）：
+    """Next/Alembic schema setup（每个 xdist worker 各跑一次）：
 
     1. 路由到 per-worker DB（``test_<worker_id>``，主进程仍用 base ``test``）
-    2. 跑 ``schema_postgres.sql`` 建表（带前向 FK 重试）
+    2. 跑 Alembic migrations 到 head
     3. 缓存 ``_TABLES_TO_TRUNCATE`` 里**真正存在**的表名 → 后续 per-test
        truncate 一次性 ``TRUNCATE t1, t2, ...`` 单 SQL 跑完
     """
@@ -410,29 +646,7 @@ def _ensure_schema_once():
     except ImportError:  # pragma: no cover
         yield
         return
-    schema_path = _ROOT / "wecom_ability_service" / "schema_postgres.sql"
-    if schema_path.exists():
-        from wecom_ability_service.db.migrations.schema_runner import (
-            run_schema_with_forward_fk_retries,
-        )
-
-        conn = psycopg.connect(url)
-        try:
-            def _execute_schema_statement(stmt: str) -> None:
-                cursor = conn.cursor()
-                try:
-                    cursor.execute(stmt)
-                finally:
-                    cursor.close()
-
-            run_schema_with_forward_fk_retries(
-                schema_path.read_text(encoding="utf-8"),
-                execute=_execute_schema_statement,
-                commit=conn.commit,
-                rollback=conn.rollback,
-            )
-        finally:
-            conn.close()
+    _run_next_alembic_upgrade(url)
 
     # 过滤出真存在的表，拼成单条 TRUNCATE。原顺序保留没意义（CASCADE 会自动处理 FK），
     # 但 information_schema 查一次省得每 test 抛 N 个 "relation does not exist"。
@@ -522,65 +736,15 @@ def _truncate_before_each_test():
 
 
 @pytest.fixture
-def app(tmp_path) -> Iterator[Any]:
-    """干净 Flask app + 真 PG，每个 test 隔离。"""
-    database_url = _ensure_pg_url()
-
-    # WeCom SDK / private key 等运行时依赖文件（test 用 fake 占位）
-    private_key = tmp_path / "wecom_private_key.pem"
-    sdk_lib = tmp_path / "libWeWorkFinanceSdk_C.so"
-    private_key.write_text("fake-key", encoding="utf-8")
-    sdk_lib.write_text("fake-so", encoding="utf-8")
-
-    from wecom_ability_service import create_app
-    from wecom_ability_service.db import close_db, init_db
-
-    app = create_app(
-        test_config={
-            "TESTING": True,
-            "DATABASE_URL": database_url,
-            "RELEASE_SHA": "release-test-sha",
-            "WECOM_CORP_ID": "ww-test",
-            "WECOM_CONTACT_SECRET": "contact-secret-test",
-            "WECOM_SECRET": "secret-test",
-            "WECOM_AGENT_ID": "1000002",
-            "WECOM_ARCHIVE_SECRET": "archive-secret",
-            "WECOM_API_BASE": "http://fake-wecom.local",
-            "WECOM_PRIVATE_KEY_PATH": str(private_key),
-            "WECOM_SDK_LIB_PATH": str(sdk_lib),
-            "WECOM_CALLBACK_TOKEN": "callback-token",
-            "WECOM_CALLBACK_AES_KEY": "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-        }
-    )
-    with app.app_context():
-        # session 级 ``_ensure_schema_once`` 已经把 schema_postgres.sql 跑过了，
-        # 这里不再重建（每 test 50-100ms × 1004 tests = 50-100s 浪费）。
-        # init_db 仍要 per-test：内含 seed_default_segments / ensure_default_budgets，
-        # 它们写入的 ``segments`` / ``automation_frequency_budget`` 表会被 truncate
-        # fixture 清掉，必须每 test 重 seed。_init_postgres 的 ALTER 是 IF NOT EXISTS
-        # 幂等，再跑一次也只是成本（暂未优化掉）。
-        init_db()
-        close_db()
-        _truncate_cached_tables_once()
-        yield app
-
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
-
-
-@pytest.fixture
 def next_pg_schema():
+    """Explicit opt-in for tests that require the Next/Alembic PG schema."""
     _ensure_pg_url()
-    from tests.automation_runtime_v2_test_helpers import ensure_runtime_v2_base_tables
-
-    ensure_runtime_v2_base_tables()
-    return True
+    return None
 
 
 @pytest.fixture
-def next_app():
+def next_app(monkeypatch):
+    monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     from aicrm_next.main import create_app
 
     return create_app()
@@ -591,3 +755,15 @@ def next_client(next_app):
     from fastapi.testclient import TestClient
 
     return TestClient(next_app)
+
+
+@pytest.fixture
+def app(next_app):
+    """Default app fixture is Next-native; legacy Flask tests must opt in."""
+    return next_app
+
+
+@pytest.fixture
+def client(next_client):
+    """Default client fixture is Next-native; legacy Flask tests must opt in."""
+    return next_client

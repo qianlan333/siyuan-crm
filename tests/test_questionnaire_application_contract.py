@@ -1,133 +1,102 @@
 from __future__ import annotations
 
-import sys
-import types
-from pathlib import Path
+from aicrm_next.questionnaire.application import (
+    GetQuestionnaireDetailQuery,
+    ListQuestionnairesQuery,
+    SubmitQuestionnaireCommand,
+    build_questionnaire_share_payload,
+)
+from aicrm_next.questionnaire.dto import QuestionnaireSubmitRequest
+from aicrm_next.questionnaire.repo import InMemoryQuestionnaireRepository, reset_questionnaire_fixture_state
 
 
-def test_questionnaire_application_skeleton_is_importable():
-    sys.modules.setdefault("imghdr", types.ModuleType("imghdr"))
+class _NullIdentityQuery:
+    def __call__(self, query):
+        self.query = query
+        return None
 
-    import wecom_ability_service.application as application_namespace
-    from wecom_ability_service.application.questionnaire import (
-        ApplyQuestionnaireMobileBindingCommand,
-        ApplyQuestionnaireResultToScrmCommand,
-        ApplyQuestionnaireSubmissionTagsCommand,
-        BuildQuestionnairePreflightQuery,
-        CheckQuestionnaireSubmissionStatusQuery,
-        ComputeQuestionnaireSubmissionOutcomeQuery,
-        CreateOrUpdateQuestionnaireCommand,
-        CreateQuestionnaireCommand,
-        DeleteQuestionnaireCommand,
-        DeleteQuestionnaireSubmissionsBySlugCommand,
-        DisableQuestionnaireCommand,
-        ExportQuestionnaireSubmissionsQuery,
-        GetLatestQuestionnaireSubmitDebugQuery,
-        GetPublicQuestionnaireBySlugQuery,
-        GetQuestionnaireDetailQuery,
-        HasQuestionnaireSubmissionQuery,
-        ListAvailableWeComTagsQuery,
-        ListQuestionnairesQuery,
-        ResolveQuestionnaireSubmitIdentityQuery,
-        RetryQuestionnaireExternalPushCommand,
-        RetryQuestionnaireExternalPushLogCommand,
-        RetryQuestionnaireExternalPushLogsCommand,
-        SaveQuestionnaireSubmissionCommand,
-        SubmitQuestionnaireCommand,
-        UpdateQuestionnaireCommand,
-        ValidateQuestionnaireAnswersQuery,
+
+class _SpySideEffectGateway:
+    def __init__(self) -> None:
+        self.mobile_binding_calls = []
+
+    def bind_mobile(self, *, submission, questionnaire):
+        self.mobile_binding_calls.append({"submission": submission, "questionnaire": questionnaire})
+        return {"ok": True, "operation": "bind_mobile", "side_effect_executed": False}
+
+    def apply_tags(self, **kwargs):
+        return {"ok": True, "operation": "apply_tags", "side_effect_executed": False, "target": kwargs}
+
+    def emit_external_push(self, **kwargs):
+        return {"ok": True, "operation": "emit_external_push", "side_effect_executed": False, "target": kwargs}
+
+    def emit_automation_questionnaire_result(self, **kwargs):
+        return {"ok": True, "operation": "emit_automation_questionnaire_result", "side_effect_executed": False, "result": {}}
+
+    def side_effect_safety(self):
+        return {"real_mobile_binding_executed": False, "side_effect_executed": False}
+
+
+def test_next_questionnaire_application_lists_and_reads_fixture_contract():
+    reset_questionnaire_fixture_state()
+
+    payload = ListQuestionnairesQuery().execute()
+    detail = GetQuestionnaireDetailQuery().execute(1)
+
+    assert payload["ok"] is True
+    assert payload["route_owner"] == "ai_crm_next"
+    assert payload["fallback_used"] is False
+    assert payload["questionnaires"][0]["slug"] == "hxc-activation-v1"
+    assert detail["ok"] is True
+    assert detail["questionnaire"]["slug"] == "hxc-activation-v1"
+    assert detail["questions"]
+
+
+def test_next_questionnaire_share_payload_keeps_public_paths():
+    reset_questionnaire_fixture_state()
+    questionnaire = GetQuestionnaireDetailQuery().execute(1)["questionnaire"]
+
+    share = build_questionnaire_share_payload(questionnaire, share_url="https://crm.example.test/s/hxc-activation-v1")
+
+    assert share["questionnaire_id"] == 1
+    assert share["slug"] == "hxc-activation-v1"
+    assert share["public_path"] == "/s/hxc-activation-v1"
+    assert share["url"] == "https://crm.example.test/s/hxc-activation-v1"
+    assert share["qr_data_url"].startswith("data:image/svg+xml")
+
+
+def test_questionnaire_submit_extracts_mobile_answer_and_runs_binding_boundary():
+    repo = InMemoryQuestionnaireRepository()
+    questionnaire = repo.get_questionnaire_by_slug("hxc-activation-v1")
+    questionnaire["questions"].append(
+        {
+            "id": "q_mobile",
+            "type": "mobile",
+            "title": "请填写你要激活的手机号",
+            "required": False,
+            "sidebar_profile_field": "mobile",
+            "options": [],
+        }
+    )
+    repo.save_questionnaire(questionnaire, questionnaire_id=questionnaire["id"])
+    identity_query = _NullIdentityQuery()
+    gateway = _SpySideEffectGateway()
+
+    result = SubmitQuestionnaireCommand(
+        repo=repo,
+        identity_query=identity_query,
+        side_effect_gateway=gateway,
+    ).execute(
+        "hxc-activation-v1",
+        QuestionnaireSubmitRequest(
+                answers={"q_activation": "activated", "q_mobile": "+86 138-0013-8000"},
+            respondent_identity={"external_userid": "external-test-identity"},
+        ),
     )
 
-    assert "questionnaire" in application_namespace.__all__
-    assert ListQuestionnairesQuery
-    assert ListAvailableWeComTagsQuery
-    assert BuildQuestionnairePreflightQuery
-    assert GetLatestQuestionnaireSubmitDebugQuery
-    assert GetQuestionnaireDetailQuery
-    assert ExportQuestionnaireSubmissionsQuery
-    assert GetPublicQuestionnaireBySlugQuery
-    assert ResolveQuestionnaireSubmitIdentityQuery
-    assert CheckQuestionnaireSubmissionStatusQuery
-    assert HasQuestionnaireSubmissionQuery
-    assert ValidateQuestionnaireAnswersQuery
-    assert ComputeQuestionnaireSubmissionOutcomeQuery
-    assert CreateQuestionnaireCommand
-    assert CreateOrUpdateQuestionnaireCommand
-    assert UpdateQuestionnaireCommand
-    assert DisableQuestionnaireCommand
-    assert DeleteQuestionnaireSubmissionsBySlugCommand
-    assert DeleteQuestionnaireCommand
-    assert SaveQuestionnaireSubmissionCommand
-    assert ApplyQuestionnaireMobileBindingCommand
-    assert ApplyQuestionnaireSubmissionTagsCommand
-    assert ApplyQuestionnaireResultToScrmCommand
-    assert SubmitQuestionnaireCommand
-    assert RetryQuestionnaireExternalPushCommand
-    assert RetryQuestionnaireExternalPushLogCommand
-    assert RetryQuestionnaireExternalPushLogsCommand
-
-
-def test_services_questionnaire_symbols_route_through_application_wrappers():
-    services_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "services.py"
-    source = services_path.read_text(encoding="utf-8")
-
-    required_fragments = [
-        "ListQuestionnairesQuery",
-        "ListAvailableWeComTagsQuery",
-        "GetLatestQuestionnaireSubmitDebugQuery",
-        "CreateQuestionnaireCommand",
-        "GetQuestionnaireDetailQuery",
-        "UpdateQuestionnaireCommand",
-        "DisableQuestionnaireCommand",
-        "DeleteQuestionnaireSubmissionsBySlugCommand",
-        "DeleteQuestionnaireCommand",
-        "ExportQuestionnaireSubmissionsQuery",
-        "GetPublicQuestionnaireBySlugQuery",
-        "ValidateQuestionnaireAnswersQuery",
-        "ComputeQuestionnaireSubmissionOutcomeQuery",
-        "ResolveQuestionnaireSubmitIdentityQuery",
-        "HasQuestionnaireSubmissionQuery",
-        "SaveQuestionnaireSubmissionCommand",
-        "ApplyQuestionnaireMobileBindingCommand",
-        "ApplyQuestionnaireSubmissionTagsCommand",
-        "ApplyQuestionnaireResultToScrmCommand",
-        "SubmitQuestionnaireCommand",
-        "RetryQuestionnaireExternalPushLogCommand",
-        "RetryQuestionnaireExternalPushLogsCommand",
-    ]
-    for fragment in required_fragments:
-        assert fragment in source, f"services.py must route questionnaire symbol through {fragment}"
-
-    forbidden_fragments = [
-        "list_questionnaires = questionnaire_domain_service.list_questionnaires",
-        "list_available_wecom_tags = questionnaire_domain_service.list_available_wecom_tags",
-        "get_latest_questionnaire_submit_debug = questionnaire_domain_service.get_latest_questionnaire_submit_debug",
-        "create_questionnaire = questionnaire_domain_service.create_questionnaire",
-        "get_questionnaire_detail = questionnaire_domain_service.get_questionnaire_detail",
-        "update_questionnaire = questionnaire_domain_service.update_questionnaire",
-        "disable_questionnaire = questionnaire_domain_service.disable_questionnaire",
-        "delete_questionnaire_submissions_by_slug = questionnaire_domain_service.delete_questionnaire_submissions_by_slug",
-        "delete_questionnaire = questionnaire_domain_service.delete_questionnaire",
-        "export_questionnaire_submissions = questionnaire_domain_service.export_questionnaire_submissions",
-        "get_public_questionnaire_by_slug = questionnaire_domain_service.get_public_questionnaire_by_slug",
-        "validate_questionnaire_answers = questionnaire_domain_service.validate_questionnaire_answers",
-        "compute_questionnaire_submission_outcome = questionnaire_domain_service.compute_questionnaire_submission_outcome",
-        "return questionnaire_domain_service.resolve_questionnaire_submit_identity(",
-        "return questionnaire_domain_service.has_questionnaire_submission(",
-        "return questionnaire_domain_service.save_questionnaire_submission(",
-        "return questionnaire_domain_service.apply_questionnaire_mobile_binding(",
-        "return questionnaire_domain_service.apply_questionnaire_submission_tags_to_scrm(",
-        "return questionnaire_domain_service.submit_questionnaire(",
-        "return questionnaire_domain_service.retry_questionnaire_external_push_log(",
-        "return questionnaire_domain_service.retry_questionnaire_external_push_logs(",
-    ]
-    for fragment in forbidden_fragments:
-        assert fragment not in source, f"services.py must not regress to direct questionnaire legacy delegation: {fragment}"
-
-
-def test_admin_support_questionnaire_tag_lookup_uses_application_query():
-    admin_support_path = Path(__file__).resolve().parents[1] / "wecom_ability_service" / "http" / "admin_support.py"
-    source = admin_support_path.read_text(encoding="utf-8")
-
-    assert "ListAvailableWeComTagsQuery" in source
-    assert "from ..domains.questionnaire.service import list_available_wecom_tags" not in source
+    assert result["ok"] is True
+    assert identity_query.query.mobile == "13800138000"
+    assert result["mobile"] == "13800138000"
+    assert result["side_effects"]["mobile_binding"]["ok"] is True
+    assert gateway.mobile_binding_calls[0]["submission"]["mobile"] == "13800138000"
+    assert gateway.mobile_binding_calls[0]["submission"]["external_userid"] == "external-test-identity"

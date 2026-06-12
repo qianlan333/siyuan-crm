@@ -34,7 +34,7 @@ from .live_mutation import (
 from .mutation_commands import PlanWeComTagMarkCommand, PlanWeComTagUnmarkCommand, WeComTagMutationCommand
 from .read_model import TagCatalogUnavailable, build_tag_catalog_repository
 from .sync_service import WeComTagSyncError, execute_wecom_tag_catalog_sync
-from aicrm_next.shared.runtime import fixture_mode, legacy_production_facade_enabled, production_environment
+from aicrm_next.shared.runtime import fixture_mode, production_environment, production_repository_required
 
 
 router = APIRouter()
@@ -47,12 +47,12 @@ def _timestamp() -> str:
 
 
 def _ensure_local_fixture_allowed() -> None:
-    if production_environment() or legacy_production_facade_enabled() or not fixture_mode():
+    if production_environment() or production_repository_required() or not fixture_mode():
         raise HTTPException(
             status_code=503,
             detail={
                 "ok": False,
-                "error": "Next fixture WeCom tag API is disabled outside local fixture mode; production must use the legacy facade or live WeCom API.",
+                "error": "Next fixture WeCom tag API is disabled outside local fixture mode; production must use the Next production repository or live WeCom API.",
                 "source_status": "fixture_disabled",
             },
         )

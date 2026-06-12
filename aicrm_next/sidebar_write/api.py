@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
 from .application import (
+    SidebarWriteConflictError,
     SidebarWriteInputError,
     SidebarWriteNotFoundError,
     SidebarWriteProductionUnavailableError,
@@ -87,6 +88,8 @@ async def _execute(request: Request, command_type: Type[SidebarWriteCommand]) ->
         return JSONResponse(jsonable_encoder(payload), status_code=200)
     except SidebarWriteInputError as exc:
         return _error(str(exc), status_code=400, source_status="input_error", write_model_status="input_error")
+    except SidebarWriteConflictError as exc:
+        return _error(str(exc), status_code=409, source_status="conflict", write_model_status="conflict")
     except SidebarWriteNotFoundError as exc:
         return _error(str(exc), status_code=404, source_status="not_found", write_model_status="not_found")
     except SidebarWriteProductionUnavailableError as exc:

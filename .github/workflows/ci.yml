@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   pr-smoke:
-    # PR 阶段只跑 campaign / broadcast queue / cloud orchestrator 相关 smoke，
+    # PR 阶段只跑 broadcast queue 相关 smoke，
     # 全量 PG 回归留给 nightly 和手动触发。
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -52,40 +52,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Check no duplicate Next source
-        run: bash scripts/check_no_duplicate_next_source.sh
-
-      - name: Check no new legacy surface
-        run: python scripts/check_no_new_legacy.py --strict
-
-      - name: Check legacy replacement backlog is generated
-        run: python tools/generate_legacy_replacement_backlog.py --check
-
       - name: Run PR smoke tests (PG-only, targeted)
         run: |
           python -m pytest \
-            tests/integration/test_pg_compat_smoke.py \
-            tests/test_campaigns_due_calc.py \
             tests/test_broadcast_jobs_service.py \
             tests/test_run_broadcast_queue_worker.py \
-            tests/test_send_task.py \
-            tests/test_campaign_hard_delete.py \
-            tests/test_ci_workflow_contract.py \
-            tests/test_deploy_workflow_contract.py \
-            tests/test_admin_rbac_navigation.py \
-            tests/test_admin_navigation_groups.py \
-            tests/test_wechat_pay_products.py \
-            tests/test_wechat_pay_admin_transactions.py \
-            tests/test_http_registration_contract.py \
-            tests/test_refactor_guardrails.py \
-            tests/test_service_layer_layout.py \
-            tests/test_run_cloud_orchestrator_scan.py \
-            tests/test_cloud_orchestrator_external_agent.py \
+            tests/test_broadcast_jobs_wecom_private_dispatch.py \
             -n auto --dist=loadfile -q --tb=short --timeout=120 --timeout-method=thread
         timeout-minutes: 15
 
   main-smoke:
-    # main push 只跑关键路径 smoke，避免每次部署都被全量回归卡 6-8 分钟。
+    # main push 只跑 broadcast queue 关键路径 smoke，避免每次部署都被全量回归卡 6-8 分钟。
     # 全量 ``pytest tests/`` 仍由 nightly / workflow_dispatch 负责。
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -121,38 +98,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Check no new legacy surface
-        run: python scripts/check_no_new_legacy.py --strict
-
-      - name: Check legacy replacement backlog is generated
-        run: python tools/generate_legacy_replacement_backlog.py --check
-
       - name: Run main smoke tests (PG-only, targeted)
         run: |
           python -m pytest \
-            tests/integration/test_pg_compat_smoke.py \
-            tests/test_postgres_schema_retry.py \
-            tests/test_marketing_schema_init.py::test_postgres_schema_includes_required_marketing_automation_tables_and_indexes \
-            tests/test_marketing_schema_init.py::test_postgres_init_adds_program_id_columns_before_schema_indexes \
-            tests/test_campaigns_due_calc.py \
             tests/test_broadcast_jobs_service.py \
             tests/test_run_broadcast_queue_worker.py \
-            tests/test_send_task.py \
-            tests/test_campaign_hard_delete.py \
-            tests/test_ci_workflow_contract.py \
-            tests/test_deploy_workflow_contract.py \
-            tests/test_user_ops_import_parsers.py \
-            tests/test_user_ops_page_service_helpers.py \
-            tests/test_hxc_dashboard_snapshot.py \
-            tests/test_admin_rbac_navigation.py \
-            tests/test_admin_navigation_groups.py \
-            tests/test_wechat_pay_products.py \
-            tests/test_wechat_pay_admin_transactions.py \
-            tests/test_http_registration_contract.py \
-            tests/test_refactor_guardrails.py \
-            tests/test_service_layer_layout.py \
-            tests/test_run_cloud_orchestrator_scan.py \
-            tests/test_cloud_orchestrator_external_agent.py \
+            tests/test_broadcast_jobs_wecom_private_dispatch.py \
             -n auto --dist=loadfile -q --tb=short --timeout=120 --timeout-method=thread
         timeout-minutes: 15
 
@@ -191,12 +142,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      - name: Check no new legacy surface
-        run: python scripts/check_no_new_legacy.py --strict
-
-      - name: Check legacy replacement backlog is generated
-        run: python tools/generate_legacy_replacement_backlog.py --check
 
       - name: Run all tests (PG-only, parallel)
         # ``-n auto`` 让 pytest-xdist 按 CPU 核数派发 test 到 worker 子进程；

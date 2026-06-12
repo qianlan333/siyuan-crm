@@ -1,4 +1,4 @@
-version: 16
+version: 15
 status: active
 
 autopilot:
@@ -17,44 +17,6 @@ owner_approval_required: false
 runtime_behavior_changed: false
 delete_ready: false
 
-legacy_prune_pr9:
-  status: complete
-  branch: codex/siyuan-pr9-legacy-prune
-  deleted_modules:
-    - wecom_ability_service/http/automation_conversion.py
-    - wecom_ability_service/http/automation_conversion_runtime_api.py
-    - wecom_ability_service/http/automation_conversion_task_runtime.py
-    - wecom_ability_service/http/automation_conversion_execution_outbound.py
-    - wecom_ability_service/http/automation_conversion_member_api.py
-    - wecom_ability_service/http/automation_conversion_compat.py
-    - wecom_ability_service/http/automation_conversion_delivery.py
-    - wecom_ability_service/http/customer_automation.py
-  migrated_tests:
-    - tests/test_automation_conversion_v1.py removed; behavior covered by Next automation timer/member/workspace/runtime tests
-    - tests/test_customer_automation_webhook_registry_lifecycle.py removed; behavior covered by Next webhook route precedence and no-real-side-effect tests
-    - tests/test_pr9_legacy_prune.py added
-  deferred_modules: []
-  production_cutover: false
-  production_db_writes: false
-  deploy_systemd_nginx_env_changed: false
-  hxc_cloud_api_docs_native_closeout: deferred
-
-pr1_core_next_baseline_sync:
-  status: in_progress_pr
-  branch: codex/siyuan-pr1-core-next-baseline-sync
-  scope:
-    - automation_runtime_v2_routes
-    - class_user_management_export
-    - customer_admin_pages
-    - user_ops_admin_pages
-    - identity_bind_mobile_page
-  deferred:
-    - commerce_external_orders_pr2
-    - alembic_graph_closeout_pr3
-    - hxc_cloud_commerce_api_docs_native_closeout_later
-  production_cutover: false
-  deploy_systemd_nginx_env_changed: false
-
 cleanup_closeout:
   global_non_runtime_cleanup: complete
   low_medium_admin_runtime_fallback_migration: complete_enough_for_product_development
@@ -63,9 +25,6 @@ cleanup_closeout:
   continue_deletion_mode: false
 
 active_safety_gates:
-  - check_legacy_facade_growth_freeze
-  - generate_legacy_replacement_backlog
-  - check_production_route_resolution
   - check_automerge_eligibility
   - check_autonomous_development_loop
   - pr_smoke
@@ -76,9 +35,6 @@ completed_runtime_fallback_tracks:
   - media_material_libraries_next_ownership
   - sidebar_customer_broad_fallback_narrowing
   - sidebar_customer_readonly_cleanup
-  - pr1_core_next_baseline_sync_customer_user_ops_identity_pages
-  - pr1_core_next_baseline_sync_class_user_export
-  - pr1_core_next_baseline_sync_automation_runtime_v2_routes
 
 remaining_runtime_fallback_tracks:
   product_specific_migration_required:
@@ -93,10 +49,10 @@ remaining_runtime_fallback_tracks:
   handling_rule: migrate only when the related product capability is actively being developed
 
 protected_runtime_boundaries:
-  - app.py Next-only startup entry
+  - app.py
   - aicrm_next/main.py
   - aicrm_next/production_compat/api.py high-risk and retained fallback entries only
-  - wecom_ability_service runtime
+  - deleted legacy package must not return
   - migrations/deploy/nginx/systemd
   - payment/OAuth/WeCom callback/public submit/product/checkout/order/image upload/runtime/outbound paths
 

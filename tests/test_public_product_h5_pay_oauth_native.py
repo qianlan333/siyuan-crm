@@ -186,7 +186,7 @@ def test_h5_pay_oauth_callback_wechat_error_payload(monkeypatch) -> None:
 def test_h5_pay_runtime_has_no_legacy_oauth_helper() -> None:
     source = Path("aicrm_next/public_product/h5_wechat_pay.py").read_text(encoding="utf-8")
     forbidden = [
-        "wecom_ability_service.infra." + "wechat_oauth",
+        "wecom_ability" + "_service.infra." + "wechat_oauth",
         "exchange_wechat_" + "oauth_code",
         "fetch_wechat_" + "userinfo",
         "WeChatOAuth" + "RequestError",

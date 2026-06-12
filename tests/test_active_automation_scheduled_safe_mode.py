@@ -129,7 +129,9 @@ def test_raw_true_execution_without_allowlist_still_returns_409(monkeypatch):
     assert campaign.json()["error_code"] == "campaign_run_due_allowlist_required"
 
 
-def test_checker_returns_ok_and_keeps_local_sentinel_stable():
+def test_checker_returns_ok_and_keeps_local_sentinel_stable(monkeypatch):
+    monkeypatch.setattr(checker, "production_config_modified", lambda: False)
+
     result = checker.run_check()
 
     assert result["ok"] is True

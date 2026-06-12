@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
@@ -23,6 +23,7 @@ from .application import (
     ListRecentMessagesQuery,
 )
 from .repo import CustomerReadRepository
+from .admin_business_profile import get_customer_business_profile
 from .dto import (
     CustomerContextRequest,
     CustomerDetailRequest,
@@ -698,6 +699,27 @@ def get_admin_customer_profile(
         external_userid=external_userid,
         mobile=mobile,
         user_id=user_id,
+    )
+    status_code = int(result.pop("status_code", 200) or 200)
+    return JSONResponse(jsonable_encoder(result), status_code=status_code)
+
+
+@router.get(
+    "/api/admin/customers/{external_userid}/business-profile",
+    summary="客户商业档案",
+    description="Session Cookie 后台接口，只聚合客户标签、最近聊天记录和问卷问题答案三类核心信息；订单和商业摘要请调用独立接口。",
+)
+def get_admin_customer_business_profile(
+    external_userid: str = Path(..., description="企业微信 external_userid"),
+    limit: int = Query(20, description="最近聊天记录条数，默认 20，最大 20"),
+    db: Session = Depends(get_db),
+) -> JSONResponse:
+    customer_repo, live_source_repo = _request_scoped_customer_repositories(db)
+    result = get_customer_business_profile(
+        external_userid,
+        limit=limit,
+        customer_repo=customer_repo,
+        live_source_repo=live_source_repo,
     )
     status_code = int(result.pop("status_code", 200) or 200)
     return JSONResponse(jsonable_encoder(result), status_code=status_code)

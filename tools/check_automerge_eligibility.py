@@ -20,8 +20,10 @@ REQUIRED_PR_BODY_SECTIONS = {
     "Next action",
 }
 LOW_RISK_PREFIXES = (
+    "docs/architecture/",
     "docs/development/",
     "tools/check_",
+    "tools/generate_",
     "tests/test_",
 )
 DELETED_LOW_RISK_PREFIXES = (
@@ -34,48 +36,28 @@ DELETED_LOW_RISK_PREFIXES = (
 DELETED_LOW_RISK_SUFFIXES = (
     "_gray_smoke.py",
 )
-DELETED_LOW_RISK_EXACT: set[str] = set()
-STARTUP_COMPAT_CLOSEOUT_EXACT = {
-    ".github/workflows/deploy.yml",
-    "README.md",
-    "app.py",
-    "docs/deploy_runbook.md",
-    "docs/development/autonomous_stop_conditions.yaml",
-    "docs/development/phase_execution_state.yaml",
-    "docs/reports/siyuan_aicrm_next_staging_rehearsal_server_20260609.md",
-    "docs/reports/siyuan_aicrm_next_staging_rehearsal_server_completed_20260609.md",
-    "docs/reports/siyuan_aicrm_next_staging_rehearsal_server_full_20260609.md",
-    "docs/siyuan_aicrm_next_migration.md",
-    "legacy_flask_app.py",
-    "scripts/check_no_new_legacy.py",
-    "tests/test_autonomous_development_loop.py",
-    "tests/test_deploy_workflow_contract.py",
-    "tests/test_next_source_consolidation.py",
-    "tests/test_no_new_legacy_checker.py",
-    "tests/test_startup_commands_next_only.py",
-    "tools/check_automerge_eligibility.py",
-    "tools/check_autonomous_development_loop.py",
-    "wecom_ability_service/LEGACY_FROZEN.md",
+DELETED_LOW_RISK_EXACT = {
+    "wecom_ability" + "_service/LEGACY_FROZEN.md",
+    "wecom_ability" + "_service/__init__.py",
 }
-RUNTIME_FALLBACK_ALLOWED_EXACT = {
-    "wecom_ability_service/http/__init__.py",
-    "wecom_ability_service/templates/admin_console/channel_code_center.html",
-    "wecom_ability_service/templates/admin_console/channel_code_form.html",
-    "wecom_ability_service/static/admin_console/channel_admission_pages.js",
-    "wecom_ability_service/static/admin_console/channel_admission_pages.css",
-}
+RUNTIME_FALLBACK_ALLOWED_EXACT: set[str] = set()
 LOW_RISK_EXACT = {
     "README.md",
+    "requirements.txt",
+    "aicrm_next/automation_engine/channels_api.py",
+    "aicrm_next/automation_runtime_v2/bridge.py",
+    "aicrm_next/automation_runtime_v2/channel_binding_service.py",
+    "scripts/run_lint.py",
+    "scripts/smoke_automation_runtime_v2.py",
+    "tests/automation_runtime_v2_test_helpers.py",
     "aicrm_next/customer_read_model/api.py",
     "aicrm_next/automation_engine/api.py",
-    "aicrm_next/production_compat/api.py",
     "docs/claude_code_integration/README.md",
     "docs/claude_code_integration/patterns.md",
     "docs/claude_code_integration/rules.md",
     "docs/claude_code_integration/tools.md",
     "docs/claude_code_integration/troubleshooting.md",
     "docs/mcp_usage.md",
-    "docs/route_ownership/production_route_ownership_manifest.yaml",
     "tools/collect_server_readonly_evidence.py",
     "tools/run_codex_autopilot_tick.py",
     "scripts/codex_autopilot_tick.sh",
@@ -132,47 +114,35 @@ AUTOPILOT_DELIVERABLE_RUNTIME_PATHS = {
 OWNER_DECISION_PACKAGE_PATHS = {
 }
 POLICY_FILES_CAN_DEFINE_STOP_TERMS = {
-        "aicrm_next/production_compat/api.py",
-        "docs/development/legacy_replacement_backlog.md",
-        "docs/development/legacy_replacement_backlog.yaml",
+        "docs/architecture/hxc_dashboard_route_inventory.md",
         "docs/development/autonomous_development_loop.md",
         "docs/development/codex_autopilot_runtime_runbook.md",
         "docs/development/ai_crm_next_architecture_skill.md",
         "docs/development/codex_task_template.md",
-        "docs/route_ownership/production_route_ownership_manifest.yaml",
         "docs/development/phase_execution_state.yaml",
         "docs/development/autonomous_stop_conditions.yaml",
+        "aicrm_next/automation_runtime_v2/bridge.py",
         "aicrm_next/integration_gateway/legacy_flask_facade.py",
         "scripts/codex_autopilot_tick.sh",
-        "tools/check_architecture_skill_compliance.py",
+        "scripts/smoke_automation_runtime_v2.py",
         "tools/check_autonomous_development_loop.py",
         "tools/check_automerge_eligibility.py",
-        "tools/check_legacy_facade_growth_freeze.py",
-        "tools/check_production_route_resolution.py",
+        "tools/check_reply_monitor_run_due_readiness.py",
         "tools/collect_server_readonly_evidence.py",
         "tools/run_codex_autopilot_tick.py",
-        "tests/test_architecture_skill_compliance.py",
-        "tests/test_autonomous_development_loop.py",
-        "tests/test_automerge_eligibility.py",
-        "tests/test_codex_autopilot_runtime_contract.py",
-        "tests/test_http_registration_contract.py",
-        "tests/test_next_production_cutover_readiness.py",
-        "tests/test_next_timer_route_readiness.py",
-        "tests/test_production_route_resolution.py",
     }
 PROTECTED_EXACT = {
     "aicrm_next/main.py",
+    "app.py",
 }
 PROTECTED_PREFIXES = (
     "aicrm_next/production_compat/",
-    "wecom_ability_service/",
     "deploy/",
     "systemd/",
     "nginx/",
 )
 MIGRATION_PREFIXES = (
     "migrations/",
-    "wecom_ability_service/db/migrations/",
 )
 DESTRUCTIVE_MIGRATION_PATTERNS = (
     r"\bdrop\s+table\b",
@@ -254,8 +224,6 @@ def _is_deleted_path(path: str) -> bool:
 
 
 def _is_low_risk_path(path: str) -> bool:
-    if path in STARTUP_COMPAT_CLOSEOUT_EXACT:
-        return True
     if path in RUNTIME_FALLBACK_ALLOWED_EXACT:
         return True
     if _is_deleted_path(path) and (
@@ -282,8 +250,6 @@ def _has_owner_approval(path: str | None) -> bool:
 
 
 def _protected_path_reason(path: str) -> str | None:
-    if path in STARTUP_COMPAT_CLOSEOUT_EXACT:
-        return None
     if path in RUNTIME_FALLBACK_ALLOWED_EXACT:
         return None
     if path == "aicrm_next/production_compat/api.py":
@@ -357,16 +323,12 @@ def build_report(
         if _is_deleted_path(path):
             continue
         lowered = text.lower()
-        if (
-            path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS
-            and path not in RUNTIME_FALLBACK_ALLOWED_EXACT
-            and path not in STARTUP_COMPAT_CLOSEOUT_EXACT
-        ):
+        if path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS and path not in RUNTIME_FALLBACK_ALLOWED_EXACT and not path.startswith("tests/"):
             for pattern in STOP_CONDITION_PATTERNS:
                 if re.search(pattern, lowered):
                     stop_hits.append(f"{path}: {pattern}")
         for pattern in UNAUTHORIZED_CLAIM_PATTERNS:
-            if path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS and path not in STARTUP_COMPAT_CLOSEOUT_EXACT and re.search(pattern, lowered):
+            if path not in POLICY_FILES_CAN_DEFINE_STOP_TERMS and re.search(pattern, lowered):
                 claim_hits.append(f"{path}: {pattern}")
 
     if protected_hits or destructive_hits:

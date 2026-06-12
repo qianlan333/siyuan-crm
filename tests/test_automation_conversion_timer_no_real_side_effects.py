@@ -19,6 +19,7 @@ def _joined(*parts: str) -> str:
 def test_timer_routes_return_no_real_side_effect_flags(monkeypatch):
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_timer_fixture_state()
     client = TestClient(create_app(), raise_server_exceptions=False)
 
@@ -28,7 +29,11 @@ def test_timer_routes_return_no_real_side_effect_flags(monkeypatch):
         ("/api/admin/automation-conversion/jobs/run-due", {"jobs": ["job_a"]}, "jobs_run_due_executed"),
     )
     for path, payload, route_flag in cases:
-        response = client.post(path, json=payload, headers={"Idempotency-Key": f"safe-{route_flag}"})
+        response = client.post(
+            path,
+            json=payload,
+            headers={"Idempotency-Key": f"safe-{route_flag}", "Authorization": "Bearer timer-token"},
+        )
         assert response.status_code == 200
         body = response.json()
         assert body["real_external_call_executed"] is False

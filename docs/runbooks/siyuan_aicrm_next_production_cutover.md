@@ -15,7 +15,7 @@
 
 - PR #77 restored staging rehearsal 已完成并合并，结论为 `PASS_WITH_NOTES`。
 - PR #77 报告中的 restored staging DB 已完成 backup/restore/Alembic/safe init/customer projection/channel backfill/runtime schema/HTTP smoke。
-- 最新 `main` 包含 `sync-customer-read-model`、`init-next-schema-safe` 和相关 validation/smoke 脚本。
+- 最新 `main` 使用 AI-CRM Next-only `app.py`；siyuan 初始化和 customer projection 演练使用 `scripts/siyuan_migration/*` 独立 helper，不依赖旧 app.py CLI。
 - 有普通 SSH shell，不是只读诊断通道。
 - `/home/ubuntu/.openclaw-wecom-pg.env` 存在，且由授权人员管理。
 - 可以执行 `pg_dump`、`pg_restore`、`psql`。
@@ -80,7 +80,7 @@ scripts/siyuan_migration/01_backup_current_assets.sh
 1. 最终冻结写入后，`pg_dump` 当前生产库。
 2. 恢复到新生产库，例如 `siyuancrm_next_prod`，或经人工确认后的 `siyuancrm_next`。
 3. 让 AI-CRM Next 新 release 临时连接新生产库。
-4. 对新生产库执行 health、schema safe init、customer projection sync、channel backfill 和 validation。
+4. 对新生产库执行 health、safe schema SQL、customer projection sync、channel backfill 和 validation。
 5. 将 systemd env 指向新生产库。
 6. 切换服务。
 7. 保留旧生产库和旧 release 作为回滚路径。
@@ -89,7 +89,7 @@ scripts/siyuan_migration/01_backup_current_assets.sh
 
 ### 策略 B：原生产库原地升级，不推荐但可选
 
-1. 最终备份后，直接在原生产库执行 `init-next-schema-safe`、customer projection sync 和 channel backfill。
+1. 最终备份后，直接在原生产库执行 `scripts/siyuan_migration/06_safe_next_schema_init.sql`、customer projection sync 和 channel backfill。
 2. 切换 systemd 到新 release。
 3. 异常时需要使用最终 dump 恢复原生产库。
 
@@ -135,20 +135,19 @@ The restore helper uses `pg_restore --no-owner --no-acl` so source-role ACL stat
 
 ```bash
 python3 app.py health
-python3 app.py init-db
-python3 app.py init-next-schema-safe
-python3 app.py sync-customer-read-model --dry-run
-python3 app.py sync-customer-read-model
 
+psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/06_safe_next_schema_init.sql
+python3 scripts/siyuan_migration/sync_customer_read_model.py --dry-run
+python3 scripts/siyuan_migration/sync_customer_read_model.py --execute
 psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/03_channel_backfill.sql
 psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/04_validate_migration.sql
 psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/07_validate_next_blockers.sql
 psql "$PG_CLI_TARGET_DB_URL" -f scripts/siyuan_migration/08_validate_customer_projection.sql
 ```
 
-`init-db` 当前只是兼容别名，仍建议同时执行 `init-next-schema-safe` 作为明确记录。不要使用 `init-db-legacy`。
+`app.py` 保持 AI-CRM Next-only runtime 入口。不要使用 `python3 app.py init-db`、`python3 app.py init-next-schema-safe` 或 `python3 app.py sync-customer-read-model` 作为 PR-12/PR-13 的迁移入口。
 
-`init-next-schema-safe` now includes the runtime v2 and commerce audit safety guard tables validated in PR #77:
+`06_safe_next_schema_init.sql` includes the runtime v2 and commerce audit safety guard tables validated in PR #77:
 
 - `automation_event_v2`
 - `automation_membership_v2`
@@ -290,9 +289,8 @@ scripts/siyuan_migration/09_smoke_customer_projection.sh
 - 最终备份完成。
 - 新生产库 restore 成功。
 - `python3 app.py health` 成功，`/health` 返回 200。
-- `python3 app.py init-db` 成功。
-- `python3 app.py init-next-schema-safe` 成功。
-- `python3 app.py sync-customer-read-model` 成功。
+- `scripts/siyuan_migration/06_safe_next_schema_init.sql` 成功。
+- `scripts/siyuan_migration/sync_customer_read_model.py` dry-run 和正式执行成功。
 - `customer_detail_snapshot_next > 0`。
 - projection coverage against contacts 为 100%，或有明确解释和业务确认。
 - `scene_alias_coverage` 不低于 PR #77 restored staging rehearsal。

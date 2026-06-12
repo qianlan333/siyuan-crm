@@ -1121,7 +1121,17 @@ class PostgresQuestionnaireReadRepository:
         return self.get_questionnaire(int(questionnaire_id))
 
     def delete_questionnaire(self, questionnaire_id: int) -> bool:
-        return self.set_enabled(questionnaire_id, False) is not None
+        with self._connect() as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    """
+                    DELETE FROM questionnaires
+                    WHERE id = %s
+                    RETURNING id
+                    """,
+                    (int(questionnaire_id),),
+                ).fetchone()
+        return bool(row)
 
     def _slug_exists(self, conn: Any, slug: str, *, exclude_id: int | None = None) -> bool:
         params: list[Any] = [slug]

@@ -661,6 +661,13 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any]) -> dict[str, Any]
                 "was_paid": was_paid,
             },
         )
+        if not was_paid:
+            try:
+                from aicrm_next.automation_runtime_v2.bridge import process_payment_succeeded_event
+
+                process_payment_succeeded_event(order=order_payload, transaction=transaction)
+            except Exception:
+                LOGGER.exception("automation_runtime_v2_payment_event_failed", extra={"out_trade_no": trade_no})
     return order_payload
 
 

@@ -1412,6 +1412,21 @@ class PostgresAutomationProgramRepository:
         group = dict(check.get(group_key) or {})
         if not bool(group.get("passed")):
             raise ValueError("完整自动化发布检查未通过" if group_key == "full" else "入口发布检查未通过")
+        if group_key == "full":
+            from aicrm_next.automation_runtime_v2.runtime_check import check_task_runtime
+
+            with self._engine.connect() as conn:
+                rows = conn.execute(
+                    text("SELECT id FROM automation_operation_task WHERE program_id = :program_id AND status = 'active' ORDER BY id ASC"),
+                    {"program_id": int(program_id)},
+                ).mappings().all()
+            blocked: dict[str, Any] = {}
+            for row in rows:
+                checked = check_task_runtime(int(row["id"]), {})
+                if not bool(checked.get("ok")):
+                    blocked[str(int(row["id"]))] = checked.get("blocked_reasons") or {}
+            if blocked:
+                raise ValueError(f"runtime_v2_check_blocked: {blocked}")
         with self._engine.begin() as conn:
             state = {"entry_published": True, "full_published": group_key == "full", "published_by": _clean_text(operator_id), "published_at": datetime.now(timezone.utc).isoformat()}
             block = self._upsert_config_block(conn, int(program_id), BLOCK_PUBLISH_STATE, state, status="published")

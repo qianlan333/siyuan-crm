@@ -24,7 +24,7 @@ def test_runtime_v2_outbox_uses_task_config_sender(next_pg_schema):
             source_type="questionnaire",
             source_id="sender-payload-submission",
             program_id=program_id,
-            external_userid="wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ",
+            external_userid="external-test-target",
             payload_json={"answers": {"need": "runtime v2"}},
         )
     )
@@ -34,8 +34,8 @@ def test_runtime_v2_outbox_uses_task_config_sender(next_pg_schema):
     metadata = job["metadata_json"] if isinstance(job["metadata_json"], dict) else json.loads(job["metadata_json"])
     assert payload["sender_userid"] == "HuangYouCan"
     assert payload["owner_userid"] == "HuangYouCan"
-    assert payload["target_external_userids"] == ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]
-    assert job["target_external_userids"] == ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]
+    assert payload["target_external_userids"] == ["external-test-target"]
+    assert job["target_external_userids"] == ["external-test-target"]
     assert metadata["sender_resolution"]["source"] == "task_config"
 
 

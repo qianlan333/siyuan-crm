@@ -250,6 +250,8 @@ class SidebarV2SqlRepository:
         return rows[0] if len(rows) == 1 else None
 
     def list_customer_wechat_pay_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict[str, Any]]:
+        safe_limit = _limit(limit, default=20, maximum=100)
+        candidate_limit = max(safe_limit, 20)
         return self._all(
             """
             WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
@@ -273,24 +275,84 @@ class SidebarV2SqlRepository:
                 FROM wecom_external_contact_identity_map m
                 JOIN target t ON m.external_userid = t.external_userid
                 WHERE COALESCE(m.unionid, '') <> ''
+            ),
+            external_orders AS (
+                SELECT
+                    id, out_trade_no, transaction_id, product_code,
+                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
+                    amount_total, currency, external_userid AS order_external_userid,
+                    mobile_snapshot, payer_openid, unionid, status, trade_state,
+                    refunded_amount_total, refund_status, paid_at, created_at,
+                    COALESCE(paid_at, created_at) AS sort_at
+                FROM wechat_pay_orders
+                WHERE :external_userid <> ''
+                  AND external_userid = :external_userid
+                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+                LIMIT :candidate_limit
+            ),
+            mobile_orders AS (
+                SELECT
+                    id, out_trade_no, transaction_id, product_code,
+                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
+                    amount_total, currency, external_userid AS order_external_userid,
+                    mobile_snapshot, payer_openid, unionid, status, trade_state,
+                    refunded_amount_total, refund_status, paid_at, created_at,
+                    COALESCE(paid_at, created_at) AS sort_at
+                FROM wechat_pay_orders
+                WHERE mobile_snapshot IN (SELECT mobile FROM bound_mobiles)
+                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+                LIMIT :candidate_limit
+            ),
+            openid_orders AS (
+                SELECT
+                    id, out_trade_no, transaction_id, product_code,
+                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
+                    amount_total, currency, external_userid AS order_external_userid,
+                    mobile_snapshot, payer_openid, unionid, status, trade_state,
+                    refunded_amount_total, refund_status, paid_at, created_at,
+                    COALESCE(paid_at, created_at) AS sort_at
+                FROM wechat_pay_orders
+                WHERE payer_openid IN (SELECT openid FROM identity_openids)
+                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+                LIMIT :candidate_limit
+            ),
+            unionid_orders AS (
+                SELECT
+                    id, out_trade_no, transaction_id, product_code,
+                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
+                    amount_total, currency, external_userid AS order_external_userid,
+                    mobile_snapshot, payer_openid, unionid, status, trade_state,
+                    refunded_amount_total, refund_status, paid_at, created_at,
+                    COALESCE(paid_at, created_at) AS sort_at
+                FROM wechat_pay_orders
+                WHERE unionid IN (SELECT unionid FROM identity_unionids)
+                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+                LIMIT :candidate_limit
+            ),
+            candidate_orders AS (
+                SELECT * FROM external_orders
+                UNION ALL
+                SELECT * FROM mobile_orders
+                UNION ALL
+                SELECT * FROM openid_orders
+                UNION ALL
+                SELECT * FROM unionid_orders
+            ),
+            deduped_orders AS (
+                SELECT DISTINCT ON (id) *
+                FROM candidate_orders
+                ORDER BY id
             )
             SELECT
                 id, out_trade_no, transaction_id, product_code,
-                COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
-                amount_total, currency, external_userid AS order_external_userid,
+                product_name, amount_total, currency, order_external_userid,
                 mobile_snapshot, payer_openid, unionid, status, trade_state,
                 refunded_amount_total, refund_status, paid_at, created_at
-            FROM wechat_pay_orders
-            WHERE (
-                (COALESCE(external_userid, '') <> '' AND external_userid = (SELECT external_userid FROM target))
-                OR (COALESCE(mobile_snapshot, '') <> '' AND mobile_snapshot IN (SELECT mobile FROM bound_mobiles))
-                OR (COALESCE(payer_openid, '') <> '' AND payer_openid IN (SELECT openid FROM identity_openids))
-                OR (COALESCE(unionid, '') <> '' AND unionid IN (SELECT unionid FROM identity_unionids))
-            )
-            ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+            FROM deduped_orders
+            ORDER BY sort_at DESC NULLS LAST, id DESC
             LIMIT :limit
             """,
-            {"external_userid": external_userid, "mobile": mobile, "limit": _limit(limit, default=20, maximum=100)},
+            {"external_userid": external_userid, "mobile": mobile, "limit": safe_limit, "candidate_limit": candidate_limit},
         )
 
     def list_questionnaire_answers(self, *, external_userid: str, mobile: str = "") -> list[dict[str, Any]]:

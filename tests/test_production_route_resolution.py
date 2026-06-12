@@ -105,7 +105,7 @@ def test_next_exact_routes_are_not_caught_by_production_compat_wildcards():
     assert _owner_for(samples, "GET", "/api/admin/questionnaires/21") == "next"
     assert _endpoint_for(samples, "GET", "/api/admin/questionnaires/21") == "aicrm_next.questionnaire.api"
     assert _owner_for(samples, "GET", "/sidebar/bind-mobile") == "next"
-    assert _endpoint_for(samples, "GET", "/sidebar/bind-mobile") == "aicrm_next.frontend_compat.legacy_routes"
+    assert _endpoint_for(samples, "GET", "/sidebar/bind-mobile") == "aicrm_next.identity_contact.admin_pages"
     assert _owner_for(samples, "GET", "/api/sidebar/contact-binding-status") == "next"
     assert _endpoint_for(samples, "GET", "/api/sidebar/contact-binding-status") == "aicrm_next.identity_contact.api"
     assert _owner_for(samples, "GET", "/api/sidebar/customer-context") == "next"

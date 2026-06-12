@@ -12,7 +12,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 REPLY_MONITOR_SERVICE = ROOT / "wecom_ability_service" / "domains" / "automation_conversion" / "reply_monitor_service.py"
-RUNTIME_API = ROOT / "wecom_ability_service" / "http" / "automation_conversion_runtime_api.py"
+NEXT_AUTOMATION_API = ROOT / "aicrm_next" / "automation_engine" / "api.py"
 TEST_FILE = ROOT / "tests" / "test_reply_monitor_run_due_invalid_phone.py"
 
 SEND_SENTINEL_TABLES = ["user_ops_send_records", "outbound_tasks"]
@@ -24,7 +24,7 @@ def _read(path: Path) -> str:
 
 def run_check() -> dict[str, Any]:
     service_source = _read(REPLY_MONITOR_SERVICE)
-    api_source = _read(RUNTIME_API)
+    api_source = _read(NEXT_AUTOMATION_API)
     test_source = _read(TEST_FILE)
     item_level_failure = all(
         token in service_source
@@ -35,7 +35,15 @@ def run_check() -> dict[str, Any]:
             "for queue_item in due_items",
         ]
     )
-    systemd_compatible_status = "partial_failed" in api_source and "status_code" in api_source
+    systemd_compatible_status = all(
+        token in api_source
+        for token in [
+            '@router.post("/api/admin/automation-conversion/reply-monitor/run-due")',
+            "PlanReplyMonitorRunDueCommand",
+            "_timer_response(command",
+            "status_code",
+        ]
+    )
     sentinel_covered = all(table in test_source for table in SEND_SENTINEL_TABLES)
     invalid_phone_tested = "invalid phone" in test_source and "response.status_code == 200" in test_source
     blockers: list[str] = []

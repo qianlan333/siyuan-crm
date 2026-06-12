@@ -17,13 +17,13 @@ DELETED_MODULES = [
     "wecom_ability_service/http/cloud_orchestrator_pages.py",
     "wecom_ability_service/http/cloud_orchestrator_plans.py",
     "wecom_ability_service/http/cloud_orchestrator_segments.py",
-]
-KEPT_MODULES = [
     "wecom_ability_service/http/automation_conversion.py",
     "wecom_ability_service/http/automation_conversion_runtime_api.py",
     "wecom_ability_service/http/automation_conversion_task_runtime.py",
     "wecom_ability_service/http/automation_conversion_execution_outbound.py",
     "wecom_ability_service/http/automation_conversion_member_api.py",
+    "wecom_ability_service/http/automation_conversion_compat.py",
+    "wecom_ability_service/http/automation_conversion_delivery.py",
     "wecom_ability_service/http/customer_automation.py",
 ]
 
@@ -42,14 +42,15 @@ def test_deleted_legacy_modules_are_removed_and_not_registered() -> None:
     for module in DELETED_MODULES:
         assert f"`{module}`" in inventory_text
         assert not (ROOT / module).exists()
-        assert Path(module).stem not in http_init_text
+        assert f'"{Path(module).stem}"' not in http_init_text
+        assert f".{Path(module).stem} import" not in http_init_text
 
 
-def test_temporarily_kept_legacy_modules_have_deletion_conditions() -> None:
+def test_pr9_deleted_legacy_modules_are_marked_deleted_in_inventory() -> None:
     text = INVENTORY.read_text(encoding="utf-8")
 
-    for module in KEPT_MODULES:
+    for module in DELETED_MODULES:
         assert f"`{module}`" in text
-        assert "keep_temporarily_historical" in text
-        assert (ROOT / module).exists()
-    assert "后续删除条件" in text
+        assert not (ROOT / module).exists()
+    assert "deleted_in_pr9" in text
+    assert "PR-9 test migration" in text

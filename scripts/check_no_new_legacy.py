@@ -502,7 +502,7 @@ POST_LEGACY_DEVELOPMENT_DOCS = {
         "legacy module / package",
         "替代 Next 模块",
         "删除决策",
-        "keep_temporarily_historical",
+        "deleted_in_pr9",
         "wecom_ability_service/http/admin_hxc_dashboard.py",
         "wecom_ability_service/http/admin_auth_routes.py",
         "wecom_ability_service/http/cloud_orchestrator_campaigns.py",
@@ -520,15 +520,16 @@ POST_LEGACY_DELETED_HTTP_MODULES = {
     "cloud_orchestrator_pages": Path("wecom_ability_service/http/cloud_orchestrator_pages.py"),
     "cloud_orchestrator_plans": Path("wecom_ability_service/http/cloud_orchestrator_plans.py"),
     "cloud_orchestrator_segments": Path("wecom_ability_service/http/cloud_orchestrator_segments.py"),
-}
-POST_LEGACY_TEMPORARY_HISTORICAL_HTTP_MODULES = {
     "automation_conversion": Path("wecom_ability_service/http/automation_conversion.py"),
     "automation_conversion_runtime_api": Path("wecom_ability_service/http/automation_conversion_runtime_api.py"),
     "automation_conversion_task_runtime": Path("wecom_ability_service/http/automation_conversion_task_runtime.py"),
     "automation_conversion_execution_outbound": Path("wecom_ability_service/http/automation_conversion_execution_outbound.py"),
     "automation_conversion_member_api": Path("wecom_ability_service/http/automation_conversion_member_api.py"),
+    "automation_conversion_compat": Path("wecom_ability_service/http/automation_conversion_compat.py"),
+    "automation_conversion_delivery": Path("wecom_ability_service/http/automation_conversion_delivery.py"),
     "customer_automation": Path("wecom_ability_service/http/customer_automation.py"),
 }
+POST_LEGACY_TEMPORARY_HISTORICAL_HTTP_MODULES: dict[str, Path] = {}
 POST_LEGACY_MAIN_FORBIDDEN_MARKERS = {
     "production_compat_router": "post_legacy_main_production_compat_router",
     "production_compat_wildcard_router": "post_legacy_main_production_compat_wildcard_router",

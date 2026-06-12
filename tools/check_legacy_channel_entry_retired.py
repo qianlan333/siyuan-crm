@@ -51,15 +51,18 @@ def main() -> int:
     for route in {"/wecom/external-contact/callback", "/api/wecom/events"} & callback_routes:
         blockers.append(f"legacy callbacks.py still registers {route}")
 
-    automation_conversion = _read("wecom_ability_service/http/automation_conversion.py")
+    channel_entry_api = _read("aicrm_next/channel_entry/api.py")
     for route in (
         "/api/admin/channels/runtime-diagnosis",
-        "/api/admin/channels/<int:channel_id>/runtime-diagnosis",
+        "/api/admin/channels/{channel_id:int}/runtime-diagnosis",
         "/api/admin/channels/runtime-diagnosis/dry-run",
         "/api/admin/channels/repair-entry",
     ):
-        if route in automation_conversion:
-            blockers.append(f"legacy automation_conversion.py still registers {route}")
+        if route not in channel_entry_api:
+            blockers.append(f"Next channel_entry api does not declare {route}")
+    legacy_automation_path = ROOT / "wecom_ability_service" / "http" / ("automation_" + "conversion.py")
+    if legacy_automation_path.exists():
+        blockers.append("legacy automation conversion HTTP aggregator still exists")
 
     if (ROOT / "wecom_ability_service/http/channel_runtime_diagnosis.py").exists():
         blockers.append("legacy channel_runtime_diagnosis.py still exists")

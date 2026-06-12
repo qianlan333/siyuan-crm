@@ -1,4 +1,4 @@
-version: 15
+version: 16
 status: active
 
 autopilot:
@@ -16,6 +16,28 @@ recommended_next_pr: product_development_or_targeted_runtime_migration
 owner_approval_required: false
 runtime_behavior_changed: false
 delete_ready: false
+
+legacy_prune_pr9:
+  status: complete
+  branch: codex/siyuan-pr9-legacy-prune
+  deleted_modules:
+    - wecom_ability_service/http/automation_conversion.py
+    - wecom_ability_service/http/automation_conversion_runtime_api.py
+    - wecom_ability_service/http/automation_conversion_task_runtime.py
+    - wecom_ability_service/http/automation_conversion_execution_outbound.py
+    - wecom_ability_service/http/automation_conversion_member_api.py
+    - wecom_ability_service/http/automation_conversion_compat.py
+    - wecom_ability_service/http/automation_conversion_delivery.py
+    - wecom_ability_service/http/customer_automation.py
+  migrated_tests:
+    - tests/test_automation_conversion_v1.py removed; behavior covered by Next automation timer/member/workspace/runtime tests
+    - tests/test_customer_automation_webhook_registry_lifecycle.py removed; behavior covered by Next webhook route precedence and no-real-side-effect tests
+    - tests/test_pr9_legacy_prune.py added
+  deferred_modules: []
+  production_cutover: false
+  production_db_writes: false
+  deploy_systemd_nginx_env_changed: false
+  hxc_cloud_api_docs_native_closeout: deferred
 
 pr1_core_next_baseline_sync:
   status: in_progress_pr

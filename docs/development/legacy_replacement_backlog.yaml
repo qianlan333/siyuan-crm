@@ -3084,6 +3084,72 @@ entries:
     recommended_verification: ["tests/test_checkout_orders_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Public order read/status APIs are Next-owned; unknown child paths return controlled 410 and production_compat rollback is removed."
   - id: "LRB-141"
+    route_pattern: "/api/external/orders"
+    methods: ["GET"]
+    capability_owner: "aicrm_next.commerce"
+    current_runtime_owner: "next_native"
+    production_behavior: "next_external_orders_read"
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: "none"
+    checker: "tests/test_external_orders_api.py"
+    replacement_phase: "phase_5_external_adapter"
+    replacement_category: "external_side_effect"
+    priority: "P2"
+    daily_business_critical: true
+    business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
+    replacement_owner: "aicrm_next.commerce"
+    replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
+    fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
+    rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
+    delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
+    recommended_verification: ["tests/test_external_orders_api.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
+    notes: "PR-2 external orders list API is read-only over local unified order read-models; bearer token required, fallback_used=false, no order creation, payment, refund, WeChat Shop active sync, or WeCom active sync."
+  - id: "LRB-142"
+    route_pattern: "/api/external/orders/{order_no}"
+    methods: ["GET"]
+    capability_owner: "aicrm_next.commerce"
+    current_runtime_owner: "next_native"
+    production_behavior: "next_external_order_detail"
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: "none"
+    checker: "tests/test_external_orders_api.py"
+    replacement_phase: "phase_5_external_adapter"
+    replacement_category: "external_side_effect"
+    priority: "P2"
+    daily_business_critical: true
+    business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
+    replacement_owner: "aicrm_next.commerce"
+    replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
+    fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
+    rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
+    delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
+    recommended_verification: ["tests/test_external_orders_api.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
+    notes: "PR-2 external order detail API is read-only over unified order detail projection; product_name is not exposed, fallback_used=false, and no payment/refund/sync side effects are executed."
+  - id: "LRB-143"
+    route_pattern: "/api/external/users/resolve"
+    methods: ["GET"]
+    capability_owner: "aicrm_next.commerce"
+    current_runtime_owner: "next_native"
+    production_behavior: "next_external_user_basic"
+    legacy_fallback_allowed: false
+    fixture_allowed_in_production: false
+    external_side_effect_risk: "none"
+    checker: "tests/test_external_orders_api.py"
+    replacement_phase: "phase_5_external_adapter"
+    replacement_category: "external_side_effect"
+    priority: "P2"
+    daily_business_critical: true
+    business_continuity_requirement: "Current route is documented with no legacy fallback. Preserve the current owner and production behavior, do not restore production_compat or legacy facade fallback, and verify the route does not regress to 404, 500, empty-data false success, fixture/local_contract success, or accidental external side effects."
+    replacement_owner: "aicrm_next.commerce"
+    replacement_strategy: "Keep the current Next-owned route owner accurate, run the declared checker and smoke tests, and prevent registry/backlog drift. Do not add legacy fallback."
+    fallback_required_until: "No legacy fallback is required or allowed for this manifest entry; keep route owner checks current and do not restore production_compat or legacy facade fallback."
+    rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
+    delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
+    recommended_verification: ["tests/test_external_orders_api.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
+    notes: "PR-2 external user resolve API is read-only over local identity and customer read models; bearer token required, fallback_used=false, and no active WeCom sync is executed."
+  - id: "LRB-144"
     route_pattern: "/api/checkout*"
     methods: ["POST", "OPTIONS", "GET", "PUT", "PATCH", "DELETE", "HEAD"]
     capability_owner: "aicrm_next.commerce"
@@ -3105,7 +3171,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_checkout_orders_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Public checkout APIs are Next-owned; checkout creates local/fake orders only, never executes a real payment request, and unknown child paths return controlled 410 without legacy fallback."
-  - id: "LRB-142"
+  - id: "LRB-145"
     route_pattern: "/api/wechat-pay*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.commerce"
@@ -3127,7 +3193,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_provider_payment_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Public WeChat Pay provider notify path is Next-owned; unknown child paths return controlled 410, no real signature verification, no real provider call, and production_compat rollback is removed."
-  - id: "LRB-143"
+  - id: "LRB-146"
     route_pattern: "/api/alipay*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.commerce"
@@ -3149,7 +3215,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_provider_payment_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Public Alipay notify/return paths are Next-owned; unknown child paths return controlled 410, no real signature verification, no real provider call, and production_compat rollback is removed."
-  - id: "LRB-144"
+  - id: "LRB-147"
     route_pattern: "/api/h5/wechat-pay*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.commerce"
@@ -3171,7 +3237,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_payment_wildcard_final_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Final production_compat wildcard rollback removed. H5 Pay OAuth uses Next native WeChatOAuthClient; sidebar product ctx uses Next native public_product.signed_context; sidebar order attribution uses Next native public_product.sidebar_order_context; h5_wechat_pay.py has no wecom_ability_service runtime import. Real payment remains guarded by existing WECHAT_PAY_ENABLED / production DB checks."
-  - id: "LRB-145"
+  - id: "LRB-148"
     route_pattern: "/api/h5/alipay*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.commerce"
@@ -3193,7 +3259,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_payment_wildcard_final_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Final production_compat wildcard rollback removed; legacy H5 Alipay paths return controlled 410 and public checkout/order/provider APIs are the replacement."
-  - id: "LRB-146"
+  - id: "LRB-149"
     route_pattern: "/api/admin/image-library*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.media_library"
@@ -3215,7 +3281,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next media routes own broad image library list/read/metadata/thumbnail/variant/upload/import/delete surfaces; production_compat rollback is removed, route contract exposes route_owner/fallback/adapter fields, and no real external storage or WeCom media upload is executed."
-  - id: "LRB-147"
+  - id: "LRB-150"
     route_pattern: "/api/admin/image-library/upload"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.media_library"
@@ -3237,7 +3303,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next multipart local image upload stores media library rows without cloud storage or WeCom media providers; production_compat rollback is removed, response includes SideEffectPlan and real_external_call_executed=false."
-  - id: "LRB-148"
+  - id: "LRB-151"
     route_pattern: "/api/admin/attachment-library*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.media_library"
@@ -3259,7 +3325,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next attachment library routes own list/read/create/upload/update/delete surfaces; production_compat rollback is removed, local writes return SideEffectPlan, and real external storage/WeCom media upload remains blocked."
-  - id: "LRB-149"
+  - id: "LRB-152"
     route_pattern: "/api/admin/miniprogram-library*"
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.media_library"
@@ -3281,7 +3347,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next miniprogram library routes own list/read/create/update/delete and guarded thumbnail resolve surfaces; production_compat rollback is removed, real external storage is not used, and real WeCom media upload remains blocked unless explicitly enabled."
-  - id: "LRB-150"
+  - id: "LRB-153"
     route_pattern: "/sidebar/bind-mobile"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.identity_contact"
@@ -3303,7 +3369,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_identity_application_contract.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next exact readonly page owner; broad /sidebar/{path:path} production_compat fallback is removed."
-  - id: "LRB-151"
+  - id: "LRB-154"
     route_pattern: "/api/sidebar/contact-binding-status"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.identity_contact"
@@ -3325,7 +3391,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next binding status route; production data failures return controlled production_unavailable; readonly legacy fallback is not allowed."
-  - id: "LRB-152"
+  - id: "LRB-155"
     route_pattern: "/api/sidebar/binding-status"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.identity_contact"
@@ -3347,7 +3413,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next alias for contact binding status; readonly legacy fallback is not allowed and no real external call is enabled."
-  - id: "LRB-153"
+  - id: "LRB-156"
     route_pattern: "/api/sidebar/customer-context"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3369,7 +3435,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next customer context route on the customer read model; production data failures return controlled production_unavailable; readonly legacy fallback is not allowed."
-  - id: "LRB-154"
+  - id: "LRB-157"
     route_pattern: "/api/sidebar/profile"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3391,7 +3457,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next profile route backed by customer read model; readonly legacy fallback is not allowed."
-  - id: "LRB-155"
+  - id: "LRB-158"
     route_pattern: "/api/sidebar/tags"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3413,7 +3479,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next tags route backed by customer tag/read projection; readonly legacy fallback is not allowed."
-  - id: "LRB-156"
+  - id: "LRB-159"
     route_pattern: "/api/admin/customers/profile"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3435,7 +3501,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_sidebar_profile_next_owner_readiness.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next exact readonly customer profile owner; broad profile production_compat fallback is removed."
-  - id: "LRB-157"
+  - id: "LRB-160"
     route_pattern: "/api/admin/customers/profile/tags"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3457,7 +3523,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_sidebar_profile_next_owner_readiness.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next exact readonly customer profile tags owner; broad profile subpath production_compat fallback is removed."
-  - id: "LRB-158"
+  - id: "LRB-161"
     route_pattern: "/api/sidebar/bind-mobile"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3479,7 +3545,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; external side effects remain SideEffectPlan only with real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-159"
+  - id: "LRB-162"
     route_pattern: "/api/sidebar/jssdk-config"
     methods: ["GET", "HEAD", "OPTIONS"]
     capability_owner: "aicrm_next.identity_contact"
@@ -3501,7 +3567,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_jssdk_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar JSSDK group 15 closeout removed legacy rollback; Next JSSDK adapter only; default fake/sandbox/real_blocked responses keep real_external_call_executed=false; real signing is blocked by default but supported under explicit real_enabled gate for sidebar identity resolution; fallback_used=false."
-  - id: "LRB-160"
+  - id: "LRB-163"
     route_pattern: "/api/sidebar/lead-pool/status"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.automation_engine"
@@ -3523,7 +3589,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next lead-pool status route on customer read model projections; readonly legacy fallback is not allowed; upsert writes remain out of scope."
-  - id: "LRB-161"
+  - id: "LRB-164"
     route_pattern: "/api/sidebar/lead-pool/upsert-class-term"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3545,7 +3611,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; external side effects remain SideEffectPlan only with real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-162"
+  - id: "LRB-165"
     route_pattern: "/api/sidebar/signup-tags/status"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3567,7 +3633,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next signup-tag status route on customer read model projections; readonly legacy fallback is not allowed; mark writes remain out of scope."
-  - id: "LRB-163"
+  - id: "LRB-166"
     route_pattern: "/api/sidebar/signup-tags/mark"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3589,7 +3655,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; WeCom tag update remains SideEffectPlan only with adapter real_blocked and real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-164"
+  - id: "LRB-167"
     route_pattern: "/api/sidebar/marketing-status"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3611,7 +3677,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Sidebar readonly group 4 closeout locked this exact Next marketing status route on customer read model marketing projections; readonly legacy fallback is not allowed; marketing state writes remain out of scope."
-  - id: "LRB-165"
+  - id: "LRB-168"
     route_pattern: "/api/sidebar/marketing-status/set-followup-segment"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3633,7 +3699,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; automation trigger remains SideEffectPlan only with adapter real_blocked and real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-166"
+  - id: "LRB-169"
     route_pattern: "/api/sidebar/marketing-status/mark-enrolled"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3655,7 +3721,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; external side effects remain SideEffectPlan only with real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-167"
+  - id: "LRB-170"
     route_pattern: "/api/sidebar/marketing-status/unmark-enrolled"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3677,7 +3743,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; external side effects remain SideEffectPlan only with real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-168"
+  - id: "LRB-171"
     route_pattern: "/api/sidebar/marketing-status*"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.automation_engine"
@@ -3699,7 +3765,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "route owner drift guard"]
     notes: "Out of scope for sidebar readonly group 4; retained only for non-closeout legacy marketing status paths, not for deleted exact sidebar write routes. Closed-out exact sidebar write routes are Next CommandBus only."
-  - id: "LRB-169"
+  - id: "LRB-172"
     route_pattern: "/api/sidebar/v2/workbench"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3721,7 +3787,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar V2 workbench read is locked to Next SidebarWorkbenchReadModel; legacy sidebar read facade fallback is removed and paid-order mobile is read-overlay only."
-  - id: "LRB-170"
+  - id: "LRB-173"
     route_pattern: "/api/sidebar/v2/questionnaires"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3743,7 +3809,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar V2 questionnaire read is locked to Next; orphan submissions are matched read-only by normalized mobile without DB backfill."
-  - id: "LRB-171"
+  - id: "LRB-174"
     route_pattern: "/api/sidebar/v2/materials"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3765,7 +3831,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Sidebar V2 material list reads Next media library data only; legacy sidebar material facade fallback is removed."
-  - id: "LRB-172"
+  - id: "LRB-175"
     route_pattern: "/api/sidebar/v2/materials/image/{image_id}/thumbnail"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3787,7 +3853,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Sidebar V2 image thumbnail reads the Next media library thumbnail query only; no legacy sidebar facade fallback is allowed."
-  - id: "LRB-173"
+  - id: "LRB-176"
     route_pattern: "/api/sidebar/v2/other-staff-messages"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3809,7 +3875,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar V2 other-staff messages read archived message projections directly through Next; legacy sidebar facade fallback is removed."
-  - id: "LRB-174"
+  - id: "LRB-177"
     route_pattern: "/api/sidebar/v2/products"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3831,7 +3897,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Sidebar V2 products read Next commerce data and Next signed context helpers; legacy sidebar facade fallback is removed."
-  - id: "LRB-175"
+  - id: "LRB-178"
     route_pattern: "/api/sidebar/v2/orders"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3853,7 +3919,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_readonly_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Sidebar V2 orders read Next commerce/order projections with read-only paid-order mobile overlay; legacy sidebar facade fallback is removed."
-  - id: "LRB-176"
+  - id: "LRB-179"
     route_pattern: "/api/sidebar/v2*"
     methods: ["GET", "HEAD"]
     capability_owner: "aicrm_next.customer_read_model"
@@ -3875,7 +3941,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next owns sidebar v2 read-only workbench/questionnaire/material/product/order surfaces; workbench/orders use read-only variants and do not auto-bind mobile."
-  - id: "LRB-177"
+  - id: "LRB-180"
     route_pattern: "/api/sidebar/v2/profile"
     methods: ["PUT", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3897,7 +3963,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; WeCom profile update remains SideEffectPlan only with adapter real_blocked and real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-178"
+  - id: "LRB-181"
     route_pattern: "/api/sidebar/v2/materials/send"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.sidebar_write"
@@ -3919,7 +3985,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_sidebar_write_registry_lifecycle.py", "route owner drift guard"]
     notes: "Sidebar write group 5 deletion closeout removed legacy production_compat rollback; Next CommandBus is the only route owner; material send remains SideEffectPlan only with adapter real_blocked and real_external_call_executed=false; JSSDK remains separate out-of-scope group."
-  - id: "LRB-179"
+  - id: "LRB-182"
     route_pattern: "/wecom/external-contact/callback"
     methods: ["GET", "POST", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.channel_entry"
@@ -3941,7 +4007,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_channel_entry_next_owner.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "WeCom external-contact callback is owned by aicrm_next.channel_entry; rollback is a release rollback, not a legacy runtime fallback. Channel entry identity bridge uses Next native identity_bridge_service/repository; no _legacy_app, no wecom_ability_service identity commands. Real WeCom detail fetch remains behind channel_entry.wecom_adapter gate. Mobile binding and questionnaire backfill are Next DB operations."
-  - id: "LRB-180"
+  - id: "LRB-183"
     route_pattern: "/api/wecom/events"
     methods: ["GET", "POST", "OPTIONS", "HEAD"]
     capability_owner: "aicrm_next.channel_entry"
@@ -3963,7 +4029,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_channel_entry_next_owner.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "WeCom event callback is owned by aicrm_next.channel_entry and processes external-contact entry events through the Next pipeline. Channel entry identity bridge uses Next native identity_bridge_service/repository; no _legacy_app, no wecom_ability_service identity commands. Real WeCom detail fetch remains behind channel_entry.wecom_adapter gate. Mobile binding and questionnaire backfill are Next DB operations."
-  - id: "LRB-181"
+  - id: "LRB-184"
     route_pattern: "/api/admin/channels/runtime-diagnosis"
     methods: ["GET", "POST"]
     capability_owner: "aicrm_next.channel_entry"
@@ -3985,7 +4051,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_channel_entry_next_owner.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next-native channel runtime diagnosis and dry-run endpoints."
-  - id: "LRB-182"
+  - id: "LRB-185"
     route_pattern: "/api/admin/channels/{channel_id}/runtime-diagnosis"
     methods: ["GET"]
     capability_owner: "aicrm_next.channel_entry"
@@ -4007,7 +4073,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_channel_entry_next_owner.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next-native channel runtime diagnosis by channel id."
-  - id: "LRB-183"
+  - id: "LRB-186"
     route_pattern: "/api/admin/channels/{channel_id}/qrcode/generate"
     methods: ["POST"]
     capability_owner: "aicrm_next.channel_entry"
@@ -4029,7 +4095,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_channel_entry_next_owner.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next-native WeCom contact_way QR generation; no fake QR is written when real calls are disabled or config is missing."
-  - id: "LRB-184"
+  - id: "LRB-187"
     route_pattern: "/api/admin/channels/repair-entry"
     methods: ["POST"]
     capability_owner: "aicrm_next.channel_entry"
@@ -4051,7 +4117,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_channel_entry_next_owner.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next-native channel entry repair; welcome resend is not faked when WelcomeCode is unavailable."
-  - id: "LRB-185"
+  - id: "LRB-188"
     route_pattern: "/admin/hxc-dashboard"
     methods: ["GET"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4073,7 +4139,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_pages.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "HXC dashboard page is served by aicrm_next.hxc_dashboard before production_compat; legacy page fallback removed."
-  - id: "LRB-186"
+  - id: "LRB-189"
     route_pattern: "/admin/hxc-send-config"
     methods: ["GET"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4095,7 +4161,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_pages.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "HXC send-config page is served by aicrm_next.hxc_dashboard before production_compat; legacy page fallback removed."
-  - id: "LRB-187"
+  - id: "LRB-190"
     route_pattern: "/api/admin/hxc-dashboard"
     methods: ["GET"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4117,7 +4183,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_api_contract.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next safe-mode dashboard read model; no production_compat fallback and no real external side effect."
-  - id: "LRB-188"
+  - id: "LRB-191"
     route_pattern: "/api/admin/hxc-dashboard/refresh"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4139,7 +4205,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_api_contract.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Legacy refresh_hxc_dashboard_snapshot removed; Next creates blocked SideEffectPlan/ExternalCallAttempt and hxc_refresh_executed=false."
-  - id: "LRB-189"
+  - id: "LRB-192"
     route_pattern: "/api/admin/hxc-dashboard/refresh-directory"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4161,7 +4227,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_api_contract.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Legacy sync_admin_wecom_directory_members removed; Next creates blocked SideEffectPlan/ExternalCallAttempt and directory_sync_executed=false."
-  - id: "LRB-190"
+  - id: "LRB-193"
     route_pattern: "/api/admin/hxc-dashboard/send-config"
     methods: ["GET"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4183,7 +4249,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_send_config.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Next safe-mode send-config read model; no production_compat fallback and no real external side effect."
-  - id: "LRB-191"
+  - id: "LRB-194"
     route_pattern: "/api/admin/hxc-dashboard/send-config"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4205,7 +4271,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_send_config.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next local safe-mode send-config upsert; no production_compat fallback and no WeCom or legacy call."
-  - id: "LRB-192"
+  - id: "LRB-195"
     route_pattern: "/api/admin/hxc-dashboard/send-config/{sender_userid}"
     methods: ["DELETE", "OPTIONS"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4227,7 +4293,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_send_config.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Next local safe-mode send-config delete; no production_compat fallback and no WeCom or legacy call."
-  - id: "LRB-193"
+  - id: "LRB-196"
     route_pattern: "/api/admin/hxc-dashboard/broadcast"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4249,7 +4315,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_broadcast_plan.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Legacy broadcast_to_filtered_users removed; Next creates blocked SideEffectPlan/ExternalCallAttempt and hxc_broadcast_executed=false."
-  - id: "LRB-194"
+  - id: "LRB-197"
     route_pattern: "/api/admin/hxc-dashboard/{unknown_path}"
     methods: ["GET", "POST", "OPTIONS"]
     capability_owner: "aicrm_next.hxc_dashboard"
@@ -4271,7 +4337,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_hxc_dashboard_route_precedence.py", "read-model parity check", "admin/browser smoke for the current page or API", "route owner drift guard"]
     notes: "Unknown HXC dashboard API paths return controlled Next 404; no production_compat fallback."
-  - id: "LRB-195"
+  - id: "LRB-198"
     route_pattern: "/mcp"
     methods: ["GET", "POST"]
     capability_owner: "aicrm_next.integration_gateway"
@@ -4293,7 +4359,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_production_route_resolution.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "MCP is owned by the aicrm_next.integration_gateway adapter boundary; openclaw_service is not an owner and must not be reintroduced."
-  - id: "LRB-196"
+  - id: "LRB-199"
     route_pattern: "/api/admin/class-user-management/export"
     methods: ["GET", "POST", "OPTIONS"]
     capability_owner: "aicrm_next.class_user_management"
@@ -4315,7 +4381,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_class_user_management_export.py", "route owner drift guard"]
     notes: "PR-1 core baseline sync registers aicrm_next.class_user_management before post_legacy_deferred for the operations page export button. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
-  - id: "LRB-197"
+  - id: "LRB-200"
     route_pattern: "/api/automation-runtime/v2/*"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.automation_runtime_v2"
@@ -4337,7 +4403,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_automation_runtime_v2_runtime_check.py", "route owner drift guard"]
     notes: "PR-1 core baseline sync registers automation_runtime_v2 API routes in aicrm_next.main. Missing DB/schema surfaces must fail as controlled production_unavailable or fixture_repository_blocked_in_production, not bare 500."
-  - id: "LRB-198"
+  - id: "LRB-201"
     route_pattern: "/api/admin/cloud-orchestrator/audit"
     methods: ["GET", "OPTIONS"]
     capability_owner: "aicrm_next.cloud_orchestrator"
@@ -4359,7 +4425,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "route owner drift guard"]
     notes: "Post-Legacy deferred closeout for the Cloud Observability page. Read-only audit API returns empty/degraded-safe contract when no audit store is configured; no real external observability service."
-  - id: "LRB-199"
+  - id: "LRB-202"
     route_pattern: "/api/admin/cloud-orchestrator/observability"
     methods: ["GET", "OPTIONS"]
     capability_owner: "aicrm_next.cloud_orchestrator"
@@ -4381,7 +4447,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "route owner drift guard"]
     notes: "Post-Legacy deferred closeout for Cloud observability summary metrics. Returns local empty metrics and health without legacy fallback or external service calls."
-  - id: "LRB-200"
+  - id: "LRB-203"
     route_pattern: "/api/admin/wecom-customer-acquisition-links"
     methods: ["GET", "POST", "OPTIONS"]
     capability_owner: "aicrm_next.post_legacy_deferred"
@@ -4403,7 +4469,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Post-Legacy deferred closeout for WeCom customer acquisition link management. Read/create is safe-mode local and plan-only; wecom_api_called=false."
-  - id: "LRB-201"
+  - id: "LRB-204"
     route_pattern: "/api/admin/wecom-customer-acquisition-links/{link_id}"
     methods: ["GET", "PATCH", "DELETE", "OPTIONS"]
     capability_owner: "aicrm_next.post_legacy_deferred"
@@ -4425,7 +4491,7 @@ entries:
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_post_legacy_deferred_api_routes.py", "fake/staging-disabled adapter check", "assert real external call is not enabled", "route owner drift guard"]
     notes: "Safe-mode local detail/update/disable for WeCom customer acquisition links; no real WeCom API calls and no production_compat fallback."
-  - id: "LRB-202"
+  - id: "LRB-205"
     route_pattern: "/api/admin/wecom-customer-acquisition-links/{link_id}/{action}"
     methods: ["POST", "OPTIONS"]
     capability_owner: "aicrm_next.post_legacy_deferred"

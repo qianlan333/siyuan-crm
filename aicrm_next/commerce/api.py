@@ -44,9 +44,11 @@ from .application import (
     UpsertProductCommand,
 )
 from .dto import CheckoutRequest, PaymentNotifyRequest, ProductUpsertRequest
+from .external_orders import router as external_orders_router
 from .repo import build_commerce_repository
 
 router = APIRouter()
+router.include_router(external_orders_router)
 _COMMERCE_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 _FRONTEND_COMPAT_TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "frontend_compat" / "templates"
 templates = Jinja2Templates(directory=[_COMMERCE_TEMPLATES_DIR, _FRONTEND_COMPAT_TEMPLATES_DIR])

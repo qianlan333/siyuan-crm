@@ -28,7 +28,7 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `aicrm_next.channel_entry`: 6 routes; P1=3, P2=3
 - `aicrm_next.class_user_management`: 1 routes; P2=1
 - `aicrm_next.cloud_orchestrator`: 6 routes; P0=1, P2=4, P3=1
-- `aicrm_next.commerce`: 13 routes; P2=13
+- `aicrm_next.commerce`: 16 routes; P2=16
 - `aicrm_next.customer_read_model`: 20 routes; P0=7, P2=13
 - `aicrm_next.customer_tags`: 15 routes; P2=15
 - `aicrm_next.hxc_dashboard`: 10 routes; P0=5, P2=5
@@ -49,7 +49,7 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `keep_guarded_until_adapter_ready`: 70 routes; blocked_or_guarded=70
 - `phase_3_readonly`: 31 routes; readonly=30, shell_or_navigation=1
 - `phase_4_internal_write`: 9 routes; internal_write=1, readonly=8
-- `phase_5_external_adapter`: 82 routes; adapter_contract=9, external_side_effect=73
+- `phase_5_external_adapter`: 85 routes; adapter_contract=9, external_side_effect=76
 - `phase_6_timer_automation`: 10 routes; timer_or_automation_execution=10
 
 ## Top 10 Suggested First Replacements
@@ -286,65 +286,68 @@ Status: Current progress snapshot, no runtime change. This document is generated
 - `LRB-138` `/p/{page_slug}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.public_product`
 - `LRB-139` `/pay/{product_code}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.public_product`
 - `LRB-140` `/api/orders*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
-- `LRB-141` `/api/checkout*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.commerce`
-- `LRB-142` `/api/wechat-pay*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.commerce`
-- `LRB-143` `/api/alipay*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.commerce`
-- `LRB-144` `/api/h5/wechat-pay*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
-- `LRB-145` `/api/h5/alipay*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
-- `LRB-146` `/api/admin/image-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
-- `LRB-147` `/api/admin/image-library/upload`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.media_library`
-- `LRB-148` `/api/admin/attachment-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
-- `LRB-149` `/api/admin/miniprogram-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
-- `LRB-150` `/sidebar/bind-mobile`: `P0` / `phase_3_readonly` / `shell_or_navigation` / owner `aicrm_next.identity_contact`
-- `LRB-151` `/api/sidebar/contact-binding-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.identity_contact`
-- `LRB-152` `/api/sidebar/binding-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.identity_contact`
-- `LRB-153` `/api/sidebar/customer-context`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-154` `/api/sidebar/profile`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-155` `/api/sidebar/tags`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-156` `/api/admin/customers/profile`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-157` `/api/admin/customers/profile/tags`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-158` `/api/sidebar/bind-mobile`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
-- `LRB-159` `/api/sidebar/jssdk-config`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.identity_contact`
-- `LRB-160` `/api/sidebar/lead-pool/status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.automation_engine`
-- `LRB-161` `/api/sidebar/lead-pool/upsert-class-term`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
-- `LRB-162` `/api/sidebar/signup-tags/status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-163` `/api/sidebar/signup-tags/mark`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.sidebar_write`
-- `LRB-164` `/api/sidebar/marketing-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
-- `LRB-165` `/api/sidebar/marketing-status/set-followup-segment`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
-- `LRB-166` `/api/sidebar/marketing-status/mark-enrolled`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
-- `LRB-167` `/api/sidebar/marketing-status/unmark-enrolled`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
-- `LRB-168` `/api/sidebar/marketing-status*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.automation_engine`
-- `LRB-169` `/api/sidebar/v2/workbench`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
-- `LRB-170` `/api/sidebar/v2/questionnaires`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
-- `LRB-171` `/api/sidebar/v2/materials`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
-- `LRB-172` `/api/sidebar/v2/materials/image/{image_id}/thumbnail`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
-- `LRB-173` `/api/sidebar/v2/other-staff-messages`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
-- `LRB-174` `/api/sidebar/v2/products`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
-- `LRB-175` `/api/sidebar/v2/orders`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
-- `LRB-176` `/api/sidebar/v2*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
-- `LRB-177` `/api/sidebar/v2/profile`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.sidebar_write`
-- `LRB-178` `/api/sidebar/v2/materials/send`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
-- `LRB-179` `/wecom/external-contact/callback`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.channel_entry`
-- `LRB-180` `/api/wecom/events`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.channel_entry`
-- `LRB-181` `/api/admin/channels/runtime-diagnosis`: `P1` / `phase_4_internal_write` / `readonly` / owner `aicrm_next.channel_entry`
-- `LRB-182` `/api/admin/channels/{channel_id}/runtime-diagnosis`: `P1` / `phase_4_internal_write` / `readonly` / owner `aicrm_next.channel_entry`
-- `LRB-183` `/api/admin/channels/{channel_id}/qrcode/generate`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.channel_entry`
-- `LRB-184` `/api/admin/channels/repair-entry`: `P1` / `phase_4_internal_write` / `readonly` / owner `aicrm_next.channel_entry`
-- `LRB-185` `/admin/hxc-dashboard`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
-- `LRB-186` `/admin/hxc-send-config`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
-- `LRB-187` `/api/admin/hxc-dashboard`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
-- `LRB-188` `/api/admin/hxc-dashboard/refresh`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
-- `LRB-189` `/api/admin/hxc-dashboard/refresh-directory`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
-- `LRB-190` `/api/admin/hxc-dashboard/send-config`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
-- `LRB-191` `/api/admin/hxc-dashboard/send-config`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
-- `LRB-192` `/api/admin/hxc-dashboard/send-config/{sender_userid}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
-- `LRB-193` `/api/admin/hxc-dashboard/broadcast`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
-- `LRB-194` `/api/admin/hxc-dashboard/{unknown_path}`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
-- `LRB-195` `/mcp`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.integration_gateway`
-- `LRB-196` `/api/admin/class-user-management/export`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.class_user_management`
-- `LRB-197` `/api/automation-runtime/v2/*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.automation_runtime_v2`
-- `LRB-198` `/api/admin/cloud-orchestrator/audit`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
-- `LRB-199` `/api/admin/cloud-orchestrator/observability`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
-- `LRB-200` `/api/admin/wecom-customer-acquisition-links`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
-- `LRB-201` `/api/admin/wecom-customer-acquisition-links/{link_id}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
-- `LRB-202` `/api/admin/wecom-customer-acquisition-links/{link_id}/{action}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
+- `LRB-141` `/api/external/orders`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
+- `LRB-142` `/api/external/orders/{order_no}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
+- `LRB-143` `/api/external/users/resolve`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
+- `LRB-144` `/api/checkout*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.commerce`
+- `LRB-145` `/api/wechat-pay*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.commerce`
+- `LRB-146` `/api/alipay*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.commerce`
+- `LRB-147` `/api/h5/wechat-pay*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
+- `LRB-148` `/api/h5/alipay*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.commerce`
+- `LRB-149` `/api/admin/image-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
+- `LRB-150` `/api/admin/image-library/upload`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.media_library`
+- `LRB-151` `/api/admin/attachment-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
+- `LRB-152` `/api/admin/miniprogram-library*`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.media_library`
+- `LRB-153` `/sidebar/bind-mobile`: `P0` / `phase_3_readonly` / `shell_or_navigation` / owner `aicrm_next.identity_contact`
+- `LRB-154` `/api/sidebar/contact-binding-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.identity_contact`
+- `LRB-155` `/api/sidebar/binding-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.identity_contact`
+- `LRB-156` `/api/sidebar/customer-context`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-157` `/api/sidebar/profile`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-158` `/api/sidebar/tags`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-159` `/api/admin/customers/profile`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-160` `/api/admin/customers/profile/tags`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-161` `/api/sidebar/bind-mobile`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
+- `LRB-162` `/api/sidebar/jssdk-config`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.identity_contact`
+- `LRB-163` `/api/sidebar/lead-pool/status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.automation_engine`
+- `LRB-164` `/api/sidebar/lead-pool/upsert-class-term`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
+- `LRB-165` `/api/sidebar/signup-tags/status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-166` `/api/sidebar/signup-tags/mark`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.sidebar_write`
+- `LRB-167` `/api/sidebar/marketing-status`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.customer_read_model`
+- `LRB-168` `/api/sidebar/marketing-status/set-followup-segment`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
+- `LRB-169` `/api/sidebar/marketing-status/mark-enrolled`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
+- `LRB-170` `/api/sidebar/marketing-status/unmark-enrolled`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
+- `LRB-171` `/api/sidebar/marketing-status*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.automation_engine`
+- `LRB-172` `/api/sidebar/v2/workbench`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
+- `LRB-173` `/api/sidebar/v2/questionnaires`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
+- `LRB-174` `/api/sidebar/v2/materials`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
+- `LRB-175` `/api/sidebar/v2/materials/image/{image_id}/thumbnail`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
+- `LRB-176` `/api/sidebar/v2/other-staff-messages`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.customer_read_model`
+- `LRB-177` `/api/sidebar/v2/products`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
+- `LRB-178` `/api/sidebar/v2/orders`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
+- `LRB-179` `/api/sidebar/v2*`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.customer_read_model`
+- `LRB-180` `/api/sidebar/v2/profile`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.sidebar_write`
+- `LRB-181` `/api/sidebar/v2/materials/send`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.sidebar_write`
+- `LRB-182` `/wecom/external-contact/callback`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.channel_entry`
+- `LRB-183` `/api/wecom/events`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.channel_entry`
+- `LRB-184` `/api/admin/channels/runtime-diagnosis`: `P1` / `phase_4_internal_write` / `readonly` / owner `aicrm_next.channel_entry`
+- `LRB-185` `/api/admin/channels/{channel_id}/runtime-diagnosis`: `P1` / `phase_4_internal_write` / `readonly` / owner `aicrm_next.channel_entry`
+- `LRB-186` `/api/admin/channels/{channel_id}/qrcode/generate`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.channel_entry`
+- `LRB-187` `/api/admin/channels/repair-entry`: `P1` / `phase_4_internal_write` / `readonly` / owner `aicrm_next.channel_entry`
+- `LRB-188` `/admin/hxc-dashboard`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
+- `LRB-189` `/admin/hxc-send-config`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
+- `LRB-190` `/api/admin/hxc-dashboard`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
+- `LRB-191` `/api/admin/hxc-dashboard/refresh`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
+- `LRB-192` `/api/admin/hxc-dashboard/refresh-directory`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
+- `LRB-193` `/api/admin/hxc-dashboard/send-config`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
+- `LRB-194` `/api/admin/hxc-dashboard/send-config`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
+- `LRB-195` `/api/admin/hxc-dashboard/send-config/{sender_userid}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
+- `LRB-196` `/api/admin/hxc-dashboard/broadcast`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.hxc_dashboard`
+- `LRB-197` `/api/admin/hxc-dashboard/{unknown_path}`: `P0` / `phase_3_readonly` / `readonly` / owner `aicrm_next.hxc_dashboard`
+- `LRB-198` `/mcp`: `P2` / `phase_5_external_adapter` / `adapter_contract` / owner `aicrm_next.integration_gateway`
+- `LRB-199` `/api/admin/class-user-management/export`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.class_user_management`
+- `LRB-200` `/api/automation-runtime/v2/*`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.automation_runtime_v2`
+- `LRB-201` `/api/admin/cloud-orchestrator/audit`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
+- `LRB-202` `/api/admin/cloud-orchestrator/observability`: `P2` / `keep_guarded_until_adapter_ready` / `blocked_or_guarded` / owner `aicrm_next.cloud_orchestrator`
+- `LRB-203` `/api/admin/wecom-customer-acquisition-links`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
+- `LRB-204` `/api/admin/wecom-customer-acquisition-links/{link_id}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`
+- `LRB-205` `/api/admin/wecom-customer-acquisition-links/{link_id}/{action}`: `P2` / `phase_5_external_adapter` / `external_side_effect` / owner `aicrm_next.post_legacy_deferred`

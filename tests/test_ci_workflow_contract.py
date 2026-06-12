@@ -81,7 +81,7 @@ def test_main_push_uses_smoke_not_full_regression():
     full_test_block = _job_block(source, "full-test")
 
     assert "if: github.event_name == 'push'" in main_smoke_block
-    assert "Run main smoke tests (PG-only, targeted)" in main_smoke_block
+    assert "Run main smoke tests (business-only, no PG)" in main_smoke_block
     assert "python -m pytest \\" in main_smoke_block
     assert "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'" in full_test_block
     assert "python -m pytest tests/ -n auto" in full_test_block
@@ -110,6 +110,21 @@ def test_pr_and_main_smoke_skip_architecture_guards_and_specialized_tests():
         assert "tools/generate_legacy_replacement_backlog.py" not in smoke_block
         for marker in SPECIALIZED_TEST_MARKERS:
             assert marker not in smoke_block
+
+
+def test_pr_and_main_smoke_do_not_boot_pg_or_xdist_workers():
+    source = _ci_source()
+    smoke_blocks = (
+        _job_block(source, "pr-smoke", "main-smoke"),
+        _job_block(source, "main-smoke", "full-test"),
+    )
+
+    for smoke_block in smoke_blocks:
+        assert "postgres:" not in smoke_block
+        assert "DATABASE_URL" not in smoke_block
+        assert "-n auto" not in smoke_block
+        assert "--dist=loadfile" not in smoke_block
+        assert "timeout-minutes: 2" in smoke_block
 
 
 def test_pr_smoke_excludes_specialized_contract_and_domain_suites():

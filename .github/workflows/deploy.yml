@@ -38,8 +38,8 @@ jobs:
             # 1) AI-CRM Next safe schema init（幂等；不 DROP/TRUNCATE）
             python3 app.py health
             python3 app.py init-next-schema-safe
-            # 2) alembic 版本对齐 — 让后续可以走标准 upgrade 路径
-            python3 -m alembic stamp head || true
+            # 2) Alembic migration（真实执行 DDL；不要 stamp 跳过 schema 变更）
+            python3 -m alembic upgrade head
             sudo systemctl restart openclaw-wecom-postgres.service
             for _ in $(seq 1 20); do
               if curl -sSf http://127.0.0.1:5001/health; then
@@ -48,6 +48,7 @@ jobs:
               sleep 0.5
             done
             curl -sSf http://127.0.0.1:5001/health
+            curl -sSf http://127.0.0.1:5001/api/admin/channels?limit=1 >/tmp/aicrm_channels_smoke.json
             sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/
             sudo cp deploy/openclaw-external-push-worker.timer /etc/systemd/system/
             sudo systemctl daemon-reload

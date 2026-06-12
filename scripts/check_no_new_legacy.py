@@ -445,7 +445,7 @@ POST_LEGACY_DEFERRED_ROUTES = {
     "/api/admin/class-user-management/export": {
         "manifest_behavior": "next_export",
         "registry_owner": "next_native",
-        "manifest_owner": "next",
+        "manifest_owner": "next_native",
     },
     "/api/admin/cloud-orchestrator/audit": {
         "manifest_behavior": "next_cloud_observability",
@@ -2678,7 +2678,7 @@ def check_user_ops_next_native_preview(root: Path = ROOT) -> list[Violation]:
 
     registry_records = _load_yaml_records(root / "docs/architecture/legacy_exit_route_registry.yaml", "routes")
     registry_by_path = {record.get("path_pattern"): record for record in registry_records}
-    readonly_records = {"/admin/user-ops": "frontend_compat", **{route: "next_native" for route in USER_OPS_READONLY_ROUTES}}
+    readonly_records = {"/admin/user-ops": "next_native", **{route: "next_native" for route in USER_OPS_READONLY_ROUTES}}
     for route_path, expected_owner in readonly_records.items():
         record = registry_by_path.get(route_path)
         if record is None:

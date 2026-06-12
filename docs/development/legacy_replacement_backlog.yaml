@@ -90,7 +90,7 @@ entries:
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tools/check_next_production_runtime_gaps.py", "route owner drift guard"]
-    notes: "Customer read legacy facade removed; Next read model is the only production read path. Missing production read model data returns production_unavailable."
+    notes: "PR-1 core baseline sync moves /admin/customers and /admin/customers/{external_userid} to aicrm_next.customer_read_model.admin_pages before frontend_compat. Missing production read model data returns production_unavailable."
   - id: "LRB-005"
     route_pattern: "/admin/questionnaires"
     methods: ["GET"]
@@ -266,7 +266,7 @@ entries:
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_user_ops_registry_lifecycle.py", "route owner drift guard"]
-    notes: "User Ops group 6 admin page opens through Next frontend_compat and reads Next-native User Ops APIs; no production_compat fallback and no real external calls."
+    notes: "PR-1 core baseline sync moves /admin/user-ops and /admin/user-ops/ui to aicrm_next.ops_enrollment.admin_pages before frontend_compat; no production_compat fallback and no real external calls."
   - id: "LRB-013"
     route_pattern: "/admin/user-ops"
     methods: ["GET"]
@@ -288,7 +288,7 @@ entries:
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_user_ops_registry_lifecycle.py", "route owner drift guard"]
-    notes: "User Ops admin page is deletion_locked on the Next frontend_compat shell over Next-native APIs; it must stay 200 and must not use production_compat fallback."
+    notes: "User Ops admin page is deletion_locked on the native aicrm_next.ops_enrollment.admin_pages shell over Next-native APIs; it must stay 200 and must not use production_compat fallback."
   - id: "LRB-014"
     route_pattern: "/api/admin/user-ops*"
     methods: ["GET", "POST", "OPTIONS", "HEAD"]
@@ -4314,7 +4314,7 @@ entries:
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "No legacy fallback delete action remains for this manifest entry; keep manifest, registry, and checker state current."
     recommended_verification: ["tests/test_class_user_management_export.py", "route owner drift guard"]
-    notes: "PR-1 core baseline sync owns the operations page export button in aicrm_next.class_user_management. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
+    notes: "PR-1 core baseline sync registers aicrm_next.class_user_management before post_legacy_deferred for the operations page export button. Returns local CSV only, route_owner=ai_crm_next, fallback_used=false, real_external_call_executed=false, external_storage_executed=false."
   - id: "LRB-196A"
     route_pattern: "/api/automation-runtime/v2/*"
     methods: ["POST", "OPTIONS"]
@@ -4336,7 +4336,7 @@ entries:
     rollback_path: "Revert the replacement PR; this manifest route does not rely on legacy fallback."
     delete_condition: "Keep route owner and degraded-state checks current; migration graph closeout is deferred to PR-3."
     recommended_verification: ["tests/test_automation_runtime_v2_runtime_check.py", "tests/test_smoke_automation_runtime_v2_script.py", "route owner drift guard"]
-    notes: "PR-1 imports automation_runtime_v2 code and routes without declaring production Alembic graph readiness."
+    notes: "PR-1 core baseline sync registers automation_runtime_v2 API routes in aicrm_next.main. Missing DB/schema surfaces must fail as controlled production_unavailable or fixture_repository_blocked_in_production, not bare 500."
   - id: "LRB-197"
     route_pattern: "/api/admin/cloud-orchestrator/audit"
     methods: ["GET", "OPTIONS"]

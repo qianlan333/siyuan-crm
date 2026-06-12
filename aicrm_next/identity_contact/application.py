@@ -8,16 +8,24 @@ from aicrm_next.shared.typing import JsonDict
 
 from .domain import normalize_identity_request
 from .dto import IdentityResolution, ResolvePersonIdentityRequest
-from .repo import FixtureIdentityRepository
+from .repo import FixtureIdentityRepository, PostgresIdentityRepository
 
 
 class ResolvePersonIdentityQuery:
-    def __init__(self, repo: FixtureIdentityRepository | None = None, identity_adapter=None) -> None:
+    def __init__(
+        self,
+        repo: FixtureIdentityRepository | None = None,
+        identity_adapter=None,
+        postgres_repo: PostgresIdentityRepository | None = None,
+    ) -> None:
         self._repo = repo or FixtureIdentityRepository()
+        self._postgres_repo = postgres_repo or PostgresIdentityRepository()
         self._identity_adapter = identity_adapter or build_identity_mapping_adapter()
 
     def execute(self, query: ResolvePersonIdentityRequest) -> IdentityResolution | None:
         normalized = normalize_identity_request(query)
+        if production_data_ready():
+            return self._postgres_repo.resolve(normalized)
         self._identity_adapter.resolve_person_identity(
             external_userid=normalized.external_userid or "",
             openid=normalized.openid or "",

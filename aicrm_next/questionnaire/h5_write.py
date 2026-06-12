@@ -264,6 +264,9 @@ def _handle_submit(command: Command) -> dict[str, Any]:
             "external_userid": (identity.external_userid if identity else identity_payload.get("external_userid")) or "",
             "mobile": (identity.mobile if identity else identity_payload.get("mobile")) or "",
             "binding_status": identity.binding_status if identity else "unresolved",
+            "identity_map_id": identity.identity_map_id if identity else None,
+            "follow_user_userid": (identity.follow_user_userid if identity else identity_payload.get("follow_user_userid")) or "",
+            "matched_by": (identity.matched_by if identity else identity_payload.get("matched_by")) or "",
         }
         if repo.find_submission_for_identity(int(item["id"]), resolved_identity):
             raise ContractError("already_submitted")
@@ -290,6 +293,9 @@ def _handle_submit(command: Command) -> dict[str, Any]:
                 "respondent_identity": identity_payload,
                 "person_id": resolved_identity.get("person_id"),
                 "binding_status": resolved_identity.get("binding_status") or "unresolved",
+                "identity_map_id": resolved_identity.get("identity_map_id"),
+                "follow_user_userid": resolved_identity.get("follow_user_userid") or "",
+                "matched_by": resolved_identity.get("matched_by") or "",
                 "score": score,
                 "final_tags": final_tags,
                 "status": "submitted",

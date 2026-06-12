@@ -1242,16 +1242,17 @@ class PostgresQuestionnaireReadRepository:
                 row = conn.execute(
                     """
                     INSERT INTO questionnaire_submissions (
-                        questionnaire_id, respondent_key, openid, unionid, external_userid,
+                        questionnaire_id, identity_map_id, respondent_key, openid, unionid, external_userid,
                         follow_user_userid, matched_by, mobile_snapshot, source_channel, campaign_id,
                         staff_id, total_score, final_tags, assessment_result_snapshot, result_token,
                         redirect_url_snapshot, submitted_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     RETURNING id, submitted_at
                     """,
                     (
                         questionnaire_id,
+                        int(payload["identity_map_id"]) if payload.get("identity_map_id") else None,
                         _text(payload.get("respondent_key") or respondent_identity.get("respondent_key")),
                         _text(payload.get("openid") or respondent_identity.get("openid")),
                         _text(payload.get("unionid") or respondent_identity.get("unionid")),
@@ -1306,6 +1307,7 @@ class PostgresQuestionnaireReadRepository:
             "diagnostics_json": _json_dict(payload.get("diagnostics_json")),
             "respondent_identity": respondent_identity,
             "person_id": payload.get("person_id"),
+            "identity_map_id": payload.get("identity_map_id"),
             "external_userid": _text(payload.get("external_userid") or respondent_identity.get("external_userid")),
             "openid": _text(payload.get("openid") or respondent_identity.get("openid")),
             "unionid": _text(payload.get("unionid") or respondent_identity.get("unionid")),

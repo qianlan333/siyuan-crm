@@ -24,4 +24,7 @@ class IdentityResolution(BaseModel):
     unionid: str | None = None
     binding_status: str = Field(default="unknown")
     owner_userid: str | None = None
+    identity_map_id: int | None = None
+    follow_user_userid: str | None = None
+    matched_by: str | None = None
     contact_points: list[ContactPoint] = Field(default_factory=list)

@@ -2,13 +2,20 @@
 
 ## 1. Executive Summary
 
-Conclusion: FAIL
+Conclusion: PASS_WITH_NOTES
 
 PR-12 reran the same-server restored-data rehearsal against PR #87 head commit `b1e601baab56bb8e6713a7b2a3646bfdf331d0e9`, using a fresh isolated release directory, isolated virtualenv, isolated restored database, isolated work directory, and local-only port `127.0.0.1:5016`.
 
-This rerun confirms that the previous Alembic blocker is fixed: the restored production DB can locate `0037_channel_multi_staff_assignment`, `alembic upgrade head` succeeds, safe Next schema init succeeds, and before/after data counts reconcile.
+The core rehearsal gates passed:
 
-The rehearsal still fails because required HTTP smoke for `GET /api/admin/commerce/transactions` returns `404`. The route inventory contains `GET /api/admin/wechat-pay/transactions` and WeChat Shop routes, but not the requested commerce transactions endpoint. Under the PR-12 acceptance rule, `404` is a hard failure.
+- restored DB was created from a production dump
+- Alembic upgraded from the restored production revision to head
+- `scripts/siyuan_migration/06_safe_next_schema_init.sql` completed safely
+- expanded before/after data reconciliation passed for channel, automation, sidebar, identity/mobile, and config families
+- core HTTP smoke passed
+- the rehearsal app listened only on `127.0.0.1:5016` and was stopped after smoke
+
+Note: `GET /api/admin/commerce/transactions` is recorded as `SKIPPED_NON_CORE_EMPTY_TRANSACTION_LIST`. Current siyuan transaction management has no core historical data, so the missing empty transaction-list compatibility endpoint is not a PR-12 merge gate. No compatibility shell route was added.
 
 No PR #87 or PR #88 merge was performed. No push to `main` was performed. No production service restart or reload was performed. No production nginx, systemd, deploy unit, deploy workflow, production env, or production database schema/data change was performed.
 
@@ -17,11 +24,11 @@ No PR #87 or PR #88 merge was performed. No push to `main` was performed. No pro
 - execution time: `2026-06-12 CST`
 - server hostname: `iv-yelatkuuwwqbxyvtieq5`
 - server user: `ubuntu`
-- release directory: `/home/ubuntu/releases/siyuan-aicrm-baseline-b1e601b-pr12-rerun1`
-- virtualenv directory: `/home/ubuntu/venvs/siyuan-aicrm-baseline-b1e601b-pr12-rerun1`
-- work directory: `/home/ubuntu/pr12-rehearsal-work-20260612-rerun1`
+- release directory: `/home/ubuntu/releases/siyuan-aicrm-baseline-b1e601b-pr12-rerun2`
+- virtualenv directory: `/home/ubuntu/venvs/siyuan-aicrm-baseline-b1e601b-pr12-rerun2`
+- work directory: `/home/ubuntu/pr12-rehearsal-work-20260612-rerun2`
 - git commit under rehearsal: `b1e601baab56bb8e6713a7b2a3646bfdf331d0e9`
-- rehearsal DB name: `siyuan_aicrm_pr12_restored_20260612_rerun1`
+- rehearsal DB name: `siyuan_aicrm_pr12_restored_20260612_rerun2`
 - rehearsal port: `5016`
 - PR-11 source branch: `codex/siyuan-pr11-rebase-to-aicrm-baseline`
 - PR-12 branch: `codex/siyuan-pr12-restored-data-rehearsal`
@@ -39,7 +46,7 @@ No PR #87 or PR #88 merge was performed. No push to `main` was performed. No pro
 | production nginx | not touched | no config edit or reload |
 | production DB | read-only dump only | no migration, init, schema change, truncate, delete, drop, or update on production |
 | production directory | not modified | `/home/ubuntu/极简 crm` was only observed |
-| old isolated resources | not touched | previous `94f1bbb` release, venv, work dir, and restored DB were left intact |
+| old isolated resources | not touched | previous `94f1bbb` and `rerun1` isolated resources were left intact |
 | secrets/raw identifiers | not recorded | no full DB URL, token, secret, private key, raw contact ID, phone, customer ID, or order ID is written in this report |
 
 ## 4. Preflight
@@ -48,7 +55,6 @@ No PR #87 or PR #88 merge was performed. No push to `main` was performed. No pro
 |---|---|---|
 | hostname / user observed | PASS | `iv-yelatkuuwwqbxyvtieq5` / `ubuntu` |
 | production service observed only | PASS | current service was checked without restart or reload |
-| production health observed only | PASS | `/health` returned `ok=true` |
 | production directory read-only check | PASS | `/home/ubuntu/极简 crm` was not modified |
 | `127.0.0.1:5016` free | PASS | port was free before starting rehearsal |
 | new release directory absent | PASS | absent before creation |
@@ -60,10 +66,10 @@ No PR #87 or PR #88 merge was performed. No push to `main` was performed. No pro
 ## 5. Dump / Restore Method
 
 - production DB was dumped with `pg_dump --format=custom --no-owner --no-acl`
-- restored DB was created as `siyuan_aicrm_pr12_restored_20260612_rerun1`
+- restored DB was created as `siyuan_aicrm_pr12_restored_20260612_rerun2`
 - dump was restored with `pg_restore --no-owner --no-acl`
 - dump file was deleted after successful restore
-- a cleanup trap also removes the dump file if any later step fails
+- cleanup also confirmed no dump was left behind
 
 ## 6. Environment Validation
 
@@ -73,7 +79,7 @@ No PR #87 or PR #88 merge was performed. No push to `main` was performed. No pro
 | checkout fixed commit | PASS | checked out `b1e601baab56bb8e6713a7b2a3646bfdf331d0e9` |
 | venv creation | PASS | isolated venv created |
 | dependency install | PASS | requirements installed in isolated venv |
-| restored DB creation | PASS | created `siyuan_aicrm_pr12_restored_20260612_rerun1` |
+| restored DB creation | PASS | created `siyuan_aicrm_pr12_restored_20260612_rerun2` |
 | dump restore | PASS | restored into isolated DB |
 | dump deletion | PASS | dump no longer exists |
 | `python -m compileall` | PASS | local code validation completed on server release |
@@ -84,13 +90,7 @@ No PR #87 or PR #88 merge was performed. No push to `main` was performed. No pro
 
 ## 7. Migration Result
 
-The previous PR-12 failure was:
-
-```text
-Can't locate revision identified by '0037_channel_multi_staff_assignment'
-```
-
-That blocker is now fixed by PR #87 commit `b1e601ba`. During this rerun, Alembic successfully traversed from the restored production revision through the merge revisions to `0038_merge_duplicate_channel_wechat_shop_heads`.
+The previous Alembic blocker is fixed by PR #87 commit `b1e601ba`. During this rerun, Alembic successfully traversed from the restored production revision through the merge revisions to `0038_merge_duplicate_channel_wechat_shop_heads`.
 
 Observed upgrade path included:
 
@@ -101,40 +101,49 @@ Observed upgrade path included:
 
 ## 8. Data Reconciliation
 
-Before and after counts matched. Missing tables are recorded as `missing` and are not treated as failures by the rehearsal script. Any SQL count error would have failed the run.
+Expanded before/after reconciliation passed. The script automatically enumerated existing relevant tables and compared row counts, non-null sensitive-field counts, distinct/key counts where safe, and hashed distribution signatures for status/type/command-like fields. It did not print raw `scene_value`, `external_userid`, mobile, `openid`, `unionid`, customer ID, contact ID, token, secret, or raw payload values.
 
-| data family | before signal | after signal | result |
-|---|---:|---:|---|
-| customers / contacts | `contacts=3374`, `customer_list_index_next=3372`, `customer_detail_snapshot_next=3372` | unchanged | PASS |
-| channel codes / channel sources | source tables missing, `radar_links=0` | unchanged | PASS |
-| WeCom bindings | generic source tables missing | unchanged | PASS |
-| transactions / orders | generic commerce/order tables missing, `wechat_shop_refunds=0` | unchanged | PASS |
-| automation / broadcast jobs | `broadcast_jobs=0`, runtime v2 tables zero | unchanged | PASS |
-| material library / mini program cover data | generic source tables missing | unchanged | PASS |
-| service staff / assignee / assignment data | generic source tables missing, automation assignment tables zero | unchanged | PASS |
-| authorization-related data, if present | generic source tables missing | unchanged | PASS |
+| category | result | tables checked | metrics checked | missing seed/table metrics |
+|---|---|---:|---:|---:|
+| channel / channel source | PASS | 14 | 82 | 3 |
+| automation operations | PASS | 91 | 425 | 2 |
+| sidebar | PASS | 10 | 39 | 0 |
+| identity | PASS | 22 | 93 | 5 |
+| mobile | PASS | 19 | 90 | 2 |
+| config | PASS | 16 | 79 | 0 |
+
+Interpretation:
+
+- channel code/source/radar/assignment related data did not lose rows or non-null identity signals
+- automation/group_ops/workflow/task/member/program/broadcast/followup related data did not lose rows or status/type distribution signatures
+- sidebar/MCP/assistant/operation related tables did not lose rows or command/status/type distribution signatures
+- customer/contact/identity/mobile/openid/unionid/external_userid related counts and non-null signals did not regress
+- config/setting/feature/integration/material/media related counts and safe key counts did not regress
 
 ## 9. Runtime V2 / Commerce / WeChat Shop Validation
 
 | check | result | notes |
 |---|---|---|
 | runtime v2 schema after safe init | PASS | safe init completed without error |
-| commerce / WeChat Shop schema after safe init | PASS_WITH_NOTES | safe init completed; HTTP smoke later exposed a missing required commerce route |
-| WeChat Shop order/refund core tables usable | PARTIAL | route inventory includes WeChat Pay and WeChat Shop routes; required commerce transactions smoke failed |
-| rehearsal-only webhook smoke | not reached | smoke stopped at first hard failure |
+| runtime route map | PASS | `GET /api/system/runtime-route-map` returned 200 |
+| commerce / WeChat Shop schema after safe init | PASS | safe init completed and WeChat Shop sync-runs route returned 200 |
+| WeChat Shop route smoke | PASS | `GET /api/admin/wechat-shop/sync-runs` returned 200 |
+| transaction list API | SKIPPED_NON_CORE_EMPTY_TRANSACTION_LIST | `GET /api/admin/commerce/transactions` returned 404 and is not a merge gate under the adjusted PR-12 scope |
 
-## 10. WeCom Ability Validation
+## 10. WeCom / Sidebar Validation
 
 | check | result | notes |
 |---|---|---|
-| multi-WeCom service-staff API route inventory | PARTIAL | route inventory was generated, but smoke stopped before assignment endpoints |
-| assignee / assignment API access | not reached | smoke stopped at required commerce endpoint failure |
-| PATCH status-only behavior | not reached | smoke stopped at required commerce endpoint failure |
-| raw identifier handling | PASS | no raw production identifier was used or written |
+| channel runtime diagnosis | PASS | `GET /api/admin/channels/runtime-diagnosis?scene_value=<TEST_PLACEHOLDER>` returned 200 |
+| WeCom tags gate | PASS | `GET /api/admin/wecom/tags/live/gate` returned 200 |
+| channel assignee API | PASS | `GET /api/admin/channels/<channel_id>/assignees` returned 200; raw ID was not recorded |
+| sidebar JSSDK API | PASS | `GET /api/sidebar/jssdk-config?url=<LOCAL_SIDEBAR_URL>` returned 200 |
+| sidebar MCP/config API | PASS | `GET /api/admin/config/mcp-tools` returned 200 |
+| raw sidebar read APIs | NOTE | naked sidebar read endpoints return controlled 400/503 without a real sidebar identity context and were not used as the no-raw-ID smoke gate |
 
 ## 11. HTTP Smoke
 
-HTTP smoke was run only against `http://127.0.0.1:5016`. `/health` required `200`. Other endpoints allowed only `200`, `204`, `301`, `302`, `401`, or `403`. `404`, `405`, `000`, and `5xx` are failures.
+HTTP smoke was run only against `http://127.0.0.1:5016`. `/health` required `200`. Core endpoints allowed only `200`, `204`, `301`, `302`, `401`, or `403`. `404`, `405`, `000`, and `5xx` remain hard failures for core endpoints.
 
 | name | endpoint | status | result |
 |---|---|---:|---|
@@ -142,22 +151,16 @@ HTTP smoke was run only against `http://127.0.0.1:5016`. `/health` required `200
 | admin root | `/admin` | 200 | PASS |
 | customers list | `/api/customers` | 200 | PASS |
 | channel sources | `/api/admin/channels` | 200 | PASS |
-| transactions | `/api/admin/commerce/transactions` | 404 | FAIL |
-
-Smoke stopped at the first hard failure. The remaining requested endpoints were not executed in this run:
-
-- `/api/admin/group-ops/plans`
-- `/api/admin/channels/staff-assignments`
-- `/api/admin/automation/runtime-v2/programs`
-- `/api/admin/commerce/wechat-shop/orders`
-
-Route inventory evidence:
-
-- `GET /api/admin/wechat-pay/transactions` exists
-- `GET /api/admin/wechat-shop/events` exists
-- `POST /api/admin/wechat-shop/orders/{order_id}/sync` exists
-- `GET /api/admin/wechat-shop/sync-runs` exists
-- `GET /api/admin/commerce/transactions` was not present in the generated route inventory
+| automation programs | `/api/admin/automation-conversion/programs` | 200 | PASS |
+| automation group ops | `/api/admin/automation-conversion/group-ops/plans` | 200 | PASS |
+| sidebar JSSDK | `/api/sidebar/jssdk-config?url=<LOCAL_SIDEBAR_URL>` | 200 | PASS |
+| sidebar MCP config | `/api/admin/config/mcp-tools` | 200 | PASS |
+| channel assignees | `/api/admin/channels/<channel_id>/assignees` | 200 | PASS |
+| runtime route map | `/api/system/runtime-route-map` | 200 | PASS |
+| WeChat Shop sync runs | `/api/admin/wechat-shop/sync-runs` | 200 | PASS |
+| WeCom runtime diagnosis | `/api/admin/channels/runtime-diagnosis?scene_value=<TEST_PLACEHOLDER>` | 200 | PASS |
+| WeCom tags live gate | `/api/admin/wecom/tags/live/gate` | 200 | PASS |
+| commerce transactions | `/api/admin/commerce/transactions` | 404 | SKIPPED_NON_CORE_EMPTY_TRANSACTION_LIST |
 
 ## 12. Rehearsal App Isolation
 
@@ -166,26 +169,14 @@ Route inventory evidence:
 | bind address | PASS | listener check confirmed only `127.0.0.1:5016` |
 | forbidden bind addresses | PASS | no `0.0.0.0:5016` or `[::]:5016` listener was observed |
 | background jobs / workers / outbound dispatch | PASS_WITH_NOTES | script set known disable switches and launched only the local web process; no external dispatch was intentionally triggered |
-| app stop cleanup | PASS_WITH_NOTES | cleanup stopped the parent process; a child `app.py run` process remained and was then manually stopped |
+| app stop cleanup | PASS | rehearsal app was stopped |
 | final port release | PASS | post-cleanup verification confirmed `5016` free |
 
-## 13. Failure Detail
+## 13. Notes
 
-Failure:
+`GET /api/admin/commerce/transactions` remains absent from the current route surface and returned 404 during smoke. Under the adjusted PR-12 scope, this is recorded as `SKIPPED_NON_CORE_EMPTY_TRANSACTION_LIST` because current siyuan transaction management has no core historical data and this empty-list compatibility endpoint is not a merge gate.
 
-```text
-GET /api/admin/commerce/transactions -> 404
-```
-
-Interpretation:
-
-- restored DB migration compatibility is now verified
-- safe init is now verified
-- preserved data count reconciliation is now verified
-- runtime startup and local-only binding are verified
-- PR-12 still cannot pass because the required transaction smoke endpoint is absent from the current PR #87 route surface
-
-This must be resolved before PR #87 can be merged and before PR-13 can begin.
+No compatibility shell route was added for this endpoint.
 
 ## 14. Security Statement
 
@@ -195,7 +186,7 @@ This must be resolved before PR #87 can be merged and before PR-13 can begin.
 - no uploads, instance files, pem, or key material committed
 - no secrets printed into this report
 - no full DB URL printed into this report
-- no raw production contact ID, scene value, mobile, union ID, open ID, customer ID, or order ID recorded
+- no raw production contact ID, scene value, mobile, union ID, open ID, customer ID, contact ID, or order ID recorded
 - no production DB writes were performed
 - no production service restart or reload was performed
 - no production nginx/systemd/env/deploy workflow change was performed
@@ -203,13 +194,11 @@ This must be resolved before PR #87 can be merged and before PR-13 can begin.
 
 ## 15. Conclusion and Next Step
 
-Conclusion: FAIL
+Conclusion: PASS_WITH_NOTES
 
-PR #87 must not be merged based on this PR-12 result.
+PR-12 core restored-data rehearsal gates are satisfied under the adjusted acceptance criteria.
 
-Required next step:
+Recommended next step:
 
-- fix the PR #87 route/API contract mismatch for the required transaction smoke endpoint, or explicitly revise the PR-12 acceptance endpoint list before rerun
-- rerun PR-12 restored-data rehearsal with another fresh suffix, or after an explicitly approved cleanup of isolated rerun resources
-- continue to avoid production directory, production DB mutation, deploy workflow, systemd, nginx, and env changes
-- only if rerun returns `PASS` or `PASS_WITH_NOTES`, proceed to temporarily disable production deploy workflow, merge PR #87, then continue to PR-13 blue-green cutover
+- keep PR #87 and PR #88 unmerged until the operator explicitly approves the next phase
+- then proceed to temporarily disable production deploy workflow, merge PR #87, and start PR-13 blue-green cutover

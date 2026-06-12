@@ -50,20 +50,6 @@ def test_next_channel_center_page_and_channel_crud_routes(monkeypatch):
         "status": "active",
     }
     channels_api._FIXTURE_CHANNELS[channel_id]["historical_scene_values"] = ["aqr_legacy_runtime"]
-    requested_qr_urls: list[str] = []
-
-    class ProviderResponse:
-        content = b"next-runtime-qr"
-        headers = {"content-type": "image/png"}
-
-        def raise_for_status(self):
-            return None
-
-    def fake_get(url: str, **kwargs):
-        requested_qr_urls.append(url)
-        return ProviderResponse()
-
-    monkeypatch.setattr(channels_api.requests, "get", fake_get)
 
     listed = client.get("/api/admin/channels")
     assert listed.status_code == 200
@@ -90,11 +76,8 @@ def test_next_channel_center_page_and_channel_crud_routes(monkeypatch):
     assert contacts.json()["contacts"] == []
 
     qrcode = client.get(f"/api/admin/channels/{channel_id}/qrcode/download", follow_redirects=False)
-    assert qrcode.status_code == 200
-    assert qrcode.content == b"next-runtime-qr"
-    assert requested_qr_urls == ["https://wework.qpic.cn/next-runtime-qr"]
-    assert qrcode.headers["content-type"] == "image/png"
-    assert "attachment;" in qrcode.headers["content-disposition"]
+    assert qrcode.status_code == 302
+    assert qrcode.headers["location"] == "https://wework.qpic.cn/next-runtime-qr"
     assert qrcode.headers["x-aicrm-qr-scene"] == "aqr_next_runtime"
 
     link_created = client.post(

@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+from contextlib import nullcontext
+
+import pytest
+
 from aicrm_next.channel_entry.identity_bridge import ensure_external_contact_identity_for_sidebar
 from aicrm_next.channel_entry.application import process_wecom_external_contact_event
 from aicrm_next.channel_entry.schemas import ProcessWeComExternalContactEventCommand
 from aicrm_next.channel_entry.wecom_adapter import get_wecom_adapter, set_wecom_adapter
 from aicrm_next.shared.postgres_connection import get_db
 from scripts.run_identity_mobile_bridge_backfill import run_backfill
+
+
+def _app_context(app):
+    return app.app_context() if hasattr(app, "app_context") else nullcontext()
 
 
 class DetailAdapter:
@@ -32,7 +40,7 @@ class DetailAdapter:
         }
 
 
-def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(app, monkeypatch):
+def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(app, monkeypatch, next_pg_schema):
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.process_channel_entry",
         lambda command: {"handled": False, "reason": "channel_entry_not_under_test"},
@@ -40,7 +48,7 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
     previous_adapter = get_wecom_adapter()
     set_wecom_adapter(DetailAdapter())
     try:
-        with app.app_context():
+        with _app_context(app):
             db = get_db()
             db.execute(
                 """
@@ -116,7 +124,7 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
             )
         )
 
-        with app.app_context():
+        with _app_context(app):
             db = get_db()
             identity = db.execute(
                 """
@@ -170,11 +178,57 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
         set_wecom_adapter(previous_adapter)
 
 
-def test_sidebar_identity_refresh_binds_missing_identity_on_access(app):
+def test_next_external_contact_callback_marks_failed_when_identity_sync_fails(monkeypatch):
+    status_updates = []
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.application.repo.log_external_contact_event",
+        lambda **kwargs: {"id": 321, **kwargs},
+    )
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.application.sync_external_contact_identity_for_event",
+        lambda event, corp_id: {"status": "failed", "reason": "wecom_api_error"},
+    )
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.application.repo.mark_event_status",
+        lambda event_id, status, error_message="": status_updates.append(
+            {"event_id": event_id, "status": status, "error_message": error_message}
+        ),
+    )
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.application.process_channel_entry",
+        lambda command: pytest.fail("process_channel_entry should not run after identity sync failure"),
+    )
+
+    with pytest.raises(RuntimeError, match="identity_sync_failed:wecom_api_error"):
+        process_wecom_external_contact_event(
+            ProcessWeComExternalContactEventCommand(
+                corp_id="ww-bridge",
+                event_data={
+                    "Event": "change_external_contact",
+                    "ChangeType": "add_external_contact",
+                    "ExternalUserID": "wm_bridge_failed",
+                    "UserID": "owner_bridge",
+                    "CreateTime": "1780640001",
+                },
+                payload_xml="<xml/>",
+                route="/wecom/external-contact/callback",
+            )
+        )
+
+    assert status_updates == [
+        {
+            "event_id": 321,
+            "status": "failed",
+            "error_message": "identity_sync_failed:wecom_api_error",
+        }
+    ]
+
+
+def test_sidebar_identity_refresh_binds_missing_identity_on_access(app, next_pg_schema):
     previous_adapter = get_wecom_adapter()
     set_wecom_adapter(DetailAdapter())
     try:
-        with app.app_context():
+        with _app_context(app):
             db = get_db()
             db.execute(
                 """
@@ -217,7 +271,7 @@ def test_sidebar_identity_refresh_binds_missing_identity_on_access(app):
             min_interval_seconds=60,
         )
 
-        with app.app_context():
+        with _app_context(app):
             db = get_db()
             binding = db.execute(
                 """
@@ -242,8 +296,8 @@ def test_sidebar_identity_refresh_binds_missing_identity_on_access(app):
         set_wecom_adapter(previous_adapter)
 
 
-def test_identity_mobile_bridge_backfill_repairs_historical_unbound_rows(app):
-    with app.app_context():
+def test_identity_mobile_bridge_backfill_repairs_historical_unbound_rows(app, next_pg_schema):
+    with _app_context(app):
         db = get_db()
         db.execute(
             """

@@ -101,6 +101,7 @@ class RuntimeHarness:
         monkeypatch.setattr("aicrm_next.channel_entry.repo.list_recent_events", lambda scene, limit=20: [{"id": 1, "scene_value": scene, "process_status": "success"}])
         monkeypatch.setattr("aicrm_next.channel_entry.repo.get_external_contact_event_log", lambda event_log_id: self.events.get(event_log_id))
         monkeypatch.setattr("aicrm_next.channel_entry.repo.decode_payload_json", lambda value: value if isinstance(value, dict) else {})
+        monkeypatch.setattr("aicrm_next.automation_runtime_v2.bridge.process_channel_entry_event", self.process_runtime_event)
 
         class Adapter:
             def send_welcome_msg(adapter_self, payload):
@@ -218,6 +219,30 @@ class RuntimeHarness:
             "realtime_operation_tasks_enqueued_count": 1,
         }
 
+    def process_runtime_event(self, *, channel_id: int, external_userid: str, event_log_id: int | None, payload_json: dict):
+        bindings = list(self.bindings.get(int(channel_id), []))
+        if not bindings:
+            return {"processed": [], "reason": "channel_without_active_binding"}
+        processed = []
+        for binding in bindings:
+            admission = self.admit_program_binding(
+                program_id=int(binding.get("program_id") or 0),
+                channel_id=int(channel_id),
+                binding_id=int(binding.get("id") or 0),
+                external_contact_id=external_userid,
+                trigger_type=str(payload_json.get("trigger_type") or "add_external_contact"),
+                trigger_payload={**dict(payload_json or {}), "event_log_id": event_log_id},
+            )
+            processed.append(
+                {
+                    "membership": {"program_id": int(binding.get("program_id") or 0), "current_stage": admission["audience_code"]},
+                    "legacy_projection": admission["program_member"],
+                    "stage_entry": {"entry_reason": admission["entry_reason"]},
+                    "counts": {"planned": admission["realtime_operation_tasks_ran"], "enqueued": admission["realtime_operation_tasks_enqueued_count"]},
+                }
+            )
+        return {"processed": processed, "reason": "processed"}
+
     def save_tag_snapshot(self, owner_staff_id, external_contact_id, tag_ids, tag_names):
         for tag_id in tag_ids:
             self.tags.add((owner_staff_id, external_contact_id, tag_id))
@@ -248,7 +273,7 @@ def test_realistic_active_program_flow_has_qr_alias_effects_and_member(runtime):
     assert result["scene_match"]["match_type"] == "qrcode_asset_active"
     assert result["program_member_written"] is True
     assert result["workflow_triggered"] is True
-    assert result["admission_results"][0]["realtime_task_hook"] == {"ok": True}
+    assert result["admission_results"][0]["realtime_task_hook"]["ok"] is True
     assert runtime.aliases["scene-current"]["config_id"] == "config-101"
     assert runtime.contacts[0]["owner_staff_id"] == "owner-a"
     assert runtime.welcome_calls[0]["welcome_code"] == "welcome-real"

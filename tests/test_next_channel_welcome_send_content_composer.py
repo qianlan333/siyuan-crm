@@ -37,7 +37,7 @@ def test_channel_form_exposes_auto_accept_friend_toggle() -> None:
     js = _read(CHANNEL_JS)
 
     assert 'name="auto_accept_friend"' in html
-    assert "扫码添加负责人时自动通过好友申请" in html
+    assert "扫码添加成员时自动通过好友申请" in html
     assert "skip_verify" in html
     assert "auto_accept_friend:" in js
     assert '[name="auto_accept_friend"]' in js

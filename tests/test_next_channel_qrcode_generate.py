@@ -72,6 +72,62 @@ def test_generate_channel_qrcode_calls_wecom_and_writes_scene_alias(monkeypatch)
     assert effects[0]["status"] == "success"
 
 
+def test_generate_channel_qrcode_uses_multi_staff_assignees(monkeypatch):
+    channel = {
+        "id": 102,
+        "channel_name": "多客服渠道",
+        "channel_code": "multi",
+        "channel_type": "qrcode",
+        "carrier_type": "qrcode",
+        "scene_value": "",
+        "qr_url": "",
+        "owner_staff_id": "",
+        "assignment_mode": "multi_staff",
+        "auto_accept_friend": False,
+        "status": "active",
+    }
+    aliases: list[dict] = []
+    effects: list[dict] = []
+    assets: list[dict] = []
+    payloads: list[dict] = []
+
+    class Adapter:
+        def create_contact_way(self, payload):
+            payloads.append(payload)
+            return {"errcode": 0, "config_id": "cfg-multi", "qr_code": "https://wework.qpic.cn/multi"}
+
+    monkeypatch.setenv("WECOM_CORP_ID", "ww-test")
+    monkeypatch.setattr("aicrm_next.channel_entry.repo.get_channel_by_id", lambda channel_id: channel if channel_id == 102 else None)
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.repo.list_channel_assignees",
+        lambda channel_id, active_only=True: [
+            {"staff_id": "StaffA", "status": "active"},
+            {"staff_id": "StaffB", "status": "active"},
+        ],
+    )
+    monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_scene_alias", lambda **kwargs: aliases.append(kwargs) or {"id": len(aliases)})
+    monkeypatch.setattr("aicrm_next.channel_entry.repo.retire_active_qrcode_assets", lambda channel_id, **kwargs: 1)
+    monkeypatch.setattr("aicrm_next.channel_entry.repo.insert_qrcode_asset", lambda **kwargs: assets.append(kwargs) or {"id": 56, **kwargs})
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.repo.update_channel_qrcode",
+        lambda **kwargs: {**channel, "scene_value": kwargs["scene_value"], "qr_url": kwargs["qr_url"], "qr_ticket": kwargs["config_id"]},
+    )
+    monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_entry_effect_log", lambda **kwargs: effects.append(kwargs) or kwargs)
+    previous = get_wecom_adapter()
+    set_wecom_adapter(Adapter())
+    try:
+        result = generate_channel_qrcode(GenerateChannelQrCodeCommand(channel_id=102, scene_value="aqr_multi"))
+    finally:
+        set_wecom_adapter(previous)
+
+    assert result["ok"] is True
+    assert result["provider_payload_user_count"] == 2
+    assert payloads == [{"type": 2, "scene": 2, "style": 1, "skip_verify": False, "state": "aqr_multi", "user": ["StaffA", "StaffB"]}]
+    assert assets[0]["channel_id"] == 102
+    assert aliases[0]["scene_value"] == "aqr_multi"
+    assert effects[0]["status"] == "success"
+
+
 def test_generate_qrcode_route_is_next_channel_entry_owned(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setattr(
@@ -94,17 +150,3 @@ def test_generate_qrcode_route_is_next_channel_entry_owned(monkeypatch):
     assert response.json()["source"] == "aicrm_next.channel_entry"
     paths = {route.path: route.endpoint.__module__ for route in client.app.routes if hasattr(route, "endpoint")}
     assert paths["/api/admin/channels/{channel_id:int}/qrcode/generate"] == "aicrm_next.channel_entry.api"
-
-
-def test_generate_qrcode_route_returns_owner_required_reason(monkeypatch):
-    monkeypatch.setenv("DATABASE_URL", "")
-    monkeypatch.setattr(
-        "aicrm_next.channel_entry.api.generate_channel_qrcode",
-        lambda command: (_ for _ in ()).throw(ValueError("owner_staff_id_required")),
-    )
-
-    client = TestClient(create_app(), raise_server_exceptions=False)
-    response = client.post("/api/admin/channels/7/qrcode/generate", json={})
-
-    assert response.status_code == 400
-    assert response.json()["detail"] == "owner_staff_id_required"

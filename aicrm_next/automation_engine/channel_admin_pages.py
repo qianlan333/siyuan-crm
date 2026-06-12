@@ -79,6 +79,7 @@ async def admin_channel_new_page(request: Request) -> Response:
     )
     context.update(
         {
+            "show_page_header": False,
             "breadcrumbs": [
                 {"label": "客户管理后台", "href": admin_path_for("api.admin_console_dashboard")},
                 {"label": "渠道码中心", "href": admin_path_for("api.admin_channels_page")},
@@ -129,6 +130,7 @@ async def admin_channel_edit_page(request: Request, channel_id: int) -> Response
     )
     context.update(
         {
+            "show_page_header": False,
             "breadcrumbs": [
                 {"label": "客户管理后台", "href": admin_path_for("api.admin_console_dashboard")},
                 {"label": "渠道码中心", "href": admin_path_for("api.admin_channels_page")},

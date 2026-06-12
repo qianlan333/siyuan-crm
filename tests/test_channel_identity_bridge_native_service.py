@@ -167,6 +167,37 @@ def test_sync_external_contact_identity_wecom_api_error() -> None:
     assert result["wecom_result"]["errcode"] == 40001
 
 
+def test_sync_external_contact_identity_allows_missing_openid() -> None:
+    repo = _FakeRepo()
+    result = _service(
+        repo,
+        adapter=_DetailAdapter(
+            {
+                "errcode": 0,
+                "external_contact": {
+                    "external_userid": "wm_native_001",
+                    "unionid": "union_native_001",
+                    "name": "native customer",
+                },
+                "follow_user": [{"userid": "owner_native"}],
+            }
+        ),
+    ).sync_external_contact_identity_for_event(
+        {
+            "Event": "change_external_contact",
+            "ChangeType": "add_external_contact",
+            "ExternalUserID": "wm_native_001",
+            "UserID": "owner_native",
+        },
+        corp_id="ww-native",
+    )
+
+    assert result["status"] == "success"
+    assert result["unionid_present"] is True
+    assert result["openid_present"] is False
+    assert repo.upserted_record["openid"] == ""
+
+
 def test_bind_mobile_from_identity_sources_no_candidate() -> None:
     result = _service(_FakeRepo()).bind_mobile_from_identity_sources("wm_native_001")
 

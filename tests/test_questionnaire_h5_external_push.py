@@ -52,7 +52,7 @@ def test_h5_submit_executes_configured_questionnaire_external_push(client: TestC
 
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {"phone": "13770938680"}},
+        json={"answers": {"phone": "13800138000"}},
     )
 
     assert response.status_code == 200
@@ -66,7 +66,7 @@ def test_h5_submit_executes_configured_questionnaire_external_push(client: TestC
 
     assert captured["url"] == "https://hooks.example.com/questionnaire"
     request_json = captured["kwargs"]["json"]  # type: ignore[index]
-    assert request_json["phone_number"] == "13770938680"
+    assert request_json["phone_number"] == "13800138000"
     assert request_json["type"] == "subscription"
     assert request_json["expires_at_ts"] == 1810310400
     assert request_json["remark"] == "499会员黄小璨激活专用"
@@ -75,4 +75,4 @@ def test_h5_submit_executes_configured_questionnaire_external_push(client: TestC
     assert len(logs) == 1
     assert logs[0]["status"] == "success"
     assert logs[0]["response_status_code"] == 200
-    assert logs[0]["request_payload"]["phone_number"] == "13770938680"
+    assert logs[0]["request_payload"]["phone_number"] == "13800138000"

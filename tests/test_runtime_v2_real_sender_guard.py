@@ -6,6 +6,9 @@ import aicrm_next.background_jobs.broadcast_queue_worker as worker
 from aicrm_next.background_jobs.broadcast_queue_worker import SafeSkippedBroadcastDispatcher
 
 
+REALTEST_TARGET = "external-test-target"
+
+
 class Adapter:
     def create_private_message_task(self, payload: dict, *, idempotency_key: str = "") -> dict:
         return {"ok": True, "wecom_msgid": "msg-ok", "result": {"msgid": "msg-ok"}}
@@ -35,8 +38,9 @@ def _job(sender: str, external_userids: list[str]) -> dict:
 def test_realtest_allows_huangyoucan(monkeypatch) -> None:
     monkeypatch.setattr("aicrm_next.integration_gateway.wecom_private_adapter.build_wecom_private_message_adapter", lambda: Adapter())
     monkeypatch.setattr(worker, "_record_outbound_task", lambda **kwargs: 1)
+    monkeypatch.setenv("AICRM_RUNTIME_V2_REALTEST_ALLOWED_EXTERNAL_USERIDS", REALTEST_TARGET)
 
-    result = SafeSkippedBroadcastDispatcher().dispatch(_job("HuangYouCan", ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]))
+    result = SafeSkippedBroadcastDispatcher().dispatch(_job("HuangYouCan", [REALTEST_TARGET]))
 
     assert result["ok"] is True
 
@@ -44,22 +48,33 @@ def test_realtest_allows_huangyoucan(monkeypatch) -> None:
 def test_realtest_allows_qianlan(monkeypatch) -> None:
     monkeypatch.setattr("aicrm_next.integration_gateway.wecom_private_adapter.build_wecom_private_message_adapter", lambda: Adapter())
     monkeypatch.setattr(worker, "_record_outbound_task", lambda **kwargs: 1)
+    monkeypatch.setenv("AICRM_RUNTIME_V2_REALTEST_ALLOWED_EXTERNAL_USERIDS", REALTEST_TARGET)
 
-    result = SafeSkippedBroadcastDispatcher().dispatch(_job("QianLan", ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]))
+    result = SafeSkippedBroadcastDispatcher().dispatch(_job("QianLan", [REALTEST_TARGET]))
 
     assert result["ok"] is True
 
 
 def test_realtest_blocks_unapproved_sender() -> None:
-    result = SafeSkippedBroadcastDispatcher().dispatch(_job("SomeoneElse", ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]))
+    result = SafeSkippedBroadcastDispatcher().dispatch(_job("SomeoneElse", [REALTEST_TARGET]))
 
     assert result["ok"] is False
     assert result["failure_type"] == "validation_failed"
     assert result["error"] == "realtest_sender_not_allowed"
 
 
-def test_realtest_blocks_non_test_external_userid() -> None:
-    result = SafeSkippedBroadcastDispatcher().dispatch(_job("HuangYouCan", ["wm_not_allowed"]))
+def test_realtest_blocks_when_target_is_not_configured() -> None:
+    result = SafeSkippedBroadcastDispatcher().dispatch(_job("HuangYouCan", [REALTEST_TARGET]))
+
+    assert result["ok"] is False
+    assert result["failure_type"] == "validation_failed"
+    assert result["error"] == "realtest_target_not_configured"
+
+
+def test_realtest_blocks_non_test_external_userid(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_RUNTIME_V2_REALTEST_ALLOWED_EXTERNAL_USERIDS", REALTEST_TARGET)
+
+    result = SafeSkippedBroadcastDispatcher().dispatch(_job("HuangYouCan", ["external-not-allowed"]))
 
     assert result["ok"] is False
     assert result["failure_type"] == "validation_failed"

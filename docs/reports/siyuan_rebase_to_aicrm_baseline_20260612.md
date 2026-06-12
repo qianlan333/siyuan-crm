@@ -9,7 +9,7 @@ Conclusion: BASELINE_REBASE_READY_FOR_REHEARSAL
 - production not changed
 - next step is same-server restored-data rehearsal
 
-This PR changes the repository only. It does not write production DB data, restart services, edit production systemd/nginx files, or change production env.
+This conclusion is valid only with the validation set below passing. This PR changes the repository only. It does not write production DB data, restart services, edit production systemd/nginx files, change production env, or change the main-push deployment workflow.
 
 ## 2. Baselines
 
@@ -25,8 +25,7 @@ This PR changes the repository only. It does not write production DB data, resta
 - `scripts/`
 - `tools/`
 - `tests/`
-- `.github/workflows/`
-- `deploy/`
+- `.github/workflows/ci.yml` for PR smoke alignment only
 - `docs/architecture/`
 - `docs/development/`
 - `docs/external_orders_api.md`
@@ -34,6 +33,8 @@ This PR changes the repository only. It does not write production DB data, resta
 - `app.py`
 
 `docs/route_ownership/` is absent from the AI-CRM baseline and was removed from siyuan instead of retained as an overlay.
+
+`.github/workflows/deploy.yml` and `deploy/` are intentionally not synced in PR-11. They remain on the existing siyuan main behavior so this baseline rebase cannot change main-push production deployment, systemd units, nginx, or env wiring. Deploy/systemd/nginx/env changes are deferred to PR-12 same-server rehearsal and PR-13 blue-green cutover.
 
 ## 4. Retained siyuan Overlays
 
@@ -46,6 +47,7 @@ This PR changes the repository only. It does not write production DB data, resta
   - `0032_miniprogram_only_resend_20260611`
   - `0033_complete_miniprogram_only_resend_20260611`
   - `0034_reset_miniprogram_only_material_jobs_20260611`
+- existing `.github/workflows/deploy.yml` and `deploy/` production deployment overlay from siyuan main, unchanged by PR-11
 
 `app.py` stays on AI-CRM Next-only runtime commands. The removed siyuan `init-next-schema-safe` and `sync-customer-read-model` app CLI entries were not restored. Rehearsal helpers now live under `scripts/siyuan_migration/`.
 
@@ -76,12 +78,15 @@ No AI-CRM production data was imported. No AI-CRM campaign/member/order/product 
 - `background_jobs`: AI-CRM `aicrm_next/background_jobs/` baseline synced
 - `external_push`: AI-CRM `aicrm_next/external_push/` and worker tests synced
 - `route ownership`: legacy `docs/route_ownership/` removed because AI-CRM baseline no longer carries it
+- `runtime_v2` realtest target guard: production-like external_userid is not committed; allowed realtest target IDs must come from `AICRM_RUNTIME_V2_REALTEST_ALLOWED_EXTERNAL_USERIDS`
 
 Runtime-only grep found no `wecom_ability_service`, `legacy_flask_facade`, `forward_to_legacy_flask`, or `production_compat_router` imports in `aicrm_next`, `app.py`, or `scripts`.
 
 ## 7. Known Deferred / Next Step
 
 - no production deploy in PR-11
+- no `.github/workflows/deploy.yml` change in PR-11
+- no `deploy/` systemd unit change in PR-11
 - data rehearsal required in PR-12
 - blue-green cutover required in PR-13
 - observation required in PR-14
@@ -93,8 +98,8 @@ Runtime-only grep found no `wecom_ability_service`, `legacy_flask_facade`, `forw
 - `.venv/bin/python app.py health`
 - `.venv/bin/python app.py routes > /tmp/pr11_routes.txt` (`631` routes)
 - `.venv/bin/python -m pytest tests/test_alembic_revision_chain.py -q` (`7 passed`)
-- `.venv/bin/python -m pytest tests/test_deploy_workflow_contract.py tests/test_external_push_worker_next_native.py tests/test_sidebar_write_commands.py tests/test_channel_multi_staff_backend.py tests/test_next_channel_qrcode_generate.py tests/test_external_orders_api.py tests/test_startup_entrypoint_next_only.py tests/test_background_jobs_next_native.py -q` (`78 passed`, one StarletteDeprecationWarning)
-- combined core rerun with Alembic included: `85 passed`, one StarletteDeprecationWarning
+- `.venv/bin/python -m pytest tests/test_deploy_workflow_contract.py tests/test_external_push_worker_next_native.py tests/test_sidebar_write_commands.py tests/test_channel_multi_staff_backend.py tests/test_next_channel_qrcode_generate.py tests/test_external_orders_api.py tests/test_startup_entrypoint_next_only.py tests/test_background_jobs_next_native.py -q` (`72 passed`, `7 skipped`, one StarletteDeprecationWarning)
+- targeted fixture cleanup rerun: `66 passed`, `2 skipped`, one StarletteDeprecationWarning
 - YAML check:
   - `docs/development/phase_execution_state.yaml`: `yaml_ok`
   - `docs/architecture/legacy_exit_route_registry.yaml`: missing in AI-CRM baseline
@@ -103,6 +108,8 @@ Runtime-only grep found no `wecom_ability_service`, `legacy_flask_facade`, `forw
 - diff check: `git diff --check` passed
 
 AI-CRM current baseline no longer includes `scripts/check_no_new_legacy.py` or `tools/generate_legacy_replacement_backlog.py`; these were not reintroduced.
+
+Because those legacy checkers were removed by the AI-CRM baseline, PR-12 restored-data rehearsal and PR-13 production smoke must cover the remaining deployment/runtime safety checks before any production cutover. The deploy-workflow rollout assertions in `tests/test_deploy_workflow_contract.py` are skipped while PR-11 intentionally keeps the existing siyuan deploy overlay unchanged.
 
 ## 9. Security Statement
 
@@ -113,5 +120,7 @@ AI-CRM current baseline no longer includes `scripts/check_no_new_legacy.py` or `
 - no raw external_userid/scene_value/mobile/unionid/openid added by this PR overlay
 - no production DB writes
 - no systemd/nginx/env changes on any production host
+- no `.github/workflows/deploy.yml` production deploy workflow change
+- no `deploy/` systemd unit change
 
-Full repository scans contain AI-CRM baseline test fixtures, placeholder env key names, and local test URLs. Diff-only scans for newly added secret patterns and raw business identifiers returned no matches.
+Full repository scans contain AI-CRM baseline test fixtures, placeholder env key names, and local test URLs. The runtime realtest external_userid guard is env-driven instead of committing a raw production-like external_userid.

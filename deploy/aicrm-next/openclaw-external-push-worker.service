@@ -1,5 +1,5 @@
 [Unit]
-Description=AI-CRM WeChat Shop order sync timer
+Description=OpenClaw External Push Worker - dispatch due webhook outbox
 After=network.target openclaw-wecom-postgres.service
 Requires=openclaw-wecom-postgres.service
 
@@ -8,5 +8,4 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/极简 crm
 EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python -m scripts.run_wechat_shop_order_sync --mode incremental'
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_external_push_worker.py'

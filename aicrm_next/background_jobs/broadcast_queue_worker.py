@@ -290,10 +290,16 @@ def _normalize_private_attachments_for_wecom(attachments: list[dict[str, Any]]) 
 def _realtest_guard(*, sender_userid: str, targets: list[str], content_text: str) -> tuple[bool, str]:
     if "【RuntimeV2真实链路测试】" not in content_text and "runtime_v2_realtest_" not in content_text:
         return True, ""
-    allowed_target = "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"
     if sender_userid not in {"HuangYouCan", "QianLan"}:
         return False, "realtest_sender_not_allowed"
-    if targets != [allowed_target]:
+    allowed_targets = [
+        item.strip()
+        for item in os.getenv("AICRM_RUNTIME_V2_REALTEST_ALLOWED_EXTERNAL_USERIDS", "").split(",")
+        if item.strip()
+    ]
+    if not allowed_targets:
+        return False, "realtest_target_not_configured"
+    if targets != allowed_targets:
         return False, "realtest_target_not_allowed"
     return True, ""
 

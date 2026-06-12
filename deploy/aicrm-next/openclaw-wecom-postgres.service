@@ -1,0 +1,15 @@
+[Unit]
+Description=OpenClaw WeCom Ability Service (PostgreSQL)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python app.py run'
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

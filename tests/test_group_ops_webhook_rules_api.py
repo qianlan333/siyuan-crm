@@ -49,7 +49,7 @@ def test_webhook_direct_recipients_idempotency_and_disabled_guard(group_ops_api_
         headers={"Authorization": f"Bearer {token}", "X-Idempotency-Key": "pytest-disabled"},
         json={
             "event": "core_feature_activation",
-            "recipients": [{"external_user_id": "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"}],
+            "recipients": [{"external_user_id": "external-test-target"}],
             "action": {"action_type": "record_only"},
         },
     )
@@ -66,7 +66,7 @@ def test_webhook_direct_recipients_idempotency_and_disabled_guard(group_ops_api_
             "event": "core_feature_activation",
             "source": "pytest",
             "sender": {"operatorAccount": "HuangYouCan"},
-            "recipients": [{"external_user_id": "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"}],
+            "recipients": [{"external_user_id": "external-test-target"}],
             "action": {"action_type": "record_only"},
         },
     )
@@ -75,7 +75,7 @@ def test_webhook_direct_recipients_idempotency_and_disabled_guard(group_ops_api_
         headers={"Authorization": f"Bearer {token}", "X-Idempotency-Key": "pytest-direct-1"},
         json={
             "event": "core_feature_activation",
-            "recipients": [{"external_user_id": "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"}],
+            "recipients": [{"external_user_id": "external-test-target"}],
             "action": {"action_type": "record_only"},
         },
     )
@@ -88,7 +88,7 @@ def test_webhook_direct_recipients_idempotency_and_disabled_guard(group_ops_api_
     logs = group_ops_api_client.get(f"/api/automation/group-ops/plans/{created['id']}/executions")
     assert logs.status_code == 200
     assert logs.json()["total"] == 1
-    assert logs.json()["items"][0]["external_user_id"] == "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"
+    assert logs.json()["items"][0]["external_user_id"] == "external-test-target"
 
 
 def test_webhook_enqueue_action_routes_through_next_action_port(group_ops_api_client, monkeypatch):
@@ -183,7 +183,7 @@ def test_action_port_enqueue_uses_next_queue_gateway_and_exact_external_userid()
             "plan_id": 1,
             "trigger_event_id": "evt_001",
             "operator_member_id": "HuangYouCan",
-            "recipient": {"external_user_id": "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"},
+            "recipient": {"external_user_id": "external-test-target"},
             "action": {"action_type": "enqueue", "content": "AI-CRM Webhook 触发测试消息"},
         }
     )
@@ -191,8 +191,8 @@ def test_action_port_enqueue_uses_next_queue_gateway_and_exact_external_userid()
     assert result["ok"] is True
     assert result["status"] == "queued"
     assert result["side_effect_executed"] is False
-    assert captured["command"].idempotency_key == "group_ops:1:evt_001:wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ:enqueue"
-    assert captured["payload"]["external_userid"] == ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]
+    assert captured["command"].idempotency_key == "group_ops:1:evt_001:external-test-target:enqueue"
+    assert captured["payload"]["external_userid"] == ["external-test-target"]
     assert captured["payload"]["sender"] == "HuangYouCan"
 
 
@@ -310,7 +310,7 @@ def test_send_message_action_port_default_is_real_blocked():
             "plan_id": 1,
             "trigger_event_id": "evt_001",
             "operator_member_id": "HuangYouCan",
-            "recipient": {"external_user_id": "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"},
+            "recipient": {"external_user_id": "external-test-target"},
             "action": {"action_type": "send_message", "content": "AI-CRM Webhook 触发测试消息"},
         }
     )
@@ -334,7 +334,7 @@ def test_send_message_action_port_fake_adapter_returns_fake_result():
             "plan_id": 1,
             "trigger_event_id": "evt_001",
             "operator_member_id": "HuangYouCan",
-            "recipient": {"external_user_id": "wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"},
+            "recipient": {"external_user_id": "external-test-target"},
             "action": {"action_type": "send_message", "content": "AI-CRM Webhook 触发测试消息"},
         }
     )
@@ -343,7 +343,7 @@ def test_send_message_action_port_fake_adapter_returns_fake_result():
     assert result["status"] == "sent_fake"
     assert result["side_effect_executed"] is False
     assert result["wecom_result"]["dispatch_adapter"] == "fake_wecom"
-    assert result["wecom_result"]["external_userids"] == ["wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ"]
+    assert result["wecom_result"]["external_userids"] == ["external-test-target"]
 
 
 def test_send_message_production_mode_requires_gate_approval_and_audit():

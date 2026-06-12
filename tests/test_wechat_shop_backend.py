@@ -35,7 +35,7 @@ def _mock_order(
     transaction_id: str = "shop_tx_001",
     finish_aftersale_sku_cnt: int = 0,
     deliver_method: int = 3,
-    buyer_mobile: str = "13520436848",
+    buyer_mobile: str = "13800138000",
     product_title: str = "微信小店虚拟课程",
     sku_id: str = "sku_shop_001",
 ) -> None:
@@ -166,7 +166,7 @@ def test_wechat_shop_subscription_product_is_canonicalized(monkeypatch) -> None:
 
 def test_wechat_shop_buyer_mobile_is_available_for_filtering_and_export(monkeypatch) -> None:
     order_id = "3705115058471208123"
-    mobile = "13520436848"
+    mobile = "13800138000"
     _mock_order(monkeypatch, order_id=order_id, buyer_mobile=mobile)
     client = _client(monkeypatch)
 

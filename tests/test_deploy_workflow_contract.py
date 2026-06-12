@@ -3,9 +3,34 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME_DIR = ROOT / ("wecom_ability" + "_service")
+
+
+def _aicrm_deploy_units_active() -> bool:
+    return (ROOT / "deploy" / "aicrm-wechat-shop-order-sync.service").exists()
+
+
+def _skip_when_siyuan_pr11_keeps_deploy_overlay() -> None:
+    if not _aicrm_deploy_units_active():
+        pytest.skip("PR-11 keeps siyuan deploy workflow/systemd overlay unchanged; deploy unit rollout is deferred to PR-12/PR-13")
+
+
+def test_siyuan_pr11_keeps_production_deploy_overlay_unchanged():
+    if _aicrm_deploy_units_active():
+        pytest.skip("AI-CRM deploy baseline is active")
+
+    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
+
+    assert "python3 app.py init-next-schema-safe" in workflow
+    assert "python3 scripts/ensure_channel_multi_staff_schema.py" in workflow
+    assert "sudo cp deploy/aicrm-reply-monitor-capture.service /etc/systemd/system/" not in workflow
+    assert "sudo cp deploy/aicrm-wechat-shop-order-sync.service /etc/systemd/system/" not in workflow
+    assert (ROOT / "deploy" / "aicrm-next" / "openclaw-broadcast-queue-worker.service").exists()
+    assert not (ROOT / "deploy" / "aicrm-wechat-shop-order-sync.service").exists()
 
 
 def test_production_deploy_loads_postgres_env_before_alembic_upgrade():
@@ -49,6 +74,8 @@ def test_production_deploy_installs_dependencies_only_when_requirements_change()
 
 
 def test_production_deploy_runs_alembic_upgrade_before_service_restart():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     env_source_index = workflow.index("source /home/ubuntu/.openclaw-wecom-pg.env")
@@ -96,6 +123,8 @@ def test_production_deploy_installs_and_runs_external_push_worker_timer():
 
 
 def test_production_deploy_installs_and_runs_reply_monitor_timer():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     health_index = workflow.index("curl -sSf http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 20); do"))
@@ -122,6 +151,8 @@ def test_production_deploy_installs_and_runs_reply_monitor_timer():
 
 
 def test_production_deploy_installs_and_runs_broadcast_queue_worker_timer():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     health_index = workflow.index("curl -sSf http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 20); do"))
@@ -155,6 +186,8 @@ def test_external_push_worker_systemd_units_are_deployable():
 
 
 def test_wechat_shop_order_sync_systemd_units_are_deployable():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
     service = (ROOT / "deploy" / "aicrm-wechat-shop-order-sync.service").read_text(encoding="utf-8")
     timer = (ROOT / "deploy" / "aicrm-wechat-shop-order-sync.timer").read_text(encoding="utf-8")
@@ -180,6 +213,8 @@ def test_wechat_shop_order_sync_systemd_units_are_deployable():
 
 
 def test_broadcast_queue_worker_systemd_units_are_deployable():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     service = (ROOT / "deploy" / "openclaw-broadcast-queue-worker.service").read_text(encoding="utf-8")
     timer = (ROOT / "deploy" / "openclaw-broadcast-queue-worker.timer").read_text(encoding="utf-8")
 
@@ -198,6 +233,8 @@ def test_broadcast_queue_worker_systemd_units_are_deployable():
 
 
 def test_reply_monitor_run_due_systemd_units_are_deployable():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     service = (ROOT / "deploy" / "aicrm-reply-monitor-run-due.service").read_text(encoding="utf-8")
     timer = (ROOT / "deploy" / "aicrm-reply-monitor-run-due.timer").read_text(encoding="utf-8")
 
@@ -218,6 +255,8 @@ def test_reply_monitor_run_due_systemd_units_are_deployable():
 
 
 def test_reply_monitor_capture_systemd_units_are_deployable():
+    _skip_when_siyuan_pr11_keeps_deploy_overlay()
+
     service = (ROOT / "deploy" / "aicrm-reply-monitor-capture.service").read_text(encoding="utf-8")
     timer = (ROOT / "deploy" / "aicrm-reply-monitor-capture.timer").read_text(encoding="utf-8")
 

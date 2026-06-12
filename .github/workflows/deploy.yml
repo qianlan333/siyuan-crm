@@ -35,12 +35,13 @@ jobs:
             else
               pip install -r requirements.txt
             fi
-            # 1) AI-CRM Next schema migrations
-            sudo systemctl stop openclaw-broadcast-queue-worker.timer || true
-            sudo systemctl stop openclaw-broadcast-queue-worker.service || true
-            sudo systemctl stop aicrm-wechat-shop-order-sync.timer || true
-            sudo systemctl stop aicrm-wechat-shop-order-sync.service || true
+            # 1) AI-CRM Next safe schema init（幂等；不 DROP/TRUNCATE）
+            python3 app.py health
+            python3 app.py init-next-schema-safe
+            # 2) Alembic migration（真实执行 DDL；不要 stamp 跳过 schema 变更）
             python3 -m alembic upgrade head
+            # 3) 修复历史 stamp head 导致版本已到 head 但渠道多客服 DDL 未落库的环境
+            python3 scripts/ensure_channel_multi_staff_schema.py
             sudo systemctl restart openclaw-wecom-postgres.service
             for _ in $(seq 1 20); do
               if curl -sSf http://127.0.0.1:5001/health; then
@@ -49,42 +50,11 @@ jobs:
               sleep 0.5
             done
             curl -sSf http://127.0.0.1:5001/health
+            curl -sSf http://127.0.0.1:5001/api/admin/channels?limit=1 >/tmp/aicrm_channels_smoke.json
             sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/
             sudo cp deploy/openclaw-external-push-worker.timer /etc/systemd/system/
-            sudo cp deploy/aicrm-reply-monitor-capture.service /etc/systemd/system/
-            sudo cp deploy/aicrm-reply-monitor-capture.timer /etc/systemd/system/
-            sudo cp deploy/aicrm-reply-monitor-run-due.service /etc/systemd/system/
-            sudo cp deploy/aicrm-reply-monitor-run-due.timer /etc/systemd/system/
-            sudo cp deploy/openclaw-broadcast-queue-worker.service /etc/systemd/system/
-            sudo cp deploy/openclaw-broadcast-queue-worker.timer /etc/systemd/system/
-            sudo cp deploy/aicrm-wechat-shop-order-sync.service /etc/systemd/system/
-            sudo cp deploy/aicrm-wechat-shop-order-sync.timer /etc/systemd/system/
             sudo systemctl daemon-reload
             sudo systemctl enable openclaw-external-push-worker.timer
             sudo systemctl restart openclaw-external-push-worker.timer
             sudo systemctl start openclaw-external-push-worker.service
             sudo systemctl status openclaw-external-push-worker.timer --no-pager
-            sudo systemctl enable aicrm-wechat-shop-order-sync.timer
-            sudo systemctl restart aicrm-wechat-shop-order-sync.timer
-            if ! sudo systemctl start aicrm-wechat-shop-order-sync.service; then
-              sudo systemctl status aicrm-wechat-shop-order-sync.service --no-pager || true
-              sudo journalctl -u aicrm-wechat-shop-order-sync.service -n 80 --no-pager || true
-            fi
-            sudo systemctl status aicrm-wechat-shop-order-sync.timer --no-pager
-            sudo systemctl enable aicrm-reply-monitor-capture.timer
-            sudo systemctl restart aicrm-reply-monitor-capture.timer
-            sudo systemctl status aicrm-reply-monitor-capture.timer --no-pager
-            sudo systemctl enable aicrm-reply-monitor-run-due.timer
-            sudo systemctl restart aicrm-reply-monitor-run-due.timer
-            if ! sudo systemctl start aicrm-reply-monitor-run-due.service; then
-              sudo systemctl status aicrm-reply-monitor-run-due.service --no-pager || true
-              sudo journalctl -u aicrm-reply-monitor-run-due.service -n 80 --no-pager || true
-            fi
-            sudo systemctl status aicrm-reply-monitor-run-due.timer --no-pager
-            sudo systemctl enable openclaw-broadcast-queue-worker.timer
-            sudo systemctl restart openclaw-broadcast-queue-worker.timer
-            if ! sudo systemctl start openclaw-broadcast-queue-worker.service; then
-              sudo systemctl status openclaw-broadcast-queue-worker.service --no-pager || true
-              sudo journalctl -u openclaw-broadcast-queue-worker.service -n 80 --no-pager || true
-            fi
-            sudo systemctl status openclaw-broadcast-queue-worker.timer --no-pager

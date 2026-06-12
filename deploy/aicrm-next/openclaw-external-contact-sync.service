@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenClaw Broadcast Queue Worker — dispatch due broadcast_jobs
+Description=OpenClaw WeCom external contact incremental sync
 After=network.target openclaw-wecom-postgres.service
 Requires=openclaw-wecom-postgres.service
 
@@ -8,4 +8,4 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/极简 crm
 EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
-ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_broadcast_queue_worker.py'
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_external_contact_sync.py'

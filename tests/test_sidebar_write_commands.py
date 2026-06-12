@@ -158,7 +158,7 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
         def __init__(self):
             self.people = [
                 {"id": 3, "mobile": "13800138123", "third_party_user_id": "tp_old"},
-                {"id": 7, "mobile": "17380533527", "third_party_user_id": "tp_existing"},
+                {"id": 7, "mobile": "13800138000", "third_party_user_id": "tp_existing"},
             ]
             self.bindings = {
                 "wm_prod_sidebar_001": {
@@ -252,7 +252,7 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
             "external_userid": "wm_prod_sidebar_001",
             "owner_userid": "sales_09",
             "bind_by_userid": "sales_09",
-            "mobile": "17380533527",
+            "mobile": "13800138000",
             "force_rebind": True,
         },
     )
@@ -263,7 +263,7 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
     assert body["source_status"] == "next_command"
     assert body["fallback_used"] is False
     assert body["real_external_call_executed"] is False
-    assert body["binding"]["mobile"] == "17380533527"
+    assert body["binding"]["mobile"] == "13800138000"
     assert body["binding"]["owner_userid"] == "sales_09"
     assert body["lead_pool_merge"]["action_type"] == "lead_pool_update"
     assert "production-ready for command execution" not in response.text

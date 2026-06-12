@@ -89,14 +89,14 @@ def test_questionnaire_submit_extracts_mobile_answer_and_runs_binding_boundary()
     ).execute(
         "hxc-activation-v1",
         QuestionnaireSubmitRequest(
-            answers={"q_activation": "activated", "q_mobile": "+86 138-3560-4611"},
-            respondent_identity={"external_userid": "wmbNXyCwAAmPAoMr3Yz015qYew8ADdMA"},
+                answers={"q_activation": "activated", "q_mobile": "+86 138-0013-8000"},
+            respondent_identity={"external_userid": "external-test-identity"},
         ),
     )
 
     assert result["ok"] is True
-    assert identity_query.query.mobile == "13835604611"
-    assert result["mobile"] == "13835604611"
+    assert identity_query.query.mobile == "13800138000"
+    assert result["mobile"] == "13800138000"
     assert result["side_effects"]["mobile_binding"]["ok"] is True
-    assert gateway.mobile_binding_calls[0]["submission"]["mobile"] == "13835604611"
-    assert gateway.mobile_binding_calls[0]["submission"]["external_userid"] == "wmbNXyCwAAmPAoMr3Yz015qYew8ADdMA"
+    assert gateway.mobile_binding_calls[0]["submission"]["mobile"] == "13800138000"
+    assert gateway.mobile_binding_calls[0]["submission"]["external_userid"] == "external-test-identity"

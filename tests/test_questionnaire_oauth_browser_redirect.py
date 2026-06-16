@@ -59,13 +59,43 @@ def test_h5_auth_gate_uses_browser_redirect_oauth_start_url(client: TestClient) 
     assert response.status_code == 200
     html = response.text
     assert '"mode": "auth_gate"' in html
-    assert "立即授权并填写" in html
+    assert "立即认证并填写" in html
     assert "/api/h5/wechat/oauth/start" in html
     assert "response_mode=redirect" in html
     assert "redirect=%2Fs%2Fhxc-activation-v1" in html
     assert "source_channel=wechat" in html
     assert "campaign_id=cmp_001" in html
     assert "staff_id=staff_001" in html
+
+
+def test_h5_submit_without_wechat_identity_returns_oauth_redirect(client: TestClient) -> None:
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={"answers": {"q_activation": "activated"}},
+        headers={"User-Agent": WECHAT_UA},
+    )
+
+    assert response.status_code == 401
+    body = response.json()
+    assert body["ok"] is False
+    assert body["error"] == "oauth_required"
+    assert body["message"] == "请先完成企微认证，认证成功后再提交问卷"
+    assert body["redirect_url"].startswith("/api/h5/wechat/oauth/start?")
+    assert "response_mode=redirect" in body["redirect_url"]
+    assert "redirect=%2Fs%2Fhxc-activation-v1" in body["redirect_url"]
+    assert body["write_model_status"] == "blocked"
+    assert body["real_external_call_executed"] is False
+
+
+def test_h5_page_handles_oauth_required_submit_without_exposing_raw_error(client: TestClient) -> None:
+    response = client.get("/s/hxc-activation-v1", params={"openid": "openid-next-public-001"})
+
+    assert response.status_code == 200
+    html = response.text
+    assert "function startOAuthRedirect" in html
+    assert "oauth_required_redirect" in html
+    assert "请先完成企微认证" in html
+    assert html.index("if (isOAuthRequired(result))") < html.index("throw new Error(result.error || '提交失败')")
 
 
 def test_oauth_callback_default_still_returns_json_and_cookie(client: TestClient) -> None:

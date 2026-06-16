@@ -313,20 +313,20 @@
   <div class="page-shell">
     {% if page_state.mode == "auth_gate" %}
     <section class="hero-card">
-      <p class="eyebrow">微信问卷入口</p>
-      <h1>点击下方授权，登记表单</h1>
-      <p class="hero-subtitle">授权后即可填写问卷信息</p>
+      <p class="eyebrow">企微认证入口</p>
+      <h1>点击下方认证，登记表单</h1>
+      <p class="hero-subtitle">认证成功后即可填写并提交问卷</p>
       {% if page_state.description %}
       <p class="hero-subtitle">{{ page_state.description }}</p>
       {% endif %}
       <div class="hero-actions">
         {% if page_state.oauth_start_url %}
-        <a href="{{ page_state.oauth_start_url }}">立即授权并填写</a>
+        <a href="{{ page_state.oauth_start_url }}">立即认证并填写</a>
         {% else %}
-        <button type="button" disabled>暂时无法授权</button>
+        <button type="button" disabled>暂时无法认证</button>
         {% endif %}
       </div>
-      <div class="hero-meta">仅需一次授权，即可继续填写当前问卷</div>
+      <div class="hero-meta">仅需一次认证，即可继续填写当前问卷</div>
       {% if page_state.env_notice %}
       <p class="hero-note">{{ page_state.env_notice }}</p>
       {% endif %}
@@ -445,6 +445,34 @@
         if (typeof error === 'string') return error;
         if (error instanceof Error && error.message) return error.message;
         return fallback;
+      }
+
+      function isOAuthRequired(result) {
+        return Boolean(result && (result.error === 'oauth_required' || result.source_status === 'oauth_required'));
+      }
+
+      function oauthRedirectUrl(result) {
+        if (result && result.redirect_url) return result.redirect_url;
+        if (pageState.oauth_start_url) return pageState.oauth_start_url;
+        return '';
+      }
+
+      function startOAuthRedirect(result) {
+        const redirectUrl = oauthRedirectUrl(result);
+        const message = (result && result.message) || '请先完成企微认证，认证成功后会回到问卷继续提交。';
+        reportClientIssue('oauth_required_redirect', message, {
+          hasRedirectUrl: Boolean(redirectUrl),
+          submitUrl,
+        });
+        setState(message, true);
+        if (redirectUrl) {
+          window.setTimeout(() => {
+            window.location.href = redirectUrl;
+          }, 450);
+          return true;
+        }
+        setState('请先完成企微认证后再提交问卷；当前认证入口不可用，请联系管理员。', true);
+        return false;
       }
 
       function reportClientIssue(stage, message, extra = {}) {
@@ -919,6 +947,10 @@
               window.location.href = submittedUrl;
               return;
             }
+            if (isOAuthRequired(data)) {
+              startOAuthRedirect(data);
+              return;
+            }
             if (!ok || !data.ok) throw new Error(data.error || '问卷不存在');
             renderQuestionnaire({ ...(data.questionnaire || {}), questions: data.questions || (data.questionnaire || {}).questions || [] });
             setState('');
@@ -1028,6 +1060,10 @@
               return;
             }
             window.location.href = submittedUrl;
+            return;
+          }
+          if (isOAuthRequired(result)) {
+            startOAuthRedirect(result);
             return;
           }
           if (!response.ok || !result.success) {

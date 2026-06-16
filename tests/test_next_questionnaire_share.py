@@ -81,7 +81,7 @@ def test_wechat_browser_without_authorized_identity_shows_auth_gate(monkeypatch)
     )
 
     assert response.status_code == 200
-    assert "授权后即可填写问卷信息" in response.text
+    assert "认证成功后即可填写并提交问卷" in response.text
     assert "/api/h5/wechat/oauth/start?" in response.text
     assert "questionnaire_h5_identity=" in response.headers.get("set-cookie", "")
 
@@ -94,7 +94,7 @@ def test_wechat_browser_with_query_identity_can_open_questionnaire(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert "授权后即可填写问卷信息" not in response.text
+    assert "认证成功后即可填写并提交问卷" not in response.text
     assert "黄小璨激活问卷" in response.text
     assert "name=\"openid\" value=\"openid-next-public-001\"" in response.text
 

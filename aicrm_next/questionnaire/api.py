@@ -373,7 +373,7 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
                 {
                     "ok": False,
                     "error": "oauth_required",
-                    "message": "请先完成微信授权后再提交问卷",
+                    "message": "请先完成企微认证，认证成功后再提交问卷",
                     "redirect_url": _questionnaire_oauth_start_url(slug, _request_values(request, _QUESTIONNAIRE_SOURCE_PARAM_FIELDS)),
                     "source_status": "oauth_required",
                     "write_model_status": "blocked",
@@ -956,7 +956,7 @@ def public_questionnaire_h5_page(request: Request, slug: str):
     page_mode = "auth_gate" if should_require_oauth else "questionnaire"
     env_notice = ""
     if page_mode == "auth_gate":
-        env_notice = "授权后即可填写问卷信息。" if oauth_configured else "当前微信登录配置未完成，请联系管理员。"
+        env_notice = "认证成功后即可填写并提交问卷。" if oauth_configured else "当前企微认证配置未完成，请联系管理员。"
     page_state = {
         "mode": page_mode,
         "slug": slug,

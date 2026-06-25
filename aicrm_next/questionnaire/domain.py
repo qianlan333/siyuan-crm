@@ -307,4 +307,30 @@ def score_and_tags(questionnaire: dict[str, Any], answers: dict[str, Any]) -> tu
             for tag_code in option.get("tag_codes") or []:
                 if tag_code not in tags:
                     tags.append(str(tag_code))
+    for tag_code in score_rule_tags(questionnaire, score):
+        if tag_code not in tags:
+            tags.append(tag_code)
     return score, tags
+
+
+def score_rule_tags(questionnaire: dict[str, Any], score: int | float) -> list[str]:
+    tags: list[str] = []
+    numeric_score = float(score or 0)
+    for rule in normalize_questionnaire(questionnaire)["score_rules"]:
+        if not _score_rule_matches(rule, numeric_score):
+            continue
+        for tag_code in rule.get("tag_codes") or []:
+            normalized = str(tag_code or "").strip()
+            if normalized and normalized not in tags:
+                tags.append(normalized)
+    return tags
+
+
+def _score_rule_matches(rule: dict[str, Any], score: float) -> bool:
+    min_score = rule.get("min_score")
+    max_score = rule.get("max_score")
+    if min_score not in (None, "") and score < float(min_score):
+        return False
+    if max_score not in (None, "") and score > float(max_score):
+        return False
+    return True

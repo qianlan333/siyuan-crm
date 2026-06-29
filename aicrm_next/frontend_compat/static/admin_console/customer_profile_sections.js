@@ -9,11 +9,27 @@
   const showSectionError = CustomerProfile.showSectionError;
   const showSectionEmpty = CustomerProfile.showSectionEmpty;
 
+  function liveTagName(tag) {
+    let value = "";
+    if (tag && typeof tag === "object") {
+      value = tag.tag_name || tag.name || tag.tag_id || tag.id || "";
+    } else {
+      value = tag;
+    }
+    const normalized = String(value || "").trim();
+    if (!normalized || normalized.toLowerCase() === "undefined" || normalized.toLowerCase() === "null") {
+      return "";
+    }
+    return normalized;
+  }
+
   function renderLiveTags(payload) {
     const stateNode = document.querySelector("[data-profile-tags-state]");
     const listNode = document.querySelector("[data-profile-tags]");
     if (!stateNode || !listNode) return;
-    const tags = payload && Array.isArray(payload.tags) ? payload.tags : [];
+    const tags = (payload && Array.isArray(payload.tags) ? payload.tags : [])
+      .map(liveTagName)
+      .filter(Boolean);
     if (!tags.length) {
       listNode.hidden = true;
       showSectionEmpty(stateNode, "当前没有实时标签", "暂未读取到企微标签。");
@@ -22,7 +38,7 @@
     stateNode.hidden = true;
     listNode.hidden = false;
     listNode.innerHTML = tags
-      .map((tag) => `<span class="admin-profile-tag">${tag.tag_name || tag.tag_id}</span>`)
+      .map((tag) => `<span class="admin-profile-tag">${escapeHtml(tag)}</span>`)
       .join("");
   }
 

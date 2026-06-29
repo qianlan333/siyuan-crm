@@ -1,16 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
 
 
-def _endpoint_module(path: str) -> str:
-    app = create_app()
-    for route in app.routes:
-        if getattr(route, "path", "") == path and "GET" in getattr(route, "methods", set()):
-            return route.endpoint.__module__
-    raise AssertionError(f"missing route for {path}")
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _read_frontend(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
 
 
 def _profile_result(
@@ -71,7 +72,7 @@ def test_customer_detail_page_renders_from_native_shell(monkeypatch) -> None:
     assert "data-automation-mark-won-url=" in response.text
     assert "data-automation-unmark-won-url=" in response.text
     assert "data-automation-push-openclaw-url=" in response.text
-    assert _endpoint_module("/admin/customers/{external_userid}") == "aicrm_next.customer_read_model.admin_pages"
+    assert response.headers.get("x-aicrm-route-owner") == "ai_crm_next"
 
 
 def test_customer_detail_page_tab_mapping_is_preserved(monkeypatch) -> None:
@@ -114,6 +115,19 @@ def test_customer_detail_page_url_contract_is_preserved(monkeypatch) -> None:
         "/api/admin/automation-conversion/member/push-openclaw",
     ):
         assert marker in response.text
+
+
+def test_customer_detail_live_tags_frontend_accepts_string_tags() -> None:
+    source = _read_frontend("aicrm_next/frontend_compat/static/admin_console/customer_profile_sections.js")
+    css = _read_frontend("aicrm_next/frontend_compat/static/admin_console/admin_console.css")
+
+    assert "function liveTagName(tag)" in source
+    assert "tag.tag_name || tag.name || tag.tag_id || tag.id" in source
+    assert ".map(liveTagName)" in source
+    assert 'normalized.toLowerCase() === "undefined"' in source
+    assert "escapeHtml(tag)" in source
+    assert "[hidden]" in css
+    assert "display: none !important" in css
 
 
 def test_customer_detail_page_not_found_state_is_preserved(monkeypatch) -> None:

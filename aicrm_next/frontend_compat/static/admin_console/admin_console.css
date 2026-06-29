@@ -833,6 +833,10 @@ code {
   margin-top: 6px;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 .admin-state {
   display: flex;
   flex-direction: column;

@@ -6,6 +6,12 @@ from uuid import uuid4
 
 from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
 from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.channel_entry.wecom_adapter import (
+    WeComAdapterBlocked,
+    WeComApiError,
+    get_wecom_adapter,
+    wecom_adapter_diagnostics,
+)
 from aicrm_next.customer_tags.live_mutation import execute_wecom_tag_mutation
 from aicrm_next.customer_tags.mutation_commands import PlanQuestionnaireTagSideEffectCommand
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
@@ -341,7 +347,9 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         external_push_result=external_push_result,
         tag_side_effect=tag_side_effect,
     )
-    real_external_call_executed = bool(external_push_result.get("attempted"))
+    real_external_call_executed = bool(external_push_result.get("attempted")) or bool(
+        tag_side_effect.get("real_external_call_executed")
+    )
     return {
         "ok": True,
         "success": True,
@@ -473,11 +481,13 @@ def _create_submit_side_effect_plan(
 ) -> SideEffectPlan:
     external_push_config = dict(questionnaire.get("external_push_config") or {})
     external_push_attempted = bool(external_push_result.get("attempted"))
+    tag_real_call_executed = bool(tag_side_effect.get("real_external_call_executed"))
+    any_real_call_executed = external_push_attempted or tag_real_call_executed
     return _side_effect_plans.create_plan(
         command_id=command.command_id,
         effect_type="questionnaire.h5.submit.side_effects",
         adapter_name="questionnaire_submit",
-        adapter_mode="real_enabled" if external_push_attempted else "real_blocked",
+        adapter_mode="real_enabled" if any_real_call_executed else "real_blocked",
         target_type="questionnaire_submission",
         target_id=str(submission.get("submission_id") or ""),
         payload={
@@ -491,22 +501,24 @@ def _create_submit_side_effect_plan(
                 "external_push_status": external_push_result.get("status") or "",
                 "external_push_log_id": (external_push_result.get("log") or {}).get("id") if isinstance(external_push_result.get("log"), dict) else None,
                 "questionnaire_tag_effect_type": tag_side_effect.get("effect_type") or "",
+                "questionnaire_tag_real_call_executed": tag_real_call_executed,
+                "questionnaire_tag_status": tag_side_effect.get("source_status") or "",
             },
             "planned_effects": [
                 effect
                 for effect in [
-                    "wecom.tag.plan" if final_tags else "",
+                    ("wecom.tag.executed" if tag_real_call_executed else "wecom.tag.plan") if final_tags else "",
                     "external_push.executed" if external_push_attempted else ("external_push.skipped" if external_push_config.get("enabled") else ""),
                     "automation.questionnaire_result.plan",
                 ]
                 if effect
             ],
-            "real_external_call_executed": external_push_attempted,
+            "real_external_call_executed": any_real_call_executed,
         },
-        status="executed" if external_push_attempted else "planned",
+        status="executed" if any_real_call_executed else "planned",
         risk_level="medium",
-        requires_approval=not external_push_attempted,
-        executed_at=utcnow_iso() if external_push_attempted else "",
+        requires_approval=not any_real_call_executed,
+        executed_at=utcnow_iso() if any_real_call_executed else "",
     )
 
 
@@ -531,6 +543,35 @@ def _plan_questionnaire_tag_side_effect(
             "skipped": True,
             "reason": "missing_external_userid_or_tags",
         }
+    follow_user_userid = str(submission.get("follow_user_userid") or submission.get("staff_id") or "").strip()
+    diagnostics = wecom_adapter_diagnostics()
+    if bool(diagnostics.get("can_mark_tag")):
+        if not follow_user_userid:
+            return {
+                "ok": False,
+                "source_status": "next_live_wecom",
+                "route_owner": "ai_crm_next",
+                "fallback_used": False,
+                "effect_type": "questionnaire.tag.apply",
+                "adapter_mode": "real_enabled",
+                "external_userid": external_userid,
+                "tag_ids": list(final_tags),
+                "real_external_call_executed": False,
+                "wecom_api_called": False,
+                "live_call_executed": False,
+                "mark_tag_executed": False,
+                "skipped": True,
+                "reason": "missing_follow_user_userid",
+                "diagnostics": diagnostics,
+            }
+        return _execute_questionnaire_tag_live(
+            questionnaire=questionnaire,
+            submission=submission,
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            final_tags=final_tags,
+            diagnostics=diagnostics,
+        )
     return execute_wecom_tag_mutation(
         PlanQuestionnaireTagSideEffectCommand(
             idempotency_key=f"{command.idempotency_key or command.command_id}:questionnaire-tag-apply",
@@ -548,6 +589,115 @@ def _plan_questionnaire_tag_side_effect(
             trace_id=command.context.trace_id,
         )
     )
+
+
+def _execute_questionnaire_tag_live(
+    *,
+    questionnaire: dict[str, Any],
+    submission: dict[str, Any],
+    external_userid: str,
+    follow_user_userid: str,
+    final_tags: list[str],
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    attempted = bool(final_tags)
+    try:
+        payload = get_wecom_adapter().mark_external_contact_tags(
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            add_tags=final_tags,
+            remove_tags=[],
+        )
+        success = int(payload.get("errcode") or 0) == 0
+        return {
+            "ok": success,
+            "source_status": "wecom_live_mark_tag_completed" if success else "wecom_live_mark_tag_failed",
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "effect_type": "questionnaire.tag.apply",
+            "adapter_mode": "real_enabled",
+            "external_userid": external_userid,
+            "follow_user_userid": follow_user_userid,
+            "tag_ids": list(final_tags),
+            "source_context": {
+                "source": "questionnaire_h5_submit",
+                "questionnaire_id": int(questionnaire["id"]),
+                "submission_id": submission.get("submission_id") or "",
+                "slug": questionnaire.get("slug") or "",
+            },
+            "wecom_result": {
+                "errcode": payload.get("errcode"),
+                "errmsg": payload.get("errmsg") or "",
+            },
+            "real_external_call_executed": attempted,
+            "wecom_api_called": attempted,
+            "live_call_executed": attempted,
+            "mark_tag_executed": success,
+            "unmark_tag_executed": False,
+            "diagnostics": diagnostics,
+        }
+    except WeComAdapterBlocked as exc:
+        return _questionnaire_tag_live_error(
+            error_code=exc.reason,
+            error_message=str(exc),
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            final_tags=final_tags,
+            attempted=False,
+            diagnostics=diagnostics,
+        )
+    except WeComApiError as exc:
+        payload = dict(exc.payload or {})
+        return _questionnaire_tag_live_error(
+            error_code=str(payload.get("errcode") or "wecom_api_error"),
+            error_message=str(payload.get("errmsg") or exc.message),
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            final_tags=final_tags,
+            attempted=attempted,
+            diagnostics=diagnostics,
+        )
+    except Exception as exc:
+        return _questionnaire_tag_live_error(
+            error_code=exc.__class__.__name__,
+            error_message=str(exc),
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            final_tags=final_tags,
+            attempted=attempted,
+            diagnostics=diagnostics,
+        )
+
+
+def _questionnaire_tag_live_error(
+    *,
+    error_code: str,
+    error_message: str,
+    external_userid: str,
+    follow_user_userid: str,
+    final_tags: list[str],
+    attempted: bool,
+    diagnostics: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "ok": False,
+        "source_status": "wecom_live_mark_tag_failed",
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "effect_type": "questionnaire.tag.apply",
+        "adapter_mode": "real_enabled" if attempted else "real_blocked",
+        "external_userid": external_userid,
+        "follow_user_userid": follow_user_userid,
+        "tag_ids": list(final_tags),
+        "error_code": error_code,
+        "error": error_message,
+        "real_external_call_executed": attempted,
+        "wecom_api_called": attempted,
+        "live_call_executed": attempted,
+        "mark_tag_executed": False,
+        "unmark_tag_executed": False,
+        "diagnostics": diagnostics,
+    }
 
 
 def _plan_response(plan: SideEffectPlan) -> dict[str, Any]:

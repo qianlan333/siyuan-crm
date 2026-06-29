@@ -14,6 +14,10 @@ from aicrm_next.channel_entry.wecom_adapter import (
 )
 from aicrm_next.customer_tags.live_mutation import execute_wecom_tag_mutation
 from aicrm_next.customer_tags.mutation_commands import PlanQuestionnaireTagSideEffectCommand
+from aicrm_next.customer_tags.questionnaire_projection import (
+    QuestionnaireTagProjectionError,
+    apply_questionnaire_tag_projection,
+)
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
 from aicrm_next.platform_foundation.command_bus.models import utcnow_iso
@@ -651,6 +655,12 @@ def _execute_questionnaire_tag_live(
             remove_tags=[],
         )
         success = int(payload.get("errcode") or 0) == 0
+        local_projection = _sync_questionnaire_tag_projection(
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            final_tags=final_tags,
+            enabled=success,
+        )
         return {
             "ok": success,
             "source_status": "wecom_live_mark_tag_completed" if success else "wecom_live_mark_tag_failed",
@@ -676,6 +686,7 @@ def _execute_questionnaire_tag_live(
             "live_call_executed": attempted,
             "mark_tag_executed": success,
             "unmark_tag_executed": False,
+            "local_projection": local_projection,
             "diagnostics": diagnostics,
         }
     except WeComAdapterBlocked as exc:
@@ -740,6 +751,40 @@ def _questionnaire_tag_live_error(
         "unmark_tag_executed": False,
         "diagnostics": diagnostics,
     }
+
+
+def _sync_questionnaire_tag_projection(
+    *,
+    external_userid: str,
+    follow_user_userid: str,
+    final_tags: list[str],
+    enabled: bool,
+) -> dict[str, Any]:
+    if not enabled:
+        return {
+            "ok": False,
+            "skipped": True,
+            "reason": "wecom_mark_tag_not_successful",
+            "external_userid": external_userid,
+            "follow_user_userid": follow_user_userid,
+            "tag_ids": list(final_tags),
+        }
+    try:
+        return apply_questionnaire_tag_projection(
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            tag_ids=final_tags,
+        )
+    except QuestionnaireTagProjectionError as exc:
+        return {
+            "ok": False,
+            "skipped": False,
+            "reason": "questionnaire_tag_projection_failed",
+            "error": str(exc),
+            "external_userid": external_userid,
+            "follow_user_userid": follow_user_userid,
+            "tag_ids": list(final_tags),
+        }
 
 
 def _plan_response(plan: SideEffectPlan) -> dict[str, Any]:

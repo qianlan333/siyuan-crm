@@ -7,6 +7,7 @@ from aicrm_next.shared.typing import JsonDict
 from .application import GetAdminCustomerProfileQuery, GetAdminCustomerProfileTagsQuery, GetCustomerContextQuery, ListRecentMessagesQuery
 from .dto import RecentMessagesRequest
 from .repo import CustomerReadRepository
+from .sidebar_v2 import SidebarV2SqlRepository
 
 ROUTE_OWNER = "ai_crm_next"
 
@@ -59,6 +60,43 @@ def _questionnaire_answers(profile: dict[str, Any]) -> list[JsonDict]:
     return answers
 
 
+def _questionnaire_answer_text(row: dict[str, Any]) -> str:
+    selected = row.get("selected_option_texts_snapshot")
+    if isinstance(selected, list):
+        answer = "、".join(str(item) for item in selected if str(item or "").strip())
+    else:
+        answer = _text(selected)
+    return answer or _text(row.get("text_value"))
+
+
+def _questionnaire_answers_from_submissions(*, external_userid: str, mobile: str = "") -> list[JsonDict]:
+    if not external_userid and not mobile:
+        return []
+    rows = SidebarV2SqlRepository().list_questionnaire_answers(external_userid=external_userid, mobile=mobile)
+    answers: list[JsonDict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        answer = _questionnaire_answer_text(row)
+        if not answer:
+            continue
+        normalized = {
+            "questionnaire_id": _text(row.get("questionnaire_id")),
+            "questionnaire_title": _text(row.get("questionnaire_title")),
+            "submission_id": _text(row.get("submission_id")),
+            "submitted_at": _text(row.get("submitted_at")),
+            "question_id": _text(row.get("question_id")),
+            "question": _text(row.get("question")) or "未命名问题",
+            "answer": answer,
+            "raw": row,
+        }
+        key = (normalized["submission_id"], normalized["question_id"], normalized["question"])
+        if key in seen:
+            continue
+        seen.add(key)
+        answers.append(normalized)
+    return answers
+
+
 def get_customer_business_profile(
     external_userid: str,
     *,
@@ -82,6 +120,11 @@ def get_customer_business_profile(
     tags = list(tags_result.get("tags") or [])
     recent_messages = list(messages_result.get("messages") or messages_result.get("items") or [])[:requested_limit]
     questionnaire_answers = _questionnaire_answers(profile)
+    if not questionnaire_answers:
+        questionnaire_answers = _questionnaire_answers_from_submissions(
+            external_userid=external_userid,
+            mobile=_text(profile.get("mobile")),
+        )
     return {
         "ok": True,
         "external_userid": external_userid,

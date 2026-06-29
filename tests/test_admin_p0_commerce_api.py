@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 from aicrm_next.admin_config.api_docs_view_model import build_api_docs_view_model
 from aicrm_next.commerce.admin_exports import reset_export_jobs_for_tests
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
+from aicrm_next.customer_read_model import admin_business_profile, api as customer_api
 from aicrm_next.main import create_app
 
 
@@ -149,6 +150,50 @@ def test_customer_business_profile_orders_and_summary(monkeypatch) -> None:
     assert summary["ok"] is True
     assert "summary" in summary
     assert {"order_count", "paid_order_count", "total_paid_amount", "providers"}.issubset(summary["summary"])
+
+
+def test_customer_questionnaire_answers_fallback_reads_submissions(monkeypatch) -> None:
+    class FakeSidebarRepo:
+        def list_questionnaire_answers(self, *, external_userid: str, mobile: str = ""):
+            assert external_userid == "wx_ext_questionnaire"
+            return [
+                {
+                    "submission_id": 462,
+                    "questionnaire_id": 12,
+                    "questionnaire_title": "沙龙商业落地需求调研",
+                    "submitted_at": "2026-06-27 07:44:14+08:00",
+                    "question_id": "q_industry",
+                    "question": "你目前所处的行业是？",
+                    "selected_option_texts_snapshot": ["健康/养生/大健康"],
+                    "text_value": "",
+                },
+                {
+                    "submission_id": 462,
+                    "questionnaire_id": 12,
+                    "questionnaire_title": "沙龙商业落地需求调研",
+                    "submitted_at": "2026-06-27 07:44:14+08:00",
+                    "question_id": "q_mobile",
+                    "question": "手机号",
+                    "selected_option_texts_snapshot": [],
+                    "text_value": "15820198818",
+                },
+            ]
+
+    monkeypatch.setattr(customer_api, "SidebarV2SqlRepository", FakeSidebarRepo)
+    monkeypatch.setattr(admin_business_profile, "SidebarV2SqlRepository", FakeSidebarRepo)
+
+    answers = customer_api._profile_questionnaire_answers_from_submissions(
+        external_userid="wx_ext_questionnaire",
+        mobile="",
+    )
+    business_answers = admin_business_profile._questionnaire_answers_from_submissions(
+        external_userid="wx_ext_questionnaire",
+        mobile="",
+    )
+
+    assert [item["answer"] for item in answers] == ["健康/养生/大健康", "15820198818"]
+    assert business_answers[0]["questionnaire_title"] == "沙龙商业落地需求调研"
+    assert business_answers[1]["answer"] == "15820198818"
 
 
 def test_identity_admin_resolve_and_links(monkeypatch) -> None:

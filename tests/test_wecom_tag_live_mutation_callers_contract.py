@@ -62,11 +62,24 @@ def test_questionnaire_submit_tag_side_effect_uses_next_plan(monkeypatch) -> Non
 
 def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeypatch) -> None:
     calls: list[dict] = []
+    mobile_bind_calls: list[dict] = []
 
     class FakeWeComAdapter:
         def mark_external_contact_tags(self, **payload):
             calls.append(dict(payload))
             return {"errcode": 0, "errmsg": "ok"}
+
+    class FakeBindMobileToExternalContactCommand:
+        def __call__(self, request):
+            mobile_bind_calls.append(
+                {
+                    "external_userid": request.external_userid,
+                    "mobile": request.mobile,
+                    "owner_userid": request.owner_userid,
+                    "bind_by_userid": request.bind_by_userid,
+                }
+            )
+            return {"binding_status": "bound"}
 
     class FakeResolvePersonIdentityQuery:
         def __call__(self, request):
@@ -87,6 +100,7 @@ def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeyp
     monkeypatch.setenv("WECOM_CORP_ID", "ww-test")
     monkeypatch.setenv("WECOM_CONTACT_SECRET", "secret")
     monkeypatch.setattr(h5_write, "ResolvePersonIdentityQuery", FakeResolvePersonIdentityQuery)
+    monkeypatch.setattr(h5_write, "BindMobileToExternalContactCommand", FakeBindMobileToExternalContactCommand)
     set_wecom_adapter(FakeWeComAdapter())
     try:
         client = TestClient(create_app(), raise_server_exceptions=False)
@@ -94,7 +108,7 @@ def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeyp
             "/api/h5/questionnaires/hxc-activation-v1/submit",
             json={
                 "answers": {"q_activation": "activated", "q_interest": ["ai_tools"]},
-                "identity": {"external_userid": "wx_real_tag_001"},
+                "identity": {"external_userid": "wx_real_tag_001", "mobile": "13800138000"},
             },
             headers={"Idempotency-Key": "questionnaire-tag-real-live"},
         )
@@ -116,6 +130,15 @@ def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeyp
             "remove_tags": [],
         }
     ]
+    assert mobile_bind_calls == [
+        {
+            "external_userid": "wx_real_tag_001",
+            "mobile": "13800138000",
+            "owner_userid": "owner-real-tag",
+            "bind_by_userid": "owner-real-tag",
+        }
+    ]
+    assert response.json()["side_effects"]["mobile_binding"]["binding_status"] == "bound"
     assert "wecom.tag.executed" in response.json()["side_effect_plan"]["payload"]["planned_effects"]
 
 

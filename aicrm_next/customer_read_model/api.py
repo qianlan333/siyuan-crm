@@ -36,6 +36,7 @@ from .sidebar_v2 import (
     SidebarMaterialReadModel,
     SidebarOtherStaffMessagesReadModel,
     SidebarQuestionnaireReadModel,
+    SidebarV2SqlRepository,
     SidebarWorkbenchReadModel,
 )
 
@@ -164,6 +165,43 @@ def _profile_questionnaire_answers(profile: dict) -> list[dict]:
                 continue
             seen.add(key)
             answers.append({"question": question or "未命名问题", "answer": answer or "未填写"})
+    return answers
+
+
+def _questionnaire_answer_text(row: dict) -> str:
+    selected = row.get("selected_option_texts_snapshot")
+    if isinstance(selected, list):
+        answer = "、".join(str(item) for item in selected if str(item or "").strip())
+    else:
+        answer = str(selected or "").strip()
+    return answer or str(row.get("text_value") or "").strip()
+
+
+def _profile_questionnaire_answers_from_submissions(*, external_userid: str, mobile: str = "") -> list[dict]:
+    if not external_userid and not mobile:
+        return []
+    rows = SidebarV2SqlRepository().list_questionnaire_answers(external_userid=external_userid, mobile=mobile)
+    answers: list[dict] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        question = str(row.get("question") or "").strip() or "未命名问题"
+        answer = _questionnaire_answer_text(row)
+        if not answer:
+            continue
+        item = {
+            "questionnaire_id": str(row.get("questionnaire_id") or ""),
+            "questionnaire_title": str(row.get("questionnaire_title") or ""),
+            "submission_id": str(row.get("submission_id") or ""),
+            "submitted_at": str(row.get("submitted_at") or ""),
+            "question_id": str(row.get("question_id") or ""),
+            "question": question,
+            "answer": answer,
+        }
+        key = (item["submission_id"], item["question_id"], item["question"])
+        if key in seen:
+            continue
+        seen.add(key)
+        answers.append(item)
     return answers
 
 
@@ -757,6 +795,11 @@ def get_admin_customer_profile_questionnaire_answers(
         return JSONResponse(jsonable_encoder(profile_result), status_code=_profile_result_status(profile_result))
     profile = dict(profile_result.get("profile") or profile_result.get("customer") or {})
     answers = _profile_questionnaire_answers(profile)
+    if not answers:
+        answers = _profile_questionnaire_answers_from_submissions(
+            external_userid=_profile_external_userid(profile_result),
+            mobile=str(profile.get("mobile") or mobile or "").strip(),
+        )
     latest_assessment_result = (
         dict(profile.get("latest_assessment_result") or {})
         or dict(dict(profile.get("marketing_profile") or {}).get("latest_assessment_result") or {})

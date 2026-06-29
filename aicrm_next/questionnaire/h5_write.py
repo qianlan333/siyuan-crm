@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
 
-from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
-from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.application import BindMobileToExternalContactCommand, ResolvePersonIdentityQuery
+from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest, ResolvePersonIdentityRequest
 from aicrm_next.channel_entry.wecom_adapter import (
     WeComAdapterBlocked,
     WeComApiError,
@@ -275,7 +275,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
             **identity_payload,
             "person_id": identity.person_id if identity else None,
             "external_userid": (identity.external_userid if identity else identity_payload.get("external_userid")) or "",
-            "mobile": (identity.mobile if identity else identity_payload.get("mobile")) or "",
+            "mobile": (identity.mobile if identity else "") or identity_payload.get("mobile") or "",
             "binding_status": identity.binding_status if identity else ("identity_resolution_unavailable" if identity_resolution_error else "unresolved"),
             "identity_map_id": identity.identity_map_id if identity else None,
             "follow_user_userid": (identity.follow_user_userid if identity else identity_payload.get("follow_user_userid")) or "",
@@ -333,6 +333,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         submission=submission,
         computed_result=result,
     )
+    bind_mobile_result = _bind_mobile_from_submission(submission)
     tag_side_effect = _plan_questionnaire_tag_side_effect(
         command=command,
         questionnaire=item,
@@ -374,6 +375,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         "side_effects": {
             "wecom_tag": tag_side_effect,
             "external_push": external_push_result,
+            "mobile_binding": bind_mobile_result,
         },
     }
 
@@ -454,6 +456,46 @@ def _mobile_answer_from_questions(questionnaire: dict[str, Any], answers: dict[s
         if mobile:
             return mobile
     return ""
+
+
+def _bind_mobile_from_submission(submission: dict[str, Any]) -> dict[str, Any]:
+    external_userid = str(submission.get("external_userid") or "").strip()
+    mobile = str(submission.get("mobile") or submission.get("mobile_snapshot") or "").strip()
+    if not external_userid or not mobile:
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "missing_external_userid_or_mobile",
+            "real_external_call_executed": False,
+        }
+    owner_userid = str(submission.get("follow_user_userid") or submission.get("staff_id") or "").strip()
+    try:
+        payload = BindMobileToExternalContactCommand()(
+            BindMobileToExternalContactRequest(
+                external_userid=external_userid,
+                mobile=mobile,
+                owner_userid=owner_userid or None,
+                bind_by_userid=owner_userid or "questionnaire_h5_submit",
+                force_rebind=False,
+            )
+        )
+        return {
+            "ok": True,
+            "skipped": False,
+            "source_status": "identity_mobile_bound",
+            "external_userid": external_userid,
+            "binding_status": payload.get("binding_status") or "bound",
+            "real_external_call_executed": False,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "skipped": False,
+            "source_status": "identity_mobile_bind_failed",
+            "external_userid": external_userid,
+            "error": str(exc),
+            "real_external_call_executed": False,
+        }
 
 
 def _public_identity(submission: dict[str, Any]) -> dict[str, Any]:

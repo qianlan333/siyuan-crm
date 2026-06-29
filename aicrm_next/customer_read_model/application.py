@@ -860,7 +860,7 @@ def _admin_profile_payload(
 
 
 def _admin_profile_tags_payload(customer: JsonDict, *, source_status: str) -> JsonDict:
-    tags = list(customer.get("tags") or [])
+    tags = _normalized_admin_profile_tags(customer.get("tags") or [])
     return {
         "ok": True,
         "tags": tags,
@@ -873,6 +873,30 @@ def _admin_profile_tags_payload(customer: JsonDict, *, source_status: str) -> Js
         "degraded": False,
         "status_code": 200,
     }
+
+
+def _admin_profile_tag_name(tag: object) -> str:
+    if isinstance(tag, dict):
+        for key in ("tag_name", "name", "label", "value", "text", "tag_id", "id"):
+            value = str(tag.get(key) or "").strip()
+            if value and value.lower() not in {"undefined", "null"}:
+                return value
+        return ""
+    value = str(tag or "").strip()
+    if value.lower() in {"undefined", "null"}:
+        return ""
+    return value
+
+
+def _normalized_admin_profile_tags(tags: object) -> list[str]:
+    if not isinstance(tags, list):
+        return []
+    normalized: list[str] = []
+    for item in tags:
+        tag = _admin_profile_tag_name(item)
+        if tag and tag not in normalized:
+            normalized.append(tag)
+    return normalized
 
 
 class GetCustomerContextQuery:

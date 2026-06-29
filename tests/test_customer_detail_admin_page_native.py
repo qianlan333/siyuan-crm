@@ -122,12 +122,39 @@ def test_customer_detail_live_tags_frontend_accepts_string_tags() -> None:
     css = _read_frontend("aicrm_next/frontend_compat/static/admin_console/admin_console.css")
 
     assert "function liveTagName(tag)" in source
-    assert "tag.tag_name || tag.name || tag.tag_id || tag.id" in source
+    assert "tag.tag_name || tag.name || tag.label || tag.value || tag.text || tag.tag_id || tag.id" in source
     assert ".map(liveTagName)" in source
     assert 'normalized.toLowerCase() === "undefined"' in source
     assert "escapeHtml(tag)" in source
     assert "[hidden]" in css
     assert "display: none !important" in css
+
+
+def test_customer_detail_live_tag_assets_are_cache_busted(monkeypatch) -> None:
+    _patch_profile_query(monkeypatch, _profile_result())
+    client = TestClient(create_app())
+
+    response = client.get("/admin/customers/ext_test_001")
+
+    assert response.status_code == 200
+    assert "customer_profile_sections.js?v=customer-profile-live-tags-20260629" in response.text
+    assert "customer_profile_core.js?v=customer-profile-live-tags-20260629" in response.text
+
+
+def test_customer_detail_live_tag_payload_normalizes_object_tags() -> None:
+    from aicrm_next.customer_read_model.application import _normalized_admin_profile_tags
+
+    assert _normalized_admin_profile_tags(
+        [
+            {"name": "大健康"},
+            {"tag_name": "创始人/老板/合伙人"},
+            {"label": "行业交流社群"},
+            {"tag_name": "undefined", "tag_id": "et_fallback"},
+            "undefined",
+            "大健康",
+            None,
+        ]
+    ) == ["大健康", "创始人/老板/合伙人", "行业交流社群", "et_fallback"]
 
 
 def test_customer_detail_page_not_found_state_is_preserved(monkeypatch) -> None:

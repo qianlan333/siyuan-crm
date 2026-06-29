@@ -195,8 +195,9 @@
 {% endblock %}
 
 {% block scripts_extra %}
-<script defer src="{{ url_for('static', filename='admin_console/customer_profile_core.js') }}"></script>
-<script defer src="{{ url_for('static', filename='admin_console/customer_profile_sections.js') }}"></script>
-<script defer src="{{ url_for('static', filename='admin_console/customer_profile_automation.js') }}"></script>
-<script defer src="{{ url_for('static', filename='admin_console/customer_profile.js') }}"></script>
+{% set customer_profile_asset_version = "customer-profile-live-tags-20260629" %}
+<script defer src="{{ url_for('static', filename='admin_console/customer_profile_core.js') }}?v={{ customer_profile_asset_version }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/customer_profile_sections.js') }}?v={{ customer_profile_asset_version }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/customer_profile_automation.js') }}?v={{ customer_profile_asset_version }}"></script>
+<script defer src="{{ url_for('static', filename='admin_console/customer_profile.js') }}?v={{ customer_profile_asset_version }}"></script>
 {% endblock %}

@@ -12,7 +12,7 @@
   function liveTagName(tag) {
     let value = "";
     if (tag && typeof tag === "object") {
-      value = tag.tag_name || tag.name || tag.tag_id || tag.id || "";
+      value = tag.tag_name || tag.name || tag.label || tag.value || tag.text || tag.tag_id || tag.id || "";
     } else {
       value = tag;
     }

@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
+from aicrm_next.questionnaire import h5_write
 from aicrm_next.questionnaire.h5_write import get_questionnaire_h5_write_audit_events
 from aicrm_next.questionnaire.oauth import COOKIE_NAME, build_questionnaire_h5_identity_cookie
 
@@ -134,6 +135,54 @@ def test_h5_submit_persists_when_identity_resolution_is_unavailable(client: Test
     assert body["external_userid"] == "wm_identity_resolution_down_001"
     assert body["mobile"] == "13800138099"
     assert body["binding_status"] == "identity_resolution_unavailable"
+
+
+def test_questionnaire_live_tag_success_syncs_customer_tag_projection(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[dict] = []
+
+    class FakeWeComAdapter:
+        def mark_external_contact_tags(self, **payload):
+            calls.append({"kind": "wecom", **payload})
+            return {"errcode": 0, "errmsg": "ok"}
+
+    def fake_projection(**payload):
+        calls.append({"kind": "projection", **payload})
+        return {
+            "ok": True,
+            "contact_tags_upserted": len(payload["tag_ids"]),
+            "customer_list_updated": 1,
+            "customer_detail_updated": 1,
+            "tags_after": ["大健康", "创始人/老板/合伙人"],
+        }
+
+    monkeypatch.setattr(h5_write, "get_wecom_adapter", lambda: FakeWeComAdapter())
+    monkeypatch.setattr(h5_write, "apply_questionnaire_tag_projection", fake_projection)
+
+    result = h5_write._execute_questionnaire_tag_live(
+        questionnaire={"id": 12, "slug": "salon-research"},
+        submission={"submission_id": 462},
+        external_userid="wm_test",
+        follow_user_userid="owner_test",
+        final_tags=["tag_health", "tag_founder"],
+        diagnostics={"can_mark_tag": True},
+    )
+
+    assert result["ok"] is True
+    assert result["mark_tag_executed"] is True
+    assert result["wecom_result"] == {"errcode": 0, "errmsg": "ok"}
+    assert result["local_projection"]["ok"] is True
+    assert result["local_projection"]["contact_tags_upserted"] == 2
+    assert calls[0] == {
+        "kind": "wecom",
+        "external_userid": "wm_test",
+        "follow_user_userid": "owner_test",
+        "add_tags": ["tag_health", "tag_founder"],
+        "remove_tags": [],
+    }
+    assert calls[1]["kind"] == "projection"
+    assert calls[1]["external_userid"] == "wm_test"
+    assert calls[1]["follow_user_userid"] == "owner_test"
+    assert calls[1]["tag_ids"] == ["tag_health", "tag_founder"]
 
 
 def test_h5_submit_rejects_repeated_identity(client: TestClient) -> None:

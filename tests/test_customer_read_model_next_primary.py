@@ -44,6 +44,9 @@ class FakeNextCustomerReadRepository:
                 "sidebar_context": {"can_open_sidebar": True},
             }
         ]
+        external_userid = str((filters or {}).get("external_userid") or "").strip()
+        if external_userid:
+            rows = [row for row in rows if row.get("external_userid") == external_userid]
         mobile = str((filters or {}).get("mobile") or "").strip()
         if mobile:
             rows = [row for row in rows if row.get("mobile") == mobile]
@@ -130,6 +133,21 @@ class MissingClosableCustomerReadRepository(ClosableNextCustomerReadRepository):
         return None
 
     get_customer_detail = get_customer
+
+
+class ListOnlyCustomerReadRepository(MissingClosableCustomerReadRepository):
+    def customer_exists(self, external_userid: str) -> bool:
+        return False
+
+    def list_timeline(self, external_userid: str, filters=None, *, limit=None, offset=0):
+        raise AssertionError("timeline snapshot should not be read when detail snapshot is missing")
+
+    get_customer_timeline = list_timeline
+
+    def list_recent_messages(self, external_userid: str, *, limit=None):
+        raise AssertionError("message snapshot should not be read when detail snapshot is missing")
+
+    get_recent_messages = list_recent_messages
 
 
 class FailingClosableCustomerReadRepository:
@@ -281,6 +299,41 @@ def test_customer_detail_closes_internal_repository_when_query_raises(monkeypatc
         raise AssertionError("expected NotFoundError")
 
     assert repo.closed is True
+
+
+def test_customer_detail_falls_back_to_list_index_when_detail_snapshot_missing(monkeypatch):
+    from aicrm_next.customer_read_model.application import GetCustomerDetailQuery
+
+    _production_env(monkeypatch)
+    repo = ListOnlyCustomerReadRepository()
+    _patch_next_repo(monkeypatch, repo)
+
+    payload = GetCustomerDetailQuery()(CustomerDetailRequest(external_userid="wx_ext_001"))
+
+    assert payload["ok"] is True
+    assert payload["customer"]["external_userid"] == "wx_ext_001"
+    assert payload["customer"]["customer_name"] == "客户一"
+    assert payload["customer"]["mobile"] == "13800138000"
+    assert payload["read_model_status"] == "list_index_fallback"
+    assert payload["fallback_used"] is True
+    assert repo.closed is True
+
+
+def test_admin_profile_opens_when_customer_only_exists_in_list_index(monkeypatch):
+    from aicrm_next.customer_read_model.application import GetAdminCustomerProfileQuery, GetCustomerContextQuery
+
+    _production_env(monkeypatch)
+    repo = ListOnlyCustomerReadRepository()
+
+    payload = GetAdminCustomerProfileQuery(GetCustomerContextQuery(repo))(external_userid="wx_ext_001")
+
+    assert payload["ok"] is True
+    assert payload["profile"]["external_userid"] == "wx_ext_001"
+    assert payload["profile"]["customer_name"] == "客户一"
+    assert payload["profile"]["mobile"] == "13800138000"
+    assert payload["source_status"] == "next_read_model"
+    assert payload["read_model_status"] == "list_index_fallback"
+    assert payload["fallback_used"] is True
 
 
 def test_customer_list_does_not_close_injected_repository(monkeypatch):

@@ -295,6 +295,85 @@ def _customer_detail_live_source_payload(query: CustomerDetailRequest, exc: Exce
             _close_repository(repo)
 
 
+def _customer_from_list_index(repo: CustomerReadRepository, external_userid: str) -> JsonDict | None:
+    external_userid = str(external_userid or "").strip()
+    if not external_userid:
+        return None
+    rows = repo.list_customers({"external_userid": external_userid}, limit=1, offset=0)
+    for row in rows:
+        if str(row.get("external_userid") or "").strip() == external_userid:
+            return dict(row)
+    return None
+
+
+def _customer_detail_list_index_payload(query: CustomerDetailRequest, exc: Exception, repo: CustomerReadRepository) -> JsonDict:
+    customer = _customer_from_list_index(repo, query.external_userid)
+    if not customer:
+        raise NotFoundError("customer not found")
+    return {
+        "ok": True,
+        "customer": detail_projection(customer),
+        "status_code": 200,
+        **_diagnostics(
+            source_status="next_read_model",
+            read_model_status="list_index_fallback",
+            degraded=True,
+            fallback_used=True,
+            fallback_reason=_production_error_message(exc),
+        ),
+    }
+
+
+def _customer_timeline_list_index_payload(query: CustomerTimelineRequest, exc: Exception, repo: CustomerReadRepository) -> JsonDict:
+    if not _customer_from_list_index(repo, query.external_userid):
+        raise NotFoundError("customer not found")
+    return {
+        "ok": True,
+        "timeline": {
+            "external_userid": query.external_userid,
+            "items": [],
+            "count": 0,
+            "limit": query.limit,
+            "offset": query.offset,
+            "filters": {
+                "event_type": query.event_type or "",
+                "limit": str(query.limit),
+                "offset": str(query.offset),
+            },
+            "total": 0,
+        },
+        "status_code": 200,
+        **_diagnostics(
+            source_status="next_read_model",
+            read_model_status="list_index_fallback",
+            degraded=True,
+            fallback_used=True,
+            fallback_reason=_production_error_message(exc),
+        ),
+    }
+
+
+def _recent_messages_list_index_payload(query: RecentMessagesRequest, exc: Exception, repo: CustomerReadRepository) -> JsonDict:
+    if not _customer_from_list_index(repo, query.external_userid):
+        raise NotFoundError("customer not found")
+    return {
+        "ok": True,
+        "messages": [],
+        "items": [],
+        "count": 0,
+        "external_userid": query.external_userid,
+        "limit": query.limit,
+        "status_code": 200,
+        **_diagnostics(
+            source_status="next_read_model",
+            read_model_status="list_index_fallback",
+            degraded=True,
+            fallback_used=True,
+            fallback_reason=_production_error_message(exc),
+        ),
+    }
+
+
 def _customer_timeline_live_source_payload(query: CustomerTimelineRequest, exc: Exception, repo: CustomerReadRepository | None = None) -> JsonDict:
     if not _customer_read_model_live_source_fallback_enabled():
         raise exc
@@ -513,8 +592,25 @@ class GetCustomerDetailQuery:
                 customer = repo.get_customer(query.external_userid)
                 if not customer:
                     raise NotFoundError("customer not found")
-            except NotFoundError:
-                raise
+            except NotFoundError as exc:
+                if repo is not None:
+                    try:
+                        return _customer_detail_list_index_payload(query, exc, repo)
+                    except NotFoundError:
+                        pass
+                    except Exception as list_index_exc:
+                        try:
+                            return _customer_detail_live_source_payload(query, list_index_exc, self._live_source_repo)
+                        except NotFoundError:
+                            pass
+                        except Exception:
+                            return _customer_detail_unavailable_payload(query.external_userid, list_index_exc)
+                try:
+                    return _customer_detail_live_source_payload(query, exc, self._live_source_repo)
+                except NotFoundError:
+                    raise exc
+                except Exception:
+                    raise exc
             except Exception as exc:
                 if self._repo is None:
                     _read_model_primary_failed(exc, repo)
@@ -584,8 +680,25 @@ class GetCustomerTimelineQuery:
                 items = repo.list_timeline(query.external_userid, {"event_type": query.event_type or ""}, limit=None, offset=0)
                 total = len(items)
                 page = items[query.offset : query.offset + query.limit]
-            except NotFoundError:
-                raise
+            except NotFoundError as exc:
+                if repo is not None:
+                    try:
+                        return _customer_timeline_list_index_payload(query, exc, repo)
+                    except NotFoundError:
+                        pass
+                    except Exception as list_index_exc:
+                        try:
+                            return _customer_timeline_live_source_payload(query, list_index_exc, self._live_source_repo)
+                        except NotFoundError:
+                            pass
+                        except Exception:
+                            return _customer_timeline_unavailable_payload(query, list_index_exc)
+                try:
+                    return _customer_timeline_live_source_payload(query, exc, self._live_source_repo)
+                except NotFoundError:
+                    raise exc
+                except Exception:
+                    raise exc
             except Exception as exc:
                 if self._repo is None:
                     _read_model_primary_failed(exc, repo)
@@ -674,8 +787,25 @@ class ListRecentMessagesQuery:
                 if not repo.customer_exists(query.external_userid):
                     raise NotFoundError("customer not found")
                 messages = repo.list_recent_messages(query.external_userid, limit=query.limit)
-            except NotFoundError:
-                raise
+            except NotFoundError as exc:
+                if repo is not None:
+                    try:
+                        return _recent_messages_list_index_payload(query, exc, repo)
+                    except NotFoundError:
+                        pass
+                    except Exception as list_index_exc:
+                        try:
+                            return _recent_messages_live_source_payload(query, list_index_exc, self._live_source_repo)
+                        except NotFoundError:
+                            pass
+                        except Exception:
+                            return _recent_messages_unavailable_payload(query, list_index_exc)
+                try:
+                    return _recent_messages_live_source_payload(query, exc, self._live_source_repo)
+                except NotFoundError:
+                    raise exc
+                except Exception:
+                    raise exc
             except Exception as exc:
                 if self._repo is None:
                     _read_model_primary_failed(exc, repo)

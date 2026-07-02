@@ -62,6 +62,7 @@ def test_questionnaire_submit_tag_side_effect_uses_next_plan(monkeypatch) -> Non
 
 def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeypatch) -> None:
     calls: list[dict] = []
+    projection_calls: list[dict] = []
     mobile_bind_calls: list[dict] = []
 
     class FakeWeComAdapter:
@@ -92,6 +93,16 @@ def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeyp
                 matched_by="external_userid",
             )
 
+    def fake_projection(**payload):
+        projection_calls.append(dict(payload))
+        return {
+            "ok": True,
+            "contact_tags_upserted": len(payload["tag_ids"]),
+            "customer_list_updated": 1,
+            "customer_detail_updated": 1,
+            "tags_after": list(payload["tag_ids"]),
+        }
+
     monkeypatch.setenv("SECRET_KEY", "questionnaire-real-tag")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
@@ -101,6 +112,7 @@ def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeyp
     monkeypatch.setenv("WECOM_CONTACT_SECRET", "secret")
     monkeypatch.setattr(h5_write, "ResolvePersonIdentityQuery", FakeResolvePersonIdentityQuery)
     monkeypatch.setattr(h5_write, "BindMobileToExternalContactCommand", FakeBindMobileToExternalContactCommand)
+    monkeypatch.setattr(h5_write, "apply_questionnaire_tag_projection", fake_projection)
     set_wecom_adapter(FakeWeComAdapter())
     try:
         client = TestClient(create_app(), raise_server_exceptions=False)
@@ -128,6 +140,13 @@ def test_questionnaire_submit_marks_wecom_tags_when_live_adapter_enabled(monkeyp
             "follow_user_userid": "owner-real-tag",
             "add_tags": ["tag_hxc_activated", "tag_interest_ai_tools"],
             "remove_tags": [],
+        }
+    ]
+    assert projection_calls == [
+        {
+            "external_userid": "wx_real_tag_001",
+            "follow_user_userid": "owner-real-tag",
+            "tag_ids": ["tag_hxc_activated", "tag_interest_ai_tools"],
         }
     ]
     assert mobile_bind_calls == [

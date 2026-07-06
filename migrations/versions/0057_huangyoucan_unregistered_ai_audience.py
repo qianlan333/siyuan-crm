@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from alembic import op
 
+from migrations.audience_read import ensure_audience_read_schema
+
 
 revision = "0057_huangyoucan_unregistered_ai_audience"
 down_revision = "0056_ai_audience_group_chat_members_view"
@@ -55,7 +57,8 @@ WHERE wc.owner_userid = :owner_userid
 
 
 def upgrade() -> None:
-    _refresh_wecom_contacts_view()
+    if not _refresh_wecom_contacts_view():
+        return
     _create_huangyoucan_registered_identities_view()
     _seed_huangyoucan_unregistered_package()
 
@@ -81,8 +84,9 @@ def downgrade() -> None:
     op.execute("DROP VIEW IF EXISTS audience_read.huangyoucan_registered_identities_v1")
 
 
-def _refresh_wecom_contacts_view() -> None:
-    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
+def _refresh_wecom_contacts_view() -> bool:
+    if not ensure_audience_read_schema():
+        return False
     op.execute(
         """
         CREATE OR REPLACE VIEW audience_read.wecom_contacts_v1 AS
@@ -144,6 +148,7 @@ def _refresh_wecom_contacts_view() -> None:
         END $$;
         """
     )
+    return True
 
 
 def _create_huangyoucan_registered_identities_view() -> None:

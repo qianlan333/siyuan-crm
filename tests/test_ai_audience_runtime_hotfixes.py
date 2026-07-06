@@ -45,6 +45,18 @@ def test_huangxiaocan_member_usage_migration_casts_text_timestamps_before_coales
     assert "COALESCE(finished_at, updated_at, created_at, CURRENT_TIMESTAMP)::timestamptz" not in source
 
 
+def test_audience_read_schema_creation_is_privilege_tolerant() -> None:
+    helper = (ROOT / "migrations/audience_read.py").read_text(encoding="utf-8")
+    direct_schema_creates = [
+        path
+        for path in (ROOT / "migrations/versions").glob("*.py")
+        if "CREATE SCHEMA IF NOT EXISTS audience_read" in path.read_text(encoding="utf-8")
+    ]
+
+    assert "WHEN insufficient_privilege" in helper
+    assert direct_schema_creates == []
+
+
 def test_ai_audience_refresh_query_timeout_allows_heavier_catalog_views() -> None:
     source = (ROOT / "aicrm_next/ai_audience_ops/refresh_service.py").read_text(encoding="utf-8")
 

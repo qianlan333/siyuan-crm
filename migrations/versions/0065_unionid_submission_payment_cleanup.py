@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from alembic import op
 
+from migrations.audience_read import ensure_audience_read_schema
+
 
 revision = "0065_unionid_submission_payment_cleanup"
 down_revision = "0064_unionid_ops_automation_foundation"
@@ -154,7 +156,8 @@ def _create_index_if_table_exists(table_name: str, statement: str) -> None:
 
 
 def _recreate_audience_read_views() -> None:
-    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
+    if not ensure_audience_read_schema():
+        return
     op.execute(
         """
         DO $$

@@ -37,6 +37,16 @@ def test_get_login_renders_wecom_auth_error(monkeypatch) -> None:
     assert "企业微信扫码登录还未启用真实授权" in response.text
 
 
+def test_get_login_renders_live_mode_from_admin_auth_mode_env(monkeypatch) -> None:
+    monkeypatch.delenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", raising=False)
+    monkeypatch.setenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", "live")
+
+    response = _client(monkeypatch).get("/login")
+
+    assert response.status_code == 200
+    assert "<code>live</code>" in response.text
+
+
 def test_login_uses_safe_next_and_redirects_when_session_cookie_is_valid(monkeypatch) -> None:
     client = _client(monkeypatch)
     client.cookies.set(SESSION_COOKIE, sign_session({"username": "bg-admin", "login_type": "break_glass", "iat": 4_102_444_800}))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-import logging
+import sys
+import types
 
 import pytest
 
@@ -85,18 +86,23 @@ def test_get_pool_settings_redacts_database_url_and_uses_env(monkeypatch) -> Non
     assert "user" not in str(settings)
 
 
-def test_engine_initialization_log_does_not_include_database_secret(monkeypatch, caplog) -> None:
+def test_engine_initialization_log_does_not_include_database_secret(monkeypatch) -> None:
     class FakeEngine:
         def dispose(self) -> None:
             pass
 
+    logs: list[str] = []
+
+    def fake_info(message: str, *args, **kwargs) -> None:
+        logs.append(message % args)
+
     monkeypatch.setattr(db_session, "create_engine", lambda url, **kwargs: FakeEngine())
+    monkeypatch.setattr(db_session.LOGGER, "info", fake_info)
     monkeypatch.setenv("DB_APPLICATION_NAME", "aicrm-next-test")
 
-    with caplog.at_level(logging.INFO):
-        db_session.get_engine("postgresql://user:super-secret@db.internal:5432/aicrm")
+    db_session.get_engine("postgresql://user:super-secret@db.internal:5432/aicrm")
 
-    log_text = "\n".join(record.getMessage() for record in caplog.records)
+    log_text = "\n".join(logs)
     assert "initializing SQLAlchemy engine" in log_text
     assert "aicrm-next-test" in log_text
     assert "super-secret" not in log_text
@@ -135,6 +141,26 @@ def test_reset_engine_cache_disposes_cached_engines(monkeypatch) -> None:
     db_session.reset_engine_cache_for_tests()
 
     assert disposed == [True]
+
+
+def test_connect_pooled_postgres_falls_back_for_psycopg_test_double(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    class FakeConnection:
+        pass
+
+    def connect(url: str, **kwargs):
+        calls.append((url, kwargs))
+        return FakeConnection()
+
+    psycopg = types.ModuleType("psycopg")
+    psycopg.connect = connect
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+
+    connection = db_session.connect_pooled_postgres("postgresql://test/test")
+
+    assert isinstance(connection, FakeConnection)
+    assert calls == [("postgresql://test/test", {"autocommit": False})]
 
 
 def test_session_scope_cleanup_error_does_not_mask_business_exception(monkeypatch) -> None:

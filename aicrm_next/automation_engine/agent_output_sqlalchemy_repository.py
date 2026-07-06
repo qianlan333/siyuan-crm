@@ -104,7 +104,7 @@ class SqlAlchemyAgentOutputRepository(InMemoryAutomationRepository):
     def _filter_clauses(self, filters: dict[str, Any]) -> tuple[list[str], dict[str, Any]]:
         clauses: list[str] = []
         params: dict[str, Any] = {}
-        for field in ("request_id", "external_contact_id", "userid", "agent_code", "output_type", "applied_status"):
+        for field in ("request_id", "unionid", "userid", "agent_code", "output_type", "applied_status"):
             value = str(filters.get(field) or "").strip()
             if value:
                 clauses.append(f"{field} = :{field}")
@@ -133,7 +133,7 @@ class SqlAlchemyAgentOutputRepository(InMemoryAutomationRepository):
                 "run_id": row.get("run_id"),
                 "request_id": row.get("request_id"),
                 "userid": row.get("userid"),
-                "external_contact_id": row.get("external_contact_id"),
+                "unionid": row.get("unionid"),
                 "agent_code": row.get("agent_code"),
                 "output_type": row.get("output_type") or "metadata",
                 "rendered_output_text": row.get("rendered_output_text"),

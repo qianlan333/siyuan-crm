@@ -299,6 +299,33 @@
     }
     .state { margin-top: 16px; color: var(--muted); font-size: 14px; line-height: 1.6; }
     .error { color: #f54a45; }
+    .weapp-launch-panel[hidden] { display: none; }
+    .weapp-launch-panel {
+      display: grid;
+      gap: 10px;
+      margin-top: 16px;
+      padding: 14px;
+      border: 1px solid #e5e6eb;
+      border-radius: 12px;
+      background: #fff;
+    }
+    .weapp-launch-title {
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 800;
+    }
+    .weapp-launch-desc {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .fallback-link {
+      display: inline-flex;
+      color: #3370ff;
+      font-size: 14px;
+      font-weight: 800;
+      text-decoration: none;
+    }
     @media (max-width: 640px) {
       .page-shell { padding: 18px 14px 40px; }
       .hero-card { padding: 28px 20px; }
@@ -411,6 +438,12 @@
         {% endif %}
       </form>
       <div id="state" class="state{% if page_state.form_error %} error{% endif %}">{{ page_state.form_error or '' }}</div>
+      <div id="weapp-launch-panel" class="weapp-launch-panel" hidden>
+        <div class="weapp-launch-title">正在打开小程序</div>
+        <div class="weapp-launch-desc" id="weapp-launch-desc">请点击下方按钮继续。</div>
+        <div id="weapp-launch-host"></div>
+        <a id="weapp-fallback-link" class="fallback-link" href="#">无法打开？点击备用链接</a>
+      </div>
     </section>
     {% endif %}
   </div>
@@ -434,10 +467,130 @@
       window.pageState = pageState;
       const submittedUrl = pageState.submitted_url;
       const reportedDiagnostics = new Set();
+      const weappLaunchPanel = document.getElementById('weapp-launch-panel');
+      const weappLaunchHost = document.getElementById('weapp-launch-host');
+      const weappLaunchDesc = document.getElementById('weapp-launch-desc');
+      const weappFallbackLink = document.getElementById('weapp-fallback-link');
 
       function setState(message, isError = false) {
         stateEl.textContent = message || '';
         stateEl.className = isError ? 'state error' : 'state';
+      }
+
+      function isSafeRedirectUrl(url) {
+        return /^https:\/\//.test(url) || /^\/(?!\/)[^\s\\]*$/.test(url);
+      }
+
+      function fallbackUrlFromTarget(target) {
+        if (!target || !target.enabled) return '';
+        const link = target.url_link || {};
+        return String(target.fallback_url || target.h5_url || link.url || '');
+      }
+
+      function safeFallbackUrl(fallbackUrl, target) {
+        const candidate = String(fallbackUrl || fallbackUrlFromTarget(target) || submittedUrl || '').trim();
+        return candidate && isSafeRedirectUrl(candidate) ? candidate : submittedUrl;
+      }
+
+      function dynamicUrlLinkResolverUrl(target, fallbackUrl) {
+        const link = target && target.url_link ? target.url_link : {};
+        const sourceUrl = String(link.source_url || '').trim();
+        if (!/^https:\/\/[^\s\\]+$/i.test(sourceUrl)) return '';
+        const params = new URLSearchParams();
+        params.set('source_url', sourceUrl);
+        params.set('response_url_key', String(link.response_url_key || 'url_link'));
+        const safeFallback = safeFallbackUrl(fallbackUrl, target);
+        if (safeFallback) params.set('fallback_url', safeFallback);
+        return `/api/h5/navigation-target/url-link/resolve?${params.toString()}`;
+      }
+
+      function escapeAttr(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      function renderWeappLauncher(target, fallbackUrl) {
+        const mini = target && target.mini_program ? target.mini_program : {};
+        const safeFallback = safeFallbackUrl(fallbackUrl, target);
+        const path = String(mini.path || '/') + (mini.query ? `?${mini.query}` : '');
+        weappLaunchPanel.hidden = false;
+        weappLaunchHost.innerHTML = '';
+        weappFallbackLink.href = safeFallback;
+        weappLaunchDesc.textContent = '请点击下方按钮继续。';
+        if (!mini.username || !mini.path) {
+          weappLaunchDesc.textContent = '无法直接打开，点击备用链接。';
+          return;
+        }
+        weappLaunchHost.innerHTML = `
+          <wx-open-launch-weapp
+            id="launch-weapp"
+            username="${escapeAttr(mini.username)}"
+            path="${escapeAttr(path)}">
+            <template>
+              <style>
+                .weapp-launch-button {
+                  width: 100%;
+                  height: 48px;
+                  border: 0;
+                  border-radius: 8px;
+                  background: #3370ff;
+                  color: #fff;
+                  font-size: 16px;
+                  font-weight: 800;
+                }
+              </style>
+              <button class="weapp-launch-button">打开小程序</button>
+            </template>
+          </wx-open-launch-weapp>
+        `;
+        const launcher = weappLaunchHost.querySelector('#launch-weapp');
+        if (launcher) {
+          launcher.addEventListener('error', () => {
+            weappLaunchDesc.textContent = '无法直接打开，点击备用链接。';
+          });
+        }
+      }
+
+      function handleCompletionTarget(target, fallbackUrl) {
+        const normalizedTarget = target || {};
+        const safeFallback = safeFallbackUrl(fallbackUrl, normalizedTarget);
+        if (!normalizedTarget.enabled) {
+          window.location.href = safeFallback;
+          return;
+        }
+        if (normalizedTarget.target_type === 'h5') {
+          const h5Url = String(normalizedTarget.h5_url || safeFallback).trim();
+          window.location.href = h5Url && isSafeRedirectUrl(h5Url) ? h5Url : safeFallback;
+          return;
+        }
+        if (normalizedTarget.target_type === 'url_link') {
+          const link = normalizedTarget.url_link || {};
+          const resolverUrl = dynamicUrlLinkResolverUrl(normalizedTarget, safeFallback);
+          if (resolverUrl) {
+            window.location.href = resolverUrl;
+            return;
+          }
+          if (link.url && isSafeRedirectUrl(link.url)) {
+            window.location.href = link.url;
+            return;
+          }
+          window.location.href = safeFallback;
+          return;
+        }
+        if (normalizedTarget.target_type === 'mini_program') {
+          const h5Url = normalizedTarget.h5_url && isSafeRedirectUrl(normalizedTarget.h5_url) ? normalizedTarget.h5_url : '';
+          if (!pageState.is_wechat_browser) {
+            window.location.href = safeFallback || h5Url || submittedUrl;
+            return;
+          }
+          setState('提交成功，正在打开小程序...');
+          renderWeappLauncher(normalizedTarget, safeFallback || h5Url || submittedUrl);
+          return;
+        }
+        window.location.href = safeFallback;
       }
 
       function normalizedErrorMessage(error, fallback) {
@@ -446,6 +599,7 @@
         if (error instanceof Error && error.message) return error.message;
         return fallback;
       }
+
 
       function isOAuthRequired(result) {
         return Boolean(result && (result.error === 'oauth_required' || result.source_status === 'oauth_required'));
@@ -493,7 +647,7 @@
             return;
           }
         } catch (error) {
-          console.warn('questionnaire diagnostics beacon failed', error);
+          window.__questionnaireDiagnosticsBeaconError = error.message || 'beacon failed';
         }
 
         fetch(diagnosticsUrl, {
@@ -940,11 +1094,7 @@
           .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
           .then(({ ok, data }) => {
             if (data && data.error === 'already_submitted') {
-              if (data.redirect_url) {
-                window.location.href = data.redirect_url;
-                return;
-              }
-              window.location.href = submittedUrl;
+              handleCompletionTarget(data.completion_target, data.redirect_url || submittedUrl);
               return;
             }
             if (isOAuthRequired(data)) {
@@ -1055,11 +1205,7 @@
           });
           const result = await response.json();
           if (result && result.error === 'already_submitted') {
-            if (result.redirect_url) {
-              window.location.href = result.redirect_url;
-              return;
-            }
-            window.location.href = submittedUrl;
+            handleCompletionTarget(result.completion_target, result.redirect_url || submittedUrl);
             return;
           }
           if (isOAuthRequired(result)) {
@@ -1069,11 +1215,7 @@
           if (!response.ok || !result.success) {
             throw new Error(result.error || '提交失败');
           }
-          if (result.redirect_url) {
-            window.location.href = result.redirect_url;
-            return;
-          }
-          window.location.href = submittedUrl;
+          handleCompletionTarget(result.completion_target, result.redirect_url || submittedUrl);
         } catch (error) {
           reportClientIssue('submit_failed', error, { submitUrl });
           setState(normalizedErrorMessage(error, '提交失败，请稍后重试'), true);

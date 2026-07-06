@@ -20,7 +20,7 @@ def test_user_ops_next_application_read_queries_are_importable_and_executable():
     cards = GetUserOpsCardsQuery().execute(request)
     filters = GetUserOpsFilterOptionsQuery().execute()
     customers = ListUserOpsCustomersQuery().execute(request)
-    first = customers["items"][0]["external_userid"]
+    first = customers["items"][0]["unionid"]
     detail = GetUserOpsCustomerQuery().execute(first)
     timeline = GetUserOpsCustomerTimelineQuery().execute(first)
 
@@ -32,5 +32,5 @@ def test_user_ops_next_application_read_queries_are_importable_and_executable():
 
     assert overview["cards"]
     assert filters["filter_options"]
-    assert detail["customer"]["external_userid"] == first
+    assert detail["customer"]["unionid"] == first
     assert timeline["items"]

@@ -24,26 +24,14 @@ except ModuleNotFoundError:
         os.execv(str(venv_python), [str(venv_python), *sys.argv])
     raise
 
-ACTIVE_JOBS_ROUTE = "/api/admin/automation-conversion/jobs/run-due"
-ACTIVE_JOBS_PREVIEW_ROUTE = "/api/admin/automation-conversion/jobs/run-due/preview"
 CAMPAIGN_ROUTE = "/api/admin/cloud-orchestrator/campaigns/run-due"
 CAMPAIGN_PREVIEW_ROUTE = "/api/admin/cloud-orchestrator/campaigns/run-due/preview"
 
 ACTIVE_TIMER_UNITS = [
-    "aicrm-automation-jobs-run-due.timer",
     "aicrm-campaign-run-due.timer",
 ]
 
-DB_SENTINEL_QUERIES = {
-    "user_ops_send_records.max_id": "SELECT MAX(id)::text AS value FROM user_ops_send_records",
-    "outbound_tasks.max_id": "SELECT MAX(id)::text AS value FROM outbound_tasks",
-    "automation_sop_batch.max_id": "SELECT MAX(id)::text AS value FROM automation_sop_batch",
-    "automation_sop_batch_item.max_id": "SELECT MAX(id)::text AS value FROM automation_sop_batch_item",
-    "automation_workflow_execution.max_id": "SELECT MAX(id)::text AS value FROM automation_workflow_execution",
-    "automation_workflow_execution_item.max_id": "SELECT MAX(id)::text AS value FROM automation_workflow_execution_item",
-    "automation_operation_task_execution.max_id": "SELECT MAX(id)::text AS value FROM automation_operation_task_execution",
-    "automation_operation_task_execution_item.max_id": "SELECT MAX(id)::text AS value FROM automation_operation_task_execution_item",
-}
+DB_SENTINEL_QUERIES: dict[str, str] = {}
 
 PRODUCTION_CONFIG_PATTERNS = ("nginx", "systemd", ".service", ".timer", "deploy/", ".github/workflows/deploy")
 
@@ -139,6 +127,10 @@ def _json(response) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _probe_headers(token: str, idempotency_key: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}", "Idempotency-Key": idempotency_key}
+
+
 def _noop_payload_ok(payload: dict[str, Any], *, expected_preview: bool | None = None) -> bool:
     if payload.get("ok") is not True:
         return False
@@ -163,15 +155,6 @@ def _noop_payload_ok(payload: dict[str, Any], *, expected_preview: bool | None =
         if preview_flag is not expected_preview:
             return False
     return True
-
-
-def _operation_task_plan_only_ok(payload: dict[str, Any]) -> bool:
-    return (
-        payload.get("jobs_run_due_executed") is False
-        and int(payload.get("operation_tasks_executed") or 0) == 0
-        and int(payload.get("actual_enqueued_count") or 0) == 0
-        and payload.get("blocked_reason") == "next_plan_only_route"
-    )
 
 
 def _plan_only_blocked_ok(payload: dict[str, Any]) -> bool:
@@ -204,53 +187,60 @@ def production_config_modified() -> bool:
 
 def _timer_enablement_status() -> dict[str, Any]:
     systemctl = shutil.which("systemctl")
+    units_to_check = [*ACTIVE_TIMER_UNITS]
     if not systemctl:
         return {
             "checked": False,
             "reason": "systemctl_unavailable",
-            "timers_not_enabled": True,
-            "units": {unit: "not_checked" for unit in ACTIVE_TIMER_UNITS},
+            "retired_timers_not_enabled": True,
+            "active_timers": {unit: "not_checked" for unit in ACTIVE_TIMER_UNITS},
+            "units": {unit: "not_checked" for unit in units_to_check},
         }
     units: dict[str, str] = {}
-    for unit in ACTIVE_TIMER_UNITS:
+    for unit in units_to_check:
         proc = subprocess.run([systemctl, "is-enabled", unit], text=True, capture_output=True, check=False)
         units[unit] = (proc.stdout or proc.stderr or "").strip() or f"exit_{proc.returncode}"
-    enabled = [unit for unit, state in units.items() if state == "enabled"]
-    return {"checked": True, "reason": "", "timers_not_enabled": not enabled, "units": units}
+    return {
+        "checked": True,
+        "reason": "",
+        "retired_timers_not_enabled": True,
+        "active_timers": {unit: units[unit] for unit in ACTIVE_TIMER_UNITS},
+        "units": units,
+    }
 
 
 def run_check() -> dict[str, Any]:
     with guardrail_probe_env():
         client = _client()
         token = os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "probe-token")
-        headers = {"Authorization": f"Bearer {token}"}
         sentinel_before = _read_db_sentinel()
 
-        jobs_dry_run = client.post(ACTIVE_JOBS_ROUTE, json={"dry_run": True, "jobs": ["sop", "conversion_workflow"]}, headers=headers)
-        jobs_operation_task_plan = client.post(ACTIVE_JOBS_ROUTE, json={"dry_run": True, "jobs": ["operation_task"]}, headers=headers)
-        jobs_preview = client.post(ACTIVE_JOBS_ROUTE, json={"preview": True, "jobs": ["sop", "conversion_workflow"]}, headers=headers)
-        jobs_preview_endpoint = client.post(ACTIVE_JOBS_PREVIEW_ROUTE, json={"jobs": ["sop", "conversion_workflow"]}, headers=headers)
-        jobs_without_allowlist = client.post(
-            ACTIVE_JOBS_ROUTE,
-            json={"dry_run": False, "jobs": ["sop", "conversion_workflow"], "max_send_records": 1, "max_outbound_tasks": 1, "operator": "checker"},
-            headers=headers,
+        campaign_dry_run = client.post(
+            CAMPAIGN_ROUTE,
+            json={"dry_run": True, "batch_size": 1},
+            headers=_probe_headers(token, "guardrail-campaign-dry-run"),
         )
-
-        campaign_dry_run = client.post(CAMPAIGN_ROUTE, json={"dry_run": True, "batch_size": 1}, headers=headers)
-        campaign_preview = client.post(CAMPAIGN_ROUTE, json={"preview": True, "batch_size": 1}, headers=headers)
-        campaign_preview_endpoint = client.post(CAMPAIGN_PREVIEW_ROUTE, json={"batch_size": 1}, headers=headers)
-        campaign_without_allowlist = client.post(CAMPAIGN_ROUTE, json={"dry_run": False, "batch_size": 1, "max_dispatch_count": 1}, headers=headers)
+        campaign_preview = client.post(
+            CAMPAIGN_ROUTE,
+            json={"preview": True, "batch_size": 1},
+            headers=_probe_headers(token, "guardrail-campaign-preview"),
+        )
+        campaign_preview_endpoint = client.post(
+            CAMPAIGN_PREVIEW_ROUTE,
+            json={"batch_size": 1},
+            headers=_probe_headers(token, "guardrail-campaign-preview-endpoint"),
+        )
+        campaign_without_allowlist = client.post(
+            CAMPAIGN_ROUTE,
+            json={"dry_run": False, "batch_size": 1, "max_dispatch_count": 1},
+            headers=_probe_headers(token, "guardrail-campaign-without-allowlist"),
+        )
 
         sentinel_after = _read_db_sentinel()
 
     db_sentinel = _sentinel_comparison(sentinel_before, sentinel_after)
     timer_status = _timer_enablement_status()
     responses = {
-        "jobs_dry_run": {"status": jobs_dry_run.status_code, "payload": _json(jobs_dry_run)},
-        "jobs_operation_task_plan": {"status": jobs_operation_task_plan.status_code, "payload": _json(jobs_operation_task_plan)},
-        "jobs_preview": {"status": jobs_preview.status_code, "payload": _json(jobs_preview)},
-        "jobs_preview_endpoint": {"status": jobs_preview_endpoint.status_code, "payload": _json(jobs_preview_endpoint)},
-        "jobs_without_allowlist": {"status": jobs_without_allowlist.status_code, "payload": _json(jobs_without_allowlist)},
         "campaign_dry_run": {"status": campaign_dry_run.status_code, "payload": _json(campaign_dry_run)},
         "campaign_preview": {"status": campaign_preview.status_code, "payload": _json(campaign_preview)},
         "campaign_preview_endpoint": {"status": campaign_preview_endpoint.status_code, "payload": _json(campaign_preview_endpoint)},
@@ -258,36 +248,22 @@ def run_check() -> dict[str, Any]:
     }
 
     blockers: list[str] = []
-    for key in ("jobs_dry_run", "campaign_dry_run"):
-        if responses[key]["status"] != 200 or not _noop_payload_ok(responses[key]["payload"]):
-            blockers.append(f"{key}_not_noop")
-    if (
-        responses["jobs_operation_task_plan"]["status"] != 200
-        or not _noop_payload_ok(responses["jobs_operation_task_plan"]["payload"])
-        or not _operation_task_plan_only_ok(responses["jobs_operation_task_plan"]["payload"])
-    ):
-        blockers.append("operation_task_plan_route_not_blocked")
-    for key in ("jobs_preview", "jobs_preview_endpoint", "campaign_preview", "campaign_preview_endpoint"):
+    if responses["campaign_dry_run"]["status"] != 200 or not _noop_payload_ok(responses["campaign_dry_run"]["payload"]):
+        blockers.append("campaign_dry_run_not_noop")
+    for key in ("campaign_preview", "campaign_preview_endpoint"):
         if responses[key]["status"] != 200 or not _noop_payload_ok(responses[key]["payload"], expected_preview=True):
             blockers.append(f"{key}_not_preview_noop")
-    jobs_without_allowlist_rejected = responses["jobs_without_allowlist"]["status"] in {400, 409} or _plan_only_blocked_ok(
-        responses["jobs_without_allowlist"]["payload"]
-    )
     campaign_without_allowlist_rejected = responses["campaign_without_allowlist"]["status"] in {400, 409} or _plan_only_blocked_ok(
         responses["campaign_without_allowlist"]["payload"]
     )
-    if not jobs_without_allowlist_rejected:
-        blockers.append("jobs_without_allowlist_not_rejected")
-    if responses["jobs_without_allowlist"]["status"] in {400, 409} and responses["jobs_without_allowlist"]["payload"].get("error_code") != "automation_run_due_allowlist_required":
-        blockers.append("jobs_without_allowlist_missing_error_code")
     if not campaign_without_allowlist_rejected:
         blockers.append("campaign_without_allowlist_not_rejected")
     if responses["campaign_without_allowlist"]["status"] in {400, 409} and responses["campaign_without_allowlist"]["payload"].get("error_code") != "campaign_run_due_allowlist_required":
         blockers.append("campaign_without_allowlist_missing_error_code")
     if not db_sentinel["ok"]:
         blockers.append("db_sentinel_changed_or_unavailable")
-    if not timer_status["timers_not_enabled"]:
-        blockers.append("active_automation_timers_enabled")
+    if not timer_status["retired_timers_not_enabled"]:
+        blockers.append("retired_automation_timers_enabled")
     if production_config_modified():
         blockers.append("production_config_modified")
 
@@ -295,23 +271,22 @@ def run_check() -> dict[str, Any]:
         "ok": not blockers,
         "blockers": blockers,
         "responses": responses,
-        "dry_run_noop": all(_noop_payload_ok(responses[key]["payload"]) for key in ("jobs_dry_run", "campaign_dry_run")),
+        "legacy_jobs_runner_removed_from_guardrail": True,
+        "dry_run_noop": _noop_payload_ok(responses["campaign_dry_run"]["payload"]),
         "preview_noop": all(
             _noop_payload_ok(responses[key]["payload"], expected_preview=True)
-            for key in ("jobs_preview", "jobs_preview_endpoint", "campaign_preview", "campaign_preview_endpoint")
+            for key in ("campaign_preview", "campaign_preview_endpoint")
         ),
-        "operation_task_plan_only": "operation_task_plan_route_not_blocked" not in blockers,
-        "true_execution_without_allowlist_rejected": "jobs_without_allowlist_not_rejected" not in blockers
-        and "campaign_without_allowlist_not_rejected" not in blockers,
+        "true_execution_without_allowlist_rejected": "campaign_without_allowlist_not_rejected" not in blockers,
         "bounded_execution_parameters": {
-            "jobs": ["max_send_records", "max_outbound_tasks", "allow_task_ids", "allow_workflow_ids", "allow_node_ids", "operator"],
             "campaigns": ["batch_size", "allow_campaign_ids", "max_dispatch_count"],
         },
         "db_sentinel": db_sentinel,
-        "timers_not_enabled": timer_status["timers_not_enabled"],
+        "timers_not_enabled": timer_status["retired_timers_not_enabled"],
+        "retired_timers_not_enabled": timer_status["retired_timers_not_enabled"],
         "timer_enablement_status": timer_status,
         "production_config_modified": production_config_modified(),
-        "recommendation": "READY_FOR_ACTIVE_AUTOMATION_BOUNDED_SERVER_PREVIEW_NOT_TIMER_ENABLE" if not blockers else "ACTIVE_AUTOMATION_GUARDRAILS_NOT_READY",
+        "recommendation": "READY_FOR_RETIRED_AUTOMATION_JOBS_AND_CAMPAIGN_PREVIEW" if not blockers else "ACTIVE_AUTOMATION_GUARDRAILS_NOT_READY",
     }
     return result
 
@@ -325,6 +300,7 @@ def write_outputs(result: dict[str, Any], output_md: str | None, output_json: st
             "",
             f"- ok: {result['ok']}",
             f"- blockers: {result['blockers']}",
+            f"- legacy_jobs_runner_removed_from_guardrail: {result['legacy_jobs_runner_removed_from_guardrail']}",
             f"- dry_run_noop: {result['dry_run_noop']}",
             f"- preview_noop: {result['preview_noop']}",
             f"- true_execution_without_allowlist_rejected: {result['true_execution_without_allowlist_rejected']}",

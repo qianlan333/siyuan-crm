@@ -1,8 +1,19 @@
 from __future__ import annotations
 
 from fastapi.testclient import TestClient
+from fastapi.routing import APIRoute
 
 from aicrm_next.main import create_app
+
+
+def _iter_api_routes(routes):
+    for route in routes:
+        original_router = getattr(route, "original_router", None)
+        nested = getattr(route, "routes", None) or getattr(original_router, "routes", None)
+        if nested:
+            yield from _iter_api_routes(nested)
+        elif isinstance(route, APIRoute):
+            yield route
 
 
 def _client(monkeypatch) -> TestClient:
@@ -15,7 +26,7 @@ def _client(monkeypatch) -> TestClient:
 
 def _endpoint_module(path: str) -> str:
     app = create_app()
-    for route in app.routes:
+    for route in _iter_api_routes(app.routes):
         if getattr(route, "path", "") == path and "GET" in getattr(route, "methods", set()):
             return route.endpoint.__module__
     raise AssertionError(f"missing route for {path}")
@@ -87,7 +98,6 @@ def test_sidebar_api_routes_stay_next_native(monkeypatch) -> None:
         ("GET", "/api/sidebar/v2/materials", 400),
         ("POST", "/api/sidebar/v2/materials/send", 400),
         ("GET", "/api/admin/customers/profile", 400),
-        ("GET", "/api/admin/automation-conversion/member", 400),
     )
     for method, path, expected_status in cases:
         response = client.request(method, path, json={} if method == "POST" else None)
@@ -95,3 +105,11 @@ def test_sidebar_api_routes_stay_next_native(monkeypatch) -> None:
         assert response.status_code == expected_status, path
         assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
         assert "X-AICRM-Compatibility-Facade" not in response.headers
+
+
+def test_retired_automation_member_route_is_removed(monkeypatch) -> None:
+    client = _client(monkeypatch)
+
+    response = client.get("/api/admin/automation-conversion/member")
+
+    assert response.status_code == 404

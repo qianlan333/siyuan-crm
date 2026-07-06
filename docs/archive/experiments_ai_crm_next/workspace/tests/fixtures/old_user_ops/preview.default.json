@@ -1,0 +1,20 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "selected_count": 2,
+    "eligible_count": 1,
+    "skipped_count": 1,
+    "skipped_by_reason": {"missing_external_userid": 1},
+    "skipped_summary": [{"reason": "missing_external_userid", "reason_label": "缺少 external_userid", "count": 1}],
+    "include_do_not_disturb": false,
+    "owner_buckets": [{"owner_userid": "owner_001", "owner_display_name": "脱敏顾问A", "sender_userid": "owner_001", "target_count": 1, "external_userids": ["external_user_masked_001"]}],
+    "sender_buckets": [{"sender_userid": "owner_001", "target_count": 1}],
+    "sendable_samples": [{"id": 101, "external_userid": "external_user_masked_001", "owner_userid": "owner_001", "owner_display_name": "脱敏顾问A", "customer_name": "customer_masked_001", "mobile": "mobile_masked_001"}],
+    "final_targets": [{"id": 101, "external_userid": "external_user_masked_001", "owner_userid": "owner_001", "owner_display_name": "脱敏顾问A", "customer_name": "customer_masked_001", "mobile": "mobile_masked_001"}],
+    "filters": {"wecom_status": "", "mobile_binding_status": "", "activation_bucket": "", "class_term_no": "", "keyword": "", "mobile": "", "owner_userid": ""},
+    "content_preview": "parity dry run",
+    "image_count": 0,
+    "has_body": true
+  }
+}

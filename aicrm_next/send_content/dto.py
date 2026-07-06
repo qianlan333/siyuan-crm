@@ -25,6 +25,13 @@ class SendContentPreviewRequest(BaseModel):
     require_body: bool = True
 
 
+class MaterialAssetsValidateRequest(BaseModel):
+    content_package: SendContentPackage = Field(default_factory=SendContentPackage)
+    channel: str = "send_content"
+    text_enabled: bool = True
+    require_body: bool = False
+
+
 class MaterialPickerListRequest(BaseModel):
     type: Literal["image", "miniprogram", "attachment"]
     q: str = ""

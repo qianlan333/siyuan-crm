@@ -198,6 +198,38 @@ def test_sync_external_contact_identity_allows_missing_openid() -> None:
     assert repo.upserted_record["openid"] == ""
 
 
+def test_sync_external_contact_identity_without_unionid_stays_pending() -> None:
+    repo = _FakeRepo()
+    result = _service(
+        repo,
+        adapter=_DetailAdapter(
+            {
+                "errcode": 0,
+                "external_contact": {
+                    "external_userid": "wm_native_001",
+                    "openid": "openid_native_001",
+                    "name": "native customer",
+                },
+                "follow_user": [{"userid": "owner_native"}],
+            }
+        ),
+    ).sync_external_contact_identity_for_event(
+        {
+            "Event": "change_external_contact",
+            "ChangeType": "add_external_contact",
+            "ExternalUserID": "wm_native_001",
+            "UserID": "owner_native",
+        },
+        corp_id="ww-native",
+    )
+
+    assert result["status"] == "pending_identity"
+    assert result["reason"] == "missing_unionid"
+    assert result["unionid_present"] is False
+    assert result["mobile_binding"] == {"status": "skipped", "reason": "identity_pending_unionid"}
+    assert repo.binding_status == {"is_bound": False, "mobile": ""}
+
+
 def test_bind_mobile_from_identity_sources_no_candidate() -> None:
     result = _service(_FakeRepo()).bind_mobile_from_identity_sources("wm_native_001")
 

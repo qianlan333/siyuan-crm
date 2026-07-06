@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 from werkzeug.security import generate_password_hash
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE
+from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE
 from aicrm_next.main import create_app
 
 
@@ -45,9 +45,24 @@ def test_break_glass_success_sets_next_cookie_and_redirects_safe_next(monkeypatc
 
     assert response.status_code == 302
     assert response.headers["location"] == "/admin/config"
-    assert SESSION_COOKIE in response.headers["set-cookie"]
-    assert "HttpOnly" in response.headers["set-cookie"]
-    assert "bg-password" not in response.headers["set-cookie"]
+    set_cookie = response.headers["set-cookie"]
+    assert SESSION_COOKIE in set_cookie
+    assert CSRF_COOKIE in set_cookie
+    assert "HttpOnly" in set_cookie
+    assert "bg-password" not in set_cookie
+
+
+def test_break_glass_success_uses_secure_cookies_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_SESSION_COOKIE_SECURE", "true")
+
+    response = _client(monkeypatch, enabled=True).post(
+        "/login",
+        data={"login_type": "break_glass", "username": "bg-admin", "password": "bg-password", "next": "/admin/config"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert "Secure" in response.headers["set-cookie"]
 
 
 def test_break_glass_success_rejects_open_redirect_next(monkeypatch) -> None:

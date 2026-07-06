@@ -137,6 +137,112 @@ def test_questionnaire_admin_write_routes_execute_next_commandbus(client: TestCl
         assert response.json()["command_id"] in command_ids
 
 
+def test_questionnaire_completion_target_admin_public_submit_and_repeat(client: TestClient) -> None:
+    target = {
+        "enabled": True,
+        "target_type": "mini_program",
+        "open_strategy": "wechat_open_tag",
+        "h5_url": "/s/completion-target-survey/submitted",
+        "fallback_url": "/fallback-paid",
+        "mini_program": {
+            "username": "gh_completion_target",
+            "path": "/pages/result/index",
+            "query": "from=questionnaire",
+            "env_version": "trial",
+        },
+    }
+    create = client.post(
+        "/api/admin/questionnaires",
+        json={**_payload("完成目标问卷"), "slug": "completion-target-survey", "completion_target": target},
+    )
+    assert create.status_code == 200
+    body = create.json()
+    assert body["questionnaire"]["completion_target_enabled"] is True
+    assert body["questionnaire"]["completion_target_type"] == "mini_program"
+    questionnaire_id = body["questionnaire_id"]
+
+    update = client.patch(
+        f"/api/admin/questionnaires/{questionnaire_id}",
+        json={**_payload("完成目标问卷更新"), "slug": "completion-target-survey", "completion_target": {**target, "fallback_url": "/fallback-updated"}},
+    )
+    assert update.status_code == 200
+    assert update.json()["questionnaire"]["completion_target"]["fallback_url"] == "/fallback-updated"
+
+    public_get = client.get("/api/h5/questionnaires/completion-target-survey")
+    assert public_get.status_code == 200
+    assert public_get.json()["questionnaire"]["completion_target"]["target_type"] == "mini_program"
+
+    submit_payload = {"answers": {"q1": "yes"}, "identity": {"respondent_key": "completion-target-user"}}
+    submit = client.post("/api/h5/questionnaires/completion-target-survey/submit", json=submit_payload)
+    assert submit.status_code == 200
+    assert submit.json()["completion_target"]["mini_program"]["username"] == "gh_completion_target"
+
+    repeat = client.post("/api/h5/questionnaires/completion-target-survey/submit", json=submit_payload)
+    assert repeat.status_code == 409
+    assert repeat.json()["error"] == "already_submitted"
+    assert repeat.json()["completion_target"]["target_type"] == "mini_program"
+
+
+def test_questionnaire_dynamic_url_link_completion_target(client: TestClient) -> None:
+    target = {
+        "enabled": True,
+        "target_type": "url_link",
+        "open_strategy": "url_link",
+        "h5_url": "/s/dynamic-url-link-survey/submitted",
+        "url_link": {
+            "enabled": True,
+            "source_url": "https://ip.lhbl.com.cn/api/wxlink?from=questionnaire",
+            "response_url_key": "url_link",
+        },
+    }
+    create = client.post(
+        "/api/admin/questionnaires",
+        json={**_payload("动态 URL Link 问卷"), "slug": "dynamic-url-link-survey", "completion_target": target},
+    )
+    assert create.status_code == 200
+    body = create.json()
+    assert body["questionnaire"]["completion_target_type"] == "url_link"
+    assert body["questionnaire"]["completion_target"]["url_link"]["source_url"] == "https://ip.lhbl.com.cn/api/wxlink?from=questionnaire"
+
+    submit = client.post(
+        "/api/h5/questionnaires/dynamic-url-link-survey/submit",
+        json={"answers": {"q1": "yes"}, "identity": {"respondent_key": "dynamic-url-link-user"}},
+    )
+    assert submit.status_code == 200
+    assert submit.json()["completion_target"]["target_type"] == "url_link"
+    assert submit.json()["completion_target"]["url_link"]["response_url_key"] == "url_link"
+
+    repeat_page = client.get(
+        "/s/dynamic-url-link-survey",
+        params={"respondent_key": "dynamic-url-link-user"},
+        follow_redirects=False,
+    )
+    assert repeat_page.status_code == 302
+    assert repeat_page.headers["location"].startswith("/api/h5/navigation-target/url-link/resolve?")
+    assert "source_url=https%3A%2F%2Fip.lhbl.com.cn%2Fapi%2Fwxlink%3Ffrom%3Dquestionnaire" in repeat_page.headers["location"]
+
+    submitted_page = client.get("/s/dynamic-url-link-survey/submitted", follow_redirects=False)
+    assert submitted_page.status_code == 302
+    assert submitted_page.headers["location"].startswith("/api/h5/navigation-target/url-link/resolve?")
+
+
+def test_questionnaire_legacy_redirect_auto_builds_h5_completion_target(client: TestClient) -> None:
+    create = client.post(
+        "/api/admin/questionnaires",
+        json={**_payload("旧跳转问卷"), "slug": "legacy-redirect-survey", "redirect_url": "/legacy-result"},
+    )
+    assert create.status_code == 200
+    target = create.json()["questionnaire"]["completion_target"]
+    assert target["enabled"] is True
+    assert target["target_type"] == "h5"
+    assert target["h5_url"] == "/legacy-result"
+
+    public_get = client.get("/api/h5/questionnaires/legacy-redirect-survey")
+    assert public_get.status_code == 200
+    assert public_get.json()["questionnaire"]["redirect_url"] == "/legacy-result"
+    assert public_get.json()["questionnaire"]["completion_target"]["h5_url"] == "/legacy-result"
+
+
 def test_questionnaire_admin_write_routes_return_controlled_errors(client: TestClient) -> None:
     missing_title = client.post("/api/admin/questionnaires", json={"description": "no title"})
     assert missing_title.status_code == 400

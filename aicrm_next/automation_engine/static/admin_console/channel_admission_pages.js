@@ -44,6 +44,9 @@
   const bootstrap = bootstrapNode ? JSON.parse(bootstrapNode.textContent || "{}") : {};
   const bootstrapChannel = bootstrap.channel || {};
   const adminToken = root.dataset.adminToken || "";
+  const state = {
+    activeChannelPanel: "basic",
+  };
 
   function bySelector(selector, scope) {
     return Array.from((scope || root).querySelectorAll(selector));
@@ -69,7 +72,6 @@
     try {
       fn();
     } catch (error) {
-      console.error(`[channel_admission_pages] ${name} init failed`, error);
       root.dataset[`init${name}Error`] = error.message || "init failed";
     }
   }
@@ -99,6 +101,17 @@
       credentials: "same-origin",
       ...options,
     }).then((response) => response.json().then((data) => ({ response, data })));
+  }
+
+  function apiErrorMessage(data, fallback) {
+    const detail = data && data.detail;
+    if (typeof detail === "string" && detail) return detail;
+    if (detail && typeof detail === "object") {
+      return detail.reason || detail.error || detail.message || detail.error_code || fallback;
+    }
+    if (data && typeof data.error === "string" && data.error) return data.error;
+    if (data && typeof data.reason === "string" && data.reason) return data.reason;
+    return fallback;
   }
 
   function urlFromBase(base, id) {
@@ -171,28 +184,10 @@
   function statusLabel(value) {
     return {
       active: "启用",
+      inactive: "停用",
       paused: "暂停",
       archived: "归档",
-      accepted: "已入池",
-      waiting: "等待审核",
-      converted: "已成交",
-      rejected: "已拒绝",
-      duplicate_active: "重复扫码",
-      manual_review: "人工审核",
-      standalone_channel: "独立渠道",
     }[value] || value || "-";
-  }
-
-  function stageLabel(value) {
-    return {
-      scan_enter: "扫码进入",
-      order_review: "订单审核",
-      questionnaire_review: "问卷审核",
-      operating: "运营中",
-      conversion_review: "成交判定",
-      converted: "已成交",
-      finished: "结束",
-    }[value] || statusLabel(value);
   }
 
   function renderImportResult(data) {
@@ -207,25 +202,6 @@
     if (data.reason) lines.push("处理说明：" + data.reason);
     if (Array.isArray(data.errors) && data.errors.length) lines.push("错误：" + data.errors.join("；"));
     return lines.length ? lines.join("\n") : "导入任务已处理";
-  }
-
-  function renderMemberStageSummary(data) {
-    const summary = (data || {}).summary || {};
-    const members = (data || {}).members || [];
-    const summaryRows = [
-      ["总人数", summary.total],
-      ["订单审核", summary.order_review],
-      ["问卷审核", summary.questionnaire_review],
-      ["运营中", summary.operating],
-      ["已成交", summary.converted],
-      ["已结束", summary.finished],
-      ["已退出", summary.exited],
-    ].map((item) => "<tr><td>" + item[0] + "</td><td>" + (item[1] || 0) + "</td></tr>").join("");
-    const memberRows = members.length
-      ? members.map((item) => "<tr><td>" + (item.display_name || item.name || item.external_contact_id || "-") + "</td><td>" + stageLabel(item.current_stage_code) + "</td><td>" + (item.pool_entered_at || "-") + "</td><td>" + (item.stage_entered_at || "-") + "</td></tr>").join("")
-      : "<tr><td colspan=\"4\">暂无池内用户。</td></tr>";
-    return "<h3>阶段分布</h3><table class=\"admin-table channel-table\"><tbody>" + summaryRows + "</tbody></table>" +
-      "<h3>池内用户</h3><table class=\"admin-table channel-table\"><thead><tr><th>客户</th><th>当前阶段</th><th>入池时间</th><th>阶段进入时间</th></tr></thead><tbody>" + memberRows + "</tbody></table>";
   }
 
   function setupChannelSearch() {
@@ -265,19 +241,14 @@
         const urls = (bootstrap.api_urls || {});
         Promise.all([
           apiJson(urlFromBase(urls.contacts_base, channelId) + "?limit=20", { method: "GET" }).catch(() => ({ data: { contacts: [] } })),
-          apiJson(urlFromBase(urls.bindings_base, channelId), { method: "GET" }).catch(() => ({ data: { bindings: [] } })),
-        ]).then(([contactsResult, bindingsResult]) => {
+        ]).then(([contactsResult]) => {
           const contacts = (contactsResult.data || {}).contacts || [];
-          const bindings = (bindingsResult.data || {}).bindings || [];
           const contactRows = contacts.length
             ? contacts.map((item) => "<tr><td>" + (item.display_name || item.name || item.external_contact_id || "-") + "</td><td>" + (item.enter_count || 0) + "</td><td>" + (item.last_channel_entered_at || "-") + "</td></tr>").join("")
             : "<tr><td colspan=\"3\">暂无渠道用户。</td></tr>";
-          const bindingText = bindings.length
-            ? bindings.map((item) => (item.program_name || item.program_id || "-") + " / " + statusLabel(item.binding_status)).join("<br>")
-            : "独立使用";
           body.innerHTML =
             "<p><strong>" + row.querySelector("strong").textContent + "</strong></p>" +
-            "<p class=\"channel-muted\">当前绑定自动化运营状态：" + bindingText + "</p>" +
+            "<p class=\"channel-muted\">以下为最近渠道用户。</p>" +
             "<h3>渠道用户列表</h3>" +
             "<table class=\"admin-table channel-table\"><thead><tr><th>客户</th><th>进入次数</th><th>最近进入</th></tr></thead><tbody>" +
             contactRows +
@@ -291,15 +262,23 @@
   }
 
   function updateTypeVisibility() {
-    const select = root.querySelector("[data-channel-type-select]");
-    if (!select) return;
-    const isLink = select.value === "wecom_customer_acquisition";
+    const selected = root.querySelector('[name="channel_type"]:checked') || root.querySelector("[data-channel-type-select]");
+    const value = selected ? selected.value : "qrcode";
+    const isLink = value === "wecom_customer_acquisition";
+    bySelector("[data-channel-type-card]").forEach((card) => {
+      card.classList.toggle("active", card.dataset.channelTypeCard === value);
+    });
     bySelector("[data-link-field], [data-link-section]").forEach((node) => {
       node.hidden = !isLink;
     });
     bySelector("[data-qrcode-field], [data-qrcode-section]").forEach((node) => {
       node.hidden = isLink;
     });
+    const typeText = isLink ? "渠道获客链接" : "普通二维码";
+    const carrierPill = root.querySelector("[data-carrier-pill]");
+    const summaryType = root.querySelector("[data-summary-channel-type]");
+    if (carrierPill) carrierPill.textContent = typeText;
+    if (summaryType) summaryType.textContent = typeText;
     const form = root.querySelector("[data-channel-form]");
     if (form) {
       const linkUrl = form.querySelector('[name="link_url"]')?.value || "";
@@ -307,9 +286,44 @@
       const preview = root.querySelector("[data-link-preview]");
       const finalInput = form.querySelector('[name="final_url"]');
       const computed = finalUrl(linkUrl, customerChannel);
-      if (preview) preview.textContent = computed || "填写原始链接和渠道参数后预览最终分享链接";
+      if (preview && "value" in preview && computed && isLink) preview.value = computed;
+      if (preview && !("value" in preview)) preview.textContent = computed || "";
       if (finalInput && computed && isLink) finalInput.value = computed;
     }
+  }
+
+  function updateFormSummary() {
+    const form = root.querySelector("[data-channel-form]");
+    const name = form?.querySelector('[name="channel_name"]')?.value || bootstrapChannel.channel_name || "未命名渠道";
+    const status = form?.querySelector('[name="status"]')?.value || bootstrapChannel.status || "active";
+    const nameNode = root.querySelector("[data-summary-channel-name]");
+    const statusNode = root.querySelector("[data-summary-channel-status]");
+    const assigneeNode = root.querySelector("[data-summary-assignee-count]");
+    if (nameNode) nameNode.textContent = name || "未命名渠道";
+    if (statusNode) statusNode.textContent = statusLabel(status);
+    if (assigneeNode) assigneeNode.textContent = visibleAssignees().length + " 人";
+  }
+
+  function setActiveChannelPanel(panel) {
+    const nextPanel = ["basic", "carrier", "assignee", "welcome", "tag"].includes(panel) ? panel : "basic";
+    state.activeChannelPanel = nextPanel;
+    bySelector("[data-channel-panel]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.channelPanel === nextPanel);
+    });
+    bySelector("[data-channel-panel-content]").forEach((panelNode) => {
+      panelNode.classList.toggle("active", panelNode.dataset.channelPanelContent === nextPanel);
+    });
+  }
+
+  function setupChannelPanels() {
+    if (!root.querySelector("[data-channel-panel]")) return;
+    root.addEventListener("click", (event) => {
+      const button = event.target.closest("[data-channel-panel]");
+      if (!button || !root.contains(button)) return;
+      event.preventDefault();
+      setActiveChannelPanel(button.dataset.channelPanel);
+    });
+    setActiveChannelPanel(state.activeChannelPanel);
   }
 
   function channelFormPayload() {
@@ -423,8 +437,9 @@
   }
 
   function setSaveButtonAvailability() {
-    const button = root.querySelector("[data-save-channel]");
-    if (button) button.disabled = assignmentState.errors.length > 0;
+    bySelector("[data-save-channel]").forEach((button) => {
+      button.disabled = assignmentState.errors.length > 0;
+    });
   }
 
   function renderAssignmentStrategies() {
@@ -441,11 +456,13 @@
   function renderAssignees() {
     const list = root.querySelector("[data-assignee-list]");
     const count = root.querySelector("[data-assignee-count]");
-    const addButton = root.querySelector("[data-add-channel-assignee]");
+    const addButtons = bySelector("[data-add-channel-assignee]");
     const assignees = visibleAssignees();
     const ratioMode = assignmentState.strategy === "ratio";
     if (count) count.textContent = assignees.length + " / 5";
-    if (addButton) addButton.disabled = assignees.length >= 5;
+    addButtons.forEach((button) => {
+      button.disabled = assignees.length >= 5;
+    });
     if (!list) return;
     if (!assignees.length) {
       list.innerHTML = '<div class="assignee-empty">请添加企微客服。</div>';
@@ -459,8 +476,8 @@
         '<div class="assignee-name"><strong>' + escapeHtml(item.display_name || item.staff_id) + '</strong><small>' + escapeHtml(item.staff_id) + '</small></div>' +
         field +
         '<div class="assignee-row-actions">' +
-        '<button class="button small" type="button" data-assignee-move-up="' + index + '" ' + (index === 0 ? "disabled" : "") + '>上移</button>' +
-        '<button class="button small ghost" type="button" data-assignee-remove="' + index + '" ' + (assignees.length <= 1 ? "disabled" : "") + '>删除</button>' +
+        '<button class="btn" type="button" data-assignee-move-up="' + index + '" ' + (index === 0 ? "disabled" : "") + '>上移</button>' +
+        '<button class="btn danger" type="button" data-assignee-remove="' + index + '" ' + (assignees.length <= 1 ? "disabled" : "") + '>删除</button>' +
         '</div></div>';
     }).join("");
   }
@@ -495,6 +512,7 @@
     const ownerInput = root.querySelector("[data-channel-owner-staff-id]");
     const first = visibleAssignees()[0];
     if (ownerInput) ownerInput.value = first ? first.staff_id : "";
+    updateFormSummary();
   }
 
   function setupChannelAssignees() {
@@ -607,21 +625,53 @@
   }
 
   function setupChannelForm() {
-    const select = root.querySelector("[data-channel-type-select]");
-    if (!select) return;
-    select.addEventListener("change", updateTypeVisibility);
+    bySelector("[data-channel-type-option]").forEach((input) => {
+      input.addEventListener("change", updateTypeVisibility);
+    });
+    bySelector("[data-channel-type-card]").forEach((card) => {
+      card.addEventListener("click", () => {
+        const input = card.querySelector("[data-channel-type-option]");
+        if (!input) return;
+        input.checked = true;
+        updateTypeVisibility();
+      });
+    });
     bySelector('[name="link_url"], [name="customer_channel"]').forEach((input) => {
       input.addEventListener("input", updateTypeVisibility);
     });
+    bySelector('[name="channel_name"], [name="status"]').forEach((input) => {
+      input.addEventListener("input", updateFormSummary);
+      input.addEventListener("change", updateFormSummary);
+    });
     updateTypeVisibility();
     root.querySelector("[data-copy-form-link]")?.addEventListener("click", () => {
-      copyText(root.querySelector("[data-link-preview]")?.textContent);
+      const preview = root.querySelector("[data-link-preview]");
+      copyText(preview && "value" in preview ? preview.value : preview?.textContent);
     });
     root.querySelector("[data-share-form-link]")?.addEventListener("click", () => {
-      shareText(root.querySelector("[data-link-preview]")?.textContent);
+      const preview = root.querySelector("[data-link-preview]");
+      shareText(preview && "value" in preview ? preview.value : preview?.textContent);
     });
-    root.querySelector("[data-save-channel]")?.addEventListener("click", () => {
-      const saveButton = root.querySelector("[data-save-channel]");
+    root.querySelector("[data-generate-form-qrcode]")?.addEventListener("click", (event) => {
+      const button = event.currentTarget;
+      const detailUrl = root.dataset.apiDetail || "";
+      if (!detailUrl) return;
+      button.disabled = true;
+      button.textContent = "生成中";
+      apiJson(detailUrl + "/qrcode/generate", { method: "POST", body: JSON.stringify({}) }).then(({ response, data }) => {
+        if (!response.ok || data.ok === false) {
+          throw new Error(apiErrorMessage(data, "二维码生成失败"));
+        }
+        toast("二维码已生成");
+        window.location.reload();
+      }).catch((error) => {
+        button.disabled = false;
+        button.textContent = "生成二维码";
+        toast(error.message || "二维码生成失败");
+      });
+    });
+
+    const saveChannel = (saveButton) => {
       const isEdit = root.dataset.isEdit === "1";
       const url = isEdit ? root.dataset.apiDetail : root.dataset.apiCreate;
       const method = isEdit ? "PATCH" : "POST";
@@ -635,18 +685,20 @@
       }
       if (saveButton) {
         saveButton.disabled = true;
+        saveButton.dataset.originalText = saveButton.dataset.originalText || saveButton.textContent || "保存当前维度";
         saveButton.textContent = "保存中...";
       }
       setSaveFeedback("正在保存渠道配置...");
       apiJson(url, { method, body: JSON.stringify(payload) }).then(({ response, data }) => {
         if (!response.ok || data.ok === false) {
-          toast(data.error || data.reason || "保存失败");
-          setSaveFeedback(data.error || data.reason || "保存失败", "error");
+          const message = apiErrorMessage(data, "保存失败");
+          toast(message);
+          setSaveFeedback(message, "error");
           return;
         }
         const savedAt = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
         toast("渠道已保存");
-        setSaveFeedback("保存成功，欢迎语和素材已更新。" + (savedAt ? " " + savedAt : ""));
+        setSaveFeedback("保存成功。" + (savedAt ? " " + savedAt : ""));
         if (!isEdit && data.channel && data.channel.id) {
           window.location.href = "/admin/channels/" + data.channel.id + "/edit";
         }
@@ -655,11 +707,15 @@
         setSaveFeedback(error.message || "保存失败", "error");
       }).finally(() => {
         if (saveButton) {
-          saveButton.textContent = "保存渠道";
+          saveButton.textContent = saveButton.dataset.originalText || "保存当前维度";
         }
         setSaveButtonAvailability();
       });
+    };
+    bySelector("[data-save-channel]").forEach((button) => {
+      button.addEventListener("click", () => saveChannel(button));
     });
+    updateFormSummary();
   }
 
   function setupWelcomeComposer() {
@@ -824,39 +880,6 @@
     renderSelectedMaterials();
   }
 
-  function setupBindModal() {
-    const modal = root.querySelector("[data-bind-modal]");
-    if (!modal) return;
-    root.querySelector("[data-open-bind-modal]")?.addEventListener("click", () => {
-      modal.hidden = false;
-    });
-    root.querySelector("[data-close-bind-modal]")?.addEventListener("click", () => {
-      modal.hidden = true;
-    });
-    root.querySelector("[data-confirm-bind]")?.addEventListener("click", () => {
-      const ids = bySelector("[data-bind-channel-checkbox]:checked", modal).map((item) => parseInt(item.value, 10)).filter(Boolean);
-      if (!ids.length) {
-        toast("请选择渠道");
-        return;
-      }
-      apiJson(root.dataset.apiBindings, {
-        method: "POST",
-        body: JSON.stringify({
-          admin_action_token: adminToken,
-          channel_ids: ids,
-          initial_audience_code: "pending_questionnaire",
-          operator_id: "next_admin",
-        }),
-      }).then(({ response, data }) => {
-        if (!response.ok || data.ok === false) {
-          toast(data.error || data.reason || "绑定失败");
-          return;
-        }
-        window.location.reload();
-      });
-    });
-  }
-
   function importPayload(dryRun) {
     const channelId = parseInt(root.querySelector("[data-import-channel-id]")?.value || "0", 10);
     return {
@@ -871,7 +894,7 @@
     const preview = root.querySelector("[data-import-payload-preview]");
     if (!preview) return;
     const update = (dryRun) => {
-      preview.textContent = "导入模式：" + (dryRun === false ? "确认导入" : "只做预估") + "\n入池时间：使用导入时间";
+      preview.textContent = "导入模式：" + (dryRun === false ? "确认导入" : "只做预估") + "\n导入结果：仅写入渠道进入事实，供 AI 人群包查询。";
     };
     update(true);
     root.querySelector("[data-import-channel-id]")?.addEventListener("change", () => update(true));
@@ -908,14 +931,10 @@
     });
     bySelector("[data-open-import-panel]").forEach((button) => {
       button.addEventListener("click", () => {
-        const bindingId = button.dataset.bindingId || button.closest("[data-bound-channel-id]")?.dataset.bindingId || "";
-        const base = (bootstrap.api_urls || {}).member_stage_summary_base || "";
-        const url = base.replace(/\/0($|[/?#])/, "/" + bindingId + "$1");
-        if (!bindingId || !url) return;
-        apiJson(url, { method: "GET" }).then(({ data }) => {
-          const preview = root.querySelector("[data-import-payload-preview]");
-          if (preview) preview.innerHTML = renderMemberStageSummary(data);
-        });
+        const preview = root.querySelector("[data-import-payload-preview]");
+        if (preview) {
+          preview.textContent = "导入模式：只做预估\n导入结果：仅写入渠道进入事实，供 AI 人群包查询。";
+        }
       });
     });
     const drawer = root.querySelector("[data-attempt-drawer]");
@@ -936,11 +955,12 @@
   safeInit("ChannelSearch", setupChannelSearch);
   safeInit("CopyShare", setupCopyShare);
   safeInit("ChannelDrawer", setupChannelDrawer);
+  safeInit("ChannelPanels", setupChannelPanels);
   safeInit("ChannelForm", setupChannelForm);
   safeInit("ChannelAssignees", setupChannelAssignees);
   safeInit("WelcomeComposer", setupWelcomeComposer);
   safeInit("EntryTagPicker", setupEntryTagPicker);
-  safeInit("BindModal", setupBindModal);
+  if (typeof setupBindModal === "function") safeInit("BindModal", setupBindModal);
   safeInit("ImportPanel", setupImportPanel);
   safeInit("EntryActions", setupEntryActions);
 })();

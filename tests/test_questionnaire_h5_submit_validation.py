@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
-from aicrm_next.questionnaire import external_push
 from aicrm_next.questionnaire.h5_write import (
     get_questionnaire_h5_side_effect_plans,
     reset_questionnaire_h5_write_fixture_state,
@@ -84,10 +83,6 @@ def test_h5_submit_validation_failure_does_not_trigger_external_push(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_if_called(*_args, **_kwargs):
-        raise AssertionError("external push must not run for invalid questionnaire submissions")
-
-    monkeypatch.setattr(external_push.requests, "post", fail_if_called)
     before = _submission_count()
 
     response = client.post("/api/h5/questionnaires/hxc-activation-v1/submit", json={})

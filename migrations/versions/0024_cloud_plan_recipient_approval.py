@@ -42,7 +42,7 @@ def upgrade() -> None:
         CREATE TABLE IF NOT EXISTS cloud_broadcast_plan_recipients (
             id BIGSERIAL PRIMARY KEY,
             plan_id TEXT NOT NULL REFERENCES cloud_broadcast_plans(plan_id) ON DELETE CASCADE,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             owner_userid TEXT NOT NULL DEFAULT '',
             display_name TEXT NOT NULL DEFAULT '',
             planned_message_count INTEGER NOT NULL DEFAULT 0,
@@ -64,8 +64,8 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_cloud_broadcast_plan_recipients_plan_external
-        ON cloud_broadcast_plan_recipients (plan_id, external_userid)
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_cloud_broadcast_plan_recipients_plan_unionid
+        ON cloud_broadcast_plan_recipients (plan_id, unionid)
         """
     )
     op.execute(
@@ -76,8 +76,8 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_cloud_broadcast_plan_recipients_external
-        ON cloud_broadcast_plan_recipients (external_userid)
+        CREATE INDEX IF NOT EXISTS idx_cloud_broadcast_plan_recipients_unionid
+        ON cloud_broadcast_plan_recipients (unionid)
         """
     )
     op.execute(
@@ -86,7 +86,7 @@ def upgrade() -> None:
             id BIGSERIAL PRIMARY KEY,
             plan_id TEXT NOT NULL REFERENCES cloud_broadcast_plans(plan_id) ON DELETE CASCADE,
             recipient_id BIGINT NOT NULL REFERENCES cloud_broadcast_plan_recipients(id) ON DELETE CASCADE,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             sequence_index INTEGER NOT NULL DEFAULT 1,
             day_offset INTEGER NOT NULL DEFAULT 0,
             send_time TEXT NOT NULL DEFAULT '',
@@ -113,9 +113,9 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_cloud_broadcast_plan_recipient_messages_recipient")
     op.execute("DROP TABLE IF EXISTS cloud_broadcast_plan_recipient_messages")
-    op.execute("DROP INDEX IF EXISTS idx_cloud_broadcast_plan_recipients_external")
+    op.execute("DROP INDEX IF EXISTS idx_cloud_broadcast_plan_recipients_unionid")
     op.execute("DROP INDEX IF EXISTS idx_cloud_broadcast_plan_recipients_plan_status")
-    op.execute("DROP INDEX IF EXISTS uq_cloud_broadcast_plan_recipients_plan_external")
+    op.execute("DROP INDEX IF EXISTS uq_cloud_broadcast_plan_recipients_plan_unionid")
     op.execute("DROP TABLE IF EXISTS cloud_broadcast_plan_recipients")
     op.execute("ALTER TABLE IF EXISTS cloud_broadcast_plans DROP COLUMN IF EXISTS run_status")
     op.execute("ALTER TABLE IF EXISTS cloud_broadcast_plans DROP COLUMN IF EXISTS review_status")

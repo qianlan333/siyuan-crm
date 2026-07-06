@@ -29,7 +29,7 @@ def test_skill_docs_are_historical_media_tool_docs_not_current_mcp_surface(skill
 
     assert "image_library_list" in skill_source
     assert "image_library_list" not in current_tools
-    assert current_tools == {"resolve_customer", "get_customer_context", "get_recent_messages", "get_automation_context"}
+    assert current_tools == {"resolve_customer", "get_customer_context", "get_recent_messages"}
 
 
 def test_skill_docs_still_point_to_local_mcp_endpoint(readme_source: str) -> None:

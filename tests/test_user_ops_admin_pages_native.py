@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
+from aicrm_next.platform_foundation.external_effects import reset_external_effect_fixture_state
 
 
 def _client() -> TestClient:
+    reset_external_effect_fixture_state()
     return TestClient(create_app())
 
 
@@ -35,7 +37,7 @@ def test_user_ops_ui_page_renders_from_native_shell(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "客户激活 / 客户列表" in response.text
-    assert "生产客户、问卷、订单和自动化成员统计" in response.text
+    assert "生产客户、问卷、订单和 AI 人群包统计" in response.text
     assert "test_read_model" in response.text
     assert "X-AICRM-Compatibility-Facade" not in response.headers
 
@@ -114,11 +116,14 @@ def test_user_ops_write_like_routes_remain_no_real_side_effect() -> None:
     assert execute_body["side_effect_safety"]["real_batch_send_executed"] is False
     assert execute_body["side_effect_safety"]["real_wecom_dispatch_executed"] is False
     assert execute_body["side_effect_safety"]["side_effect_executed"] is False
+    assert execute_body["execution_backend"] == "external_effect_queue"
+    assert execute_body["external_effect_job_ids"]
     assert execute_body["execution_summary"]["side_effect_safety"]["side_effect_executed"] is False
+    assert execute_body["execution_summary"]["backend"] == "external_effect_queue"
 
     dnd = client.post(
         "/api/admin/user-ops/do-not-disturb",
-        json={"external_userid": "wx_ext_001", "reason_code": "manual_set", "reason_text": "运营设置"},
+        json={"unionid": "union_ops_001", "reason_code": "manual_set", "reason_text": "运营设置"},
     )
     assert dnd.status_code == 200
     dnd_body = dnd.json()
@@ -128,5 +133,7 @@ def test_user_ops_write_like_routes_remain_no_real_side_effect() -> None:
     refresh = client.post(f"/api/admin/user-ops/send-records/{execute_body['record_id']}/refresh")
     assert refresh.status_code == 200
     refresh_body = refresh.json()
-    assert refresh_body["refreshed"] is False
+    assert refresh_body["refreshed"] is True
+    assert refresh_body["external_effect_status_supported"] is True
+    assert refresh_body["wecom_delivery_status_supported"] is False
     assert refresh_body["real_external_call_executed"] is False

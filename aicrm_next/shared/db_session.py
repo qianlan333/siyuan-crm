@@ -203,6 +203,69 @@ def get_db() -> Iterator[Session]:
             LOGGER.warning("failed to close SQLAlchemy session in get_db cleanup", exc_info=True)
 
 
+def connect_raw_postgres(database_url: str, *, autocommit: bool = False):
+    import psycopg
+
+    return psycopg.connect(database_url, autocommit=autocommit)
+
+
+def _psycopg_can_back_sqlalchemy() -> bool:
+    try:
+        import psycopg
+    except Exception:
+        return False
+    return bool(getattr(psycopg, "paramstyle", None)) and callable(getattr(psycopg, "connect", None))
+
+
+class PooledPsycopgConnection:
+    def __init__(self, database_url: str | None = None) -> None:
+        self._pooled = get_engine(database_url).raw_connection()
+        self._conn = getattr(self._pooled, "driver_connection", None) or getattr(self._pooled, "connection", None)
+        if self._conn is None:
+            self._conn = self._pooled
+        try:
+            from psycopg.rows import dict_row
+
+            self._conn.row_factory = dict_row
+        except Exception:
+            LOGGER.debug("failed to set pooled psycopg row_factory", exc_info=True)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, _exc, _tb) -> None:
+        try:
+            if exc_type is None:
+                self.commit()
+            else:
+                self.rollback()
+        finally:
+            self.close()
+
+    def cursor(self):
+        return self._conn.cursor()
+
+    def execute(self, query: str, params: object | None = None):
+        return self._conn.execute(query, params)
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def close(self) -> None:
+        self._pooled.close()
+
+
+def connect_pooled_postgres(database_url: str | None = None):
+    if not _psycopg_can_back_sqlalchemy():
+        raw_url = database_url or raw_database_url()
+        if raw_url:
+            return connect_raw_postgres(raw_url, autocommit=False)
+    return PooledPsycopgConnection(database_url)
+
+
 def reset_engine_cache_for_tests() -> None:
     for engine in list(_ENGINE_CACHE.values()):
         engine.dispose()

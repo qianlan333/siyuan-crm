@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from aicrm_next.channel_entry.wecom_adapter import (
@@ -65,7 +67,7 @@ def test_get_wecom_adapter_blocks_when_flag_disabled_or_config_missing(monkeypat
     assert missing_diagnosis["missing_config"] == ["WECOM_CONTACT_SECRET"]
 
 
-def test_production_wecom_adapter_contract_posts_real_wecom_endpoints(monkeypatch):
+def test_production_wecom_adapter_contract_posts_real_wecom_endpoints():
     calls: list[dict] = []
 
     def fake_request(method, url, **kwargs):
@@ -76,9 +78,12 @@ def test_production_wecom_adapter_contract_posts_real_wecom_endpoints(monkeypatc
             return _Response({"errcode": 0, "config_id": "cfg", "qr_code": "https://qr"})
         return _Response({"errcode": 0, "errmsg": "ok"})
 
-    monkeypatch.setattr("aicrm_next.channel_entry.wecom_adapter.requests.request", fake_request)
-
-    adapter = ProductionWeComAdapter(corp_id="ww-test", secret="secret", api_base="https://qyapi.weixin.qq.com")
+    adapter = ProductionWeComAdapter(
+        corp_id="ww-test",
+        secret="secret",
+        api_base="https://qyapi.weixin.qq.com",
+        http_request=fake_request,
+    )
     welcome = adapter.send_welcome_msg({"welcome_code": "wc", "text": {"content": "hi"}})
     tag = adapter.mark_external_contact_tags(external_userid="wm", follow_user_userid="owner", add_tags=["tag"], remove_tags=[])
     qrcode = adapter.create_contact_way({"state": "aqr", "user": ["owner"]})
@@ -96,3 +101,10 @@ def test_production_wecom_adapter_contract_posts_real_wecom_endpoints(monkeypatc
         "/cgi-bin/externalcontact/get",
     ]
     assert calls[2]["json"] == {"userid": "owner", "external_userid": "wm", "add_tag": ["tag"]}
+
+
+def test_channel_entry_wecom_adapter_facade_has_no_direct_http_call() -> None:
+    source = Path("aicrm_next/channel_entry/wecom_adapter.py").read_text(encoding="utf-8")
+
+    assert "requests.request" not in source
+    assert "import requests" not in source

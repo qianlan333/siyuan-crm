@@ -26,7 +26,7 @@ def test_questionnaire_sidebar_customer_api_contracts_are_next_owned(monkeypatch
 
     questionnaire = _assert_next_response(client.get("/api/admin/questionnaires/1"))
     h5 = _assert_next_response(client.get("/api/h5/questionnaires/hxc-activation-v1"))
-    sidebar = _assert_next_response(client.get("/api/sidebar/customer-context?external_userid=wx_ext_001"))
+    sidebar = _assert_next_response(client.get("/api/sidebar/customer-context?external_userid=wx_ext_001&owner_userid=ZhaoYanFang"))
     customers = _assert_next_response(client.get("/api/customers?limit=5"))
     detail = _assert_next_response(client.get("/api/customers/wx_ext_001"))
 
@@ -41,7 +41,7 @@ def test_identity_and_sidebar_binding_contracts_are_next_owned(monkeypatch):
     client = _client(monkeypatch)
 
     identity = _assert_next_response(client.get("/api/admin/identity/resolve?external_userid=wx_ext_001"))
-    binding = _assert_next_response(client.get("/api/sidebar/contact-binding-status?external_userid=wx_ext_001"))
+    binding = _assert_next_response(client.get("/api/sidebar/contact-binding-status?external_userid=wx_ext_001&owner_userid=ZhaoYanFang"))
 
     assert identity["identity"]["external_userid"] == "wx_ext_001"
     assert binding["is_bound"] is True

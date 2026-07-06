@@ -163,7 +163,7 @@ def _production_success_marker_blockers() -> list[str]:
         probes = {
             "customer_read_model": client.get("/api/customers"),
             "questionnaire": client.get("/api/admin/questionnaires"),
-            "automation_engine": client.get("/api/admin/automation-conversion/overview"),
+            "ai_audience_ops": client.get("/api/admin/ai-audience/packages"),
             "commerce": client.get("/api/admin/wechat-pay/products"),
             "media_library": client.get("/api/admin/image-library"),
         }

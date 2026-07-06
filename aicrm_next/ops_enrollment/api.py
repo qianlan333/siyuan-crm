@@ -169,18 +169,18 @@ def user_ops_customers(
     )
 
 
-@router.get("/api/admin/user-ops/customers/{external_userid}")
-def user_ops_customer_detail(external_userid: str) -> dict:
+@router.get("/api/admin/user-ops/customers/{unionid}")
+def user_ops_customer_detail(unionid: str) -> dict:
     try:
-        return GetUserOpsCustomerQuery()(external_userid=external_userid)
+        return GetUserOpsCustomerQuery()(unionid=unionid)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@router.get("/api/admin/user-ops/customers/{external_userid}/timeline")
-def user_ops_customer_timeline(external_userid: str, limit: int = 20, offset: int = 0) -> dict:
+@router.get("/api/admin/user-ops/customers/{unionid}/timeline")
+def user_ops_customer_timeline(unionid: str, limit: int = 20, offset: int = 0) -> dict:
     try:
-        return GetUserOpsCustomerTimelineQuery()(external_userid=external_userid, limit=limit, offset=offset)
+        return GetUserOpsCustomerTimelineQuery()(unionid=unionid, limit=limit, offset=offset)
     except NotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -210,9 +210,9 @@ def user_ops_export_preview(request: ExportPreviewRequest, idempotency_key: str 
 
 
 @router.post("/api/admin/user-ops/batch-send/execute")
-def user_ops_batch_send_execute(request: BatchSendRequest) -> dict:
+def user_ops_batch_send_execute(request: BatchSendRequest, idempotency_key: str = Header(default="", alias="Idempotency-Key")) -> dict:
     try:
-        return ExecuteUserOpsBatchSendCommand()(request)
+        return ExecuteUserOpsBatchSendCommand()(request, idempotency_key=idempotency_key)
     except ContractError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

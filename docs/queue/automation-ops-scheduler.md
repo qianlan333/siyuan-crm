@@ -1,6 +1,6 @@
 # Automation Ops Scheduler
 
-`scripts/run_automation_ops_scheduler.py` is the business-domain scheduler for automation ops. It creates due `broadcast_jobs` rows and refreshes backend-owned read models such as the HXC dashboard snapshot. Real WeCom delivery stays in `scripts/run_broadcast_queue_worker.py`, `broadcast_jobs.handlers`, `tasks.service`, and the WeCom adapter guard.
+`scripts/run_automation_ops_scheduler.py` is now the production scheduler entry for group_ops only. It creates due `external_effect_job` rows with `effect_type=wecom.message.group.send`; historical `broadcast_jobs` remain read-only compatibility records. Real WeCom group delivery is handled by the External Effect worker and the `wecom_group_message` adapter guard.
 
 ## group_ops due_at
 
@@ -21,11 +21,11 @@ For every active plan node and every active bound group:
 5. Convert the start anchor to the business timezone, take that local date, then compute `due_at = start_date + (day_index - 1) days + scheduled_time`.
 6. Store `scheduled_for` as business-timezone ISO, for example `2026-05-29T13:00:00+08:00`.
 7. Compare due-ness by converting both `due_at` and scheduler `now` to UTC.
-8. If `due_at <= now`, enqueue through `LegacyBroadcastJobQueueGateway.enqueue_group_message`.
+8. If `due_at <= now`, plan a `wecom.message.group.send` External Effect job with `scheduled_at=due_at`.
 
 Groups with the same `plan_id`, `node_id`, `due_at` minute, owner, and content hash are merged into one job. Their `content_payload.chat_ids` contains all due `chat_id` values. Groups with different `due_at` values are not merged.
 
-The queue job keeps the current group_ops contract: `source_type=workflow`, `source_table=automation_group_ops_plans`, `business_domain=group_ops`, `channel=wecom_customer_group`, `target_kind=chat_id`, and `content_type=wecom_customer_group`. `scheduled_for` is the computed `due_at`, not scheduler runtime.
+The External Effect job keeps the current group_ops delivery contract in `payload_json`: `chat_ids`, `owner_userid`, `webhook_key`, `content_payload.channel=wecom_customer_group`, and the normalized message payload. `scheduled_at` is the computed `due_at`, not scheduler runtime.
 
 ## Idempotency
 
@@ -36,22 +36,17 @@ The scheduler uses a stable source/idempotency shape that includes:
 - `due_at` minute
 - sorted `chat_ids` hash
 
-The `broadcast_jobs` unique idempotency guard is still the final protection, so rerunning the timer does not duplicate queue rows.
+The `external_effect_job` idempotency guard is the primary protection, with a historical `broadcast_jobs` lookup only for older rows. Rerunning the timer does not duplicate External Effect jobs.
 
-## operation_task
+## Retired legacy components
 
-The same runner calls `run_due_operation_tasks(...)` for `scheduled_daily` operation tasks. That service pre-schedules `operation_task` jobs into `broadcast_jobs`; the worker later resolves the audience and sends through the existing operation-task handler.
-
-## HXC dashboard snapshot
-
-The HXC dashboard is backend-refreshed. The scheduler checks `user_ops_hxc_dashboard_meta` every minute and calls `refresh_hxc_dashboard_snapshot(...)` only when the latest successful snapshot is at least 30 minutes old. The admin page must not auto-POST `/api/admin/hxc-dashboard/refresh`; it only reads the snapshot and keeps the manual refresh button for operator-initiated repair.
+The old `operation_task` scheduler path, HXC dashboard refresh hook, and Feishu hourly report hook have been removed from this runner. They no longer appear as skipped components and must not be used as compatibility placeholders for old automation program/task orchestration.
 
 ## Responsibility Boundary
 
-- Automation ops scheduler: compute due business work and enqueue `broadcast_jobs`.
-- HXC dashboard scheduler path: refresh the snapshot read model at a 30-minute cadence.
-- Broadcast queue worker: claim due queue rows and dispatch handlers.
-- Handlers and tasks service: create recoverable outbound intent.
+- Automation ops scheduler: compute due group_ops work and plan External Effect jobs.
+- External Effect worker: claim due group-send effects and dispatch the guarded `wecom_group_message` adapter.
+- Broadcast queue worker: remains for historical/non-group_ops broadcast rows.
 - WeCom adapter: decide whether fake, blocked, or production side effects may run.
 
 The scheduler must not call WeCom directly.
@@ -71,7 +66,7 @@ Real group_ops acceptance must use only:
 
 ```bash
 python scripts/run_automation_ops_scheduler.py
-python scripts/run_broadcast_queue_worker.py
+python scripts/run_external_effect_queue_worker.py --execute --effect-type wecom.message.group.send
 ```
 
 Do not use group_ops run-due or direct queue writes to stand in for automatic scheduling.

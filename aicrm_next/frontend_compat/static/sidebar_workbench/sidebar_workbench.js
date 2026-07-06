@@ -33,6 +33,15 @@
   };
   const DEFAULT_TIMEOUT_MS = 8000;
   const SDK_TIMEOUT_MS = 5000;
+  const PANEL_TIMEOUT_MS = {
+    workbench: 6500,
+    questionnaires: 9000,
+    products: 9000,
+    orders: 12000,
+    materials: 10000,
+    other_staff_messages: 9000,
+  };
+  const PANEL_CACHE_TTL_MS = 2 * 60 * 1000;
   const PRODUCT_CARD_IMAGE_PATH = "/static/sidebar_workbench/product-card-cover.png";
 
   const state = {
@@ -40,6 +49,8 @@
     external_userid: "",
     owner_userid: "",
     bind_by_userid: "",
+    sidebar_owner_token: "",
+    sidebar_owner_token_status: "",
     activeTab: "profile",
     materialType: "image",
     workbench: null,
@@ -54,6 +65,7 @@
     profileSaveTimer: null,
     toastTimer: null,
     lastError: null,
+    panelCache: {},
   };
 
   const debugEnabled = root && root.dataset.debugEnabled === "true";
@@ -86,7 +98,6 @@
     const item = document.createElement("pre");
     item.textContent = line;
     debugWrap.appendChild(item);
-    console.log(line);
   }
 
   function customerContextQuery() {
@@ -112,6 +123,42 @@
     };
   }
 
+  function applySidebarOwnerToken(payload) {
+    const token = String((payload && payload.sidebar_owner_token) || "").trim();
+    if (payload && Object.prototype.hasOwnProperty.call(payload, "sidebar_owner_token")) state.sidebar_owner_token = token;
+    state.sidebar_owner_token_status = String((payload && payload.sidebar_owner_token_status) || state.sidebar_owner_token_status || "").trim();
+    const context = (payload && payload.sidebar_owner_context) || {};
+    const owner = String(context.owner_userid || context.viewer_userid || "").trim();
+    if (owner) state.owner_userid = owner;
+    const bindBy = String(context.bind_by_userid || "").trim();
+    if (bindBy) state.bind_by_userid = bindBy;
+  }
+
+  function jssdkConfigUrl(viewerUserId) {
+    const currentUrl = window.location.href.split("#")[0];
+    const url = new URL(endpoint("jssdkConfigUrl"), window.location.origin);
+    url.searchParams.set("url", currentUrl);
+    if (state.external_userid) url.searchParams.set("external_userid", state.external_userid);
+    const viewer = String(viewerUserId || state.owner_userid || "").trim();
+    if (viewer) url.searchParams.set("viewer_userid", viewer);
+    const bindBy = String(state.bind_by_userid || viewer || "").trim();
+    if (bindBy) url.searchParams.set("bind_by_userid", bindBy);
+    return url.toString();
+  }
+
+  async function refreshSidebarOwnerToken() {
+    if (!state.owner_userid && !state.external_userid) return false;
+    try {
+      const payload = await requestJson(jssdkConfigUrl(state.owner_userid), { timeoutMs: SDK_TIMEOUT_MS, retryCount: 1, retryDelayMs: 300 });
+      applySidebarOwnerToken(payload);
+      writeDebug("sidebar owner token refreshed", { status: state.sidebar_owner_token_status, has_token: Boolean(state.sidebar_owner_token) });
+      return Boolean(state.sidebar_owner_token);
+    } catch (error) {
+      writeDebug("sidebar owner token refresh failed", { message: error.message || String(error) });
+      return false;
+    }
+  }
+
   function showToast(message, tone) {
     window.clearTimeout(state.toastTimer);
     toastNode.textContent = message || "";
@@ -120,7 +167,34 @@
     state.toastTimer = window.setTimeout(() => toastNode.classList.add("hidden"), 1900);
   }
 
+  function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
+
+  function shouldRetryRequest(error) {
+    if (!error) return false;
+    if (error.stage === "request_timeout") return true;
+    if (!error.status) return true;
+    return error.status >= 500;
+  }
+
   async function requestJson(url, options) {
+    const retryCount = Math.max(0, Number((options && options.retryCount) || 0));
+    const retryDelayMs = Math.max(0, Number((options && options.retryDelayMs) || 320));
+    let lastError = null;
+    for (let attempt = 0; attempt <= retryCount; attempt += 1) {
+      try {
+        return await requestJsonOnce(url, options || {});
+      } catch (error) {
+        lastError = error;
+        if (attempt >= retryCount || !shouldRetryRequest(error)) break;
+        await sleep(retryDelayMs * (attempt + 1));
+      }
+    }
+    throw lastError;
+  }
+
+  async function requestJsonOnce(url, options) {
     const timeoutMs = Number((options && options.timeoutMs) || DEFAULT_TIMEOUT_MS);
     const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
     const timer = controller
@@ -130,12 +204,15 @@
       headers: {
         Accept: "application/json",
         ...(options && options.body ? { "Content-Type": "application/json" } : {}),
+        ...(state.sidebar_owner_token ? { "X-AICRM-Sidebar-Owner-Token": state.sidebar_owner_token } : {}),
         ...((options && options.headers) || {}),
       },
       ...(options || {}),
       ...(controller ? { signal: controller.signal } : {}),
     };
     delete finalOptions.timeoutMs;
+    delete finalOptions.retryCount;
+    delete finalOptions.retryDelayMs;
     try {
       const response = await fetch(url, finalOptions);
       const text = await response.text();
@@ -169,6 +246,36 @@
     return url.toString();
   }
 
+  function panelCacheKey(tab, url) {
+    return [state.external_userid || "", tab || "", url || ""].join("::");
+  }
+
+  function readPanelCache(tab, url) {
+    const item = state.panelCache[panelCacheKey(tab, url)];
+    if (!item || item.expiresAt < Date.now()) return null;
+    return item.payload;
+  }
+
+  function writePanelCache(tab, url, payload) {
+    state.panelCache[panelCacheKey(tab, url)] = {
+      payload,
+      expiresAt: Date.now() + PANEL_CACHE_TTL_MS,
+    };
+  }
+
+  async function requestPanelJson(tab, url, options) {
+    const cached = readPanelCache(tab, url);
+    if (cached) return cached;
+    const payload = await requestJson(url, {
+      timeoutMs: PANEL_TIMEOUT_MS[tab] || DEFAULT_TIMEOUT_MS,
+      retryCount: 1,
+      retryDelayMs: 420,
+      ...(options || {}),
+    });
+    writePanelCache(tab, url, payload);
+    return payload;
+  }
+
   function absoluteUrl(path) {
     const text = String(path || "").trim();
     if (!text) return "";
@@ -183,8 +290,23 @@
     return new URLSearchParams(window.location.search).get(key) || "";
   }
 
+  function firstQueryValue(keys) {
+    for (const key of keys || []) {
+      const value = getQueryValue(key).trim();
+      if (value) return value;
+    }
+    return "";
+  }
+
   function setPanelLoading(title) {
-    content.innerHTML = panel(title || "", '<div class="status">正在加载…</div>');
+    content.innerHTML = panel(
+      title || "",
+      '<div class="skeleton-list" aria-busy="true">' +
+        '<div class="skeleton-line strong"></div>' +
+        '<div class="skeleton-line"></div>' +
+        '<div class="skeleton-line short"></div>' +
+      "</div>"
+    );
   }
 
   function stateLabel(status) {
@@ -217,6 +339,7 @@
     document.getElementById("workflow-title").textContent = "";
     const bindingState = document.getElementById("binding-state");
     bindingState.textContent = isLoading ? (status === WORKBENCH_STATES.identifying_customer ? "识别中" : "加载中...") : stateLabel(status);
+    bindingState.classList.remove("hidden");
     bindingState.classList.toggle("loading", isLoading);
     bindingState.classList.toggle("unbound", !isLoading);
     if (detail && detail.message) writeDebug("top state detail", detail);
@@ -255,15 +378,19 @@
     const name = String(customer.display_name || "当前客户").trim();
     const mobile = String(customer.mobile || "").trim();
     const externalUserid = String(customer.external_userid || state.external_userid || "").trim();
-    const isBound = Boolean(customer.is_bound);
+    const isBound = customer.mobile_bound !== undefined ? Boolean(customer.mobile_bound) : Boolean(customer.is_bound && mobile);
     document.getElementById("customer-name").textContent = name;
     document.getElementById("customer-mobile").textContent = mobile ? "手机号 " + mobile : "";
     document.getElementById("customer-external-userid").textContent = externalUserid ? "外部联系人 ID " + externalUserid : "";
     document.getElementById("workflow-title").textContent = String(workflow.title || "").trim();
     const bindingState = document.getElementById("binding-state");
-    bindingState.textContent = isBound ? "手机号已绑定" : "手机号未绑定";
+    const hideBindingState = Boolean(customer.owner_pending);
+    bindingState.textContent = hideBindingState ? "" : (isBound ? "手机号已绑定" : "手机号未绑定");
+    bindingState.classList.toggle("hidden", hideBindingState);
     bindingState.classList.remove("loading");
     bindingState.classList.toggle("unbound", !isBound);
+    const changeButton = document.getElementById("change-mobile-button");
+    if (changeButton) changeButton.disabled = Boolean(customer.owner_pending);
   }
 
   function updateProfileField(key, value) {
@@ -427,6 +554,10 @@
   function renderOtherStaffMessages() {
     const rows = state.data.other_staff_messages || [];
     if (!rows.length) {
+      if (((state.workbench || {}).customer || {}).owner_pending) {
+        content.innerHTML = panel("其他客服的聊天记录", empty("员工身份待确认后可查看其他客服聊天记录"));
+        return;
+      }
       content.innerHTML = panel("其他客服的聊天记录", empty("暂无其他客服聊天记录"));
       return;
     }
@@ -447,13 +578,38 @@
     );
   }
 
+  function renderOwnerPendingWorkbench(message) {
+    state.workbench = {
+      customer: {
+        external_userid: state.external_userid,
+        display_name: "当前客户",
+        owner_pending: true,
+        mobile_bound: false,
+        is_bound: false,
+      },
+      profile: {},
+      workflow: {},
+      diagnostics: { context_source_status: "owner_pending" },
+    };
+    renderTop();
+    renderTabs();
+    content.innerHTML = panel(
+      "核心画像",
+      '<div class="status error">' + escapeHtml(message || "员工身份待确认，请从企微侧边栏重新打开或稍后重试。") + "</div>" +
+        '<div class="row-actions"><button class="btn primary" type="button" data-retry-boot>重试</button></div>'
+    );
+    setWorkbenchState(WORKBENCH_STATES.degraded_ready, { stage: "owner_pending", message: message || "" });
+  }
+
   async function loadWorkbench() {
     setWorkbenchState(WORKBENCH_STATES.loading_workbench, { external_userid: state.external_userid });
-    const payload = await requestJson(
+    const payload = await requestPanelJson(
+      "workbench",
       queryUrl(endpoint("workbenchUrl"), {
         external_userid: state.external_userid,
         owner_userid: state.owner_userid,
-      })
+      }),
+      { timeoutMs: PANEL_TIMEOUT_MS.workbench }
     );
     writeDebug("workbench response", payload);
     state.workbench = payload;
@@ -465,19 +621,31 @@
     renderTabs();
     renderActiveTab();
     setWorkbenchState(payload.diagnostics && payload.diagnostics.context_source_status === "error" ? WORKBENCH_STATES.degraded_ready : WORKBENCH_STATES.ready, payload.diagnostics || {});
+    prefetchTabs(["questionnaires", "orders"]);
+  }
+
+  function prefetchTabs(tabNames) {
+    window.setTimeout(() => {
+      (tabNames || []).forEach((tab) => {
+        if (state.loaded[tab]) return;
+        loadTabData(tab)
+          .then(() => writeDebug("prefetch success", { tab }))
+          .catch((error) => writeDebug("prefetch skipped", { tab, message: error.message || String(error) }));
+      });
+    }, 160);
   }
 
   async function loadTabData(tab) {
     if (tab === "profile" || state.loaded[tab]) return;
     if (tab === "questionnaires") {
-      const payload = await requestJson(queryUrl(endpoint("questionnairesUrl"), { external_userid: state.external_userid }));
+      const payload = await requestPanelJson("questionnaires", queryUrl(endpoint("questionnairesUrl"), customerContextQuery()));
       state.data.questionnaires = payload.questionnaires || [];
     } else if (tab === "products") {
-      const payload = await requestJson(queryUrl(endpoint("productsUrl"), customerContextQuery()));
+      const payload = await requestPanelJson("products", queryUrl(endpoint("productsUrl"), customerContextQuery()));
       writeDebug("products response", productContextDiagnostics(payload));
       state.data.products = payload.products || [];
     } else if (tab === "orders") {
-      const payload = await requestJson(queryUrl(endpoint("ordersUrl"), customerContextQuery()));
+      const payload = await requestPanelJson("orders", queryUrl(endpoint("ordersUrl"), customerContextQuery()));
       if (payload.customer) {
         state.workbench.customer = Object.assign({}, state.workbench.customer || {}, payload.customer);
         renderTop();
@@ -487,7 +655,13 @@
     } else if (tab === "materials") {
       await loadMaterials(state.materialType);
     } else if (tab === "other_staff_messages") {
-      const payload = await requestJson(
+      if (((state.workbench || {}).customer || {}).owner_pending) {
+        state.data.other_staff_messages = [];
+        state.loaded[tab] = true;
+        return;
+      }
+      const payload = await requestPanelJson(
+        "other_staff_messages",
         queryUrl(endpoint("otherStaffMessagesUrl"), {
           external_userid: state.external_userid,
           current_userid: state.bind_by_userid || state.owner_userid,
@@ -503,7 +677,7 @@
 
   async function loadMaterials(type) {
     if (state.data.materials[type]) return;
-    const payload = await requestJson(queryUrl(endpoint("materialsUrl"), { type, limit: 50 }));
+    const payload = await requestPanelJson("materials", queryUrl(endpoint("materialsUrl"), { type, limit: 50 }));
     state.data.materials[type] = payload.materials || [];
   }
 
@@ -628,6 +802,9 @@
     mobileStatus.textContent = "正在保存…";
     try {
       const customer = (state.workbench || {}).customer || {};
+      if (customer.owner_pending) {
+        throw new Error("请先从企微侧边栏重新打开以确认当前员工身份");
+      }
       const payload = await requestJson(endpoint("bindMobileUrl"), {
         method: "POST",
         body: JSON.stringify({
@@ -635,12 +812,13 @@
           owner_userid: state.owner_userid,
           bind_by_userid: state.bind_by_userid || state.owner_userid,
           mobile: mobileInput.value,
-          force_rebind: Boolean(customer.is_bound),
+          force_rebind: Boolean(customer.mobile_bound !== undefined ? customer.mobile_bound : customer.is_bound && customer.mobile),
         }),
       });
       const binding = payload.binding || payload;
       state.workbench.customer.mobile = binding.mobile || mobileInput.value;
       state.workbench.customer.is_bound = true;
+      state.workbench.customer.mobile_bound = true;
       renderTop();
       closeMobileModal();
       showToast("手机号已保存");
@@ -654,13 +832,15 @@
   }
 
   async function resolveContextFromQuery() {
-    state.external_userid = getQueryValue("external_userid").trim();
-    state.owner_userid = getQueryValue("owner_userid").trim();
-    state.bind_by_userid = getQueryValue("bind_by_userid").trim() || state.owner_userid;
+    state.external_userid = firstQueryValue(["external_userid", "externalUserid", "externalUserId", "user_id", "userId"]);
+    state.owner_userid = firstQueryValue(["owner_userid", "ownerUserid", "viewer_userid", "viewerUserId", "operator_userid", "operatorUserId", "userid"]) || state.owner_userid;
+    state.bind_by_userid = firstQueryValue(["bind_by_userid", "bindByUserid", "operator_userid", "operatorUserId"]) || state.owner_userid;
+    state.sidebar_owner_token = firstQueryValue(["sidebar_owner_token", "owner_token"]) || state.sidebar_owner_token;
     writeDebug("query context", {
       external_userid: state.external_userid,
       owner_userid: state.owner_userid,
       bind_by_userid: state.bind_by_userid,
+      has_owner_token: Boolean(state.sidebar_owner_token),
       query: Object.fromEntries(new URLSearchParams(window.location.search).entries()),
     });
     return Boolean(state.external_userid);
@@ -670,9 +850,13 @@
     if (!window.wx) return { ok: false, status: WORKBENCH_STATES.sdk_unavailable, reason: "wx_missing" };
     let configPayload;
     try {
-      const currentUrl = window.location.href.split("#")[0];
-      configPayload = await requestJson(endpoint("jssdkConfigUrl") + "?url=" + encodeURIComponent(currentUrl), { timeoutMs: SDK_TIMEOUT_MS });
-      writeDebug("jssdk config response", { has_config: Boolean(configPayload && configPayload.config), has_agent_config: Boolean(configPayload && configPayload.agent_config) });
+      configPayload = await requestJson(jssdkConfigUrl(), { timeoutMs: SDK_TIMEOUT_MS, retryCount: 1, retryDelayMs: 300 });
+      applySidebarOwnerToken(configPayload);
+      writeDebug("jssdk config response", {
+        has_config: Boolean(configPayload && configPayload.config),
+        has_agent_config: Boolean(configPayload && configPayload.agent_config),
+        owner_token_status: state.sidebar_owner_token_status,
+      });
     } catch (error) {
       writeDebug("jssdk config error", { message: error.message || String(error) });
       return { ok: false, status: WORKBENCH_STATES.sdk_unavailable, reason: "jssdk_config_failed", error: error.message || String(error) };
@@ -765,6 +949,7 @@
       state.external_userid = externalUserid;
       state.owner_userid = String((res || {}).owner_userid || state.owner_userid || "").trim();
       state.bind_by_userid = String((res || {}).operator_userid || state.bind_by_userid || state.owner_userid || "").trim();
+      await refreshSidebarOwnerToken();
       writeDebug("getCurExternalContact success", {
         external_userid: state.external_userid,
         owner_userid: state.owner_userid,
@@ -783,16 +968,27 @@
     setPanelLoading("");
     try {
       const hasQuery = await resolveContextFromQuery();
-      const contextResult = hasQuery ? { ok: true, status: WORKBENCH_STATES.identifying_customer, source: "query" } : await resolveContextFromWeCom();
+      let contextResult = hasQuery ? { ok: true, status: WORKBENCH_STATES.identifying_customer, source: "query" } : await resolveContextFromWeCom();
+      if (hasQuery && !state.sidebar_owner_token && !state.owner_userid) {
+        const sdkContext = await resolveContextFromWeCom();
+        if (sdkContext.ok) contextResult = sdkContext;
+      }
       writeDebug("identity result", contextResult);
       if (!contextResult.ok) {
         setWorkbenchState(contextResult.status || WORKBENCH_STATES.context_missing, contextResult);
         renderRetryPanel("", contextResult.status === WORKBENCH_STATES.sdk_unavailable ? "企微 SDK 暂不可用，请确认从企微侧边栏打开，或带 external_userid 参数重试。" : "未识别到客户，请从企微客户侧边栏重新打开。");
         return;
       }
+      if (!state.sidebar_owner_token) {
+        await refreshSidebarOwnerToken();
+      }
       await loadWorkbench();
     } catch (error) {
       writeDebug("boot error", { message: error.message || String(error), stage: error.stage || "" });
+      if (String(error.message || "").indexOf("owner_userid is required") >= 0) {
+        renderOwnerPendingWorkbench(error.message || "owner_userid is required");
+        return;
+      }
       setWorkbenchState(WORKBENCH_STATES.error, { message: error.message || String(error), stage: error.stage || "" });
       renderRetryPanel("", error.message || "加载失败，请稍后重试。");
     }

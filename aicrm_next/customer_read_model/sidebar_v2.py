@@ -8,17 +8,18 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from aicrm_next.commerce.application import ListProductsQuery
+from aicrm_next.commerce.repo import build_commerce_repository
 from aicrm_next.customer_read_model.application import GetCustomerContextQuery, _close_repository
 from aicrm_next.customer_read_model.dto import CustomerContextRequest
 from aicrm_next.customer_read_model.repo import CustomerReadRepository, build_customer_live_source_repository
-from aicrm_next.media_library.application import GetImageThumbnailQuery, GetMediaItemQuery, ListMediaItemsQuery
-from aicrm_next.media_library.variants import decode_image_base64
+from aicrm_next.media_library.application import GetImageThumbnailQuery, ListMediaItemsQuery
 from aicrm_next.shared.db_session import get_engine
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.runtime import raw_database_url
 from aicrm_next.shared.signed_context import append_ctx_query, build_sidebar_product_context_token
 
 MODULES = ["profile", "questionnaires", "products", "orders", "materials", "other_staff_messages"]
+READONLY_OWNER_PENDING_USERID = "__aicrm_readonly_owner_pending__"
 ORDER_STATUS_LABELS = {
     "pending": "待支付",
     "paid": "已支付",
@@ -28,10 +29,28 @@ ORDER_STATUS_LABELS = {
     "closed": "已关闭",
     "failed": "支付失败",
 }
+_CUSTOMER_PLACEHOLDER_TEXTS = {
+    "customer_name",
+    "display_name",
+    "name",
+    "remark",
+    "description",
+    "mobile",
+    "phone",
+    "title",
+    "external_userid",
+}
+_QUESTIONNAIRE_TITLE_PLACEHOLDER_TEXTS = {"questionnaire_title", "title", "name", "submitted_at"}
+_QUESTION_PLACEHOLDER_TEXTS = {"question", "question_title", "question_title_snapshot"}
+_ANSWER_PLACEHOLDER_TEXTS = {"text_value", "selected_option_texts_snapshot", "answer", "value"}
 
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _is_readonly_owner_pending(owner_userid: Any, *, owner_verified: bool = False) -> bool:
+    return owner_verified and _text(owner_userid) == READONLY_OWNER_PENDING_USERID
 
 
 def _limit(value: Any, *, default: int = 50, maximum: int = 200) -> int:
@@ -92,6 +111,35 @@ def _normalize_mobile(value: Any) -> str:
     return "".join(ch for ch in str(value or "") if ch.isdigit())
 
 
+def _clean_placeholder_text(value: Any, placeholders: set[str]) -> str:
+    value_text = _text(value)
+    if not value_text:
+        return ""
+    if value_text.lower() in placeholders:
+        return ""
+    return value_text
+
+
+def _customer_text(value: Any) -> str:
+    return _clean_placeholder_text(value, _CUSTOMER_PLACEHOLDER_TEXTS)
+
+
+def _customer_mobile(value: Any) -> str:
+    return _normalize_mobile(value)
+
+
+def _questionnaire_title_text(value: Any) -> str:
+    return _clean_placeholder_text(value, _QUESTIONNAIRE_TITLE_PLACEHOLDER_TEXTS)
+
+
+def _question_text(value: Any) -> str:
+    return _clean_placeholder_text(value, _QUESTION_PLACEHOLDER_TEXTS)
+
+
+def _answer_text_value(value: Any) -> str:
+    return _clean_placeholder_text(value, _ANSWER_PLACEHOLDER_TEXTS)
+
+
 def _diagnostics(**extra: Any) -> dict[str, Any]:
     return {
         "source_status": "next_read_model",
@@ -126,10 +174,23 @@ class SidebarV2SqlRepository:
     def get_profile_fields(self, external_userid: str) -> dict[str, Any] | None:
         return self._one(
             """
-            SELECT external_userid, source, industry, industry_description,
-                   needs_blockers_followup, updated_by, updated_at
-            FROM sidebar_customer_profile_fields
-            WHERE external_userid = :external_userid
+            SELECT
+                COALESCE(NULLIF(identity.primary_external_userid, ''), :external_userid) AS external_userid,
+                profile.source,
+                profile.industry,
+                profile.industry_description,
+                profile.needs_blockers_followup,
+                profile.updated_by,
+                profile.updated_at
+            FROM crm_user_identity identity
+            JOIN sidebar_customer_profile_fields profile ON profile.unionid = identity.unionid
+            WHERE (
+                identity.primary_external_userid = :external_userid
+                OR jsonb_exists(identity.external_userids_json, :external_userid)
+            )
+              AND COALESCE(identity.unionid, '') <> ''
+            ORDER BY profile.updated_at DESC
+            LIMIT 1
             """,
             {"external_userid": external_userid},
         )
@@ -137,14 +198,17 @@ class SidebarV2SqlRepository:
     def get_workflow_title_for_customer(self, external_userid: str) -> str:
         row = self._one(
             """
-            SELECT COALESCE(NULLIF(w.workflow_name, ''), NULLIF(p.program_name, ''), NULLIF(c.channel_name, '')) AS title
-            FROM automation_member m
-            LEFT JOIN automation_channel c ON c.id = m.source_channel_id
-            LEFT JOIN automation_program p ON p.id = c.program_id
+            SELECT COALESCE(NULLIF(l.link_name, ''), NULLIF(c.channel_name, ''), NULLIF(l.initial_audience_code, ''), NULLIF(c.channel_code, '')) AS title
+            FROM crm_user_identity identity
+            JOIN automation_channel_contact channel_contact ON channel_contact.unionid = identity.unionid
+            LEFT JOIN automation_channel c ON c.id = channel_contact.channel_id
             LEFT JOIN wecom_customer_acquisition_links l ON l.automation_channel_id = c.id
-            LEFT JOIN automation_workflow w ON w.id = l.workflow_id
-            WHERE m.external_contact_id = :external_userid
-            ORDER BY m.updated_at DESC, m.id DESC
+            WHERE (
+                identity.primary_external_userid = :external_userid
+                OR jsonb_exists(identity.external_userids_json, :external_userid)
+            )
+              AND COALESCE(identity.unionid, '') <> ''
+            ORDER BY channel_contact.updated_at DESC, channel_contact.id DESC, l.updated_at DESC, l.id DESC
             LIMIT 1
             """,
             {"external_userid": external_userid},
@@ -154,9 +218,20 @@ class SidebarV2SqlRepository:
     def get_contact_snapshot(self, external_userid: str) -> dict[str, Any] | None:
         return self._one(
             """
-            SELECT external_userid, customer_name, owner_userid, remark, description
-            FROM contacts
-            WHERE external_userid = :external_userid
+            SELECT
+                im.external_userid,
+                COALESCE(NULLIF(im.name, ''), NULLIF(im.raw_profile ->> 'name', '')) AS customer_name,
+                COALESCE(NULLIF(fu.user_id, ''), NULLIF(im.follow_user_userid, '')) AS owner_userid,
+                COALESCE(NULLIF(fu.remark, ''), NULLIF(im.raw_profile ->> 'remark', '')) AS remark,
+                COALESCE(NULLIF(im.raw_profile ->> 'description', ''), '') AS description
+            FROM wecom_external_contact_identity_map im
+            LEFT JOIN wecom_external_contact_follow_users fu
+              ON fu.corp_id = im.corp_id
+             AND fu.external_userid = im.external_userid
+             AND COALESCE(fu.relation_status, 'active') = 'active'
+            WHERE im.external_userid = :external_userid
+            ORDER BY fu.is_primary DESC NULLS LAST, fu.updated_at DESC NULLS LAST, im.updated_at DESC, im.id DESC
+            LIMIT 1
             """,
             {"external_userid": external_userid},
         )
@@ -173,22 +248,51 @@ class SidebarV2SqlRepository:
             {"external_userid": external_userid},
         )
 
+    def get_contact_owner_userids(self, external_userid: str) -> set[str]:
+        rows = self._all(
+            """
+            SELECT DISTINCT owner_userid
+            FROM (
+                SELECT COALESCE(NULLIF(user_id, ''), NULLIF(raw_follow_user ->> 'userid', '')) AS owner_userid
+                FROM wecom_external_contact_follow_users
+                WHERE external_userid = :external_userid
+                  AND COALESCE(relation_status, 'active') = 'active'
+                UNION ALL
+                SELECT NULLIF(follow_user_userid, '') AS owner_userid
+                FROM wecom_external_contact_identity_map
+                WHERE external_userid = :external_userid
+            ) owners
+            WHERE COALESCE(owner_userid, '') <> ''
+            """,
+            {"external_userid": external_userid},
+        )
+        return {_text(row.get("owner_userid")) for row in rows if _text(row.get("owner_userid"))}
+
     def get_contact_binding_status(self, external_userid: str) -> dict[str, Any]:
         row = self._one(
             """
             SELECT
-                b.external_userid,
+                COALESCE(NULLIF(identity.primary_external_userid, ''), :external_userid) AS external_userid,
                 b.person_id,
-                b.first_bound_by_userid,
+                '' AS first_bound_by_userid,
                 b.first_owner_userid,
                 b.last_owner_userid,
-                b.created_at,
+                NULL::timestamptz AS created_at,
                 b.updated_at,
-                p.mobile,
-                p.third_party_user_id
-            FROM external_contact_bindings b
-            JOIN people p ON p.id = b.person_id
-            WHERE b.external_userid = :external_userid
+                identity.mobile,
+                identity.unionid AS third_party_user_id,
+                identity.primary_owner_userid,
+                identity.customer_name
+            FROM crm_user_identity identity
+            LEFT JOIN external_contact_bindings b
+              ON b.external_userid = identity.primary_external_userid
+            WHERE (
+                identity.primary_external_userid = :external_userid
+                OR jsonb_exists(identity.external_userids_json, :external_userid)
+            )
+              AND COALESCE(identity.unionid, '') <> ''
+            ORDER BY identity.updated_at DESC
+            LIMIT 1
             """,
             {"external_userid": external_userid},
         )
@@ -203,7 +307,8 @@ class SidebarV2SqlRepository:
             "first_bound_by_userid": _text(row.get("first_bound_by_userid")),
             "first_owner_userid": _text(row.get("first_owner_userid")),
             "last_owner_userid": _text(row.get("last_owner_userid")),
-            "owner_userid": _text(row.get("last_owner_userid") or row.get("first_owner_userid")),
+            "owner_userid": _text(row.get("last_owner_userid") or row.get("first_owner_userid") or row.get("primary_owner_userid")),
+            "customer_name": _text(row.get("customer_name")),
             "created_at": _text(row.get("created_at")),
             "updated_at": _text(row.get("updated_at")),
         }
@@ -212,28 +317,27 @@ class SidebarV2SqlRepository:
         rows = self._all(
             """
             WITH target(external_userid) AS (VALUES (:external_userid)),
-            identity_openids AS (
-                SELECT m.openid
-                FROM wecom_external_contact_identity_map m
-                JOIN target t ON m.external_userid = t.external_userid
-                WHERE COALESCE(m.openid, '') <> ''
-            ),
-            identity_unionids AS (
-                SELECT m.unionid
-                FROM wecom_external_contact_identity_map m
-                JOIN target t ON m.external_userid = t.external_userid
-                WHERE COALESCE(m.unionid, '') <> ''
+            identity_scope AS (
+                SELECT identity.unionid, identity.mobile
+                FROM crm_user_identity identity
+                JOIN target t ON (
+                    identity.primary_external_userid = t.external_userid
+                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
+                )
+                WHERE COALESCE(identity.unionid, '') <> ''
             ),
             matching_orders AS (
-                SELECT mobile_snapshot, userid_snapshot, paid_at, created_at, id
-                FROM wechat_pay_orders
-                WHERE COALESCE(mobile_snapshot, '') <> ''
+                SELECT identity.mobile AS mobile_snapshot, '' AS userid_snapshot, paid_at, created_at, o.id::text AS id
+                FROM wechat_pay_orders o
+                JOIN identity_scope identity ON identity.unionid = o.unionid
+                WHERE COALESCE(identity.mobile, '') <> ''
                   AND (status = 'paid' OR trade_state = 'SUCCESS')
-                  AND (
-                    (COALESCE(external_userid, '') <> '' AND external_userid = (SELECT external_userid FROM target))
-                    OR (COALESCE(payer_openid, '') <> '' AND payer_openid IN (SELECT openid FROM identity_openids))
-                    OR (COALESCE(unionid, '') <> '' AND unionid IN (SELECT unionid FROM identity_unionids))
-                  )
+                UNION ALL
+                SELECT identity.mobile AS mobile_snapshot, '' AS userid_snapshot, o.paid_at, o.created_at, o.order_id::text AS id
+                FROM wechat_shop_orders o
+                JOIN identity_scope identity ON identity.unionid = o.unionid
+                WHERE COALESCE(identity.mobile, '') <> ''
+                  AND (deal_recorded IS TRUE OR status_code::text = '30' OR business_status IN ('deal', 'paid'))
             )
             SELECT
                 mobile_snapshot,
@@ -255,96 +359,66 @@ class SidebarV2SqlRepository:
         return self._all(
             """
             WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
-            bound_mobiles AS (
-                SELECT p.mobile
-                FROM external_contact_bindings b
-                JOIN people p ON p.id = b.person_id
-                JOIN target t ON b.external_userid = t.external_userid
-                WHERE COALESCE(p.mobile, '') <> ''
-                UNION
-                SELECT mobile FROM target WHERE COALESCE(mobile, '') <> ''
-            ),
-            identity_openids AS (
-                SELECT m.openid
-                FROM wecom_external_contact_identity_map m
-                JOIN target t ON m.external_userid = t.external_userid
-                WHERE COALESCE(m.openid, '') <> ''
-            ),
-            identity_unionids AS (
-                SELECT m.unionid
-                FROM wecom_external_contact_identity_map m
-                JOIN target t ON m.external_userid = t.external_userid
-                WHERE COALESCE(m.unionid, '') <> ''
-            ),
-            external_orders AS (
-                SELECT
-                    id, out_trade_no, transaction_id, product_code,
-                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
-                    amount_total, currency, external_userid AS order_external_userid,
-                    mobile_snapshot, payer_openid, unionid, status, trade_state,
-                    refunded_amount_total, refund_status, paid_at, created_at,
-                    COALESCE(paid_at, created_at) AS sort_at
-                FROM wechat_pay_orders
-                WHERE :external_userid <> ''
-                  AND external_userid = :external_userid
-                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
-                LIMIT :candidate_limit
-            ),
-            mobile_orders AS (
-                SELECT
-                    id, out_trade_no, transaction_id, product_code,
-                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
-                    amount_total, currency, external_userid AS order_external_userid,
-                    mobile_snapshot, payer_openid, unionid, status, trade_state,
-                    refunded_amount_total, refund_status, paid_at, created_at,
-                    COALESCE(paid_at, created_at) AS sort_at
-                FROM wechat_pay_orders
-                WHERE mobile_snapshot IN (SELECT mobile FROM bound_mobiles)
-                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
-                LIMIT :candidate_limit
-            ),
-            openid_orders AS (
-                SELECT
-                    id, out_trade_no, transaction_id, product_code,
-                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
-                    amount_total, currency, external_userid AS order_external_userid,
-                    mobile_snapshot, payer_openid, unionid, status, trade_state,
-                    refunded_amount_total, refund_status, paid_at, created_at,
-                    COALESCE(paid_at, created_at) AS sort_at
-                FROM wechat_pay_orders
-                WHERE payer_openid IN (SELECT openid FROM identity_openids)
-                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
-                LIMIT :candidate_limit
+            identity_scope AS (
+                SELECT identity.unionid, identity.primary_external_userid, identity.mobile
+                FROM crm_user_identity identity
+                JOIN target t ON (
+                    identity.primary_external_userid = t.external_userid
+                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
+                    OR (t.mobile <> '' AND identity.mobile = t.mobile)
+                    OR (t.mobile <> '' AND identity.mobile_normalized = t.mobile)
+                )
+                WHERE COALESCE(identity.unionid, '') <> ''
             ),
             unionid_orders AS (
                 SELECT
-                    id, out_trade_no, transaction_id, product_code,
-                    COALESCE(NULLIF(product_name, ''), product_code) AS product_name,
-                    amount_total, currency, external_userid AS order_external_userid,
-                    mobile_snapshot, payer_openid, unionid, status, trade_state,
-                    refunded_amount_total, refund_status, paid_at, created_at,
-                    COALESCE(paid_at, created_at) AS sort_at
-                FROM wechat_pay_orders
-                WHERE unionid IN (SELECT unionid FROM identity_unionids)
-                ORDER BY COALESCE(paid_at, created_at) DESC, id DESC
+                    'wechat_pay' AS provider, 'wechat_pay' AS channel, '微信支付' AS channel_label,
+                    o.id::text AS id, o.out_trade_no, o.transaction_id, o.product_code,
+                    COALESCE(NULLIF(o.product_name, ''), o.product_code) AS product_name,
+                    o.amount_total, o.currency, identity.primary_external_userid AS order_external_userid,
+                    identity.mobile AS mobile_snapshot, '' AS payer_openid, o.unionid, o.status, o.trade_state,
+                    o.refunded_amount_total, o.refund_status, o.paid_at, o.created_at,
+                    COALESCE(o.paid_at, o.created_at) AS sort_at
+                FROM wechat_pay_orders o
+                JOIN identity_scope identity ON identity.unionid = o.unionid
+                ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.id DESC
+                LIMIT :candidate_limit
+            ),
+            wechat_shop_unionid_orders AS (
+                SELECT
+                    'wechat_shop' AS provider, 'wechat_shop' AS channel, '微信小店' AS channel_label,
+                    o.order_id::text AS id, o.order_id::text AS out_trade_no, o.transaction_id, o.product_code,
+                    COALESCE(NULLIF(o.product_name, ''), o.product_code) AS product_name,
+                    o.amount_total, o.currency, identity.primary_external_userid AS order_external_userid,
+                    identity.mobile AS mobile_snapshot, '' AS payer_openid, o.unionid,
+                    CASE
+                        WHEN o.deal_recorded IS TRUE OR o.status_code::text = '30' OR o.business_status IN ('deal', 'paid') THEN 'paid'
+                        WHEN o.business_status IN ('closed', 'cancelled') THEN 'closed'
+                        ELSE COALESCE(NULLIF(o.business_status, ''), 'pending')
+                    END AS status,
+                    CASE
+                        WHEN o.deal_recorded IS TRUE OR o.status_code::text = '30' OR o.business_status IN ('deal', 'paid') THEN 'SUCCESS'
+                        ELSE o.status_code::text
+                    END AS trade_state,
+                    o.refunded_amount_total, '' AS refund_status, o.paid_at, o.created_at,
+                    COALESCE(o.paid_at, o.created_at) AS sort_at
+                FROM wechat_shop_orders o
+                JOIN identity_scope identity ON identity.unionid = o.unionid
+                ORDER BY COALESCE(o.paid_at, o.created_at) DESC, o.order_id DESC
                 LIMIT :candidate_limit
             ),
             candidate_orders AS (
-                SELECT * FROM external_orders
-                UNION ALL
-                SELECT * FROM mobile_orders
-                UNION ALL
-                SELECT * FROM openid_orders
-                UNION ALL
                 SELECT * FROM unionid_orders
+                UNION ALL
+                SELECT * FROM wechat_shop_unionid_orders
             ),
             deduped_orders AS (
-                SELECT DISTINCT ON (id) *
+                SELECT DISTINCT ON (provider, id) *
                 FROM candidate_orders
-                ORDER BY id
+                ORDER BY provider, id, sort_at DESC NULLS LAST
             )
             SELECT
-                id, out_trade_no, transaction_id, product_code,
+                provider, channel, channel_label, id, out_trade_no, transaction_id, product_code,
                 product_name, amount_total, currency, order_external_userid,
                 mobile_snapshot, payer_openid, unionid, status, trade_state,
                 refunded_amount_total, refund_status, paid_at, created_at
@@ -369,14 +443,15 @@ class SidebarV2SqlRepository:
                 a.selected_option_texts_snapshot,
                 a.text_value
             FROM questionnaire_submissions s
+            JOIN crm_user_identity identity ON identity.unionid = s.unionid
             LEFT JOIN questionnaires q ON q.id = s.questionnaire_id
             LEFT JOIN questionnaire_submission_answers a ON a.submission_id = s.id
             WHERE (
-                s.external_userid = :external_userid
+                identity.primary_external_userid = :external_userid
+                OR jsonb_exists(identity.external_userids_json, :external_userid)
                 OR (
-                    COALESCE(s.external_userid, '') = ''
-                    AND :mobile <> ''
-                    AND regexp_replace(COALESCE(s.mobile_snapshot, ''), '[^0-9]', '', 'g') = :mobile
+                    :mobile <> ''
+                    AND regexp_replace(COALESCE(identity.mobile, ''), '[^0-9]', '', 'g') = :mobile
                 )
             )
             ORDER BY s.submitted_at DESC, s.id DESC, a.id ASC
@@ -387,10 +462,16 @@ class SidebarV2SqlRepository:
     def list_other_staff_messages(self, external_userid: str, *, limit: int = 200) -> list[dict[str, Any]]:
         return self._all(
             """
-            SELECT id, msgid, chat_type, external_userid, owner_userid, sender, receiver,
-                   msgtype, content, send_time, raw_payload, created_at
-            FROM archived_messages
-            WHERE external_userid = :external_userid
+            SELECT message.id, message.msgid, message.chat_type,
+                   identity.primary_external_userid AS external_userid,
+                   message.owner_userid, message.sender, message.receiver,
+                   message.msgtype, message.content, message.send_time, message.raw_payload, message.created_at
+            FROM archived_messages message
+            JOIN crm_user_identity identity ON identity.unionid = message.unionid
+            WHERE (
+                identity.primary_external_userid = :external_userid
+                OR jsonb_exists(identity.external_userids_json, :external_userid)
+            )
             ORDER BY send_time ASC, id ASC
             LIMIT :limit
             """,
@@ -436,7 +517,7 @@ class SidebarV2SqlRepository:
 
 def _first_named_value(*candidates: tuple[str, Any]) -> tuple[str, str]:
     for source, value in candidates:
-        value_text = _text(value)
+        value_text = _customer_text(value)
         if value_text:
             return value_text, source
     return "未命名客户", "default"
@@ -468,16 +549,23 @@ def _resolve_customer_payload(
         ("binding.customer_name", binding.get("customer_name")),
         ("binding.remark", binding.get("remark")),
     )
-    resolved_owner = (
-        _text(owner_userid)
-        or _text(customer.get("owner_userid"))
-        or _text(binding.get("owner_userid"))
-        or _text(binding.get("last_owner_userid"))
-        or _text(contacts_row.get("owner_userid"))
-        or _text(identity_row.get("follow_user_userid"))
+    if _text(owner_userid) == READONLY_OWNER_PENDING_USERID:
+        resolved_owner = ""
+    else:
+        resolved_owner = (
+            _text(owner_userid)
+            or _text(customer.get("owner_userid"))
+            or _text(binding.get("owner_userid"))
+            or _text(binding.get("last_owner_userid"))
+            or _text(contacts_row.get("owner_userid"))
+            or _text(identity_row.get("follow_user_userid"))
+        )
+    mobile = (
+        _customer_mobile(binding.get("mobile"))
+        or _customer_mobile(customer.get("mobile"))
+        or _customer_mobile(customer_binding.get("mobile"))
     )
-    mobile = _text(binding.get("mobile")) or _text(customer.get("mobile")) or _text(customer_binding.get("mobile"))
-    is_bound = bool(binding.get("is_bound")) or bool(customer_binding.get("is_bound")) or bool(mobile)
+    is_bound = bool(mobile)
     payload = {
         "display_name": display_name,
         "avatar_text": display_name[:1] if display_name else "",
@@ -500,6 +588,118 @@ def _resolve_customer_payload(
     return payload, diagnostics
 
 
+def _snapshot_owner_candidates(
+    *,
+    repo: SidebarV2SqlRepository,
+    external_userid: str,
+    contact: dict[str, Any],
+    identity: dict[str, Any],
+    binding: dict[str, Any],
+) -> set[str]:
+    candidates = {
+        _text(contact.get("owner_userid")),
+        _text(identity.get("follow_user_userid")),
+        _text(binding.get("owner_userid")),
+        _text(binding.get("first_owner_userid")),
+        _text(binding.get("last_owner_userid")),
+    }
+    owner_list = getattr(repo, "get_contact_owner_userids", None)
+    if callable(owner_list):
+        candidates.update(owner_list(external_userid))
+    candidates.discard("")
+    return candidates
+
+
+def _assert_snapshot_owner_scope(
+    *,
+    repo: SidebarV2SqlRepository,
+    external_userid: str,
+    owner_userid: str,
+    owner_verified: bool,
+    contact: dict[str, Any],
+    identity: dict[str, Any],
+    binding: dict[str, Any],
+) -> None:
+    if _is_readonly_owner_pending(owner_userid, owner_verified=owner_verified):
+        return
+    owner_candidates = _snapshot_owner_candidates(
+        repo=repo,
+        external_userid=external_userid,
+        contact=contact,
+        identity=identity,
+        binding=binding,
+    )
+    if owner_candidates and _text(owner_userid) not in owner_candidates:
+        raise NotFoundError("customer not found")
+    if not owner_candidates and not owner_verified:
+        raise NotFoundError("customer not found")
+
+
+def verify_sidebar_identity_snapshot_owner_scope(
+    *,
+    external_userid: str,
+    owner_userid: str,
+    owner_verified: bool = False,
+    repo: SidebarV2SqlRepository | None = None,
+) -> None:
+    normalized_external = _text(external_userid)
+    normalized_owner = _text(owner_userid)
+    if not normalized_external:
+        raise ValueError("external_userid is required")
+    if not normalized_owner:
+        raise ValueError("owner_userid is required")
+    if _text(normalized_owner) == READONLY_OWNER_PENDING_USERID:
+        raise ValueError("owner_userid is required")
+    sql_repo = repo or SidebarV2SqlRepository()
+    contact = sql_repo.get_contact_snapshot(normalized_external) or {}
+    identity = sql_repo.get_external_identity_snapshot(normalized_external) or {}
+    binding = sql_repo.get_contact_binding_status(normalized_external)
+    if not contact and not identity and not binding.get("is_bound"):
+        raise NotFoundError("customer not found")
+    _assert_snapshot_owner_scope(
+        repo=sql_repo,
+        external_userid=normalized_external,
+        owner_userid=normalized_owner,
+        owner_verified=owner_verified,
+        contact=contact,
+        identity=identity,
+        binding=binding,
+    )
+
+
+def _customer_from_identity_snapshot(
+    *,
+    repo: SidebarV2SqlRepository,
+    external_userid: str,
+    owner_userid: str,
+    owner_verified: bool = False,
+    context_source_status: str = "identity_snapshot_fallback",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    contact = repo.get_contact_snapshot(external_userid) or {}
+    identity = repo.get_external_identity_snapshot(external_userid) or {}
+    binding = repo.get_contact_binding_status(external_userid)
+    if not contact and not identity and not binding.get("is_bound"):
+        raise NotFoundError("customer not found")
+    _assert_snapshot_owner_scope(
+        repo=repo,
+        external_userid=external_userid,
+        owner_userid=owner_userid,
+        owner_verified=owner_verified,
+        contact=contact,
+        identity=identity,
+        binding=binding,
+    )
+    customer, resolution = _resolve_customer_payload(
+        context={},
+        binding=binding,
+        contacts=contact,
+        identity_map=identity,
+        external_userid=external_userid,
+        owner_userid=owner_userid,
+    )
+    return customer, {"context_source_status": context_source_status, **resolution}
+
+
 class SidebarWorkbenchReadModel:
     def __init__(
         self,
@@ -508,22 +708,59 @@ class SidebarWorkbenchReadModel:
         context_query: GetCustomerContextQuery | None = None,
         live_source_repo: CustomerReadRepository | None = None,
     ) -> None:
-        self._repo = repo or SidebarV2SqlRepository()
+        self._repo = repo
         self._context_query = context_query or GetCustomerContextQuery()
         self._live_source_repo = live_source_repo
 
-    def __call__(self, *, external_userid: str, owner_userid: str = "") -> dict[str, Any]:
+    def _sql_repo(self) -> SidebarV2SqlRepository:
+        if self._repo is None:
+            self._repo = SidebarV2SqlRepository()
+        return self._repo
+
+    def __call__(self, *, external_userid: str, owner_userid: str = "", owner_verified: bool = False) -> dict[str, Any]:
         normalized_external = _text(external_userid)
         if not normalized_external:
             raise ValueError("external_userid is required")
         normalized_owner = _text(owner_userid)
-        context, context_diagnostics = self._context(normalized_external)
-        contact = self._repo.get_contact_snapshot(normalized_external) or {}
-        identity = self._repo.get_external_identity_snapshot(normalized_external) or {}
-        profile = self._repo.get_profile_fields(normalized_external) or {}
-        binding = self._repo.get_contact_binding_status(normalized_external)
+        if not normalized_owner:
+            raise ValueError("owner_userid is required")
+        readonly_owner_pending = _is_readonly_owner_pending(normalized_owner, owner_verified=owner_verified)
+        try:
+            context, context_diagnostics = self._context(
+                normalized_external,
+                owner_userid=normalized_owner,
+                owner_verified=owner_verified,
+            )
+        except NotFoundError:
+            if self._repo is None:
+                from aicrm_next.shared.runtime import production_data_ready
+
+                if not production_data_ready():
+                    raise
+            context, context_diagnostics = {}, {"context_source_status": "not_found"}
+        repo = self._sql_repo()
+        contact = repo.get_contact_snapshot(normalized_external) or {}
+        identity = repo.get_external_identity_snapshot(normalized_external) or {}
+        profile = repo.get_profile_fields(normalized_external) or {}
+        binding = repo.get_contact_binding_status(normalized_external)
         if not context.get("customer") and not contact and not identity and not profile and not binding.get("is_bound"):
-            raise NotFoundError("customer not found")
+            if not readonly_owner_pending:
+                raise NotFoundError("customer not found")
+        if not context.get("customer") or context_diagnostics.get("context_source_status") in {"missing", "error", "live_source", "not_found"}:
+            if readonly_owner_pending:
+                context_diagnostics["context_source_status"] = "readonly_owner_pending"
+            else:
+                _assert_snapshot_owner_scope(
+                    repo=repo,
+                    external_userid=normalized_external,
+                    owner_userid=normalized_owner,
+                    owner_verified=owner_verified,
+                    contact=contact,
+                    identity=identity,
+                    binding=binding,
+                )
+            if not context.get("customer") and not readonly_owner_pending:
+                context_diagnostics["context_source_status"] = "identity_snapshot_fallback"
         customer, resolution = _resolve_customer_payload(
             context=context,
             binding=binding,
@@ -537,8 +774,7 @@ class SidebarWorkbenchReadModel:
         workflow_title = (
             _text(sidebar_context.get("workflow_title"))
             or _text(sidebar_context.get("sop_title"))
-            or _text(sidebar_context.get("program_name"))
-            or self._repo.get_workflow_title_for_customer(normalized_external)
+            or repo.get_workflow_title_for_customer(normalized_external)
         )
         payload = {
             "ok": True,
@@ -550,18 +786,41 @@ class SidebarWorkbenchReadModel:
         }
         return _with_route_owner(payload)
 
-    def customer_with_overlay(self, *, external_userid: str, owner_userid: str = "") -> tuple[dict[str, Any], dict[str, Any]]:
-        payload = self(external_userid=external_userid, owner_userid=owner_userid)
+    def customer_with_overlay(
+        self,
+        *,
+        external_userid: str,
+        owner_userid: str = "",
+        owner_verified: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        payload = self(external_userid=external_userid, owner_userid=owner_userid, owner_verified=owner_verified)
         return dict(payload.get("customer") or {}), dict(payload.get("diagnostics") or {})
 
-    def _context(self, external_userid: str) -> tuple[dict[str, Any], dict[str, Any]]:
+    def _context(
+        self,
+        external_userid: str,
+        *,
+        owner_userid: str = "",
+        owner_verified: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        if _is_readonly_owner_pending(owner_userid, owner_verified=owner_verified):
+            return {}, {"context_source_status": "readonly_owner_pending"}
         try:
             payload = self._context_query(
-                CustomerContextRequest(external_userid=external_userid, recent_message_limit=20, timeline_limit=20)
+                CustomerContextRequest(
+                    external_userid=external_userid,
+                    owner_userid=_text(owner_userid) or None,
+                    require_owner_scope=True,
+                    owner_verified=owner_verified,
+                    recent_message_limit=20,
+                    timeline_limit=20,
+                )
             )
             if (payload or {}).get("ok", True) and payload.get("customer"):
                 return dict(payload or {}), {"context_source_status": payload.get("source_status") or "next_read_model"}
         except Exception:
+            if _text(owner_userid):
+                raise
             pass
         repo = self._live_source_repo
         owned_repo = repo is None
@@ -592,7 +851,7 @@ class SidebarWorkbenchReadModel:
         if customer.get("is_bound") or _text(customer.get("mobile")):
             diagnostics["paid_order_mobile_binding"] = {"ok": True, "status": "already_bound"}
             return
-        candidate = self._repo.get_bindable_wechat_pay_order_mobile(_text(customer.get("external_userid")))
+        candidate = self._sql_repo().get_bindable_wechat_pay_order_mobile(_text(customer.get("external_userid")))
         mobile = _text((candidate or {}).get("mobile_snapshot"))
         if not mobile:
             diagnostics["paid_order_mobile_binding"] = {"ok": True, "status": "no_single_candidate"}
@@ -602,7 +861,7 @@ class SidebarWorkbenchReadModel:
         diagnostics["paid_order_mobile_binding"] = {"ok": True, "status": "read_overlay"}
 
     def _profile_payload(self, external_userid: str, context: dict[str, Any], *, persisted: dict[str, Any] | None = None) -> dict[str, str]:
-        persisted = persisted if persisted is not None else self._repo.get_profile_fields(external_userid) or {}
+        persisted = persisted if persisted is not None else self._sql_repo().get_profile_fields(external_userid) or {}
         if persisted:
             return {
                 "source": _text(persisted.get("source")),
@@ -612,10 +871,10 @@ class SidebarWorkbenchReadModel:
             }
         sidebar_context = dict((context.get("customer") or {}).get("sidebar_context") or {})
         return {
-            "source": _text(sidebar_context.get("source")),
-            "industry": _text(sidebar_context.get("industry")),
-            "industry_description": _text(sidebar_context.get("industry_description")),
-            "needs_blockers_followup": _text(sidebar_context.get("needs_blockers_followup")),
+            "source": _customer_text(sidebar_context.get("source")),
+            "industry": _customer_text(sidebar_context.get("industry")),
+            "industry_description": _customer_text(sidebar_context.get("industry_description")),
+            "needs_blockers_followup": _customer_text(sidebar_context.get("needs_blockers_followup")),
         }
 
 
@@ -627,17 +886,36 @@ class SidebarQuestionnaireReadModel:
         context_query: GetCustomerContextQuery | None = None,
         live_source_repo: CustomerReadRepository | None = None,
     ) -> None:
-        self._repo = repo or SidebarV2SqlRepository()
+        self._repo = repo
         self._context_query = context_query
         self._live_source_repo = live_source_repo
 
-    def __call__(self, *, external_userid: str) -> dict[str, Any]:
-        customer, diagnostics = SidebarWorkbenchReadModel(
-            self._repo,
-            context_query=self._context_query,
-            live_source_repo=self._live_source_repo,
-        ).customer_with_overlay(external_userid=external_userid)
-        rows = self._repo.list_questionnaire_answers(external_userid=_text(external_userid), mobile=_text(customer.get("mobile")))
+    def _sql_repo(self) -> SidebarV2SqlRepository:
+        if self._repo is None:
+            self._repo = SidebarV2SqlRepository()
+        return self._repo
+
+    def __call__(self, *, external_userid: str, owner_userid: str = "", owner_verified: bool = False) -> dict[str, Any]:
+        try:
+            customer, diagnostics = SidebarWorkbenchReadModel(
+                self._repo,
+                context_query=self._context_query,
+                live_source_repo=self._live_source_repo,
+            ).customer_with_overlay(external_userid=external_userid, owner_userid=owner_userid, owner_verified=owner_verified)
+        except NotFoundError as primary_not_found:
+            try:
+                customer, diagnostics = _customer_from_identity_snapshot(
+                    repo=self._sql_repo(),
+                    external_userid=_text(external_userid),
+                    owner_userid=_text(owner_userid),
+                    owner_verified=owner_verified,
+                    context_source_status="identity_snapshot_fallback",
+                )
+            except NotFoundError:
+                raise
+            except Exception:
+                raise primary_not_found
+        rows = self._sql_repo().list_questionnaire_answers(external_userid=_text(external_userid), mobile=_text(customer.get("mobile")))
         return _with_route_owner({"ok": True, "questionnaires": self._group(rows), "diagnostics": diagnostics})
 
     def _group(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -647,7 +925,7 @@ class SidebarQuestionnaireReadModel:
             submission_id = _text(row.get("submission_id"))
             questionnaire_id = _text(row.get("questionnaire_id"))
             submitted_at = _format_time(row.get("submitted_at"))
-            title = _text(row.get("questionnaire_title")) or "未命名问卷"
+            title = _questionnaire_title_text(row.get("questionnaire_title")) or "未命名问卷"
             key = (submission_id or questionnaire_id, title, submitted_at)
             if key not in grouped:
                 order.append(key)
@@ -660,17 +938,18 @@ class SidebarQuestionnaireReadModel:
                     "answers": [],
                 }
             answer = self._answer_text(row)
-            if _text(row.get("question")) or answer:
-                grouped[key]["answers"].append({"question": _text(row.get("question")) or "未命名问题", "answer": answer})
+            question = _question_text(row.get("question"))
+            if question or answer:
+                grouped[key]["answers"].append({"question": question or "未命名问题", "answer": answer})
                 grouped[key]["answer_count"] += 1
                 grouped[key]["total_count"] += 1
-        return [grouped[key] for key in order]
+        return [grouped[key] for key in order if grouped[key]["answer_count"] > 0]
 
     def _answer_text(self, row: dict[str, Any]) -> str:
         selected = _json(row.get("selected_option_texts_snapshot"), [])
         if isinstance(selected, list) and selected:
-            return "、".join(_text(item) for item in selected if _text(item))
-        return _text(row.get("text_value"))
+            return "、".join(_answer_text_value(item) for item in selected if _answer_text_value(item))
+        return _answer_text_value(row.get("text_value"))
 
 
 class SidebarMaterialReadModel:
@@ -685,9 +964,6 @@ class SidebarMaterialReadModel:
         return _with_route_owner({"ok": True, "materials": [self._material_item(dict(item), normalized_type) for item in rows]})
 
     def thumbnail(self, image_id: int) -> dict[str, Any]:
-        original = self._original_image_payload(image_id)
-        if original:
-            return original
         try:
             payload = GetImageThumbnailQuery()(str(int(image_id)), 160)
         except NotFoundError:
@@ -698,30 +974,8 @@ class SidebarMaterialReadModel:
         return {
             "body": thumbnail.get("bytes") or b"",
             "mime_type": _text(thumbnail.get("mime_type")) or "image/png",
+            "etag": _text(thumbnail.get("etag")),
         }
-
-    def _original_image_payload(self, image_id: int) -> dict[str, Any] | None:
-        try:
-            item = dict(GetMediaItemQuery("image")(str(int(image_id)), include_data=True).get("item") or {})
-        except NotFoundError:
-            raise LookupError("image not found") from None
-        except ContractError as exc:
-            raise ValueError("invalid image data") from exc
-        except Exception:
-            return None
-        source_url = _text(item.get("source_url"))
-        if _text(item.get("source")) == "url" and source_url:
-            return None
-        data_base64 = _text(item.get("data_base64"))
-        if not data_base64:
-            return None
-        try:
-            return {
-                "body": decode_image_base64(data_base64),
-                "mime_type": _text(item.get("mime_type")) or "image/png",
-            }
-        except ContractError as exc:
-            raise ValueError("invalid image data") from exc
 
     def _material_item(self, item: dict[str, Any], material_type: str) -> dict[str, Any]:
         item_id = _int(item.get("id"))
@@ -751,13 +1005,19 @@ class SidebarMaterialReadModel:
 
 class SidebarOtherStaffMessagesReadModel:
     def __init__(self, repo: SidebarV2SqlRepository | None = None) -> None:
-        self._repo = repo or SidebarV2SqlRepository()
+        self._repo = repo
+
+    def _sql_repo(self) -> SidebarV2SqlRepository:
+        if self._repo is None:
+            self._repo = SidebarV2SqlRepository()
+        return self._repo
 
     def __call__(self, *, external_userid: str, current_userid: str = "", limit: int = 20) -> dict[str, Any]:
         if not _text(external_userid):
             raise ValueError("external_userid is required")
         safe_limit = _limit(limit, default=20, maximum=100)
-        rows = self._repo.list_other_staff_messages(_text(external_userid), limit=200)
+        repo = self._sql_repo()
+        rows = repo.list_other_staff_messages(_text(external_userid), limit=200)
         current_staff = {_text(current_userid)}
         filtered: list[dict[str, Any]] = []
         for row in rows:
@@ -767,9 +1027,9 @@ class SidebarOtherStaffMessagesReadModel:
                 continue
             filtered.append(row)
         selected = filtered[-safe_limit:]
-        staff_names = self._repo.owner_names({_text(item.get("sender")) for item in selected})
+        staff_names = repo.owner_names({_text(item.get("sender")) for item in selected})
         chat_ids = {self._chat_id(item) for item in selected}
-        group_names = self._repo.group_names(chat_ids)
+        group_names = repo.group_names(chat_ids)
         return _with_route_owner({"ok": True, "messages": [self._message_item(item, staff_names, group_names) for item in selected]})
 
     def _chat_id(self, message: dict[str, Any]) -> str:
@@ -805,9 +1065,14 @@ class SidebarCommerceReadModel:
         context_query: GetCustomerContextQuery | None = None,
         live_source_repo: CustomerReadRepository | None = None,
     ) -> None:
-        self._repo = repo or SidebarV2SqlRepository()
-        self._context_query = context_query
+        self._repo = repo
+        self._context_query = context_query or GetCustomerContextQuery()
         self._live_source_repo = live_source_repo
+
+    def _sql_repo(self) -> SidebarV2SqlRepository:
+        if self._repo is None:
+            self._repo = SidebarV2SqlRepository()
+        return self._repo
 
     def products(self, *, external_userid: str, owner_userid: str = "", bind_by_userid: str = "") -> dict[str, Any]:
         normalized_external = _text(external_userid)
@@ -816,18 +1081,21 @@ class SidebarCommerceReadModel:
         diagnostics = {"context_source": "sidebar_product_link"}
         context_token = ""
         context_status = "missing"
-        try:
-            context_token = build_sidebar_product_context_token(
-                external_userid=normalized_external,
-                owner_userid=_text(owner_userid),
-                bind_by_userid=_text(bind_by_userid) or _text(owner_userid),
-            )
-            context_status = "signed"
-        except Exception as exc:
-            context_status = "sign_failed"
-            diagnostics["context_error"] = str(exc).strip() or exc.__class__.__name__
+        if _text(owner_userid):
+            try:
+                context_token = build_sidebar_product_context_token(
+                    external_userid=normalized_external,
+                    owner_userid=_text(owner_userid),
+                    bind_by_userid=_text(bind_by_userid) or _text(owner_userid),
+                )
+                context_status = "signed"
+            except Exception as exc:
+                context_status = "sign_failed"
+                diagnostics["context_error"] = str(exc).strip() or exc.__class__.__name__
+        else:
+            context_status = "owner_pending"
         diagnostics["context_status"] = context_status
-        rows = list(ListProductsQuery()(limit=100, offset=0).get("items") or [])
+        rows = self._list_sidebar_products(limit=100)
         active = [dict(item) for item in rows if bool(item.get("enabled")) and _text(item.get("status")) == "active"]
         return _with_route_owner(
             {
@@ -837,17 +1105,44 @@ class SidebarCommerceReadModel:
             }
         )
 
-    def orders(self, *, external_userid: str, owner_userid: str = "") -> dict[str, Any]:
-        customer, diagnostics = SidebarWorkbenchReadModel(
-            self._repo,
-            context_query=self._context_query,
-            live_source_repo=self._live_source_repo,
-        ).customer_with_overlay(
-            external_userid=external_userid,
-            owner_userid=owner_userid,
-        )
-        rows = self._repo.list_customer_wechat_pay_orders(
-            external_userid=_text(external_userid),
+    def orders(self, *, external_userid: str, owner_userid: str = "", owner_verified: bool = False) -> dict[str, Any]:
+        normalized_external = _text(external_userid)
+        normalized_owner = _text(owner_userid)
+        if not normalized_external:
+            raise ValueError("external_userid is required")
+        if not normalized_owner:
+            raise ValueError("owner_userid is required")
+        try:
+            customer, diagnostics = SidebarWorkbenchReadModel(
+                self._repo,
+                context_query=self._context_query,
+                live_source_repo=self._live_source_repo,
+            ).customer_with_overlay(
+                external_userid=normalized_external,
+                owner_userid=normalized_owner,
+                owner_verified=owner_verified,
+            )
+            orders_context = (
+                "identity_snapshot_fallback"
+                if diagnostics.get("context_source_status") == "identity_snapshot_fallback"
+                else "workbench_customer_overlay"
+            )
+            diagnostics = {**diagnostics, "orders_context": orders_context}
+        except NotFoundError as primary_not_found:
+            try:
+                customer, diagnostics = _customer_from_identity_snapshot(
+                    repo=self._sql_repo(),
+                    external_userid=normalized_external,
+                    owner_userid=normalized_owner,
+                    owner_verified=owner_verified,
+                )
+                diagnostics = {**diagnostics, "orders_context": "identity_snapshot_fallback"}
+            except NotFoundError:
+                raise
+            except Exception:
+                raise primary_not_found
+        rows = self._sql_repo().list_customer_wechat_pay_orders(
+            external_userid=normalized_external,
             mobile=_text(customer.get("mobile")),
             limit=20,
         )
@@ -859,6 +1154,12 @@ class SidebarCommerceReadModel:
                 "diagnostics": diagnostics,
             }
         )
+
+    def _list_sidebar_products(self, *, limit: int) -> list[dict[str, Any]]:
+        repo = build_commerce_repository()
+        if hasattr(repo, "list_sidebar_active_products"):
+            return list(repo.list_sidebar_active_products(limit=limit, offset=0).get("items") or [])
+        return list(ListProductsQuery(repo=repo)(limit=limit, offset=0).get("items") or [])
 
     def _product_item(self, item: dict[str, Any], *, context_token: str = "", context_status: str = "") -> dict[str, Any]:
         product_code = _text(item.get("product_code"))
@@ -879,17 +1180,24 @@ class SidebarCommerceReadModel:
 
     def _order_item(self, order: dict[str, Any]) -> dict[str, Any]:
         order_id = _text(order.get("id"))
+        provider = _text(order.get("provider") or "wechat_pay")
+        channel = _text(order.get("channel") or provider)
+        channel_label = _text(order.get("channel_label")) or ("微信小店" if provider == "wechat_shop" else "微信支付")
         product_code = _text(order.get("product_code"))
         product_name = _text(order.get("product_name")) or product_code or "未命名商品"
         status = self._order_status(order)
+        detail_base = "/admin/wechat-shop/transactions" if provider == "wechat_shop" else "/admin/wechat-pay/transactions"
         return {
             "id": _text(order.get("out_trade_no")) or order_id,
             "order_id": order_id,
+            "provider": provider,
+            "channel": channel,
+            "channel_label": channel_label,
             "title": product_name,
             "amount_label": _money_label(order.get("amount_total")),
             "status_label": ORDER_STATUS_LABELS.get(status, status),
             "paid_at": _format_time(order.get("paid_at") or order.get("created_at")),
-            "detail_url": f"/admin/wechat-pay/transactions/{order_id}" if order_id else "",
+            "detail_url": f"{detail_base}/{order_id}" if order_id else "",
         }
 
     def _order_status(self, order: dict[str, Any]) -> str:

@@ -1,6 +1,7 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
+<script src="{{ url_for('static', filename='admin_console/image_upload_client.js') }}"></script>
 <style>
   .product-admin { display: grid; gap: 18px; }
   .product-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
@@ -9,59 +10,81 @@
   .product-pill { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 9px; border-radius: 999px; background: #eef2f7; color: #475569; font-size: 12px; font-weight: 800; }
   .product-pill.active { background: #e7f8ee; color: #0f7a43; }
   .product-pill.draft { background: #fff4d6; color: #8a5a00; }
-  .product-editor { display: grid; gap: 18px; align-items: start; }
-  .product-edit-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; }
-  .product-edit-title { display: grid; gap: 4px; min-width: 0; }
-  .product-edit-title h1 { margin: 0; overflow: hidden; color: var(--text); font-size: 22px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
-  .product-edit-title p { margin: 0; color: var(--muted); font-size: 13px; font-weight: 800; }
-  .product-form { display: grid; gap: 0; }
-  .product-module { overflow: hidden; border-bottom: 1px solid var(--line); }
-  .product-module:last-of-type { border-bottom: 0; }
-  .product-module-head { min-height: 74px; display: flex; justify-content: space-between; gap: 18px; align-items: center; padding: 18px 0; }
-  .product-module-title { display: flex; gap: 12px; align-items: center; min-width: 0; }
-  .product-module-step { width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 10px; background: #eef2f7; color: #475569; font-weight: 900; }
-  .product-module-copy { display: grid; gap: 3px; min-width: 0; }
-  .product-module-copy h2 { margin: 0; color: var(--text); font-size: 16px; line-height: 1.25; }
-  .product-module-copy p { margin: 0; color: var(--muted); font-size: 13px; font-weight: 750; line-height: 1.35; }
-  .product-module-body { display: grid; gap: 14px; padding: 0 0 18px; }
-  .product-module-panel { display: grid; gap: 14px; padding: 0 0 18px; }
-  .product-module-panel[hidden] { display: none !important; }
-  .product-field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
-  .product-field { display: flex; flex-direction: column; gap: 8px; }
-  .product-field label { color: var(--muted); font-size: 13px; font-weight: 800; }
-  .product-field input, .product-field select, .product-field textarea {
-    width: 100%; min-height: 42px; padding: 10px 12px; border: 1px solid var(--line);
-    border-radius: 8px; background: #fffdf8; color: var(--text); font: inherit;
-  }
-  .product-field textarea { min-height: 92px; resize: vertical; }
-  .product-wide { grid-column: 1 / -1; }
+  .product-editor { --bg:#f6f8fb; --panel:#fff; --line:#e7ebf2; --line2:#eef2f7; --text:#101828; --muted:#667085; --muted2:#98a2b3; --blue:#2563eb; --blue2:#eaf2ff; --blue3:#bfdbfe; --green:#079455; --green2:#ecfdf3; --danger:#d92d20; --danger2:#fff1f3; --shadow:0 14px 34px rgba(16,24,40,.06); --r:16px; min-width: 1180px; margin: -24px -28px -48px; padding: 24px 28px 48px; background: var(--bg); color: var(--text); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; }
+  .product-editor * { box-sizing: border-box; }
+  .product-editor-topbar { background:#fff; border:1px solid var(--line); border-radius:0 0 18px 18px; margin:-24px -28px 22px; padding:22px 28px; }
+  .product-editor-crumb { color:#98a2b3; font-size:12px; font-weight:800; margin-bottom:4px; }
+  .product-editor-topbar h1 { margin:0; font-size:24px; line-height:1.2; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); box-shadow:var(--shadow); }
+  .summary-card { padding:22px; display:grid; gap:16px; margin-bottom:18px; }
+  .summary-head { display:flex; justify-content:space-between; gap:16px; align-items:center; }
+  .summary-title { display:grid; gap:4px; min-width:0; }
+  .summary-title h2 { margin:0; font-size:20px; font-weight:900; overflow-wrap:anywhere; }
+  .summary-code { color:#667085; font-size:13px; font-weight:850; overflow-wrap:anywhere; }
+  .btns { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+  .btn { min-height:38px; border:1px solid #d0d5dd; border-radius:10px; background:#fff; color:#344054; cursor:pointer; font:inherit; font-weight:850; padding:8px 14px; white-space:nowrap; text-decoration:none; }
+  .btn.primary { border-color:var(--blue); background:var(--blue); color:#fff; }
+  .btn.soft { border-color:#d6e4ff; background:#f5f8ff; color:#1849a9; }
+  .btn.danger { border-color:#fecdca; background:var(--danger2); color:var(--danger); }
+  .btn:disabled { opacity:.45; cursor:not-allowed; }
+  .summary-grid { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+  .mini { min-height:84px; padding:16px 18px; border:1px solid var(--line); border-radius:14px; background:#fff; display:grid; align-content:center; gap:6px; }
+  .mini .label { color:#8a94a6; font-size:13px; font-weight:850; }
+  .mini .value { color:var(--text); font-size:20px; font-weight:900; overflow-wrap:anywhere; }
+  .product-toast { min-height:22px; color:#667085; font-weight:800; }
+  .product-form { display:grid; gap:0; }
+  .workspace { display:grid; grid-template-columns:196px minmax(0,1fr); gap:18px; align-items:start; }
+  .side-nav { padding:10px; position:sticky; top:18px; }
+  .side-nav button { width:100%; min-height:56px; display:grid; grid-template-columns:28px minmax(0,1fr); gap:10px; align-items:center; border:0; border-radius:13px; background:#fff; color:#344054; cursor:pointer; text-align:left; font:inherit; padding:10px 12px; }
+  .side-nav button + button { margin-top:8px; }
+  .side-nav button.active { background:var(--blue2); color:#1456f0; }
+  .index { width:26px; height:26px; display:grid; place-items:center; border-radius:999px; background:#eef2f7; color:#667085; font-weight:900; }
+  .side-nav button.active .index { background:var(--blue); color:#fff; }
+  .nav-label { font-size:16px; font-weight:900; }
+  .panel { display:none; padding:24px; min-height:420px; }
+  .panel.active { display:block; }
+  .panel-title-row { display:flex; justify-content:space-between; align-items:center; gap:16px; padding-bottom:18px; margin-bottom:20px; border-bottom:1px solid var(--line2); }
+  .panel-title-row h3 { margin:0; font-size:22px; font-weight:900; }
+  .pill { display:inline-flex; align-items:center; justify-content:center; min-height:30px; border:1px solid #abefc6; border-radius:999px; background:var(--green2); color:#067647; padding:4px 12px; font-size:13px; font-weight:850; white-space:nowrap; }
+  .pill.blue { border-color:#d6e4ff; background:#f5f8ff; color:#1849a9; }
+  .pill.gray { border-color:#eaecf0; background:#f2f4f7; color:#475467; }
+  .pill.red { border-color:#fecdca; background:#fff1f3; color:#b42318; }
+  .form-grid, .product-field-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .field, .product-field { display:grid; gap:8px; }
+  .field.full, .product-wide { grid-column:1/-1; }
+  .field label, .product-field label { color:#667085; font-size:13px; font-weight:850; }
+  .field input, .field select, .field textarea, .product-field input, .product-field select, .product-field textarea { width:100%; border:1px solid #d0d5dd; border-radius:10px; background:#fff; color:#1d2939; font:inherit; outline:none; padding:11px 13px; }
+  .field textarea, .product-field textarea { min-height:110px; resize:vertical; }
+  .panel-actions { display:flex; justify-content:flex-end; gap:8px; padding-top:20px; margin-top:20px; border-top:1px solid var(--line2); }
+  .upload-card, .product-upload-row { border:1px dashed #d0d5dd; border-radius:14px; background:#fff; padding:18px; display:grid; grid-template-columns:minmax(0,1fr) auto; gap:18px; align-items:center; margin-bottom:16px; }
+  .upload-card strong, .product-upload-copy strong { font-size:17px; color:var(--text); }
+  .slice-list, .product-slices { display:grid; gap:10px; }
+  .slice-row, .product-slice { display:grid; grid-template-columns:36px minmax(0,1fr) auto; gap:12px; align-items:center; border:1px solid var(--line2); border-radius:14px; background:#fff; padding:14px 16px; }
+  .drag, .product-drag { width:32px; height:32px; display:grid; place-items:center; border:1px solid var(--line); border-radius:8px; background:#f8fafc; color:#667085; cursor:grab; font-weight:900; }
+  .empty { padding:34px 12px; color:#667085; text-align:center; font-weight:750; border:1px solid var(--line2); border-radius:14px; background:#fff; }
+  .switch-line, .product-collapse-control { display:flex; align-items:center; gap:10px; color:#1d2939; font-weight:900; white-space:nowrap; }
+  .switch-btn, .product-switch { position:relative; width:48px; height:28px; border:0; border-radius:999px; background:#d0d5dd; cursor:pointer; }
+  .switch-btn::after, .product-switch::after { content:""; position:absolute; top:4px; left:4px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(15,23,42,.24); transition:transform .18s; }
+  .switch-btn.on, .product-switch[aria-checked="true"] { background:#2563eb; }
+  .switch-btn.on::after, .product-switch[aria-checked="true"]::after { transform:translateX(20px); }
+  .option-grid, .product-option-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-bottom:18px; }
+  .option-card, .product-option { border:1px solid var(--line); border-radius:16px; background:#fff; padding:18px 20px; display:grid; grid-template-columns:auto 1fr; gap:12px; align-items:start; cursor:pointer; color:var(--text); text-align:left; font:inherit; }
+  .option-card.active, .product-option.active { border-color:#93c5fd; background:#eff6ff; }
+  .option-dot { width:18px; height:18px; margin-top:3px; border-radius:999px; border:2px solid #d0d5dd; background:#fff; }
+  .product-option.active .option-dot { border-color:#1677ff; box-shadow:inset 0 0 0 4px #fff; background:#1677ff; }
+  .option-card strong, .product-option strong { font-size:18px; font-weight:900; }
+  .target-card, .push-card { max-width:none; border:1px solid var(--line); border-radius:16px; background:#fff; padding:18px; display:grid; gap:16px; }
+  .target-card .field-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .target-card .field { display:grid; gap:8px; }
+  .target-card .field.full { grid-column:1/-1; }
+  .target-card .field label { color:#667085; font-size:13px; font-weight:850; }
+  .target-card input, .target-card select, .target-card textarea { width:100%; border:1px solid #d0d5dd; border-radius:10px; background:#fff; color:#1d2939; font:inherit; outline:none; padding:11px 13px; }
+  .param-row, .product-param-row { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto; gap:10px; align-items:center; }
+  .muted { color:#667085; }
   .product-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  .product-toast { min-height: 22px; color: var(--muted); font-weight: 800; }
   .product-error { color: #b91c1c; font-weight: 800; }
-  .product-slices { display: grid; gap: 10px; }
-  .product-slice { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 10px; background: #fff; }
-  .product-drag { display: grid; place-items: center; height: 32px; border: 1px solid var(--line); border-radius: 8px; background: #f8fafc; cursor: grab; color: var(--muted); font-weight: 900; }
-  .product-upload-row { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding: 14px; border: 1px dashed var(--line); border-radius: 10px; background: #fffdf8; }
-  .product-upload-copy { display: grid; gap: 3px; }
-  .product-upload-copy strong { color: var(--text); }
-  .product-side { position: sticky; top: 16px; display: grid; gap: 12px; }
   .product-qr { width: 220px; height: 220px; justify-self: center; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; padding: 12px; background: #fff; }
   .product-share-link { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fffdf8; }
-  .product-param-row { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1fr) auto; gap: 8px; }
-  .product-collapse-control { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; font-weight: 850; white-space: nowrap; }
-  .product-switch { position: relative; width: 46px; height: 26px; border: 0; border-radius: 999px; background: #d0d5dd; cursor: pointer; transition: background .18s ease; box-shadow: inset 0 0 0 1px rgba(15, 23, 42, .06); }
-  .product-switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(15, 23, 42, .24); transition: transform .18s ease; }
-  .product-switch[aria-checked="true"] { background: #2563eb; }
-  .product-switch[aria-checked="true"]::after { transform: translateX(20px); }
-  .product-switch:focus-visible { outline: 3px solid rgba(37, 99, 235, .22); outline-offset: 3px; }
-  .product-option-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .product-option { min-height: 74px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #fffdf8; text-align: left; cursor: pointer; }
-  .product-option strong { display: block; margin-bottom: 5px; color: var(--text); font: inherit; font-weight: 900; }
-  .product-option span { color: var(--muted); font-size: 12px; font-weight: 750; line-height: 1.35; }
-  .product-option.active { border-color: #93c5fd; background: #eff6ff; box-shadow: 0 0 0 3px rgba(37, 99, 235, .08); }
-  .product-advanced { overflow: hidden; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-  .product-advanced summary { padding: 13px 14px; background: #f8fafc; color: var(--text); cursor: pointer; font-weight: 900; }
-  .product-advanced-body { display: grid; gap: 14px; padding: 14px; border-top: 1px solid var(--line); }
   #product-share-modal[hidden] { display: none !important; }
   .product-share-modal { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(15, 23, 42, 0.34); }
   .product-share-panel { width: min(520px, 100%); overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: #fff; box-shadow: 0 24px 72px rgba(15, 23, 42, 0.22); }
@@ -73,7 +96,13 @@
   .product-share-input { min-width: 0; height: 42px; border: 1px solid var(--line); border-radius: 8px; background: #fffdf8; color: var(--text); padding: 0 12px; }
   .product-share-qr-wrap { display: grid; justify-items: center; gap: 10px; }
   .product-share-qr { width: 220px; height: 220px; object-fit: contain; border: 1px solid var(--line); border-radius: 8px; background: #fff; padding: 12px; }
-  @media (max-width: 980px) { .product-edit-top, .product-field-grid, .product-option-grid, .product-share-row, .product-upload-row { grid-template-columns: 1fr; flex-direction: column; align-items: stretch; } .product-side { position: static; } }
+  .product-hidden-toggle { position:absolute; width:1px; height:1px; opacity:0; pointer-events:none; }
+  .target-body[hidden],
+  .product-panel-body[hidden],
+  [data-h5-url-fields][hidden],
+  [data-url-link-fields][hidden] { display: none !important; }
+  .warning { margin-top: 12px; color: #f53f3f; font-size: 13px; line-height: 1.6; }
+  @media (max-width: 980px) { .product-editor { min-width: 0; margin: -18px; padding: 18px; } .product-editor-topbar { margin: -18px -18px 18px; } .summary-head, .upload-card, .product-upload-row { grid-template-columns:1fr; flex-direction:column; align-items:stretch; } .summary-grid, .workspace, .form-grid, .product-field-grid, .option-grid, .product-option-grid, .target-card .field-grid, .param-row, .product-param-row { grid-template-columns:1fr; } .side-nav { position:static; } }
 </style>
 {% endblock %}
 
@@ -120,54 +149,68 @@
   </section>
   {% else %}
   <div class="product-editor">
-    <section class="admin-card">
-      <form class="product-form" id="productForm">
-        <div class="product-edit-top">
-          <div class="product-edit-title">
-            <h1 id="productEditTitle">编辑商品</h1>
-            <p>客户管理后台 / 商品管理 / 编辑商品</p>
-          </div>
-          <div class="product-actions">
-            <a class="admin-button admin-button--ghost" href="/admin/wechat-pay/products">返回列表</a>
-            <button class="admin-button admin-button--ghost" id="copyShareLinkBtn" type="button">复制链接</button>
-            <button class="admin-button admin-button--ghost" id="openSharePreviewBtn" type="button">打开预览</button>
-            <button class="admin-button admin-button--primary" type="submit">保存商品</button>
-            <span class="product-toast" id="productToast"></span>
-          </div>
-        </div>
+    <header class="product-editor-topbar">
+      <div class="product-editor-crumb">客户管理后台 / 商品管理 / {{ "创建商品" if product_page_mode == "new" else "编辑商品" }}</div>
+      <h1>商品管理</h1>
+    </header>
 
-        <div class="product-module" id="saleInfoModule">
-          <div class="product-module-head">
-            <div class="product-module-title">
-              <div class="product-module-step">1</div>
-              <div class="product-module-copy">
-                <h2>售卖信息</h2>
-                <p>只保留影响用户下单的核心字段。</p>
-              </div>
+    <section class="card summary-card">
+      <div class="summary-head">
+        <div class="summary-title">
+          <h2 id="productEditTitle">{{ "创建商品" if product_page_mode == "new" else "编辑商品" }}</h2>
+          <div class="summary-code" id="summaryProductCode">商品编码</div>
+        </div>
+        <div class="btns">
+          <a class="btn soft" href="/admin/wechat-pay/products">返回列表</a>
+          <button class="btn" id="copyShareLinkBtn" type="button">复制链接</button>
+          <button class="btn" id="openSharePreviewBtn" type="button">打开预览</button>
+          <button class="btn primary" id="saveCurrentPanelBtn" type="button">保存当前维度</button>
+        </div>
+      </div>
+      <div class="summary-grid">
+        <div class="mini"><div class="label">价格</div><div class="value" id="summaryPrice">0.00</div></div>
+        <div class="mini"><div class="label">商品状态</div><div class="value" id="summaryStatus">草稿</div></div>
+        <div class="mini"><div class="label">页面素材</div><div class="value" id="summarySliceCount">0 / 10</div></div>
+        <div class="mini"><div class="label">外部推送</div><div class="value" id="summaryExternalPush">未启用</div></div>
+      </div>
+      <span class="product-toast" id="productToast"></span>
+    </section>
+
+    <form class="product-form" id="productForm">
+      <section class="workspace">
+        <nav class="card side-nav" aria-label="商品配置维度">
+          <button class="active" data-product-panel="sale" type="button"><span class="index">1</span><span class="nav-label">售卖信息</span></button>
+          <button data-product-panel="media" type="button"><span class="index">2</span><span class="nav-label">页面素材</span></button>
+          <button data-product-panel="after" type="button"><span class="index">3</span><span class="nav-label">购买后动作</span></button>
+          <button data-product-panel="push" type="button"><span class="index">4</span><span class="nav-label">外部推送</span></button>
+        </nav>
+
+        <div class="card">
+          <section class="panel active" id="panel-sale" data-product-panel-content="sale">
+            <div class="panel-title-row">
+              <h3>售卖信息</h3>
             </div>
-          </div>
-          <div class="product-module-body">
-            <div class="product-field-grid">
-              <div class="product-field">
+            <div class="form-grid">
+              <div class="field">
                 <label for="productTitle">商品名称</label>
                 <input id="productTitle" required maxlength="120" autocomplete="off">
               </div>
-              <div class="product-field">
+              <div class="field">
                 <label for="productPrice">价格</label>
                 <input id="productPrice" type="number" min="0" step="0.01" required>
               </div>
-              <div class="product-field">
+              <div class="field">
                 <label for="buyButtonText">购买按钮文案</label>
                 <input id="buyButtonText" maxlength="24" autocomplete="off">
               </div>
-              <div class="product-field">
+              <div class="field">
                 <label for="requireMobile">手机号要求</label>
                 <select id="requireMobile">
                   <option value="false">不要求</option>
                   <option value="true">要求填写</option>
                 </select>
               </div>
-              <div class="product-field">
+              <div class="field">
                 <label for="productStatus">商品状态</label>
                 <select id="productStatus">
                   <option value="active">已上架</option>
@@ -175,145 +218,152 @@
                   <option value="disabled">已下架</option>
                 </select>
               </div>
-              <div class="product-field">
+              <div class="field">
                 <label for="productCode">商品编码</label>
                 <input id="productCode" class="product-mono" required minlength="3" maxlength="80" autocomplete="off" {% if product_page_mode == "edit" %}readonly{% endif %}>
               </div>
-              <div class="product-field product-wide">
+              <div class="field full">
                 <label for="productDescription">商品描述</label>
                 <textarea id="productDescription"></textarea>
               </div>
             </div>
-          </div>
-        </div>
-
-        <div class="product-module" id="mediaModule">
-          <div class="product-module-head">
-            <div class="product-module-title">
-              <div class="product-module-step">2</div>
-              <div class="product-module-copy">
-                <h2>页面素材</h2>
-                <p>商品页长图切片。上传、排序、删除集中在这里。</p>
-              </div>
+            <div class="panel-actions">
+              <button class="btn primary" data-save-panel="sale" type="button">保存售卖信息</button>
             </div>
-            <div class="product-toast" id="sliceCount">0 / 10 张</div>
-          </div>
-          <div class="product-module-body">
-            <div class="product-upload-row">
-              <div class="product-upload-copy">
-                <strong>上传长图切片</strong>
-                <span class="product-toast">支持 PNG / JPG，最多 10 张；拖拽排序后保存生效。</span>
-              </div>
-              <label class="admin-button admin-button--ghost">
+          </section>
+
+          <section class="panel" id="panel-media" data-product-panel-content="media">
+            <div class="panel-title-row">
+              <h3>页面素材</h3>
+              <span class="pill gray" id="sliceCount">0 / 10 张</span>
+            </div>
+            <div class="upload-card">
+              <strong>上传长图切片（最大 2MB）</strong>
+              <label class="btn primary">
                 上传图片
                 <input id="sliceInput" type="file" accept="image/png,image/jpeg" multiple style="display:none">
               </label>
             </div>
-            <div class="product-slices" id="sliceList"></div>
-          </div>
-        </div>
+            <div class="slice-list" id="sliceList"></div>
+            <div class="panel-actions">
+              <button class="btn primary" data-save-panel="media" type="button">保存页面素材</button>
+            </div>
+          </section>
 
-        <div class="product-module" id="afterActionModule">
-          <div class="product-module-head">
-            <div class="product-module-title">
-              <div class="product-module-step">3</div>
-              <div class="product-module-copy">
-                <h2>购买后动作</h2>
-                <p>开关开启后，支付后的引流或跳转配置才会生效。</p>
+          <section class="panel" id="panel-after" data-product-panel-content="after">
+            <div class="panel-title-row">
+              <h3>购买后动作</h3>
+              <div class="switch-line">
+                <span id="afterActionStateText">未启用</span>
+                <button class="product-switch" id="afterActionExpand" type="button" role="switch" aria-checked="false" aria-label="启用购买后动作配置"></button>
               </div>
             </div>
-            <div class="product-collapse-control">
-              <span id="afterActionStateText">未启用</span>
-              <button class="product-switch" id="afterActionExpand" type="button" role="switch" aria-checked="false" aria-label="启用购买后动作配置"></button>
-            </div>
-          </div>
-          <div class="product-module-panel" id="afterActionPanel" hidden>
-            <div class="product-option-grid" role="group" aria-label="购买后动作模式">
-              <button class="product-option" data-after-mode="lead" type="button">
-                <strong>支付后展示引流二维码</strong>
-                <span>用户支付成功后看到已绑定的引流渠道码。</span>
-              </button>
-              <button class="product-option" data-after-mode="redirect" type="button">
-                <strong>支付完成后直接跳转</strong>
-                <span>用户完成报名/支付后直接进入指定链接。</span>
-              </button>
-            </div>
-            <div class="product-field-grid">
-              <div class="product-field">
-                <label for="leadChannel">引流渠道码</label>
-                <select id="leadChannel"></select>
-              </div>
-              <div class="product-field">
-                <label for="completionRedirectUrl">跳转链接</label>
-                <input id="completionRedirectUrl" placeholder="https://example.com/welcome">
-              </div>
-            </div>
-          </div>
-        </div>
 
-        <div class="product-module" id="externalPushSection">
-          <div class="product-module-head">
-            <div class="product-module-title">
-              <div class="product-module-step">4</div>
-              <div class="product-module-copy">
-                <h2>外部推送</h2>
-                <p>开关开启后，订单 webhook 外推才会生效。</p>
+            <div class="product-panel-body" id="afterActionPanel" hidden>
+              <div class="option-grid" role="group" aria-label="购买后动作模式">
+                <button class="product-option active" data-after-mode="lead" type="button">
+                  <span class="option-dot" aria-hidden="true"></span>
+                  <strong>支付后展示引流二维码</strong>
+                </button>
+                <button class="product-option" data-after-mode="redirect" type="button">
+                  <span class="option-dot" aria-hidden="true"></span>
+                  <strong>支付完成后直接跳转</strong>
+                </button>
+              </div>
+              <div class="form-grid" id="leadActionFields">
+                <div class="field full">
+                  <label for="leadChannel">引流渠道码</label>
+                  <select id="leadChannel"></select>
+                </div>
+              </div>
+              <section class="target-card" data-completion-target-config>
+                <input class="product-hidden-toggle" type="checkbox" name="completion_target_enabled" data-target-enabled>
+                <div class="target-body" data-target-body hidden>
+                  <div class="field-grid">
+                    <div class="field full">
+                      <label>跳转类型</label>
+                      <select name="completion_target_type">
+                        <option value="h5">H5 跳转地址</option>
+                        <option value="url_link">动态 URL Link 接口</option>
+                      </select>
+                    </div>
+                    <div class="field full" data-h5-url-fields>
+                      <label>H5 跳转地址</label>
+                      <input name="completion_h5_url" placeholder="https://example.com/landing 或 /internal/path">
+                    </div>
+                    <div class="field full" data-url-link-fields>
+                      <label>动态 URL Link 接口</label>
+                      <input name="completion_url_link_source_url" placeholder="https://ip.lhbl.com.cn/api/wxlink?from=qianlan_pay">
+                    </div>
+                    <div class="field" data-url-link-fields>
+                      <label>响应字段</label>
+                      <input name="completion_url_link_response_key" placeholder="url_link" value="url_link">
+                    </div>
+                  </div>
+                  <div class="warning" data-validation-warning hidden></div>
+                </div>
+              </section>
+            </div>
+            <div class="panel-actions">
+              <button class="btn primary" data-save-panel="after" type="button">保存购买后动作</button>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-push" data-product-panel-content="push">
+            <div class="panel-title-row">
+              <h3>外部推送</h3>
+              <div class="switch-line">
+                <span id="externalPushStateText">未启用</span>
+                <button class="product-switch" id="externalPushExpand" type="button" role="switch" aria-checked="false" aria-label="启用外部推送配置"></button>
               </div>
             </div>
-            <div class="product-collapse-control">
-              <span id="externalPushStateText">未启用</span>
-              <button class="product-switch" id="externalPushExpand" type="button" role="switch" aria-checked="false" aria-label="启用外部推送配置"></button>
-            </div>
-          </div>
-          <div class="product-module-panel" id="externalPushPanel" hidden>
-            <div class="product-field-grid">
-              <div class="product-field">
-                <label for="externalPushUrl">推送地址</label>
-                <input id="externalPushUrl" placeholder="https://hooks.example.com/...">
-              </div>
-              <div class="product-field product-wide">
-                <label for="externalPushRemark">备注</label>
-                <textarea id="externalPushRemark"></textarea>
-              </div>
-            </div>
-            <details class="product-advanced">
-              <summary>高级参数</summary>
-              <div class="product-advanced-body">
-                <div class="product-field-grid">
-                  <div class="product-field">
+
+            <div class="product-panel-body" id="externalPushPanel" hidden>
+              <div class="push-card">
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="externalPushUrl">推送地址</label>
+                    <input id="externalPushUrl" placeholder="https://hooks.example.com/...">
+                  </div>
+                  <div class="field full">
+                    <label for="externalPushRemark">备注</label>
+                    <textarea id="externalPushRemark"></textarea>
+                  </div>
+                  <div class="field">
                     <label for="externalPushType">push_type</label>
                     <input id="externalPushType" placeholder="paid_notify">
                   </div>
-                  <div class="product-field">
+                  <div class="field">
                     <label for="externalPushExpiresAtTs">expires_at_ts</label>
                     <input id="externalPushExpiresAtTs" type="number" step="1">
                   </div>
-                  <div class="product-field">
+                  <div class="field">
                     <label for="externalPushDay">day</label>
                     <input id="externalPushDay" type="number" step="1">
                   </div>
-                  <div class="product-field">
+                  <div class="field">
                     <label for="externalPushFrequency">frequency</label>
                     <input id="externalPushFrequency" type="number" step="1">
                   </div>
                 </div>
-                <div class="product-field">
+                <div class="field">
                   <label>custom_params</label>
                   <div id="externalPushParams" class="product-slices"></div>
-                  <button class="admin-button admin-button--ghost" id="addExternalPushParam" type="button">新增参数</button>
                 </div>
+                <div class="btns">
+                  <button class="btn" id="addExternalPushParam" type="button">新增参数</button>
+                  <button class="btn" id="testExternalPushBtn" type="button">测试推送</button>
+                </div>
+                <span class="product-toast" id="externalPushResult"></span>
               </div>
-            </details>
-            <div class="product-actions">
-              <button class="admin-button admin-button--ghost" id="testExternalPushBtn" type="button">测试推送</button>
-              <span class="product-toast">测试前会先保存当前外推配置。</span>
-              <span class="product-toast" id="externalPushResult"></span>
             </div>
-          </div>
+            <div class="panel-actions">
+              <button class="btn primary" data-save-panel="push" type="button">保存外部推送</button>
+            </div>
+          </section>
         </div>
-
-      </form>
-    </section>
+      </section>
+    </form>
   </div>
   {% endif %}
 
@@ -356,6 +406,7 @@
     require_mobile: false,
     completion_redirect_enabled: false,
     completion_redirect_url: "",
+    completion_target: null,
     slices: []
   }, initialProduct);
   let externalPush = { enabled: false, webhook_url: "", push_type: "", expires_at_ts: "", day: "", frequency: "", remark: "", custom_params: {} };
@@ -363,21 +414,48 @@
   let dragId = "";
   let activeShareUrl = "";
   let shareInfo = null;
-  let afterActionEnabled = Boolean(product.completion_redirect_enabled || product.lead_channel_id);
+  let afterActionEnabled = Boolean((product.completion_target && product.completion_target.enabled) || product.completion_redirect_enabled || product.lead_channel_id);
   let afterActionMode = product.completion_redirect_enabled ? "redirect" : "lead";
+  let activeProductPanel = "sale";
 
   function $(id) { return document.getElementById(id); }
   function esc(value) { return String(value == null ? "" : value).replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c])); }
   function cents(value) { const n = Number.parseFloat(String(value || "0")); return Number.isFinite(n) ? Math.round(n * 100) : 0; }
   function money(value) { return ((Number(value || 0)) / 100).toFixed(2); }
   function showToast(text) { if (toast) toast.textContent = text; }
+  function statusLabel(value) { return { active: "已上架", draft: "草稿", disabled: "已下架" }[value] || value || "草稿"; }
   function productDisplayName(value) { return String(value || "商品").trim() || "商品"; }
   function safeQrDownloadName(value) {
     return `${productDisplayName(value).replace(/[\\/:*?"<>|]+/g, "_")}二维码.svg`;
   }
+  function updateProductSummary() {
+    const title = $("productEditTitle");
+    const titleValue = $("productTitle")?.value.trim() || product.title || product.name || (mode === "new" ? "创建商品" : "编辑商品");
+    if (title) title.textContent = titleValue;
+    const code = $("summaryProductCode");
+    if (code) code.textContent = product.product_code || $("productCode")?.value.trim() || "商品编码";
+    const price = $("summaryPrice");
+    if (price) price.textContent = $("productPrice") ? money(cents($("productPrice").value)) : money(product.price_cents || product.amount_total);
+    const status = $("summaryStatus");
+    if (status) status.textContent = statusLabel($("productStatus")?.value || product.status || "draft");
+    const sliceCount = $("summarySliceCount");
+    if (sliceCount) sliceCount.textContent = `${(product.slices || []).length} / 10`;
+    const pushStatus = $("summaryExternalPush");
+    if (pushStatus) pushStatus.textContent = externalPush.enabled ? "已启用" : "未启用";
+  }
+  function switchProductPanel(panel) {
+    activeProductPanel = ["sale", "media", "after", "push"].includes(panel) ? panel : "sale";
+    document.querySelectorAll("[data-product-panel]").forEach(button => {
+      button.classList.toggle("active", button.dataset.productPanel === activeProductPanel);
+    });
+    document.querySelectorAll("[data-product-panel-content]").forEach(panelEl => {
+      panelEl.classList.toggle("active", panelEl.dataset.productPanelContent === activeProductPanel);
+    });
+  }
   function setSwitch(button, enabled) {
     if (!button) return;
     button.setAttribute("aria-checked", enabled ? "true" : "false");
+    button.classList.toggle("on", Boolean(enabled));
   }
   function switchIsOn(button) {
     return button?.getAttribute("aria-checked") === "true";
@@ -391,19 +469,134 @@
     const label = $(labelId);
     if (label) label.textContent = enabled ? onText : offText;
   }
+  function syncCompletionTargetEnabled() {
+    const targetRoot = document.querySelector("[data-completion-target-config]");
+    const enabledEl = targetRoot?.querySelector("[data-target-enabled]");
+    const leadFields = $("leadActionFields");
+    if (leadFields) leadFields.hidden = !afterActionEnabled || afterActionMode !== "lead";
+    if (targetRoot) targetRoot.hidden = !afterActionEnabled || afterActionMode !== "redirect";
+    if (enabledEl) {
+      enabledEl.checked = afterActionEnabled && afterActionMode === "redirect";
+      enabledEl.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }
   function setAfterActionEnabled(enabled) {
     afterActionEnabled = Boolean(enabled);
     setPanelSwitch("afterActionExpand", "afterActionPanel", afterActionEnabled, "afterActionStateText");
+    syncCompletionTargetEnabled();
   }
   function setExternalPushActive(enabled) {
     externalPush.enabled = Boolean(enabled);
     setPanelSwitch("externalPushExpand", "externalPushPanel", externalPush.enabled, "externalPushStateText");
+    updateProductSummary();
   }
   function selectAfterActionMode(modeName) {
     afterActionMode = modeName === "redirect" ? "redirect" : "lead";
     document.querySelectorAll("[data-after-mode]").forEach(option => {
       option.classList.toggle("active", option.dataset.afterMode === afterActionMode);
     });
+    syncCompletionTargetEnabled();
+  }
+  function defaultCompletionTarget(url = "") {
+    const h5Url = String(url || "").trim();
+    return {
+      enabled: Boolean(h5Url),
+      target_type: "h5",
+      open_strategy: "h5_redirect",
+      h5_url: h5Url,
+      fallback_url: "",
+      mini_program: { appid: "", username: "", path: "", query: "", env_version: "release" },
+      url_link: { enabled: false, url: "", source_url: "", response_url_key: "url_link", expire_type: 0, expire_interval: 30 }
+    };
+  }
+  function normalizeCompletionTarget(value, fallbackUrl = "") {
+    const base = defaultCompletionTarget(fallbackUrl);
+    const target = Object.assign({}, base, value || {});
+    target.mini_program = Object.assign({}, base.mini_program, target.mini_program || {});
+    target.url_link = Object.assign({}, base.url_link, target.url_link || {});
+    if (!["h5", "url_link"].includes(target.target_type)) target.target_type = "h5";
+    target.open_strategy = target.target_type === "url_link" ? "url_link" : "h5_redirect";
+    target.url_link.enabled = target.target_type === "url_link" && Boolean(target.url_link.url || target.url_link.source_url);
+    return target;
+  }
+  function mountCompletionTargetConfig(root, initialValue) {
+    const enabledEl = root.querySelector("[data-target-enabled]");
+    const bodyEl = root.querySelector("[data-target-body]");
+    const warningEl = root.querySelector("[data-validation-warning]");
+    const typeEl = root.querySelector('[name="completion_target_type"]');
+    const h5UrlEl = root.querySelector('[name="completion_h5_url"]');
+    const sourceUrlEl = root.querySelector('[name="completion_url_link_source_url"]');
+    const responseKeyEl = root.querySelector('[name="completion_url_link_response_key"]');
+    function syncVisibility() {
+      bodyEl.hidden = !enabledEl.checked;
+      const isUrlLink = typeEl && typeEl.value === "url_link";
+      root.querySelectorAll("[data-h5-url-fields]").forEach(el => { el.hidden = isUrlLink; });
+      root.querySelectorAll("[data-url-link-fields]").forEach(el => { el.hidden = !isUrlLink; });
+    }
+    function fill(initial) {
+      const target = normalizeCompletionTarget(initial, product.completion_redirect_url || "");
+      enabledEl.checked = Boolean(target.enabled);
+      if (typeEl) typeEl.value = target.target_type === "url_link" ? "url_link" : "h5";
+      h5UrlEl.value = target.h5_url || target.fallback_url || product.completion_redirect_url || "";
+      if (sourceUrlEl) sourceUrlEl.value = target.url_link.source_url || "";
+      if (responseKeyEl) responseKeyEl.value = target.url_link.response_url_key || "url_link";
+      syncVisibility();
+    }
+    root.collectCompletionTarget = function collectCompletionTarget(options = {}) {
+      const validate = options.validate !== false;
+      const enabled = enabledEl.checked;
+      const targetType = typeEl && typeEl.value === "url_link" ? "url_link" : "h5";
+      const h5Url = targetType === "h5" ? h5UrlEl.value.trim() : "";
+      const sourceUrl = sourceUrlEl ? sourceUrlEl.value.trim() : "";
+      const responseUrlKey = responseKeyEl ? responseKeyEl.value.trim() || "url_link" : "url_link";
+      const payload = {
+        enabled,
+        target_type: targetType,
+        open_strategy: targetType === "url_link" ? "url_link" : "h5_redirect",
+        h5_url: h5Url,
+        fallback_url: "",
+        mini_program: {
+          appid: "",
+          username: "",
+          path: "",
+          query: "",
+          env_version: "release"
+        },
+        url_link: {
+          enabled: targetType === "url_link" && Boolean(sourceUrl),
+          url: "",
+          source_url: sourceUrl,
+          response_url_key: responseUrlKey
+        }
+      };
+      warningEl.hidden = true;
+      warningEl.textContent = "";
+      if (validate && enabled && targetType === "h5" && !h5Url) {
+        warningEl.textContent = "请填写 H5 跳转地址。";
+        warningEl.hidden = false;
+        throw new Error(warningEl.textContent);
+      }
+      if (validate && enabled && targetType === "url_link" && !sourceUrl) {
+        warningEl.textContent = "请填写动态 URL Link 接口。";
+        warningEl.hidden = false;
+        throw new Error(warningEl.textContent);
+      }
+      return payload;
+    };
+    root.addEventListener("input", () => {
+      product.completion_target = root.collectCompletionTarget({ validate: false });
+      if (product.completion_target.target_type === "h5") {
+        product.completion_redirect_url = product.completion_target.h5_url || "";
+      }
+    });
+    root.addEventListener("change", () => {
+      syncVisibility();
+      product.completion_target = root.collectCompletionTarget({ validate: false });
+      if (product.completion_target.target_type === "h5") {
+        product.completion_redirect_url = product.completion_target.h5_url || "";
+      }
+    });
+    fill(initialValue);
   }
   async function copyText(text) {
     const value = String(text || "");
@@ -493,21 +686,29 @@
     $("requireMobile").value = product.require_mobile ? "true" : "false";
     $("productDescription").value = product.description || "";
     $("leadChannel").value = String(product.lead_channel_id || 0);
-    $("completionRedirectUrl").value = product.completion_redirect_url || "";
-    setAfterActionEnabled(Boolean(product.completion_redirect_enabled || product.lead_channel_id));
-    selectAfterActionMode(product.completion_redirect_enabled ? "redirect" : "lead");
+    setAfterActionEnabled(Boolean((product.completion_target && product.completion_target.enabled) || product.completion_redirect_enabled || product.lead_channel_id));
+    selectAfterActionMode(((product.completion_target && product.completion_target.enabled) || product.completion_redirect_enabled) ? "redirect" : "lead");
+    const targetRoot = document.querySelector("[data-completion-target-config]");
+    if (targetRoot) mountCompletionTargetConfig(targetRoot, product.completion_target || defaultCompletionTarget(product.completion_redirect_url || ""));
+    syncCompletionTargetEnabled();
     renderSlices();
+    updateProductSummary();
   }
 
   function completionRedirectPayload() {
-    const enabled = afterActionEnabled && afterActionMode === "redirect";
-    const url = String($("completionRedirectUrl").value || "").trim();
-    const isSafeInternalPath = /^\/(?!\/)[^\s\\]*$/.test(url);
-    if (enabled && !url) throw new Error("请填写跳转链接");
-    if (enabled && !/^https:\/\/[^/\s?#]+/i.test(url) && !isSafeInternalPath) throw new Error("跳转链接格式不合法");
+    const targetRoot = document.querySelector("[data-completion-target-config]");
+    const completionTarget = targetRoot && targetRoot.collectCompletionTarget
+      ? targetRoot.collectCompletionTarget()
+      : normalizeCompletionTarget(product.completion_target, product.completion_redirect_url || "");
+    if (!afterActionEnabled) completionTarget.enabled = false;
+    const enabled = afterActionEnabled && afterActionMode === "redirect" && completionTarget.enabled;
+    const targetUrl = completionTarget.target_type === "h5" ? completionTarget.h5_url : "";
+    if (enabled && completionTarget.target_type === "h5" && !targetUrl) throw new Error("请填写 H5 跳转地址");
+    if (enabled && completionTarget.target_type === "h5" && !/^https:\/\/[^/\s?#]+/i.test(targetUrl) && !/^\/(?!\/)[^\s\\]*$/.test(targetUrl)) throw new Error("H5 跳转地址格式不合法");
     return {
-      completion_redirect_enabled: enabled,
-      completion_redirect_url: enabled ? url : ""
+      completion_redirect_enabled: enabled && completionTarget.target_type === "h5",
+      completion_redirect_url: enabled && completionTarget.target_type === "h5" ? targetUrl : "",
+      completion_target: completionTarget
     };
   }
 
@@ -534,9 +735,8 @@
     if (!select) return;
     select.innerHTML = leadChannels.map(channel => {
       const disabled = channel.selectable === false ? " disabled" : "";
-      const program = channel.program_name ? ` · ${channel.program_name}` : "";
       const suffix = channel.selectable === false ? " · 未配置二维码" : "";
-      return `<option value="${Number(channel.channel_id || 0)}"${disabled}>${esc((channel.channel_name || "渠道") + program + suffix)}</option>`;
+      return `<option value="${Number(channel.channel_id || 0)}"${disabled}>${esc((channel.channel_name || "渠道") + suffix)}</option>`;
     }).join("");
   }
 
@@ -546,16 +746,17 @@
     const slices = product.slices || [];
     const count = $("sliceCount");
     if (count) count.textContent = `${slices.length} / 10 张`;
+    updateProductSummary();
     if (!slices.length) {
-      target.innerHTML = '<div class="product-toast">暂无贴图切片</div>';
+      target.innerHTML = '<div class="empty">暂无页面素材</div>';
       return;
     }
     target.innerHTML = slices.map((slice, index) => {
       const key = slice.local_id || slice.id || slice.image_library_id;
-      return `<div class="product-slice" draggable="true" data-key="${esc(key)}">
-        <div class="product-drag">::</div>
+      return `<div class="product-slice slice-row" draggable="true" data-key="${esc(key)}">
+        <div class="product-drag drag">::</div>
         <div>${index + 1}. ${esc(slice.name || slice.file_name || "图片切片")}</div>
-        <button class="admin-button admin-button--danger" data-action="remove-slice" data-key="${esc(key)}" type="button">删除</button>
+        <button class="btn danger" data-action="remove-slice" data-key="${esc(key)}" type="button">删除</button>
       </div>`;
     }).join("");
     target.querySelectorAll(".product-slice").forEach(row => {
@@ -580,19 +781,15 @@
     if (!target) return;
     const entries = Object.entries(externalPush.custom_params || {});
     if (!entries.length) entries.push(["", ""]);
-    target.innerHTML = entries.map(([key, value]) => `<div class="product-param-row">
+    target.innerHTML = entries.map(([key, value]) => `<div class="product-param-row param-row">
       <input class="push-key" placeholder="key" value="${esc(key)}">
       <input class="push-value" placeholder="value" value="${esc(value)}">
-      <button class="admin-button admin-button--danger" data-action="remove-param" type="button">删除</button>
+      <button class="btn danger" data-action="remove-param" type="button">删除</button>
     </div>`).join("");
   }
 
   function fillExternalPush() {
-    if (!$("externalPushSection")) return;
-    if (mode !== "edit") {
-      $("externalPushSection").hidden = true;
-      return;
-    }
+    if (!$("externalPushUrl")) return;
     setExternalPushActive(Boolean(externalPush.enabled));
     $("externalPushUrl").value = externalPush.webhook_url || "";
     $("externalPushType").value = externalPush.push_type || "";
@@ -601,6 +798,7 @@
     $("externalPushFrequency").value = externalPush.frequency == null ? "" : externalPush.frequency;
     $("externalPushRemark").value = externalPush.remark || "";
     renderExternalPushParams();
+    updateProductSummary();
   }
 
   function readExternalPushBody() {
@@ -634,19 +832,72 @@
     const selected = Array.from(files || []);
     if ((product.slices || []).length + selected.length > 10) throw new Error("全景贴图最多 10 张");
     for (const file of selected) {
+      const prepared = await window.ImageUploadClient.prepareImageForUpload(file);
       const form = new FormData();
-      form.append("image", file);
+      form.append("image", prepared.file);
       form.append("name", file.name);
-      const payload = await api("/api/admin/image-library/upload", { method: "POST", body: form });
+      const payload = await (window.ImageUploadClient.requestJson || api)("/api/admin/image-library/upload", { method: "POST", body: form });
+      if (payload.ok === false) throw new Error(payload.detail || payload.error || "上传失败");
       product.slices.push({
         local_id: `local_${Date.now()}_${Math.random().toString(16).slice(2)}`,
         image_library_id: payload.item.id,
         name: payload.item.name || file.name,
         file_name: payload.item.file_name || file.name,
-        file_size: payload.item.file_size || file.size
+        file_size: payload.item.file_size || prepared.uploadSize || prepared.file.size
       });
     }
     renderSlices();
+    updateProductSummary();
+  }
+
+  async function saveExternalPushOnly() {
+    if (mode !== "edit" || !product.id) {
+      showToast("请先保存商品");
+      return null;
+    }
+    externalPush = (await api(
+      `/api/admin/wechat-pay/products/${encodeURIComponent(product.id)}/external-push`,
+      { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(readExternalPushBody()) }
+    )).config || externalPush;
+    fillExternalPush();
+    showToast("外部推送已保存");
+    return externalPush;
+  }
+
+  async function saveProduct() {
+    showToast("保存中");
+    const productId = product.id || "";
+    const saved = await api(
+      mode === "edit" ? `/api/admin/wechat-pay/products/${encodeURIComponent(productId)}` : "/api/admin/wechat-pay/products",
+      { method: mode === "edit" ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(readProductBody()) }
+    );
+    product = saved.product || product;
+    if (mode === "edit") {
+      let externalPushError = null;
+      try {
+        externalPush = (await api(
+          `/api/admin/wechat-pay/products/${encodeURIComponent(product.id)}/external-push`,
+          { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(readExternalPushBody()) }
+        )).config || externalPush;
+      } catch (error) {
+        externalPushError = error;
+      }
+      fillExternalPush();
+      updateProductSummary();
+      loadShareInfo().catch(() => {});
+      showToast(externalPushError ? `商品已保存，外部推送保存失败：${externalPushError.message || "请求失败"}` : "已保存");
+    } else {
+      window.location.href = `/admin/wechat-pay/products/${encodeURIComponent(product.id)}/edit`;
+    }
+    return product;
+  }
+
+  async function saveCurrentPanel() {
+    if (activeProductPanel === "push") {
+      await saveExternalPushOnly();
+      return;
+    }
+    await saveProduct();
   }
 
   async function initEditor() {
@@ -696,7 +947,7 @@
   });
 
   $("addExternalPushParam")?.addEventListener("click", () => {
-    $("externalPushParams").insertAdjacentHTML("beforeend", '<div class="product-param-row"><input class="push-key" placeholder="key"><input class="push-value" placeholder="value"><button class="admin-button admin-button--danger" data-action="remove-param" type="button">删除</button></div>');
+    $("externalPushParams").insertAdjacentHTML("beforeend", '<div class="product-param-row param-row"><input class="push-key" placeholder="key"><input class="push-value" placeholder="value"><button class="btn danger" data-action="remove-param" type="button">删除</button></div>');
   });
 
   $("testExternalPushBtn")?.addEventListener("click", async () => {
@@ -719,6 +970,22 @@
   $("externalPushExpand")?.addEventListener("click", () => setExternalPushActive(!externalPush.enabled));
   document.querySelectorAll("[data-after-mode]").forEach(option => {
     option.addEventListener("click", () => selectAfterActionMode(option.dataset.afterMode));
+  });
+  document.querySelectorAll("[data-product-panel]").forEach(button => {
+    button.addEventListener("click", () => switchProductPanel(button.dataset.productPanel || "sale"));
+  });
+  document.querySelectorAll("[data-save-panel]").forEach(button => {
+    button.addEventListener("click", async () => {
+      switchProductPanel(button.dataset.savePanel || activeProductPanel);
+      try {
+        await saveCurrentPanel();
+      } catch (error) {
+        showToast(error.message || "保存失败");
+      }
+    });
+  });
+  $("saveCurrentPanelBtn")?.addEventListener("click", () => {
+    saveCurrentPanel().catch(error => showToast(error.message || "保存失败"));
   });
   $("copyShareLinkBtn")?.addEventListener("click", async () => {
     try {
@@ -750,34 +1017,17 @@
 
   $("productForm")?.addEventListener("submit", async event => {
     event.preventDefault();
-    showToast("保存中");
     try {
-      const productId = product.id || "";
-      const saved = await api(
-        mode === "edit" ? `/api/admin/wechat-pay/products/${encodeURIComponent(productId)}` : "/api/admin/wechat-pay/products",
-        { method: mode === "edit" ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(readProductBody()) }
-      );
-      product = saved.product || product;
-      if (mode === "edit") {
-        let externalPushError = null;
-        try {
-          externalPush = (await api(`/api/admin/wechat-pay/products/${encodeURIComponent(product.id)}/external-push`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(readExternalPushBody()) })).config || externalPush;
-        } catch (error) {
-          externalPushError = error;
-        }
-        fillExternalPush();
-        loadShareInfo().catch(() => {});
-        $("productEditTitle").textContent = product.title || product.name || "编辑商品";
-        showToast(externalPushError ? `商品已保存，外部推送保存失败：${externalPushError.message || "请求失败"}` : "已保存");
-      } else {
-        window.location.href = `/admin/wechat-pay/products/${encodeURIComponent(product.id)}/edit`;
-      }
+      await saveProduct();
     } catch (error) {
       showToast(error.message || "保存失败");
     }
   });
+  $("productForm")?.addEventListener("input", updateProductSummary);
+  $("productForm")?.addEventListener("change", updateProductSummary);
 
   refreshList().catch(() => {});
+  switchProductPanel(activeProductPanel);
   initEditor().catch(error => showToast(error.message || "加载失败"));
 })();
 </script>

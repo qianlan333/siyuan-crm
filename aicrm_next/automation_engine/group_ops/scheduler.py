@@ -8,11 +8,11 @@ from datetime import datetime, time, timezone, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from aicrm_next.integration_gateway.wecom_group_contract import GroupOpsQueueGatewayContract
 from aicrm_next.shared.errors import ContractError
 
 from .duplicate_checker import build_group_ops_duplicate_checker
 from .domain import build_node_group_message_content, clean_text, derive_node_scheduled_time
+from .external_effects import GROUP_OPS_MESSAGE_LOOPBACK, plan_group_ops_external_effect
 from .integration_gateway import resolve_group_ops_content_package_materials
 from .repo import GroupOpsRepository, build_group_ops_repository
 
@@ -83,6 +83,7 @@ class GroupOpsSchedulerSummary:
     group_ops_scanned_plans: int = 0
     group_ops_due_nodes: int = 0
     group_ops_enqueued_jobs: int = 0
+    group_ops_external_effect_jobs: int = 0
     group_ops_skipped_future: int = 0
     group_ops_skipped_duplicate: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
@@ -93,6 +94,7 @@ class GroupOpsSchedulerSummary:
             "group_ops_scanned_plans": self.group_ops_scanned_plans,
             "group_ops_due_nodes": self.group_ops_due_nodes,
             "group_ops_enqueued_jobs": self.group_ops_enqueued_jobs,
+            "group_ops_external_effect_jobs": self.group_ops_external_effect_jobs,
             "group_ops_skipped_future": self.group_ops_skipped_future,
             "group_ops_skipped_duplicate": self.group_ops_skipped_duplicate,
             "errors": self.errors,
@@ -104,11 +106,9 @@ class GroupOpsDueScheduler:
         self,
         *,
         repo: GroupOpsRepository | None = None,
-        queue_gateway: GroupOpsQueueGatewayContract | None = None,
         duplicate_checker: Callable[[str], bool] | None = None,
     ) -> None:
         self._repo = repo
-        self._queue_gateway = queue_gateway
         self._duplicate_checker = duplicate_checker or _default_duplicate_checker
 
     def run_due(self, *, now: datetime | None = None, operator: str = "automation_ops_scheduler") -> dict[str, Any]:
@@ -121,13 +121,6 @@ class GroupOpsDueScheduler:
         if repo is None:
             summary.errors.append({"scope": "group_ops", "error": "group ops repository unavailable"})
             return summary.as_dict()
-        if self._queue_gateway is None:
-            from aicrm_next.integration_gateway.wecom_group_adapter import build_group_ops_queue_gateway
-
-            queue_gateway = build_group_ops_queue_gateway()
-        else:
-            queue_gateway = self._queue_gateway
-
         plans, _total = repo.list_plans({"plan_type": "standard", "status": "active", "limit": 500, "offset": 0})
         for plan in plans:
             summary.group_ops_scanned_plans += 1
@@ -150,7 +143,6 @@ class GroupOpsDueScheduler:
                     try:
                         self._schedule_node(
                             summary=summary,
-                            queue_gateway=queue_gateway,
                             plan=plan,
                             node=node,
                             groups=groups,
@@ -175,7 +167,6 @@ class GroupOpsDueScheduler:
         self,
         *,
         summary: GroupOpsSchedulerSummary,
-        queue_gateway: GroupOpsQueueGatewayContract,
         plan: dict[str, Any],
         node: dict[str, Any],
         groups: list[dict[str, Any]],
@@ -225,30 +216,37 @@ class GroupOpsDueScheduler:
                 continue
             content_payload = dict(base_payload)
             content_payload["chat_ids"] = chat_ids
-            job_id = queue_gateway.enqueue_group_message(
+            outbound_mode = "external_effect"
+            planned = plan_group_ops_external_effect(
+                effect_type=GROUP_OPS_MESSAGE_LOOPBACK,
                 plan_id=int(plan["id"]),
-                source_id=source_id,
-                scheduled_at=scheduled_at,
-                owner_userid=clean_text(plan.get("owner_userid")),
+                target_type="group_ops_node",
+                target_id=str(node.get("id") or 0),
+                business_id=str(plan.get("id") or 0),
+                node_id=int(node.get("id") or 0),
                 chat_ids=chat_ids,
-                content_payload=content_payload,
                 content_summary=(content.get("text") or {}).get("content", "") or clean_text(node.get("action_title")),
-                created_by=clean_text(operator) or "automation_ops_scheduler",
+                content_payload=content_payload,
+                operator_member_id=clean_text(operator) or "automation_ops_scheduler",
+                source_module="automation_engine.group_ops.scheduler",
+                source_route="group_ops_due_scheduler",
+                source_command_id=source_id,
+                idempotency_key=idempotency_key,
+                outbound_mode=outbound_mode,
+                scheduled_at=scheduled_at,
             )
-            if int(job_id or 0):
-                summary.group_ops_enqueued_jobs += 1
+            if planned and int(planned.get("id") or 0):
+                summary.group_ops_external_effect_jobs += 1
 
 
 def run_group_ops_due_scheduler(
     *,
     repo: GroupOpsRepository | None = None,
-    queue_gateway: GroupOpsQueueGatewayContract | None = None,
     duplicate_checker: Callable[[str], bool] | None = None,
     now: datetime | None = None,
     operator: str = "automation_ops_scheduler",
 ) -> dict[str, Any]:
     return GroupOpsDueScheduler(
         repo=repo,
-        queue_gateway=queue_gateway,
         duplicate_checker=duplicate_checker,
     ).run_due(now=now, operator=operator)

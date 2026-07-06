@@ -14,7 +14,7 @@ DDL 全部用 IF NOT EXISTS / 列存在性预检查，重复运行幂等。
 from __future__ import annotations
 
 from alembic import op
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 
 revision: str = "0006"
@@ -35,8 +35,14 @@ def _has_column(table: str, column: str) -> bool:
     return bool(row)
 
 
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    schema = None if bind.dialect.name == "sqlite" else "public"
+    return inspect(bind).has_table(table, schema=schema)
+
+
 def _add_column(table: str, column_def: str, column_name: str) -> None:
-    if not _has_column(table, column_name):
+    if _has_table(table) and not _has_column(table, column_name):
         op.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
 
 
@@ -89,5 +95,7 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_miniprogram_library_appid")
     op.execute("DROP INDEX IF EXISTS idx_miniprogram_library_enabled")
     op.execute("DROP TABLE IF EXISTS miniprogram_library")
-    op.execute("ALTER TABLE cloud_broadcast_plans DROP COLUMN IF EXISTS attachments_json")
-    op.execute("ALTER TABLE automation_sop_template DROP COLUMN IF EXISTS miniprograms_json")
+    if _has_table("cloud_broadcast_plans"):
+        op.execute("ALTER TABLE cloud_broadcast_plans DROP COLUMN IF EXISTS attachments_json")
+    if _has_table("automation_sop_template"):
+        op.execute("ALTER TABLE automation_sop_template DROP COLUMN IF EXISTS miniprograms_json")

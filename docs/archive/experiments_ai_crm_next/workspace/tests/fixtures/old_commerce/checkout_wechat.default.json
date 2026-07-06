@@ -1,0 +1,14 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "order_no": "order_masked_001",
+    "payment_provider": "wechat",
+    "amount_cents": 9900,
+    "payment_status": "pending",
+    "checkout_url": "https://fake-pay.local/wechat/checkout/order_masked_001",
+    "qr_code_url": "https://fake-pay.local/wechat/qr/order_masked_001.png",
+    "provider_payload": {"provider": "wechat", "order_no": "order_masked_001", "amount_cents": 9900, "signature_verified": false, "source_status": "fake"},
+    "fake_payment": true
+  }
+}

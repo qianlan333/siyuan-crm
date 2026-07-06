@@ -90,7 +90,7 @@ def test_sidebar_and_profile_readonly_routes_reuse_customer_context_query(monkey
     monkeypatch.setattr(customer_application, "GetCustomerContextQuery", FakeGetCustomerContextQuery)
     client = TestClient(create_app())
 
-    sidebar_response = client.get("/api/sidebar/customer-context?external_userid=wx_ext_001")
+    sidebar_response = client.get("/api/sidebar/customer-context?external_userid=wx_ext_001&owner_userid=ZhaoYanFang")
     profile_response = client.get("/api/admin/customers/profile?external_userid=wx_ext_001")
     tags_response = client.get("/api/admin/customers/profile/tags?external_userid=wx_ext_001")
 
@@ -159,4 +159,4 @@ def test_admin_customer_detail_page_uses_context_backed_profile_route():
     assert response.status_code == 200
     assert response.headers.get("location", "") == ""
     assert "客户档案" in response.text
-    assert "/api/admin/customers/profile/tags?external_userid=wx_ext_001" in response.text
+    assert "/api/admin/customers/profile/tags?unionid=union_customer_001" in response.text

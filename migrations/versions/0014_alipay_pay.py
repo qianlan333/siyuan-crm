@@ -28,10 +28,8 @@ def upgrade() -> None:
             description TEXT NOT NULL DEFAULT '',
             amount_total INTEGER NOT NULL,
             currency TEXT NOT NULL DEFAULT 'CNY',
-            buyer_id TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
             buyer_logon_id TEXT NOT NULL DEFAULT '',
-            mobile_snapshot TEXT NOT NULL DEFAULT '',
-            identity_snapshot TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'created',
             trade_status TEXT NOT NULL DEFAULT '',
             success_url TEXT NOT NULL DEFAULT '',
@@ -65,9 +63,9 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_mobile_created
-        ON alipay_pay_orders (mobile_snapshot, created_at DESC, id DESC)
-        WHERE mobile_snapshot <> ''
+        CREATE INDEX IF NOT EXISTS idx_alipay_pay_orders_unionid_created
+        ON alipay_pay_orders (unionid, created_at DESC, id DESC)
+        WHERE unionid <> ''
         """
     )
     op.execute(
@@ -103,7 +101,7 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS idx_alipay_pay_order_events_order")
     op.execute("DROP TABLE IF EXISTS alipay_pay_order_events")
     op.execute("DROP INDEX IF EXISTS idx_alipay_pay_orders_trade_no")
-    op.execute("DROP INDEX IF EXISTS idx_alipay_pay_orders_mobile_created")
+    op.execute("DROP INDEX IF EXISTS idx_alipay_pay_orders_unionid_created")
     op.execute("DROP INDEX IF EXISTS idx_alipay_pay_orders_product_created")
     op.execute("DROP INDEX IF EXISTS idx_alipay_pay_orders_status_created")
     op.execute("DROP TABLE IF EXISTS alipay_pay_orders")

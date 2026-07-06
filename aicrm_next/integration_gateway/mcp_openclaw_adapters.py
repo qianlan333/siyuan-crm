@@ -235,7 +235,7 @@ class McpToolGateway(_GuardedMcpOpenClawAdapter):
             idempotency_key=idempotency_key,
             result_factory=lambda: {
                 "tool_catalog_id": f"{mode_prefix}_mcp_tools_{_digest(repr(target))[:12]}",
-                "tools": ["resolve_customer", "get_customer_context", "get_recent_messages", "get_automation_context"],
+                "tools": ["resolve_customer", "get_customer_context", "get_recent_messages"],
                 "side_effect_safety": mcp_openclaw_side_effect_safety(),
             },
         )
@@ -329,50 +329,6 @@ class CustomerContextToolAdapter(_GuardedMcpOpenClawAdapter):
         return self._audit_only(operation=operation, target=target, result=result, error_code=error_code, idempotency_key=idempotency_key)
 
 
-class AutomationContextToolAdapter(_GuardedMcpOpenClawAdapter):
-    adapter_name = "AutomationContextToolAdapter"
-    production_flag = "AICRM_NEXT_ENABLE_REAL_MCP_TOOLS"
-
-    def get_member_context(self, *, member_id: str, external_userid: str = "", request_id: str = "", idempotency_key: str | None = None) -> Json:
-        target = {"member_id": member_id, "external_userid": external_userid, "request_id": request_id, "context_type": "automation_member"}
-        return self._operation(
-            "get_member_context",
-            target=target,
-            idempotency_key=idempotency_key,
-            result_factory=lambda: {"member_context_preview_id": f"{_mode_prefix(self.mode)}_automation_member_{_digest(repr(target))[:16]}", "side_effect_safety": mcp_openclaw_side_effect_safety()},
-        )
-
-    def get_pool_summary(self, *, pool_id: str = "", request_id: str = "", idempotency_key: str | None = None) -> Json:
-        target = {"pool_id": pool_id, "request_id": request_id, "context_type": "automation_pool"}
-        return self._operation(
-            "get_pool_summary",
-            target=target,
-            idempotency_key=idempotency_key,
-            result_factory=lambda: {"pool_summary_preview_id": f"{_mode_prefix(self.mode)}_automation_pool_{_digest(repr(target))[:16]}", "side_effect_safety": mcp_openclaw_side_effect_safety()},
-        )
-
-    def get_execution_records(self, *, member_id: str = "", request_id: str = "", idempotency_key: str | None = None) -> Json:
-        target = {"member_id": member_id, "request_id": request_id, "context_type": "automation_execution_records"}
-        return self._operation(
-            "get_execution_records",
-            target=target,
-            idempotency_key=idempotency_key,
-            result_factory=lambda: {"execution_records_preview_id": f"{_mode_prefix(self.mode)}_automation_records_{_digest(repr(target))[:16]}", "side_effect_safety": mcp_openclaw_side_effect_safety()},
-        )
-
-    def build_automation_context_preview(self, *, member_id: str = "", context_type: str = "", request_id: str = "", idempotency_key: str | None = None) -> Json:
-        target = {"member_id": member_id, "context_type": context_type, "request_id": request_id}
-        return self._operation(
-            "build_automation_context_preview",
-            target=target,
-            idempotency_key=idempotency_key,
-            result_factory=lambda: {"preview_id": f"{_mode_prefix(self.mode)}_automation_preview_{_digest(repr(target))[:16]}", "side_effect_safety": mcp_openclaw_side_effect_safety()},
-        )
-
-    def record_automation_context_audit(self, *, operation: str, target: dict[str, Any], result: dict[str, Any] | None = None, error_code: str = "", idempotency_key: str | None = None) -> Json:
-        return self._audit_only(operation=operation, target=target, result=result, error_code=error_code, idempotency_key=idempotency_key)
-
-
 class OpenClawLegacyBridgeAdapter(_GuardedMcpOpenClawAdapter):
     adapter_name = "OpenClawLegacyBridgeAdapter"
     production_flag = "AICRM_NEXT_ENABLE_REAL_OPENCLAW_BRIDGE"
@@ -428,8 +384,6 @@ class McpCompatibilityGateway(_GuardedMcpOpenClawAdapter):
     LEGACY_TOOL_NAMES = {
         "customer_context": "get_customer_context",
         "recent_messages": "get_recent_messages",
-        "member_context": "get_automation_context",
-        "automation_member_context": "get_automation_context",
     }
 
     def map_legacy_tool_name(self, *, tool_name: str, request_id: str = "", idempotency_key: str | None = None) -> Json:
@@ -480,10 +434,6 @@ def build_mcp_tool_gateway() -> McpToolGateway:
 
 def build_customer_context_tool_adapter() -> CustomerContextToolAdapter:
     return CustomerContextToolAdapter(os.getenv("AICRM_NEXT_CUSTOMER_CONTEXT_TOOL_MODE", "fake"))
-
-
-def build_automation_context_tool_adapter() -> AutomationContextToolAdapter:
-    return AutomationContextToolAdapter(os.getenv("AICRM_NEXT_AUTOMATION_CONTEXT_TOOL_MODE", "fake"))
 
 
 def build_openclaw_legacy_bridge_adapter() -> OpenClawLegacyBridgeAdapter:

@@ -48,26 +48,27 @@ def test_experiments_does_not_keep_duplicate_next_source_package() -> None:
     assert not duplicate_package.exists()
 
 
-def test_experiments_pytest_and_tools_import_root_next_package() -> None:
+def test_experiments_workspace_is_retired_stub_only() -> None:
     experiment_root = REPO_ROOT / "experiments" / "ai_crm_next"
-    pyproject = (experiment_root / "pyproject.toml").read_text(encoding="utf-8")
-    tool_sources = "\n".join(path.read_text(encoding="utf-8") for path in sorted((experiment_root / "tools").glob("*.py")))
+    readme = (experiment_root / "README.md").read_text(encoding="utf-8")
 
-    assert 'pythonpath = ["../.."]' in pyproject
-    assert 'packages = ["src/aicrm_next"]' not in pyproject
-    assert 'pythonpath = ["src"]' not in pyproject
-    assert 'PROJECT_ROOT / "src"' not in tool_sources
-    assert "SRC_ROOT" not in tool_sources
+    assert "no longer an active test or runtime workspace" in readme
+    assert "docs/archive/experiments_ai_crm_next/" in readme
+    for retired_child in ("docs", "tests", "tools", "scripts", "migrations"):
+        assert not any((experiment_root / retired_child).rglob("*"))
+    assert not (experiment_root / "pyproject.toml").exists()
+    assert not (experiment_root / "alembic.ini").exists()
 
 
 def test_duplicate_source_references_are_not_active_import_or_config_paths() -> None:
-    ignored_dirs = {".git", ".venv", "__pycache__", ".pytest_cache"}
     allowed_files = {Path("tests/test_next_source_consolidation.py")}
     offenders: list[str] = []
-    for path in REPO_ROOT.rglob("*"):
-        if not path.is_file() or any(part in ignored_dirs for part in path.parts):
+    tracked = subprocess.run(["git", "ls-files"], cwd=REPO_ROOT, check=True, capture_output=True, text=True).stdout.splitlines()
+    for rel_text in tracked:
+        rel = Path(rel_text)
+        path = REPO_ROOT / rel
+        if not path.is_file():
             continue
-        rel = path.relative_to(REPO_ROOT)
         if rel in allowed_files:
             continue
         if path.suffix not in {".py", ".toml", ".sh", ".yml", ".yaml"}:
@@ -91,3 +92,7 @@ def test_shell_guard_blocks_duplicate_next_source_return() -> None:
 
 def test_root_next_does_not_import_d7_external_fallbacks() -> None:
     assert _python_import_offenders(REPO_ROOT / "aicrm_next") == []
+
+
+def test_retired_production_compat_package_does_not_return() -> None:
+    assert not (REPO_ROOT / "aicrm_next" / "production_compat").exists()

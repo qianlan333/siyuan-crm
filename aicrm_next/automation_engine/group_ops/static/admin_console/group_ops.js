@@ -31,6 +31,7 @@
     showNodeModal: false,
     editingNodeId: 0,
     oneTimeToken: "",
+    activeDetailPanel: "basic",
   };
 
   const routes = {
@@ -385,6 +386,11 @@
     if (action === "show-create-plan") return showCreatePlan();
     if (action === "cancel-create-plan") return cancelCreatePlan();
     if (action === "save-plan") return savePlan();
+    if (action === "save-active-detail-panel") return saveActiveDetailPanel();
+    if (action === "switch-detail-panel") {
+      state.activeDetailPanel = event.currentTarget.dataset.panel || "basic";
+      return renderDetail();
+    }
     if (action === "refresh-owner-groups") return refreshOwnerGroups();
     if (action === "enable-plan") return enablePlan(event.currentTarget.dataset.planId);
     if (action === "disable-plan") return disablePlan(event.currentTarget.dataset.planId);
@@ -521,9 +527,18 @@
     loadDetailPage(state.plan.id);
   }
 
+  function saveCurrentDimensionDisabled() {
+    return state.activeDetailPanel !== "basic";
+  }
+
+  function saveActiveDetailPanel() {
+    if (state.activeDetailPanel === "basic") return savePlan();
+    return undefined;
+  }
+
   async function bindGroup(chatId) {
     if (!state.plan || !chatId) return;
-    await requestJson(routes.apiPlanGroups(state.plan.id), { method: "POST", body: { chat_id: chatId } });
+    await requestJson(routes.apiPlanGroups(state.plan.id), { method: "POST", body: { chat_id: chatId, operator: "admin_ui" } });
     state.notice = "已添加";
     loadDetailPage(state.plan.id);
   }
@@ -780,22 +795,26 @@
   async function loadDetailPage(planId) {
     renderLoading();
     try {
-      const [planPayload, groupPayload, nodePayload, ownersPayload] = await Promise.all([
+      const [planPayload, groupPayload, ownersPayload] = await Promise.all([
         requestJson(routes.apiPlan(planId)),
         requestJson(routes.apiPlanGroups(planId)),
-        requestJson(routes.apiPlanNodes(planId)),
         requestJson(routes.apiMembers),
       ]);
       state.plan = planPayload.item || planPayload.plan || planPayload;
-      const allGroupsPayload = await requestJson(`${routes.apiGroups}?owner_userid=${encodeURIComponent(state.plan.owner_userid || "")}`);
+      const isWebhook = state.plan.plan_type === "webhook";
+      const [allGroupsPayload, typePayload] = await Promise.all([
+        requestJson(`${routes.apiGroups}?owner_userid=${encodeURIComponent(state.plan.owner_userid || "")}`),
+        requestJson(isWebhook ? routes.apiWebhook(planId) : routes.apiPlanNodes(planId)),
+      ]);
       state.planGroups = normalizeItems(groupPayload);
       state.groupSummary = groupPayload.summary || null;
       state.groups = normalizeItems(allGroupsPayload);
-      state.nodes = normalizeItems(nodePayload);
       state.ownerOptions = normalizeOwners(ownersPayload, state.plan);
-      if (state.plan.plan_type === "webhook") {
-        state.webhook = await requestJson(routes.apiWebhook(planId));
+      if (isWebhook) {
+        state.nodes = [];
+        state.webhook = typePayload;
       } else {
+        state.nodes = normalizeItems(typePayload);
         state.webhook = null;
       }
       renderDetail();
@@ -949,19 +968,11 @@
   }
 
   function renderStats(summary) {
-    if (state.plan.plan_type === "webhook") {
-      return `
-        ${statCard("绑定群", formatNumber(summary.bound_group_count))}
-        ${statCard("外部联系人", formatNumber(summary.external_member_count))}
-        ${statCard("接收方式", "POST")}
-        ${statCard("默认动作", "入队")}
-      `;
-    }
     return `
+      ${statCard("运营成员", state.plan.owner_name || state.plan.owner_userid || "-")}
       ${statCard("绑定群", formatNumber(summary.bound_group_count))}
-      ${statCard("内部联系人", formatNumber(summary.internal_member_count))}
       ${statCard("外部联系人", formatNumber(summary.external_member_count))}
-      ${statCard("预计通知", formatNumber(summary.estimated_reach))}
+      ${statCard("状态", statusText(state.plan.status))}
     `;
   }
 
@@ -1034,25 +1045,46 @@
         </tr>`,
       )
       .join("");
+    const isStandard = state.plan.plan_type === "standard";
     return `
-      <section class="group-ops__card">
-        <div class="group-ops__section-head"><h2 class="group-ops__section-title">标准编排</h2>${actionButton("添加动作", "open-node-modal", "group-ops__button--primary")}</div>
+      <section class="group-ops__panel${state.activeDetailPanel === "nodes" ? " is-active" : ""}" id="panel-nodes">
+        <div class="group-ops__panel-title-row">
+          <h3>标准编排</h3>
+          ${isStandard ? actionButton("添加动作", "open-node-modal", "group-ops__button--primary") : ""}
+        </div>
         <div class="group-ops__table-wrap">
           <table class="group-ops__table">
-            <thead><tr><th>第几天</th><th>发送时间</th><th>动作标题</th><th>标准话术摘要</th><th>素材标签</th><th>编辑 / 删除</th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="6" class="group-ops__empty">暂无节点</td></tr>'}</tbody>
+            <thead><tr><th>第几天</th><th>发送时间</th><th>动作标题</th><th>标准话术摘要</th><th>素材标签</th><th class="group-ops__table-actions-head">操作</th></tr></thead>
+            <tbody>${
+              isStandard
+                ? rows || '<tr><td colspan="6" class="group-ops__empty">暂无节点</td></tr>'
+                : '<tr><td colspan="6" class="group-ops__empty">Webhook 接收计划无需配置标准编排</td></tr>'
+            }</tbody>
           </table>
         </div>
       </section>
-      ${modal}
+      ${isStandard ? modal : ""}
     `;
   }
 
   function renderWebhook() {
     const config = state.webhook || {};
+    if (state.plan.plan_type !== "webhook") {
+      return `
+        <section class="group-ops__panel${state.activeDetailPanel === "webhook" ? " is-active" : ""}" id="panel-webhook">
+          <div class="group-ops__panel-title-row">
+            <h3>Webhook</h3>
+          </div>
+          <div class="group-ops__empty">标准编排计划无需配置 Webhook</div>
+        </section>
+      `;
+    }
     return `
-      <section class="group-ops__card">
-        <div class="group-ops__section-head"><h2 class="group-ops__section-title">Webhook 接收地址</h2></div>
+      <section class="group-ops__panel${state.activeDetailPanel === "webhook" ? " is-active" : ""}" id="panel-webhook">
+        <div class="group-ops__panel-title-row">
+          <h3>Webhook</h3>
+          <span class="group-ops__pill">Webhook 接收计划</span>
+        </div>
         <div class="group-ops__webhook-panel">
           <div class="group-ops__webhook-line">
             <span class="group-ops__chip">POST</span>
@@ -1060,19 +1092,124 @@
             ${actionButton("复制地址", "copy-webhook", "group-ops__button--primary")}
           </div>
           <div class="group-ops__webhook-line">
-            <strong>Token 状态 / 重置入口</strong>
-            <span class="group-ops__chip group-ops__chip--ok">Token：${escapeHtml(config.token_status === "generated" ? "已生成" : "未生成")}</span>
+            <strong>Token 状态</strong>
+            <span class="group-ops__chip group-ops__chip--ok">${escapeHtml(config.token_status === "generated" ? "已生成" : "未生成")}</span>
             ${actionButton("重置 token", "reset-webhook")}
           </div>
-          ${
-            state.oneTimeToken
-              ? `<div class="group-ops__webhook-line"><strong>一次性 token</strong><div class="group-ops__url">${escapeHtml(
-                  state.oneTimeToken,
-                )}</div><span class="group-ops__chip">复制后不可再次查看</span></div>`
-              : ""
-          }
         </div>
       </section>
+    `;
+  }
+
+  function detailPanelButton(key, index, label) {
+    const active = state.activeDetailPanel === key;
+    return `
+      <button class="${active ? "is-active" : ""}" type="button" data-action="switch-detail-panel" data-panel="${escapeHtml(key)}">
+        <span class="group-ops__detail-index">${escapeHtml(index)}</span>
+        <span class="group-ops__detail-nav-label">${escapeHtml(label)}</span>
+      </button>
+    `;
+  }
+
+  function renderDetailNav() {
+    return `
+      <nav class="group-ops__side-nav" aria-label="群运营计划配置维度">
+        ${detailPanelButton("basic", "1", "基础配置")}
+        ${detailPanelButton("groups", "2", "绑定群")}
+        ${detailPanelButton("webhook", "3", "Webhook")}
+        ${detailPanelButton("nodes", "4", "标准编排")}
+      </nav>
+    `;
+  }
+
+  function renderBasicPanel() {
+    return `
+      <section class="group-ops__panel${state.activeDetailPanel === "basic" ? " is-active" : ""}" id="panel-basic">
+        <div class="group-ops__panel-title-row">
+          <h3>基础配置</h3>
+          <span class="group-ops__pill">可保存</span>
+        </div>
+        <div class="group-ops__form-grid">
+          <div class="group-ops__field group-ops__field--full">
+            <span>运营成员</span>
+            ${renderMemberField("owner_userid", state.plan.owner_userid, "pick-plan-owner", "更换运营成员")}
+          </div>
+          <label class="group-ops__field">
+            <span>状态</span>
+            <select name="status">
+              <option value="draft"${state.plan.status === "draft" ? " selected" : ""}>草稿</option>
+              <option value="active"${state.plan.status === "active" ? " selected" : ""}>启用</option>
+              <option value="disabled"${state.plan.status === "disabled" ? " selected" : ""}>停用</option>
+            </select>
+          </label>
+          <label class="group-ops__field">
+            <span>计划名称</span>
+            <input name="plan_name" value="${escapeHtml(state.plan.plan_name || "")}">
+          </label>
+          <label class="group-ops__field">
+            <span>计划类型</span>
+            <select name="plan_type">
+              <option value="standard"${state.plan.plan_type === "standard" ? " selected" : ""}>标准编排计划</option>
+              <option value="webhook"${state.plan.plan_type === "webhook" ? " selected" : ""}>Webhook 接收计划</option>
+            </select>
+          </label>
+        </div>
+        <div class="group-ops__panel-actions">
+          ${renderRefreshOwnerGroupsButton()}
+          ${actionButton("保存基础配置", "save-plan", "group-ops__button--primary")}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderGroupsPanel() {
+    return `
+      <section class="group-ops__panel${state.activeDetailPanel === "groups" ? " is-active" : ""}" id="panel-groups">
+        <div class="group-ops__panel-title-row">
+          <h3>绑定群</h3>
+          ${actionButton("选择群", "open-group-picker", "group-ops__button--primary")}
+        </div>
+        <div class="group-ops__group-list">${renderBoundGroups()}</div>
+        <div class="group-ops__panel-actions">
+          ${renderRefreshOwnerGroupsButton()}
+        </div>
+      </section>
+    `;
+  }
+
+  function renderDetailPanels() {
+    return `
+      <div class="group-ops__panel-card">
+        ${renderBasicPanel()}
+        ${renderGroupsPanel()}
+        ${renderWebhook()}
+        ${renderNodes()}
+      </div>
+    `;
+  }
+
+  function renderDetailShell(summary) {
+    return `
+      <div class="group-ops__notice" ${state.notice ? "" : "hidden"}>${escapeHtml(state.notice)}</div>
+      <section class="group-ops__detail-shell">
+        <section class="group-ops__summary-card">
+          <div class="group-ops__summary-head">
+            <h2>${escapeHtml(state.plan.plan_name || "群运营计划")}</h2>
+            <div class="group-ops__summary-actions">
+              ${pageButton("返回列表", routes.list)}
+              <button class="group-ops__button group-ops__button--primary" type="button" data-action="save-active-detail-panel"${
+                saveCurrentDimensionDisabled() ? " disabled" : ""
+              }>保存当前维度</button>
+            </div>
+          </div>
+          <div class="group-ops__summary-grid">${renderStats(summary)}</div>
+        </section>
+        <section class="group-ops__workspace">
+          ${renderDetailNav()}
+          ${renderDetailPanels()}
+        </section>
+      </section>
+      ${renderGroupPickerModal()}
     `;
   }
 
@@ -1083,58 +1220,7 @@
       external_member_count: state.planGroups.reduce((sum, item) => sum + Number(item.external_member_count_snapshot || 0), 0),
       estimated_reach: state.planGroups.reduce((sum, item) => sum + Number(item.external_member_count_snapshot || 0), 0),
     };
-    const isWebhook = state.plan.plan_type === "webhook";
-    renderShell(`
-      <div class="group-ops__bar">
-        ${pageButton("返回列表", routes.list)}
-        ${actionButton("保存计划", "save-plan", "group-ops__button--primary")}
-      </div>
-      <div class="group-ops__notice" ${state.notice ? "" : "hidden"}>${escapeHtml(state.notice)}</div>
-      <section class="group-ops__detail-grid">
-        <article class="group-ops__card">
-          <div class="group-ops__section-head"><h2 class="group-ops__section-title">运营成员</h2></div>
-          <div class="group-ops__owner-grid">
-            <label class="group-ops__field">
-              <span>运营成员</span>
-              ${renderMemberField("owner_userid", state.plan.owner_userid, "pick-plan-owner", "更换运营成员")}
-            </label>
-            <div class="group-ops__field group-ops__field--button"><span>&nbsp;</span>${renderRefreshOwnerGroupsButton()}</div>
-            <label class="group-ops__field">
-              <span>状态</span>
-              <select name="status">
-                <option value="draft"${state.plan.status === "draft" ? " selected" : ""}>草稿</option>
-                <option value="active"${state.plan.status === "active" ? " selected" : ""}>启用</option>
-                <option value="disabled"${state.plan.status === "disabled" ? " selected" : ""}>停用</option>
-              </select>
-            </label>
-            <label class="group-ops__field">
-              <span>计划名称</span>
-              <input name="plan_name" value="${escapeHtml(state.plan.plan_name || "")}">
-            </label>
-            <label class="group-ops__field">
-              <span>计划类型</span>
-              <select name="plan_type">
-                <option value="standard"${state.plan.plan_type === "standard" ? " selected" : ""}>标准编排计划</option>
-                <option value="webhook"${state.plan.plan_type === "webhook" ? " selected" : ""}>Webhook 接收计划</option>
-              </select>
-            </label>
-          </div>
-        </article>
-        <article class="group-ops__card">
-          <div class="group-ops__section-head">
-            <div>
-              <h2 class="group-ops__section-title">绑定群</h2>
-              <div class="group-ops__group-meta">通过弹窗选择当前运营成员名下客户群</div>
-            </div>
-            ${actionButton("选择群", "open-group-picker", "group-ops__button--primary")}
-          </div>
-          <div class="group-ops__group-list">${renderBoundGroups()}</div>
-        </article>
-      </section>
-      <section class="group-ops__stats-grid">${renderStats(summary)}</section>
-      ${isWebhook ? renderWebhook() : renderNodes()}
-      ${renderGroupPickerModal()}
-    `);
+    renderShell(renderDetailShell(summary));
     state.notice = "";
   }
 

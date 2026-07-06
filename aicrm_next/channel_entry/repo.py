@@ -58,6 +58,12 @@ def _json(value: Any) -> Any:
     return Jsonb(json_safe(value if value is not None else {}), dumps=_json_dumps)
 
 
+def _with_effect_log_diagnostic_identity(row: dict[str, Any]) -> dict[str, Any]:
+    payload = row.get("request_json") if isinstance(row.get("request_json"), dict) else {}
+    row.setdefault("external_contact_id", text(payload.get("external_contact_id")))
+    return row
+
+
 def find_channel_by_scene_value(scene_value: str) -> dict[str, Any] | None:
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
@@ -128,33 +134,9 @@ def find_confirmed_channel_by_scene_alias(corp_id: str, scene_value: str) -> dic
 
 
 def find_channel_by_historical_scene_value(scene_value: str) -> dict[str, Any] | None:
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            WITH scene_events AS (
-                SELECT external_userid, created_at
-                FROM wecom_external_contact_event_logs
-                WHERE change_type = 'add_external_contact'
-                  AND external_userid <> ''
-                  AND COALESCE(NULLIF(payload_json->>'State', ''), NULLIF(payload_json->>'state', '')) = %s
-            ),
-            channel_votes AS (
-                SELECT m.source_channel_id AS channel_id, COUNT(*) AS vote_count, MAX(e.created_at) AS latest_event_at
-                FROM scene_events e
-                JOIN automation_member m ON m.external_contact_id = e.external_userid
-                WHERE m.source_channel_id IS NOT NULL
-                GROUP BY m.source_channel_id
-            )
-            SELECT c.*
-            FROM channel_votes votes
-            JOIN automation_channel c ON c.id = votes.channel_id
-            ORDER BY votes.vote_count DESC, votes.latest_event_at DESC, c.updated_at DESC, c.id DESC
-            LIMIT 1
-            """,
-            (text(scene_value),),
-        )
-        row = cur.fetchone()
-        return dict(row) if row else None
+    # Channel entry is now channel-only; unknown scenes should remain diagnostic
+    # instead of being inferred from retired program-admission projections.
+    return None
 
 
 def qrcode_asset_hash(qr_url: str) -> str:
@@ -186,18 +168,19 @@ def resolve_external_contact_customer_name(external_userid: str, *, corp_id: str
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT COALESCE(name, '') AS customer_name
-            FROM wecom_external_contact_identity_map
-            WHERE external_userid = %s
-              AND COALESCE(name, '') <> ''
-              AND (%s = '' OR corp_id = %s)
-            ORDER BY CASE WHEN corp_id = %s THEN 0 ELSE 1 END,
+            SELECT COALESCE(NULLIF(customer_name, ''), NULLIF(remark, ''), '') AS customer_name
+            FROM crm_user_identity
+            WHERE (
+                primary_external_userid = %s
+                OR jsonb_exists(external_userids_json, %s)
+            )
+              AND COALESCE(NULLIF(customer_name, ''), NULLIF(remark, ''), '') <> ''
+            ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END,
                      last_seen_at DESC NULLS LAST,
-                     updated_at DESC NULLS LAST,
-                     id DESC
+                     updated_at DESC NULLS LAST
             LIMIT 1
             """,
-            (external, text(corp_id), text(corp_id), text(corp_id)),
+            (external, external, external),
         )
         row = cur.fetchone()
     return text((row or {}).get("customer_name"))
@@ -749,6 +732,7 @@ def list_assignment_stats_24h(channel_id: int) -> list[dict[str, Any]]:
 
 
 def _serialize_assignment_event(row: dict[str, Any]) -> dict[str, Any]:
+    source_payload = row.get("source_payload_json") if isinstance(row.get("source_payload_json"), dict) else {}
     return {
         "id": int(row.get("id") or 0),
         "channel_id": int(row.get("channel_id") or 0),
@@ -756,7 +740,8 @@ def _serialize_assignment_event(row: dict[str, Any]) -> dict[str, Any]:
         "strategy": text(row.get("strategy")),
         "reason": text(row.get("reason")),
         "status": text(row.get("status")) or "assigned",
-        "external_contact_id": text(row.get("external_contact_id")),
+        "unionid": text(row.get("unionid")),
+        "external_contact_id": text(source_payload.get("external_contact_id")),
         "wecom_user_id": text(row.get("wecom_user_id")),
         "assigned_at": row.get("assigned_at").isoformat() if isinstance(row.get("assigned_at"), datetime) else text(row.get("assigned_at")),
     }
@@ -768,16 +753,21 @@ def insert_assignment_event(
     assignee_staff_id: str,
     strategy: str,
     reason: str,
+    unionid: str = "",
     external_contact_id: str = "",
     wecom_user_id: str = "",
     source_payload_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _connect() as conn, conn.cursor() as cur:
+        resolved_unionid = text(unionid) or _resolve_unionid_by_external_userid(cur, external_contact_id)
+        source_payload = dict(source_payload_json or {})
+        if external_contact_id:
+            source_payload.setdefault("external_contact_id", text(external_contact_id))
         cur.execute(
             """
             INSERT INTO automation_channel_assignment_event (
                 channel_id, assignee_staff_id, strategy, reason, status,
-                external_contact_id, wecom_user_id, source_payload_json,
+                unionid, wecom_user_id, source_payload_json,
                 assigned_at, created_at, updated_at
             )
             VALUES (%s, %s, %s, %s, 'assigned', %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -788,9 +778,9 @@ def insert_assignment_event(
                 text(assignee_staff_id),
                 text(strategy),
                 text(reason),
-                text(external_contact_id),
+                resolved_unionid,
                 text(wecom_user_id),
-                _json(source_payload_json or {}),
+                _json(source_payload),
             ),
         )
         row = cur.fetchone()
@@ -889,6 +879,7 @@ def choose_channel_assignee(
             assignee_staff_id=selected["staff_id"],
             strategy=strategy,
             reason=reason,
+            unionid=text((source_payload or {}).get("unionid")),
             external_contact_id=external_contact_id,
             wecom_user_id=wecom_user_id,
             source_payload_json=source_payload or {},
@@ -926,16 +917,21 @@ def update_channel_qrcode(*, channel_id: int, scene_value: str, qr_url: str, con
         return dict(row) if row else {}
 
 
-def upsert_channel_contact(*, channel_id: int, external_contact_id: str, owner_staff_id: str, source_payload: dict[str, Any]) -> dict[str, Any]:
+def upsert_channel_contact(*, channel_id: int, unionid: str = "", external_contact_id: str, owner_staff_id: str, source_payload: dict[str, Any]) -> dict[str, Any]:
+    sanitized_payload = {
+        key: value
+        for key, value in dict(source_payload or {}).items()
+        if key not in {"external_contact_id", "ExternalUserID", "external_userid"}
+    }
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
             INSERT INTO automation_channel_contact (
-                channel_id, external_contact_id, owner_staff_id, source_payload_json,
+                channel_id, unionid, owner_staff_id, source_payload_json,
                 first_channel_entered_at, last_channel_entered_at, enter_count, created_at, updated_at
             )
             VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (channel_id, external_contact_id) WHERE external_contact_id <> ''
+            ON CONFLICT (channel_id, unionid) WHERE unionid <> ''
             DO UPDATE SET owner_staff_id = EXCLUDED.owner_staff_id,
                 source_payload_json = EXCLUDED.source_payload_json,
                 last_channel_entered_at = CURRENT_TIMESTAMP,
@@ -943,11 +939,176 @@ def upsert_channel_contact(*, channel_id: int, external_contact_id: str, owner_s
                 updated_at = CURRENT_TIMESTAMP
             RETURNING *
             """,
-            (int(channel_id), text(external_contact_id), text(owner_staff_id), _json(source_payload)),
+            (int(channel_id), text(unionid), text(owner_staff_id), _json(sanitized_payload)),
         )
         row = cur.fetchone()
         conn.commit()
         return dict(row) if row else {}
+
+
+def upsert_channel_entry_runtime(
+    *,
+    corp_id: str,
+    event_log_id: int | None = None,
+    channel_id: int | None = None,
+    scene_value: str = "",
+    external_userid: str = "",
+    follow_user_userid: str = "",
+    welcome_code_present: bool = False,
+    unionid: str = "",
+    identity_status: str = "pending",
+    runtime_status: str = "received",
+    payload_json: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO automation_channel_entry_runtime (
+                corp_id, event_log_id, channel_id, scene_value, external_userid, follow_user_userid,
+                welcome_code_present, unionid, identity_status, runtime_status, payload_json,
+                first_seen_at, last_seen_at, created_at, updated_at
+            )
+            VALUES (
+                %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s,
+                NOW(), NOW(), NOW(), NOW()
+            )
+            ON CONFLICT (corp_id, external_userid, follow_user_userid, scene_value)
+            WHERE external_userid <> '' AND scene_value <> ''
+            DO UPDATE SET
+                event_log_id = COALESCE(EXCLUDED.event_log_id, automation_channel_entry_runtime.event_log_id),
+                channel_id = COALESCE(EXCLUDED.channel_id, automation_channel_entry_runtime.channel_id),
+                welcome_code_present = automation_channel_entry_runtime.welcome_code_present OR EXCLUDED.welcome_code_present,
+                unionid = CASE
+                    WHEN EXCLUDED.unionid <> '' THEN EXCLUDED.unionid
+                    ELSE automation_channel_entry_runtime.unionid
+                END,
+                identity_status = EXCLUDED.identity_status,
+                runtime_status = EXCLUDED.runtime_status,
+                payload_json = automation_channel_entry_runtime.payload_json || EXCLUDED.payload_json,
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            RETURNING *
+            """,
+            (
+                text(corp_id),
+                event_log_id,
+                channel_id,
+                text(scene_value),
+                text(external_userid),
+                text(follow_user_userid),
+                bool(welcome_code_present),
+                text(unionid),
+                text(identity_status) or "pending",
+                text(runtime_status) or "received",
+                _json(payload_json or {}),
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return dict(row) if row else {}
+
+
+def mark_channel_entry_runtime_identity(
+    *,
+    event_log_id: int | None = None,
+    corp_id: str = "",
+    scene_value: str = "",
+    external_userid: str = "",
+    follow_user_userid: str = "",
+    unionid: str = "",
+    identity_status: str = "",
+    identity_sync: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    clauses: list[str] = []
+    params: list[Any] = []
+    if event_log_id:
+        clauses.append("event_log_id = %s")
+        params.append(int(event_log_id))
+    if text(external_userid) and text(scene_value):
+        clauses.append(
+            "(corp_id = %s AND external_userid = %s AND follow_user_userid = %s AND scene_value = %s)"
+        )
+        params.extend([text(corp_id), text(external_userid), text(follow_user_userid), text(scene_value)])
+    if not clauses:
+        return {"status": "skipped", "reason": "runtime_lookup_missing", "updated_count": 0}
+    payload = {"identity_sync": json_safe(identity_sync or {})}
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            f"""
+            UPDATE automation_channel_entry_runtime
+            SET unionid = CASE WHEN %s <> '' THEN %s ELSE unionid END,
+                identity_status = %s,
+                payload_json = payload_json || %s,
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            WHERE {" OR ".join(clauses)}
+            """,
+            (
+                text(unionid),
+                text(unionid),
+                text(identity_status) or "pending",
+                _json(payload),
+                *params,
+            ),
+        )
+        updated_count = int(cur.rowcount or 0)
+        conn.commit()
+    return {"status": "success", "updated_count": updated_count}
+
+
+def enqueue_channel_entry_identity_resolution(
+    *,
+    corp_id: str,
+    external_userid: str,
+    follow_user_userid: str = "",
+    payload_json: dict[str, Any] | None = None,
+    reason: str = "identity_pending_unionid",
+) -> None:
+    external = text(external_userid)
+    if not external:
+        return
+    source_key = f"{text(corp_id)}:{external}:{text(follow_user_userid)}"
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO crm_user_identity_resolution_queue (
+                source_type,
+                source_key,
+                corp_id,
+                external_userid,
+                payload_json,
+                reason,
+                status,
+                first_seen_at,
+                last_seen_at,
+                created_at,
+                updated_at
+            ) VALUES (
+                'channel_entry',
+                %s,
+                %s,
+                %s,
+                %s,
+                %s,
+                'pending',
+                NOW(),
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (source_type, source_key) WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
+            DO UPDATE SET
+                corp_id = COALESCE(NULLIF(EXCLUDED.corp_id, ''), crm_user_identity_resolution_queue.corp_id),
+                external_userid = COALESCE(NULLIF(EXCLUDED.external_userid, ''), crm_user_identity_resolution_queue.external_userid),
+                payload_json = crm_user_identity_resolution_queue.payload_json || EXCLUDED.payload_json,
+                reason = EXCLUDED.reason,
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            """,
+            (source_key, text(corp_id), external, _json(payload_json or {}), text(reason) or "identity_pending_unionid"),
+        )
+        conn.commit()
 
 
 def get_channel_entry_effect_log(effect_type: str, idempotency_key: str) -> dict[str, Any] | None:
@@ -957,7 +1118,7 @@ def get_channel_entry_effect_log(effect_type: str, idempotency_key: str) -> dict
             (text(effect_type), text(idempotency_key)),
         )
         row = cur.fetchone()
-        return dict(row) if row else None
+        return _with_effect_log_diagnostic_identity(dict(row)) if row else None
 
 
 def upsert_channel_entry_effect_log(
@@ -968,6 +1129,7 @@ def upsert_channel_entry_effect_log(
     event_log_id: int | None = None,
     channel_id: int | None = None,
     scene_value: str = "",
+    unionid: str = "",
     external_contact_id: str = "",
     owner_staff_id: str = "",
     reason: str = "",
@@ -975,10 +1137,14 @@ def upsert_channel_entry_effect_log(
     response_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _connect() as conn, conn.cursor() as cur:
+        resolved_unionid = text(unionid) or _resolve_unionid_by_external_userid(cur, external_contact_id)
+        source_request = dict(request_json or {})
+        if external_contact_id:
+            source_request.setdefault("external_contact_id", text(external_contact_id))
         cur.execute(
             """
             INSERT INTO automation_channel_entry_effect_log (
-                event_log_id, channel_id, scene_value, external_contact_id, owner_staff_id,
+                event_log_id, channel_id, scene_value, unionid, owner_staff_id,
                 effect_type, idempotency_key, status, reason, request_json, response_json, created_at, updated_at
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
@@ -986,7 +1152,7 @@ def upsert_channel_entry_effect_log(
             SET event_log_id = COALESCE(EXCLUDED.event_log_id, automation_channel_entry_effect_log.event_log_id),
                 channel_id = COALESCE(EXCLUDED.channel_id, automation_channel_entry_effect_log.channel_id),
                 scene_value = CASE WHEN EXCLUDED.scene_value <> '' THEN EXCLUDED.scene_value ELSE automation_channel_entry_effect_log.scene_value END,
-                external_contact_id = CASE WHEN EXCLUDED.external_contact_id <> '' THEN EXCLUDED.external_contact_id ELSE automation_channel_entry_effect_log.external_contact_id END,
+                unionid = CASE WHEN EXCLUDED.unionid <> '' THEN EXCLUDED.unionid ELSE automation_channel_entry_effect_log.unionid END,
                 owner_staff_id = CASE WHEN EXCLUDED.owner_staff_id <> '' THEN EXCLUDED.owner_staff_id ELSE automation_channel_entry_effect_log.owner_staff_id END,
                 status = EXCLUDED.status,
                 reason = EXCLUDED.reason,
@@ -999,19 +1165,19 @@ def upsert_channel_entry_effect_log(
                 event_log_id,
                 channel_id,
                 text(scene_value),
-                text(external_contact_id),
+                resolved_unionid,
                 text(owner_staff_id),
                 text(effect_type),
                 text(idempotency_key),
                 text(status),
                 text(reason),
-                _json(request_json or {}),
+                _json(source_request),
                 _json(response_json or {}),
             ),
         )
         row = cur.fetchone()
         conn.commit()
-        return dict(row) if row else {}
+        return _with_effect_log_diagnostic_identity(dict(row)) if row else {}
 
 
 def list_channel_entry_effect_logs(*, channel_id: int | None = None, scene_value: str = "", limit: int = 20) -> list[dict[str, Any]]:
@@ -1035,89 +1201,7 @@ def list_channel_entry_effect_logs(*, channel_id: int | None = None, scene_value
             """,
             tuple(params),
         )
-        return [dict(row) for row in cur.fetchall() or []]
-
-
-def list_active_bindings_for_channel(channel_id: int) -> list[dict[str, Any]]:
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT b.*, p.status AS program_status, p.program_name, p.program_code
-            FROM automation_program_channel_binding b
-            JOIN automation_program p ON p.id = b.program_id
-            WHERE b.channel_id = %s AND b.binding_status = 'active'
-            ORDER BY b.priority DESC, b.id DESC
-            """,
-            (int(channel_id),),
-        )
-        return [dict(row) for row in cur.fetchall() or []]
-
-
-def insert_program_admission_attempt(
-    *,
-    program_id: int,
-    channel_id: int,
-    binding_id: int | None,
-    external_contact_id: str,
-    trigger_type: str,
-    trigger_event_id: str = "",
-    trigger_payload_json: dict[str, Any] | None = None,
-    admission_status: str,
-    entry_reason: str,
-) -> dict[str, Any]:
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO automation_program_admission_attempt (
-                program_id, channel_id, binding_id, external_contact_id, trigger_type, trigger_event_id,
-                trigger_payload_json, admission_status, pool_entered_at, stage_code, audience_code,
-                stage_entered_at, entry_reason, created_at, updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s, CURRENT_TIMESTAMP, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            RETURNING *
-            """,
-            (
-                int(program_id),
-                int(channel_id),
-                binding_id,
-                text(external_contact_id),
-                text(trigger_type) or "channel_enter",
-                text(trigger_event_id),
-                _json(trigger_payload_json or {}),
-                text(admission_status),
-                "operating" if admission_status == "accepted" else "",
-                "operating" if admission_status == "accepted" else "",
-                text(entry_reason),
-            ),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return dict(row) if row else {}
-
-
-def upsert_program_member(*, program_id: int, channel_id: int, binding_id: int, external_contact_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            INSERT INTO automation_program_member (
-                program_id, external_contact_id, source_channel_id, source_binding_id,
-                first_source_channel_id, latest_source_channel_id, in_program,
-                current_stage_code, current_audience_code, current_stage_entered_at,
-                pool_entered_at, state_payload_json, created_at, updated_at
-            )
-            VALUES (%s, %s, %s, %s, %s, %s, TRUE, 'operating', 'operating', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-            ON CONFLICT (program_id, external_contact_id) WHERE external_contact_id <> ''
-            DO UPDATE SET latest_source_channel_id = EXCLUDED.latest_source_channel_id,
-                source_binding_id = EXCLUDED.source_binding_id,
-                state_payload_json = EXCLUDED.state_payload_json,
-                updated_at = CURRENT_TIMESTAMP
-            RETURNING *
-            """,
-            (int(program_id), text(external_contact_id), int(channel_id), int(binding_id), int(channel_id), int(channel_id), _json(payload)),
-        )
-        row = cur.fetchone()
-        conn.commit()
-        return dict(row) if row else {}
+        return [_with_effect_log_diagnostic_identity(dict(row)) for row in cur.fetchall() or []]
 
 
 def log_external_contact_event(
@@ -1181,11 +1265,43 @@ def mark_event_status(event_log_id: int, status: str, error_message: str = "") -
         conn.commit()
 
 
+def record_identity_sync_result(
+    event_log_id: int,
+    *,
+    status: str,
+    error_code: str = "",
+    error_message: str = "",
+    response_json: dict[str, Any] | None = None,
+) -> None:
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE wecom_external_contact_event_logs
+            SET identity_sync_status = %s,
+                identity_sync_error_code = %s,
+                identity_sync_error_message = %s,
+                identity_sync_response_json = %s,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (
+                text(status),
+                text(error_code),
+                text(error_message),
+                _json(response_json or {}),
+                int(event_log_id),
+            ),
+        )
+        conn.commit()
+
+
 def list_recent_events(scene_value: str, limit: int = 20) -> list[dict[str, Any]]:
     with _connect() as conn, conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, change_type, external_userid, user_id, process_status, error_message, created_at
+            SELECT id, change_type, external_userid, user_id, process_status, error_message,
+                   identity_sync_status, identity_sync_error_code, identity_sync_error_message,
+                   created_at
             FROM wecom_external_contact_event_logs
             WHERE COALESCE(NULLIF(payload_json->>'State', ''), NULLIF(payload_json->>'state', '')) = %s
             ORDER BY created_at DESC, id DESC
@@ -1200,17 +1316,113 @@ def save_tag_snapshot(owner_staff_id: str, external_contact_id: str, tag_ids: li
     if not tag_ids:
         return
     with _connect() as conn, conn.cursor() as cur:
+        unionid = _resolve_unionid_by_external_userid(cur, external_contact_id)
+        if not unionid:
+            _enqueue_tag_identity_resolution(cur, owner_staff_id=owner_staff_id, external_contact_id=external_contact_id, tag_ids=tag_ids, tag_names=tag_names)
+            conn.commit()
+            return
         for tag_id in tag_ids:
             cur.execute(
                 """
-                INSERT INTO contact_tags (external_userid, userid, tag_id, tag_name, created_at)
-                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (external_userid, userid, tag_id) DO UPDATE
-                SET tag_name = EXCLUDED.tag_name
+                UPDATE contact_tags
+                SET tag_name = %s,
+                    created_at = CURRENT_TIMESTAMP
+                WHERE unionid = %s
+                  AND userid = %s
+                  AND tag_id = %s
                 """,
-                (text(external_contact_id), text(owner_staff_id), text(tag_id), text(tag_names.get(tag_id))),
+                (text(tag_names.get(tag_id)), unionid, text(owner_staff_id), text(tag_id)),
+            )
+            if cur.rowcount:
+                continue
+            cur.execute(
+                """
+                INSERT INTO contact_tags (unionid, userid, tag_id, tag_name, created_at)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """,
+                (unionid, text(owner_staff_id), text(tag_id), text(tag_names.get(tag_id))),
             )
         conn.commit()
+
+
+def _resolve_unionid_by_external_userid(cur, external_userid: str) -> str:
+    normalized = text(external_userid)
+    if not normalized:
+        return ""
+    cur.execute(
+        """
+        SELECT unionid
+        FROM crm_user_identity
+        WHERE primary_external_userid = %s
+           OR jsonb_exists(external_userids_json, %s)
+        ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END,
+                 updated_at DESC
+        LIMIT 1
+        """,
+        (normalized, normalized, normalized),
+    )
+    row = cur.fetchone()
+    return text((row or {}).get("unionid"))
+
+
+def _enqueue_tag_identity_resolution(
+    cur,
+    *,
+    owner_staff_id: str,
+    external_contact_id: str,
+    tag_ids: list[str],
+    tag_names: dict[str, str],
+) -> None:
+    external_userid = text(external_contact_id)
+    if not external_userid:
+        return
+    source_key = f"{external_userid}:{text(owner_staff_id)}:contact_tags"
+    cur.execute(
+        """
+        INSERT INTO crm_user_identity_resolution_queue (
+            source_type,
+            source_key,
+            external_userid,
+            payload_json,
+            reason,
+            status,
+            first_seen_at,
+            last_seen_at,
+            created_at,
+            updated_at
+        ) VALUES (
+            'contact_tags',
+            %s,
+            %s,
+            %s,
+            'missing_unionid',
+            'pending',
+            NOW(),
+            NOW(),
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT (source_type, source_key) WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
+        DO UPDATE SET
+            external_userid = COALESCE(NULLIF(EXCLUDED.external_userid, ''), crm_user_identity_resolution_queue.external_userid),
+            payload_json = crm_user_identity_resolution_queue.payload_json || EXCLUDED.payload_json,
+            reason = EXCLUDED.reason,
+            last_seen_at = NOW(),
+            updated_at = NOW()
+        """,
+        (
+            source_key,
+            external_userid,
+            _json(
+                {
+                    "owner_staff_id": text(owner_staff_id),
+                    "external_contact_id": external_userid,
+                    "tag_ids": [text(tag_id) for tag_id in tag_ids],
+                    "tag_names": {text(key): text(value) for key, value in tag_names.items()},
+                }
+            ),
+        ),
+    )
 
 
 def decode_payload_json(value: Any) -> dict[str, Any]:

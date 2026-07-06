@@ -6,8 +6,10 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
-import requests
-
+from aicrm_next.platform_foundation.command_bus import CommandContext
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH
+from aicrm_next.platform_foundation.internal_events.legacy_path_markers import mark_legacy_path_invoked
+from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
 from aicrm_next.shared.errors import NotFoundError
 
@@ -19,6 +21,28 @@ STATUS_SKIPPED = "skipped"
 STATUS_PLANNED = "planned"
 _REAL_RETRY_ENV = "AICRM_QUESTIONNAIRE_EXTERNAL_PUSH_RETRY_REAL_ENABLED"
 _plans = InMemorySideEffectPlanRepository()
+
+
+def _record_legacy_marker(metadata: dict[str, Any] | None = None) -> None:
+    try:
+        mark_legacy_path_invoked(
+            legacy_path="questionnaire.legacy_webhook_retry",
+            replacement_event_type="questionnaire.submitted",
+            replacement_consumer="questionnaire_webhook_consumer",
+            source_module="questionnaire.external_push_logs",
+            source_route="QuestionnaireExternalPushRetryService.retry_one",
+            aggregate_id=(metadata or {}).get("push_log_id") or "",
+            reason="questionnaire_webhook_retry_replaced_by_internal_event_consumer",
+        )
+        LegacyWebhookCleanupService().record_runtime_marker(
+            "old_questionnaire_sync_external_push",
+            marker="legacy_path_invoked",
+            operator="questionnaire.external_push_logs",
+            metadata=metadata or {},
+            real_external_call_executed=False,
+        )
+    except Exception:
+        pass
 
 
 @dataclass(frozen=True)
@@ -49,7 +73,7 @@ class ExternalPushDeliveryAdapter:
 
     @property
     def adapter_mode(self) -> str:
-        return "real_enabled" if self.real_enabled else "real_blocked"
+        return "external_effect_queue"
 
     @property
     def real_enabled(self) -> bool:
@@ -58,16 +82,6 @@ class ExternalPushDeliveryAdapter:
         return str(os.getenv(_REAL_RETRY_ENV, "")).strip().lower() in {"1", "true", "yes", "on"}
 
     def deliver(self, *, target_url: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if not self.real_enabled:
-            return {
-                "ok": False,
-                "attempted": False,
-                "status": STATUS_PLANNED,
-                "response_status_code": None,
-                "response_body": "",
-                "failure_reason": "retry side-effect planned; real external call blocked",
-                "real_external_call_executed": False,
-            }
         if not target_url:
             return {
                 "ok": False,
@@ -78,42 +92,39 @@ class ExternalPushDeliveryAdapter:
                 "failure_reason": "external push url is empty",
                 "real_external_call_executed": False,
             }
-        try:
-            response = requests.post(
-                target_url,
-                json=payload,
-                headers={"Content-Type": "application/json"},
-                timeout=self._timeout_seconds,
-            )
-        except requests.Timeout as exc:
-            return {
-                "ok": False,
-                "attempted": True,
-                "status": STATUS_FAILED,
-                "response_status_code": None,
-                "response_body": "",
-                "failure_reason": f"request timeout: {exc}",
-                "real_external_call_executed": True,
-            }
-        except requests.RequestException as exc:
-            return {
-                "ok": False,
-                "attempted": True,
-                "status": STATUS_FAILED,
-                "response_status_code": None,
-                "response_body": "",
-                "failure_reason": f"network error: {exc}",
-                "real_external_call_executed": True,
-            }
-        status_code = int(response.status_code)
+        job = ExternalEffectService().plan_effect(
+            effect_type=WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH,
+            adapter_name="outbound_webhook",
+            operation="post",
+            target_type="questionnaire_external_push_log",
+            target_id=str(payload.get("submission_id") or payload.get("submission_record_id") or uuid4().hex),
+            business_type="questionnaire",
+            business_id=str(payload.get("questionnaire_id") or ""),
+            payload={"webhook_url": target_url, "body": payload},
+            payload_summary={
+                "target_url_present": bool(target_url),
+                "body_type": type(payload).__name__,
+                "questionnaire_id": payload.get("questionnaire_id"),
+                "submission_id": payload.get("submission_id"),
+            },
+            context=CommandContext(
+                actor_id="questionnaire_external_push_retry",
+                actor_type="system",
+                trace_id=str(payload.get("submission_id") or payload.get("submission_record_id") or ""),
+                source_route="questionnaire.external_push_logs.retry",
+            ),
+            source_module="questionnaire.external_push_logs",
+            idempotency_key=f"questionnaire-external-push-log:{payload.get('submission_id') or payload.get('submission_record_id') or uuid4().hex}",
+        )
         return {
-            "ok": status_code == 200,
-            "attempted": True,
-            "status": STATUS_SUCCESS if status_code == 200 else STATUS_FAILED,
-            "response_status_code": status_code,
-            "response_body": (response.text or "")[:5000],
-            "failure_reason": "" if status_code == 200 else f"HTTP {status_code}",
-            "real_external_call_executed": True,
+            "ok": True,
+            "attempted": False,
+            "status": STATUS_PLANNED,
+            "response_status_code": None,
+            "response_body": f"external_effect_job_id={job.get('id')}",
+            "failure_reason": "external_effect_job_queued",
+            "external_effect_job_id": job.get("id"),
+            "real_external_call_executed": False,
         }
 
 
@@ -229,6 +240,7 @@ class QuestionnaireExternalPushRetryService:
         self._adapter = adapter or ExternalPushDeliveryAdapter()
 
     def retry_one(self, command: QuestionnaireExternalPushRetryCommand) -> dict[str, Any]:
+        _record_legacy_marker({"operation": "retry_one", "push_log_id_present": bool(command.push_log_id)})
         source = self._repo.get_external_push_log(int(command.push_log_id))
         if not source:
             raise NotFoundError("questionnaire external push log not found")
@@ -381,7 +393,7 @@ def _retry_response(
         "route_owner": "ai_crm_next",
         "fallback_used": False,
         "adapter_mode": adapter.adapter_mode,
-        "real_external_call_executed": adapter.real_enabled and not skipped,
+        "real_external_call_executed": False,
         "skipped": bool(skipped),
         "skip_reason": skip_reason,
         "source_log": source_log,

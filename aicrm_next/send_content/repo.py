@@ -30,6 +30,15 @@ class SendContentRepository(Protocol):
 
     def get_materials_by_ids(self, material_type: str, ids: list[int]) -> list[dict[str, Any]]: ...
 
+    def list_material_asset_usage(
+        self,
+        material_type: str,
+        source_id: int,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]: ...
+
 
 def _fixture_items() -> dict[str, list[dict[str, Any]]]:
     return {
@@ -130,10 +139,115 @@ class InMemorySendContentRepository:
         by_id = {int(item["library_id"]): deepcopy(item) for item in self._data[material_type]}
         return [by_id[item_id] for item_id in ids if item_id in by_id]
 
+    def list_material_asset_usage(
+        self,
+        material_type: str,
+        source_id: int,
+        *,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> dict[str, Any]:
+        _assert_material_type(material_type)
+        limit = _clamp_limit(limit)
+        offset = max(0, int(offset or 0))
+        material_asset_id = f"{material_type}:{int(source_id)}"
+        rows = [
+            item
+            for item in _fixture_usage_items()
+            if item["material_asset_id"] == material_asset_id
+        ]
+        return {"items": deepcopy(rows[offset : offset + limit]), "total": len(rows), "limit": limit, "offset": offset}
+
 
 def _assert_material_type(material_type: str) -> None:
     if material_type not in MATERIAL_TYPES:
         raise ContractError("素材类型必须是 image、miniprogram 或 attachment")
+
+
+def _fixture_usage_items() -> list[dict[str, Any]]:
+    return [
+        _usage_item(
+            material_type="image",
+            source_id=12,
+            consumer_type="channel_welcome_config",
+            source_table="automation_channel",
+            source_record_id="fixture-channel-1",
+            title="渠道欢迎语",
+            status="active",
+            field_path="welcome_image_library_ids",
+        ),
+        _usage_item(
+            material_type="image",
+            source_id=12,
+            consumer_type="cloud_plan_content_payload",
+            source_table="cloud_broadcast_plan_recipient_messages",
+            source_record_id="fixture-plan-1:message-1",
+            title="云群发计划话术",
+            status="pending",
+            field_path="content_payload_json.image_library_ids",
+        ),
+        _usage_item(
+            material_type="image",
+            source_id=12,
+            consumer_type="wechat_pay_product_page_slice",
+            source_table="wechat_pay_product_page_slices",
+            source_record_id="fixture-product-slice-1",
+            title="支付商品页切片",
+            status="enabled",
+            field_path="image_library_id",
+        ),
+        _usage_item(
+            material_type="miniprogram",
+            source_id=34,
+            consumer_type="group_ops_draft",
+            source_table="automation_group_ops_plan_nodes",
+            source_record_id="fixture-group-node-1",
+            title="群运营草稿节点",
+            status="draft",
+            field_path="content_package_json.miniprogram_library_ids",
+        ),
+        _usage_item(
+            material_type="attachment",
+            source_id=56,
+            consumer_type="group_ops_draft",
+            source_table="automation_group_ops_plan_nodes",
+            source_record_id="fixture-group-node-2",
+            title="群运营附件节点",
+            status="active",
+            field_path="content_package_json.attachment_library_ids",
+        ),
+    ]
+
+
+def _usage_item(
+    *,
+    material_type: str,
+    source_id: int,
+    consumer_type: str,
+    source_table: str,
+    source_record_id: str,
+    title: str,
+    status: str,
+    field_path: str,
+    owner_userid: str = "",
+    used_at: str = "",
+) -> dict[str, Any]:
+    material_asset_id = f"{material_type}:{int(source_id)}"
+    return {
+        "usage_id": f"{consumer_type}:{source_table}:{source_record_id}:{field_path}",
+        "material_asset_id": material_asset_id,
+        "asset_type": material_type,
+        "source_id": int(source_id),
+        "consumer_type": consumer_type,
+        "source_table": source_table,
+        "source_record_id": str(source_record_id),
+        "title": str(title or ""),
+        "status": str(status or ""),
+        "owner_userid": str(owner_userid or ""),
+        "field_path": str(field_path or ""),
+        "used_at": str(used_at or ""),
+        "metadata": {},
+    }
 
 
 def _search_blob(item: dict[str, Any]) -> str:

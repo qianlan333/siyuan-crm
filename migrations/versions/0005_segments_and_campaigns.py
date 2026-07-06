@@ -81,7 +81,7 @@ def upgrade() -> None:
             id BIGSERIAL PRIMARY KEY,
             segment_id BIGINT NOT NULL,
             member_id BIGINT NOT NULL,
-            external_contact_id TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
             captured_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
         """
@@ -217,7 +217,7 @@ def upgrade() -> None:
             campaign_segment_id BIGINT NOT NULL,
             segment_id BIGINT NOT NULL,
             member_id BIGINT NOT NULL,
-            external_contact_id TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
             joined_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             anchor_date TEXT NOT NULL DEFAULT '',
             current_step_index INTEGER NOT NULL DEFAULT -1,
@@ -254,8 +254,8 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_campaign_members_external
-        ON campaign_members (external_contact_id, campaign_id, id DESC)
+        CREATE INDEX IF NOT EXISTS idx_campaign_members_unionid
+        ON campaign_members (unionid, campaign_id, id DESC)
         """
     )
     op.execute(

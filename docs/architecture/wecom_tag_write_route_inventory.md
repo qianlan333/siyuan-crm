@@ -38,9 +38,9 @@ Lifecycle for exact write routes is `delete_status=deletion_locked` and `replace
 
 `aicrm_next/customer_tags/api.py` exposes `write_router` and registers exact write routes before `production compatibility router` in `aicrm_next/main.py`.
 
-`aicrm_next/production_compat/api.py` no longer registers WeCom tag read/write/sync exact or family fallback routes.
+`historical retired production_compat module` no longer registers WeCom tag read/write/sync exact or family fallback routes.
 
-`aicrm_next/customer_tags/commands.py` defines the write command shapes. `aicrm_next/customer_tags/admin_write.py` owns CommandBus dispatch, validation, idempotency, audit recording, production blocking, and response shape. `aicrm_next/customer_tags/write_repo.py` owns `WeComTagWriteRepository`, the local projection write fixture repository.
+`aicrm_next/customer_tags/commands.py` defines the write command shapes. `aicrm_next/customer_tags/admin_write.py` owns CommandBus dispatch, validation, idempotency, audit recording, production repository selection, and response shape. `aicrm_next/customer_tags/write_repo.py` owns `WeComTagWriteRepository` for local fixture mode and `PostgresWeComTagWriteRepository` for production tag catalog projection writes.
 
 Every successful command response must include `route_owner=ai_crm_next`, `source_status=next_command`, `fallback_used=false`, `real_external_call_executed=false`, `local_only=true`, and a `side_effect_plan` with `adapter_mode=real_blocked`.
 
@@ -48,7 +48,7 @@ Every successful command response must include `route_owner=ai_crm_next`, `sourc
 
 ## Guardrails
 
-Real WeCom create/update/delete is not executed by the CRUD write model. The command layer records a `SideEffectPlan`, keeps `adapter_mode=real_blocked`, and production data mode returns `production_unavailable` instead of fixture writes.
+Real WeCom create/update/delete is not executed by the CRUD write model. The command layer records a `SideEffectPlan`, keeps `adapter_mode=real_blocked`, and production data mode writes only the Next-owned `wecom_corp_tag_groups` / `wecom_corp_tags` projection through `PostgresWeComTagWriteRepository`. A production environment without PostgreSQL still returns `production_unavailable` instead of fixture writes.
 
 Sync may execute the read-only WeCom tag catalog API and must not create/update/delete WeCom tags, tag groups, customer tags, questionnaire tags, payment records, storage assets, OpenClaw tasks, or automation runtime jobs. Sync writes are limited to the Next tag catalog projection tables and sync run evidence.
 

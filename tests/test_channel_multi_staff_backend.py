@@ -12,11 +12,9 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("SECRET_KEY", "channel-multi-staff-backend-test")
     channels_api._FIXTURE_CHANNELS.clear()
-    channels_api._FIXTURE_PROGRAM_BINDINGS.clear()
     channels_api._FIXTURE_CHANNEL_ASSIGNEES.clear()
     channels_api._FIXTURE_ASSIGNMENT_EVENTS.clear()
     channels_api._NEXT_ID = 1
-    channels_api._NEXT_BINDING_ID = 1
     channels_api._NEXT_ASSIGNEE_ID = 1
     channels_api._NEXT_ASSIGNMENT_EVENT_ID = 1
     return TestClient(create_app(), raise_server_exceptions=False)
@@ -76,7 +74,7 @@ def test_channel_multi_staff_migration_contains_required_schema():
         "automation_channel_assignment_event",
         "idx_channel_assignee_active",
         "idx_channel_assignment_24h",
-        "idx_channel_assignment_external",
+        "idx_channel_assignment_unionid",
     ):
         assert token in source
 
@@ -247,6 +245,173 @@ def test_patch_status_only_preserves_qrcode_fields(monkeypatch):
     assert channel["auto_accept_friend"] is True
 
 
+def test_unified_create_and_patch_qrcode_payload_boundary(monkeypatch):
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/channels",
+        json={
+            "channel_type": "qrcode",
+            "carrier_type": "qrcode",
+            "channel_name": "二维码保存边界",
+            "channel_code": "qr-boundary",
+            "auto_accept_friend": True,
+            "customer_channel": "should-not-save",
+            "link_url": "https://work.weixin.qq.com/ca/should-not-save",
+            "final_url": "https://work.weixin.qq.com/ca/should-not-save?customer_channel=bad",
+        },
+    )
+    assert created.status_code == 201
+    channel = created.json()["channel"]
+    channel_id = int(channel["id"])
+    assert channel["channel_type"] == "qrcode"
+    assert channel["carrier_type"] == "qrcode"
+    assert channel["auto_accept_friend"] is True
+    assert channel["customer_channel"] == ""
+    assert channel["link_url"] == ""
+    assert channel["final_url"] == ""
+    assert channel["scene_value"] == ""
+    assert channel["qr_url"] == ""
+
+    patched = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={
+            "channel_type": "qrcode",
+            "carrier_type": "qrcode",
+            "customer_channel": "still-ignored",
+            "link_url": "https://work.weixin.qq.com/ca/still-ignored",
+            "final_url": "https://work.weixin.qq.com/ca/still-ignored?customer_channel=bad",
+            "auto_accept_friend": False,
+        },
+    )
+    assert patched.status_code == 200
+    channel = patched.json()["channel"]
+    assert channel["auto_accept_friend"] is False
+    assert channel["customer_channel"] == ""
+    assert channel["link_url"] == ""
+    assert channel["final_url"] == ""
+
+    rejected_scene = client.patch(f"/api/admin/channels/{channel_id}", json={"scene_value": "frontend_scene"})
+    rejected_qr = client.patch(f"/api/admin/channels/{channel_id}", json={"qr_url": "https://wework.qpic.cn/frontend"})
+    assert rejected_scene.status_code == 400
+    assert rejected_scene.json()["detail"] == "scene_value_is_system_managed"
+    assert rejected_qr.status_code == 400
+    assert rejected_qr.json()["detail"] == "qr_url_is_system_managed"
+
+
+def test_unified_create_and_patch_wecom_link_payload_boundary(monkeypatch):
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/channels",
+        json={
+            "channel_type": "wecom_customer_acquisition",
+            "carrier_type": "link",
+            "channel_name": "获客链接保存边界",
+            "channel_code": "link-boundary",
+            "customer_channel": "wca_boundary",
+            "link_url": "https://work.weixin.qq.com/ca/boundary",
+            "final_url": "https://work.weixin.qq.com/ca/boundary?customer_channel=wca_boundary",
+            "auto_accept_friend": True,
+        },
+    )
+    assert created.status_code == 201
+    channel = created.json()["channel"]
+    channel_id = int(channel["id"])
+    assert channel["channel_type"] == "wecom_customer_acquisition"
+    assert channel["carrier_type"] == "link"
+    assert channel["customer_channel"] == "wca_boundary"
+    assert channel["link_url"] == "https://work.weixin.qq.com/ca/boundary"
+    assert channel["final_url"] == "https://work.weixin.qq.com/ca/boundary?customer_channel=wca_boundary"
+    assert channel["auto_accept_friend"] is False
+
+    patched = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={
+            "channel_type": "wecom_customer_acquisition",
+            "carrier_type": "link",
+            "customer_channel": "wca_boundary_next",
+            "link_url": "https://work.weixin.qq.com/ca/boundary-next",
+            "final_url": "https://work.weixin.qq.com/ca/boundary-next?customer_channel=wca_boundary_next",
+            "auto_accept_friend": True,
+        },
+    )
+    assert patched.status_code == 200
+    channel = patched.json()["channel"]
+    assert channel["customer_channel"] == "wca_boundary_next"
+    assert channel["link_url"] == "https://work.weixin.qq.com/ca/boundary-next"
+    assert channel["final_url"] == "https://work.weixin.qq.com/ca/boundary-next?customer_channel=wca_boundary_next"
+    assert channel["auto_accept_friend"] is False
+
+
+def test_unified_create_and_patch_validate_assignment_contract(monkeypatch):
+    client = _client(monkeypatch)
+
+    one_ratio = client.post(
+        "/api/admin/channels",
+        json={
+            "channel_name": "单客服比例",
+            "channel_code": "ratio-one",
+            "assignment_mode": "multi_staff",
+            "assignment_strategy": "ratio",
+            "assignees": [_ratio_assignees(100, 0)[0]],
+        },
+    )
+    assert one_ratio.status_code == 201
+    assert [item["ratio_percent"] for item in one_ratio.json()["channel"]["assignees"]] == [100]
+
+    two_ratio = client.post(
+        "/api/admin/channels",
+        json={
+            "channel_name": "双客服比例",
+            "channel_code": "ratio-two",
+            "assignment_mode": "multi_staff",
+            "assignment_strategy": "ratio",
+            "assignees": _ratio_assignees(50, 50),
+        },
+    )
+    assert two_ratio.status_code == 201
+    channel_id = int(two_ratio.json()["channel"]["id"])
+
+    invalid_ratio = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={"assignment_mode": "multi_staff", "assignment_strategy": "ratio", "assignees": _ratio_assignees(60, 30)},
+    )
+    assert invalid_ratio.status_code == 400
+    assert invalid_ratio.json()["detail"] == "ratio_percent_total_must_equal_100"
+
+    too_many = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={
+            "assignment_mode": "multi_staff",
+            "assignment_strategy": "ratio",
+            "assignees": [
+                {"staff_id": f"staff-{index}", "display_name": f"Staff {index}", "priority": index, "ratio_percent": 20, "status": "active"}
+                for index in range(1, 6)
+            ]
+            + [{"staff_id": "staff-6", "display_name": "Staff 6", "priority": 6, "ratio_percent": 0, "status": "active"}],
+        },
+    )
+    assert too_many.status_code == 400
+    assert too_many.json()["detail"] == "active_assignees_count_must_be_1_to_5"
+
+    cap_saved = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={"assignment_mode": "multi_staff", "assignment_strategy": "cap_switch", "assignees": _cap_assignees(1, 2)},
+    )
+    assert cap_saved.status_code == 200
+    assert [item["max_scans_24h"] for item in cap_saved.json()["channel"]["assignees"]] == [1, 2]
+
+    invalid_cap = client.patch(
+        f"/api/admin/channels/{channel_id}",
+        json={"assignment_mode": "multi_staff", "assignment_strategy": "cap_switch", "assignees": _cap_assignees(0, 1)},
+    )
+    assert invalid_cap.status_code == 400
+    assert invalid_cap.json()["detail"] == "max_scans_24h_must_be_positive"
+
+    invalid_strategy = client.patch(f"/api/admin/channels/{channel_id}", json={"assignment_strategy": "weighted_random"})
+    assert invalid_strategy.status_code == 400
+    assert invalid_strategy.json()["detail"] == "invalid_assignment_strategy"
+
+
 def test_channel_status_only_patch_supports_list_page_lifecycle(monkeypatch):
     client = _client(monkeypatch)
     created = client.post(
@@ -289,7 +454,13 @@ def test_channel_status_only_patch_supports_list_page_lifecycle(monkeypatch):
     assert channel["assignment_strategy"] == "ratio"
     assert len(channel["assignees"]) == 2
     listed = client.get("/api/admin/channels").json()["channels"]
-    assert any(item["id"] == channel_id and item["status"] == "archived" for item in listed)
+    assert all(item["id"] != channel_id for item in listed)
+
+    archived_listed = client.get("/api/admin/channels?status=archived").json()["channels"]
+    assert any(item["id"] == channel_id and item["status"] == "archived" for item in archived_listed)
+
+    include_archived = client.get("/api/admin/channels?include_archived=true").json()["channels"]
+    assert any(item["id"] == channel_id and item["status"] == "archived" for item in include_archived)
 
     invalid = client.patch(f"/api/admin/channels/{channel_id}", json={"status": "deleted"})
     assert invalid.status_code == 400

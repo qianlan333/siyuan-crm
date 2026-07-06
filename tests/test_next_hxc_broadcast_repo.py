@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import os
+
+import pytest
+from sqlalchemy import text
+
 from aicrm_next.hxc_dashboard.application import CreateHxcBroadcastTaskCommand
 from aicrm_next.hxc_dashboard.dto import HxcBroadcastTaskRequest
 from aicrm_next.hxc_dashboard.repo import InMemoryHxcDashboardBroadcastRepository
+from aicrm_next.hxc_dashboard.postgres_repo import PostgresHxcDashboardBroadcastRepository
+from aicrm_next.shared.db_session import get_session_factory
 from aicrm_next.shared.repository_provider import RepositoryProviderError
 
 
@@ -10,7 +17,7 @@ def test_fixture_repo_returns_predictable_audience_preview() -> None:
     repo = InMemoryHxcDashboardBroadcastRepository()
 
     preview = repo.preview_audience(
-        selected_customer_ids=["ext_hxc_001", "ext_hxc_002", "mobile_only_001"],
+        selected_customer_ids=["union_hxc_001", "union_hxc_002", "mobile_only_001"],
         audience_filter={},
         sender_userid="QianLan",
     )
@@ -20,8 +27,66 @@ def test_fixture_repo_returns_predictable_audience_preview() -> None:
     assert preview["skipped_count"] == 2
     assert preview["skipped_by_reason"] == {
         "do_not_disturb": 1,
-        "missing_external_userid": 1,
+        "missing_unionid": 1,
     }
+    assert preview["eligible_unionids"] == ["union_hxc_001"]
+    assert preview["eligible_external_userids"] == ["ext_hxc_001"]
+
+
+@pytest.mark.usefixtures("next_pg_schema")
+def test_postgres_preview_resolves_hxc_snapshot_unionids_and_dnd() -> None:
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        session.execute(
+            text(
+                """
+                INSERT INTO crm_user_identity (
+                    unionid, primary_external_userid, external_userids_json,
+                    mobile, mobile_normalized, primary_owner_userid
+                )
+                VALUES
+                    ('union_hxc_ready', 'wm_hxc_ready', '["wm_hxc_ready"]'::jsonb, '13900001001', '13900001001', 'QianLan'),
+                    ('union_hxc_dnd', 'wm_hxc_dnd', '["wm_hxc_dnd"]'::jsonb, '13900001002', '13900001002', 'QianLan'),
+                    ('union_hxc_mobile', 'wm_hxc_mobile', '["wm_hxc_mobile"]'::jsonb, '13900001003', '13900001003', 'QianLan')
+                """
+            )
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO user_ops_hxc_dashboard_snapshot (
+                    mobile, phone_match_key, unionid, owner_userid,
+                    hxc_member_hit, hxc_user_hit, funnel_state, refreshed_at
+                )
+                VALUES
+                    ('13900001001', '13900001001', 'union_hxc_ready', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP),
+                    ('13900001002', '13900001002', '', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP),
+                    ('13900001003', '13900001003', '', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP)
+                """
+            )
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO user_ops_do_not_disturb_next (unionid, is_active, reason_code)
+                VALUES ('union_hxc_dnd', true, 'pytest')
+                """
+            )
+        )
+        session.commit()
+
+    repo = PostgresHxcDashboardBroadcastRepository(os.environ["DATABASE_URL"])
+
+    preview = repo.preview_audience(
+        selected_customer_ids=["union_hxc_ready", "wm_hxc_dnd", "13900001003"],
+        audience_filter={},
+        sender_userid="QianLan",
+    )
+
+    assert preview["audience_total"] == 3
+    assert preview["eligible_unionids"] == ["union_hxc_ready", "union_hxc_mobile"]
+    assert preview["eligible_external_userids"] == ["wm_hxc_ready", "wm_hxc_mobile"]
+    assert preview["skipped_by_reason"] == {"do_not_disturb": 1}
 
 
 class UnavailablePostgresLikeRepo:

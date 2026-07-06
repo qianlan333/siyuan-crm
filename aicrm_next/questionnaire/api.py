@@ -1,19 +1,23 @@
 from __future__ import annotations
 
+import base64
 import csv
+from datetime import datetime, timezone
 import json
 import logging
+import os
 from io import StringIO
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 from uuid import uuid4
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from aicrm_next.navigation_target import safe_completion_url
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.runtime import production_data_ready
 
@@ -45,11 +49,11 @@ from .application import (
     GetQuestionnaireResultsSummaryQuery,
     GetSubmissionResultQuery,
     LatestSubmitDebugQuery,
+    ListExternalQuestionnaireSubmissionsQuery,
     ListQuestionnaireQuestionsQuery,
     ListQuestionnaireSubmissionsQuery,
     ListQuestionnairesQuery,
     StartWechatOAuthQuery,
-    build_questionnaire_share_payload,
 )
 from .dto import OAuthCallbackRequest, OAuthStartRequest
 from .oauth import COOKIE_NAME, questionnaire_oauth_state_context
@@ -59,6 +63,8 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "frontend_compat" / "templates"
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+_EXTERNAL_SOURCE_STATUS = "external_questionnaire_submissions"
+_EXTERNAL_TOKEN_ENV_KEY = "AUTOMATION_INTERNAL_API_TOKEN"
 
 _QUESTIONNAIRE_IDENTITY_HINT_FIELDS = (
     "respondent_key",
@@ -72,6 +78,34 @@ _QUESTIONNAIRE_SOURCE_PARAM_FIELDS = (
     "staff_id",
 )
 _QUESTIONNAIRE_META_FIELDS = _QUESTIONNAIRE_IDENTITY_HINT_FIELDS + _QUESTIONNAIRE_SOURCE_PARAM_FIELDS
+
+
+def _completion_target_redirect_url(slug: str, completion_target: Any, *, fallback_url: Any = "") -> str:
+    if not isinstance(completion_target, dict) or not completion_target.get("enabled"):
+        return ""
+    if str(completion_target.get("target_type") or "").strip() != "url_link":
+        return ""
+    link = completion_target.get("url_link") if isinstance(completion_target.get("url_link"), dict) else {}
+    source_url = str(link.get("source_url") or "").strip()
+    if source_url:
+        query = {
+            "source_url": source_url,
+            "response_url_key": str(link.get("response_url_key") or "url_link") or "url_link",
+        }
+        safe_fallback = _safe_completion_fallback(slug, fallback_url)
+        if safe_fallback:
+            query["fallback_url"] = safe_fallback
+        return f"/api/h5/navigation-target/url-link/resolve?{urlencode(query)}"
+    return safe_completion_url(link.get("url"))
+
+
+def _safe_completion_fallback(slug: str, fallback_url: Any) -> str:
+    safe_url = safe_completion_url(fallback_url)
+    if safe_url in {"", f"/s/{slug}/submitted"}:
+        return ""
+    return safe_url
+
+
 def _raise_http(exc: Exception) -> None:
     if isinstance(exc, NotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -84,6 +118,74 @@ def _read_response(payload: dict[str, Any]) -> dict[str, Any] | JSONResponse:
     if payload.get("source_status") == "production_unavailable":
         return JSONResponse(jsonable_encoder(payload), status_code=503)
     return payload
+
+
+def _external_text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _external_error(*, error_code: str, message: str, status_code: int) -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": False,
+            "error_code": error_code,
+            "message": message,
+            "route_owner": "ai_crm_next",
+            "source_status": _EXTERNAL_SOURCE_STATUS,
+            "fallback_used": False,
+        },
+        status_code=status_code,
+    )
+
+
+def _external_auth_failure(request: Request) -> JSONResponse | None:
+    expected = _external_text(os.getenv(_EXTERNAL_TOKEN_ENV_KEY))
+    if not expected:
+        return _external_error(
+            error_code="internal_token_not_configured",
+            message="internal token not configured",
+            status_code=503,
+        )
+    auth_header = _external_text(request.headers.get("Authorization"))
+    provided = _external_text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
+    if not provided:
+        return _external_error(error_code="missing_internal_token", message="missing internal token", status_code=401)
+    if provided != expected:
+        return _external_error(error_code="invalid_internal_token", message="invalid internal token", status_code=401)
+    return None
+
+
+def _external_encode_cursor(offset: int | None) -> str:
+    if offset is None:
+        return ""
+    payload = json.dumps({"offset": max(0, int(offset))}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _external_decode_cursor(cursor: str | None) -> int:
+    token = _external_text(cursor)
+    if not token:
+        return 0
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        return max(0, int(payload.get("offset") or 0))
+    except Exception as exc:
+        raise ValueError("cursor is invalid") from exc
+
+
+def _external_timestamp_filter(value: int | None, name: str) -> str | None:
+    if value is None:
+        return None
+    if value < 0:
+        raise ValueError(f"{name} must be a Unix timestamp in seconds")
+    if value > 9_999_999_999:
+        raise ValueError(f"{name} must be a Unix timestamp in seconds, not milliseconds")
+    return datetime.fromtimestamp(value, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _external_filters(**kwargs: Any) -> dict[str, Any]:
+    return {key: value for key, value in kwargs.items() if value not in {None, ""}}
 
 
 def _csv_value(value: Any) -> Any:
@@ -187,6 +289,66 @@ def _as_bool(value: Any) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+@router.get("/api/external/questionnaire-submissions")
+def list_external_questionnaire_submissions(
+    request: Request,
+    mobile: str | None = Query(None, description="手机号"),
+    unionid: str | None = Query(None, description="微信 unionid"),
+    external_userid: str | None = Query(None, description="企业微信 external_userid"),
+    questionnaire_id: int | None = Query(None, ge=1, description="问卷 ID"),
+    submitted_from: int | None = Query(None, description="提交开始秒级 Unix 时间戳"),
+    submitted_to: int | None = Query(None, description="提交结束秒级 Unix 时间戳"),
+    limit: int = Query(100, ge=1, le=500, description="分页条数，最大 500"),
+    cursor: str | None = Query(None, description="下一页游标"),
+) -> JSONResponse:
+    auth_failure = _external_auth_failure(request)
+    if auth_failure:
+        return auth_failure
+    if not any(_external_text(value) for value in (mobile, unionid, external_userid)):
+        return _external_error(
+            error_code="invalid_request",
+            message="one of mobile, unionid, or external_userid is required",
+            status_code=400,
+        )
+    try:
+        offset = _external_decode_cursor(cursor)
+        submitted_from_filter = _external_timestamp_filter(submitted_from, "submitted_from")
+        submitted_to_filter = _external_timestamp_filter(submitted_to, "submitted_to")
+        if submitted_from_filter and submitted_to_filter and submitted_from_filter > submitted_to_filter:
+            raise ValueError("submitted_from must be earlier than or equal to submitted_to")
+        filters = _external_filters(
+            mobile=mobile,
+            unionid=unionid,
+            external_userid=external_userid,
+            questionnaire_id=questionnaire_id,
+            submitted_from=submitted_from_filter,
+            submitted_to=submitted_to_filter,
+        )
+        payload = ListExternalQuestionnaireSubmissionsQuery()(filters=filters, limit=limit, offset=offset)
+    except ValueError as exc:
+        return _external_error(error_code="invalid_request", message=str(exc), status_code=400)
+
+    if payload.get("source_status") == "production_unavailable":
+        return JSONResponse(jsonable_encoder(payload), status_code=503)
+    items = list(payload.get("items") or [])
+    total = int(payload.get("total") or 0)
+    next_offset = offset + len(items) if offset + len(items) < total else None
+    response_payload = {
+        "ok": True,
+        "items": items,
+        "total": total,
+        "limit": int(payload.get("limit") or limit),
+        "next_cursor": _external_encode_cursor(next_offset),
+        "has_more": next_offset is not None,
+        "filters": payload.get("filters") or {},
+        "route_owner": "ai_crm_next",
+        "source_status": _EXTERNAL_SOURCE_STATUS,
+        "read_model_status": payload.get("read_model_status") or "",
+        "fallback_used": False,
+    }
+    return JSONResponse(jsonable_encoder(response_payload))
+
+
 def _is_redirect_response_mode(response_mode: str | None, browser_redirect: Any = None) -> bool:
     mode = str(response_mode or "").strip().lower()
     return mode == "redirect" or _as_bool(browser_redirect)
@@ -274,6 +436,7 @@ def _h5_write_error(
     write_model_status: str,
     degraded: bool = False,
     error_code: str | None = None,
+    extra: dict[str, Any] | None = None,
 ) -> JSONResponse:
     return JSONResponse(
         {
@@ -286,6 +449,7 @@ def _h5_write_error(
             "fallback_used": False,
             "real_external_call_executed": False,
             "degraded": degraded,
+            **(extra or {}),
         },
         status_code=status_code,
     )
@@ -410,7 +574,24 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
             error_code="invalid_questionnaire_submission",
         )
     except QuestionnaireH5AlreadySubmittedError as exc:
-        return _h5_write_error(str(exc), status_code=409, source_status="already_submitted", write_model_status="already_submitted")
+        status_payload: dict[str, Any] = {}
+        try:
+            identity_result = _questionnaire_identity_result_from_request(request)
+            status_payload = GetPublicQuestionnaireSubmissionStatusQuery()(slug, identity=identity_result["identity"])
+        except Exception:
+            status_payload = {}
+        return _h5_write_error(
+            str(exc),
+            status_code=409,
+            source_status="already_submitted",
+            write_model_status="already_submitted",
+            extra={
+                "redirect_url": status_payload.get("redirect_url") or status_payload.get("submitted_url"),
+                "completion_target": status_payload.get("completion_target"),
+                "completion_target_enabled": status_payload.get("completion_target_enabled"),
+                "completion_target_type": status_payload.get("completion_target_type"),
+            },
+        )
     except QuestionnaireH5WriteNotFoundError as exc:
         return _h5_write_error(str(exc), status_code=404, source_status="not_found", write_model_status="not_found")
     except QuestionnaireH5WriteProductionUnavailableError as exc:
@@ -753,6 +934,9 @@ def public_get_questionnaire(request: Request, slug: str) -> Response:
                     "error": "already_submitted",
                     "message": "已经提交过该问卷",
                     "redirect_url": submission_status.get("redirect_url") or submission_status.get("submitted_url"),
+                    "completion_target": submission_status.get("completion_target"),
+                    "completion_target_enabled": submission_status.get("completion_target_enabled"),
+                    "completion_target_type": submission_status.get("completion_target_type"),
                 },
                 status_code=409,
             ), identity_result)
@@ -949,7 +1133,11 @@ def public_questionnaire_h5_page(request: Request, slug: str):
     should_require_oauth = is_wechat_browser and oauth_configured and not is_authorized
     submission_status = GetPublicQuestionnaireSubmissionStatusQuery()(slug, identity=identity)
     if submission_status.get("submitted") and not should_require_oauth:
-        redirect_url = str(
+        redirect_url = _completion_target_redirect_url(
+            slug,
+            submission_status.get("completion_target"),
+            fallback_url=submission_status.get("redirect_url") or "",
+        ) or str(
             submission_status.get("redirect_url") or submission_status.get("submitted_url") or f"/s/{slug}/submitted"
         ).strip()
         return _with_identity_cookie(RedirectResponse(redirect_url, status_code=302), identity_result)
@@ -968,6 +1156,9 @@ def public_questionnaire_h5_page(request: Request, slug: str):
         "api_url": f"/api/h5/questionnaires/{slug}",
         "diagnostics_url": f"/api/h5/questionnaires/{slug}/client-diagnostics",
         "submitted_url": f"/s/{slug}/submitted",
+        "completion_target": questionnaire.get("completion_target") or {},
+        "completion_target_enabled": bool(questionnaire.get("completion_target_enabled")),
+        "completion_target_type": questionnaire.get("completion_target_type") or "h5",
         "request_hints": request_hints,
         "initial_questionnaire": {**questionnaire, "questions": questions} if page_mode == "questionnaire" else None,
         "answer_display_mode": questionnaire.get("answer_display_mode") or "all_in_one",
@@ -986,4 +1177,16 @@ def public_questionnaire_h5_page(request: Request, slug: str):
 
 @router.get("/s/{slug}/submitted", response_class=HTMLResponse)
 def public_questionnaire_submitted(request: Request, slug: str):
+    try:
+        payload = GetPublicQuestionnaireQuery()(slug)
+    except Exception as exc:
+        _raise_http(exc)
+    questionnaire = jsonable_encoder(payload["questionnaire"])
+    redirect_url = _completion_target_redirect_url(
+        slug,
+        questionnaire.get("completion_target"),
+        fallback_url=questionnaire.get("redirect_url") or "",
+    )
+    if redirect_url:
+        return RedirectResponse(redirect_url, status_code=302)
     return templates.TemplateResponse(request, "questionnaire_h5_submitted.html", {"request": request})

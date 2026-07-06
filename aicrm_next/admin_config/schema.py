@@ -334,11 +334,6 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
                 "required": False,
                 "label": "问卷提交Token",
             },
-            "LAOHUANG_CHAT_WEBHOOK_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "老黄 AI 聊天接口 Token",
-            },
             "AUTOMATION_INTERNAL_API_TOKEN": {
                 "type": "secret",
                 "required": False,

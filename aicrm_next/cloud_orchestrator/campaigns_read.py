@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from aicrm_next.shared import runtime
 from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.runtime import raw_database_url
+from .repository import connect_cloud_campaign_read_db
 
 SOURCE_STATUS = "next_cloud_orchestrator_campaign_read"
 ROUTE_OWNER = "ai_crm_next"
@@ -104,13 +105,15 @@ def _step_view(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def _member_view(row: dict[str, Any]) -> dict[str, Any]:
+    current_step_index = row.get("current_step_index")
     return {
         "id": int(row.get("id") or 0),
         "member_id": row.get("member_id"),
+        "unionid": _text(row.get("unionid")),
         "external_contact_id": _text(row.get("external_contact_id")),
         "status": _text(row.get("status")) or "pending",
         "stop_reason": _text(row.get("stop_reason")),
-        "current_step_index": int(row.get("current_step_index") or -1),
+        "current_step_index": int(current_step_index) if current_step_index not in (None, "") else -1,
         "next_due_at": _json_value(row.get("next_due_at") or ""),
         "last_step_sent_at": _json_value(row.get("last_step_sent_at") or ""),
         "last_error_text": _text(row.get("last_error_text")),
@@ -161,6 +164,7 @@ def _step_payload_view(payload: dict[str, Any]) -> dict[str, Any]:
 class CloudCampaignReadRepository(Protocol):
     def list_campaigns(self, *, review_status: str = "", run_status: str = "", group_code: str = "", limit: int = 5000, offset: int = 0) -> tuple[list[dict[str, Any]], int]: ...
     def get_campaign(self, campaign_code: str) -> dict[str, Any] | None: ...
+    def create_campaign(self, payload: dict[str, Any]) -> dict[str, Any] | None: ...
     def campaign_overview(self, campaign_code: str) -> dict[str, Any] | None: ...
     def list_members(self, campaign_code: str, *, status: str = "", limit: int = 200, offset: int = 0) -> dict[str, Any] | None: ...
     def list_steps(self, campaign_code: str) -> dict[str, Any] | None: ...
@@ -173,13 +177,7 @@ class PostgresCloudCampaignReadRepository:
             raise RepositoryProviderError("cloud campaign read repository unavailable: DATABASE_URL is required")
 
     def _connect(self):
-        try:
-            import psycopg
-            from psycopg.rows import dict_row
-
-            return psycopg.connect(self._database_url, row_factory=dict_row)
-        except Exception as exc:
-            raise RepositoryProviderError(f"cloud campaign read repository unavailable: {exc}") from exc
+        return connect_cloud_campaign_read_db(self._database_url)
 
     def list_campaigns(self, *, review_status: str = "", run_status: str = "", group_code: str = "", limit: int = 5000, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
         where = ["1=1"]
@@ -233,6 +231,48 @@ class PostgresCloudCampaignReadRepository:
                 (campaign_code,),
             ).fetchone()
         return _campaign_view(dict(row)) if row else None
+
+    def create_campaign(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        campaign_code = _text(payload.get("campaign_code"))
+        if not campaign_code:
+            return None
+        existing = self.get_campaign(campaign_code)
+        if existing:
+            return existing
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        if isinstance(payload.get("metadata_json"), dict):
+            metadata = dict(payload["metadata_json"])
+        display_name = _text(payload.get("display_name") or payload.get("name") or campaign_code)
+        intent = _text(payload.get("intent") or payload.get("objective"))
+        anchor_mode = _text(payload.get("anchor_mode") or "campaign_start_date")
+        anchor_date = _text(payload.get("anchor_date"))
+        created_by_agent = _text(payload.get("created_by_agent") or payload.get("operator") or "admin_ui")
+        owner_userid = _text(payload.get("owner_userid") or payload.get("operator"))
+        trace_id = _text(payload.get("trace_id") or campaign_code)
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO campaigns (
+                    campaign_code, display_name, intent, anchor_mode, anchor_date,
+                    review_status, run_status, created_by_agent, owner_userid, trace_id,
+                    metadata_json, created_at, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, 'draft', 'draft', %s, %s, %s, %s::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    campaign_code,
+                    display_name,
+                    intent,
+                    anchor_mode,
+                    anchor_date,
+                    created_by_agent,
+                    owner_userid,
+                    trace_id,
+                    json.dumps(metadata, ensure_ascii=False),
+                ),
+            )
+            conn.commit()
+        return self.get_campaign(campaign_code)
 
     def campaign_overview(self, campaign_code: str) -> dict[str, Any] | None:
         campaign = self.get_campaign(campaign_code)
@@ -302,17 +342,16 @@ class PostgresCloudCampaignReadRepository:
             ).fetchone()
             rows = conn.execute(
                 """
-                SELECT cm.id, cm.member_id, cm.external_contact_id, cm.status, cm.stop_reason,
+                SELECT cm.id, cm.member_id, cm.unionid, cm.status, cm.stop_reason,
                        cm.current_step_index, cm.next_due_at, cm.last_step_sent_at,
                        cm.last_error_text, cm.retry_count, cm.anchor_date, cm.joined_at,
                        cs.label AS segment_label, cs.priority AS segment_priority,
                        s.display_name AS segment_name, s.segment_code,
-                       am.phone, am.current_pool, am.current_audience_code,
-                       am.profile_segment_key, am.behavior_tier_key
+                       '' AS phone, '' AS current_pool, '' AS current_audience_code,
+                       '' AS profile_segment_key, '' AS behavior_tier_key
                 FROM campaign_members cm
                 JOIN campaign_segments cs ON cs.id = cm.campaign_segment_id
                 JOIN segments s ON s.id = cs.segment_id
-                LEFT JOIN automation_member am ON am.id = cm.member_id
                 WHERE """
                 + " AND ".join(where)
                 + """
@@ -394,8 +433,8 @@ class InMemoryCloudCampaignReadRepository:
             }
         ]
         self.members = [
-            {"id": 101, "member_id": 501, "external_contact_id": "wm_fixture_a", "status": "pending", "phone": "13800000001", "segment_label": "Fixture segment", "segment_priority": 100, "segment_name": "Fixture segment", "segment_code": "seg_fixture", "profile_segment_key": "trial", "behavior_tier_key": "warm"},
-            {"id": 102, "member_id": 502, "external_contact_id": "wm_fixture_b", "status": "pending", "phone": "13800000002", "segment_label": "Fixture segment", "segment_priority": 100, "segment_name": "Fixture segment", "segment_code": "seg_fixture", "profile_segment_key": "trial", "behavior_tier_key": "cold"},
+            {"id": 101, "member_id": 501, "unionid": "union_fixture_a", "external_contact_id": "wm_fixture_a", "status": "pending", "current_step_index": -1, "next_due_at": "2026-06-03T09:00:00+00:00", "phone": "13800000001", "segment_label": "Fixture segment", "segment_priority": 100, "segment_name": "Fixture segment", "segment_code": "seg_fixture", "profile_segment_key": "trial", "behavior_tier_key": "warm"},
+            {"id": 102, "member_id": 502, "unionid": "union_fixture_b", "external_contact_id": "wm_fixture_b", "status": "pending", "current_step_index": -1, "next_due_at": "2026-06-03T09:00:00+00:00", "phone": "13800000002", "segment_label": "Fixture segment", "segment_priority": 100, "segment_name": "Fixture segment", "segment_code": "seg_fixture", "profile_segment_key": "trial", "behavior_tier_key": "cold"},
         ]
         self.deleted_campaign_codes: set[str] = set()
 
@@ -417,6 +456,37 @@ class InMemoryCloudCampaignReadRepository:
             if row["campaign_code"] == campaign_code:
                 return _campaign_view(copy.deepcopy(row))
         return None
+
+    def create_campaign(self, payload: dict[str, Any]) -> dict[str, Any] | None:
+        campaign_code = _text(payload.get("campaign_code"))
+        if not campaign_code:
+            return None
+        existing = self.get_campaign(campaign_code)
+        if existing:
+            return existing
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        if isinstance(payload.get("metadata_json"), dict):
+            metadata = dict(payload["metadata_json"])
+        row = {
+            "id": max([int(item.get("id") or 0) for item in self.campaigns] or [0]) + 1,
+            "campaign_code": campaign_code,
+            "display_name": _text(payload.get("display_name") or payload.get("name") or campaign_code),
+            "intent": _text(payload.get("intent") or payload.get("objective")),
+            "anchor_mode": _text(payload.get("anchor_mode") or "campaign_start_date"),
+            "anchor_date": _text(payload.get("anchor_date")),
+            "review_status": _text(payload.get("review_status") or "draft"),
+            "run_status": _text(payload.get("run_status") or "draft"),
+            "created_by_agent": _text(payload.get("created_by_agent") or payload.get("operator") or "admin_ui"),
+            "owner_userid": _text(payload.get("owner_userid") or payload.get("operator")),
+            "trace_id": _text(payload.get("trace_id") or campaign_code),
+            "created_at": "2026-06-03T15:00:00+08:00",
+            "updated_at": "2026-06-03T15:00:00+08:00",
+            "metadata_json": metadata,
+            "segment_count": int(payload.get("segment_count") or 0),
+            "member_count": int(payload.get("member_count") or payload.get("target_count") or 0),
+        }
+        self.campaigns.append(row)
+        return _campaign_view(copy.deepcopy(row))
 
     def update_campaign_status(
         self,

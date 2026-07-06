@@ -1,0 +1,159 @@
+{% extends "admin_console/base.html" %}
+
+{% block content %}
+<section class="admin-card admin-module-banner" data-customer-360-root data-unionid="{{ customer_360.unionid }}">
+  <div class="admin-card-head">
+    <div>
+      <h2>Customer 360</h2>
+      <p>{{ customer_360.identity.unionid }}</p>
+    </div>
+    <a class="admin-button admin-button--ghost" href="{{ url_for('api.admin_console_customers') }}">返回客户列表</a>
+  </div>
+
+  <div class="admin-profile-grid">
+    <div class="admin-profile-field">
+      <span>unionid</span>
+      <strong>{{ customer_360.identity.unionid or "未绑定" }}</strong>
+    </div>
+    <div class="admin-profile-field">
+      <span>外部联系人 ID</span>
+      <strong>{{ customer_360.identity.external_userid or "未投影" }}</strong>
+    </div>
+    <div class="admin-profile-field">
+      <span>手机号</span>
+      <strong>{{ customer_360.identity.mobile or "未投影" }}</strong>
+    </div>
+    <div class="admin-profile-field">
+      <span>负责人</span>
+      <strong>{{ customer_360.identity.owner_userid or "未分配" }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="admin-card-grid">
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">订单</div>
+    <div class="admin-card-value admin-card-value--compact">{{ customer_360.orders_summary.paid_order_count }}</div>
+    <p class="admin-card-copy">已支付订单数；来源 {{ customer_360.orders_summary.source_status }}。</p>
+  </article>
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">问卷</div>
+    <div class="admin-card-value admin-card-value--compact">{{ customer_360.questionnaire_summary.answer_count }}</div>
+    <p class="admin-card-copy">已聚合的问卷答案数。</p>
+  </article>
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">消息</div>
+    <div class="admin-card-value admin-card-value--compact">{{ customer_360.message_summary.recent_message_count }}</div>
+    <p class="admin-card-copy">最近消息窗口内的记录数。</p>
+  </article>
+  <article class="admin-card admin-stat-card admin-stat-card--nested">
+    <div class="admin-card-label">风险</div>
+    <div class="admin-card-value admin-card-value--compact">{{ customer_360.risk_flags|length }}</div>
+    <p class="admin-card-copy">当前 read model 识别的风险标记。</p>
+  </article>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>运营状态</h2>
+      <p>用户运营与自动化状态来自 Customer Read Model 投影。</p>
+    </div>
+  </div>
+  <div class="admin-profile-grid">
+    <div class="admin-profile-field">
+      <span>当前状态</span>
+      <strong>{{ customer_360.user_ops_status.current_status or "-" }}</strong>
+    </div>
+    <div class="admin-profile-field">
+      <span>激活分层</span>
+      <strong>{{ customer_360.user_ops_status.activation_bucket or "-" }}</strong>
+    </div>
+    <div class="admin-profile-field">
+      <span>自动化阶段</span>
+      <strong>{{ customer_360.automation_status.stage_key or "-" }}</strong>
+    </div>
+    <div class="admin-profile-field">
+      <span>建议动作</span>
+      <strong>{{ customer_360.automation_status.recommended_action or "-" }}</strong>
+    </div>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>标签与风险</h2>
+      <p>这里只展示标准化标签名和风险摘要。</p>
+    </div>
+  </div>
+  <div class="admin-profile-tag-list">
+    {% for tag in customer_360.tags %}
+    <span class="admin-profile-tag">{{ tag }}</span>
+    {% else %}
+    <span class="admin-muted">暂无标签</span>
+    {% endfor %}
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>风险</th>
+          <th>等级</th>
+          <th>说明</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for flag in customer_360.risk_flags %}
+        <tr>
+          <td>{{ flag.flag }}</td>
+          <td>{{ flag.severity }}</td>
+          <td>{{ flag.summary }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="3">暂无风险标记</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="admin-card">
+  <div class="admin-card-head">
+    <div>
+      <h2>最近触点</h2>
+      <p>按 Customer 360 read model 聚合的最近触点。</p>
+    </div>
+  </div>
+  <div class="admin-table-wrap">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th>触点</th>
+          <th>类型</th>
+          <th>摘要</th>
+          <th>来源</th>
+          <th>时间</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in customer_360.recent_touchpoints %}
+        <tr>
+          <td>{{ item.touchpoint_key or "-" }}</td>
+          <td>{{ item.touchpoint_type or "-" }}</td>
+          <td>{{ item.summary or "-" }}</td>
+          <td>{{ item.source_table }} #{{ item.source_id }}</td>
+          <td>{{ item.occurred_at or "-" }}</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td colspan="5">暂无最近触点</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

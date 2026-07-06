@@ -19,6 +19,7 @@ def test_channel_entry_logs_real_call_disabled_without_fake_success(monkeypatch)
     }
     effects: list[dict] = []
     contacts: list[dict] = []
+    wakeups: list[int] = []
 
     monkeypatch.delenv("AICRM_NEXT_WECOM_REAL_CALLS_ENABLED", raising=False)
     monkeypatch.setenv("WECOM_CORP_ID", "ww-test")
@@ -28,15 +29,12 @@ def test_channel_entry_logs_real_call_disabled_without_fake_success(monkeypatch)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_contact", lambda **kwargs: contacts.append(kwargs) or {"id": 1, **kwargs})
     monkeypatch.setattr("aicrm_next.channel_entry.repo.get_channel_entry_effect_log", lambda *args: None)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_entry_effect_log", lambda **kwargs: effects.append(kwargs) or kwargs)
-    monkeypatch.setattr("aicrm_next.channel_entry.repo.list_active_bindings_for_channel", lambda channel_id: [])
     monkeypatch.setattr("aicrm_next.channel_entry.repo.save_tag_snapshot", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        "aicrm_next.automation_runtime_v2.bridge.process_channel_entry_event",
-        lambda **kwargs: {"processed": [], "reason": "channel_without_active_binding"},
-    )
+    monkeypatch.setattr("aicrm_next.channel_entry.application.wake_external_effect_job", lambda job_id, **kwargs: wakeups.append(int(job_id)) or True)
 
     result = process_channel_entry(
         ProcessChannelEntryCommand(
+            unionid="union-real-disabled",
             external_contact_id="wm-real-disabled",
             payload_json={"State": "scene-a", "WelcomeCode": "welcome-code", "corp_id": "ww-test"},
             follow_user_userid="owner-a",
@@ -48,10 +46,14 @@ def test_channel_entry_logs_real_call_disabled_without_fake_success(monkeypatch)
     assert result["handled"] is True
     assert result["baseline_effects"]["channel_contact"]["external_contact_id"] == "wm-real-disabled"
     assert result["welcome_message"]["sent"] is False
-    assert result["welcome_message"]["reason"] == "wecom_real_calls_disabled"
+    assert result["welcome_message"]["queued"] is True
+    assert result["welcome_message"]["reason"] == "external_effect_job_queued"
+    assert result["welcome_message"]["immediate_dispatch_scheduled"] is True
     assert result["entry_tag"]["applied"] is False
-    assert result["entry_tag"]["reason"] == "wecom_real_calls_disabled"
-    assert result["mode"] == "standalone_channel"
+    assert result["entry_tag"]["queued"] is True
+    assert result["entry_tag"]["reason"] == "external_effect_job_queued"
+    assert result["mode"] == "channel_baseline_only"
     assert contacts
-    assert any(row["effect_type"] == "welcome_message" and row["status"] == "failed" and row["reason"] == "wecom_real_calls_disabled" for row in effects)
-    assert any(row["effect_type"] == "entry_tag" and row["status"] == "failed" and row["reason"] == "wecom_real_calls_disabled" for row in effects)
+    assert wakeups
+    assert any(row["effect_type"] == "welcome_message" and row["status"] == "queued" and row["reason"] == "external_effect_job_queued" for row in effects)
+    assert any(row["effect_type"] == "entry_tag" and row["status"] == "queued" and row["reason"] == "external_effect_job_queued" for row in effects)

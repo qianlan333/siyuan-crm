@@ -16,7 +16,6 @@ from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.typing import JsonDict
 
 from .mcp_openclaw_adapters import (
-    build_automation_context_tool_adapter,
     build_customer_context_tool_adapter,
     build_mcp_compatibility_gateway,
     build_mcp_tool_gateway,
@@ -34,12 +33,10 @@ class McpToolDispatcher:
         self,
         tool_gateway=None,
         customer_context_adapter=None,
-        automation_context_adapter=None,
         compatibility_gateway=None,
     ) -> None:
         self._tool_gateway = tool_gateway or build_mcp_tool_gateway()
         self._customer_context_adapter = customer_context_adapter or build_customer_context_tool_adapter()
-        self._automation_context_adapter = automation_context_adapter or build_automation_context_tool_adapter()
         self._compatibility_gateway = compatibility_gateway or build_mcp_compatibility_gateway()
 
     def resolve_external_userid(self, arguments: JsonDict) -> str:
@@ -84,14 +81,6 @@ class McpToolDispatcher:
         if mapped_name == "get_recent_messages":
             return self._with_mcp_contracts(
                 self._get_recent_messages(arguments),
-                compatibility=compatibility,
-                payload_mapping=payload_mapping,
-                validation=validation,
-                invocation=invocation,
-            )
-        if mapped_name == "get_automation_context":
-            return self._with_mcp_contracts(
-                self._get_automation_context(arguments),
                 compatibility=compatibility,
                 payload_mapping=payload_mapping,
                 validation=validation,
@@ -148,22 +137,6 @@ class McpToolDispatcher:
         )
         result.setdefault("adapter_contract", {})["customer_context_tool"] = recent_contract
         result["side_effect_safety"] = {**mcp_openclaw_side_effect_safety(), **dict(result.get("side_effect_safety") or {})}
-        return result
-
-    def _get_automation_context(self, arguments: JsonDict) -> JsonDict:
-        from aicrm_next.automation_engine.application import GetAutomationMemberDetailQuery
-
-        member_id = str(arguments.get("member_id") or arguments.get("customer_ref") or "").strip()
-        if not member_id:
-            raise ContractError("member_id is required")
-        automation_contract = self._automation_context_adapter.get_member_context(
-            member_id=member_id,
-            external_userid=str(arguments.get("external_userid") or ""),
-            request_id=str(arguments.get("request_id") or ""),
-        )
-        result = GetAutomationMemberDetailQuery()(member_id)
-        result.setdefault("adapter_contract", {})["automation_context_tool"] = automation_contract
-        result["side_effect_safety"] = mcp_openclaw_side_effect_safety()
         return result
 
     def _with_mcp_contracts(

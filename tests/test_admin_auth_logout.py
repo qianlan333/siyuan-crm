@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
+from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE, sign_session
 from aicrm_next.main import create_app
 
 
@@ -24,6 +24,7 @@ def test_logout_redirects_to_login_and_clears_next_cookie(monkeypatch) -> None:
     assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert SESSION_COOKIE in response.headers["set-cookie"]
+    assert CSRF_COOKIE in response.headers["set-cookie"]
     assert "Max-Age=0" in response.headers["set-cookie"] or "max-age=0" in response.headers["set-cookie"].lower()
 
 

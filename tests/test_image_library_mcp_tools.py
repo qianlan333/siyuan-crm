@@ -35,7 +35,7 @@ def assert_json_contract(payload: dict) -> None:
 def test_legacy_image_library_mcp_tools_are_not_current_mcp_surface() -> None:
     names = {tool["name"] for tool in MCP_TOOLS}
 
-    assert names == {"resolve_customer", "get_customer_context", "get_recent_messages", "get_automation_context"}
+    assert names == {"resolve_customer", "get_customer_context", "get_recent_messages"}
     assert not any(name.startswith("image_library_") for name in names)
 
 

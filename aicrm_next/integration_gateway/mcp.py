@@ -46,18 +46,6 @@ MCP_TOOLS = [
             },
         },
     },
-    {
-        "name": "get_automation_context",
-        "description": "Return readonly automation member context.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "member_id": {"type": "string"},
-                "external_userid": {"type": "string"},
-                "request_id": {"type": "string"},
-            },
-        },
-    },
 ]
 
 

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
+from sqlalchemy import text
+
 import aicrm_next.background_jobs.broadcast_queue_worker as worker
-from aicrm_next.background_jobs.broadcast_queue_worker import SafeSkippedBroadcastDispatcher, run_broadcast_queue_worker
+from aicrm_next.background_jobs.broadcast_queue_worker import PostgresBroadcastQueueRepository, SafeSkippedBroadcastDispatcher, run_broadcast_queue_worker
+from aicrm_next.shared.db_session import get_session_factory
 
 
 class FakeRepo:
@@ -17,11 +22,11 @@ class FakeRepo:
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]:
         return self.jobs[:limit]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0) -> None:
-        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count})
+    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
+        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count, "claim_token": claim_token})
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error") -> None:
-        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type})
+    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
+        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type, "claim_token": claim_token})
 
 
 class Adapter:
@@ -43,23 +48,33 @@ class RecordingWeComClient:
         return {"errcode": 0, "msgid": "msg-recorded"}
 
 
+@pytest.fixture(autouse=True)
+def _resolve_unionid_targets(monkeypatch) -> None:
+    def fake_resolver(unionids: list[str]) -> tuple[list[str], list[str]]:
+        return [f"wm_{str(item).removeprefix('union_')}" for item in unionids], []
+
+    monkeypatch.setattr(worker, "_resolve_private_targets_by_unionid", fake_resolver)
+
+
 def _job(**overrides: Any) -> dict[str, Any]:
     payload = {
         "channel": "wecom_private",
         "sender_userid": "HuangYouCan",
-        "target_external_userids": ["wm_test"],
+        "target_unionids": ["union_test"],
         "rendered_content": {"content_text": "hello private"},
     }
     payload.update(overrides.pop("payload", {}))
     job = {
         "id": 101,
-        "source_type": "automation_runtime_v2",
-        "source_id": "v2:event:1:task:2:member:3",
-        "idempotency_key": "v2:event:1:task:2:member:3",
-        "trace_id": "v2:event:1:task:2:member:3",
+        "source_type": "campaign",
+        "source_table": "campaign_members",
+        "source_id": "campaign:1:member:3",
+        "idempotency_key": "campaign:1:member:3",
+        "trace_id": "campaign:1:member:3",
         "channel": "wecom_private",
-        "target_kind": "external_userid",
-        "target_external_userids": json.dumps(["wm_test"]),
+        "content_type": "private_message",
+        "target_kind": "unionid",
+        "target_unionids_json": json.dumps(["union_test"]),
         "target_count": 1,
         "content_payload": payload,
     }
@@ -76,9 +91,212 @@ def test_wecom_private_job_is_dispatched_and_marked_sent(monkeypatch) -> None:
     summary = run_broadcast_queue_worker(repo=repo, dispatcher=SafeSkippedBroadcastDispatcher(), now=datetime(2026, 6, 1, tzinfo=timezone.utc))
 
     assert summary["sent_ok"] == 1
-    assert repo.sent == [{"job_id": 101, "outbound_task_id": 888, "sent_count": 1, "failed_count": 0}]
+    assert {key: repo.sent[0][key] for key in ("job_id", "outbound_task_id", "sent_count", "failed_count")} == {
+        "job_id": 101,
+        "outbound_task_id": 888,
+        "sent_count": 1,
+        "failed_count": 0,
+    }
+    assert repo.sent[0]["claim_token"]
     assert adapter.payload["sender"] == "HuangYouCan"
     assert adapter.payload["external_userids"] == ["wm_test"]
+
+
+def test_wecom_private_global_execution_mode_disabled_blocks_before_adapter(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "disabled")
+
+    def fail_adapter():
+        raise AssertionError("adapter should not be built when global WeCom execution is disabled")
+
+    monkeypatch.setattr("aicrm_next.integration_gateway.wecom_private_adapter.build_wecom_private_message_adapter", fail_adapter)
+    repo = FakeRepo([_job()])
+
+    summary = run_broadcast_queue_worker(repo=repo, dispatcher=SafeSkippedBroadcastDispatcher())
+
+    assert summary["sent_failed"] == 1
+    assert repo.failed[0]["failure_type"] == "wecom_execution_disabled"
+    assert "AICRM_WECOM_EXECUTION_MODE=disabled" in repo.failed[0]["error"]
+
+
+def test_cloud_plan_recipient_message_uses_bound_sender_and_hydrates_text(monkeypatch) -> None:
+    adapter = Adapter({"ok": True, "wecom_msgid": "msg-cloud", "result": {"msgid": "msg-cloud"}})
+    marked: dict[str, Any] = {}
+    monkeypatch.setattr("aicrm_next.integration_gateway.wecom_private_adapter.build_wecom_private_message_adapter", lambda: adapter)
+    monkeypatch.setattr(worker, "_record_outbound_task", lambda **kwargs: 901)
+    monkeypatch.setattr(worker, "runtime_setting", lambda key, default="": "HuangYouCan" if key == "AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS" else default)
+    monkeypatch.setattr(
+        worker,
+        "_load_cloud_plan_recipient_message",
+        lambda payload: {"cloud_plan_message_id": 77, "content_text": "agent generated hello", "content_payload_json": {}, "attachments": []},
+    )
+    monkeypatch.setattr(worker, "_mark_cloud_plan_recipient_message_sent", lambda payload, outbound_task_id=None: marked.update({"payload": payload, "outbound_task_id": outbound_task_id}))
+    repo = FakeRepo(
+        [
+            _job(
+                source_type="cloud_plan",
+                source_table="cloud_broadcast_plan_recipients",
+                source_id="agent_plan:2",
+                idempotency_key="cloud_plan_recipient:agent_plan:2",
+                channel="wecom_private",
+                content_type="cloud_plan",
+                payload={
+                    "plan_id": "agent_plan",
+                    "recipient_id": 2,
+                    "external_userid": "wm_test",
+                    "message_mode": "recipient_messages",
+                    "owner_userid": "WangWei",
+                    "rendered_content": {},
+                },
+            )
+        ]
+    )
+
+    summary = run_broadcast_queue_worker(repo=repo, dispatcher=SafeSkippedBroadcastDispatcher(), now=datetime(2026, 6, 1, tzinfo=timezone.utc))
+
+    assert summary["sent_ok"] == 1
+    assert adapter.payload["sender"] == "HuangYouCan"
+    assert adapter.payload["text"] == {"content": "agent generated hello"}
+    assert marked["payload"]["cloud_plan_message_id"] == 77
+    assert marked["outbound_task_id"] == 901
+
+
+def test_cloud_plan_message_loader_does_not_require_external_userid_column(monkeypatch) -> None:
+    class Cursor:
+        def execute(self, sql: str, params: tuple[Any, ...]) -> "Cursor":
+            assert "external_userid" not in sql
+            assert params == ("agent_plan", 2)
+            return self
+
+        def fetchone(self) -> dict[str, Any]:
+            return {
+                "id": 77,
+                "recipient_id": 2,
+                "content_text": "agent generated hello",
+                "content_payload_json": {"miniprogram_library_ids": [1325]},
+                "attachments_json": [],
+            }
+
+    @contextmanager
+    def fake_connect():
+        yield Cursor()
+
+    monkeypatch.setattr(worker, "connect", fake_connect)
+
+    message = worker._load_cloud_plan_recipient_message(
+        {
+            "plan_id": "agent_plan",
+            "recipient_id": 2,
+            "external_userid": "stale-column-value",
+            "message_mode": "recipient_messages",
+        }
+    )
+
+    assert message == {
+        "cloud_plan_message_id": 77,
+        "content_text": "agent generated hello",
+        "content_payload_json": {"miniprogram_library_ids": [1325]},
+        "attachments": [],
+    }
+
+
+def test_cloud_plan_failure_marks_recipient_and_message_failed(next_pg_schema) -> None:
+    del next_pg_schema
+    plan_id = "plan_failure_sync_1"
+    with get_session_factory()() as session:
+        session.execute(
+            text(
+                """
+                INSERT INTO cloud_broadcast_plans (plan_id, trace_id, session_id, operator, intent)
+                VALUES (:plan_id, :plan_id, 'test-session', 'tester', 'failure sync')
+                """
+            ),
+            {"plan_id": plan_id},
+        )
+        recipient = session.execute(
+            text(
+                """
+                INSERT INTO cloud_broadcast_plan_recipients (
+                    plan_id, unionid, owner_userid, display_name,
+                    planned_message_count, approval_status, send_status
+                )
+                VALUES (
+                    :plan_id, 'union_failed', 'HuangYouCan', '失败客户',
+                    1, 'approved', 'queued'
+                )
+                RETURNING id
+                """
+            ),
+            {"plan_id": plan_id},
+        ).mappings().one()
+        recipient_id = int(recipient["id"])
+        session.execute(
+            text(
+                """
+                INSERT INTO cloud_broadcast_plan_recipient_messages (
+                    plan_id, recipient_id, unionid, content_text, status
+                )
+                VALUES (:plan_id, :recipient_id, 'union_failed', 'hello', 'queued')
+                """
+            ),
+            {"plan_id": plan_id, "recipient_id": recipient_id},
+        )
+        job = session.execute(
+            text(
+                """
+                INSERT INTO broadcast_jobs (
+                    source_type, source_id, source_table, status,
+                    business_domain, idempotency_key, channel, target_kind,
+                    target_unionids_json, target_count, content_type, content_payload
+                )
+                VALUES (
+                    'cloud_plan', :source_id, 'cloud_broadcast_plan_recipients', 'claimed',
+                    'ai_assistant', :idempotency_key, 'wecom_private', 'unionid',
+                    '["union_failed"]'::jsonb, 1, 'cloud_plan', CAST(:payload AS jsonb)
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "source_id": f"{plan_id}:{recipient_id}",
+                "idempotency_key": f"cloud_plan_recipient:{plan_id}:{recipient_id}",
+                "payload": json.dumps(
+                    {
+                        "plan_id": plan_id,
+                        "recipient_id": recipient_id,
+                        "unionid": "union_failed",
+                        "message_mode": "recipient_messages",
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        ).mappings().one()
+        job_id = int(job["id"])
+        session.execute(
+            text("UPDATE cloud_broadcast_plan_recipients SET broadcast_job_id = :job_id WHERE id = :recipient_id"),
+            {"job_id": job_id, "recipient_id": recipient_id},
+        )
+        session.commit()
+
+    PostgresBroadcastQueueRepository().mark_failed(job_id, error="not external contact", failure_type="wecom_api_error")
+
+    with get_session_factory()() as session:
+        job_row = session.execute(text("SELECT status, failure_type, last_error FROM broadcast_jobs WHERE id = :job_id"), {"job_id": job_id}).mappings().one()
+        recipient_row = session.execute(
+            text("SELECT send_status, last_error FROM cloud_broadcast_plan_recipients WHERE id = :recipient_id"),
+            {"recipient_id": recipient_id},
+        ).mappings().one()
+        message_row = session.execute(
+            text("SELECT status, last_error FROM cloud_broadcast_plan_recipient_messages WHERE recipient_id = :recipient_id"),
+            {"recipient_id": recipient_id},
+        ).mappings().one()
+
+    assert job_row["status"] == "failed_retryable"
+    assert job_row["failure_type"] == "wecom_api_error"
+    assert "not external contact" in job_row["last_error"]
+    assert recipient_row["send_status"] == "failed"
+    assert "not external contact" in recipient_row["last_error"]
+    assert message_row["status"] == "failed"
+    assert "not external contact" in message_row["last_error"]
 
 
 def test_wecom_private_adapter_canonicalizes_miniprogram_attachment(monkeypatch) -> None:
@@ -152,7 +370,13 @@ def test_campaign_private_message_job_is_dispatched(monkeypatch) -> None:
     summary = run_broadcast_queue_worker(repo=repo, dispatcher=SafeSkippedBroadcastDispatcher())
 
     assert summary["sent_ok"] == 1
-    assert repo.sent == [{"job_id": 101, "outbound_task_id": 889, "sent_count": 1, "failed_count": 0}]
+    assert {key: repo.sent[0][key] for key in ("job_id", "outbound_task_id", "sent_count", "failed_count")} == {
+        "job_id": 101,
+        "outbound_task_id": 889,
+        "sent_count": 1,
+        "failed_count": 0,
+    }
+    assert repo.sent[0]["claim_token"]
     assert adapter.payload["sender"] == "HuangYouCan"
     assert adapter.payload["external_userids"] == ["wm_test"]
     assert adapter.payload["text"]["content"] == "campaign private hello"
@@ -296,10 +520,10 @@ def test_campaign_private_message_job_with_complete_fields_is_dispatched(monkeyp
                 source_table="campaign_members",
                 content_type="private_message",
                 channel="wecom_private",
-                target_kind="external_userid",
+                target_kind="unionid",
                 payload={
                     "channel": "wecom_private",
-                    "target_kind": "external_userid",
+                    "target_kind": "unionid",
                     "rendered_content": {},
                     "campaign": {"owner_userid": "HuangYouCan"},
                     "step": {"content_text": "campaign complete fields"},
@@ -360,12 +584,12 @@ def test_wecom_private_sender_missing_is_validation_failed() -> None:
 
 
 def test_wecom_private_target_missing_is_validation_failed() -> None:
-    repo = FakeRepo([_job(target_external_userids="[]", target_count=0, payload={"target_external_userids": []})])
+    repo = FakeRepo([_job(target_unionids_json="[]", target_count=0, payload={"target_unionids": []})])
 
     run_broadcast_queue_worker(repo=repo, dispatcher=SafeSkippedBroadcastDispatcher())
 
     assert repo.failed[0]["failure_type"] == "validation_failed"
-    assert repo.failed[0]["error"] == "target_external_userids_missing"
+    assert repo.failed[0]["error"] == "target_unionids_missing"
 
 
 def test_wecom_private_target_count_mismatch_is_validation_failed() -> None:

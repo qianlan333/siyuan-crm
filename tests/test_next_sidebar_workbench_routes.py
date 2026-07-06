@@ -92,17 +92,15 @@ def test_next_sidebar_jssdk_adapter_returns_blocked_signature_payload(monkeypatc
     assert response.json()["agent_config"]["signature"]
 
 
-def test_next_sidebar_detail_dependencies_return_input_errors_without_404(monkeypatch):
+def test_next_sidebar_detail_dependencies_exclude_retired_automation_member(monkeypatch):
     client = _production_client(monkeypatch)
 
     member_response = client.get("/api/admin/automation-conversion/member")
     tags_response = client.get("/api/admin/customers/profile/tags")
 
-    assert member_response.status_code == 400
-    assert member_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
-    assert member_response.json()["error"] == "external_contact_id or phone is required"
+    assert member_response.status_code == 404
     assert tags_response.status_code == 400
-    assert tags_response.json()["error"] == "external_userid is required"
+    assert tags_response.json()["error"] == "unionid is required"
 
 
 def test_next_owns_sidebar_customer_context_and_profile_readonly_routes(monkeypatch):

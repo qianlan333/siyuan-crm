@@ -41,6 +41,8 @@ class CustomerReadRepository(Protocol):
 
     def get_customer(self, external_userid: str) -> JsonDict | None: ...
 
+    def get_customer_by_unionid(self, unionid: str) -> JsonDict | None: ...
+
     def get_customer_timeline(
         self,
         external_userid: str,
@@ -63,7 +65,20 @@ class CustomerReadRepository(Protocol):
 
     def list_recent_messages(self, external_userid: str, *, limit: int | None = None) -> list[JsonDict]: ...
 
+    def list_timeline_by_unionid(
+        self,
+        unionid: str,
+        filters: JsonDict | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[JsonDict]: ...
+
+    def list_recent_messages_by_unionid(self, unionid: str, *, limit: int | None = None) -> list[JsonDict]: ...
+
     def customer_exists(self, external_userid: str) -> bool: ...
+
+    def customer_exists_by_unionid(self, unionid: str) -> bool: ...
 
 
 class FixtureCustomerReadRepository:
@@ -72,6 +87,7 @@ class FixtureCustomerReadRepository:
     def __init__(self) -> None:
         self._customers: list[JsonDict] = [
             {
+                "unionid": "union_customer_001",
                 "person_id": "person_001",
                 "external_userid": "wx_ext_001",
                 "customer_name": "张小蓝",
@@ -92,7 +108,7 @@ class FixtureCustomerReadRepository:
                 "last_touch_at": "2026-05-18T10:20:00+08:00",
                 "updated_at": "2026-05-18T10:20:00+08:00",
                 "binding": {"is_bound": True, "mobile": "13800138000", "binding_status": "bound"},
-                "identity": {"person_id": "person_001", "external_userid": "wx_ext_001", "mobile": "13800138000"},
+                "identity": {"unionid": "union_customer_001", "person_id": "person_001", "external_userid": "wx_ext_001", "mobile": "13800138000"},
                 "follow_users": [{"userid": "ZhaoYanFang", "display_name": "赵艳芳", "is_primary": True}],
                 "marketing_summary": {
                     "main_stage": "trial",
@@ -125,10 +141,11 @@ class FixtureCustomerReadRepository:
                 "sidebar_context": {
                     "can_open_sidebar": True,
                     "marketing_stage": "activated_focus",
-                    "customer_profile_url": "/admin/customers/wx_ext_001",
+                    "customer_profile_url": "/admin/customers/union_customer_001",
                 },
             },
             {
+                "unionid": "union_customer_002",
                 "person_id": "person_002",
                 "external_userid": "wx_ext_002",
                 "customer_name": "李未绑",
@@ -149,7 +166,7 @@ class FixtureCustomerReadRepository:
                 "last_touch_at": "2026-05-17T18:05:00+08:00",
                 "updated_at": "2026-05-17T18:05:00+08:00",
                 "binding": {"is_bound": False, "mobile": None, "binding_status": "unbound"},
-                "identity": {"person_id": "person_002", "external_userid": "wx_ext_002", "mobile": None},
+                "identity": {"unionid": "union_customer_002", "person_id": "person_002", "external_userid": "wx_ext_002", "mobile": None},
                 "follow_users": [{"userid": "LiuXiao", "display_name": "刘晓", "is_primary": True}],
                 "marketing_summary": {"main_stage": "new_user", "sub_stage": "pending_input", "value_segment": "unknown"},
                 "marketing_profile": {
@@ -166,10 +183,11 @@ class FixtureCustomerReadRepository:
                 "sidebar_context": {
                     "can_open_sidebar": True,
                     "marketing_stage": "new_user",
-                    "customer_profile_url": "/admin/customers/wx_ext_002",
+                    "customer_profile_url": "/admin/customers/union_customer_002",
                 },
             },
             {
+                "unionid": "union_customer_003",
                 "person_id": "person_003",
                 "external_userid": "",
                 "customer_name": "王缺失",
@@ -190,7 +208,7 @@ class FixtureCustomerReadRepository:
                 "last_touch_at": None,
                 "updated_at": "2026-05-16T12:00:00+08:00",
                 "binding": {"is_bound": True, "mobile": "13900139000", "binding_status": "bound_no_external_userid"},
-                "identity": {"person_id": "person_003", "external_userid": "", "mobile": "13900139000"},
+                "identity": {"unionid": "union_customer_003", "person_id": "person_003", "external_userid": "", "mobile": "13900139000"},
                 "follow_users": [],
                 "marketing_summary": {"main_stage": "lead", "sub_stage": "imported", "value_segment": "unknown"},
                 "marketing_profile": {"stage_key": "lead/imported", "recommended_action": "等待加微", "signals": []},
@@ -198,6 +216,7 @@ class FixtureCustomerReadRepository:
                 "sidebar_context": {"can_open_sidebar": False, "marketing_stage": "lead_imported"},
             },
             {
+                "unionid": "union_customer_004",
                 "person_id": "person_004",
                 "external_userid": "wx_ext_004",
                 "customer_name": "陈复访",
@@ -218,7 +237,7 @@ class FixtureCustomerReadRepository:
                 "last_touch_at": "2026-05-15T11:30:00+08:00",
                 "updated_at": "2026-05-15T11:30:00+08:00",
                 "binding": {"is_bound": True, "mobile": "13700137000", "binding_status": "bound"},
-                "identity": {"person_id": "person_004", "external_userid": "wx_ext_004", "mobile": "13700137000"},
+                "identity": {"unionid": "union_customer_004", "person_id": "person_004", "external_userid": "wx_ext_004", "mobile": "13700137000"},
                 "follow_users": [{"userid": "ZhaoYanFang", "display_name": "赵艳芳", "is_primary": True}],
                 "marketing_summary": {"main_stage": "followup", "sub_stage": "not_activated", "value_segment": "medium"},
                 "marketing_profile": {
@@ -235,7 +254,7 @@ class FixtureCustomerReadRepository:
                 "sidebar_context": {
                     "can_open_sidebar": True,
                     "marketing_stage": "followup",
-                    "customer_profile_url": "/admin/customers/wx_ext_004",
+                    "customer_profile_url": "/admin/customers/union_customer_004",
                 },
             },
             {
@@ -453,6 +472,10 @@ class FixtureCustomerReadRepository:
 
     get_customer_detail = get_customer
 
+    def get_customer_by_unionid(self, unionid: str) -> JsonDict | None:
+        item = next((item for item in self._customers if str(item.get("unionid") or item.get("identity", {}).get("unionid") or "") == unionid), None)
+        return deepcopy(item) if item else None
+
     def list_timeline(
         self,
         external_userid: str,
@@ -474,8 +497,28 @@ class FixtureCustomerReadRepository:
 
     get_recent_messages = list_recent_messages
 
+    def list_timeline_by_unionid(
+        self,
+        unionid: str,
+        filters: JsonDict | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[JsonDict]:
+        customer = self.get_customer_by_unionid(unionid)
+        external_userid = str((customer or {}).get("external_userid") or "")
+        return self.list_timeline(external_userid, filters, limit=limit, offset=offset) if external_userid else []
+
+    def list_recent_messages_by_unionid(self, unionid: str, *, limit: int | None = None) -> list[JsonDict]:
+        customer = self.get_customer_by_unionid(unionid)
+        external_userid = str((customer or {}).get("external_userid") or "")
+        return self.list_recent_messages(external_userid, limit=limit) if external_userid else []
+
     def customer_exists(self, external_userid: str) -> bool:
         return self.get_customer(external_userid) is not None
+
+    def customer_exists_by_unionid(self, unionid: str) -> bool:
+        return self.get_customer_by_unionid(unionid) is not None
 
 
 class SqlAlchemyCustomerReadModelRepository:
@@ -535,14 +578,15 @@ class SqlAlchemyCustomerReadModelRepository:
         messages_by_external_userid = messages_by_external_userid or {}
         for index, customer in enumerate(customers, start=1):
             external_userid = str(customer.get("external_userid") or "")
+            identity = dict(customer.get("identity") or {})
+            unionid = str(customer.get("unionid") or identity.get("unionid") or "").strip()
             created_at = _coerce_datetime(customer.get("created_at") or customer.get("updated_at"))
             updated_at = _coerce_datetime(customer.get("updated_at"))
             binding = dict(customer.get("binding") or {})
             self._session.execute(
                 insert(customer_list_index_next).values(
                     id=index,
-                    person_id=customer.get("person_id") or "",
-                    external_userid=external_userid,
+                    unionid=unionid,
                     customer_name=customer.get("customer_name") or "",
                     owner_userid=customer.get("owner_userid") or "",
                     owner_display_name=customer.get("owner_display_name") or "",
@@ -562,8 +606,7 @@ class SqlAlchemyCustomerReadModelRepository:
             self._session.execute(
                 insert(customer_detail_snapshot_next).values(
                     id=index,
-                    person_id=customer.get("person_id") or "",
-                    external_userid=external_userid,
+                    unionid=unionid,
                     customer_json=dict(customer),
                     binding_json=dict(customer.get("binding") or {}),
                     identity_json=dict(customer.get("identity") or {}),
@@ -581,8 +624,7 @@ class SqlAlchemyCustomerReadModelRepository:
                     insert(customer_timeline_event_next).values(
                         id=index * 1000 + event_index,
                         event_id=item.get("event_id") or f"evt_{index}_{event_index}",
-                        person_id=customer.get("person_id") or "",
-                        external_userid=external_userid,
+                        unionid=str(item.get("unionid") or unionid or "").strip(),
                         event_type=item.get("event_type") or "",
                         event_time=_coerce_datetime(item.get("event_time")),
                         title=item.get("title") or "",
@@ -599,7 +641,7 @@ class SqlAlchemyCustomerReadModelRepository:
                     insert(customer_recent_message_next).values(
                         id=index * 1000 + message_index,
                         msgid=item.get("msgid") or f"msg_{index}_{message_index}",
-                        external_userid=external_userid,
+                        unionid=str(item.get("unionid") or unionid or "").strip(),
                         msgtype=item.get("msgtype") or "text",
                         content=item.get("content") or "",
                         send_time=_coerce_datetime(item.get("send_time")),
@@ -632,16 +674,29 @@ class SqlAlchemyCustomerReadModelRepository:
         return int(self._session.execute(stmt).scalar_one() or 0)
 
     def get_customer(self, external_userid: str) -> JsonDict | None:
+        for row in self._session.execute(select(customer_detail_snapshot_next)).mappings():
+            customer = self._detail_row_to_customer(row)
+            if str(customer.get("external_userid") or "") == external_userid:
+                return customer
+        return None
+
+    get_customer_detail = get_customer
+
+    def get_customer_by_unionid(self, unionid: str) -> JsonDict | None:
         row = self._session.execute(
             select(customer_detail_snapshot_next)
-            .where(customer_detail_snapshot_next.c.external_userid == external_userid)
+            .where(customer_detail_snapshot_next.c.unionid == unionid)
             .limit(1)
         ).mappings().first()
         if not row:
             return None
+        return self._detail_row_to_customer(row)
+
+    def _detail_row_to_customer(self, row) -> JsonDict:
         customer = dict(row["customer_json"] or {})
         customer.update(
             {
+                "unionid": str(row["unionid"] or customer.get("unionid") or ""),
                 "binding": dict(row["binding_json"] or {}),
                 "identity": dict(row["identity_json"] or {}),
                 "follow_users": list(row["follow_users_json"] or []),
@@ -652,9 +707,10 @@ class SqlAlchemyCustomerReadModelRepository:
                 "updated_at": _iso(customer.get("updated_at") or row["updated_at"]),
             }
         )
+        identity = dict(customer.get("identity") or {})
+        identity.setdefault("unionid", str(row["unionid"] or ""))
+        customer["identity"] = identity
         return customer
-
-    get_customer_detail = get_customer
 
     def list_timeline(
         self,
@@ -664,7 +720,28 @@ class SqlAlchemyCustomerReadModelRepository:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[JsonDict]:
-        stmt = select(customer_timeline_event_next).where(customer_timeline_event_next.c.external_userid == external_userid)
+        customer = self.get_customer(external_userid)
+        unionid = str((customer or {}).get("unionid") or "")
+        return self.list_timeline_by_unionid(unionid, filters, limit=limit, offset=offset) if unionid else []
+
+    get_customer_timeline = list_timeline
+
+    def list_recent_messages(self, external_userid: str, *, limit: int | None = None) -> list[JsonDict]:
+        customer = self.get_customer(external_userid)
+        unionid = str((customer or {}).get("unionid") or "")
+        return self.list_recent_messages_by_unionid(unionid, limit=limit) if unionid else []
+
+    get_recent_messages = list_recent_messages
+
+    def list_timeline_by_unionid(
+        self,
+        unionid: str,
+        filters: JsonDict | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[JsonDict]:
+        stmt = select(customer_timeline_event_next).where(customer_timeline_event_next.c.unionid == unionid)
         event_type = str((filters or {}).get("event_type") or "").strip()
         if event_type:
             stmt = stmt.where(customer_timeline_event_next.c.event_type == event_type)
@@ -672,21 +749,20 @@ class SqlAlchemyCustomerReadModelRepository:
         rows = [self._timeline_row_to_dict(row) for row in self._session.execute(stmt).mappings()]
         return _apply_page(rows, limit=limit, offset=offset)
 
-    get_customer_timeline = list_timeline
-
-    def list_recent_messages(self, external_userid: str, *, limit: int | None = None) -> list[JsonDict]:
+    def list_recent_messages_by_unionid(self, unionid: str, *, limit: int | None = None) -> list[JsonDict]:
         stmt = (
             select(customer_recent_message_next)
-            .where(customer_recent_message_next.c.external_userid == external_userid)
+            .where(customer_recent_message_next.c.unionid == unionid)
             .order_by(customer_recent_message_next.c.send_time.desc(), customer_recent_message_next.c.id.asc())
         )
         rows = [self._message_row_to_dict(row) for row in self._session.execute(stmt).mappings()]
         return _apply_page(rows, limit=limit, offset=0)
 
-    get_recent_messages = list_recent_messages
-
     def customer_exists(self, external_userid: str) -> bool:
         return self.get_customer(external_userid) is not None
+
+    def customer_exists_by_unionid(self, unionid: str) -> bool:
+        return self.get_customer_by_unionid(unionid) is not None
 
     def _customer_list_stmt(self, filters: JsonDict):
         stmt = select(customer_list_index_next)
@@ -696,7 +772,11 @@ class SqlAlchemyCustomerReadModelRepository:
             stmt = stmt.where(table.owner_userid == owner_userid)
         tag = str(filters.get("tag") or "").strip()
         if tag:
-            stmt = stmt.where(cast(table.tags_json, Text).like(f"%{tag}%"))
+            escaped_tag = json.dumps(tag, ensure_ascii=True)[1:-1]
+            tag_patterns = [f"%{tag}%"]
+            if escaped_tag != tag:
+                tag_patterns.append(f"%{escaped_tag}%")
+            stmt = stmt.where(or_(*(cast(table.tags_json, Text).like(pattern) for pattern in tag_patterns)))
         status = str(filters.get("status") or "").strip()
         if status:
             stmt = stmt.where(
@@ -716,7 +796,7 @@ class SqlAlchemyCustomerReadModelRepository:
             pattern = f"%{keyword}%"
             stmt = stmt.where(
                 or_(
-                    func.lower(table.external_userid).like(pattern),
+                    func.lower(table.unionid).like(pattern),
                     func.lower(table.customer_name).like(pattern),
                     func.lower(table.owner_userid).like(pattern),
                     func.lower(table.owner_display_name).like(pattern),
@@ -733,8 +813,9 @@ class SqlAlchemyCustomerReadModelRepository:
     def _list_row_to_customer(self, row) -> JsonDict:
         data = dict(row)
         return {
-            "person_id": data.get("person_id") or "",
-            "external_userid": data.get("external_userid") or "",
+            "unionid": data.get("unionid") or "",
+            "person_id": "",
+            "external_userid": "",
             "customer_name": data.get("customer_name") or "",
             "remark": data.get("remark") or "",
             "description": data.get("description") or "",
@@ -774,7 +855,7 @@ class SqlAlchemyCustomerReadModelRepository:
             "msgtype": data.get("msgtype") or "text",
             "content": data.get("content") or "",
             "send_time": _iso(data.get("send_time")),
-            "external_userid": data.get("external_userid") or "",
+            "unionid": data.get("unionid") or "",
             "owner_userid": data.get("owner_userid") or "",
             "chat_type": data.get("chat_type") or "single",
         }
@@ -784,6 +865,8 @@ class SqlAlchemyCustomerReadModelRepository:
 
 class LiveSourceCustomerReadRepository:
     """Read live customer data from production source tables when projections are not ready."""
+
+    source_name = "live_source"
 
     def __init__(self, session: Session) -> None:
         self._session = session
@@ -800,8 +883,15 @@ class LiveSourceCustomerReadRepository:
         *,
         limit: int | None = None,
         offset: int = 0,
+        external_userids: set[str] | None = None,
     ) -> list[JsonDict]:
-        rows = self._customer_rows(filters or {}, limit=limit, offset=offset)
+        effective_filters = dict(filters or {})
+        normalized_external_userids = {str(item or "").strip() for item in (external_userids or set()) if str(item or "").strip()}
+        if len(normalized_external_userids) == 1 and not effective_filters.get("external_userid"):
+            effective_filters["external_userid"] = next(iter(normalized_external_userids))
+        rows = self._customer_rows(effective_filters, limit=limit, offset=offset)
+        if normalized_external_userids:
+            rows = [row for row in rows if str(row.get("external_userid") or "").strip() in normalized_external_userids]
         return self._decorate_customer_rows(rows)
 
     def count_customers(self, filters: JsonDict | None = None) -> int:
@@ -816,6 +906,11 @@ class LiveSourceCustomerReadRepository:
         return customers[0] if customers else None
 
     get_customer_detail = get_customer
+
+    def get_customer_by_unionid(self, unionid: str) -> JsonDict | None:
+        rows = self._customer_rows({"unionid": str(unionid or "").strip()}, limit=1, offset=0)
+        customers = self._decorate_customer_rows(rows)
+        return customers[0] if customers else None
 
     def list_timeline(
         self,
@@ -846,23 +941,58 @@ class LiveSourceCustomerReadRepository:
     get_customer_timeline = list_timeline
 
     def list_recent_messages(self, external_userid: str, *, limit: int | None = None) -> list[JsonDict]:
+        identity = self._identity_by_external_userid(str(external_userid or "").strip())
+        unionid = str(identity.get("unionid") or "").strip()
+        if not unionid:
+            return []
+        return self.list_recent_messages_by_unionid(unionid, limit=limit)
+
+    get_recent_messages = list_recent_messages
+
+    def list_timeline_by_unionid(
+        self,
+        unionid: str,
+        filters: JsonDict | None = None,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[JsonDict]:
+        event_type = str((filters or {}).get("event_type") or "").strip()
+        messages = [
+            {
+                "event_id": f"message:{item.get('source_id') or item.get('msgid')}",
+                "event_type": "message",
+                "event_time": item.get("send_time"),
+                "title": f"消息 · {item.get('msgtype') or 'unknown'}",
+                "summary": item.get("content") or "",
+                "source_table": "archived_messages",
+                "source_id": str(item.get("source_id") or ""),
+                "metadata": dict(item),
+            }
+            for item in self.list_recent_messages_by_unionid(unionid, limit=(limit or 50) + offset)
+        ]
+        if event_type:
+            messages = [item for item in messages if item.get("event_type") == event_type]
+        return _apply_page(messages, limit=limit, offset=offset)
+
+    def list_recent_messages_by_unionid(self, unionid: str, *, limit: int | None = None) -> list[JsonDict]:
         rows = self._session.execute(
             text(
                 """
-                SELECT id, msgid, chat_type, external_userid, owner_userid, sender, receiver,
+                SELECT id, msgid, chat_type, unionid, owner_userid, sender, receiver,
                        msgtype, content, send_time, raw_payload, created_at
                 FROM archived_messages
-                WHERE external_userid = :external_userid
+                WHERE unionid = :unionid
                 ORDER BY send_time DESC, id DESC
                 LIMIT :limit
                 """
             ),
-            {"external_userid": str(external_userid or "").strip(), "limit": max(1, int(limit or 20))},
+            {"unionid": str(unionid or "").strip(), "limit": max(1, int(limit or 20))},
         ).mappings()
         return [
             {
                 "msgid": row.get("msgid") or "",
-                "external_userid": row.get("external_userid") or "",
+                "unionid": row.get("unionid") or "",
                 "msgtype": row.get("msgtype") or "text",
                 "content": row.get("content") or "",
                 "send_time": _iso(row.get("send_time")),
@@ -876,16 +1006,17 @@ class LiveSourceCustomerReadRepository:
             for row in rows
         ]
 
-    get_recent_messages = list_recent_messages
-
     def customer_exists(self, external_userid: str) -> bool:
         return self.get_customer(external_userid) is not None
+
+    def customer_exists_by_unionid(self, unionid: str) -> bool:
+        return self.get_customer_by_unionid(unionid) is not None
 
     def _customer_rows(self, filters: JsonDict, *, limit: int | None, offset: int) -> list[JsonDict]:
         where, params = self._customer_where(filters)
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         sql = self._customer_decorated_sql(where_sql, "*") + """
-            ORDER BY sort_updated_at DESC, external_userid DESC
+            ORDER BY sort_updated_at DESC, unionid DESC
             LIMIT :limit OFFSET :offset
         """
         effective_limit = _DEFAULT_LIVE_SOURCE_LIST_LIMIT if limit is None else int(limit)
@@ -895,95 +1026,103 @@ class LiveSourceCustomerReadRepository:
     def _customer_decorated_sql(self, where_sql: str, select_sql: str) -> str:
         return f"""
             WITH scope AS (
-                SELECT external_userid FROM contacts
+                SELECT unionid FROM crm_user_identity WHERE COALESCE(identity_status, 'active') <> 'deleted'
                 UNION
-                SELECT external_userid FROM external_contact_bindings
+                SELECT unionid FROM wechat_pay_orders
                 UNION
-                SELECT external_userid FROM wecom_external_contact_identity_map
+                SELECT unionid FROM questionnaire_submissions
                 UNION
-                SELECT external_userid FROM wecom_external_contact_follow_users
+                SELECT unionid FROM archived_messages
                 UNION
-                SELECT external_userid FROM contact_tags
+                SELECT unionid FROM contact_tags
                 UNION
-                SELECT external_userid FROM class_user_status_current
+                SELECT unionid FROM class_user_status_current
                 UNION
-                SELECT external_userid FROM archived_messages
+                SELECT unionid FROM automation_channel_contact
             ),
             latest_messages AS (
-                SELECT external_userid, MAX(send_time) AS last_message_at
+                SELECT unionid, MAX(send_time) AS last_message_at
                 FROM archived_messages
-                WHERE external_userid IS NOT NULL AND external_userid <> ''
-                GROUP BY external_userid
+                WHERE unionid IS NOT NULL AND unionid <> ''
+                GROUP BY unionid
             ),
             decorated AS (
                 SELECT
-                    scope.external_userid,
+                    scope.unionid,
+                    COALESCE(NULLIF(identity.primary_external_userid, ''), '') AS external_userid,
                     COALESCE(
                         NULLIF(class_status.owner_userid_snapshot, ''),
-                        NULLIF(contact.owner_userid, ''),
-                        NULLIF(binding.last_owner_userid, ''),
-                        NULLIF(binding.first_owner_userid, ''),
-                        NULLIF((
-                            SELECT identity.follow_user_userid
-                            FROM wecom_external_contact_identity_map identity
-                            WHERE identity.external_userid = scope.external_userid
-                              AND identity.follow_user_userid IS NOT NULL
-                              AND identity.follow_user_userid <> ''
-                            ORDER BY identity.updated_at DESC, identity.id DESC
-                            LIMIT 1
-                        ), ''),
-                        NULLIF((
-                            SELECT follow_user.user_id
-                            FROM wecom_external_contact_follow_users follow_user
-                            WHERE follow_user.external_userid = scope.external_userid
-                              AND follow_user.user_id IS NOT NULL
-                              AND follow_user.user_id <> ''
-                            ORDER BY follow_user.is_primary DESC, follow_user.updated_at DESC, follow_user.id DESC
-                            LIMIT 1
-                        ), ''),
+                        NULLIF(channel_contact.owner_staff_id, ''),
+                        NULLIF(identity.primary_owner_userid, ''),
                         ''
                     ) AS owner_userid,
                     COALESCE(
                         NULLIF(class_status.customer_name_snapshot, ''),
-                        NULLIF(contact.customer_name, ''),
-                        NULLIF((
-                            SELECT identity.name
-                            FROM wecom_external_contact_identity_map identity
-                            WHERE identity.external_userid = scope.external_userid
-                              AND identity.name IS NOT NULL
-                              AND identity.name <> ''
-                            ORDER BY identity.updated_at DESC, identity.id DESC
-                            LIMIT 1
-                        ), ''),
-                        scope.external_userid
+                        NULLIF(CAST(channel_contact.source_payload_json ->> 'customer_name' AS TEXT), ''),
+                        NULLIF(CAST(channel_contact.source_payload_json ->> 'name' AS TEXT), ''),
+                        NULLIF(identity.customer_name, ''),
+                        NULLIF(CAST(identity.profile_json ->> 'name' AS TEXT), ''),
+                        NULLIF(CAST(identity.profile_json ->> 'customer_name' AS TEXT), ''),
+                        NULLIF(identity.remark, ''),
+                        NULLIF(identity.primary_external_userid, ''),
+                        scope.unionid
                     ) AS customer_name,
-                    COALESCE(NULLIF(people.mobile, ''), NULLIF(class_status.mobile_snapshot, ''), '') AS mobile,
-                    COALESCE(contact.remark, '') AS remark,
-                    COALESCE(contact.description, '') AS description,
+                    COALESCE(NULLIF(identity.mobile, ''), '') AS mobile,
+                    COALESCE(NULLIF(identity.remark, ''), NULLIF(CAST(channel_contact.source_payload_json ->> 'remark' AS TEXT), ''), '') AS remark,
+                    COALESCE(NULLIF(identity.description, ''), NULLIF(CAST(channel_contact.source_payload_json ->> 'description' AS TEXT), ''), '') AS description,
                     COALESCE(class_status.signup_status, '') AS signup_status,
                     COALESCE(class_status.signup_label_name, '') AS signup_label_name,
                     COALESCE(CAST(class_status.status_flags_json AS TEXT), '{{}}') AS status_flags_json,
-                    CASE WHEN binding.external_userid IS NULL THEN 0 ELSE 1 END AS is_bound,
-                    binding.person_id AS person_id,
-                    people.third_party_user_id AS third_party_user_id,
-                    contact.updated_at AS contact_updated_at,
-                    binding.updated_at AS binding_updated_at,
+                    CASE WHEN COALESCE(NULLIF(identity.mobile, ''), NULLIF(identity.primary_external_userid, '')) IS NULL THEN 0 ELSE 1 END AS is_bound,
+                    COALESCE(NULLIF(identity.legacy_person_id, ''), '') AS person_id,
+                    '' AS third_party_user_id,
+                    latest_payment_order.latest_paid_order_id AS latest_paid_order_id,
+                    latest_payment_order.latest_paid_at AS latest_paid_at,
+                    identity.updated_at AS contact_updated_at,
+                    channel_contact.updated_at AS channel_contact_updated_at,
+                    identity.updated_at AS binding_updated_at,
                     class_status.updated_at AS class_status_updated_at,
                     latest_messages.last_message_at AS last_message_at,
+                    identity.primary_openid AS openid,
+                    identity.identity_status AS identity_status,
+                    identity.follow_users_json AS follow_users_json,
                     COALESCE(
                         CAST(class_status.updated_at AS TEXT),
-                        CAST(contact.updated_at AS TEXT),
-                        CAST(binding.updated_at AS TEXT),
-                        latest_messages.last_message_at,
+                        CAST(channel_contact.updated_at AS TEXT),
+                        CAST(latest_payment_order.latest_paid_at AS TEXT),
+                        CAST(identity.updated_at AS TEXT),
+                        CAST(latest_messages.last_message_at AS TEXT),
                         ''
                     ) AS sort_updated_at
                 FROM scope
-                LEFT JOIN contacts contact ON contact.external_userid = scope.external_userid
-                LEFT JOIN external_contact_bindings binding ON binding.external_userid = scope.external_userid
-                LEFT JOIN people people ON people.id = binding.person_id
-                LEFT JOIN class_user_status_current class_status ON class_status.external_userid = scope.external_userid
-                LEFT JOIN latest_messages ON latest_messages.external_userid = scope.external_userid
-                WHERE scope.external_userid IS NOT NULL AND scope.external_userid <> ''
+                JOIN crm_user_identity identity ON identity.unionid = scope.unionid
+                LEFT JOIN (
+                    SELECT *
+                    FROM (
+                        SELECT channel_contact.*,
+                               ROW_NUMBER() OVER (
+                                   PARTITION BY channel_contact.unionid
+                                   ORDER BY channel_contact.updated_at DESC, channel_contact.id DESC
+                               ) AS row_num
+                        FROM automation_channel_contact channel_contact
+                        WHERE channel_contact.unionid IS NOT NULL
+                          AND channel_contact.unionid <> ''
+                    ) ranked_channel_contact
+                    WHERE ranked_channel_contact.row_num = 1
+                ) channel_contact ON channel_contact.unionid = scope.unionid
+                LEFT JOIN (
+                    SELECT unionid,
+                           MAX(id) AS latest_paid_order_id,
+                           MAX(COALESCE(paid_at, updated_at, created_at)) AS latest_paid_at
+                    FROM wechat_pay_orders
+                    WHERE unionid IS NOT NULL
+                      AND unionid <> ''
+                      AND (status = 'paid' OR trade_state = 'SUCCESS')
+                    GROUP BY unionid
+                ) latest_payment_order ON latest_payment_order.unionid = scope.unionid
+                LEFT JOIN class_user_status_current class_status ON class_status.unionid = scope.unionid
+                LEFT JOIN latest_messages ON latest_messages.unionid = scope.unionid
+                WHERE scope.unionid IS NOT NULL AND scope.unionid <> ''
             )
             SELECT {select_sql}
             FROM decorated
@@ -993,6 +1132,10 @@ class LiveSourceCustomerReadRepository:
     def _customer_where(self, filters: JsonDict) -> tuple[list[str], JsonDict]:
         where: list[str] = []
         params: JsonDict = {}
+        unionid = str(filters.get("unionid") or "").strip()
+        if unionid:
+            where.append("decorated.unionid = :unionid")
+            params["unionid"] = unionid
         external_userid = str(filters.get("external_userid") or "").strip()
         if external_userid:
             where.append("decorated.external_userid = :external_userid")
@@ -1022,7 +1165,7 @@ class LiveSourceCustomerReadRepository:
                     OR EXISTS (
                         SELECT 1
                         FROM contact_tags tag
-                        WHERE tag.external_userid = decorated.external_userid
+                        WHERE tag.unionid = decorated.unionid
                           AND (tag.tag_id = :tag OR tag.tag_name = :tag)
                     )
                 )
@@ -1054,7 +1197,8 @@ class LiveSourceCustomerReadRepository:
             where.append(
                 """
                 (
-                    LOWER(decorated.external_userid) LIKE :keyword
+                    LOWER(decorated.unionid) LIKE :keyword
+                    OR LOWER(decorated.external_userid) LIKE :keyword
                     OR LOWER(decorated.customer_name) LIKE :keyword
                     OR LOWER(decorated.owner_userid) LIKE :keyword
                     OR LOWER(decorated.remark) LIKE :keyword
@@ -1071,7 +1215,7 @@ class LiveSourceCustomerReadRepository:
                     OR EXISTS (
                         SELECT 1
                         FROM contact_tags tag
-                        WHERE tag.external_userid = decorated.external_userid
+                        WHERE tag.unionid = decorated.unionid
                           AND (LOWER(tag.tag_id) LIKE :keyword OR LOWER(tag.tag_name) LIKE :keyword)
                     )
                 )
@@ -1081,10 +1225,8 @@ class LiveSourceCustomerReadRepository:
         return where, params
 
     def _decorate_customer_rows(self, rows: list[JsonDict]) -> list[JsonDict]:
-        external_userids = [str(row.get("external_userid") or "").strip() for row in rows if str(row.get("external_userid") or "").strip()]
-        tag_map = self._tag_map(external_userids)
-        follow_users_map = self._follow_users_map(external_userids)
-        identity_map = self._identity_map(external_userids)
+        unionids = [str(row.get("unionid") or "").strip() for row in rows if str(row.get("unionid") or "").strip()]
+        tag_map = self._tag_map(unionids)
         owner_display_map = self._owner_display_map(
             [
                 str(row.get("owner_userid") or "").strip()
@@ -1094,10 +1236,12 @@ class LiveSourceCustomerReadRepository:
         )
         customers: list[JsonDict] = []
         for row in rows:
+            unionid = str(row.get("unionid") or "").strip()
             external_userid = str(row.get("external_userid") or "").strip()
             owner_userid = str(row.get("owner_userid") or "").strip()
             mobile = str(row.get("mobile") or "").strip() or None
             is_bound = bool(row.get("is_bound"))
+            customer_name = row.get("customer_name") or external_userid or unionid
             class_user_status = {
                 "current_status": row.get("signup_status") or "",
                 "signup_status": row.get("signup_status") or "",
@@ -1105,18 +1249,21 @@ class LiveSourceCustomerReadRepository:
                 "activation_bucket": _json_dict(row.get("status_flags_json")).get("activation_bucket", ""),
                 "updated_at": _iso(row.get("class_status_updated_at")),
             }
-            identity = identity_map.get(external_userid) or {}
+            follow_users = _json_list(row.get("follow_users_json"))
+            if not follow_users and owner_userid:
+                follow_users = [{"userid": owner_userid, "display_name": owner_display_map.get(owner_userid) or owner_userid, "is_primary": True}]
             customers.append(
                 {
-                    "person_id": str(row.get("person_id") or identity.get("person_id") or ""),
+                    "unionid": unionid,
+                    "person_id": str(row.get("person_id") or ""),
                     "external_userid": external_userid,
-                    "customer_name": row.get("customer_name") or external_userid,
+                    "customer_name": customer_name,
                     "remark": row.get("remark") or "",
                     "description": row.get("description") or "",
                     "owner_userid": owner_userid,
                     "owner_display_name": owner_display_map.get(owner_userid) or owner_userid,
                     "mobile": mobile,
-                    "tags": tag_map.get(external_userid, []),
+                    "tags": tag_map.get(unionid, []),
                     "class_user_status": class_user_status,
                     "last_message_at": _iso(row.get("last_message_at")),
                     "last_touch_at": _iso(row.get("class_status_updated_at") or row.get("contact_updated_at") or row.get("binding_updated_at")),
@@ -1133,90 +1280,94 @@ class LiveSourceCustomerReadRepository:
                         "person_id": row.get("person_id"),
                         "external_userid": external_userid,
                         "mobile": mobile,
-                        "unionid": identity.get("unionid") or "",
-                        "openid": identity.get("openid") or "",
-                        "status": identity.get("status") or "",
+                        "unionid": unionid,
+                        "openid": row.get("openid") or "",
+                        "status": row.get("identity_status") or "",
                     },
-                    "follow_users": follow_users_map.get(external_userid, []),
+                    "follow_users": follow_users,
                     "marketing_summary": {},
                     "marketing_profile": {},
                     "contact": {
                         "external_userid": external_userid,
-                        "name": row.get("customer_name") or external_userid,
+                        "name": customer_name,
                         "remark": row.get("remark") or "",
                         "description": row.get("description") or "",
                     },
                     "sidebar_context": {
-                        "can_open_sidebar": bool(external_userid),
-                        "customer_profile_url": f"/admin/customers/{external_userid}" if external_userid else "",
+                        "can_open_sidebar": bool(unionid),
+                        "customer_profile_url": f"/admin/customers/{unionid}" if unionid else "",
                     },
                 }
             )
         return customers
 
-    def _tag_map(self, external_userids: list[str]) -> dict[str, list[str]]:
+    def _tag_map(self, unionids: list[str]) -> dict[str, list[str]]:
         rows = self._execute_in_query(
             """
-            SELECT external_userid, COALESCE(NULLIF(tag_name, ''), tag_id) AS tag
+            SELECT unionid, COALESCE(NULLIF(tag_name, ''), tag_id) AS tag
             FROM contact_tags
-            WHERE external_userid IN :external_userids
-            ORDER BY external_userid ASC, tag ASC
+            WHERE unionid IN :external_userids
+            ORDER BY unionid ASC, tag ASC
             """,
-            external_userids,
+            unionids,
         )
         result: dict[str, list[str]] = {}
         for row in rows:
-            external_userid = str(row.get("external_userid") or "").strip()
+            unionid = str(row.get("unionid") or "").strip()
             tag = str(row.get("tag") or "").strip()
-            if external_userid and tag and tag not in result.setdefault(external_userid, []):
-                result[external_userid].append(tag)
+            if unionid and tag and tag not in result.setdefault(unionid, []):
+                result[unionid].append(tag)
         return result
 
-    def _follow_users_map(self, external_userids: list[str]) -> dict[str, list[JsonDict]]:
-        rows = self._execute_in_query(
-            """
-            SELECT external_userid, user_id, relation_status, is_primary, remark, description, updated_at
-            FROM wecom_external_contact_follow_users
-            WHERE external_userid IN :external_userids
-            ORDER BY external_userid ASC, is_primary DESC, updated_at DESC, id DESC
-            """,
-            external_userids,
-        )
-        result: dict[str, list[JsonDict]] = {}
-        for row in rows:
-            external_userid = str(row.get("external_userid") or "").strip()
-            userid = str(row.get("user_id") or "").strip()
-            if not external_userid or not userid:
-                continue
-            result.setdefault(external_userid, []).append(
-                {
-                    "userid": userid,
-                    "display_name": userid,
-                    "relation_status": str(row.get("relation_status") or "").strip(),
-                    "is_primary": bool(row.get("is_primary")),
-                    "remark": str(row.get("remark") or "").strip(),
-                    "description": str(row.get("description") or "").strip(),
-                    "updated_at": _iso(row.get("updated_at")),
-                }
-            )
-        return result
+    def _identity_by_external_userid(self, external_userid: str) -> JsonDict:
+        normalized = str(external_userid or "").strip()
+        if not normalized:
+            return {}
+        if self._is_sqlite_session():
+            return self._identity_by_external_userid_sqlite(normalized)
+        row = self._session.execute(
+            text(
+                """
+                SELECT unionid, primary_external_userid, primary_openid, identity_status
+                FROM crm_user_identity
+                WHERE primary_external_userid = :external_userid
+                   OR jsonb_exists(external_userids_json, :external_userid)
+                   OR EXISTS (
+                       SELECT 1
+                       FROM jsonb_array_elements(external_userids_json) AS item(value)
+                       WHERE jsonb_typeof(item.value) = 'object'
+                         AND item.value ->> 'external_userid' = :external_userid
+                   )
+                ORDER BY CASE WHEN primary_external_userid = :external_userid THEN 0 ELSE 1 END,
+                         updated_at DESC
+                LIMIT 1
+                """
+            ),
+            {"external_userid": normalized},
+        ).mappings().first()
+        return dict(row or {})
 
-    def _identity_map(self, external_userids: list[str]) -> dict[str, JsonDict]:
-        rows = self._execute_in_query(
-            """
-            SELECT external_userid, unionid, openid, follow_user_userid, name, status, updated_at, id
-            FROM wecom_external_contact_identity_map
-            WHERE external_userid IN :external_userids
-            ORDER BY external_userid ASC, updated_at DESC, id DESC
-            """,
-            external_userids,
-        )
-        result: dict[str, JsonDict] = {}
-        for row in rows:
-            external_userid = str(row.get("external_userid") or "").strip()
-            if external_userid and external_userid not in result:
-                result[external_userid] = dict(row)
-        return result
+    def _is_sqlite_session(self) -> bool:
+        bind = self._session.get_bind()
+        dialect = getattr(bind, "dialect", None)
+        return str(getattr(dialect, "name", "") or "").lower() == "sqlite"
+
+    def _identity_by_external_userid_sqlite(self, external_userid: str) -> JsonDict:
+        row = self._session.execute(
+            text(
+                """
+                SELECT unionid, primary_external_userid, primary_openid, identity_status
+                FROM crm_user_identity
+                WHERE primary_external_userid = :external_userid
+                   OR COALESCE(CAST(external_userids_json AS TEXT), '') LIKE :external_userid_like
+                ORDER BY CASE WHEN primary_external_userid = :external_userid THEN 0 ELSE 1 END,
+                         updated_at DESC
+                LIMIT 1
+                """
+            ),
+            {"external_userid": external_userid, "external_userid_like": f'%"{external_userid}"%'},
+        ).mappings().first()
+        return dict(row or {})
 
     def _owner_display_map(self, userids: list[str]) -> dict[str, str]:
         rows = self._execute_in_query(
@@ -1331,6 +1482,18 @@ def _json_dict(value: object) -> JsonDict:
     except Exception:
         return {}
     return dict(parsed) if isinstance(parsed, dict) else {}
+
+
+def _json_list(value: object) -> list[JsonDict]:
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if not value:
+        return []
+    try:
+        parsed = json.loads(str(value))
+    except Exception:
+        return []
+    return [dict(item) for item in parsed if isinstance(item, dict)] if isinstance(parsed, list) else []
 
 
 def build_customer_live_source_repository(

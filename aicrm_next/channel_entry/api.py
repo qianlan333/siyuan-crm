@@ -4,59 +4,67 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
+from aicrm_next.shared.sync_request import read_request_body
+
 from .application import (
     callback_config,
-    decrypt_callback_body,
     diagnose_channel_runtime,
     dry_run_channel_entry,
     encrypted_success_reply,
     generate_channel_qrcode,
-    process_wecom_external_contact_event,
     repair_channel_entry,
     verify_callback_echostr,
 )
+from .callback_ingress import ingest_wecom_external_contact_callback
 from .schemas import (
     DiagnoseChannelRuntimeQuery,
     GenerateChannelQrCodeCommand,
     ProcessChannelEntryCommand,
-    ProcessWeComExternalContactEventCommand,
     RepairChannelEntryCommand,
 )
 
+callback_router = APIRouter()
 router = APIRouter()
 
 
-async def _handle_callback(request: Request) -> Response:
+def _handle_callback(request: Request, body: bytes = b"") -> Response:
     query = {key: str(value) for key, value in request.query_params.items()}
     try:
         if request.method == "GET":
             return Response(verify_callback_echostr(query), media_type="text/plain")
-        event_data, plain_xml = decrypt_callback_body(query=query, body=await request.body())
-        process_wecom_external_contact_event(
-            ProcessWeComExternalContactEventCommand(
-                corp_id=str(event_data.get("ToUserName") or ""),
-                event_data=event_data,
-                payload_xml=plain_xml,
-                route=str(request.url.path),
-            )
-        )
-        return Response(encrypted_success_reply(query), media_type="application/xml")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        ingest_wecom_external_contact_callback(
+            query=query,
+            headers=dict(request.headers),
+            body=body,
+            route=str(request.url.path),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="webhook ingress unavailable") from exc
+    return Response(encrypted_success_reply(query), media_type="application/xml")
 
 
-@router.api_route("/wecom/external-contact/callback", methods=["GET", "POST", "OPTIONS", "HEAD"])
-async def external_contact_callback(request: Request) -> Response:
+@callback_router.api_route("/wecom/external-contact/callback", methods=["GET", "POST", "OPTIONS", "HEAD"])
+def external_contact_callback(request: Request) -> Response:
     if request.method in {"OPTIONS", "HEAD"}:
         return Response("", media_type="text/plain")
-    return await _handle_callback(request)
+    body = b"" if request.method == "GET" else read_request_body(request)
+    return _handle_callback(request, body=body)
 
 
-@router.api_route("/api/wecom/events", methods=["GET", "POST", "OPTIONS", "HEAD"])
-async def wecom_events(request: Request) -> Response:
+@callback_router.api_route("/api/wecom/events", methods=["GET", "POST", "OPTIONS", "HEAD"])
+def wecom_events(request: Request) -> Response:
     if request.method in {"OPTIONS", "HEAD"}:
         return Response("", media_type="text/plain")
-    return await _handle_callback(request)
+    body = b"" if request.method == "GET" else read_request_body(request)
+    return _handle_callback(request, body=body)
+
+
+router.include_router(callback_router)
 
 
 @router.get("/api/admin/channels/runtime-diagnosis")

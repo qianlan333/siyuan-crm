@@ -10,9 +10,7 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("SECRET_KEY", "qrcode-download-consistency")
     channels_api._FIXTURE_CHANNELS.clear()
-    channels_api._FIXTURE_PROGRAM_BINDINGS.clear()
     channels_api._NEXT_ID = 1
-    channels_api._NEXT_BINDING_ID = 1
     return TestClient(create_app(), raise_server_exceptions=False)
 
 

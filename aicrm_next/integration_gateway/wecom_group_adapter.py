@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from typing import Any, Callable
 
 from aicrm_next.automation_engine.group_ops.domain import normalize_group_admin_userids
+from aicrm_next.platform_foundation.external_effects.execution_gates import explicit_wecom_execution_disabled
 from aicrm_next.shared.postgres_connection import get_db
+from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
 
 from .audit import record_audit_event
 from .wecom_customer_group_client import WeComCustomerGroupClient, WeComCustomerGroupClientError
@@ -16,12 +17,14 @@ WECOM_GROUP_CHAT_ID_LIST_FIELD = "chat_id_list"
 
 
 def _mode() -> str:
-    value = str(os.getenv("AICRM_WECOM_GROUP_ADAPTER_MODE", "") or "").strip().lower()
+    if explicit_wecom_execution_disabled():
+        return "disabled"
+    value = str(runtime_setting("AICRM_WECOM_GROUP_ADAPTER_MODE") or "").strip().lower()
     return value if value in {"disabled", "fake", "staging", "production"} else "disabled"
 
 
 def _enabled(name: str) -> bool:
-    return str(os.getenv(name, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+    return runtime_bool(name)
 
 
 def _hash_payload(payload: dict[str, Any]) -> str:
@@ -547,10 +550,6 @@ class WeComGroupChatSyncAdapter(WeComGroupAssetAdapter):
     adapter_name = "WeComGroupChatSyncAdapter"
 
 
-def _json_dumps(value: Any, *, default: Any) -> str:
-    return json.dumps(value if value is not None else default, ensure_ascii=False)
-
-
 def _decode_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -561,94 +560,6 @@ def _decode_payload(value: Any) -> dict[str, Any]:
         except ValueError:
             return {}
     return {}
-
-
-class NextGroupOpsQueueGateway:
-    def __init__(self, *, insert_job_fn: Callable[..., int] | None = None) -> None:
-        self._insert_job_fn = insert_job_fn
-
-    def enqueue_group_message(
-        self,
-        *,
-        plan_id: int,
-        source_id: str,
-        scheduled_at: str | None,
-        owner_userid: str,
-        chat_ids: list[str],
-        content_payload: dict[str, Any],
-        content_summary: str,
-        created_by: str = "group_ops_webhook",
-    ) -> int:
-        cleaned_chat_ids = [str(item or "").strip() for item in chat_ids if str(item or "").strip()]
-        payload = dict(content_payload or {})
-        payload["channel"] = "wecom_customer_group"
-        payload["chat_ids"] = cleaned_chat_ids
-        payload["sender"] = str(owner_userid or "").strip()
-        source_ref = str(source_id or plan_id)
-        idempotency_key = f"group_ops:{source_id or plan_id}:{scheduled_at or ''}"
-        fields = {
-            "source_type": "workflow",
-            "source_table": "automation_group_ops_plans",
-            "source_id": source_ref,
-            "idempotency_key": idempotency_key,
-            "business_domain": "group_ops",
-            "channel": "wecom_customer_group",
-            "target_kind": "chat_id" if cleaned_chat_ids else "dynamic",
-            "scheduled_for": scheduled_at,
-            "target_external_userids": [],
-            "target_count": 0,
-            "target_summary": f"{len(cleaned_chat_ids)} customer groups",
-            "content_type": "wecom_customer_group",
-            "content_payload": payload,
-            "content_summary": str(content_summary or "")[:500],
-            "created_by": created_by,
-        }
-        if self._insert_job_fn is not None:
-            return int(self._insert_job_fn(**fields) or 0)
-        db = get_db()
-        row = db.execute(
-            """
-            INSERT INTO broadcast_jobs (
-                source_type, source_id, source_table, scheduled_for, priority, batch_key,
-                business_domain, idempotency_key, channel, target_kind, retry_policy_json, metadata_json,
-                status, requires_approval,
-                target_external_userids, target_count, target_summary,
-                content_type, content_payload, content_summary,
-                trace_id, created_by
-            ) VALUES (
-                ?, ?, ?, ?, 100, '',
-                ?, ?, ?, ?, CAST(? AS jsonb), CAST(? AS jsonb),
-                'queued', FALSE,
-                CAST(? AS jsonb), ?, ?,
-                ?, CAST(? AS jsonb), ?,
-                ?, ?
-            )
-            ON CONFLICT (idempotency_key) WHERE idempotency_key IS NOT NULL AND idempotency_key <> '' DO NOTHING
-            RETURNING id
-            """,
-            (
-                fields["source_type"],
-                fields["source_id"],
-                fields["source_table"],
-                fields["scheduled_for"],
-                fields["business_domain"],
-                fields["idempotency_key"],
-                fields["channel"],
-                fields["target_kind"],
-                _json_dumps({}, default={}),
-                _json_dumps({}, default={}),
-                _json_dumps(fields["target_external_userids"], default=[]),
-                fields["target_count"],
-                fields["target_summary"],
-                fields["content_type"],
-                _json_dumps(fields["content_payload"], default={}),
-                fields["content_summary"],
-                fields["idempotency_key"],
-                fields["created_by"],
-            ),
-        ).fetchone()
-        db.commit()
-        return int((row or {}).get("id") or 0)
 
 
 class NextGroupOpsQueueStatsGateway:
@@ -692,10 +603,6 @@ def build_wecom_group_asset_adapter() -> WeComGroupAssetAdapter:
 
 def build_wecom_group_chat_sync_adapter() -> WeComGroupAssetAdapter:
     return build_wecom_group_asset_adapter()
-
-
-def build_group_ops_queue_gateway() -> NextGroupOpsQueueGateway:
-    return NextGroupOpsQueueGateway()
 
 
 def build_group_ops_queue_stats_gateway() -> NextGroupOpsQueueStatsGateway:

@@ -23,7 +23,7 @@ DATABASE_URL=postgresql://test:test@localhost:5432/test pytest tests/integration
 docker stop pg-test
 ```
 
-旧的 `tests/integration/test_pg_compat_smoke.py` 已随 legacy package/domain executable tests 归档。新的 PG smoke 应放到对应 Next-native owner 测试文件中，并通过 `DATABASE_URL` 在真实 PG 上运行。
+旧的 `historical removed reference (test_pg_compat_smoke.py)` 已随 legacy package/domain executable tests 归档。新的 PG smoke 应放到对应 Next-native owner 测试文件中，并通过 `DATABASE_URL` 在真实 PG 上运行。
 
 CI 上 GitHub Actions 用 service container 起 postgres:16，自动设 `DATABASE_URL`，每个 PR 必跑。
 
@@ -34,7 +34,7 @@ CI 上 GitHub Actions 用 service container 起 postgres:16，自动设 `DATABAS
 | `tests/test_marketing_schema_init.py` | Next-owned marketing/user-ops fixture repo smoke |
 | `tests/test_campaigns_due_calc.py` | campaign due calculation on current data shape |
 | `tests/test_broadcast_jobs_service.py` / `tests/test_run_broadcast_queue_worker.py` | broadcast queue lifecycle and worker contracts |
-| `tests/test_post_closeout_production_contract.py` | post-closeout production runtime contract |
+| `historical removed reference (test_post_closeout_production_contract.py)` | post-closeout production runtime contract |
 
 ## 怎么加新的 smoke
 

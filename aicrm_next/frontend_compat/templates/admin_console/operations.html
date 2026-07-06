@@ -273,17 +273,11 @@
   <article class="admin-card">
     <div class="admin-card-head">
       <div>
-        <h2>待处理作业</h2>
-        <p>执行作业前会要求确认；执行后会记录操作人和时间。</p>
+        <h2>待处理作业执行已退场</h2>
+        <p>旧的待处理作业 runner 已停用；新自动化运营请使用 AI 人群包、内部事件和外推任务队列。</p>
       </div>
     </div>
-    <form method="post" action="{{ url_for('api.admin_console_operations_action') }}" class="admin-form-stack">
-      <input type="hidden" name="return_tab" value="deferred">
-      <input type="hidden" name="action" value="run-deferred-jobs">
-      <label class="admin-field"><span>执行数量上限</span><input type="number" name="limit" min="1" max="200" value="20"></label>
-      <label class="admin-check-line"><input type="checkbox" name="confirm" value="1"><span>我确认执行当前待处理作业</span></label>
-      <button class="admin-button admin-button--primary" type="submit">执行待处理作业</button>
-    </form>
+    <div class="admin-empty">这里只保留历史待处理作业的只读排查入口，不再提供手动执行按钮。</div>
     <hr class="admin-divider">
     <form method="post" action="{{ url_for('api.admin_console_operations_action') }}" class="admin-form-stack">
       <input type="hidden" name="return_tab" value="deferred">

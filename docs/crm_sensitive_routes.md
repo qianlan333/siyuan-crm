@@ -8,7 +8,7 @@
 
 - 本轮不启用 internal auth
 - 本轮不改变现有路由行为
-- 清单以 `create_app().url_map` 与 [routes.py](../wecom_ability_service/routes.py) 为准
+- 清单以 `create_app().url_map` 与 [routes.py](#historical-reference) 为准
 
 ## 当前真实存在的敏感接口
 

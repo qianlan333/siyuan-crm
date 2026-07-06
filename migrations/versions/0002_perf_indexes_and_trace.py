@@ -21,6 +21,7 @@ from the PostgreSQL schema bootstrap is a no-op.
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import inspect
 
 revision: str = "0002"
 down_revision: str | None = "0001"
@@ -28,13 +29,20 @@ branch_labels: str | None = None
 depends_on: str | None = None
 
 
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    schema = None if bind.dialect.name == "sqlite" else "public"
+    return inspect(bind).has_table(table, schema=schema)
+
+
 def upgrade() -> None:
-    op.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_conversion_dispatch_log_external_dispatched
-        ON conversion_dispatch_log (external_userid, dispatched_at DESC)
-        """
-    )
+    if _has_table("conversion_dispatch_log"):
+        op.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_conversion_dispatch_log_external_dispatched
+            ON conversion_dispatch_log (external_userid, dispatched_at DESC)
+            """
+        )
 
     op.execute(
         """

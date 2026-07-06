@@ -8,6 +8,8 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from aicrm_next.shared.runtime import production_data_ready
+
 router = APIRouter()
 
 _COMMON_HEADERS = {
@@ -57,6 +59,16 @@ async def _payload(request: Request) -> dict[str, Any]:
 async def class_user_management_export(request: Request) -> Response:
     if request.method.upper() == "OPTIONS":
         return _options("next_class_user_management_export")
+    if production_data_ready():
+        payload = _common_payload("production_unavailable")
+        payload.update(
+            {
+                "ok": False,
+                "error": "class_user_management_export_requires_real_read_model",
+                "read_model_status": "unavailable",
+            }
+        )
+        return JSONResponse(payload, status_code=503, headers=_COMMON_HEADERS)
 
     payload = await _payload(request)
     signup_status = _text(payload.get("signup_status"))

@@ -21,6 +21,24 @@ def test_group_ops_message_adapter_fake_mode_verifies_exact_targets() -> None:
     assert result["requested_chat_ids"] == ["chat_a", "chat_b"]
 
 
+def test_group_ops_message_adapter_respects_global_execution_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "disabled")
+    adapter = WeComGroupMessageAdapter(mode=None)
+
+    result = adapter.create_group_message_task(
+        {
+            "sender": "owner_1",
+            "chat_ids": ["chat_a"],
+            "text": {"content": "hello"},
+        },
+        idempotency_key="group-ops-global-disabled",
+    )
+
+    assert result["ok"] is False
+    assert result["mode"] == "disabled"
+    assert result["side_effect_executed"] is False
+
+
 def test_group_ops_message_adapter_disabled_mode_blocks_send() -> None:
     adapter = WeComGroupMessageAdapter(mode="disabled")
 

@@ -7,28 +7,11 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
-
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSIONS = ROOT / "migrations" / "versions"
 NUMERIC_BIND_PATTERN = re.compile(r"(?<![:\\]):[0-9]+")
 ALEMBIC_VERSION_NUM_LENGTH = 128
-PLACEHOLDER_REVISIONS = (
-    "0032_miniprogram_only_resend_20260611",
-    "0033_complete_miniprogram_only_resend_20260611",
-    "0034_reset_miniprogram_only_material_jobs_20260611",
-)
-FORBIDDEN_PRODUCTION_DATA_MARKERS = (
-    "HuangYouCan",
-    "external_second_push_feishu",
-    "mini_only_20260611",
-    "INSERT INTO campaigns",
-    "INSERT INTO campaign_members",
-    "INSERT INTO campaign_steps",
-    "UPDATE broadcast_jobs",
-)
 
 
 def _literal_assignment(tree: ast.Module, name: str) -> Any:
@@ -129,57 +112,86 @@ def test_user_ops_production_tables_migration_is_parent_of_wechat_unionid_index(
     assert revisions["0030_wechat_pay_unionid_idx"]["down_revision"] == "0029_user_ops_prod_tables"
 
 
-def test_siyuan_production_channel_assignment_revision_is_locatable() -> None:
-    revisions = _migration_revisions()
-    revision_id = "0037_channel_multi_staff_assignment"
-    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
+def test_miniprogram_reset_migration_preserves_broadcast_job_claim_token_not_null_contract() -> None:
+    source = (
+        VERSIONS / "0034_reset_miniprogram_only_material_jobs_20260611.py"
+    ).read_text(encoding="utf-8")
 
-    assert revision_id in revisions
-    assert revisions[revision_id]["path"].name == "0037_channel_multi_staff_assignment.py"
-    assert revisions[revision_id]["down_revision"] == "0036_wechat_shop_sync_runs"
-    assert script.get_revision(revision_id).revision == revision_id
-
-
-def test_siyuan_production_channel_assignment_revision_can_upgrade_to_head() -> None:
-    script = ScriptDirectory.from_config(Config(str(ROOT / "alembic.ini")))
-    upgrade_steps = script._upgrade_revs("heads", "0037_channel_multi_staff_assignment")
-    upgrade_revision_ids = {step.revision.revision for step in upgrade_steps}
-
-    assert "0038_merge_duplicate_channel_wechat_shop_heads" in upgrade_revision_ids
-    assert "0037_channel_multi_staff_assignment" in _parents(
-        _migration_revisions()["0038_merge_duplicate_channel_wechat_shop_heads"]["down_revision"]
-    )
+    assert "claim_token TEXT NOT NULL DEFAULT ''" in (
+        VERSIONS / "0012_broadcast_job_leases.py"
+    ).read_text(encoding="utf-8")
+    assert "claim_token = ''" in source or "siyuan-safe placeholder" in source
+    assert "claim_token = NULL" not in source
 
 
-def test_siyuan_channel_assignment_migration_is_idempotent_overlay() -> None:
-    source = (VERSIONS / "0037_channel_multi_staff_assignment.py").read_text(encoding="utf-8")
+def test_perf_index_migration_does_not_require_retired_conversion_table_on_fresh_db() -> None:
+    source = (VERSIONS / "0002_perf_indexes_and_trace.py").read_text(encoding="utf-8")
 
-    assert "ADD COLUMN IF NOT EXISTS assignment_mode" in source
-    assert "ADD COLUMN IF NOT EXISTS assignment_strategy" in source
-    assert "ADD COLUMN IF NOT EXISTS overflow_policy" in source
-    assert "ADD COLUMN IF NOT EXISTS assignment_config_json" in source
+    assert 'if _has_table("conversion_dispatch_log"):' in source
+    assert "CREATE INDEX IF NOT EXISTS idx_conversion_dispatch_log_external_dispatched" in source
+    assert "DO $$" not in source
+
+
+def test_member_segment_migration_does_not_recreate_retired_member_table_on_fresh_db() -> None:
+    source = (VERSIONS / "0003_member_segment_columns.py").read_text(encoding="utf-8")
+
+    assert 'if not _has_table("automation_member"):' in source
+    assert "return" in source
+    assert "CREATE TABLE automation_member" not in source
+    assert "to_regclass" not in source
+
+
+def test_cloud_orchestrator_migration_skips_legacy_automation_tables_on_fresh_db() -> None:
+    source = (VERSIONS / "0004_cloud_orchestrator.py").read_text(encoding="utf-8")
+
+    assert '_create_index_if_table_exists(\n        "automation_touch_delivery_log"' in source
+    assert '_create_index_if_table_exists(\n        "outbound_tasks"' in source
+    assert 'and _has_table("automation_touch_delivery_log")' in source
+    assert 'and _has_table("automation_ai_push_log")' in source
+    assert "CREATE TABLE automation_member" not in source
+    assert "to_regclass" not in source
+
+
+def test_miniprogram_library_migration_skips_missing_sop_template_on_fresh_db() -> None:
+    source = (VERSIONS / "0006_miniprogram_library.py").read_text(encoding="utf-8")
+
+    assert "def _has_table" in source
+    assert "if _has_table(table) and not _has_column(table, column_name):" in source
+    assert 'if _has_table("automation_sop_template"):' in source
+    assert "CREATE TABLE automation_sop_template" not in source
+
+
+def test_radar_pdf_preview_migration_keeps_foreign_keys_optional_for_fresh_db() -> None:
+    source = (VERSIONS / "0025_radar_pdf_preview_assets.py").read_text(encoding="utf-8")
+
+    assert 'if _has_table("radar_links") else ""' in source
+    assert "radar_link_id BIGINT{link_reference}" in source
+    assert "link_id BIGINT NOT NULL{link_reference}" in source
+
+
+def test_group_ops_admin_userids_migration_skips_legacy_group_chats_on_fresh_db() -> None:
+    source = (VERSIONS / "0027_group_ops_admin_userids.py").read_text(encoding="utf-8")
+
+    assert 'if not _has_table("wecom_group_chat_snapshots"):' in source
+    assert 'if not _has_table("group_chats"):' in source
+    assert "FROM group_chats" in source
+
+
+def test_wechat_pay_unionid_index_migration_skips_missing_legacy_orders_on_fresh_db() -> None:
+    source = (VERSIONS / "0030_wechat_pay_unionid_idx.py").read_text(encoding="utf-8")
+
+    assert 'if not _has_table("wechat_pay_orders"):' in source
+    assert "idx_wechat_pay_orders_unionid_created" in source
+
+
+def test_channel_multi_staff_migration_keeps_channel_foreign_key_optional_for_fresh_db() -> None:
+    source = (VERSIONS / "0036_channel_multi_staff_assignment.py").read_text(encoding="utf-8")
+
+    assert 'if _has_table("automation_channel") else ""' in source
+    assert "channel_id BIGINT NOT NULL__CHANNEL_REFERENCE__" in source
+    assert '.replace("__CHANNEL_REFERENCE__", channel_reference)' in source
     assert "CREATE TABLE IF NOT EXISTS automation_channel_assignee" in source
     assert "CREATE TABLE IF NOT EXISTS automation_channel_assignment_event" in source
-    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignee_active" in source
-    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignment_24h" in source
-    assert "CREATE INDEX IF NOT EXISTS idx_channel_assignment_external" in source
-
-
-def test_siyuan_placeholders_do_not_import_ai_crm_production_data() -> None:
-    revisions = _migration_revisions()
-
-    for revision in PLACEHOLDER_REVISIONS:
-        path = revisions[revision]["path"]
-        source = path.read_text(encoding="utf-8")
-        tree = ast.parse(source, filename=str(path))
-        functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
-
-        assert "AI-CRM product data migration intentionally no-op for siyuan" in source
-        assert all(marker not in source for marker in FORBIDDEN_PRODUCTION_DATA_MARKERS)
-        assert set(functions) >= {"upgrade", "downgrade"}
-        for name in ("upgrade", "downgrade"):
-            assert len(functions[name].body) == 1
-            assert isinstance(functions[name].body[0], ast.Pass)
 
 
 def test_raw_migration_sql_does_not_expose_numeric_bind_literals() -> None:
@@ -240,4 +252,24 @@ def test_alembic_commands_can_walk_revision_graph() -> None:
         if args == ("heads",):
             heads = [line for line in result.stdout.splitlines() if "(head)" in line]
             assert len(heads) == 1
-            assert "0038_merge_duplicate_channel_wechat_shop_heads" in heads[0]
+
+
+def test_deployed_webhook_inbox_revision_is_merged_into_current_head() -> None:
+    revisions = _migration_revisions()
+
+    assert revisions["0054_webhook_inbox"]["down_revision"] is None
+    assert set(revisions["0058_merge_webhook_inbox_and_huangyoucan_audience"]["down_revision"]) == {
+        "0054_webhook_inbox",
+        "0057_huangyoucan_unregistered_ai_audience",
+    }
+    assert revisions["0059_ai_audience_simple_sql_runtime"]["down_revision"] == "0058_merge_webhook_inbox_and_huangyoucan_audience"
+    assert revisions["0060_ai_audience_hxc_member_usage_view"]["down_revision"] == "0059_ai_audience_simple_sql_runtime"
+
+
+def test_legacy_webhook_retirement_migration_does_not_delete_history_data() -> None:
+    source = (VERSIONS / "0044_retire_legacy_webhook_deprecations.py").read_text(encoding="utf-8")
+
+    assert "history_data_deleted" in source
+    assert "physical_delete" in source
+    assert "DELETE FROM legacy_webhook_cleanup_audit" in source
+    assert "DROP TABLE" not in source

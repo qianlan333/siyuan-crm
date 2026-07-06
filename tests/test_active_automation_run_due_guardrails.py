@@ -15,79 +15,21 @@ def _production_client(monkeypatch):
     return TestClient(create_app())
 
 
-def _auth_headers():
-    return {"Authorization": "Bearer probe-token"}
+def _auth_headers(idempotency_key: str = "probe-run-due"):
+    return {"Authorization": "Bearer probe-token", "Idempotency-Key": idempotency_key}
 
 
-def test_jobs_run_due_dry_run_is_noop_and_not_forwarded(monkeypatch):
-    client = _production_client(monkeypatch)
-
-    response = client.post(
-        checker.ACTIVE_JOBS_ROUTE,
-        json={"dry_run": True, "jobs": ["sop", "conversion_workflow"]},
-        headers=_auth_headers(),
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["ok"] is True
-    assert payload["dry_run"] is True
-    assert payload.get("side_effect_executed", False) is False
-    assert payload["fallback_used"] is False
-    assert payload["route_owner"] == "ai_crm_next"
-    assert "X-AICRM-Compatibility-Facade" not in response.headers
-
-
-def test_jobs_run_due_preview_body_is_read_only_and_not_forwarded(monkeypatch):
-    client = _production_client(monkeypatch)
-
-    response = client.post(
-        checker.ACTIVE_JOBS_ROUTE,
-        json={"preview": True, "jobs": ["sop", "conversion_workflow"]},
-        headers=_auth_headers(),
-    )
-
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["timer_status"] == "preview_only"
-    assert payload.get("side_effect_executed", False) is False
-    assert payload["fallback_used"] is False
-    assert "X-AICRM-Compatibility-Facade" not in response.headers
-    assert [item["job_code"] for item in payload["candidates"]] == ["sop", "conversion_workflow"]
-    assert set(payload["candidates"][0]) >= {"job_code", "status", "estimated_actions"}
-
-
-def test_jobs_run_due_preview_endpoint_is_available(monkeypatch):
-    client = _production_client(monkeypatch)
-
-    response = client.post(checker.ACTIVE_JOBS_PREVIEW_ROUTE, json={"jobs": ["sop"]}, headers=_auth_headers())
-
-    assert response.status_code == 200
-    assert response.json()["timer_status"] == "preview_only"
-
-
-def test_jobs_run_due_real_execution_requires_allowlist_in_production(monkeypatch):
-    client = _production_client(monkeypatch)
-
-    response = client.post(
-        checker.ACTIVE_JOBS_ROUTE,
-        json={"dry_run": False, "jobs": ["sop", "conversion_workflow"], "max_send_records": 1, "max_outbound_tasks": 1},
-        headers=_auth_headers(),
-    )
-
-    assert response.status_code == 409
-    payload = response.json()
-    assert payload["error_code"] == "automation_run_due_allowlist_required"
-    assert payload["side_effect_executed"] is False
-    assert payload["fallback_used"] is False
-    assert payload["preflight_summary"]["allowlist_present"] is False
+def test_legacy_jobs_runner_is_not_part_of_guardrail_surface():
+    assert not hasattr(checker, "ACTIVE_JOBS_ROUTE")
+    assert not hasattr(checker, "ACTIVE_JOBS_PREVIEW_ROUTE")
+    assert not checker.DB_SENTINEL_QUERIES
 
 
 def test_campaign_dry_run_and_preview_are_noop(monkeypatch):
     client = _production_client(monkeypatch)
 
-    dry_run = client.post(checker.CAMPAIGN_ROUTE, json={"dry_run": True, "batch_size": 1}, headers=_auth_headers())
-    preview = client.post(checker.CAMPAIGN_PREVIEW_ROUTE, json={"batch_size": 1}, headers=_auth_headers())
+    dry_run = client.post(checker.CAMPAIGN_ROUTE, json={"dry_run": True, "batch_size": 1}, headers=_auth_headers("probe-dry-run"))
+    preview = client.post(checker.CAMPAIGN_PREVIEW_ROUTE, json={"batch_size": 1}, headers=_auth_headers("probe-preview"))
 
     assert dry_run.status_code == 200
     assert dry_run.json().get("side_effect_executed", False) is False
@@ -101,7 +43,11 @@ def test_campaign_dry_run_and_preview_are_noop(monkeypatch):
 def test_campaign_real_execution_requires_allowlist_in_production(monkeypatch):
     client = _production_client(monkeypatch)
 
-    response = client.post(checker.CAMPAIGN_ROUTE, json={"dry_run": False, "batch_size": 1, "max_dispatch_count": 1}, headers=_auth_headers())
+    response = client.post(
+        checker.CAMPAIGN_ROUTE,
+        json={"dry_run": False, "batch_size": 1, "max_dispatch_count": 1},
+        headers=_auth_headers("probe-real-without-allowlist"),
+    )
 
     assert response.status_code == 409
     payload = response.json()
@@ -110,25 +56,18 @@ def test_campaign_real_execution_requires_allowlist_in_production(monkeypatch):
     assert payload["fallback_used"] is False
 
 
-def test_active_guardrail_routes_still_require_internal_token(monkeypatch):
-    client = _production_client(monkeypatch)
-
-    response = client.post(checker.ACTIVE_JOBS_ROUTE, json={"preview": True})
-
-    assert response.status_code == 401
-
-
 def test_checker_returns_ok_and_keeps_local_sentinel_stable(monkeypatch):
     monkeypatch.setattr(checker, "production_config_modified", lambda: False)
 
     result = checker.run_check()
 
     assert result["ok"] is True
+    assert result["legacy_jobs_runner_removed_from_guardrail"] is True
     assert result["dry_run_noop"] is True
     assert result["preview_noop"] is True
     assert result["true_execution_without_allowlist_rejected"] is True
     assert result["db_sentinel"]["ok"] is True
-    assert result["timers_not_enabled"] is True
+    assert result["retired_timers_not_enabled"] is True
 
 
 def test_checker_detects_sentinel_change(monkeypatch):
@@ -150,19 +89,17 @@ def test_checker_detects_sentinel_change(monkeypatch):
                 return FakeResponse(200, _noop_payload(route, preview=True))
             if (json or {}).get("dry_run"):
                 return FakeResponse(200, _noop_payload(route, dry_run=True))
-            if route == checker.ACTIVE_JOBS_ROUTE:
-                return FakeResponse(409, {"error_code": "automation_run_due_allowlist_required"})
             return FakeResponse(409, {"error_code": "campaign_run_due_allowlist_required"})
 
     sentinels = iter(
         [
-            {"available": True, "reason": "", "values": {key: "before" for key in checker.DB_SENTINEL_QUERIES}},
-            {"available": True, "reason": "", "values": {key: "after" for key in checker.DB_SENTINEL_QUERIES}},
+            {"available": True, "reason": "", "values": {}},
+            {"available": False, "reason": "sentinel_unavailable", "values": {}},
         ]
     )
     monkeypatch.setattr(checker, "_client", lambda: FakeClient())
     monkeypatch.setattr(checker, "_read_db_sentinel", lambda: next(sentinels))
-    monkeypatch.setattr(checker, "_timer_enablement_status", lambda: {"timers_not_enabled": True, "units": {}})
+    monkeypatch.setattr(checker, "_timer_enablement_status", lambda: {"retired_timers_not_enabled": True, "units": {}})
 
     result = checker.run_check()
 
@@ -172,8 +109,7 @@ def test_checker_detects_sentinel_change(monkeypatch):
 
 def test_docs_do_not_use_forbidden_status_markers():
     docs = [
-        "docs/reply_system_reenable_runbook.md",
-        "docs/active_automation_reenable_runbook.md",
+        "docs/runbooks/active_automation_retirement.md",
     ]
     content = "\n".join(open(path, encoding="utf-8").read() for path in docs)
     for marker in ("delete_ready", "production_ready", "production_approved"):

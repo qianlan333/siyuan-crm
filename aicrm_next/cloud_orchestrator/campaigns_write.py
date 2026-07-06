@@ -6,6 +6,13 @@ from uuid import uuid4
 
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
+from aicrm_next.platform_foundation.internal_events.shadow import (
+    AI_CAMPAIGN_APPROVED_EVENT_TYPE,
+    AI_CAMPAIGN_CREATED_EVENT_TYPE,
+    AI_CAMPAIGN_STARTED_EVENT_TYPE,
+    emit_ai_campaign_shadow_event,
+    safe_emit,
+)
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
 
 from .campaigns_read import build_campaign_read_repository
@@ -49,6 +56,11 @@ class CloudCampaignWriteCommand:
             "dry_run": self.dry_run,
             "trace_id": self.trace_id,
         }
+
+
+@dataclass(frozen=True)
+class CreateCloudCampaignCommand(CloudCampaignWriteCommand):
+    command_name = "cloud_orchestrator.campaign.create"
 
 
 @dataclass(frozen=True)
@@ -162,6 +174,7 @@ def execute_cloud_campaign_command(command: CloudCampaignWriteCommand) -> dict[s
 
 
 def _register_handlers() -> None:
+    _command_bus.register(CreateCloudCampaignCommand.command_name, _handle_create)
     _command_bus.register(ApproveCloudCampaignCommand.command_name, _handle_approve)
     _command_bus.register(RejectCloudCampaignCommand.command_name, _handle_reject)
     _command_bus.register(StartCloudCampaignCommand.command_name, _handle_start)
@@ -197,6 +210,17 @@ def _get_campaign(repo: Any, campaign_code: str) -> dict[str, Any]:
     return campaign
 
 
+def _create_campaign(repo: Any, campaign_code: str, payload: dict[str, Any]) -> dict[str, Any]:
+    if not hasattr(repo, "create_campaign"):
+        raise CloudCampaignWriteInputError("campaign create write model unavailable")
+    campaign_payload = dict(payload or {})
+    campaign_payload["campaign_code"] = campaign_code
+    campaign = repo.create_campaign(campaign_payload)
+    if not campaign:
+        raise CloudCampaignWriteInputError("campaign_create_failed")
+    return campaign
+
+
 def _update_campaign_status(
     repo: Any,
     campaign_code: str,
@@ -225,11 +249,50 @@ def _update_campaign_status(
     return campaign
 
 
+def _internal_event_response(internal_event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "internal_event_id": internal_event.get("event_id") or "",
+        "internal_event_status": internal_event.get("status") or "",
+        "internal_event_reason": internal_event.get("reason") or "",
+        "internal_event_error": internal_event.get("error") or "",
+        "internal_event_consumer_run_count": int(internal_event.get("consumer_run_count") or 0),
+    }
+
+
+def _handle_create(command: Command) -> dict[str, Any]:
+    campaign_code = str(command.payload.get("campaign_code") or "").strip()
+    repo = _repo()
+    campaign = _create_campaign(repo, campaign_code, dict(command.payload.get("payload") or {}))
+    internal_event = safe_emit(
+        "ai_campaign.created",
+        emit_ai_campaign_shadow_event,
+        command=command,
+        event_type=AI_CAMPAIGN_CREATED_EVENT_TYPE,
+        campaign=campaign,
+    )
+    return {
+        "write_model_status": "created",
+        "campaign": campaign,
+        **_internal_event_response(internal_event),
+    }
+
+
 def _handle_approve(command: Command) -> dict[str, Any]:
     campaign_code = str(command.payload.get("campaign_code") or "").strip()
     repo = _repo()
     campaign = _update_campaign_status(repo, campaign_code, review_status="approved")
-    return {"write_model_status": "updated", "campaign": campaign}
+    internal_event = safe_emit(
+        "ai_campaign.approved",
+        emit_ai_campaign_shadow_event,
+        command=command,
+        event_type=AI_CAMPAIGN_APPROVED_EVENT_TYPE,
+        campaign=campaign,
+    )
+    return {
+        "write_model_status": "updated",
+        "campaign": campaign,
+        **_internal_event_response(internal_event),
+    }
 
 
 def _handle_reject(command: Command) -> dict[str, Any]:
@@ -244,7 +307,19 @@ def _handle_start(command: Command) -> dict[str, Any]:
     repo = _repo()
     campaign = _update_campaign_status(repo, campaign_code, review_status="approved", run_status="active")
     plan = _create_start_side_effect_plan(command=command, target_id=campaign_code, payload_summary={"campaign_code": campaign_code})
-    return {"write_model_status": "planned", "campaign": campaign, "side_effect_plan": _plan_response(plan)}
+    internal_event = safe_emit(
+        "ai_campaign.started",
+        emit_ai_campaign_shadow_event,
+        command=command,
+        event_type=AI_CAMPAIGN_STARTED_EVENT_TYPE,
+        campaign=campaign,
+    )
+    return {
+        "write_model_status": "planned",
+        "campaign": campaign,
+        "side_effect_plan": _plan_response(plan),
+        **_internal_event_response(internal_event),
+    }
 
 
 def _handle_pause(command: Command) -> dict[str, Any]:

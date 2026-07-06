@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from starlette.routing import Match
 
 from aicrm_next.main import create_app
 
@@ -11,9 +12,16 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _endpoint_module(path: str) -> str:
     app = create_app()
+    scope = {"type": "http", "path": path, "method": "GET", "root_path": "", "query_string": b""}
     for route in app.routes:
-        if getattr(route, "path", "") == path and "GET" in getattr(route, "methods", set()):
-            return route.endpoint.__module__
+        match, _ = route.matches(scope)
+        if match is Match.FULL:
+            endpoint = getattr(route, "endpoint", None)
+            if endpoint is not None:
+                return endpoint.__module__
+            for candidate in getattr(route, "_effective_candidates", ()):
+                if getattr(candidate, "path", "") == path:
+                    return candidate.endpoint.__module__
     raise AssertionError(f"missing route for {path}")
 
 
@@ -35,7 +43,8 @@ def test_customer_list_admin_page_renders_from_native_shell() -> None:
 def test_customer_pages_and_user_ops_removed_from_frontend_compat_inventory() -> None:
     assert not (ROOT / "aicrm_next/frontend_compat/legacy_routes.py").exists()
     assert _endpoint_module("/admin/customers") == "aicrm_next.customer_read_model.admin_pages"
-    assert _endpoint_module("/admin/customers/{external_userid}") == "aicrm_next.customer_read_model.admin_pages"
+    assert _endpoint_module("/admin/customers/{unionid}") == "aicrm_next.customer_read_model.admin_pages"
+    assert _endpoint_module("/admin/customer-360/{unionid}") == "aicrm_next.customer_read_model.admin_pages"
 
 
 def test_customer_list_page_degrades_when_read_model_unavailable(monkeypatch) -> None:

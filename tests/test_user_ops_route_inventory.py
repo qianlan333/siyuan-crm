@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_user_ops_route_inventory_documents_group_6_routes() -> None:
-    text = Path("docs/architecture/user_ops_route_inventory.md").read_text(encoding="utf-8")
+    text = Path("docs/archive/route_inventory/user_ops_route_inventory.md").read_text(encoding="utf-8")
 
     for route in [
         "/admin/user-ops/ui",
@@ -12,8 +12,8 @@ def test_user_ops_route_inventory_documents_group_6_routes() -> None:
         "/api/admin/user-ops/overview",
         "/api/admin/user-ops/cards",
         "/api/admin/user-ops/customers",
-        "/api/admin/user-ops/customers/{external_userid}",
-        "/api/admin/user-ops/customers/{external_userid}/timeline",
+        "/api/admin/user-ops/customers/{unionid}",
+        "/api/admin/user-ops/customers/{unionid}/timeline",
         "/api/admin/user-ops/filters",
         "/api/admin/user-ops/send-records",
         "/api/admin/user-ops/broadcast/preview",

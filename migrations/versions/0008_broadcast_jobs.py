@@ -10,7 +10,7 @@ cloud_orchestrator / focus_send / user_ops_deferred）的"未来该发的批次"
 该表，按 batch_key 聚合后调 dispatch_wecom_task() 真发。
 
 设计要点：
-- 一个 job = 一次群发批次（含多 user），target_external_userids 是 JSON 数组
+- 一个 job = 一次群发批次（含多 user），target_unionids_json 是 JSON 数组
 - AI 草稿用 status='waiting_approval' + requires_approval=true，运营 confirm 后转 'queued'
 - 取消用软删（status='cancelled' + cancelled_by/cancelled_at/cancel_reason），便于审计
 - 失败不自动重试（status='failed' + last_error），由运营手动 retry
@@ -40,14 +40,14 @@ def upgrade() -> None:
             priority INTEGER NOT NULL DEFAULT 100,
             batch_key TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'queued'
-                CHECK (status IN ('waiting_approval', 'queued', 'claimed', 'sent', 'failed', 'cancelled')),
+                CHECK (status IN ('waiting_approval', 'queued', 'claimed', 'sent', 'failed', 'blocked', 'cancelled')),
             requires_approval BOOLEAN NOT NULL DEFAULT FALSE,
             approved_by TEXT NOT NULL DEFAULT '',
             approved_at TIMESTAMPTZ,
             cancelled_by TEXT NOT NULL DEFAULT '',
             cancelled_at TIMESTAMPTZ,
             cancel_reason TEXT NOT NULL DEFAULT '',
-            target_external_userids JSONB NOT NULL DEFAULT '[]'::jsonb,
+            target_unionids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             target_count INTEGER NOT NULL DEFAULT 0,
             target_summary TEXT NOT NULL DEFAULT '',
             content_type TEXT NOT NULL DEFAULT 'text',

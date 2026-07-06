@@ -6,8 +6,7 @@ from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any
 
-from flask import current_app, g, has_app_context
-
+from aicrm_next.shared.db_session import connect_raw_postgres
 from aicrm_next.shared.runtime import raw_database_url
 
 _scoped_db: ContextVar["PostgresConnection | None"] = ContextVar("next_scoped_db", default=None)
@@ -25,7 +24,6 @@ def _translate_sql(sql: str) -> str:
 
 class PostgresCursor:
     def __init__(self, conn: Any) -> None:
-        import psycopg
         from psycopg.rows import dict_row
 
         base_factory = dict_row
@@ -117,27 +115,17 @@ class PostgresConnection:
 
 
 def _database_url() -> str:
-    if has_app_context():
-        configured = str(current_app.config.get("DATABASE_URL", "") or "").strip()
-        if configured:
-            return configured
     return raw_database_url()
 
 
 def _connect() -> PostgresConnection:
-    import psycopg
-
     database_url = _database_url()
     if not database_url:
         raise RuntimeError("DATABASE_URL is required for Next automation admission runtime")
-    return PostgresConnection(psycopg.connect(database_url, autocommit=False))
+    return PostgresConnection(connect_raw_postgres(database_url, autocommit=False))
 
 
 def get_db() -> PostgresConnection:
-    if has_app_context():
-        if "next_db" not in g:
-            g.next_db = _connect()
-        return g.next_db
     scoped = _scoped_db.get()
     if scoped is not None:
         return scoped
@@ -146,9 +134,6 @@ def get_db() -> PostgresConnection:
 
 @contextmanager
 def db_session() -> Iterator[PostgresConnection]:
-    if has_app_context():
-        yield get_db()
-        return
     existing = _scoped_db.get()
     if existing is not None:
         yield existing

@@ -1,0 +1,30 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "id": 201,
+        "record_id": "record_masked_001",
+        "task_type": "user_ops_batch_send",
+        "selected_count": 1,
+        "eligible_count": 1,
+        "sent_count": 1,
+        "skipped_count": 0,
+        "skipped_reasons": {},
+        "include_do_not_disturb": false,
+        "content_preview": "parity dry run",
+        "image_count": 0,
+        "sender_userids": ["owner_001"],
+        "filter_snapshot": {},
+        "operator": "old-fixture-admin",
+        "status": "created",
+        "status_label": "已创建任务",
+        "created_at": "2026-05-20T00:00:00+08:00"
+      }
+    ],
+    "limit": 20,
+    "offset": 0,
+    "total": 1
+  }
+}

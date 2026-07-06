@@ -40,6 +40,45 @@ class DetailRepoWithMissingOptionalTables:
         raise RepositoryProviderError("group ops repository unavailable: relation automation_group_ops_execution_log does not exist")
 
 
+def test_group_ops_admin_api_routes_are_registered_on_existing_contracts(monkeypatch):
+    monkeypatch.setenv("AICRM_NEXT_ENV", "test")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "0")
+    from aicrm_next.main import create_app
+
+    app = create_app()
+    registered = {
+        (method, getattr(route, "path", ""))
+        for route in app.routes
+        for method in getattr(route, "methods", set())
+    }
+
+    expected = {
+        ("GET", "/api/admin/automation-conversion/group-ops/plans"),
+        ("POST", "/api/admin/automation-conversion/group-ops/plans"),
+        ("GET", "/api/admin/automation-conversion/group-ops/plans/{plan_id}"),
+        ("PUT", "/api/admin/automation-conversion/group-ops/plans/{plan_id}"),
+        ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/enable"),
+        ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/disable"),
+        ("DELETE", "/api/admin/automation-conversion/group-ops/plans/{plan_id}"),
+        ("GET", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/groups"),
+        ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/groups"),
+        ("DELETE", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/groups/{chat_id}"),
+        ("GET", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/nodes"),
+        ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/nodes"),
+        ("PUT", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/nodes/{node_id}"),
+        ("DELETE", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/nodes/{node_id}"),
+        ("GET", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook"),
+        ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook/regenerate"),
+        ("GET", "/api/admin/automation-conversion/group-ops/groups"),
+        ("POST", "/api/admin/automation-conversion/group-ops/groups/sync"),
+        ("GET", "/api/admin/common/operation-members"),
+    }
+
+    assert expected <= registered
+    assert ("PATCH", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook") not in registered
+
+
 def test_plan_list_returns_plan_fields_without_next_action(group_ops_api_client):
     response = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans")
 
@@ -74,6 +113,76 @@ def test_plan_detail_tolerates_missing_optional_webhook_rule_tables():
     assert payload["plan"]["segmentation"] == {}
     assert payload["plan"]["segmentationStats"] == {"total": 0, "layers": []}
     assert payload["plan"]["executionStats"] == {"total": 0, "lastStatus": ""}
+
+
+def test_group_ops_detail_api_regression_keeps_existing_business_endpoints(group_ops_api_client):
+    listed = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans")
+    detail = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/1")
+    assert listed.status_code == 200
+    assert detail.status_code == 200
+
+    current = detail.json()["item"]
+    updated_plan = group_ops_api_client.put(
+        "/api/admin/automation-conversion/group-ops/plans/1",
+        json={
+            "plan_name": "pytest 更新群运营计划",
+            "plan_code": current["plan_code"],
+            "plan_type": current["plan_type"],
+            "owner_userid": current["owner_userid"],
+            "status": "draft",
+        },
+    )
+    assert updated_plan.status_code == 200
+    assert updated_plan.json()["item"]["plan_name"] == "pytest 更新群运营计划"
+
+    groups = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/1/groups")
+    bind = group_ops_api_client.post(
+        "/api/admin/automation-conversion/group-ops/plans/1/groups",
+        json={"chat_id": "wrOgAAA003", "operator": "pytest"},
+    )
+    unbind = group_ops_api_client.delete("/api/admin/automation-conversion/group-ops/plans/1/groups/wrOgAAA003")
+    assert groups.status_code == 200
+    assert bind.status_code == 201
+    assert unbind.status_code == 200
+
+    webhook_config = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/2/webhook")
+    webhook_regenerated = group_ops_api_client.post("/api/admin/automation-conversion/group-ops/plans/2/webhook/regenerate")
+    assert webhook_config.status_code == 200
+    assert webhook_config.json()["method"] == "POST"
+    assert webhook_regenerated.status_code == 200
+    assert webhook_regenerated.json()["token_status"] == "generated"
+
+    nodes = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/1/nodes")
+    created_node = group_ops_api_client.post(
+        "/api/admin/automation-conversion/group-ops/plans/1/nodes",
+        json={
+            "day_index": 2,
+            "scheduled_time": "10:00",
+            "action_title": "pytest 回归动作",
+            "text_content": "pytest 回归动作正文",
+            "sort_order": 90,
+            "status": "active",
+        },
+    )
+    assert nodes.status_code == 200
+    assert created_node.status_code == 201
+    node_id = created_node.json()["item"]["id"]
+
+    updated_node = group_ops_api_client.put(
+        f"/api/admin/automation-conversion/group-ops/plans/1/nodes/{node_id}",
+        json={
+            "day_index": 2,
+            "scheduled_time": "10:30",
+            "action_title": "pytest 更新动作",
+            "text_content": "pytest 更新动作正文",
+            "sort_order": 91,
+            "status": "active",
+        },
+    )
+    deleted_node = group_ops_api_client.delete(f"/api/admin/automation-conversion/group-ops/plans/1/nodes/{node_id}")
+    assert updated_node.status_code == 200
+    assert updated_node.json()["item"]["scheduled_time"] == "10:30"
+    assert deleted_node.status_code == 200
 
 
 def test_plan_list_returns_group_ops_queue_count(group_ops_api_client, monkeypatch):

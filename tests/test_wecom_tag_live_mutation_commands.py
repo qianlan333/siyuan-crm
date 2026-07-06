@@ -5,6 +5,8 @@ from fastapi.testclient import TestClient
 from aicrm_next.customer_tags.live_mutation import (
     get_wecom_tag_live_mutation_audit_events,
     get_wecom_tag_live_mutation_side_effect_plans,
+    live_gate_status,
+    tag_execution_status,
 )
 from aicrm_next.main import create_app
 
@@ -18,25 +20,27 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def _assert_plan_only(payload: dict, command_name: str, effect_type: str) -> None:
+def _assert_queued_external_effect(payload: dict, command_name: str, effect_type: str) -> None:
     assert payload["ok"] is True
     assert payload["command_name"] == command_name
     assert payload["source_status"] == "next_command"
     assert payload["route_owner"] == "ai_crm_next"
     assert payload["fallback_used"] is False
-    assert payload["adapter_mode"] == "real_blocked"
+    assert payload["adapter_mode"] == "queued_external_effect"
     assert payload["effect_type"] == effect_type
+    assert payload["external_effect_status"] == "queued"
     assert payload["real_external_call_executed"] is False
     assert payload["wecom_api_called"] is False
     assert payload["side_effect_plan"]["effect_type"] == effect_type
-    assert payload["side_effect_plan"]["adapter_name"] == "wecom"
-    assert payload["side_effect_plan"]["adapter_mode"] == "real_blocked"
-    assert payload["side_effect_plan"]["requires_approval"] is True
+    assert payload["side_effect_plan"]["adapter_name"] == "wecom_tag"
+    assert payload["side_effect_plan"]["adapter_mode"] == "queued_external_effect"
+    assert payload["side_effect_plan"]["status"] == "queued"
+    assert payload["side_effect_plan"]["requires_approval"] is False
     assert payload["side_effect_plan"]["real_external_call_executed"] is False
     assert payload["side_effect_plan"]["wecom_api_called"] is False
 
 
-def test_live_gate_is_next_owned_blocked_gate(monkeypatch) -> None:
+def test_live_gate_reports_projection_and_queue_support(monkeypatch) -> None:
     client = _client(monkeypatch)
 
     response = client.get("/api/admin/wecom/tags/live/gate")
@@ -44,18 +48,24 @@ def test_live_gate_is_next_owned_blocked_gate(monkeypatch) -> None:
     assert response.status_code == 200
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     payload = response.json()
-    assert payload["source_status"] == "next_live_gate"
+    assert payload["source_status"] == "tag_execution_status"
     assert payload["route_owner"] == "ai_crm_next"
     assert payload["fallback_used"] is False
-    assert payload["adapter_mode"] == "real_blocked"
-    assert payload["real_enabled"] is False
-    assert payload["available"] is False
-    assert payload["blocked"] is True
+    assert payload["adapter_mode"] == "local_projection_and_external_effect"
+    assert payload["local_projection_supported"] is True
+    assert payload["external_effect_supported"] is True
+    assert payload["requires_approval"] is False
+    assert payload["available"] is True
+    assert payload["blocked"] is False
     assert payload["real_external_call_executed"] is False
     assert payload["wecom_api_called"] is False
 
 
-def test_live_mark_and_unmark_execute_next_commandbus_plan_only(monkeypatch) -> None:
+def test_live_gate_status_is_deprecated_alias() -> None:
+    assert live_gate_status() == tag_execution_status()
+
+
+def test_live_mark_and_unmark_queue_external_effect_without_approval(monkeypatch) -> None:
     client = _client(monkeypatch)
 
     mark = client.post(
@@ -71,8 +81,8 @@ def test_live_mark_and_unmark_execute_next_commandbus_plan_only(monkeypatch) -> 
 
     assert mark.status_code == 200
     assert unmark.status_code == 200
-    _assert_plan_only(mark.json(), "wecom.tag.mark", "wecom.tag.mark")
-    _assert_plan_only(unmark.json(), "wecom.tag.unmark", "wecom.tag.unmark")
+    _assert_queued_external_effect(mark.json(), "wecom.tag.mark", "wecom.tag.mark")
+    _assert_queued_external_effect(unmark.json(), "wecom.tag.unmark", "wecom.tag.unmark")
     assert len(get_wecom_tag_live_mutation_audit_events()) == 2
     assert len(get_wecom_tag_live_mutation_side_effect_plans()) == 2
 

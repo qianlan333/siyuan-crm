@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from aicrm_next.customer_read_model.dto import (
+    CustomerContextRequest,
     CustomerDetailRequest,
     CustomerTimelineRequest,
     ListCustomersRequest,
@@ -44,9 +45,6 @@ class FakeNextCustomerReadRepository:
                 "sidebar_context": {"can_open_sidebar": True},
             }
         ]
-        external_userid = str((filters or {}).get("external_userid") or "").strip()
-        if external_userid:
-            rows = [row for row in rows if row.get("external_userid") == external_userid]
         mobile = str((filters or {}).get("mobile") or "").strip()
         if mobile:
             rows = [row for row in rows if row.get("mobile") == mobile]
@@ -135,21 +133,6 @@ class MissingClosableCustomerReadRepository(ClosableNextCustomerReadRepository):
     get_customer_detail = get_customer
 
 
-class ListOnlyCustomerReadRepository(MissingClosableCustomerReadRepository):
-    def customer_exists(self, external_userid: str) -> bool:
-        return False
-
-    def list_timeline(self, external_userid: str, filters=None, *, limit=None, offset=0):
-        raise AssertionError("timeline snapshot should not be read when detail snapshot is missing")
-
-    get_customer_timeline = list_timeline
-
-    def list_recent_messages(self, external_userid: str, *, limit=None):
-        raise AssertionError("message snapshot should not be read when detail snapshot is missing")
-
-    get_recent_messages = list_recent_messages
-
-
 class FailingClosableCustomerReadRepository:
     def __init__(self) -> None:
         self.closed = False
@@ -175,6 +158,60 @@ class ClosableLiveSourceCustomerReadRepository(FakeLiveSourceCustomerReadReposit
 
     def close(self) -> None:
         self.closed = True
+
+
+class MultiCustomerLiveSourceCustomerReadRepository(ClosableLiveSourceCustomerReadRepository):
+    def list_customers(self, filters=None, *, limit=None, offset=0):
+        self.list_calls += 1
+        self.list_args.append((dict(filters or {}), limit, offset))
+        rows = []
+        for index in range(1, 4):
+            rows.append(
+                {
+                    "external_userid": f"wx_ext_00{index}",
+                    "person_id": f"person_00{index}",
+                    "customer_name": f"客户{index}",
+                    "remark": "",
+                    "description": "",
+                    "owner_userid": "owner-a",
+                    "owner_display_name": "顾问甲",
+                    "mobile": f"1380013800{index}",
+                    "binding": {"is_bound": True, "binding_status": "bound", "mobile": f"1380013800{index}"},
+                    "tags": ["重点跟进"] if index == 1 else [],
+                    "class_user_status": {"current_status": "lead"},
+                    "last_message_at": "2026-06-01T08:00:00+00:00",
+                    "last_touch_at": "2026-06-01T08:10:00+00:00",
+                    "updated_at": "2026-06-01T08:10:00+00:00",
+                    "created_at": "2026-06-01T08:00:00+00:00",
+                    "identity": {"person_id": f"person_00{index}", "external_userid": f"wx_ext_00{index}", "mobile": f"1380013800{index}"},
+                    "follow_users": [{"userid": "owner-a", "display_name": "顾问甲", "is_primary": True}],
+                    "marketing_summary": {"main_stage": "lead"},
+                    "marketing_profile": {"stage_key": "lead"},
+                    "contact": {"external_userid": f"wx_ext_00{index}", "name": f"客户{index}"},
+                    "sidebar_context": {"can_open_sidebar": True},
+                }
+            )
+        mobile = str((filters or {}).get("mobile") or "").strip()
+        if mobile:
+            rows = [row for row in rows if row.get("mobile") == mobile]
+        external_userid = str((filters or {}).get("external_userid") or "").strip()
+        if external_userid:
+            rows = [row for row in rows if row.get("external_userid") == external_userid]
+        return rows[offset:] if limit is None else rows[offset : offset + limit]
+
+    def count_customers(self, filters=None):
+        self.count_args.append(dict(filters or {}))
+        rows = self.list_customers(filters, limit=None, offset=0)
+        return len(rows)
+
+    def get_customer(self, external_userid: str):
+        rows = self.list_customers({"external_userid": external_userid}, limit=1, offset=0)
+        return rows[0] if rows else None
+
+    get_customer_detail = get_customer
+
+    def customer_exists(self, external_userid: str) -> bool:
+        return self.get_customer(external_userid) is not None
 
 
 class FakeSession:
@@ -301,41 +338,6 @@ def test_customer_detail_closes_internal_repository_when_query_raises(monkeypatc
     assert repo.closed is True
 
 
-def test_customer_detail_falls_back_to_list_index_when_detail_snapshot_missing(monkeypatch):
-    from aicrm_next.customer_read_model.application import GetCustomerDetailQuery
-
-    _production_env(monkeypatch)
-    repo = ListOnlyCustomerReadRepository()
-    _patch_next_repo(monkeypatch, repo)
-
-    payload = GetCustomerDetailQuery()(CustomerDetailRequest(external_userid="wx_ext_001"))
-
-    assert payload["ok"] is True
-    assert payload["customer"]["external_userid"] == "wx_ext_001"
-    assert payload["customer"]["customer_name"] == "客户一"
-    assert payload["customer"]["mobile"] == "13800138000"
-    assert payload["read_model_status"] == "list_index_fallback"
-    assert payload["fallback_used"] is True
-    assert repo.closed is True
-
-
-def test_admin_profile_opens_when_customer_only_exists_in_list_index(monkeypatch):
-    from aicrm_next.customer_read_model.application import GetAdminCustomerProfileQuery, GetCustomerContextQuery
-
-    _production_env(monkeypatch)
-    repo = ListOnlyCustomerReadRepository()
-
-    payload = GetAdminCustomerProfileQuery(GetCustomerContextQuery(repo))(external_userid="wx_ext_001")
-
-    assert payload["ok"] is True
-    assert payload["profile"]["external_userid"] == "wx_ext_001"
-    assert payload["profile"]["customer_name"] == "客户一"
-    assert payload["profile"]["mobile"] == "13800138000"
-    assert payload["source_status"] == "next_read_model"
-    assert payload["read_model_status"] == "list_index_fallback"
-    assert payload["fallback_used"] is True
-
-
 def test_customer_list_does_not_close_injected_repository(monkeypatch):
     from aicrm_next.customer_read_model.application import ListCustomersQuery
 
@@ -454,6 +456,48 @@ def test_empty_primary_customer_list_uses_live_source_fallback_when_source_has_r
     assert primary_repo.closed is True
     assert live_source_repo.closed is True
     assert "legacy_production_facade" not in str(payload)
+
+
+def test_partial_primary_customer_list_uses_live_source_fallback_when_source_has_more_rows(monkeypatch):
+    from aicrm_next.customer_read_model.application import ListCustomersQuery
+
+    _production_env(monkeypatch)
+    primary_repo = ClosableNextCustomerReadRepository()
+    live_source_repo = MultiCustomerLiveSourceCustomerReadRepository()
+    _patch_next_repo(monkeypatch, primary_repo)
+    _patch_live_source_repo(monkeypatch, live_source_repo)
+
+    payload = ListCustomersQuery()(ListCustomersRequest(limit=50))
+
+    assert payload["ok"] is True
+    assert payload["source_status"] == "live_source_fallback"
+    assert payload["read_model_status"] == "fallback"
+    assert payload["fallback_used"] is True
+    assert [customer["external_userid"] for customer in payload["customers"]] == ["wx_ext_001", "wx_ext_002", "wx_ext_003"]
+    assert payload["total"] == 3
+    assert "primary returned 1 matching customers while live source has 3" in payload["fallback_reason"]
+    assert primary_repo.closed is True
+    assert live_source_repo.closed is True
+
+
+def test_customer_context_uses_live_source_fallback_when_primary_detail_is_missing(monkeypatch):
+    from aicrm_next.customer_read_model.application import GetCustomerContextQuery
+
+    _production_env(monkeypatch)
+    primary_repo = MissingClosableCustomerReadRepository()
+    live_source_repo = MultiCustomerLiveSourceCustomerReadRepository()
+
+    payload = GetCustomerContextQuery(primary_repo, live_source_repo=live_source_repo)(
+        CustomerContextRequest(external_userid="wx_ext_002", recent_message_limit=5, timeline_limit=5)
+    )
+
+    assert payload["ok"] is True
+    assert payload["source_status"] == "live_source_fallback"
+    assert payload["read_model_status"] == "fallback"
+    assert payload["fallback_used"] is True
+    assert payload["customer"]["external_userid"] == "wx_ext_002"
+    assert payload["timeline"]["external_userid"] == "wx_ext_002"
+    assert payload["recent_messages"][0]["external_userid"] == "wx_ext_002"
 
 
 def test_empty_primary_customer_list_stays_empty_when_live_source_has_no_match(monkeypatch):

@@ -1,0 +1,349 @@
+{
+  "version": 1,
+  "description": "Scoped CI routing manifest. Keep this file JSON-compatible so the selector can run before Python dependencies are installed.",
+  "unmapped_path_message": "No CI test scope matched these changed files. Add or update docs/ci/test_scope_manifest.yml instead of falling back to full PR regression.",
+  "high_risk_paths": [
+    "requirements.txt",
+    ".github/**",
+    "scripts/ci/**",
+    "tests/conftest.py",
+    "app.py",
+    "aicrm_next/platform_foundation/**",
+    "aicrm_next/admin_auth/**",
+    "aicrm_next/commerce/order_reconciliation.py",
+    "aicrm_next/integration_gateway/**",
+    "aicrm_next/background_jobs/**",
+    "aicrm_next/external_push/**",
+    "migrations/**",
+    "deploy/**",
+    "docs/architecture/*manifest*"
+  ],
+  "frontend_build_paths": [
+    "frontend/admin/**/*.ts",
+    "tsconfig.frontend.json",
+    "package.json",
+    "package-lock.json"
+  ],
+  "scopes": [
+    {
+      "name": "commerce",
+      "paths": [
+        "aicrm_next/commerce/**",
+        "aicrm_next/public_product/**",
+        "tests/test_wechat_products_admin_page_contract.py",
+        "tests/test_product_external_push.py",
+        "tests/test_wechat_pay_*.py",
+        "tests/test_public_product_*.py",
+        "tests/test_next_h5_wechat_pay_external_push_outbox.py"
+      ],
+      "python_tests": [
+        "tests/test_wechat_products_admin_page_contract.py",
+        "tests/test_product_external_push.py",
+        "tests/test_public_product_no_real_payment.py",
+        "tests/test_public_product_h5_pay_oauth_native.py",
+        "tests/test_public_product_api_contract.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "media_library",
+      "paths": [
+        "aicrm_next/media_library/**",
+        "aicrm_next/commerce/templates/wechat_products.html",
+        "tests/test_image_upload_client_static.py",
+        "tests/test_image_library*.py",
+        "tests/test_media_library_next_contract.py"
+      ],
+      "python_tests": [
+        "tests/test_image_upload_client_static.py",
+        "tests/test_image_library_template.py",
+        "tests/test_media_library_next_contract.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "none"
+    },
+    {
+      "name": "ai_audience_ops",
+      "paths": [
+        "aicrm_next/ai_audience_ops/**",
+        "tests/test_ai_audience_*.py",
+        "tests/test_huangyoucan_unregistered_ai_audience.py"
+      ],
+      "python_tests": [
+        "tests/test_ai_audience_ops.py",
+        "tests/test_ai_audience_runtime_hotfixes.py",
+        "tests/test_ai_audience_external_api.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "ai_assist_external_campaigns",
+      "paths": [
+        "aicrm_next/ai_assist/**",
+        "tests/test_ai_assist_external_campaigns.py",
+        "tests/test_ai_assist_external_effect_queue.py"
+      ],
+      "python_tests": [
+        "tests/test_ai_assist_external_campaigns.py",
+        "tests/test_ai_assist_external_effect_queue.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "customer_read_model_sidebar",
+      "paths": [
+        "aicrm_next/customer_read_model/**",
+        "aicrm_next/sidebar_write/**",
+        "aicrm_next/frontend_compat/templates/sidebar_customer_workbench.html",
+        "aicrm_next/frontend_compat/static/sidebar_workbench/**",
+        "tests/test_sidebar_*.py",
+        "tests/test_customer_*read_model*.py",
+        "tests/test_next_sidebar_workbench_routes.py"
+      ],
+      "python_tests": [
+        "tests/test_sidebar_v2_api.py",
+        "tests/test_customer_read_model_request_scope.py",
+        "tests/test_sidebar_workbench_frontend.py",
+        "tests/test_sidebar_jssdk_frontend_contract.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "identity_contact",
+      "paths": [
+        "aicrm_next/identity_contact/**",
+        "aicrm_next/channel_entry/**",
+        "aicrm_next/auth_wecom/**",
+        "tests/test_identity_*.py",
+        "tests/test_channel_entry_*.py",
+        "tests/test_next_channel_*.py",
+        "tests/test_auth_wecom_*.py",
+        "tests/test_identity_resolution_backfill_worker.py"
+      ],
+      "python_tests": [
+        "tests/test_identity_application_contract.py",
+        "tests/test_channel_entry_identity_best_effort_contract.py",
+        "tests/test_identity_resolution_backfill_worker.py",
+        "tests/test_next_channel_entry_orchestrator.py"
+      ],
+      "needs_postgres": true,
+      "architecture_gate": "db"
+    },
+    {
+      "name": "broadcast_group_ops",
+      "paths": [
+        "aicrm_next/background_jobs/**",
+        "aicrm_next/external_push/**",
+        "aicrm_next/integration_gateway/**",
+        "aicrm_next/platform_foundation/external_effects/**",
+        "aicrm_next/automation_engine/group_ops/**",
+        "tests/test_broadcast_*.py",
+        "tests/test_group_ops_*.py",
+        "tests/test_external_effect*.py",
+        "tests/test_external_push_*.py",
+        "tests/test_push_center.py"
+      ],
+      "python_tests": [
+        "tests/test_broadcast_jobs_platform_contract.py",
+        "tests/test_group_ops_queue_contract.py",
+        "tests/test_external_effects_mvp.py",
+        "tests/test_external_effect_scheduler.py"
+      ],
+      "needs_postgres": true,
+      "architecture_gate": "db"
+    },
+    {
+      "name": "user_ops",
+      "paths": [
+        "aicrm_next/ops_enrollment/**",
+        "tests/test_user_ops_*.py",
+        "tests/test_ops_enrollment_*.py"
+      ],
+      "python_tests": [
+        "tests/test_user_ops_api.py",
+        "tests/test_user_ops_application_contract.py",
+        "tests/test_user_ops_lead_pool_helpers.py",
+        "tests/test_user_ops_external_effect_enqueue.py",
+        "tests/test_user_ops_send_record_projection.py",
+        "tests/test_user_ops_admin_pages_native.py",
+        "tests/test_user_ops_next_queries.py",
+        "tests/test_user_ops_no_real_side_effects.py",
+        "tests/test_user_ops_production_repository_selection.py",
+        "tests/test_ops_enrollment_db_session_lifecycle.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "data_health",
+      "paths": [
+        "aicrm_next/data_health/**",
+        "tests/test_data_health_checks.py",
+        "tests/test_data_quality_*.py"
+      ],
+      "python_tests": [
+        "tests/test_data_health_checks.py",
+        "tests/test_data_quality_registry.py",
+        "tests/test_data_quality_snapshot_job.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "admin_auth_security",
+      "paths": [
+        "aicrm_next/admin_auth/**",
+        "tests/test_admin_auth_*.py",
+        "tests/test_admin_routes_require_auth.py"
+      ],
+      "python_tests": [
+        "tests/test_admin_routes_require_auth.py",
+        "tests/test_admin_auth_login_submit.py",
+        "tests/test_admin_auth_logout.py"
+      ],
+      "needs_postgres": true,
+      "architecture_gate": "db"
+    },
+    {
+      "name": "frontend_p1",
+      "paths": [
+        "frontend/admin/**",
+        "tests/frontend/**",
+        "tsconfig.frontend.json",
+        "package.json",
+        "package-lock.json"
+      ],
+      "frontend_tests": [
+        "tests/frontend/p1_push_center_status.test.mjs",
+        "tests/frontend/p1_group_ops_status.test.mjs",
+        "tests/frontend/p1_group_ops_workspace.test.mjs",
+        "tests/frontend/p1_ops_plan_status.test.mjs",
+        "tests/frontend/p1_wecom_status.test.mjs",
+        "tests/frontend/p1_interaction_shell.test.mjs",
+        "tests/frontend/p1_business_pages_interaction_shell.test.mjs",
+        "tests/frontend/p1_preview_board.test.mjs"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "none"
+    },
+    {
+      "name": "migration_db",
+      "paths": [
+        "migrations/**",
+        "aicrm_next/**/repo.py",
+        "aicrm_next/**/postgres_repo.py",
+        "tests/test_alembic_revision_chain.py",
+        "tests/test_*migration*.py",
+        "tests/test_sql_static_guard.py"
+      ],
+      "python_tests": [
+        "tests/test_alembic_revision_chain.py"
+      ],
+      "needs_postgres": true,
+      "architecture_gate": "db"
+    },
+    {
+      "name": "ci_deploy",
+      "paths": [
+        ".github/**",
+        "scripts/ci/**",
+        "deploy/**",
+        "tools/**",
+        "docs/ci/**",
+        "docs/development/**",
+        "docs/architecture/*manifest*",
+        "tests/test_ci_workflow_contract.py",
+        "tests/test_select_test_scope.py",
+        "requirements.txt",
+        "app.py",
+        "aicrm_next/platform_foundation/**"
+      ],
+      "python_tests": [
+        "tests/test_ci_workflow_contract.py",
+        "tests/test_select_test_scope.py",
+        "tests/test_architecture_boundaries.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "full"
+    },
+    {
+      "name": "shared_sidebar_runtime",
+      "paths": [
+        "aicrm_next/shared/db_session.py",
+        "aicrm_next/shared/signed_context.py",
+        "tests/test_shared_db_session.py",
+        "tests/test_shared_flask_config_retirement.py"
+      ],
+      "python_tests": [
+        "tests/test_shared_db_session.py",
+        "tests/test_shared_flask_config_retirement.py",
+        "tests/test_sidebar_jssdk_adapter.py",
+        "tests/test_sidebar_v2_api.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "next_native_full_sync",
+      "paths": [
+        ".gitignore",
+        "CLAUDE.md",
+        "Makefile",
+        "aicrm_next/admin_config/**",
+        "aicrm_next/admin_jobs/**",
+        "aicrm_next/admin_read_model/**",
+        "aicrm_next/admin_shell/**",
+        "aicrm_next/automation_agents/**",
+        "aicrm_next/automation_engine/**",
+        "aicrm_next/class_user_management/**",
+        "aicrm_next/cloud_orchestrator/**",
+        "aicrm_next/common_operation_members.py",
+        "aicrm_next/customer_tags/**",
+        "aicrm_next/delivery_lineage/**",
+        "aicrm_next/fixture_reset_registry.py",
+        "aicrm_next/frontend_compat/**",
+        "aicrm_next/growth_orchestration/**",
+        "aicrm_next/main.py",
+        "aicrm_next/message_archive/**",
+        "aicrm_next/navigation_target/**",
+        "aicrm_next/owner_migration/**",
+        "aicrm_next/questionnaire/**",
+        "aicrm_next/router_registry.py",
+        "aicrm_next/send_content/**",
+        "aicrm_next/send_targets/**",
+        "aicrm_next/shared/**",
+        "experiments/**",
+        "scripts/**",
+        "skills/**",
+        "tests/**"
+      ],
+      "python_tests": [
+        "tests/test_startup_entrypoint_next_only.py",
+        "tests/test_router_registry_contract.py",
+        "tests/test_admin_shell_native.py",
+        "tests/test_admin_config_next.py",
+        "tests/test_automation_agents_admin_api.py",
+        "tests/test_questionnaire_application_contract.py",
+        "tests/test_send_content_next_native.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "docs_only",
+      "paths": [
+        "docs/**",
+        "README.md",
+        "AGENTS.md"
+      ],
+      "python_tests": [],
+      "frontend_tests": [],
+      "needs_postgres": false,
+      "architecture_gate": "none"
+    }
+  ]
+}

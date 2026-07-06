@@ -14,6 +14,7 @@ def test_cloud_orchestrator_run_due_blocks_external_agent_execution() -> None:
         PlanCloudCampaignRunDueCommand(
             batch_size=10,
             source_route="/api/admin/cloud-orchestrator/campaigns/run-due",
+            idempotency_key="external-agent-run-due-blocked",
         )
     )
 

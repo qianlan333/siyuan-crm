@@ -70,6 +70,19 @@ class FixtureIdentityRepository:
                 return person
         return None
 
+    def list_external_contact_owner_userids(self, external_userid: str) -> set[str]:
+        person = self.resolve(ResolvePersonIdentityRequest(external_userid=external_userid))
+        if person is None:
+            return set()
+        return {
+            owner
+            for owner in {
+                _text(person.owner_userid),
+                _text(person.follow_user_userid),
+            }
+            if owner
+        }
+
 
 class FixtureIdentityBindingRepository:
     source_status = "fixture_identity_binding"
@@ -138,53 +151,116 @@ class PostgresIdentityRepository:
             ("external_userid", _text(query.external_userid)),
             ("unionid", _text(query.unionid)),
             ("openid", _text(query.openid)),
+            ("mobile", _text(query.mobile)),
         ]
         with self._connect() as conn:
             for field, value in lookups:
                 if not value:
                     continue
+                if field == "unionid":
+                    where_sql = "unionid = %s"
+                    params: tuple[Any, ...] = (value,)
+                elif field == "external_userid":
+                    where_sql = "primary_external_userid = %s OR jsonb_exists(external_userids_json, %s)"
+                    params = (value, value)
+                elif field == "openid":
+                    where_sql = "primary_openid = %s OR jsonb_exists(openids_json, %s)"
+                    params = (value, value)
+                else:
+                    where_sql = "mobile = %s"
+                    params = (value,)
                 row = conn.execute(
                     f"""
-                    SELECT id AS identity_map_id,
-                           external_userid,
-                           unionid,
-                           openid,
-                           follow_user_userid,
-                           follow_user_userid AS owner_userid,
-                           status
-                    FROM wecom_external_contact_identity_map
-                    WHERE {field} = %s
-                    ORDER BY updated_at DESC, id DESC
+                    SELECT unionid,
+                           primary_external_userid AS external_userid,
+                           primary_openid AS openid,
+                           primary_owner_userid AS follow_user_userid,
+                           primary_owner_userid AS owner_userid,
+                           mobile,
+                           identity_status AS status
+                    FROM crm_user_identity
+                    WHERE {where_sql}
+                    ORDER BY updated_at DESC
                     LIMIT 1
                     """,
-                    (value,),
+                    params,
                 ).fetchone()
                 if row:
-                    return self._from_identity_map(row, matched_by=field, mobile=_text(query.mobile))
-            mobile = _text(query.mobile)
-            if mobile:
-                row = conn.execute(
-                    """
-                    SELECT b.person_id,
-                           b.external_userid,
-                           p.mobile,
-                           b.last_owner_userid AS owner_userid,
-                           im.id AS identity_map_id,
-                           im.unionid,
-                           im.openid,
-                           im.follow_user_userid
-                    FROM people p
-                    JOIN external_contact_bindings b ON b.person_id = p.id
-                    LEFT JOIN wecom_external_contact_identity_map im ON im.external_userid = b.external_userid
-                    WHERE p.mobile = %s
-                    ORDER BY b.updated_at DESC NULLS LAST, b.external_userid DESC
-                    LIMIT 1
-                    """,
-                    (mobile,),
-                ).fetchone()
-                if row:
-                    return self._from_identity_map(row, matched_by="mobile", mobile=mobile)
+                    return self._from_user_identity(row, matched_by=field)
         return None
+
+    def list_external_contact_owner_userids(self, external_userid: str) -> set[str]:
+        normalized_external = _text(external_userid)
+        if not normalized_external:
+            return set()
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT owner_userid
+                FROM (
+                    SELECT COALESCE(NULLIF(user_id, ''), NULLIF(raw_follow_user ->> 'userid', '')) AS owner_userid
+                    FROM wecom_external_contact_follow_users
+                    WHERE external_userid = %s
+                      AND COALESCE(relation_status, 'active') = 'active'
+                    UNION ALL
+                    SELECT NULLIF(follow_user_userid, '') AS owner_userid
+                    FROM wecom_external_contact_identity_map
+                    WHERE external_userid = %s
+                    UNION ALL
+                    SELECT NULLIF(primary_owner_userid, '') AS owner_userid
+                    FROM crm_user_identity
+                    WHERE primary_external_userid = %s
+                       OR jsonb_exists(external_userids_json, %s)
+                    UNION ALL
+                    SELECT NULLIF(first_owner_userid, '') AS owner_userid
+                    FROM external_contact_bindings
+                    WHERE external_userid = %s
+                    UNION ALL
+                    SELECT NULLIF(last_owner_userid, '') AS owner_userid
+                    FROM external_contact_bindings
+                    WHERE external_userid = %s
+                ) owners
+                WHERE COALESCE(owner_userid, '') <> ''
+                """,
+                (
+                    normalized_external,
+                    normalized_external,
+                    normalized_external,
+                    normalized_external,
+                    normalized_external,
+                    normalized_external,
+                ),
+            ).fetchall()
+        return {_text(row.get("owner_userid")) for row in rows if _text(row.get("owner_userid"))}
+
+    def _from_user_identity(self, row, *, matched_by: str) -> IdentityResolution:
+        external_userid = _text(row.get("external_userid"))
+        unionid = _text(row.get("unionid")) or None
+        openid = _text(row.get("openid")) or None
+        mobile = _text(row.get("mobile")) or None
+        follow_user_userid = _text(row.get("follow_user_userid"))
+        contact_points = []
+        if unionid:
+            contact_points.append(ContactPoint(type="wechat_unionid", value=unionid, verified=True))
+        if external_userid:
+            contact_points.append(ContactPoint(type="wecom_external_userid", value=external_userid, verified=True))
+        if openid:
+            contact_points.append(ContactPoint(type="wechat_openid", value=openid, verified=True))
+        if mobile:
+            contact_points.append(ContactPoint(type="mobile", value=mobile, verified=True))
+        return IdentityResolution(
+            person_id=None,
+            external_userid=external_userid or None,
+            mobile=mobile,
+            openid=openid,
+            unionid=unionid,
+            binding_status="bound" if unionid else "unresolved",
+            owner_userid=_text(row.get("owner_userid")) or follow_user_userid or None,
+            identity_map_id=None,
+            follow_user_userid=follow_user_userid or None,
+            matched_by=matched_by,
+            contact_points=contact_points,
+        )
 
     def _from_identity_map(self, row, *, matched_by: str, mobile: str = "") -> IdentityResolution:
         external_userid = _text(row.get("external_userid"))
@@ -254,7 +330,7 @@ class PostgresIdentityBindingRepository:
                 contact = self._fetch_contact_profile(cur, external_userid=external_userid)
                 resolved_owner = owner_userid or _text(contact.get("owner_userid")) if contact else owner_userid
                 resolved_name = customer_name or _text(contact.get("customer_name")) if contact else customer_name
-                self._merge_lead_pool(
+                self._record_mobile_identity_binding(
                     cur,
                     external_userid=external_userid,
                     mobile=mobile,
@@ -327,15 +403,24 @@ class PostgresIdentityBindingRepository:
     def _fetch_contact_profile(self, cur, *, external_userid: str) -> dict[str, Any] | None:
         return cur.execute(
             """
-            SELECT external_userid, owner_userid, customer_name, remark
-            FROM contacts
-            WHERE external_userid = %s
+            SELECT
+                im.external_userid,
+                COALESCE(NULLIF(fu.user_id, ''), NULLIF(im.follow_user_userid, '')) AS owner_userid,
+                COALESCE(NULLIF(im.name, ''), NULLIF(im.raw_profile ->> 'name', '')) AS customer_name,
+                COALESCE(NULLIF(fu.remark, ''), NULLIF(im.raw_profile ->> 'remark', '')) AS remark
+            FROM wecom_external_contact_identity_map im
+            LEFT JOIN wecom_external_contact_follow_users fu
+              ON fu.corp_id = im.corp_id
+             AND fu.external_userid = im.external_userid
+             AND COALESCE(fu.relation_status, 'active') = 'active'
+            WHERE im.external_userid = %s
+            ORDER BY fu.is_primary DESC NULLS LAST, fu.updated_at DESC NULLS LAST, im.updated_at DESC, im.id DESC
             LIMIT 1
             """,
             (external_userid,),
         ).fetchone()
 
-    def _merge_lead_pool(
+    def _record_mobile_identity_binding(
         self,
         cur,
         *,
@@ -346,108 +431,84 @@ class PostgresIdentityBindingRepository:
         customer_name: str,
         operator: str,
     ) -> None:
-        rows = list(
-            cur.execute(
-                """
-                SELECT *
-                FROM user_ops_lead_pool_current
-                WHERE mobile = %s OR external_userid = %s
-                ORDER BY
-                    CASE WHEN mobile = %s THEN 0 ELSE 1 END,
-                    updated_at DESC,
-                    id DESC
-                """,
-                (mobile, external_userid, mobile),
-            ).fetchall()
-        )
-        if not rows:
-            cur.execute(
-                """
-                INSERT INTO user_ops_lead_pool_current (
-                    mobile, external_userid, customer_name, owner_userid, is_wecom_added, is_mobile_bound,
-                    huangxiaocan_activation_state, class_term_no, class_term_label,
-                    first_entry_source, last_entry_source, created_at, updated_at
-                )
-                VALUES (%s, %s, %s, %s, TRUE, TRUE, 'unknown', NULL, '', 'mobile_bind', 'mobile_bind', NOW(), NOW())
-                """,
-                (mobile, external_userid, customer_name, owner_userid),
-            )
-            self._write_lead_pool_history(
-                cur,
-                mobile=mobile,
-                external_userid=external_userid,
-                action_type="mobile_bind_insert",
-                before=None,
-                after={"external_userid": external_userid, "mobile": mobile},
-                operator=operator,
-            )
-            return
-
-        target = dict(rows[0])
-        before = dict(target)
-        cur.execute(
+        updated = cur.execute(
             """
-            UPDATE user_ops_lead_pool_current
-            SET external_userid = %s,
-                mobile = %s,
-                owner_userid = COALESCE(NULLIF(%s, ''), owner_userid),
+            UPDATE crm_user_identity
+            SET mobile = %s,
+                mobile_normalized = %s,
+                mobile_verified = TRUE,
+                mobile_source = 'mobile_bind',
+                primary_owner_userid = COALESCE(NULLIF(%s, ''), primary_owner_userid),
                 customer_name = COALESCE(NULLIF(%s, ''), customer_name),
-                is_wecom_added = TRUE,
-                is_mobile_bound = TRUE,
-                last_entry_source = 'mobile_bind',
+                legacy_person_id = COALESCE(NULLIF(%s, ''), legacy_person_id),
+                profile_json = profile_json || %s::jsonb,
                 updated_at = NOW()
-            WHERE id = %s
-            """,
-            (external_userid, mobile, owner_userid, customer_name, target["id"]),
-        )
-        duplicate_ids = [int(row["id"]) for row in rows[1:] if row.get("id") is not None]
-        if duplicate_ids:
-            cur.execute("DELETE FROM user_ops_lead_pool_current WHERE id = ANY(%s)", (duplicate_ids,))
-        after = {
-            **target,
-            "external_userid": external_userid,
-            "mobile": mobile,
-            "owner_userid": owner_userid or target.get("owner_userid"),
-            "customer_name": customer_name or target.get("customer_name"),
-            "merged_duplicate_ids": duplicate_ids,
-        }
-        self._write_lead_pool_history(
-            cur,
-            mobile=mobile,
-            external_userid=external_userid,
-            action_type="mobile_bind_merge" if duplicate_ids else "mobile_bind_update",
-            before=before,
-            after=after,
-            operator=operator,
-        )
-
-    def _write_lead_pool_history(
-        self,
-        cur,
-        *,
-        mobile: str,
-        external_userid: str,
-        action_type: str,
-        before: dict[str, Any] | None,
-        after: dict[str, Any],
-        operator: str,
-    ) -> None:
-        cur.execute(
-            """
-            INSERT INTO user_ops_lead_pool_history (
-                mobile, external_userid, action_type, source_type, operator,
-                before_json, after_json, remark, created_at
-            )
-            VALUES (%s, %s, %s, 'mobile_bind', %s, %s::jsonb, %s::jsonb, %s, NOW())
+            WHERE primary_external_userid = %s
+               OR jsonb_exists(external_userids_json, %s)
+            RETURNING unionid
             """,
             (
                 mobile,
+                mobile,
+                owner_userid,
+                customer_name,
+                str(person_id),
+                json.dumps(
+                    {"mobile_bind": {"external_userid": external_userid, "operator": operator}},
+                    ensure_ascii=False,
+                    default=_json_default,
+                ),
                 external_userid,
-                action_type,
-                operator,
-                json.dumps(before or {}, ensure_ascii=False, default=_json_default),
-                json.dumps(after, ensure_ascii=False, default=_json_default),
-                f"bind mobile external_userid={external_userid}",
+                external_userid,
+            ),
+        ).fetchone()
+        if updated:
+            return
+
+        cur.execute(
+            """
+            INSERT INTO crm_user_identity_resolution_queue (
+                source_type, source_key, source_table, source_id,
+                external_userid, mobile, payload_json, raw_payload_json,
+                reason, status, last_seen_at, updated_at
+            )
+            VALUES (
+                'identity_contact_mobile_bind', %s, 'external_contact_bindings', %s,
+                %s, %s, %s::jsonb, %s::jsonb,
+                'pending_unionid_for_mobile_bind', 'pending', NOW(), NOW()
+            )
+            ON CONFLICT (source_type, source_key)
+            WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
+            DO UPDATE SET
+                external_userid = COALESCE(NULLIF(EXCLUDED.external_userid, ''), crm_user_identity_resolution_queue.external_userid),
+                mobile = COALESCE(NULLIF(EXCLUDED.mobile, ''), crm_user_identity_resolution_queue.mobile),
+                payload_json = crm_user_identity_resolution_queue.payload_json || EXCLUDED.payload_json,
+                raw_payload_json = crm_user_identity_resolution_queue.raw_payload_json || EXCLUDED.raw_payload_json,
+                reason = EXCLUDED.reason,
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            """,
+            (
+                external_userid,
+                external_userid,
+                external_userid,
+                mobile,
+                json.dumps(
+                    {
+                        "external_userid": external_userid,
+                        "mobile": mobile,
+                        "person_id": str(person_id),
+                        "owner_userid": owner_userid,
+                        "customer_name": customer_name,
+                    },
+                    ensure_ascii=False,
+                    default=_json_default,
+                ),
+                json.dumps(
+                    {"operator": operator, "source": "identity_contact_mobile_bind"},
+                    ensure_ascii=False,
+                    default=_json_default,
+                ),
             ),
         )
 

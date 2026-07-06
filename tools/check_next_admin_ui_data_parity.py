@@ -56,7 +56,7 @@ ADMIN_PAGES = [
 ]
 
 PRODUCTION_DATA_ROUTES = [
-    "/api/admin/automation-conversion/overview",
+    "/api/admin/ai-audience/packages",
     "/api/admin/questionnaires",
     "/api/customers",
     "/api/admin/wechat-pay/products",
@@ -148,15 +148,21 @@ def _admin_pages(client: TestClient) -> tuple[dict[str, int], list[str], list[st
 def _static_production_data_contracts_ready() -> tuple[bool, list[str]]:
     blockers: list[str] = []
     checks = {
-        "automation_overview_legacy_facade": ROOT / "aicrm_next" / "automation_engine" / "api.py",
-        "automation_program_legacy_facade": ROOT / "aicrm_next" / "frontend_compat" / "legacy_routes.py",
+        "ai_audience_admin_read_api": ROOT / "aicrm_next" / "ai_audience_ops" / "admin_api.py",
         "questionnaire_legacy_facade": ROOT / "aicrm_next" / "questionnaire" / "api.py",
         "customer_legacy_facade": ROOT / "aicrm_next" / "customer_read_model" / "api.py",
     }
     for name, path in checks.items():
         source = path.read_text(encoding="utf-8")
+        if name == "ai_audience_admin_read_api":
+            if "list_admin_package_summaries" not in source:
+                blockers.append(f"{name}:missing_admin_read_model")
+            continue
         if "production_data_ready()" not in source:
             blockers.append(f"{name}:missing_production_data_ready_guard")
+    frontend_compat_facade = ROOT / "aicrm_next" / "frontend_compat" / "legacy_routes.py"
+    if frontend_compat_facade.exists():
+        blockers.append("frontend_compat_legacy_routes:should_be_removed")
     for facade in (
         ROOT / "aicrm_next" / "integration_gateway" / "legacy_automation_facade.py",
         ROOT / "aicrm_next" / "integration_gateway" / "legacy_questionnaire_facade.py",

@@ -40,7 +40,7 @@
 
   function updateMetrics(channels) {
     metric("total", channels.length);
-    metric("standalone", channels.filter((channel) => !channel.bound_program_id).length);
+    metric("standalone", channels.length);
     metric("link", channels.filter(isLink).length);
     metric("entered", channels.reduce((total, channel) => total + Number(channel.channel_contact_count || 0), 0));
   }
@@ -190,7 +190,7 @@
 
   function confirmStatusAction(nextStatus) {
     if (nextStatus !== "archived") return true;
-    return window.confirm("删除后会归档渠道并保留历史用户、二维码、绑定和入渠记录。确认删除？");
+    return window.confirm("删除后会归档渠道并保留历史用户、二维码、配置和入渠记录。确认删除？");
   }
 
   function renderRow(channel) {
@@ -201,9 +201,6 @@
     const typeText = link ? "企微获客助手链接" : "普通二维码";
     const downloadUrl = channel.qr_download_url || `/api/admin/channels/${encodeURIComponent(channel.id)}/qrcode/download`;
     const copyText = channelLinkText(channel);
-    const bound = channel.bound_program_name
-      ? '<span class="channel-pill is-bound">已绑定</span>'
-      : '<span class="channel-pill is-standalone">独立使用</span>';
     const action = link
       ? `<button class="admin-button admin-button--secondary" type="button" data-copy-channel-link data-copy-text="${escapeHtml(copyText)}">复制链接</button>
          <button class="admin-button admin-button--secondary" type="button" data-share-channel-link data-copy-text="${escapeHtml(copyText)}">分享链接</button>`
@@ -223,7 +220,6 @@
           <span class="channel-pill ${channel.entry_tag_configured ? "is-ok" : ""}">${channel.entry_tag_configured ? "标签" : "无标签"}</span>
         </td>
         <td>${escapeHtml(channel.channel_contact_count || 0)}</td>
-        <td>${bound}</td>
         <td class="channel-action-cell">
           <div class="channel-row-actions">
             ${action}
@@ -243,10 +239,10 @@
       }
       const channels = Array.isArray(data.channels) ? data.channels : [];
       updateMetrics(channels);
-      list.innerHTML = channels.length ? channels.map(renderRow).join("") : '<tr><td colspan="7">暂无渠道。</td></tr>';
+      list.innerHTML = channels.length ? channels.map(renderRow).join("") : '<tr><td colspan="6">暂无渠道。</td></tr>';
     })
     .catch(() => {
-      list.innerHTML = '<tr><td colspan="7">渠道加载失败，请稍后重试。</td></tr>';
+      list.innerHTML = '<tr><td colspan="6">渠道加载失败，请稍后重试。</td></tr>';
     });
 
   search?.addEventListener("input", () => {
@@ -301,7 +297,9 @@
         if (!response.ok || data.ok === false) {
           throw new Error(data.detail || data.error || data.reason || "channel_status_update_failed");
         }
-        if (row && data.channel) {
+        if (row && nextStatus === "archived") {
+          row.remove();
+        } else if (row && data.channel) {
           row.outerHTML = renderRow(data.channel);
         }
         toast(statusSuccessMessage(nextStatus));
@@ -324,19 +322,13 @@
     const urls = bootstrapUrls();
     Promise.all([
       apiJson(urlFromBase(urls.contacts_base, channelId) + "?limit=20").catch(() => ({ data: { contacts: [] } })),
-      apiJson(urlFromBase(urls.bindings_base, channelId)).catch(() => ({ data: { bindings: [] } })),
-    ]).then(([contactsResult, bindingsResult]) => {
+    ]).then(([contactsResult]) => {
       const contacts = (contactsResult.data || {}).contacts || [];
-      const bindings = (bindingsResult.data || {}).bindings || [];
       const contactRows = contacts.length
         ? contacts.map((item) => `<tr><td>${escapeHtml(item.display_name || item.name || item.external_contact_id || "-")}</td><td>${escapeHtml(item.enter_count || 0)}</td></tr>`).join("")
         : '<tr><td colspan="2">暂无渠道用户。</td></tr>';
-      const bindingText = bindings.length
-        ? bindings.map((item) => `${escapeHtml(item.program_name || item.program_id || "-")} / ${escapeHtml(statusLabel(item.binding_status))}`).join("<br>")
-        : "独立使用";
       drawerBody.innerHTML = `
         <p><strong>${escapeHtml(row.querySelector("strong")?.textContent || "")}</strong></p>
-        <p class="channel-muted">当前绑定自动化运营状态：${bindingText}</p>
         <h3>渠道用户列表</h3>
         <table class="admin-table channel-table"><thead><tr><th>客户</th><th>进入次数</th></tr></thead><tbody>${contactRows}</tbody></table>`;
     });

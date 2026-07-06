@@ -22,3 +22,7 @@ All Codex development tasks must also follow
 [`docs/development/ai_crm_next_architecture_skill.md`](docs/development/ai_crm_next_architecture_skill.md)
 for AI-CRM Next architecture boundaries, production safety, legacy freeze rules,
 and PR output expectations.
+
+The architecture skill is the canonical development preflight. Other agent entry
+documents must point back to it instead of introducing separate required-reading
+lists.

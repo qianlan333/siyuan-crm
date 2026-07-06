@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,7 @@ from aicrm_next.admin_jobs.routes import (
 )
 from aicrm_next.admin_shell import admin_path_for, shell_context
 from aicrm_next.platform_foundation.internal_run_due_guard import maybe_guard_internal_run_due_request
+from aicrm_next.platform_foundation.external_effects.test_receiver import safe_current_base_url
 
 from .application import (
     ApproveCloudPlanCommand,
@@ -42,6 +44,7 @@ from .campaigns_write import (
     BatchStartCloudCampaignsCommand,
     CloudCampaignWriteInputError,
     CloudCampaignWriteNotFoundError,
+    CreateCloudCampaignCommand,
     DeleteCloudCampaignCommand,
     DeleteCloudCampaignStepCommand,
     PauseCloudCampaignCommand,
@@ -260,6 +263,18 @@ def _bool_payload(value: Any, *, default: bool) -> bool:
     return default
 
 
+def _receiver_response_status_payload(value: Any) -> int:
+    try:
+        status = int(value or 200)
+    except (TypeError, ValueError):
+        return 200
+    return status if status in {200, 400, 500} else 200
+
+
+def _ai_assist_external_effect_test_mode_enabled() -> bool:
+    return str(os.getenv("AI_ASSIST_EXTERNAL_EFFECT_TEST_MODE", "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 async def _run_due_payload(request: Request) -> dict[str, Any]:
     payload = await _request_payload(request)
     merged = dict(payload or {})
@@ -273,6 +288,8 @@ async def _run_due_payload(request: Request) -> dict[str, Any]:
         "allow_campaign_ids",
         "expected_due_count",
         "due_count",
+        "test_only",
+        "receiver_response_status",
     ):
         if key not in merged and key in request.query_params:
             merged[key] = request.query_params.get(key)
@@ -284,6 +301,8 @@ def _run_due_actor(request: Request, payload: dict[str, Any]) -> str:
 
 
 def _run_due_common(request: Request, payload: dict[str, Any], source_route: str) -> dict[str, Any]:
+    test_only = _bool_payload(payload.get("test_only"), default=False)
+    loopback_requested = test_only or _ai_assist_external_effect_test_mode_enabled()
     return {
         "idempotency_key": str(request.headers.get("Idempotency-Key") or payload.get("idempotency_key") or "").strip(),
         "actor_id": _run_due_actor(request, payload),
@@ -293,6 +312,9 @@ def _run_due_common(request: Request, payload: dict[str, Any], source_route: str
         "source_route": source_route,
         "trace_id": str(request.headers.get("X-AICRM-Trace-Id") or payload.get("trace_id") or "").strip(),
         "now": str(payload.get("now") or "").strip(),
+        "test_only": test_only,
+        "test_receiver_base_url": safe_current_base_url(request) if loopback_requested else "",
+        "receiver_response_status": _receiver_response_status_payload(payload.get("receiver_response_status")),
     }
 
 
@@ -499,6 +521,21 @@ def api_list_cloud_campaigns(
         offset=offset,
     )
     return JSONResponse(payload, headers=_CAMPAIGN_READ_HEADERS)
+
+
+@router.post("/api/admin/cloud-orchestrator/campaigns")
+async def api_create_cloud_campaign(request: Request) -> JSONResponse:
+    payload = await _campaign_write_payload(request)
+    campaign_code = str(payload.get("campaign_code") or "").strip()
+    command = CreateCloudCampaignCommand(
+        campaign_code=campaign_code,
+        **_campaign_command_common(
+            request,
+            payload,
+            "/api/admin/cloud-orchestrator/campaigns",
+        ),
+    )
+    return _campaign_write_response(command)
 
 
 @router.get("/api/admin/cloud-orchestrator/campaigns/{campaign_code}")

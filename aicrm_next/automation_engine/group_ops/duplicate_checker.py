@@ -20,17 +20,21 @@ class GroupOpsDuplicateChecker:
             return False
         if self._fetch_job_by_idempotency_key is not None:
             return bool(self._fetch_job_by_idempotency_key(key))
-        row = self._db_factory().execute(
-            """
-            SELECT id
-            FROM broadcast_jobs
-            WHERE idempotency_key = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (key,),
-        ).fetchone()
-        return bool(row)
+        db = self._db_factory()
+        for table in ("external_effect_job", "broadcast_jobs"):
+            row = db.execute(
+                f"""
+                SELECT id
+                FROM {table}
+                WHERE idempotency_key = ?
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (key,),
+            ).fetchone()
+            if row:
+                return True
+        return False
 
 
 def build_group_ops_duplicate_checker() -> GroupOpsDuplicateChecker:

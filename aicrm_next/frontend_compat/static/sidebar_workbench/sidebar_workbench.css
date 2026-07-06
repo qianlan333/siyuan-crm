@@ -541,6 +541,38 @@ button[disabled] {
   color: var(--danger);
 }
 
+.skeleton-list {
+  display: grid;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.skeleton-line {
+  height: 12px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #eef4ff 0%, #dbe8fb 45%, #eef4ff 90%);
+  background-size: 220% 100%;
+  animation: sidebar-skeleton 1.15s ease-in-out infinite;
+}
+
+.skeleton-line.strong {
+  width: 72%;
+  height: 15px;
+}
+
+.skeleton-line.short {
+  width: 46%;
+}
+
+@keyframes sidebar-skeleton {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
 .modal {
   position: fixed;
   inset: 0;

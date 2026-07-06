@@ -9,6 +9,6 @@ typecheck:
 	$(PYTHON) scripts/run_typecheck.py
 
 build:
-	$(PYTHON) scripts/run_build.py
+	$(PYTHON) -m pytest tests/test_deploy_workflow_contract.py tests/test_post_closeout_production_contract.py -q
 
 check: lint typecheck build

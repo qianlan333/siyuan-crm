@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 from pathlib import Path
 from urllib.parse import quote
 
@@ -12,11 +14,13 @@ from fastapi.templating import Jinja2Templates
 from aicrm_next.admin_shell import shell_context
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.share_qr import svg_qr_data_url
+from aicrm_next.shared.sync_request import read_request_body, read_request_json
 
 from .admin_transactions import (
     default_filters,
     create_wechat_refund_request,
     export_orders_csv,
+    handle_wechat_refund_notify,
     list_wechat_admin_orders,
     list_wechat_product_options,
 )
@@ -56,6 +60,7 @@ from .application import (
     SetProductEnabledCommand,
     UpsertProductCommand,
 )
+from .domain import has_product_page_material
 from .dto import CheckoutRequest, PaymentNotifyRequest, ProductUpsertRequest
 from .external_orders import router as external_orders_router
 from .repo import build_commerce_repository
@@ -74,6 +79,7 @@ _COMMERCE_TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 _FRONTEND_COMPAT_TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "frontend_compat" / "templates"
 templates = Jinja2Templates(directory=[_COMMERCE_TEMPLATES_DIR, _FRONTEND_COMPAT_TEMPLATES_DIR])
 _EXTERNAL_PUSH_CALL_EXECUTED = bool(1)
+logger = logging.getLogger(__name__)
 
 
 def _raise_http(exc: Exception) -> None:
@@ -81,7 +87,11 @@ def _raise_http(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, ContractError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.exception("commerce api unexpected error")
+    raise HTTPException(
+        status_code=500,
+        detail={"error_code": "commerce_internal_error", "message": "internal commerce error"},
+    ) from exc
 
 
 def _admin_api_error(*, error_code: str, message: str, source_status: str, status_code: int) -> JSONResponse:
@@ -306,6 +316,21 @@ def _payment_final_options_payload(route: str, methods: list[str], *, source_sta
     }
 
 
+def _external_base_url(request: Request) -> str:
+    configured = str(
+        os.getenv("AICRM_PUBLIC_BASE_URL")
+        or os.getenv("PUBLIC_BASE_URL")
+        or os.getenv("APP_BASE_URL")
+        or ""
+    ).strip()
+    return configured.rstrip("/") if configured else str(request.base_url).rstrip("/")
+
+
+def _refund_notify_url(request: Request) -> str:
+    configured = str(os.getenv("WECHAT_PAY_REFUND_NOTIFY_URL") or "").strip()
+    return configured or f"{_external_base_url(request)}/api/h5/wechat-pay/refund/notify"
+
+
 def _product_admin_context(
     request: Request,
     *,
@@ -338,7 +363,8 @@ def _product_admin_context(
 
 def _share_payload(request: Request, product: dict) -> dict:
     product_code = str(product.get("product_code") or "")
-    url = str(request.base_url).rstrip("/") + f"/p/{quote(product_code)}"
+    public_path = "p" if has_product_page_material(product) else "pay"
+    url = str(request.base_url).rstrip("/") + f"/{public_path}/{quote(product_code)}"
     return {
         "product_id": str(product.get("id") or ""),
         "product_code": product_code,
@@ -576,8 +602,11 @@ def list_wechat_admin_order_page(
 
 
 @router.post("/api/admin/wechat-pay/order-exports")
-async def export_wechat_admin_orders(request: Request) -> Response:
-    payload = await request.json()
+def export_wechat_admin_orders(request: Request) -> Response:
+    try:
+        payload = read_request_json(request)
+    except Exception:
+        payload = {}
     csv_text = export_orders_csv(payload.get("filters") if isinstance(payload, dict) else {})
     return Response(
         csv_text,
@@ -629,10 +658,15 @@ def retry_wechat_order_external_push_delivery(order_id: str, delivery_id: str) -
 
 
 @router.post("/api/admin/wechat-pay/orders/{order_id}/refunds")
-async def request_wechat_admin_refund(order_id: str, request: Request) -> JSONResponse:
-    payload = await request.json()
+def request_wechat_admin_refund(order_id: str, request: Request) -> JSONResponse:
     try:
-        result = create_wechat_refund_request(order_id, payload if isinstance(payload, dict) else {})
+        payload = read_request_json(request)
+    except Exception:
+        payload = {}
+    normalized_payload = dict(payload) if isinstance(payload, dict) else {}
+    normalized_payload["refund_notify_url"] = _refund_notify_url(request)
+    try:
+        result = create_wechat_refund_request(order_id, normalized_payload)
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc), **_payment_final_side_effects()}, status_code=400, headers=_payment_final_headers())
     provider_refund_executed = bool((result.get("refund") or {}).get("provider_refund_executed"))
@@ -647,6 +681,17 @@ async def request_wechat_admin_refund(order_id: str, request: Request) -> JSONRe
             real_refund_executed=provider_refund_executed,
         ),
     )
+
+
+@router.post("/api/h5/wechat-pay/refund/notify")
+def wechat_refund_notify(request: Request) -> JSONResponse:
+    body = read_request_body(request)
+    body_text = body.decode("utf-8")
+    try:
+        handle_wechat_refund_notify(body_text, dict(request.headers))
+        return JSONResponse({"code": "SUCCESS", "message": "成功"})
+    except Exception as exc:
+        return JSONResponse({"code": "FAIL", "message": str(exc)}, status_code=401)
 
 
 @router.get("/api/admin/wechat-pay/products")
@@ -712,9 +757,9 @@ def get_product_external_push(product_id: str) -> dict:
 
 
 @router.put("/api/admin/wechat-pay/products/{product_id}/external-push")
-async def save_product_external_push(product_id: str, request: Request) -> dict:
+def save_product_external_push(product_id: str, request: Request) -> dict:
     try:
-        payload = await request.json()
+        payload = read_request_json(request)
         config = build_commerce_repository().save_external_push_config(product_id, payload if isinstance(payload, dict) else {})
     except Exception as exc:
         _raise_http(exc)
@@ -918,17 +963,22 @@ def wechat_shop_notify_verify(request: Request) -> Response:
 
 
 @router.post("/api/wechat-shop/notify")
-async def wechat_shop_notify(request: Request) -> Response:
+def wechat_shop_notify(request: Request) -> Response:
     try:
-        payload = await request.json()
+        body = read_request_body(request)
+        payload = json.loads(body.decode("utf-8")) if body else {}
         if not isinstance(payload, dict):
             return Response("invalid payload", media_type="text/plain", status_code=400)
         handle_wechat_shop_notify(payload, dict(request.query_params))
         return Response("success", media_type="text/plain")
+    except json.JSONDecodeError:
+        return Response("invalid payload", media_type="text/plain", status_code=400)
     except ValueError as exc:
-        return Response(str(exc), media_type="text/plain", status_code=400)
+        status_code = 403 if "signature" in str(exc).lower() or "callback token" in str(exc).lower() else 400
+        return Response(str(exc), media_type="text/plain", status_code=status_code)
     except Exception:
-        return Response("success", media_type="text/plain")
+        logger.exception("wechat shop notify failed before durable event handling")
+        return Response("wechat shop notify failed", media_type="text/plain", status_code=500)
 
 
 @router.get("/api/alipay/return")

@@ -12,12 +12,6 @@
     selectedAgentCode: null,
     selectedAgentDetail: null,
     focusedPromptField: null,
-    templates: [],
-    catalog: [],
-    templateCatalog: [],
-    selectedTemplateId: null,
-    selectedTemplateDetail: null,
-    categoryDrafts: [],
     defaultChannel: null,
     defaultChannelSelectedTag: null,
     providerAvailable: false,
@@ -99,8 +93,6 @@
       summaryGrid: document.getElementById("agent-config-summary-grid"),
       agentTotal: document.getElementById("agent-total"),
       agentPublishedTotal: document.getElementById("agent-published-total"),
-      templateTotal: document.getElementById("template-total"),
-      catalogTotal: document.getElementById("catalog-total"),
       agentTableBody: document.getElementById("agent-table-body"),
       agentEmpty: document.getElementById("agent-empty"),
       agentCreateButton: document.getElementById("agent-create-button"),
@@ -119,22 +111,6 @@
       agentPublishedTaskPrompt: document.getElementById("agent-published-task-prompt"),
       agentPublishedContextSources: document.getElementById("agent-published-context-sources"),
       agentDiffSummary: document.getElementById("agent-diff-summary"),
-      templateTableBody: document.getElementById("template-table-body"),
-      templateEmpty: document.getElementById("template-empty"),
-      templateDetailPanel: document.getElementById("template-detail-panel"),
-      templateDetailTitle: document.getElementById("template-detail-title"),
-      templateDetailCode: document.getElementById("template-detail-code"),
-      templateDetailSummary: document.getElementById("template-detail-summary"),
-      templateDetailCategories: document.getElementById("template-detail-categories"),
-      templateCreateButton: document.getElementById("template-create-button"),
-      templateEditButton: document.getElementById("template-edit-button"),
-      templateFormPanel: document.getElementById("template-form-panel"),
-      templateFormTitle: document.getElementById("template-form-title"),
-      templateForm: document.getElementById("template-form"),
-      templateFormFeedback: document.getElementById("template-form-feedback"),
-      templateFormCancel: document.getElementById("template-form-cancel"),
-      categoryAddButton: document.getElementById("category-add-button"),
-      categoryList: document.getElementById("template-category-list"),
       defaultChannelFeedback: document.getElementById("default-channel-feedback"),
       defaultChannelGenerateButton: document.getElementById("default-channel-generate-button"),
       defaultChannelQrImage: document.getElementById("default-channel-qr-image"),
@@ -172,19 +148,6 @@
       changeSummary: agentForm ? agentForm.querySelector('[name="change_summary"]') : null,
       rolePrompt: agentForm ? agentForm.querySelector('[name="role_prompt"]') : null,
       taskPrompt: agentForm ? agentForm.querySelector('[name="task_prompt"]') : null,
-    };
-  }
-
-  function templateFields() {
-    const { templateForm } = elements();
-    return {
-      templateId: templateForm ? templateForm.querySelector('[name="template_id"]') : null,
-      templateName: templateForm ? templateForm.querySelector('[name="template_name"]') : null,
-      templateCode: templateForm ? templateForm.querySelector('[name="template_code"]') : null,
-      description: templateForm ? templateForm.querySelector('[name="description"]') : null,
-      questionnaireId: templateForm ? templateForm.querySelector('[name="questionnaire_id"]') : null,
-      segmentationQuestionId: templateForm ? templateForm.querySelector('[name="segmentation_question_id"]') : null,
-      enabled: templateForm ? templateForm.querySelector('[name="enabled"]') : null,
     };
   }
 
@@ -304,17 +267,10 @@
     if (nodes.agentPublishedTotal) {
       nodes.agentPublishedTotal.textContent = String(state.agents.filter((item) => item.status === "published").length);
     }
-    if (nodes.templateTotal) nodes.templateTotal.textContent = String(state.templates.length);
-    if (nodes.catalogTotal) nodes.catalogTotal.textContent = String(state.templateCatalog.length);
   }
 
   function syncInitialState() {
-    const currentRoot = root();
     state.agents = (parseJsonScript("automation-agent-config-initial-agents", []) || []).map(normalizeAgentItem);
-    state.templates = parseJsonScript("automation-agent-config-initial-templates", []) || [];
-    state.catalog = parseJsonScript("automation-agent-config-initial-catalog", []) || [];
-    state.templateCatalog = state.catalog;
-    state.selectedTemplateId = Number((currentRoot && currentRoot.dataset && currentRoot.dataset.selectedTemplateId) || 0) || null;
     updateSummaryCounters();
   }
 
@@ -328,7 +284,6 @@
   AutomationAgentConfig.state = state;
   AutomationAgentConfig.elements = elements;
   AutomationAgentConfig.agentFields = agentFields;
-  AutomationAgentConfig.templateFields = templateFields;
   AutomationAgentConfig.defaultChannelFields = defaultChannelFields;
   AutomationAgentConfig.modelSettingsFields = modelSettingsFields;
   AutomationAgentConfig.showFeedback = showFeedback;

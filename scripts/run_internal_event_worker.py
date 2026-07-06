@@ -1,0 +1,63 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import argparse
+import sys
+
+try:
+    from scripts.script_runtime import ensure_repo_root_on_path, print_json, read_int_env
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from script_runtime import ensure_repo_root_on_path, print_json, read_int_env
+
+ensure_repo_root_on_path()
+
+from aicrm_next.platform_foundation.internal_events.config import DEFAULT_WORKER_BATCH_SIZE
+from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
+
+
+def _csv(value: str) -> list[str]:
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
+def _default_limit() -> int:
+    return read_int_env(
+        "AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE",
+        read_int_env("AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE", DEFAULT_WORKER_BATCH_SIZE),
+    )
+
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run the AI-CRM Internal Event Queue worker.")
+    parser.add_argument("--limit", "--batch-size", dest="limit", type=int, default=_default_limit())
+    parser.add_argument("--event-types", default="")
+    parser.add_argument("--consumer-names", default="")
+    parser.add_argument("--execute", action="store_true", default=False, help="Dispatch consumers. Without this flag the worker dry-runs.")
+    args = parser.parse_args(argv)
+    if args.limit <= 0:
+        parser.error("--limit must be >= 1")
+    return args
+
+
+def run(*, limit: int | None = None, dry_run: bool = True, event_types: list[str] | None = None, consumer_names: list[str] | None = None) -> dict:
+    return InternalEventWorker().run_due(
+        batch_size=int(limit or _default_limit()),
+        dry_run=bool(dry_run),
+        event_types=event_types,
+        consumer_names=consumer_names,
+    )
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parse_args(argv)
+    payload = run(
+        limit=int(args.limit),
+        dry_run=not bool(args.execute),
+        event_types=_csv(args.event_types),
+        consumer_names=_csv(args.consumer_names),
+    )
+    print_json(payload)
+    return 0 if payload.get("ok") or payload.get("dry_run") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

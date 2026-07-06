@@ -43,6 +43,15 @@ def test_channel_form_exposes_auto_accept_friend_toggle() -> None:
     assert '[name="auto_accept_friend"]' in js
 
 
+def test_channel_form_save_error_prefers_fastapi_detail() -> None:
+    js = _read(CHANNEL_JS)
+
+    assert "function apiErrorMessage(data, fallback)" in js
+    assert "const detail = data && data.detail" in js
+    assert 'const message = apiErrorMessage(data, "保存失败")' in js
+    assert "data.error || data.reason || \"保存失败\"" not in js
+
+
 def test_channel_form_no_longer_uses_private_welcome_material_picker() -> None:
     combined = _read(TEMPLATE) + "\n" + _read(CHANNEL_JS)
 

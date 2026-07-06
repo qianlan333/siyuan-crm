@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from aicrm_next.shared.errors import ApplicationError, ContractError, NotFoundError
 from aicrm_next.common_operation_members import search_operation_members
+from aicrm_next.platform_foundation.external_effects.test_receiver import safe_current_base_url
 
 from .application import (
     AddGroupOpsPlanGroupCommand,
@@ -349,8 +350,10 @@ def preview_group_ops_plan_run_due(plan_id: int, payload: GroupOpsRunDueRequest)
 
 
 @router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/run-due")
-def run_group_ops_plan_due(plan_id: int, payload: GroupOpsRunDueRequest) -> JSONResponse:
+def run_group_ops_plan_due(plan_id: int, payload: GroupOpsRunDueRequest, request: Request) -> JSONResponse:
     try:
+        if payload.external_effect_test_loopback:
+            payload = payload.model_copy(update={"test_receiver_base_url": safe_current_base_url(request)})
         return _json_result(RunGroupOpsPlanDueCommand()(plan_id, payload))
     except Exception as exc:
         _raise_http(exc)
@@ -535,11 +538,14 @@ def list_group_ops_executions(
 def receive_group_ops_webhook(
     webhook_key: str,
     payload: GroupOpsWebhookReceiveRequest,
+    request: Request,
     authorization: str | None = Header(default=None),
     x_idempotency_key: str | None = Header(default=None),
     x_signature: str | None = Header(default=None),
 ) -> JSONResponse:
     try:
+        if payload.external_effect_test_loopback:
+            payload = payload.model_copy(update={"test_receiver_base_url": safe_current_base_url(request)})
         return _json_result(
             ReceiveGroupOpsWebhookCommand()(
                 webhook_key,

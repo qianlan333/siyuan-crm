@@ -23,61 +23,43 @@ def test_live_source_repository_reads_existing_customer_source_tables(monkeypatc
         session,
         [
             """
-            CREATE TABLE contacts (
-                id INTEGER PRIMARY KEY,
-                external_userid TEXT,
-                customer_name TEXT,
-                owner_userid TEXT,
-                remark TEXT,
-                description TEXT,
-                updated_at TEXT
-            )
-            """,
-            """
-            CREATE TABLE people (
-                id INTEGER PRIMARY KEY,
+            CREATE TABLE crm_user_identity (
+                unionid TEXT PRIMARY KEY,
+                openids_json TEXT,
+                external_userids_json TEXT,
                 mobile TEXT,
-                third_party_user_id TEXT,
-                updated_at TEXT
-            )
-            """,
-            """
-            CREATE TABLE external_contact_bindings (
-                external_userid TEXT PRIMARY KEY,
-                person_id INTEGER,
-                first_owner_userid TEXT,
-                last_owner_userid TEXT,
-                updated_at TEXT
-            )
-            """,
-            """
-            CREATE TABLE wecom_external_contact_identity_map (
-                id INTEGER PRIMARY KEY,
-                external_userid TEXT,
-                unionid TEXT,
-                openid TEXT,
-                follow_user_userid TEXT,
-                name TEXT,
-                status TEXT,
-                updated_at TEXT
-            )
-            """,
-            """
-            CREATE TABLE wecom_external_contact_follow_users (
-                id INTEGER PRIMARY KEY,
-                external_userid TEXT,
-                user_id TEXT,
-                relation_status TEXT,
-                is_primary INTEGER,
+                mobile_normalized TEXT,
+                mobile_verified INTEGER,
+                mobile_source TEXT,
+                customer_name TEXT,
                 remark TEXT,
                 description TEXT,
+                avatar TEXT,
+                gender INTEGER,
+                profile_json TEXT,
+                follow_users_json TEXT,
+                legacy_person_id TEXT,
+                legacy_identity_map_ids_json TEXT,
+                legacy_sources_json TEXT,
+                primary_external_userid TEXT,
+                primary_openid TEXT,
+                primary_owner_userid TEXT,
+                identity_status TEXT,
+                unionid_resolved_at TEXT,
+                first_seen_at TEXT,
+                last_seen_at TEXT,
+                last_polled_at TEXT,
+                next_poll_at TEXT,
+                poll_attempt_count INTEGER,
+                last_poll_error TEXT,
+                created_at TEXT,
                 updated_at TEXT
             )
             """,
             """
             CREATE TABLE contact_tags (
                 id INTEGER PRIMARY KEY,
-                external_userid TEXT,
+                unionid TEXT,
                 userid TEXT,
                 tag_id TEXT,
                 tag_name TEXT,
@@ -86,12 +68,11 @@ def test_live_source_repository_reads_existing_customer_source_tables(monkeypatc
             """,
             """
             CREATE TABLE class_user_status_current (
-                external_userid TEXT PRIMARY KEY,
+                unionid TEXT PRIMARY KEY,
                 signup_status TEXT,
                 signup_label_name TEXT,
                 customer_name_snapshot TEXT,
                 owner_userid_snapshot TEXT,
-                mobile_snapshot TEXT,
                 status_flags_json TEXT,
                 updated_at TEXT
             )
@@ -101,7 +82,7 @@ def test_live_source_repository_reads_existing_customer_source_tables(monkeypatc
                 id INTEGER PRIMARY KEY,
                 msgid TEXT,
                 chat_type TEXT,
-                external_userid TEXT,
+                unionid TEXT,
                 owner_userid TEXT,
                 sender TEXT,
                 receiver TEXT,
@@ -112,6 +93,18 @@ def test_live_source_repository_reads_existing_customer_source_tables(monkeypatc
                 created_at TEXT
             )
             """,
+            "CREATE TABLE wechat_pay_orders (id INTEGER, unionid TEXT, status TEXT, trade_state TEXT, paid_at TEXT, updated_at TEXT, created_at TEXT)",
+            "CREATE TABLE questionnaire_submissions (id INTEGER, unionid TEXT)",
+            """
+            CREATE TABLE automation_channel_contact (
+                id INTEGER PRIMARY KEY,
+                channel_id INTEGER,
+                unionid TEXT,
+                owner_staff_id TEXT,
+                source_payload_json TEXT,
+                updated_at TEXT
+            )
+            """,
             """
             CREATE TABLE owner_role_map (
                 userid TEXT PRIMARY KEY,
@@ -119,31 +112,28 @@ def test_live_source_repository_reads_existing_customer_source_tables(monkeypatc
             )
             """,
             """
-            INSERT INTO contacts VALUES
-            (1, 'wx_ext_001', '源表客户', 'owner-a', '重点备注', '客户描述', '2026-06-02T08:00:00+00:00')
+            INSERT INTO crm_user_identity VALUES
+            (
+                'union-1', '["openid-1"]', '["wx_ext_001"]',
+                '13800138000', '13800138000', 1, 'test_fixture',
+                '身份客户名', '重点备注', '客户描述', '', NULL,
+                '{"name":"身份客户名","remark":"重点备注","description":"客户描述"}',
+                '[]', 'person-1', '[]', '{}', 'wx_ext_001', 'openid-1', 'owner-a',
+                'active', '2026-06-02T08:02:00+00:00',
+                '2026-06-02T08:02:00+00:00', '2026-06-02T08:02:00+00:00',
+                '2026-06-02T08:02:00+00:00', NULL, 0, '',
+                '2026-06-02T08:02:00+00:00', '2026-06-02T08:02:00+00:00'
+            )
             """,
-            "INSERT INTO people VALUES (1, '13800138000', 'third-party-1', '2026-06-02T08:00:00+00:00')",
-            """
-            INSERT INTO external_contact_bindings VALUES
-            ('wx_ext_001', 1, 'owner-a', 'owner-a', '2026-06-02T08:01:00+00:00')
-            """,
-            """
-            INSERT INTO wecom_external_contact_identity_map VALUES
-            (1, 'wx_ext_001', 'union-1', 'openid-1', 'owner-a', '身份客户名', 'active', '2026-06-02T08:02:00+00:00')
-            """,
-            """
-            INSERT INTO wecom_external_contact_follow_users VALUES
-            (1, 'wx_ext_001', 'owner-a', 'active', 1, '跟进备注', '跟进描述', '2026-06-02T08:03:00+00:00')
-            """,
-            "INSERT INTO contact_tags VALUES (1, 'wx_ext_001', 'owner-a', 'tag-1', '重点跟进', '2026-06-02T08:04:00+00:00')",
+            "INSERT INTO contact_tags VALUES (1, 'union-1', 'owner-a', 'tag-1', '重点跟进', '2026-06-02T08:04:00+00:00')",
             """
             INSERT INTO class_user_status_current VALUES
-            ('wx_ext_001', 'activated', '已激活', '状态快照名', 'owner-a', '13800138000',
+            ('union-1', 'activated', '已激活', '状态快照名', 'owner-a',
              '{"activation_bucket":"activated"}', '2026-06-02T08:05:00+00:00')
             """,
             """
             INSERT INTO archived_messages VALUES
-            (1, 'msg-1', 'single', 'wx_ext_001', 'owner-a', 'customer', 'owner-a', 'text',
+            (1, 'msg-1', 'single', 'union-1', 'owner-a', 'customer', 'owner-a', 'text',
              '你好', '2026-06-02T08:06:00+00:00', '{}', '2026-06-02T08:06:00+00:00')
             """,
             "INSERT INTO owner_role_map VALUES ('owner-a', '顾问甲')",
@@ -166,6 +156,7 @@ def test_live_source_repository_reads_existing_customer_source_tables(monkeypatc
     assert rows[0]["class_user_status"]["activation_bucket"] == "activated"
     assert detail["identity"]["unionid"] == "union-1"
     assert messages[0]["msgid"] == "msg-1"
+    assert messages[0]["unionid"] == "union-1"
     assert timeline[0]["event_type"] == "message"
 
 

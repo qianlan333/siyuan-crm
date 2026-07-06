@@ -160,8 +160,12 @@ def _post_filter(items: list[dict[str, Any]], filters: dict[str, str]) -> list[d
     return rows
 
 
-def _order_sort_key(item: dict[str, Any]) -> tuple[datetime, datetime]:
-    return (_parse_time(item.get("paid_at")), _parse_time(item.get("created_at")))
+def _order_sort_key(item: dict[str, Any]) -> tuple[datetime, datetime, str]:
+    return (
+        _parse_time(item.get("created_at")),
+        _parse_time(item.get("paid_at")),
+        _text(item.get("order_no") or item.get("out_trade_no") or item.get("merchant_order_no")),
+    )
 
 
 def list_orders(

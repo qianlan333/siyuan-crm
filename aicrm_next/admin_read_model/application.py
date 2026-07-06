@@ -11,7 +11,7 @@ from .projections import (
     funnel_payload,
     jobs_payload,
     media_payload,
-    page_row_count,
+    page_row_count as page_row_count,
     products_payload,
     transactions_payload,
     wecom_tags_payload,

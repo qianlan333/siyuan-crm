@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from aicrm_next.shared.errors import NotFoundError
 
-from .domain import public_projection
+from .domain import normalize_questionnaire, public_projection
 from .oauth import (
     COOKIE_NAME,
     build_questionnaire_h5_identity_cookie,
@@ -124,6 +124,7 @@ class QuestionnaireSubmissionStatusService:
         submission = self._repo.find_submission_for_identity(int(item["id"]), dict(identity or {}))
         normalized_slug = _text(item.get("slug")) or _text(slug)
         redirect_url = _text(item.get("redirect_url"))
+        questionnaire = normalize_questionnaire(item)
         return {
             "ok": True,
             "submitted": bool(submission),
@@ -132,6 +133,9 @@ class QuestionnaireSubmissionStatusService:
             "identity_key": self._identity_key(identity or {}),
             "submission": submission,
             "redirect_url": redirect_url,
+            "completion_target": questionnaire["completion_target"],
+            "completion_target_enabled": questionnaire["completion_target_enabled"],
+            "completion_target_type": questionnaire["completion_target_type"],
             "submitted_url": f"/s/{normalized_slug}/submitted",
             **_read_meta(self._repo),
         }

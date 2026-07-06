@@ -36,6 +36,7 @@ def test_jssdk_ignores_real_enabled_without_explicit_gate(monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
     monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("AICRM_SIDEBAR_JSSDK_ADAPTER_MODE", "real_enabled")
+    monkeypatch.setenv("AICRM_SIDEBAR_JSSDK_ALLOWED_HOSTS", "example.com")
     monkeypatch.delenv("AICRM_SIDEBAR_JSSDK_REAL_ENABLED", raising=False)
     client = TestClient(create_app(), raise_server_exceptions=False)
 

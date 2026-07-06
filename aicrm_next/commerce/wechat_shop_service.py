@@ -7,10 +7,15 @@ import re
 import secrets
 from typing import Any
 
-from aicrm_next.shared.runtime import database_mode, raw_database_url
+from aicrm_next.integration_gateway.wechat_shop_client import (
+    WeChatShopClient,
+    WeChatShopClientConfig,
+    WeChatShopClientError,
+)
+from aicrm_next.shared.runtime import database_mode
 
 from .product_code_aliases import canonical_product_code, canonical_product_name
-from .wechat_shop_client import WeChatShopClient, WeChatShopClientConfig, WeChatShopClientError
+from .repo import connect_commerce_db
 from .wechat_shop_signature import callback_token, should_skip_signature_without_token, verify_signature
 
 PROVIDER = "wechat_shop"
@@ -74,10 +79,7 @@ def _iso(value: Any) -> str:
 
 
 def _connect():
-    import psycopg
-    from psycopg.rows import dict_row
-
-    return psycopg.connect(raw_database_url(), row_factory=dict_row)
+    return connect_commerce_db()
 
 
 def _jsonb(value: Any):
@@ -132,8 +134,9 @@ def _event_type(payload: dict[str, Any]) -> str:
 def _verify_query_signature(query_params: dict[str, Any] | None) -> None:
     token = callback_token()
     if not token:
-        should_skip_signature_without_token()
-        return
+        if should_skip_signature_without_token():
+            return
+        raise ValueError("wechat shop callback token is not configured")
     params = dict(query_params or {})
     signature = _text(params.get("signature"))
     timestamp = _text(params.get("timestamp"))
@@ -861,7 +864,7 @@ def _upsert_order(order: dict[str, Any], *, source_event_id: int | None = None) 
             INSERT INTO wechat_shop_orders (
                 order_id, provider, provider_label, deal_recorded, returned_recorded, business_status,
                 status_code, status_label, paid_at, returned_at, amount_total, refunded_amount_total,
-                currency, transaction_id, payment_method, buyer_mobile, openid, unionid, product_name, product_code,
+                currency, transaction_id, payment_method, unionid, product_name, product_code,
                 product_count, deliver_method, is_virtual_delivery, virtual_account_no, virtual_account_type,
                 aftersale_order_count, on_aftersale_order_count, finish_aftersale_sku_count, raw_order_json,
                 last_event_type, last_event_at, synced_at, sync_status, last_error, created_at, updated_at
@@ -870,7 +873,7 @@ def _upsert_order(order: dict[str, Any], *, source_event_id: int | None = None) 
                 %(order_id)s, %(provider)s, %(provider_label)s, %(deal_recorded)s, %(returned_recorded)s,
                 %(business_status)s, %(status_code)s, %(status_label)s, %(paid_at)s, %(returned_at)s,
                 %(amount_total)s, %(refunded_amount_total)s, %(currency)s, %(transaction_id)s,
-                %(payment_method)s, %(buyer_mobile)s, %(openid)s, %(unionid)s, %(product_name)s, %(product_code)s,
+                %(payment_method)s, %(unionid)s, %(product_name)s, %(product_code)s,
                 %(product_count)s, %(deliver_method)s, %(is_virtual_delivery)s, %(virtual_account_no)s,
                 %(virtual_account_type)s, %(aftersale_order_count)s, %(on_aftersale_order_count)s,
                 %(finish_aftersale_sku_count)s, %(raw_order_json)s, %(last_event_type)s, %(last_event_at)s,
@@ -891,8 +894,6 @@ def _upsert_order(order: dict[str, Any], *, source_event_id: int | None = None) 
                 currency = EXCLUDED.currency,
                 transaction_id = EXCLUDED.transaction_id,
                 payment_method = EXCLUDED.payment_method,
-                buyer_mobile = EXCLUDED.buyer_mobile,
-                openid = EXCLUDED.openid,
                 unionid = EXCLUDED.unionid,
                 product_name = EXCLUDED.product_name,
                 product_code = EXCLUDED.product_code,

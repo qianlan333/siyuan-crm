@@ -22,10 +22,6 @@ DOC = ROOT / "docs" / "migration" / "send_content_next_surface_inventory.md"
 
 
 SURFACES = {
-    "automation_operation": [
-        AUTOMATION_TEMPLATES / "_automation_operation_orchestration_panel.html",
-        AUTOMATION_STATIC / "automation_operation_orchestration_panel.js",
-    ],
     "hxc_dashboard": [TEMPLATES / "hxc_dashboard.html"],
     "channel_welcome": [
         AUTOMATION_TEMPLATES / "channel_code_form.html",
@@ -37,6 +33,8 @@ SURFACES = {
     ],
     "campaign_step": [TEMPLATES / "cloud_campaigns_workspace.html"],
 }
+RETIRED_OPERATION_PANEL = AUTOMATION_TEMPLATES / "_automation_operation_orchestration_panel.html"
+RETIRED_OPERATION_JS = AUTOMATION_STATIC / "automation_operation_orchestration_panel.js"
 
 
 DIRECT_MATERIAL_API_MARKERS = [
@@ -67,6 +65,11 @@ def test_all_migrated_send_content_surfaces_use_standard_composer() -> None:
     for name, paths in SURFACES.items():
         source = _surface_source(paths)
         assert "AICRMSendContentComposer.open" in source, name
+
+
+def test_retired_automation_operation_surface_stays_removed() -> None:
+    assert not RETIRED_OPERATION_PANEL.exists()
+    assert not RETIRED_OPERATION_JS.exists()
 
 
 def test_migrated_send_content_surfaces_do_not_fetch_material_libraries_directly() -> None:
@@ -126,7 +129,7 @@ def test_send_content_surface_inventory_has_required_status_sections() -> None:
     assert "## Pending" in source
     assert "## Legacy Only / Not Migrating" in source
     for row in [
-        "| 自动化运营编排 | migrated |",
+        "| 自动化运营编排 | retired |",
         "| HXC 漏斗看板 | migrated |",
         "| 渠道码中心欢迎语 | migrated |",
         "| 群运营计划动作 | migrated |",

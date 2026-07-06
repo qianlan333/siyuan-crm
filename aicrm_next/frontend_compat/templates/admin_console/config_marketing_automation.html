@@ -4,35 +4,34 @@
 <section class="admin-card">
   <div class="admin-card-head">
     <div>
-      <h2>自动化转化兼容入口</h2>
-      <p>旧的自动化转化配置模板已经并入新的自动化转化后台，不再单独维护第二套页面。</p>
+      <h2>AI 自动化运营入口</h2>
+      <p>旧的自动化方案配置已经退场；新增运营请通过 AI SQL 人群包、事件队列和外推队列完成。</p>
     </div>
     <div class="admin-toolbar">
-      <a class="admin-button admin-button--primary" href="/admin/automation-conversion">进入自动化转化后台</a>
-      <a class="admin-button admin-button--ghost" href="{{ automation_program_overview_href or url_for('api.admin_automation_conversion') }}">进入数据概览</a>
+      <a class="admin-button admin-button--primary" href="/admin/automation-conversion">进入 AI 自动化运营</a>
     </div>
   </div>
 
   <div class="admin-state admin-state--inline">
     <strong>当前统一口径</strong>
-    <span>当前自动化转化按方案维护数据概览、自动化运营、画像分层、渠道入口与执行记录；共享资源只保留自动化应答、智能体和大模型底座。</span>
+    <span>一级页面只展示 AI 人群包；刷新通过 internal_event 调度，外推通过 external_effects，配置页仅保留 Agent 话术和大模型底座说明。</span>
   </div>
 
   <div class="admin-card-grid">
     <article class="admin-card admin-stat-card admin-stat-card--nested">
-      <div class="admin-card-label">问卷配置</div>
-      <div class="admin-card-value admin-card-value--compact">统一到新页面</div>
-      <p class="admin-card-copy">问卷定义继续复用现有数据；基础画像分层模板进入具体方案，按方案绑定不同问卷和题目。</p>
+      <div class="admin-card-label">AI 人群包</div>
+      <div class="admin-card-value admin-card-value--compact">SQL 定义</div>
+      <p class="admin-card-copy">运营命中规则由 AI 生成受控 SQL，人群包按统一增量或每日刷新机制计算成员变化。</p>
     </article>
     <article class="admin-card admin-stat-card admin-stat-card--nested">
-      <div class="admin-card-label">系统大人群</div>
-      <div class="admin-card-value admin-card-value--compact">统一到新页面</div>
-      <p class="admin-card-copy">未填问卷、运营中、已转化 3 类系统大人群，以及成员进入人群的时间记录，都在新页面查看。</p>
+      <div class="admin-card-label">事件与外推</div>
+      <div class="admin-card-value admin-card-value--compact">统一队列</div>
+      <p class="admin-card-copy">数据变化和成员增量进入 internal_event；外部 Agent 推送统一规划到 external_effects。</p>
     </article>
     <article class="admin-card admin-stat-card admin-stat-card--nested">
-      <div class="admin-card-label">任务流与节点</div>
-      <div class="admin-card-value admin-card-value--compact">线性节点配置</div>
-      <p class="admin-card-copy">任务流、节点配置、执行记录都归属于方案；智能体本体和大模型接口作为共享底座继续复用。</p>
+      <div class="admin-card-label">Agent 话术底座</div>
+      <div class="admin-card-value admin-card-value--compact">继续保留</div>
+      <p class="admin-card-copy">自动化话术生成、日志和产出继续保留；旧阶段机、任务编排和 Runtime V2 不再参与新链路。</p>
     </article>
   </div>
 </section>

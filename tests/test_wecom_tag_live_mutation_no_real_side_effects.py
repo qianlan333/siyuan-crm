@@ -52,11 +52,12 @@ def test_live_mutation_ignores_live_wecom_env_flags(monkeypatch) -> None:
     payload = client.post(
         "/api/admin/wecom/tags/live/mark",
         json={"external_userid": "wx_ext_001", "tag_ids": ["tag_fixture_active"]},
-        headers={"Idempotency-Key": "live-env-still-plan-only"},
+        headers={"Idempotency-Key": "live-env-still-queued-only"},
     ).json()
 
     assert payload["source_status"] == "next_command"
-    assert payload["adapter_mode"] == "real_blocked"
+    assert payload["adapter_mode"] == "queued_external_effect"
     assert payload["real_external_call_executed"] is False
     assert payload["wecom_api_called"] is False
-    assert payload["side_effect_plan"]["status"] == "planned"
+    assert payload["side_effect_plan"]["status"] == "queued"
+    assert payload["side_effect_plan"]["requires_approval"] is False

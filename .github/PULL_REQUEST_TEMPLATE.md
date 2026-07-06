@@ -30,3 +30,13 @@
 - [ ] 未修改现有 API 路径
 - [ ] 若改响应字段，仅新增未删除
 - [ ] 已先跑定向测试，再跑全量回归
+
+## schema_change_checklist
+- [ ] 是否新增表？如果是，已补 lifecycle manifest entry / owner / business key / PII level。
+- [ ] 是否删除表？如果是，已说明 replacement / retired lifecycle / rollback note。
+- [ ] 是否变更业务主键？如果是，已说明迁移路径、回填策略、读写路径影响。
+- [ ] 是否影响 unionid？如果是，已覆盖身份解析、历史数据、幂等和回滚验证。
+- [ ] 是否影响 external effect？如果是，已确认真实外呼边界、审计、重试和发送人约束。
+- [ ] 是否影响 payment / notification？如果是，已确认支付状态、通知幂等和回调兼容性。
+- [ ] 是否影响 material assets？如果是，已确认素材 lineage、usage、分页和校验规则。
+- [ ] 如涉及 migration，已按 `docs/development/schema_migration_template.md` 填写迁移头和验证证据。

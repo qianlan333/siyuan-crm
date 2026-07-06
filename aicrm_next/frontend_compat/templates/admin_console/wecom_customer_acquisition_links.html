@@ -21,22 +21,6 @@
       <span>link_name</span>
       <input name="link_name" placeholder="投放名称">
     </label>
-    <label class="admin-form-field">
-      <span>program_id</span>
-      <input name="program_id" type="number" min="1">
-    </label>
-    <label class="admin-form-field">
-      <span>workflow_id</span>
-      <input name="workflow_id" type="number" min="1">
-    </label>
-    <label class="admin-form-field">
-      <span>初始人群</span>
-      <select name="initial_audience_code">
-        <option value="pending_questionnaire">待问卷</option>
-        <option value="operating">运营中</option>
-        <option value="converted">已转化</option>
-      </select>
-    </label>
     <div class="admin-form-actions">
       <button class="admin-button admin-button--primary" type="submit">保存绑定</button>
       <span class="admin-form-message" data-wca-message></span>
@@ -48,7 +32,7 @@
   <div class="admin-section-header">
     <div>
       <h2 class="admin-section-title">链接列表</h2>
-      <p class="admin-section-summary">复制 final_url 用于投放；停用后回调只记录事件，不再入池。</p>
+      <p class="admin-section-summary">复制 final_url 用于投放；停用后回调只记录渠道进入事实，供 AI 人群包查询。</p>
     </div>
     <button class="admin-button admin-button--secondary" type="button" data-wca-refresh>刷新</button>
   </div>

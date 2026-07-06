@@ -29,7 +29,7 @@ body:
       label: 授权修改文件
       description: 事故处置允许修改的文件。
       placeholder: |
-        wecom_ability_service/routes.py
+        aicrm_next/main.py
         tests/test_api.py
     validations:
       required: true

@@ -38,8 +38,8 @@ Outer business pages own strategy, audience, sender, schedule, approval, and rou
 - `aicrm_next/frontend_compat/static/admin_console/send_content_composer.css`
 - `aicrm_next/frontend_compat/static/admin_console/material_picker.js`
 - `aicrm_next/frontend_compat/static/admin_console/material_picker.css`
-- `aicrm_next/automation_engine/templates/admin_console/_automation_operation_orchestration_panel.html`
-- `aicrm_next/automation_engine/static/admin_console/automation_operation_orchestration_panel.js`
+- `historical removed reference (_automation_operation_orchestration_panel.html)`
+- `historical removed reference (automation_operation_orchestration_panel.js)`
 - `aicrm_next/frontend_compat/templates/admin_console/hxc_dashboard.html`
 - `aicrm_next/automation_engine/templates/admin_console/channel_code_form.html`
 - `aicrm_next/automation_engine/static/admin_console/channel_admission_pages.js`
@@ -51,7 +51,7 @@ Outer business pages own strategy, audience, sender, schedule, approval, and rou
 
 | Surface | 状态 | 外层负责 | 标准组件负责 | 备注 |
 |---|---|---|---|---|
-| 自动化运营编排 | migrated | content_mode / segment / agent | content_text + 三类素材 | 样板入口；发送策略属于外层页面 |
+| 自动化运营编排 | retired | - | - | 旧 operation-task 编排面板已退场；新自动化触发与人群命中由 AI Audience 承接 |
 | HXC 漏斗看板 | migrated | audience_filter / sender / idempotency_key | content_text + 三类素材 | 已接 Next-native `/api/admin/hxc-dashboard/broadcast-tasks`；真实外发仍由后续 dispatch 链路负责 |
 | 渠道码中心欢迎语 | migrated | 渠道基础信息 / 入渠标签 | welcome_message + 三类素材 | adapter 映射到原 welcome 字段 |
 | 群运营计划动作 | migrated | day / time / status / sort | 标准话术 + 三类素材 | legacy attachments 只兼容旧数据和发送 fallback |

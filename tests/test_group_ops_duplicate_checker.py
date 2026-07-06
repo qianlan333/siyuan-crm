@@ -56,9 +56,36 @@ def test_duplicate_checker_uses_next_db_factory() -> None:
     fake_db = FakeDb()
 
     assert GroupOpsDuplicateChecker(db_factory=lambda: fake_db).exists("group_ops:k") is True
-    assert "FROM broadcast_jobs" in fake_db.calls[0]["sql"]
+    assert "FROM external_effect_job" in fake_db.calls[0]["sql"]
     assert "idempotency_key" in fake_db.calls[0]["sql"]
     assert fake_db.calls[0]["params"] == ("group_ops:k",)
+    assert len(fake_db.calls) == 1
+
+
+def test_duplicate_checker_falls_back_to_legacy_broadcast_jobs() -> None:
+    class FakeCursor:
+        def __init__(self, row):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
+
+    class FakeDb:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def execute(self, sql, params):
+            self.calls.append({"sql": sql, "params": params})
+            if "FROM external_effect_job" in sql:
+                return FakeCursor(None)
+            return FakeCursor({"id": 88})
+
+    fake_db = FakeDb()
+
+    assert GroupOpsDuplicateChecker(db_factory=lambda: fake_db).exists("group_ops:k") is True
+    assert "FROM external_effect_job" in fake_db.calls[0]["sql"]
+    assert "FROM broadcast_jobs" in fake_db.calls[1]["sql"]
+    assert fake_db.calls[1]["params"] == ("group_ops:k",)
 
 
 def test_duplicate_checker_db_exception_bubbles() -> None:

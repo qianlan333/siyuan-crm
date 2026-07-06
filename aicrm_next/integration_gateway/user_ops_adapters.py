@@ -197,6 +197,7 @@ class UserOpsDndWriteGateway(_GuardedUserOpsAdapter):
     def enable_do_not_disturb(
         self,
         *,
+        unionid: str = "",
         external_userid: str = "",
         mobile: str = "",
         owner_userid: str = "",
@@ -209,6 +210,7 @@ class UserOpsDndWriteGateway(_GuardedUserOpsAdapter):
         return self._dnd_operation(
             "enable_do_not_disturb",
             is_active=True,
+            unionid=unionid,
             external_userid=external_userid,
             mobile=mobile,
             owner_userid=owner_userid,
@@ -222,6 +224,7 @@ class UserOpsDndWriteGateway(_GuardedUserOpsAdapter):
     def cancel_do_not_disturb(
         self,
         *,
+        unionid: str = "",
         external_userid: str = "",
         mobile: str = "",
         owner_userid: str = "",
@@ -234,6 +237,7 @@ class UserOpsDndWriteGateway(_GuardedUserOpsAdapter):
         return self._dnd_operation(
             "cancel_do_not_disturb",
             is_active=False,
+            unionid=unionid,
             external_userid=external_userid,
             mobile=mobile,
             owner_userid=owner_userid,
@@ -296,8 +300,9 @@ class UserOpsDndWriteGateway(_GuardedUserOpsAdapter):
     ) -> Json:
         return self._audit_only(operation=operation, target=target, result=result, error_code=error_code, idempotency_key=idempotency_key)
 
-    def _dnd_operation(self, operation: str, *, is_active: bool, external_userid: str, mobile: str, owner_userid: str, record_id: str, reason_code: str, reason_text: str, operator: str, idempotency_key: str | None) -> Json:
+    def _dnd_operation(self, operation: str, *, is_active: bool, unionid: str, external_userid: str, mobile: str, owner_userid: str, record_id: str, reason_code: str, reason_text: str, operator: str, idempotency_key: str | None) -> Json:
         target = self._target(
+            unionid=unionid,
             external_userid=external_userid,
             mobile=mobile,
             owner_userid=owner_userid,
@@ -325,8 +330,9 @@ class UserOpsDndWriteGateway(_GuardedUserOpsAdapter):
         )
 
     @staticmethod
-    def _target(*, external_userid: str, mobile: str, owner_userid: str, record_id: str, reason_code: str, reason_text: str, operator: str, action: str) -> dict[str, Any]:
+    def _target(*, unionid: str = "", external_userid: str, mobile: str, owner_userid: str, record_id: str, reason_code: str, reason_text: str, operator: str, action: str) -> dict[str, Any]:
         return {
+            "unionid": unionid,
             "external_userid": external_userid,
             "mobile": mobile,
             "owner_userid": owner_userid,

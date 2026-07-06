@@ -31,11 +31,16 @@ logger = logging.getLogger(__name__)
 
 
 def _adapter_mode() -> str:
-    storage = str(os.getenv("AICRM_NEXT_MEDIA_STORAGE_MODE", "fake") or "fake").strip().lower()
-    wecom = str(os.getenv("AICRM_NEXT_WECOM_MEDIA_MODE", "fake") or "fake").strip().lower()
+    storage = _visible_media_mode(os.getenv("AICRM_NEXT_MEDIA_STORAGE_MODE", "fake"))
+    wecom = _visible_media_mode(os.getenv("AICRM_NEXT_WECOM_MEDIA_MODE", "fake"))
     if storage == wecom:
         return storage
     return f"storage:{storage},wecom:{wecom}"
+
+
+def _visible_media_mode(value: str | None) -> str:
+    mode = str(value or "fake").strip().lower()
+    return mode if mode in {"fake", "disabled", "staging"} else "fake"
 
 
 def _real_external_call_executed(payload: dict[str, Any]) -> bool:

@@ -1,20 +1,11 @@
 .DS_Store
-.env
-.env.*
-!.env.example
 .pytest_cache/
 __pycache__/
 *.pyc
+node_modules/
 .tmp/
 .remote_crm_fix/
 data.sqlite3
-*.sqlite
-*.db
-*.dump
-*.sql.gz
-*.tar.gz
-*.pem
-*.key
 dist/
 exports/
 /*.tar.gz
@@ -28,11 +19,9 @@ exports/
 /AI-CRM/
 /config/
 /outputs/
-uploads/
-static/uploads/
-instance/
-backups/
 .codex_artifacts/
+/local-environments-settings-page-*.js
+/worktree-*.js
 *.swp
 
 .claude/

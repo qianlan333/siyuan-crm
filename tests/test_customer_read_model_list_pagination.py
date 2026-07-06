@@ -11,12 +11,11 @@ from aicrm_next.customer_read_model.models import customer_list_index_next
 from aicrm_next.customer_read_model.repo import SqlAlchemyCustomerReadModelRepository
 
 
-def _row(row_id: int, *, external_userid: str, owner_userid: str = "owner-a", mobile: str = "") -> dict:
+def _row(row_id: int, *, unionid: str = "", external_userid: str = "", owner_userid: str = "owner-a", mobile: str = "") -> dict:
     now = datetime(2026, 6, row_id, tzinfo=timezone.utc)
     return {
         "id": row_id,
-        "person_id": f"person-{row_id}",
-        "external_userid": external_userid,
+        "unionid": unionid or f"union_customer_{row_id:03d}",
         "customer_name": f"客户{row_id}",
         "owner_userid": owner_userid,
         "owner_display_name": "顾问甲",
@@ -41,10 +40,10 @@ def test_sqlalchemy_customer_list_uses_sql_limit_offset_and_count() -> None:
     session.execute(
         insert(customer_list_index_next),
         [
-            _row(1, external_userid="wx_ext_001", owner_userid="owner-a", mobile="13800138001"),
-            _row(2, external_userid="wx_ext_002", owner_userid="owner-a", mobile="13800138002"),
-            _row(3, external_userid="wx_ext_003", owner_userid="owner-a", mobile="13800138003"),
-            _row(4, external_userid="wx_ext_004", owner_userid="owner-b", mobile="13900139004"),
+            _row(1, unionid="union_customer_001", owner_userid="owner-a", mobile="13800138001"),
+            _row(2, unionid="union_customer_002", owner_userid="owner-a", mobile="13800138002"),
+            _row(3, unionid="union_customer_003", owner_userid="owner-a", mobile="13800138003"),
+            _row(4, unionid="union_customer_004", owner_userid="owner-b", mobile="13900139004"),
         ],
     )
     session.commit()
@@ -59,7 +58,7 @@ def test_sqlalchemy_customer_list_uses_sql_limit_offset_and_count() -> None:
     rows = repo.list_customers({"owner_userid": "owner-a"}, limit=1, offset=1)
     total = repo.count_customers({"owner_userid": "owner-a"})
 
-    assert [row["external_userid"] for row in rows] == ["wx_ext_002"]
+    assert [row["unionid"] for row in rows] == ["union_customer_002"]
     assert total == 3
     list_sql = next(statement for statement in statements if "FROM customer_list_index_next" in statement and "LIMIT" in statement.upper())
     assert "LIMIT" in list_sql.upper()

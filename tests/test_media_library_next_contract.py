@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import sys
+import types
 from io import BytesIO
 
 from fastapi.testclient import TestClient
@@ -46,6 +48,41 @@ def test_media_library_list_and_page_routes_have_next_contract() -> None:
         assert isinstance(payload["items"], list)
         assert payload["count"] == len(payload["items"])
         assert "total" in payload
+
+
+def test_media_library_production_mode_env_is_not_exposed_as_available(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_NEXT_MEDIA_STORAGE_MODE", "production")
+    monkeypatch.setenv("AICRM_NEXT_WECOM_MEDIA_MODE", "production")
+    client = make_client()
+
+    payload = client.get("/api/admin/image-library").json()
+
+    assert_json_contract(payload)
+    assert payload["adapter_mode"] == "fake"
+    assert payload["storage_adapter_mode"] == "fake"
+
+
+def test_media_library_postgres_connection_does_not_reuse_sqlalchemy_raw_pool(monkeypatch) -> None:
+    from aicrm_next.media_library.repo import connect_media_library_db
+
+    calls: list[dict[str, object]] = []
+    dict_row = object()
+    fake_psycopg = types.ModuleType("psycopg")
+    fake_rows = types.ModuleType("psycopg.rows")
+    fake_rows.dict_row = dict_row
+
+    def fake_connect(url: str, *, row_factory: object | None = None) -> str:
+        calls.append({"url": url, "row_factory": row_factory})
+        return "raw-psycopg-connection"
+
+    fake_psycopg.connect = fake_connect
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", fake_rows)
+
+    result = connect_media_library_db("postgresql+psycopg://user:pass@localhost/db")
+
+    assert result == "raw-psycopg-connection"
+    assert calls == [{"url": "postgresql://user:pass@localhost/db", "row_factory": dict_row}]
 
 
 def test_upload_update_delete_routes_report_local_side_effect_plan() -> None:

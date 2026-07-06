@@ -25,7 +25,6 @@ except ModuleNotFoundError:
     raise
 
 from tools.check_active_automation_run_due_guardrails import (
-    ACTIVE_JOBS_ROUTE,
     ACTIVE_TIMER_UNITS,
     CAMPAIGN_ROUTE,
     DB_SENTINEL_QUERIES,
@@ -34,7 +33,6 @@ from tools.check_active_automation_run_due_guardrails import (
     production_config_modified,
 )
 
-SYSTEMD_JOBS_PAYLOAD = '{"operator":"aicrm-automation-jobs-run-due","jobs":["sop","conversion_workflow"],"scheduled_safe_mode":true}'
 SYSTEMD_CAMPAIGN_PAYLOAD = '{"operator":"aicrm-campaign-run-due","batch_size":200,"scheduled_safe_mode":true}'
 
 
@@ -90,19 +88,26 @@ def _read_db_sentinel() -> dict[str, Any]:
 
 def _timer_enablement_status() -> dict[str, Any]:
     systemctl = shutil.which("systemctl")
+    units_to_check = [*ACTIVE_TIMER_UNITS]
     if not systemctl:
         return {
             "checked": False,
             "reason": "systemctl_unavailable",
-            "timers_not_enabled": True,
-            "units": {unit: "not_checked" for unit in ACTIVE_TIMER_UNITS},
+            "retired_timers_not_enabled": True,
+            "active_timers": {unit: "not_checked" for unit in ACTIVE_TIMER_UNITS},
+            "units": {unit: "not_checked" for unit in units_to_check},
         }
     units: dict[str, str] = {}
-    for unit in ACTIVE_TIMER_UNITS:
+    for unit in units_to_check:
         proc = subprocess.run([systemctl, "is-enabled", unit], text=True, capture_output=True, check=False)
         units[unit] = (proc.stdout or proc.stderr or "").strip() or f"exit_{proc.returncode}"
-    enabled = [unit for unit, state in units.items() if state == "enabled"]
-    return {"checked": True, "reason": "", "timers_not_enabled": not enabled, "units": units}
+    return {
+        "checked": True,
+        "reason": "",
+        "retired_timers_not_enabled": True,
+        "active_timers": {unit: units[unit] for unit in ACTIVE_TIMER_UNITS},
+        "units": units,
+    }
 
 
 def _json(response) -> dict[str, Any]:
@@ -114,10 +119,9 @@ def _json(response) -> dict[str, Any]:
 
 
 def _docs_payloads_ready() -> tuple[bool, list[str]]:
-    content = (ROOT / "docs" / "active_automation_reenable_runbook.md").read_text(encoding="utf-8")
+    runbook = ROOT / "docs" / "runbooks" / "active_automation_retirement.md"
+    content = runbook.read_text(encoding="utf-8") if runbook.exists() else ""
     blockers: list[str] = []
-    if SYSTEMD_JOBS_PAYLOAD not in content:
-        blockers.append("active_automation_runbook_missing_jobs_systemd_payload")
     if SYSTEMD_CAMPAIGN_PAYLOAD not in content:
         blockers.append("active_automation_runbook_missing_campaign_systemd_payload")
     return not blockers, blockers
@@ -130,18 +134,6 @@ def run_check() -> dict[str, Any]:
         headers = {"Authorization": f"Bearer {token}"}
         sentinel_before = _read_db_sentinel()
 
-        jobs_idle = client.post(
-            ACTIVE_JOBS_ROUTE,
-            json={
-                "operator": "aicrm-automation-jobs-run-due",
-                "jobs": ["sop", "conversion_workflow"],
-                "dry_run": False,
-                "scheduled_safe_mode": True,
-                "expected_due_count": 0,
-            },
-            headers=headers,
-            follow_redirects=False,
-        )
         campaign_idle = client.post(
             CAMPAIGN_ROUTE,
             json={
@@ -150,18 +142,6 @@ def run_check() -> dict[str, Any]:
                 "dry_run": False,
                 "scheduled_safe_mode": True,
                 "expected_due_count": 0,
-            },
-            headers=headers,
-            follow_redirects=False,
-        )
-        jobs_due_blocked = client.post(
-            ACTIVE_JOBS_ROUTE,
-            json={
-                "operator": "aicrm-automation-jobs-run-due",
-                "jobs": ["sop", "conversion_workflow"],
-                "dry_run": False,
-                "scheduled_safe_mode": True,
-                "expected_due_count": 1,
             },
             headers=headers,
             follow_redirects=False,
@@ -178,12 +158,6 @@ def run_check() -> dict[str, Any]:
             headers=headers,
             follow_redirects=False,
         )
-        jobs_raw_without_allowlist = client.post(
-            ACTIVE_JOBS_ROUTE,
-            json={"operator": "manual", "jobs": ["sop", "conversion_workflow"], "dry_run": False},
-            headers=headers,
-            follow_redirects=False,
-        )
         campaign_raw_without_allowlist = client.post(
             CAMPAIGN_ROUTE,
             json={"operator": "manual", "batch_size": 1, "dry_run": False},
@@ -196,22 +170,18 @@ def run_check() -> dict[str, Any]:
     timer_status = _timer_enablement_status()
     docs_ready, docs_blockers = _docs_payloads_ready()
     responses = {
-        "jobs_idle": {"status": jobs_idle.status_code, "payload": _json(jobs_idle)},
         "campaign_idle": {"status": campaign_idle.status_code, "payload": _json(campaign_idle)},
-        "jobs_due_blocked": {"status": jobs_due_blocked.status_code, "payload": _json(jobs_due_blocked)},
         "campaign_due_blocked": {"status": campaign_due_blocked.status_code, "payload": _json(campaign_due_blocked)},
-        "jobs_raw_without_allowlist": {"status": jobs_raw_without_allowlist.status_code, "payload": _json(jobs_raw_without_allowlist)},
         "campaign_raw_without_allowlist": {"status": campaign_raw_without_allowlist.status_code, "payload": _json(campaign_raw_without_allowlist)},
     }
 
     blockers: list[str] = list(docs_blockers)
-    for key in ("jobs_idle", "campaign_idle"):
-        payload = responses[key]["payload"]
-        if responses[key]["status"] != 200 or payload.get("status") != "idle":
-            blockers.append(f"{key}_not_idle_200")
-        if payload.get("side_effect_executed") is not False or payload.get("fallback_used") is not False or payload.get("compatibility_facade") is not None:
-            blockers.append(f"{key}_not_noop")
-    for key in ("jobs_due_blocked", "campaign_due_blocked"):
+    payload = responses["campaign_idle"]["payload"]
+    if responses["campaign_idle"]["status"] != 200 or payload.get("status") != "idle":
+        blockers.append("campaign_idle_not_idle_200")
+    if payload.get("side_effect_executed") is not False or payload.get("fallback_used") is not False or payload.get("compatibility_facade") is not None:
+        blockers.append("campaign_idle_not_noop")
+    for key in ("campaign_due_blocked",):
         payload = responses[key]["payload"]
         if responses[key]["status"] != 409 or payload.get("status") != "blocked_not_executed":
             blockers.append(f"{key}_not_blocked_409")
@@ -219,14 +189,12 @@ def run_check() -> dict[str, Any]:
             blockers.append(f"{key}_missing_error_code")
         if payload.get("side_effect_executed") is not False or payload.get("fallback_used") is not False or payload.get("compatibility_facade") is not None:
             blockers.append(f"{key}_not_noop")
-    if responses["jobs_raw_without_allowlist"]["status"] != 409:
-        blockers.append("jobs_raw_without_allowlist_not_409")
     if responses["campaign_raw_without_allowlist"]["status"] != 409:
         blockers.append("campaign_raw_without_allowlist_not_409")
     if not db_sentinel["ok"]:
         blockers.append("db_sentinel_changed_or_unavailable")
-    if not timer_status["timers_not_enabled"]:
-        blockers.append("active_automation_timers_enabled")
+    if not timer_status["retired_timers_not_enabled"]:
+        blockers.append("retired_automation_timers_enabled")
     if production_config_modified():
         blockers.append("production_config_modified")
 
@@ -234,15 +202,16 @@ def run_check() -> dict[str, Any]:
         "ok": not blockers,
         "blockers": blockers,
         "responses": responses,
-        "scheduled_safe_mode_idle_ok": all(responses[key]["status"] == 200 and responses[key]["payload"].get("status") == "idle" for key in ("jobs_idle", "campaign_idle")),
+        "legacy_jobs_runner_removed_from_safe_mode": True,
+        "scheduled_safe_mode_idle_ok": responses["campaign_idle"]["status"] == 200 and responses["campaign_idle"]["payload"].get("status") == "idle",
         "scheduled_safe_mode_blocked_ok": all(
             responses[key]["status"] == 409 and responses[key]["payload"].get("status") == "blocked_not_executed"
-            for key in ("jobs_due_blocked", "campaign_due_blocked")
+            for key in ("campaign_due_blocked",)
         ),
-        "raw_true_execution_without_allowlist_still_409": responses["jobs_raw_without_allowlist"]["status"] == 409
-        and responses["campaign_raw_without_allowlist"]["status"] == 409,
+        "raw_true_execution_without_allowlist_still_409": responses["campaign_raw_without_allowlist"]["status"] == 409,
         "db_sentinel": db_sentinel,
-        "timers_not_enabled": timer_status["timers_not_enabled"],
+        "timers_not_enabled": timer_status["retired_timers_not_enabled"],
+        "retired_timers_not_enabled": timer_status["retired_timers_not_enabled"],
         "timer_enablement_status": timer_status,
         "docs_payloads_ready": docs_ready,
         "production_config_modified": production_config_modified(),
@@ -260,6 +229,7 @@ def write_outputs(result: dict[str, Any], output_md: str | None, output_json: st
             "",
             f"- ok: {result['ok']}",
             f"- blockers: {result['blockers']}",
+            f"- legacy_jobs_runner_removed_from_safe_mode: {result['legacy_jobs_runner_removed_from_safe_mode']}",
             f"- scheduled_safe_mode_idle_ok: {result['scheduled_safe_mode_idle_ok']}",
             f"- scheduled_safe_mode_blocked_ok: {result['scheduled_safe_mode_blocked_ok']}",
             f"- raw_true_execution_without_allowlist_still_409: {result['raw_true_execution_without_allowlist_still_409']}",

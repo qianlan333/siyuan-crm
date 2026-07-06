@@ -111,22 +111,22 @@ class IdentityBridgeService:
 
             mobile = text(candidate.get("mobile"))
             owner = self.repository.resolve_binding_owner_userid(external, owner_userid)
-            person_id, normalized_mobile = self.repository.get_or_create_person_for_mobile(mobile)
             binding = self.repository.upsert_external_contact_binding_record(
                 external_userid=external,
-                person_id=person_id,
+                person_id=0,
+                mobile=mobile,
                 bind_by_userid=text(bind_by_userid) or owner or "wecom_external_contact_callback",
                 owner_userid=owner,
                 force_rebind=force_rebind,
             )
             lead_pool_merge = self.repository.merge_lead_pool_after_mobile_bind(
                 external_userid=external,
-                mobile=normalized_mobile,
+                mobile=mobile,
                 owner_userid=owner,
             )
             return {
                 "status": "bound",
-                "mobile": normalized_mobile,
+                "mobile": mobile,
                 "candidate": dict(candidate),
                 "binding": binding,
                 "lead_pool_merge": lead_pool_merge,
@@ -151,6 +151,16 @@ class IdentityBridgeService:
                 return {"status": "skipped", "reason": "contact_detail_missing_external_userid"}
 
             identity_map_id = self.repository.upsert_external_contact_identity(record)
+            if not text(record.get("unionid")):
+                return {
+                    "status": "pending_identity",
+                    "reason": "missing_unionid",
+                    "identity_map_id": int(identity_map_id or 0),
+                    "unionid_present": False,
+                    "openid_present": bool(text(record.get("openid"))),
+                    "mobile_binding": {"status": "skipped", "reason": "identity_pending_unionid"},
+                    "questionnaire_backfill": {"status": "skipped", "reason": "identity_pending_unionid"},
+                }
             self.repository.replace_external_contact_follow_users(
                 corp_id,
                 external_userid,
@@ -173,6 +183,7 @@ class IdentityBridgeService:
             return {
                 "status": "success",
                 "identity_map_id": int(identity_map_id or 0),
+                "unionid": text(record.get("unionid")),
                 "unionid_present": bool(text(record.get("unionid"))),
                 "openid_present": bool(text(record.get("openid"))),
                 "mobile_binding": mobile_binding,

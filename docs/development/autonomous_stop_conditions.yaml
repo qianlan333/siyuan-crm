@@ -55,7 +55,7 @@ high_risk_stop_conditions:
 
 protected_paths:
   - aicrm_next/main.py
-  - aicrm_next/production_compat/api.py
+  - aicrm_next/production_compat/
   - migrations/
   - deploy/
   - systemd/

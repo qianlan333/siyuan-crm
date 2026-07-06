@@ -1,5 +1,50 @@
 {% extends "admin_console/base.html" %}
 
+{% block head_extra %}
+<style>
+  .target-card {
+    max-width: 760px;
+    border: 1px solid #e5e6eb;
+    border-radius: 12px;
+    background: #ffffff;
+    padding: 20px;
+  }
+  .target-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; margin-bottom: 18px; }
+  .target-title { margin: 0; font-size: 18px; font-weight: 800; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; color: #1f2329; font-weight: 700; font-size: 14px; cursor: pointer; }
+  .switch input { width: 18px; height: 18px; }
+  .target-body[hidden],
+  [data-h5-url-fields][hidden],
+  [data-url-link-fields][hidden] { display: none !important; }
+  .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .target-card .field { display: grid; gap: 7px; }
+  .target-card .field.full { grid-column: 1 / -1; }
+  .target-card .field label { color: #1f2329; font-size: 13px; font-weight: 700; }
+  .target-card .field small { color: #86909c; line-height: 1.5; }
+  .target-card input, .target-card select, .target-card textarea {
+    width: 100%;
+    min-height: 40px;
+    border: 1px solid #e5e6eb;
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: #fff;
+    color: #1f2329;
+    font: inherit;
+    outline: none;
+  }
+  .target-card textarea { min-height: 72px; resize: vertical; }
+  .target-card input:focus, .target-card select:focus, .target-card textarea:focus {
+    border-color: #3370ff;
+    box-shadow: 0 0 0 3px rgba(51, 112, 255, .12);
+  }
+  .warning { margin-top: 12px; color: #f53f3f; font-size: 13px; line-height: 1.6; }
+  @media (max-width: 720px) {
+    .field-grid { grid-template-columns: 1fr; }
+    .target-head { flex-direction: column; }
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <section class="admin-card">
   <div class="admin-card-head">
@@ -46,7 +91,47 @@
       <label class="admin-field"><span>访问标识</span><input type="text" name="slug" value="{{ editor_payload.slug }}"></label>
       <label class="admin-field"><span>标题</span><input type="text" name="title" value="{{ editor_payload.title }}"></label>
       <label class="admin-field"><span>说明</span><textarea name="description" rows="3">{{ editor_payload.description }}</textarea></label>
-      <label class="admin-field"><span>提交后跳转地址</span><input type="text" name="redirect_url" value="{{ editor_payload.redirect_url }}"></label>
+      <input type="hidden" name="redirect_url" value="{{ editor_payload.redirect_url }}">
+      <input type="hidden" name="completion_target" id="completion-target-json">
+      {% set completion_target = questionnaire_payload.questionnaire.completion_target or {} %}
+      <section class="target-card" data-completion-target-config>
+        <div class="target-head">
+          <div>
+            <h2 class="target-title">提交后跳转</h2>
+          </div>
+          <label class="switch">
+            <input type="checkbox" name="completion_target_enabled" data-target-enabled{% if completion_target.enabled %} checked{% endif %}>
+            启用
+          </label>
+        </div>
+
+        <div class="target-body" data-target-body hidden>
+          <div class="field-grid">
+            <div class="field full">
+              <label>跳转类型</label>
+              <select name="completion_target_type">
+                <option value="h5"{% if completion_target.target_type != "url_link" %} selected{% endif %}>H5 跳转地址</option>
+                <option value="url_link"{% if completion_target.target_type == "url_link" %} selected{% endif %}>动态 URL Link 接口</option>
+              </select>
+            </div>
+            <div class="field full" data-h5-url-fields>
+              <label>H5 跳转地址</label>
+              <input name="completion_h5_url" placeholder="https://example.com/landing 或 /internal/path" value="{{ completion_target.h5_url or completion_target.fallback_url or editor_payload.redirect_url }}">
+              <small>提交成功后直接进入该 H5 地址。</small>
+            </div>
+            <div class="field full" data-url-link-fields>
+              <label>动态 URL Link 接口</label>
+              <input name="completion_url_link_source_url" placeholder="https://ip.lhbl.com.cn/api/wxlink?from=qianlan_pay" value="{{ (completion_target.url_link or {}).source_url or '' }}">
+              <small>提交成功后先访问该接口，从 JSON 里取微信官方 URL Link 后再跳转。</small>
+            </div>
+            <div class="field" data-url-link-fields>
+              <label>响应字段</label>
+              <input name="completion_url_link_response_key" placeholder="url_link" value="{{ (completion_target.url_link or {}).response_url_key or 'url_link' }}">
+            </div>
+          </div>
+          <div class="warning" data-validation-warning hidden></div>
+        </div>
+      </section>
       <label class="admin-check-line">
         <input type="checkbox" name="is_disabled" value="1"{% if editor_payload.is_disabled %} checked{% endif %}>
         <span>保存后保持停用</span>
@@ -165,4 +250,93 @@
     </table>
   </div>
 </section>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+  function mountCompletionTargetConfig(root) {
+    const enabledEl = root.querySelector('[data-target-enabled]');
+    const bodyEl = root.querySelector('[data-target-body]');
+    const warningEl = root.querySelector('[data-validation-warning]');
+    const typeEl = root.querySelector('[name="completion_target_type"]');
+    const h5UrlEl = root.querySelector('[name="completion_h5_url"]');
+    const sourceUrlEl = root.querySelector('[name="completion_url_link_source_url"]');
+    const responseKeyEl = root.querySelector('[name="completion_url_link_response_key"]');
+
+    function syncVisibility() {
+      bodyEl.hidden = !enabledEl.checked;
+      const isUrlLink = typeEl && typeEl.value === 'url_link';
+      root.querySelectorAll('[data-h5-url-fields]').forEach((el) => {
+        el.hidden = isUrlLink;
+      });
+      root.querySelectorAll('[data-url-link-fields]').forEach((el) => {
+        el.hidden = !isUrlLink;
+      });
+    }
+
+    root.collectCompletionTarget = function collectCompletionTarget() {
+      const enabled = enabledEl.checked;
+      const targetType = typeEl && typeEl.value === 'url_link' ? 'url_link' : 'h5';
+      const h5Url = targetType === 'h5' ? h5UrlEl.value.trim() : '';
+      const sourceUrl = sourceUrlEl ? sourceUrlEl.value.trim() : '';
+      const responseUrlKey = responseKeyEl ? responseKeyEl.value.trim() || 'url_link' : 'url_link';
+      const payload = {
+        enabled,
+        target_type: targetType,
+        open_strategy: targetType === 'url_link' ? 'url_link' : 'h5_redirect',
+        h5_url: h5Url,
+        fallback_url: '',
+        mini_program: {
+          appid: '',
+          username: '',
+          path: '',
+          query: '',
+          env_version: 'release'
+        },
+        url_link: {
+          enabled: targetType === 'url_link' && Boolean(sourceUrl),
+          url: '',
+          source_url: sourceUrl,
+          response_url_key: responseUrlKey
+        }
+      };
+      warningEl.hidden = true;
+      warningEl.textContent = '';
+      if (enabled && targetType === 'h5' && !h5Url) {
+        warningEl.textContent = '请填写 H5 跳转地址。';
+        warningEl.hidden = false;
+        throw new Error(warningEl.textContent);
+      }
+      if (enabled && targetType === 'url_link' && !sourceUrl) {
+        warningEl.textContent = '请填写动态 URL Link 接口。';
+        warningEl.hidden = false;
+        throw new Error(warningEl.textContent);
+      }
+      return payload;
+    };
+
+    enabledEl.addEventListener('change', syncVisibility);
+    if (typeEl) typeEl.addEventListener('change', syncVisibility);
+    syncVisibility();
+  }
+
+  document.querySelectorAll('[data-completion-target-config]').forEach((root) => {
+    mountCompletionTargetConfig(root);
+    const form = root.closest('form');
+    if (!form) return;
+    form.addEventListener('submit', (event) => {
+      try {
+        const target = root.collectCompletionTarget();
+        const hidden = document.getElementById('completion-target-json');
+        if (hidden) hidden.value = JSON.stringify(target);
+        if (target.target_type === 'h5') {
+          const redirectInput = form.querySelector('[name="redirect_url"]');
+          if (redirectInput) redirectInput.value = target.h5_url || '';
+        }
+      } catch (error) {
+        event.preventDefault();
+      }
+    });
+  });
+</script>
 {% endblock %}

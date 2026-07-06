@@ -430,7 +430,6 @@ def run_check(*, base_url: str | None = None, timeout: float = 5.0) -> dict[str,
         production_client = _client()
         health = production_client.get("/health").json()
         production_probes = _probe_testclient(production_client, PRODUCTION_PROBE_ROUTES)
-    local_probe_database = "127.0.0.1:1/aicrm_probe" in os.environ.get("DATABASE_URL", "")
     production_route_blockers, production_route_warnings = _route_availability_blockers(
         production_probes,
         allow_local_probe_5xx=True,

@@ -1,0 +1,14 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "checks": {
+      "wechat_oauth_configured": false,
+      "wecom_contact_configured": false,
+      "debug_session_api_enabled": true,
+      "questionnaire_admin_ui_enabled": true,
+      "wecom_tags_api_available": false,
+      "identity_map_available": true
+    }
+  }
+}

@@ -6,6 +6,8 @@ from typing import Any
 from fastapi.responses import JSONResponse
 
 from aicrm_next.ai_assist import external_campaigns as service
+from aicrm_next.ai_assist.external_campaigns_repo import PostgresExternalCampaignRepository
+from aicrm_next.platform_foundation.external_effects import AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK, ExternalEffectService, reset_external_effect_fixture_state
 
 
 def _json_response_payload(response: Any) -> dict[str, Any]:
@@ -16,29 +18,26 @@ def _json_response_payload(response: Any) -> dict[str, Any]:
 class FakeExternalCampaignRepository:
     def __init__(self) -> None:
         self.pool_rows: dict[str, dict[str, Any]] = {}
+        self.identity_by_external: dict[str, dict[str, Any]] = {}
+        self.identity_by_unionid: dict[str, dict[str, Any]] = {}
+        self.dnd_reasons: dict[str, list[dict[str, Any]]] = {}
+        self.broadcast_jobs_by_idempotency_key: dict[str, dict[str, Any]] = {}
         self.member_rows: dict[str, dict[str, Any]] = {}
         self.contact_rows: dict[str, dict[str, Any]] = {}
         self.backfill_rows: dict[str, dict[str, Any]] = {}
         self.campaigns_by_code: dict[str, dict[str, Any]] = {}
         self.campaigns_by_id: dict[int, dict[str, Any]] = {}
-        self.segments_by_code: dict[str, dict[str, Any]] = {}
         self.overview: dict[str, Any] | None = None
-        self.allocate_result: dict[str, Any] | None = None
         self.calls: list[str] = []
         self.write_calls: list[str] = []
-        self.cleanup_calls: list[int] = []
-        self.steps: list[dict[str, Any]] = []
         self.commits = 0
         self.rollbacks = 0
         self.real_outbound_send_called = False
-        self._campaign_id = 100
-        self._segment_id = 200
-        self._campaign_segment_id = 300
 
     def table_columns(self, table_name: str) -> set[str]:
         return {
             "id",
-            "external_contact_id",
+            "unionid",
             "owner_staff_id",
             "current_step_index",
             "trace_id",
@@ -46,76 +45,46 @@ class FakeExternalCampaignRepository:
             "source_type",
         }
 
-    def fetch_user_ops_pool_current_row(self, external_userid: str) -> dict[str, Any]:
-        self.calls.append("fetch_user_ops_pool_current_row")
-        return dict(self.pool_rows.get(external_userid) or {})
+    def fetch_send_target_by_unionid(self, unionid: str) -> dict[str, Any] | None:
+        self.calls.append("fetch_send_target_by_unionid")
+        row = self.identity_by_unionid.get(unionid)
+        return dict(row) if row else None
 
-    def fetch_automation_member_row(self, external_userid: str) -> dict[str, Any]:
-        self.calls.append("fetch_automation_member_row")
-        return dict(self.member_rows.get(external_userid) or {})
+    def fetch_send_target_by_external_userid(self, external_userid: str) -> dict[str, Any] | None:
+        self.calls.append("fetch_send_target_by_external_userid")
+        row = self.identity_by_external.get(external_userid)
+        return dict(row) if row else None
+
+    def fetch_do_not_disturb_reasons(self, unionid: str) -> list[dict[str, Any]]:
+        self.calls.append("fetch_do_not_disturb_reasons")
+        return [dict(item) for item in self.dnd_reasons.get(unionid, [])]
 
     def fetch_contact_row(self, external_userid: str) -> dict[str, Any]:
         self.calls.append("fetch_contact_row")
         return dict(self.contact_rows.get(external_userid) or {})
 
-    def get_sidebar_binding_candidate(self, external_userid: str) -> dict[str, Any]:
-        return dict(self.backfill_rows.get(external_userid) or {})
+    def get_broadcast_job_by_idempotency_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        self.calls.append("get_broadcast_job_by_idempotency_key")
+        job = self.broadcast_jobs_by_idempotency_key.get(idempotency_key)
+        return dict(job) if job else None
 
-    def ensure_automation_member_for_external_campaign(
-        self,
-        *,
-        external_userid: str,
-        owner_userid: str,
-        operator: str,
-        dry_run: bool,
-        allow_owner_mismatch: bool,
-    ) -> dict[str, Any]:
-        self.calls.append("ensure_automation_member_for_external_campaign")
-        existing = self.member_rows.get(external_userid)
+    def create_broadcast_job(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append("create_broadcast_job")
+        self.write_calls.append("create_broadcast_job")
+        existing = self.get_broadcast_job_by_idempotency_key(kwargs["idempotency_key"])
         if existing:
-            return {
-                "external_userid": external_userid,
-                "status": "exists",
-                "source": "automation_member",
-                "automation_member_id": int(existing.get("id") or 1),
-                "owner_userid": str(existing.get("owner_staff_id") or ""),
-            }
-        candidate = self.backfill_rows.get(external_userid)
-        if not candidate:
-            return {"external_userid": external_userid, "status": "unresolved", "source": "", "owner_userid": ""}
-        source_owner = str(candidate.get("owner_userid") or candidate.get("owner_staff_id") or "")
-        if source_owner and owner_userid and source_owner != owner_userid and not allow_owner_mismatch:
-            return {
-                "external_userid": external_userid,
-                "status": "owner_mismatch",
-                "source": str(candidate.get("source") or "sidebar_binding"),
-                "owner_userid": source_owner,
-                "requested_owner_userid": owner_userid,
-            }
-        result = {
-            "external_userid": external_userid,
-            "status": "would_insert" if dry_run else "inserted",
-            "source": str(candidate.get("source") or "sidebar_binding"),
-            "owner_userid": source_owner or owner_userid,
-            "requested_owner_userid": owner_userid,
-            "customer_name": str(candidate.get("customer_name") or ""),
-            "target": {
-                "source": str(candidate.get("source") or "sidebar_binding"),
-                "external_userid": external_userid,
-                "owner_userid": source_owner or owner_userid,
-                "customer_name": str(candidate.get("customer_name") or ""),
-                "contact": {},
-                "pool_current": {},
-            },
+            return {**existing, "idempotent_existing": True}
+        job_id = 900 + len(self.broadcast_jobs_by_idempotency_key) + 1
+        job = {
+            "id": job_id,
+            "status": "queued",
+            **kwargs,
+            "target_unionids_json": json.dumps(kwargs.get("target_unionids") or []),
+            "content_payload": kwargs.get("content_payload") or {},
+            "metadata": kwargs.get("metadata") or {},
         }
-        if not dry_run:
-            self.write_calls.append("insert_automation_member")
-            self.member_rows[external_userid] = {
-                "id": len(self.member_rows) + 1,
-                "external_contact_id": external_userid,
-                "owner_staff_id": source_owner or owner_userid,
-            }
-        return result
+        self.broadcast_jobs_by_idempotency_key[kwargs["idempotency_key"]] = job
+        return dict(job)
 
     def get_campaign_by_code(self, campaign_code: str) -> dict[str, Any] | None:
         self.calls.append("get_campaign_by_code")
@@ -129,74 +98,6 @@ class FakeExternalCampaignRepository:
     def count_open_campaign_jobs(self, campaign_id: int) -> int:
         self.calls.append("count_open_campaign_jobs")
         return 0
-
-    def get_segment_by_code(self, segment_code: str) -> dict[str, Any] | None:
-        item = self.segments_by_code.get(segment_code)
-        return dict(item) if item else None
-
-    def create_or_update_external_segment(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("create_or_update_external_segment")
-        self.write_calls.append("create_or_update_external_segment")
-        code = kwargs["segment_code"]
-        self._segment_id += 1
-        segment = {
-            "id": self._segment_id,
-            "segment_code": code,
-            "cached_headcount": int(kwargs.get("headcount") or 1),
-            "status": "active",
-            "source_type": "external_campaign",
-            "sql_params": kwargs.get("sql_params") or {},
-        }
-        self.segments_by_code[code] = segment
-        return dict(segment)
-
-    def create_campaign_draft(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("create_campaign_draft")
-        self.write_calls.append("create_campaign_draft")
-        self._campaign_id += 1
-        campaign = {
-            "id": self._campaign_id,
-            "campaign_code": kwargs["campaign_code"],
-            "review_status": "draft",
-            "run_status": "draft",
-            "trace_id": kwargs.get("trace_id", ""),
-        }
-        self.campaigns_by_code[kwargs["campaign_code"]] = campaign
-        self.campaigns_by_id[self._campaign_id] = campaign
-        return dict(campaign)
-
-    def add_segment_to_campaign(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("add_segment_to_campaign")
-        self.write_calls.append("add_segment_to_campaign")
-        self._campaign_segment_id += 1
-        return {"id": self._campaign_segment_id, "segment_id": self._segment_id}
-
-    def add_step_to_campaign(self, **kwargs: Any) -> dict[str, Any]:
-        self.calls.append("add_step_to_campaign")
-        self.write_calls.append("add_step_to_campaign")
-        self.steps.append(dict(kwargs))
-        return {"campaign_segment_id": kwargs["campaign_segment_id"], "step_index": kwargs["step_index"]}
-
-    def allocate_campaign_members(self, campaign_id: int) -> dict[str, Any]:
-        self.calls.append("allocate_campaign_members")
-        self.write_calls.append("allocate_campaign_members")
-        if self.allocate_result is not None:
-            return dict(self.allocate_result)
-        return {"campaign_id": campaign_id, "allocated": 1, "skipped_collisions": 0, "errors": []}
-
-    def submit_campaign_for_review(self, campaign_id: int, operator: str) -> dict[str, Any]:
-        self.calls.append("submit_campaign_for_review")
-        self.write_calls.append("submit_campaign_for_review")
-        campaign = self.campaigns_by_id[int(campaign_id)]
-        campaign["review_status"] = "pending_review"
-        campaign["run_status"] = "draft"
-        return dict(campaign)
-
-    def delete_campaign(self, campaign_id: int) -> dict[str, Any]:
-        self.calls.append("delete_campaign")
-        self.write_calls.append("delete_campaign")
-        self.cleanup_calls.append(int(campaign_id))
-        return {"ok": True, "deleted_id": int(campaign_id)}
 
     def assemble_campaign_overview(self, campaign_id: int) -> dict[str, Any]:
         self.calls.append("assemble_campaign_overview")
@@ -232,7 +133,16 @@ def _payload(**extra: Any) -> dict[str, Any]:
 
 def _repo_with_target(external_userid: str = "ext_1") -> FakeExternalCampaignRepository:
     repo = FakeExternalCampaignRepository()
-    repo.pool_rows[external_userid] = {"external_userid": external_userid, "owner_userid": "owner_1"}
+    row = {
+        "unionid": f"union_{external_userid}",
+        "primary_external_userid": external_userid,
+        "external_userid": external_userid,
+        "primary_owner_userid": "owner_1",
+        "owner_userid": "owner_1",
+        "customer_name": "Alice",
+    }
+    repo.identity_by_external[external_userid] = row
+    repo.identity_by_unionid[row["unionid"]] = row
     repo.contact_rows[external_userid] = {"external_userid": external_userid, "owner_userid": "owner_1"}
     return repo
 
@@ -251,36 +161,57 @@ def test_external_campaign_token_required(monkeypatch) -> None:
 
 
 def test_external_campaign_dry_run_preview_no_write() -> None:
+    reset_external_effect_fixture_state()
     repo = _repo_with_target()
     result = service.create_external_campaigns(_payload(dry_run=True), repo=repo)
+    _items, total = ExternalEffectService().list_jobs({"effect_type": AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK})
 
     assert result["ok"] is True
     assert result["dry_run"] is True
     assert result["side_effect_executed"] is False
-    assert result["campaigns"][0]["would_create"] is True
+    assert result["send_path"] == "ai_assist_pending_review"
+    assert result["required_send_path"] == "ai_assist_pending_review"
+    assert result["forbidden_send_path"] == "direct_broadcast_job"
+    assert result["review_required"] is True
+    assert result["review_status"] == "pending_review"
+    assert result["run_status"] == "draft"
+    assert result["jobs"] == []
+    assert result["previews"][0]["status"] == "preview"
     assert repo.write_calls == []
+    assert total == 0
 
 
-def test_external_campaign_create_single_recipient_success() -> None:
+def test_external_campaign_create_requires_ai_assist_review_without_direct_job() -> None:
+    reset_external_effect_fixture_state()
     repo = _repo_with_target()
-    result = service.create_external_campaigns(_payload(), repo=repo)
+    try:
+        service.create_external_campaigns(_payload(), repo=repo)
+    except service.ExternalCampaignError as exc:
+        payload = exc.to_response()
+        status_code = exc.status_code
+    else:  # pragma: no cover
+        raise AssertionError("expected ExternalCampaignError")
+    _items, total = ExternalEffectService().list_jobs({"effect_type": AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK})
 
-    campaign = result["campaigns"][0]
-    assert campaign["status"] == "created"
-    assert campaign["review_status"] == "pending_review"
-    assert campaign["run_status"] == "draft"
-    assert result["created_count"] == 1
-    assert campaign["requires_human_review"] is True
-    assert campaign["scheduled_jobs"] == 0
-    assert repo.write_calls == [
-        "create_or_update_external_segment",
-        "create_campaign_draft",
-        "add_segment_to_campaign",
-        "add_step_to_campaign",
-        "allocate_campaign_members",
-        "submit_campaign_for_review",
-    ]
+    assert status_code == 409
+    assert payload["error"] == "ai_assist_review_required"
+    assert payload["phase"] == "ai_assist_review_guard"
+    assert payload["send_path"] == "ai_assist_pending_review"
+    assert payload["required_send_path"] == "ai_assist_pending_review"
+    assert payload["forbidden_send_path"] == "direct_broadcast_job"
+    assert payload["review_required"] is True
+    assert payload["review_status"] == "pending_review"
+    assert payload["run_status"] == "draft"
+    assert payload["scheduled_jobs"] == 0
+    assert payload["recipient_count"] == 1
+    assert payload["previews"][0]["unionid"] == "union_ext_1"
+    assert payload["previews"][0]["external_userid"] == "ext_1"
+    assert repo.write_calls == []
+    assert repo.commits == 0
+    assert repo.rollbacks == 1
+    assert "fetch_user_ops_pool_current_row" not in repo.calls
     assert repo.real_outbound_send_called is False
+    assert total == 0
 
 
 def test_external_campaign_allows_attachment_only_step() -> None:
@@ -295,11 +226,35 @@ def test_external_campaign_allows_attachment_only_step() -> None:
         ],
     )
 
-    result = service.create_external_campaigns(payload, repo=repo)
+    try:
+        service.create_external_campaigns(payload, repo=repo)
+    except service.ExternalCampaignError as exc:
+        result = exc.to_response()
+    else:  # pragma: no cover
+        raise AssertionError("expected ExternalCampaignError")
 
-    assert result["created_count"] == 1
-    assert repo.steps[0]["content_text"] == ""
-    assert repo.steps[0]["content_payload"] == {"miniprogram_library_ids": [17]}
+    assert result["error"] == "ai_assist_review_required"
+    assert result["previews"][0]["jobs"][0]["content_summary"] == "attachments:miniprogram_library_ids=1"
+    assert repo.broadcast_jobs_by_idempotency_key == {}
+
+
+def test_external_campaign_contact_lookup_is_optional_when_wecom_tables_missing() -> None:
+    class MissingContactTablesDb:
+        def __init__(self) -> None:
+            self.rolled_back = False
+
+        def execute(self, sql: str, params=()):
+            assert "wecom_external_contact_identity_map" in sql
+            raise RuntimeError("relation does not exist")
+
+        def rollback(self) -> None:
+            self.rolled_back = True
+
+    db = MissingContactTablesDb()
+    repo = PostgresExternalCampaignRepository(db=db)
+
+    assert repo.fetch_contact_row("wm_missing") == {}
+    assert db.rolled_back is True
 
 
 def test_campaign_private_broadcast_job_fields_are_complete() -> None:
@@ -314,27 +269,111 @@ def test_campaign_private_broadcast_job_fields_are_complete() -> None:
     payload = _campaign_private_broadcast_payload(
         campaign={"owner_userid": "owner_1"},
         step={"content_text": "", "content_payload_json": {"miniprogram_library_ids": [17]}},
-        members=[{"external_contact_id": "ext_1"}],
+        members=[{"unionid": "union_1"}],
     )
 
     assert columns == ["business_domain", "channel", "target_kind"]
     assert placeholders == ["%s", "%s", "%s"]
-    assert params == ["automation_ops", "wecom_private", "external_userid"]
+    assert params == ["automation_ops", "wecom_private", "unionid"]
     assert payload["channel"] == "wecom_private"
-    assert payload["target_kind"] == "external_userid"
+    assert payload["target_kind"] == "unionid"
     assert payload["step"]["content_payload_json"] == {"miniprogram_library_ids": [17]}
 
 
-def test_external_campaign_idempotent_existing_campaign() -> None:
+def test_external_campaign_repeated_create_still_requires_review_and_stays_read_only() -> None:
     repo = _repo_with_target()
-    repo.campaigns_by_code["fixed_code"] = {"id": 9, "campaign_code": "fixed_code", "review_status": "pending_review", "run_status": "draft"}
-    result = service.create_external_campaigns(_payload(campaign_code="fixed_code"), repo=repo)
+    for _ in range(2):
+        try:
+            service.create_external_campaigns(_payload(campaign_code="fixed_code"), repo=repo)
+        except service.ExternalCampaignError as exc:
+            payload = exc.to_response()
+        else:  # pragma: no cover
+            raise AssertionError("expected ExternalCampaignError")
 
-    assert result["campaigns"][0]["status"] == "exists"
-    assert "create_campaign_draft" not in repo.write_calls
+        assert payload["error"] == "ai_assist_review_required"
+        assert payload["campaign_code"] == "fixed_code"
+    assert repo.write_calls == []
+    assert repo.commits == 0
 
 
-def test_external_campaign_target_not_found() -> None:
+def test_direct_wecom_private_send_dry_run_no_write() -> None:
+    repo = _repo_with_target()
+
+    result = service.create_direct_wecom_private_send(_payload(dry_run=True), repo=repo)
+
+    assert result["ok"] is True
+    assert result["dry_run"] is True
+    assert result["side_effect_executed"] is False
+    assert result["jobs"][0]["status"] == "preview"
+    assert result["jobs"][0]["external_userid"] == "ext_1"
+    assert repo.write_calls == []
+    assert repo.commits == 0
+
+
+def test_direct_wecom_private_send_content_required() -> None:
+    repo = _repo_with_target()
+
+    try:
+        service.create_direct_wecom_private_send(_payload(message="", content_payload={}), repo=repo)
+    except service.ExternalCampaignError as exc:
+        payload = exc.to_response()
+        status_code = exc.status_code
+    else:  # pragma: no cover
+        raise AssertionError("expected ExternalCampaignError")
+
+    assert payload["error"] == "content_required"
+    assert payload["phase"] == "content_validation"
+    assert status_code == 400
+    assert repo.write_calls == []
+
+
+def test_direct_wecom_private_send_rejects_unresolved_material_refs() -> None:
+    repo = _repo_with_target()
+
+    try:
+        service.create_direct_wecom_private_send(_payload(message="", material_asset_ids=["asset_without_type"]), repo=repo)
+    except service.ExternalCampaignError as exc:
+        payload = exc.to_response()
+        status_code = exc.status_code
+    else:  # pragma: no cover
+        raise AssertionError("expected ExternalCampaignError")
+
+    assert payload["error"] == "material_invalid"
+    assert payload["phase"] == "content_validation"
+    assert status_code == 400
+    assert repo.write_calls == []
+
+
+def test_direct_wecom_private_send_dnd_blocks_by_default() -> None:
+    repo = _repo_with_target()
+    repo.dnd_reasons["union_ext_1"] = [{"reason_code": "manual_pause", "reason_text": "paused"}]
+
+    try:
+        service.create_direct_wecom_private_send(_payload(), repo=repo)
+    except service.ExternalCampaignError as exc:
+        payload = exc.to_response()
+        status_code = exc.status_code
+    else:  # pragma: no cover
+        raise AssertionError("expected ExternalCampaignError")
+
+    assert payload["error"] == "do_not_disturb"
+    assert status_code == 409
+    assert repo.write_calls == []
+
+
+def test_direct_wecom_private_send_bypass_dnd_warns_and_queues() -> None:
+    repo = _repo_with_target()
+    repo.dnd_reasons["union_ext_1"] = [{"reason_code": "manual_pause", "reason_text": "paused"}]
+
+    result = service.create_direct_wecom_private_send(_payload(bypass_dnd=True), repo=repo)
+
+    assert result["created_count"] == 1
+    assert result["jobs"][0]["status"] == "queued"
+    assert result["jobs"][0]["warnings"][0]["code"] == "do_not_disturb_bypassed"
+    assert repo.write_calls == ["create_broadcast_job"]
+
+
+def test_external_campaign_target_identity_not_found() -> None:
     repo = FakeExternalCampaignRepository()
 
     try:
@@ -345,17 +384,31 @@ def test_external_campaign_target_not_found() -> None:
     else:  # pragma: no cover
         raise AssertionError("expected ExternalCampaignError")
 
-    assert payload["error"] == "target_not_found"
+    assert payload["error"] == "target_identity_not_found"
     assert payload["phase"] == "target_lookup"
     assert status_code == 404
 
 
-def test_external_campaign_owner_mismatch() -> None:
-    repo = FakeExternalCampaignRepository()
+def test_external_campaign_owner_mismatch_is_warning_by_default() -> None:
+    repo = _repo_with_target()
+    repo.identity_by_external["ext_1"]["owner_userid"] = "owner_2"
+    repo.identity_by_external["ext_1"]["primary_owner_userid"] = "owner_2"
     repo.contact_rows["ext_1"] = {"external_userid": "ext_1", "owner_userid": "owner_2"}
 
+    result = service.create_external_campaigns(_payload(dry_run=True), repo=repo)
+
+    assert result["ok"] is True
+    assert result["previews"][0]["warnings"][0]["code"] == "owner_mismatch_warning"
+    assert repo.write_calls == []
+
+
+def test_external_campaign_strict_owner_match_can_still_fail() -> None:
+    repo = _repo_with_target()
+    repo.identity_by_external["ext_1"]["owner_userid"] = "owner_2"
+    repo.identity_by_external["ext_1"]["primary_owner_userid"] = "owner_2"
+
     try:
-        service.create_external_campaigns(_payload(), repo=repo)
+        service.create_external_campaigns(_payload(strict_owner_match=True), repo=repo)
     except service.ExternalCampaignError as exc:
         payload = exc.to_response()
         status_code = exc.status_code
@@ -366,58 +419,65 @@ def test_external_campaign_owner_mismatch() -> None:
     assert status_code == 409
 
 
-def test_external_campaign_auto_backfill_dry_run_would_insert() -> None:
+def test_external_campaign_automation_member_backfill_is_retired() -> None:
     repo = FakeExternalCampaignRepository()
     repo.backfill_rows["ext_1"] = {"source": "sidebar_binding", "owner_userid": "owner_1", "customer_name": "Alice"}
-    result = service.create_external_campaigns(_payload(dry_run=True, auto_backfill_automation_member=True), repo=repo)
 
-    assert result["backfill_summary"]["results"][0]["status"] == "would_insert"
-    assert result["backfill_summary"]["would_insert_count"] == 1
-    assert result["campaigns"][0]["would_create"] is True
+    try:
+        service.create_external_campaigns(_payload(dry_run=True, auto_backfill_automation_member=True), repo=repo)
+    except service.ExternalCampaignError as exc:
+        payload = exc.to_response()
+        status_code = exc.status_code
+    else:  # pragma: no cover
+        raise AssertionError("expected ExternalCampaignError")
+
+    assert status_code == 410
+    assert payload["error"] == "automation_member_backfill_retired"
     assert "insert_automation_member" not in repo.write_calls
     assert repo.write_calls == []
 
 
-def test_external_campaign_auto_backfill_insert_then_create() -> None:
-    repo = FakeExternalCampaignRepository()
-    repo.backfill_rows["ext_1"] = {"source": "sidebar_binding", "owner_userid": "owner_1", "customer_name": "Alice"}
-    result = service.create_external_campaigns(_payload(auto_backfill_automation_member=True), repo=repo)
-
-    assert result["created_count"] == 1
-    assert result["backfill_summary"]["inserted_count"] == 1
-    assert "insert_automation_member" in repo.write_calls
-    assert "create_campaign_draft" in repo.write_calls
-
-
 def test_external_campaign_multi_recipient_campaign_code_suffix() -> None:
     repo = _repo_with_target("ext_1")
-    repo.pool_rows["ext_2"] = {"external_userid": "ext_2", "owner_userid": "owner_1"}
+    row = {
+        "unionid": "union_ext_2",
+        "primary_external_userid": "ext_2",
+        "external_userid": "ext_2",
+        "primary_owner_userid": "owner_1",
+        "owner_userid": "owner_1",
+    }
+    repo.identity_by_external["ext_2"] = row
+    repo.identity_by_unionid["union_ext_2"] = row
     repo.contact_rows["ext_2"] = {"external_userid": "ext_2", "owner_userid": "owner_1"}
     result = service.create_external_campaigns(
-        _payload(campaign_code="fixed_code", recipients=["ext_1", "ext_2"]),
+        _payload(dry_run=True, campaign_code="fixed_code", recipients=["ext_1", "ext_2"]),
         repo=repo,
     )
 
-    codes = [item["campaign_code"] for item in result["campaigns"]]
-    assert len(codes) == 2
-    assert len(set(codes)) == 2
-    assert all(code.startswith("fixed_code_") for code in codes)
+    assert len(result["previews"]) == 2
+    assert result["jobs"] == []
+    assert {item["unionid"] for item in result["previews"]} == {"union_ext_1", "union_ext_2"}
+    assert repo.write_calls == []
 
 
-def test_external_campaign_allocation_failure_cleans_up() -> None:
+def test_external_campaign_workflow_flag_is_retired() -> None:
     repo = _repo_with_target()
-    repo.allocate_result = {"campaign_id": 101, "allocated": 0, "errors": [{"reason": "empty"}]}
 
     try:
-        service.create_external_campaigns(_payload(), repo=repo)
+        service.create_external_campaigns(_payload(use_campaign_workflow=True), repo=repo)
     except service.ExternalCampaignError as exc:
         payload = exc.to_response()
+        status_code = exc.status_code
     else:  # pragma: no cover
         raise AssertionError("expected ExternalCampaignError")
 
-    assert payload["error"] == "campaign_member_allocation_failed"
-    assert payload["cleanup_ok"] is True
-    assert repo.cleanup_calls
+    assert status_code == 410
+    assert payload["error"] == "campaign_workflow_retired"
+    assert payload["send_path"] == "ai_assist_pending_review"
+    assert payload["required_send_path"] == "ai_assist_pending_review"
+    assert payload["forbidden_send_path"] == "direct_broadcast_job"
+    assert payload["retired_path"] == "campaign_workflow"
+    assert repo.write_calls == []
 
 
 def test_external_campaign_status_uses_next_repo() -> None:

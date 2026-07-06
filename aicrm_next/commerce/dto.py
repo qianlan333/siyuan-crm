@@ -20,6 +20,7 @@ class ProductUpsertRequest(BaseModel):
     buy_button_text: str = "立即购买"
     completion_redirect_enabled: bool = False
     completion_redirect_url: str = ""
+    completion_target: dict[str, Any] | None = None
     require_mobile: bool = False
     lead_program_id: int | None = None
     lead_channel_id: int | None = None

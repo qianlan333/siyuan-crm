@@ -8,7 +8,7 @@ import json
 import os
 from typing import Any
 
-from .wecom_contact_callback_adapter import FakeStubWeComContactCallbackAdapter, redact_external_userid
+from .wecom_contact_callback_adapter import FakeStubWeComContactCallbackAdapter
 from .wecom_contact_callback_live_gateway import (
     WeComContactCallbackLiveGateway,
     build_wecom_contact_callback_live_gateway,

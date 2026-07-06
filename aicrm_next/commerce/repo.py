@@ -5,12 +5,18 @@ from datetime import datetime, timezone
 import secrets
 from typing import Any, Protocol
 
+from aicrm_next.navigation_target import completion_action_for_target
+from aicrm_next.shared.db_session import connect_pooled_postgres
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.repository_provider import assert_repository_allowed
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
 
-from .domain import completion_redirect_projection, normalize_status, now_iso, validate_completion_redirect, validate_price_cents
+from .domain import completion_redirect_projection, normalize_product_completion_target, normalize_status, now_iso, validate_price_cents
 from .domain import validate_product_code
+
+
+def connect_commerce_db(database_url: str | None = None):
+    return connect_pooled_postgres(database_url or raw_database_url())
 
 
 class CommerceRepository(Protocol):
@@ -207,16 +213,13 @@ class InMemoryCommerceRepository:
 
     def save_product(self, payload: dict[str, Any], product_id: str | None = None) -> dict[str, Any]:
         validate_price_cents(int(payload.get("price_cents", 0)))
-        normalized_redirect = validate_completion_redirect(
-            payload.get("completion_redirect_enabled"),
-            payload.get("completion_redirect_url"),
-        )
+        completion_fields = normalize_product_completion_target(payload)
         payload = {
             **payload,
-            **normalized_redirect,
+            **completion_fields,
             **completion_redirect_projection(
-                normalized_redirect["completion_redirect_enabled"],
-                normalized_redirect["completion_redirect_url"],
+                completion_fields["completion_redirect_enabled"],
+                completion_fields["completion_redirect_url"],
             ),
         }
         now = now_iso()
@@ -281,7 +284,7 @@ class InMemoryCommerceRepository:
         return self.save_product(payload)
 
     def list_lead_channels(self) -> list[dict[str, Any]]:
-        return [{"channel_id": 0, "channel_name": "不配置引流渠道码", "program_name": "", "qr_url": "", "selectable": True}]
+        return [{"channel_id": 0, "channel_name": "不配置引流渠道码", "qr_url": "", "selectable": True}]
 
     def get_external_push_config(self, product_id: str) -> dict[str, Any]:
         if not self.get_product(product_id):
@@ -386,10 +389,11 @@ class InMemoryCommerceRepository:
             "buy_button_text": str(payload.get("buy_button_text") or payload.get("cta_text") or "立即购买").strip() or "立即购买",
             "cta_text": str(payload.get("buy_button_text") or payload.get("cta_text") or "立即购买").strip() or "立即购买",
             "require_mobile": bool(payload.get("require_mobile", False)),
-            "lead_program_id": _positive_int_or_none(payload.get("lead_program_id")),
+            "lead_program_id": None,
             "lead_channel_id": _positive_int_or_none(payload.get("lead_channel_id")),
             "slices": slices,
             "slice_count": len(slices),
+            "completion_target_json": deepcopy(payload.get("completion_target_json") or payload.get("completion_target") or {}),
             **completion_redirect_projection(
                 payload.get("completion_redirect_enabled"),
                 payload.get("completion_redirect_url"),
@@ -406,6 +410,12 @@ class InMemoryCommerceRepository:
             item.get("completion_redirect_enabled"),
             item.get("completion_redirect_url"),
         )
+        completion_target = normalize_product_completion_target(item)
+        completion_action = completion_action_for_target(
+            completion_target["completion_target_json"],
+            legacy_redirect_url=completion_redirect.get("completion_redirect_url"),
+            legacy_enabled=completion_redirect.get("completion_redirect_enabled"),
+        )
         return {
             **deepcopy(item),
             "title": title,
@@ -417,11 +427,14 @@ class InMemoryCommerceRepository:
             "buy_button_text": cta,
             "cta_text": cta,
             "require_mobile": bool(item.get("require_mobile", False)),
-            "lead_program_id": _positive_int_or_none(item.get("lead_program_id")),
+            "lead_program_id": None,
             "lead_channel_id": _positive_int_or_none(item.get("lead_channel_id")),
             "slices": slices,
             "slice_count": len(slices),
             **completion_redirect,
+            "completion_target_json": completion_target["completion_target_json"],
+            "completion_target": completion_target["completion_target_json"],
+            "completion_action": completion_action,
         }
 
 
@@ -558,10 +571,7 @@ class PostgresCommerceRepository:
         self._database_url = database_url
 
     def _connect(self):
-        import psycopg
-        from psycopg.rows import dict_row
-
-        return psycopg.connect(self._database_url, row_factory=dict_row)
+        return connect_commerce_db(self._database_url)
 
     def list_products(self, *, limit: int, offset: int) -> dict[str, Any]:
         limit = max(1, min(int(limit or 50), 100))
@@ -581,6 +591,51 @@ class PostgresCommerceRepository:
                     (limit, offset),
                 ).fetchall()
                 total_row = cur.execute("SELECT count(*) AS total FROM wechat_pay_products").fetchone() or {}
+        return {
+            "items": [self._serialize_product(row) for row in rows],
+            "total": int(total_row.get("total") or 0),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    def list_sidebar_active_products(self, *, limit: int, offset: int) -> dict[str, Any]:
+        limit = max(1, min(int(limit or 50), 100))
+        offset = max(0, int(offset or 0))
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                rows = cur.execute(
+                    """
+                    SELECT
+                        p.id,
+                        p.product_code,
+                        p.name,
+                        p.amount_total,
+                        p.currency,
+                        p.enabled,
+                        p.status,
+                        p.cta_text,
+                        p.require_mobile,
+                        p.lead_channel_id,
+                        p.completion_redirect_enabled,
+                        p.completion_redirect_url,
+                        p.completion_target_json,
+                        p.metadata_json,
+                        p.created_at,
+                        p.updated_at,
+                        count(s.id) AS slice_count
+                    FROM wechat_pay_products p
+                    LEFT JOIN wechat_pay_product_page_slices s
+                      ON s.product_id = p.id AND s.enabled = TRUE
+                    WHERE p.enabled = TRUE AND p.status = 'active'
+                    GROUP BY p.id
+                    ORDER BY p.updated_at DESC, p.id DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    (limit, offset),
+                ).fetchall()
+                total_row = cur.execute(
+                    "SELECT count(*) AS total FROM wechat_pay_products WHERE enabled = TRUE AND status = 'active'"
+                ).fetchone() or {}
         return {
             "items": [self._serialize_product(row) for row in rows],
             "total": int(total_row.get("total") or 0),
@@ -611,17 +666,13 @@ class PostgresCommerceRepository:
 
     def save_product(self, payload: dict[str, Any], product_id: str | None = None) -> dict[str, Any]:
         validate_price_cents(int(payload.get("price_cents", 0)))
-        normalized_redirect = validate_completion_redirect(
-            payload.get("completion_redirect_enabled"),
-            payload.get("completion_redirect_url"),
-        )
-        payload = {**payload, **normalized_redirect}
+        completion_fields = normalize_product_completion_target(payload)
+        payload = {**payload, **completion_fields}
         code = validate_product_code(str(payload["product_code"]))
         status = _normalize_product_status(payload.get("status") or ("active" if payload.get("enabled", True) else "disabled"))
         enabled = status == "active"
         metadata = self._metadata_from_payload(payload)
         lead_channel_id = _positive_int_or_none(payload.get("lead_channel_id"))
-        lead_program_id = _positive_int_or_none(payload.get("lead_program_id"))
         params = {
             "product_code": code,
             "name": str(payload.get("title") or "").strip(),
@@ -631,17 +682,18 @@ class PostgresCommerceRepository:
             "enabled": enabled,
             "cta_text": str(payload.get("buy_button_text") or "立即购买").strip() or "立即购买",
             "require_mobile": bool(payload.get("require_mobile", False)),
-            "lead_program_id": lead_program_id,
+            "lead_program_id": None,
             "lead_channel_id": lead_channel_id,
-            "completion_redirect_enabled": bool(normalized_redirect["completion_redirect_enabled"]),
-            "completion_redirect_url": str(normalized_redirect["completion_redirect_url"] or ""),
+            "completion_redirect_enabled": bool(completion_fields["completion_redirect_enabled"]),
+            "completion_redirect_url": str(completion_fields["completion_redirect_url"] or ""),
+            "completion_target_json": _jsonb(completion_fields["completion_target_json"]),
             "metadata_json": _jsonb(metadata),
         }
         with self._connect() as conn:
             if lead_channel_id:
                 channel = conn.execute(
                     """
-                    SELECT id, program_id, qr_url
+                    SELECT id, qr_url
                     FROM automation_channel
                     WHERE id = %s
                     LIMIT 1
@@ -650,7 +702,6 @@ class PostgresCommerceRepository:
                 ).fetchone()
                 if not channel or not str(channel.get("qr_url") or "").strip():
                     raise ContractError("selected lead channel is missing qr_url")
-                params["lead_program_id"] = int(channel.get("program_id") or 0) or lead_program_id
             if product_id:
                 existing = conn.execute(
                     "SELECT product_code FROM wechat_pay_products WHERE id::text = %s LIMIT 1",
@@ -674,6 +725,7 @@ class PostgresCommerceRepository:
                         lead_channel_id = %(lead_channel_id)s,
                         completion_redirect_enabled = %(completion_redirect_enabled)s,
                         completion_redirect_url = %(completion_redirect_url)s,
+                        completion_target_json = %(completion_target_json)s,
                         metadata_json = %(metadata_json)s,
                         updated_at = CURRENT_TIMESTAMP
                     WHERE id::text = %(product_id)s
@@ -706,6 +758,7 @@ class PostgresCommerceRepository:
                     lead_channel_id,
                     completion_redirect_enabled,
                     completion_redirect_url,
+                    completion_target_json,
                     metadata_json,
                     created_at,
                     updated_at
@@ -723,6 +776,7 @@ class PostgresCommerceRepository:
                     %(lead_channel_id)s,
                     %(completion_redirect_enabled)s,
                     %(completion_redirect_url)s,
+                    %(completion_target_json)s,
                     %(metadata_json)s,
                     CURRENT_TIMESTAMP,
                     CURRENT_TIMESTAMP
@@ -829,9 +883,7 @@ class PostgresCommerceRepository:
                     c.id AS channel_id,
                     c.channel_name,
                     COALESCE(NULLIF(active_asset.qr_url, ''), NULLIF(c.qr_url, ''), '') AS qr_url,
-                    c.status,
-                    c.program_id,
-                    p.program_name AS program_name
+                    c.status
                 FROM automation_channel c
                 LEFT JOIN LATERAL (
                     SELECT qa.qr_url
@@ -842,19 +894,16 @@ class PostgresCommerceRepository:
                     ORDER BY qa.generated_at DESC, qa.id DESC
                     LIMIT 1
                 ) active_asset ON TRUE
-                LEFT JOIN automation_program p ON p.id = c.program_id
                 ORDER BY c.updated_at DESC NULLS LAST, c.id DESC
                 LIMIT 200
                 """
             ).fetchall()
         return [
-            {"channel_id": 0, "channel_name": "不配置引流渠道码", "program_name": "", "qr_url": "", "selectable": True}
+            {"channel_id": 0, "channel_name": "不配置引流渠道码", "qr_url": "", "selectable": True}
         ] + [
             {
                 "channel_id": int(row.get("channel_id") or 0),
                 "channel_name": str(row.get("channel_name") or f"渠道 {row.get('channel_id')}"),
-                "program_id": int(row.get("program_id") or 0) or None,
-                "program_name": str(row.get("program_name") or ""),
                 "qr_url": str(row.get("qr_url") or ""),
                 "status": str(row.get("status") or ""),
                 "selectable": bool(str(row.get("qr_url") or "").strip()),
@@ -958,6 +1007,18 @@ class PostgresCommerceRepository:
             row.get("completion_redirect_enabled"),
             row.get("completion_redirect_url"),
         )
+        completion_target = normalize_product_completion_target(
+            {
+                "completion_target": row.get("completion_target_json"),
+                "completion_redirect_enabled": row.get("completion_redirect_enabled"),
+                "completion_redirect_url": row.get("completion_redirect_url"),
+            }
+        )
+        completion_action = completion_action_for_target(
+            completion_target["completion_target_json"],
+            legacy_redirect_url=completion_redirect.get("completion_redirect_url"),
+            legacy_enabled=completion_redirect.get("completion_redirect_enabled"),
+        )
         return {
             "id": str(row.get("id") or ""),
             "product_code": product_code,
@@ -976,11 +1037,14 @@ class PostgresCommerceRepository:
             "buy_button_text": cta,
             "cta_text": cta,
             "require_mobile": bool(row.get("require_mobile")),
-            "lead_program_id": _positive_int_or_none(row.get("lead_program_id")),
+            "lead_program_id": None,
             "lead_channel_id": _positive_int_or_none(row.get("lead_channel_id")),
             "slices": slices,
             "slice_count": int(row.get("slice_count") or len(slices)),
             **completion_redirect,
+            "completion_target_json": completion_target["completion_target_json"],
+            "completion_target": completion_target["completion_target_json"],
+            "completion_action": completion_action,
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
             "deleted": False,

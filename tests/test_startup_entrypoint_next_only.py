@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 
+import app as app_entrypoint
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -56,6 +58,14 @@ def test_app_routes_prints_next_routes_without_legacy_import() -> None:
     assert result.returncode == 0, result.stderr
     assert "/health" in result.stdout
     assert "wecom_ability" + "_service" not in result.stdout + result.stderr
+
+
+def test_removed_legacy_commands_are_table_driven() -> None:
+    expected = {command for command, _, _ in app_entrypoint.REMOVED_LEGACY_COMMANDS}
+
+    assert app_entrypoint.REMOVED_LEGACY_COMMAND_NAMES == expected
+    parser = app_entrypoint.build_parser()
+    assert expected.issubset(parser._subparsers._group_actions[0].choices)
 
 
 @pytest.mark.parametrize(

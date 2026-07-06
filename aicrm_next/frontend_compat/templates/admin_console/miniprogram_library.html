@@ -437,7 +437,7 @@
   function closeCreateModal() { $createModal.hidden = true; }
   function refreshListInBackground() {
     loadList().catch(function (e) {
-      console.warn('miniprogram library background refresh failed', e);
+      document.body.dataset.miniprogramRefreshError = e.message || 'refresh failed';
     });
   }
 

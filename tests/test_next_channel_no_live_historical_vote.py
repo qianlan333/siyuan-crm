@@ -11,7 +11,6 @@ def test_unknown_scene_does_not_use_live_historical_vote_or_send_effects(monkeyp
     monkeypatch.setattr("aicrm_next.channel_entry.repo.find_confirmed_channel_by_scene_alias", lambda corp_id, scene: None)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.find_channel_by_historical_scene_value", lambda scene: {"id": 1, "channel_name": "历史候选"})
     monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_contact", lambda **kwargs: calls.append("contact") or {})
-    monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_program_member", lambda **kwargs: calls.append("member") or {})
     monkeypatch.setattr("aicrm_next.channel_entry.repo.upsert_channel_entry_effect_log", lambda **kwargs: effect_logs.append(kwargs) or kwargs)
 
     result = process_channel_entry(

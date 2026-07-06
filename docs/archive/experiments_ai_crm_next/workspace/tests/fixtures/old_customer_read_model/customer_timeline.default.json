@@ -1,0 +1,26 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "timeline": {
+      "external_userid": "external_user_masked_001",
+      "items": [
+        {
+          "event_id": "event_masked_001",
+          "event_type": "message",
+          "event_time": "2026-05-18T10:15:00+08:00",
+          "title": "title_masked_001",
+          "summary": "summary_masked_001",
+          "source_table": "source_table_masked_001",
+          "source_id": "source_id_masked_001",
+          "metadata": {"sample": "masked"}
+        }
+      ],
+      "count": 1,
+      "limit": 50,
+      "offset": 0,
+      "filters": {},
+      "total": 1
+    }
+  }
+}

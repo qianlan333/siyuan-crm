@@ -92,7 +92,7 @@ class AdminConfigRepository:
                     )
                     VALUES (
                         :operator, :action_type, :target_type, :target_id,
-                        :before_json, :after_json, CURRENT_TIMESTAMP
+                        CAST(:before_json AS jsonb), CAST(:after_json AS jsonb), CURRENT_TIMESTAMP
                     )
                     """
                 ),
@@ -702,3 +702,49 @@ class AdminConfigRepository:
             LOGGER.warning("admin login audit read unavailable", exc_info=True)
             return []
         return [dict(row) for row in rows]
+
+    def insert_admin_login_audit(
+        self,
+        *,
+        admin_user_id: int,
+        login_type: str,
+        login_result: str,
+        ip: str = "",
+        user_agent: str = "",
+    ) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO admin_login_audit (
+                        admin_user_id, login_type, login_result, ip, user_agent, created_at
+                    )
+                    VALUES (
+                        :admin_user_id, :login_type, :login_result, :ip, :user_agent, CURRENT_TIMESTAMP
+                    )
+                    """
+                ),
+                {
+                    "admin_user_id": int(admin_user_id or 0) or None,
+                    "login_type": str(login_type or "").strip(),
+                    "login_result": str(login_result or "").strip(),
+                    "ip": str(ip or "").strip(),
+                    "user_agent": str(user_agent or "").strip()[:500],
+                },
+            )
+
+    def update_admin_last_login(self, *, admin_user_id: int) -> None:
+        if int(admin_user_id or 0) <= 0:
+            return
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE admin_users
+                    SET last_login_at = CURRENT_TIMESTAMP,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = :id
+                    """
+                ),
+                {"id": int(admin_user_id or 0)},
+            )

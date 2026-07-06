@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVENTORY = ROOT / "docs/architecture/cloud_orchestrator_run_due_route_inventory.md"
+INVENTORY = ROOT / "docs/archive/route_inventory/cloud_orchestrator_run_due_route_inventory.md"
 
 
 def _text() -> str:
@@ -39,7 +39,7 @@ def test_run_due_inventory_covers_callers_and_boundaries():
         "production_compat rollback deleted",
         "legacy_fallback_allowed=false",
         "deletion_locked",
-        "automation-conversion/jobs/run-due",
+        "Legacy automation conversion timer fallback routes are retired",
         "out-of-scope",
     ]
     for item in required:

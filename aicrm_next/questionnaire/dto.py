@@ -31,6 +31,7 @@ class QuestionnaireUpsertRequest(BaseModel):
     description: str = ""
     enabled: bool = True
     redirect_url: str = ""
+    completion_target: dict[str, Any] | None = None
     submit_button_text: str = "提交"
     questions: list[QuestionnaireQuestionInput] = Field(default_factory=list)
     external_push_config: dict[str, Any] = Field(default_factory=dict)

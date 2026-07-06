@@ -19,6 +19,7 @@ class ProcessWeComExternalContactEventCommand(BaseModel):
 
 
 class ProcessChannelEntryCommand(BaseModel):
+    unionid: str = ""
     external_contact_id: str = ""
     phone: str = ""
     payload_json: dict[str, Any] = Field(default_factory=dict)

@@ -6,9 +6,10 @@ import json
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
-from urllib.parse import urljoin
 
-import requests
+from aicrm_next.platform_foundation.command_bus import CommandContext
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_GENERIC_PUSH, WEBHOOK_ORDER_PAID_PUSH
+from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 
 from . import repo
 from .security import WebhookUrlValidationError, resolve_and_validate_public_https_url, validate_webhook_url
@@ -30,6 +31,19 @@ class ExternalPushError(ValueError):
 
 def _normalized_text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _record_legacy_marker(legacy_key: str, *, marker: str = "legacy_path_invoked", metadata: dict[str, Any] | None = None) -> None:
+    try:
+        LegacyWebhookCleanupService().record_runtime_marker(
+            legacy_key,
+            marker=marker,
+            operator="external_push.service",
+            metadata=metadata or {},
+            real_external_call_executed=False,
+        )
+    except Exception:
+        pass
 
 
 def _iso(value: Any = None) -> str:
@@ -182,6 +196,54 @@ def _product_for_order(repository: Any, order: dict[str, Any]) -> dict[str, Any]
     }
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value:
+        try:
+            payload = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+    return {}
+
+
+def _metadata_mobile(order: dict[str, Any]) -> str:
+    metadata = _json_object(order.get("metadata_json"))
+    for key in ("payer_identity", "buyer_identity"):
+        identity = metadata.get(key)
+        if isinstance(identity, dict):
+            mobile = _normalized_text(identity.get("mobile"))
+            if mobile:
+                return mobile
+    return ""
+
+
+def _metadata_openid(order: dict[str, Any]) -> str:
+    metadata = _json_object(order.get("metadata_json"))
+    for key in ("payer_identity", "buyer_identity"):
+        identity = metadata.get(key)
+        if isinstance(identity, dict):
+            openid = _normalized_text(identity.get("openid"))
+            if openid:
+                return openid
+    return ""
+
+
+def _resolve_order_mobile(repository: Any | None, order: dict[str, Any]) -> str:
+    mobile = _metadata_mobile(order)
+    if mobile or repository is None:
+        return mobile
+    unionid = _normalized_text(order.get("unionid"))
+    if not unionid or not hasattr(repository, "resolve_identity_mobile_by_unionid"):
+        return ""
+    return _normalized_text(repository.resolve_identity_mobile_by_unionid(unionid))
+
+
+def _resolve_order_openid(order: dict[str, Any]) -> str:
+    return _normalized_text(order.get("payer_openid")) or _metadata_openid(order)
+
+
 def build_external_push_payload(
     event: str,
     order: dict[str, Any],
@@ -189,6 +251,7 @@ def build_external_push_payload(
     config: dict[str, Any],
     *,
     delivery_id: str,
+    phone_number: str | None = None,
 ) -> dict[str, Any]:
     event_type = _normalized_text(event)
     if event_type == EVENT_EXTERNAL_PUSH_TEST:
@@ -218,8 +281,9 @@ def build_external_push_payload(
         "name": _normalized_text(product.get("name") or order.get("product_name")),
         "price": int(product.get("amount_total") or order.get("amount_total") or 0),
     }
+    resolved_phone = _normalized_text(phone_number) or _metadata_mobile(order)
     return {
-        "phone_number": _normalized_text(order.get("mobile_snapshot")),
+        "phone_number": resolved_phone,
         "type": _normalized_text(config.get("push_type")),
         "day": config.get("day"),
         "frequency": config.get("frequency"),
@@ -232,9 +296,9 @@ def build_external_push_payload(
         "product": product_payload,
         "buyer": {
             "id": _normalized_text(order.get("external_userid") or order.get("userid_snapshot") or order.get("respondent_key")),
-            "openid": _mask_openid(order.get("payer_openid")),
+            "openid": _mask_openid(_resolve_order_openid(order)),
             "unionid": _normalized_text(order.get("unionid")),
-            "phone": _normalized_text(order.get("mobile_snapshot")),
+            "phone": resolved_phone,
         },
     }
 
@@ -248,17 +312,6 @@ def schedule_next_retry(attempt_count: int) -> str | None:
 
 def _webhook_timeout_seconds() -> float:
     return float(os.getenv("EXTERNAL_PUSH_WEBHOOK_TIMEOUT_SECONDS") or 5)
-
-
-def _send_http_post(url: str, *, raw_body: str, headers: dict[str, str], timeout: float) -> tuple[int, str, str]:
-    resolved = resolve_and_validate_public_https_url(url)
-    response = requests.post(resolved, data=raw_body.encode("utf-8"), headers=headers, timeout=timeout, allow_redirects=False)
-    if response.is_redirect and response.headers.get("Location"):
-        redirect_url = urljoin(resolved, response.headers["Location"])
-        redirect_url = resolve_and_validate_public_https_url(redirect_url)
-        response = requests.post(redirect_url, data=raw_body.encode("utf-8"), headers=headers, timeout=timeout, allow_redirects=False)
-        resolved = redirect_url
-    return int(response.status_code), truncate_body(response.text or "", MAX_BODY_BYTES), resolved
 
 
 def _attempt_delivery(
@@ -281,6 +334,7 @@ def _attempt_delivery(
             product,
             config,
             delivery_id=delivery_id,
+            phone_number=_resolve_order_mobile(repository, order),
         )
     if request_payload is None:
         request_payload = delivery.get("request_body")
@@ -293,6 +347,7 @@ def _attempt_delivery(
             product,
             config,
             delivery_id=delivery_id,
+            phone_number=_resolve_order_mobile(repository, order),
         )
     raw_body = json.dumps(request_payload, ensure_ascii=False, separators=(",", ":"))
     timestamp = str(int(datetime.now(timezone.utc).timestamp()))
@@ -307,42 +362,72 @@ def _attempt_delivery(
     next_attempt = int(delivery.get("attempt_count") or 0) + 1
     request_url = _normalized_text(config.get("webhook_url") or delivery.get("request_url"))
     try:
-        status_code, response_body, final_url = _send_http_post(
-            request_url,
-            raw_body=raw_body,
-            headers=headers,
-            timeout=_webhook_timeout_seconds(),
+        final_url = resolve_and_validate_public_https_url(request_url)
+        effect_type = WEBHOOK_GENERIC_PUSH if event_type == EVENT_EXTERNAL_PUSH_TEST else WEBHOOK_ORDER_PAID_PUSH
+        job = ExternalEffectService().plan_effect(
+            effect_type=effect_type,
+            adapter_name="outbound_webhook",
+            operation="post",
+            target_type="external_push_delivery",
+            target_id=delivery_id,
+            business_type="commerce_order" if event_type == EVENT_TRANSACTION_PAID else "external_push_test",
+            business_id=_normalized_text(delivery.get("order_id") or delivery.get("product_id") or delivery_id),
+            payload={
+                "webhook_url": final_url,
+                "body": request_payload,
+                "headers": headers,
+                "legacy_delivery_id": delivery_id,
+                "source_event_type": event_type,
+            },
+            payload_summary={
+                "delivery_id": delivery_id,
+                "event_type": event_type,
+                "target_url_present": bool(final_url),
+                "body_type": type(request_payload).__name__,
+            },
+            context=CommandContext(
+                actor_id="external_push_worker",
+                actor_type="system",
+                request_id=delivery_id,
+                trace_id=delivery_id,
+                source_route="external_push.service._attempt_delivery",
+            ),
+            source_module="external_push.service",
+            source_event_id=delivery_id,
+            source_command_id=delivery_id,
+            idempotency_key=f"external-push:{delivery_id}:{next_attempt}:external-effect",
         )
-        ok = 200 <= status_code < 300
-        next_retry = "" if ok else (schedule_next_retry(next_attempt) or "")
-        status = "success" if ok else ("retrying" if next_retry else "gave_up")
         updated = repository.update_delivery_result(
             delivery_id,
-            status=status,
-            attempt_count=next_attempt,
+            status="retrying",
+            attempt_count=int(delivery.get("attempt_count") or 0),
             request_url=final_url,
             request_headers=redact_sensitive_fields(headers),
             request_body=redact_sensitive_fields(request_payload),
-            response_status=status_code,
-            response_body=response_body,
-            error_message="" if ok else f"HTTP {status_code}",
-            next_retry_at=next_retry,
+            response_status=None,
+            response_body=f"external_effect_job_id={job.get('id')}",
+            error_message="external_effect_job_queued",
+            next_retry_at="",
         )
-        return {"ok": ok, "delivery": updated, "status_code": status_code, "reason": "" if ok else f"HTTP {status_code}"}
+        return {
+            "ok": True,
+            "queued": True,
+            "delivery": updated,
+            "external_effect_job_id": job.get("id"),
+            "real_external_call_executed": False,
+        }
     except Exception as exc:
-        next_retry = schedule_next_retry(next_attempt) or ""
-        status = "retrying" if next_retry else "gave_up"
         updated = repository.update_delivery_result(
             delivery_id,
-            status=status,
-            attempt_count=next_attempt,
+            status="failed",
+            attempt_count=int(delivery.get("attempt_count") or 0),
             request_url=request_url,
             request_headers=redact_sensitive_fields(headers),
             request_body=redact_sensitive_fields(request_payload),
             response_status=None,
             response_body="",
             error_message=truncate_body(str(exc), 1000),
-            next_retry_at=next_retry,
+            next_retry_at="",
         )
         return {"ok": False, "delivery": updated, "reason": str(exc)}
 
@@ -377,6 +462,10 @@ def _is_config_expired(config: dict[str, Any]) -> bool:
 
 
 def process_transaction_paid_outbox(outbox: dict[str, Any], *, repository: Any | None = None) -> dict[str, Any]:
+    _record_legacy_marker(
+        "old_external_push_outbox_worker",
+        metadata={"event_type": EVENT_TRANSACTION_PAID, "outbox_id_present": bool((outbox or {}).get("id"))},
+    )
     repository = repository or repo.build_external_push_repository()
     payload = outbox.get("payload") if isinstance(outbox.get("payload"), dict) else {}
     order_id = int(payload.get("order_id") or outbox.get("aggregate_id") or 0)
@@ -413,13 +502,21 @@ def process_transaction_paid_outbox(outbox: dict[str, Any], *, repository: Any |
     if _normalized_text(delivery.get("status")) == "success":
         repository.mark_outbox_status(int(outbox["id"]), status="success")
         return {"ok": True, "delivery": delivery, "deduped": True}
-    push_payload = build_external_push_payload(EVENT_TRANSACTION_PAID, order, product, config, delivery_id=delivery["delivery_id"])
+    push_payload = build_external_push_payload(
+        EVENT_TRANSACTION_PAID,
+        order,
+        product,
+        config,
+        delivery_id=delivery["delivery_id"],
+        phone_number=_resolve_order_mobile(repository, order),
+    )
     result = _attempt_delivery(delivery, config=config_with_secret, payload=push_payload, repository=repository)
     repository.mark_outbox_status(int(outbox["id"]), status="success")
     return result
 
 
 def run_due_external_push_events(*, limit: int = 20, repository: Any | None = None) -> dict[str, Any]:
+    _record_legacy_marker("old_external_push_outbox_worker", metadata={"operation": "run_due_external_push_events", "limit": limit})
     repository = repository or repo.build_external_push_repository()
     events = repository.list_due_outbox_events(limit=limit)
     results = [process_transaction_paid_outbox(event, repository=repository) for event in events]
@@ -434,6 +531,7 @@ def run_due_external_push_events(*, limit: int = 20, repository: Any | None = No
 
 
 def run_due_external_push_retries(*, limit: int = 20, repository: Any | None = None) -> dict[str, Any]:
+    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "run_due_external_push_retries", "limit": limit})
     repository = repository or repo.build_external_push_repository()
     deliveries = repository.list_due_deliveries(limit=limit)
     results = []
@@ -444,6 +542,7 @@ def run_due_external_push_retries(*, limit: int = 20, repository: Any | None = N
 
 
 def send_webhook_delivery(delivery_id: str, *, repository: Any | None = None) -> dict[str, Any]:
+    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "send_webhook_delivery", "delivery_id_present": bool(delivery_id)})
     repository = repository or repo.build_external_push_repository()
     delivery = repository.get_delivery_by_delivery_id(delivery_id)
     if not delivery:
@@ -451,7 +550,9 @@ def send_webhook_delivery(delivery_id: str, *, repository: Any | None = None) ->
     config = repository.get_config_with_secret(int(delivery.get("config_id") or 0)) or {}
     return _attempt_delivery(delivery, config=config, repository=repository)
 
+
 def send_product_external_push_test(product_id: int, *, repository: Any | None = None) -> dict[str, Any]:
+    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "send_product_external_push_test", "product_id_present": bool(product_id)})
     repository = repository or repo.build_external_push_repository()
     product = repository.get_product_by_id(int(product_id))
     if not product:
@@ -489,6 +590,7 @@ def list_order_deliveries(order_id: int, *, repository: Any | None = None) -> li
 
 
 def retry_order_delivery(order_id: int, delivery_id: str, *, repository: Any | None = None) -> dict[str, Any]:
+    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "retry_order_delivery", "order_id_present": bool(order_id), "delivery_id_present": bool(delivery_id)})
     repository = repository or repo.build_external_push_repository()
     order = repository.get_order_by_id(int(order_id))
     if not order:

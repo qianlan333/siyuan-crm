@@ -1,0 +1,30 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "customer": {
+      "external_userid": "external_user_masked_001",
+      "customer_name": "customer_masked_001",
+      "owner_userid": "owner_masked_001",
+      "owner_display_name": "owner_display_masked_001",
+      "remark": "remark_masked_001",
+      "description": "description_masked_001",
+      "mobile": "mobile_masked_001",
+      "is_bound": true,
+      "binding_status": "bound",
+      "follow_user_userids": ["owner_masked_001"],
+      "tags": ["tag_masked_001"],
+      "class_user_status": {"current_status": "lead_trial", "activation_bucket": "activated"},
+      "last_message_at": "2026-05-18T10:15:00+08:00",
+      "last_touch_at": "2026-05-18T10:20:00+08:00",
+      "updated_at": "2026-05-18T10:20:00+08:00",
+      "binding": {"is_bound": true, "mobile": "mobile_masked_001", "binding_status": "bound"},
+      "identity": {"person_id": "person_masked_001", "external_userid": "external_user_masked_001", "mobile": "mobile_masked_001"},
+      "follow_users": [{"userid": "owner_masked_001", "display_name": "owner_display_masked_001", "is_primary": true}],
+      "marketing_summary": {"main_stage": "trial", "sub_stage": "activated"},
+      "marketing_profile": {"stage_key": "trial/activated", "recommended_action": "masked_action"},
+      "contact": {"external_userid": "external_user_masked_001", "name": "customer_masked_001"},
+      "sidebar_context": {"can_open_sidebar": true}
+    }
+  }
+}

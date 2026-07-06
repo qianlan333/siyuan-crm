@@ -20,8 +20,8 @@ def test_questionnaire_h5_submit_inventory_documents_group_9_scope() -> None:
     assert "Next CommandBus only" in text
     assert "legacy rollback removed" in text
     assert "deletion_locked" in text
-    assert "adapter_mode=real_enabled" in text
-    assert "configured external push is attempted" in text
-    assert "real_external_call_executed=false" in text
+    assert "adapter_mode=real_mark_tag" in text
+    assert "ProductionWeComAdapter.mark_external_contact_tags()" in text
+    assert "post-success mirror" in text
     assert "production_unavailable" in text
     assert "admin read/write" in text

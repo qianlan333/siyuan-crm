@@ -16,8 +16,7 @@ def upgrade() -> None:
         """
         CREATE TABLE IF NOT EXISTS customer_list_index_next (
             id BIGSERIAL PRIMARY KEY,
-            person_id TEXT,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             customer_name TEXT NOT NULL DEFAULT '',
             owner_userid TEXT NOT NULL DEFAULT '',
             owner_display_name TEXT NOT NULL DEFAULT '',
@@ -39,8 +38,7 @@ def upgrade() -> None:
         """
         CREATE TABLE IF NOT EXISTS customer_detail_snapshot_next (
             id BIGSERIAL PRIMARY KEY,
-            person_id TEXT,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             customer_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             binding_json JSONB NOT NULL DEFAULT '{}'::jsonb,
             identity_json JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -59,8 +57,7 @@ def upgrade() -> None:
         CREATE TABLE IF NOT EXISTS customer_timeline_event_next (
             id BIGSERIAL PRIMARY KEY,
             event_id TEXT NOT NULL,
-            person_id TEXT,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             event_type TEXT NOT NULL,
             event_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             title TEXT NOT NULL DEFAULT '',
@@ -77,7 +74,7 @@ def upgrade() -> None:
         CREATE TABLE IF NOT EXISTS customer_recent_message_next (
             id BIGSERIAL PRIMARY KEY,
             msgid TEXT NOT NULL,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             msgtype TEXT NOT NULL DEFAULT 'text',
             content TEXT NOT NULL DEFAULT '',
             send_time TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -89,15 +86,15 @@ def upgrade() -> None:
         """
     )
     for statement in [
-        "CREATE INDEX IF NOT EXISTS ix_customer_list_index_next_external_userid ON customer_list_index_next (external_userid)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_list_index_next_unionid ON customer_list_index_next (unionid)",
         "CREATE INDEX IF NOT EXISTS ix_customer_list_index_next_owner_userid ON customer_list_index_next (owner_userid)",
         "CREATE INDEX IF NOT EXISTS ix_customer_list_index_next_mobile ON customer_list_index_next (mobile)",
         "CREATE INDEX IF NOT EXISTS ix_customer_list_index_next_updated_at ON customer_list_index_next (updated_at)",
-        "CREATE INDEX IF NOT EXISTS ix_customer_detail_snapshot_next_external_userid ON customer_detail_snapshot_next (external_userid)",
-        "CREATE INDEX IF NOT EXISTS ix_customer_timeline_event_next_external_userid ON customer_timeline_event_next (external_userid)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_detail_snapshot_next_unionid ON customer_detail_snapshot_next (unionid)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_timeline_event_next_unionid ON customer_timeline_event_next (unionid)",
         "CREATE INDEX IF NOT EXISTS ix_customer_timeline_event_next_event_type ON customer_timeline_event_next (event_type)",
         "CREATE INDEX IF NOT EXISTS ix_customer_timeline_event_next_event_time ON customer_timeline_event_next (event_time)",
-        "CREATE INDEX IF NOT EXISTS ix_customer_recent_message_next_external_userid ON customer_recent_message_next (external_userid)",
+        "CREATE INDEX IF NOT EXISTS ix_customer_recent_message_next_unionid ON customer_recent_message_next (unionid)",
         "CREATE INDEX IF NOT EXISTS ix_customer_recent_message_next_send_time ON customer_recent_message_next (send_time)",
     ]:
         op.execute(statement)
@@ -106,15 +103,15 @@ def upgrade() -> None:
 def downgrade() -> None:
     for index_name in [
         "ix_customer_recent_message_next_send_time",
-        "ix_customer_recent_message_next_external_userid",
+        "ix_customer_recent_message_next_unionid",
         "ix_customer_timeline_event_next_event_time",
         "ix_customer_timeline_event_next_event_type",
-        "ix_customer_timeline_event_next_external_userid",
-        "ix_customer_detail_snapshot_next_external_userid",
+        "ix_customer_timeline_event_next_unionid",
+        "ix_customer_detail_snapshot_next_unionid",
         "ix_customer_list_index_next_updated_at",
         "ix_customer_list_index_next_mobile",
         "ix_customer_list_index_next_owner_userid",
-        "ix_customer_list_index_next_external_userid",
+        "ix_customer_list_index_next_unionid",
     ]:
         op.execute(f"DROP INDEX IF EXISTS {index_name}")
     op.execute("DROP TABLE IF EXISTS customer_recent_message_next")

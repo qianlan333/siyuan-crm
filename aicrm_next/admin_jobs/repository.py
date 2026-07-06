@@ -40,7 +40,6 @@ class AdminJobsRepository(Protocol):
     def ack_message_batch(self, batch_id: int, *, ack_note: str, acked_by: str) -> dict[str, Any] | None: ...
     def list_deferred_jobs(self, *, status: str = "", owner_userid: str = "", external_userid: str = "", limit: int = 20) -> list[dict[str, Any]]: ...
     def deferred_job_counts(self) -> dict[str, int]: ...
-    def run_due_deferred_jobs(self, *, limit: int, operator: str) -> dict[str, Any]: ...
     def webhook_counts(self) -> dict[str, int]: ...
     def list_webhook_deliveries(self, *, event_type: str = "", status: str = "", limit: int = 20) -> list[dict[str, Any]]: ...
     def get_webhook_delivery(self, delivery_id: int) -> dict[str, Any] | None: ...
@@ -171,15 +170,26 @@ class PostgresAdminJobsRepository:
 
     def list_message_batches(self, *, status: str = "", limit: int = 20) -> list[dict[str, Any]]:
         params: list[Any] = []
-        where = ""
-        if status:
-            where = " WHERE status = %s"
-            params.append(status)
+        clauses: list[str] = []
+        if status == "acked":
+            clauses.append("metadata_json ? 'message_batch_ack'")
+        elif status == "pending":
+            clauses.append("NOT (metadata_json ? 'message_batch_ack')")
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
         params.append(limit)
         return self._rows(
             """
-            SELECT id, batch_key, window_start, window_end, status, message_count, created_at, acked_at, ack_note, acked_by
-            FROM message_batches
+            SELECT id,
+                   COALESCE(NULLIF(batch_key, ''), 'broadcast:' || id::text) AS batch_key,
+                   scheduled_for AS window_start,
+                   COALESCE(sent_at, updated_at, created_at) AS window_end,
+                   CASE WHEN metadata_json ? 'message_batch_ack' THEN 'acked' ELSE 'pending' END AS status,
+                   COALESCE(NULLIF(target_count, 0), jsonb_array_length(target_unionids_json)) AS message_count,
+                   created_at,
+                   metadata_json #>> '{message_batch_ack,acked_at}' AS acked_at,
+                   metadata_json #>> '{message_batch_ack,ack_note}' AS ack_note,
+                   metadata_json #>> '{message_batch_ack,acked_by}' AS acked_by
+            FROM broadcast_jobs
             """ + where + " ORDER BY id DESC LIMIT %s",
             tuple(params),
         )
@@ -189,9 +199,9 @@ class PostgresAdminJobsRepository:
             self._one(
                 """
                 SELECT COUNT(*) AS total_count,
-                       COALESCE(SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END), 0) AS pending_count,
-                       COALESCE(SUM(CASE WHEN status = 'acked' THEN 1 ELSE 0 END), 0) AS acked_count
-                FROM message_batches
+                       COALESCE(SUM(CASE WHEN NOT (metadata_json ? 'message_batch_ack') THEN 1 ELSE 0 END), 0) AS pending_count,
+                       COALESCE(SUM(CASE WHEN metadata_json ? 'message_batch_ack' THEN 1 ELSE 0 END), 0) AS acked_count
+                FROM broadcast_jobs
                 """
             )
         )
@@ -199,8 +209,17 @@ class PostgresAdminJobsRepository:
     def get_message_batch(self, batch_id: int) -> dict[str, Any] | None:
         return self._one(
             """
-            SELECT id, batch_key, window_start, window_end, status, message_count, created_at, acked_at, ack_note, acked_by
-            FROM message_batches
+            SELECT id,
+                   COALESCE(NULLIF(batch_key, ''), 'broadcast:' || id::text) AS batch_key,
+                   scheduled_for AS window_start,
+                   COALESCE(sent_at, updated_at, created_at) AS window_end,
+                   CASE WHEN metadata_json ? 'message_batch_ack' THEN 'acked' ELSE 'pending' END AS status,
+                   COALESCE(NULLIF(target_count, 0), jsonb_array_length(target_unionids_json)) AS message_count,
+                   created_at,
+                   metadata_json #>> '{message_batch_ack,acked_at}' AS acked_at,
+                   metadata_json #>> '{message_batch_ack,ack_note}' AS ack_note,
+                   metadata_json #>> '{message_batch_ack,acked_by}' AS acked_by
+            FROM broadcast_jobs
             WHERE id = %s
             """,
             (batch_id,),
@@ -209,12 +228,21 @@ class PostgresAdminJobsRepository:
     def list_batch_messages(self, batch_id: int, *, limit: int = 50) -> list[dict[str, Any]]:
         return self._rows(
             """
-            SELECT mbi.batch_id, mbi.message_id, mbi.msgid, mbi.chat_type, mbi.chat_id, mbi.external_userid,
-                   mbi.owner_userid, mbi.send_time, am.content, am.msgtype, am.sender, am.receiver
-            FROM message_batch_items mbi
-            LEFT JOIN archived_messages am ON am.id = mbi.message_id
-            WHERE mbi.batch_id = %s
-            ORDER BY mbi.send_time ASC, mbi.id ASC
+            SELECT job_id AS batch_id,
+                   id AS message_id,
+                   COALESCE(event_payload->>'msgid', '') AS msgid,
+                   COALESCE(event_payload->>'chat_type', '') AS chat_type,
+                   COALESCE(event_payload->>'chat_id', '') AS chat_id,
+                   COALESCE(event_payload->>'external_userid', event_payload->>'unionid', '') AS external_userid,
+                   COALESCE(actor_id, '') AS owner_userid,
+                   created_at AS send_time,
+                   COALESCE(event_payload->>'content', event_payload->>'content_summary', event_type) AS content,
+                   event_type AS msgtype,
+                   COALESCE(actor_id, '') AS sender,
+                   '' AS receiver
+            FROM broadcast_job_events
+            WHERE job_id = %s
+            ORDER BY created_at ASC, id ASC
             LIMIT %s
             """,
             (batch_id, limit),
@@ -223,67 +251,37 @@ class PostgresAdminJobsRepository:
     def ack_message_batch(self, batch_id: int, *, ack_note: str, acked_by: str) -> dict[str, Any] | None:
         return self._execute_returning(
             """
-            UPDATE message_batches
-            SET status = 'acked', ack_note = %s, acked_by = %s, acked_at = CURRENT_TIMESTAMP
+            UPDATE broadcast_jobs
+            SET metadata_json = metadata_json || jsonb_build_object(
+                    'message_batch_ack',
+                    jsonb_build_object(
+                        'ack_note', %s::text,
+                        'acked_by', %s::text,
+                        'acked_at', to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                    )
+                ),
+                updated_at = CURRENT_TIMESTAMP
             WHERE id = %s
-            RETURNING id, batch_key, window_start, window_end, status, message_count, created_at, acked_at, ack_note, acked_by
+            RETURNING id,
+                      COALESCE(NULLIF(batch_key, ''), 'broadcast:' || id::text) AS batch_key,
+                      scheduled_for AS window_start,
+                      COALESCE(sent_at, updated_at, created_at) AS window_end,
+                      'acked' AS status,
+                      COALESCE(NULLIF(target_count, 0), jsonb_array_length(target_unionids_json)) AS message_count,
+                      created_at,
+                      metadata_json #>> '{message_batch_ack,acked_at}' AS acked_at,
+                      metadata_json #>> '{message_batch_ack,ack_note}' AS ack_note,
+                      metadata_json #>> '{message_batch_ack,acked_by}' AS acked_by
             """,
             (ack_note, acked_by, batch_id),
         )
 
     def list_deferred_jobs(self, *, status: str = "", owner_userid: str = "", external_userid: str = "", limit: int = 20) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
-        if status:
-            clauses.append("status = %s")
-            params.append(status)
-        if owner_userid:
-            clauses.append("owner_userid = %s")
-            params.append(owner_userid)
-        if external_userid:
-            clauses.append("external_userid = %s")
-            params.append(external_userid)
-        where = " WHERE " + " AND ".join(clauses) if clauses else ""
-        params.append(limit)
-        rows = self._rows(
-            """
-            SELECT id, job_type, external_userid, owner_userid, run_after, status,
-                   attempt_count, payload_json, result_json, created_at, updated_at
-            FROM user_ops_deferred_jobs
-            """ + where + " ORDER BY run_after ASC, id ASC LIMIT %s",
-            tuple(params),
-        )
-        for row in rows:
-            row["payload_json"] = _json_load(row.get("payload_json"), default={})
-            row["result_json"] = _json_load(row.get("result_json"), default={})
-        return rows
+        del status, owner_userid, external_userid, limit
+        return []
 
     def deferred_job_counts(self) -> dict[str, int]:
-        row = self._one("SELECT status, COUNT(*) AS cnt FROM user_ops_deferred_jobs GROUP BY status")
-        rows = self._rows("SELECT status, COUNT(*) AS cnt FROM user_ops_deferred_jobs GROUP BY status")
-        del row
-        return _status_counts(rows)
-
-    def run_due_deferred_jobs(self, *, limit: int, operator: str) -> dict[str, Any]:
-        rows = self._rows(
-            """
-            UPDATE user_ops_deferred_jobs
-            SET status = 'success',
-                attempt_count = attempt_count + 1,
-                result_json = jsonb_build_object('ok', true, 'runner', 'aicrm_next_admin_jobs', 'operator', %s),
-                updated_at = CURRENT_TIMESTAMP
-            WHERE id IN (
-                SELECT id FROM user_ops_deferred_jobs
-                WHERE status = 'pending' AND run_after <= CURRENT_TIMESTAMP
-                ORDER BY run_after ASC, id ASC
-                LIMIT %s
-                FOR UPDATE SKIP LOCKED
-            )
-            RETURNING id, status
-            """,
-            (operator, limit),
-        )
-        return {"ok": True, "count": len(rows), "updated_jobs": rows, "runner": "aicrm_next_admin_jobs"}
+        return _status_counts([])
 
     def webhook_counts(self) -> dict[str, int]:
         row = self._one(
@@ -655,16 +653,6 @@ class FixtureAdminJobsRepository:
 
     def deferred_job_counts(self) -> dict[str, int]:
         return _simple_counts(self.deferred_jobs, "status", total_name="total_count")
-
-    def run_due_deferred_jobs(self, *, limit: int, operator: str) -> dict[str, Any]:
-        updated: list[dict[str, Any]] = []
-        for row in self.deferred_jobs:
-            if row["status"] == "pending" and len(updated) < limit:
-                row["status"] = "success"
-                row["attempt_count"] = int(row["attempt_count"]) + 1
-                row["result_json"] = {"ok": True, "runner": "aicrm_next_admin_jobs", "operator": operator}
-                updated.append(copy.deepcopy(row))
-        return {"ok": True, "count": len(updated), "updated_jobs": updated, "runner": "aicrm_next_admin_jobs"}
 
     def webhook_counts(self) -> dict[str, int]:
         return _simple_counts(self.webhooks, "status", total_name="total_count")

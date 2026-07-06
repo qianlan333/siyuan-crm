@@ -1,0 +1,27 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "order_no": "order_masked_001",
+        "payment_provider": "wechat",
+        "product_code": "course_masked_001",
+        "product_title": "product_masked_001",
+        "buyer_mobile": "mobile_masked_001",
+        "external_userid": "external_user_masked_001",
+        "amount_cents": 9900,
+        "currency": "CNY",
+        "payment_status": "paid",
+        "transaction_id": "transaction_masked_001",
+        "paid_at": "2026-05-20T12:01:00Z",
+        "created_at": "2026-05-20T12:01:00Z",
+        "updated_at": "2026-05-20T12:01:00Z"
+      }
+    ],
+    "total": 1,
+    "limit": 50,
+    "offset": 0,
+    "filters": {}
+  }
+}

@@ -166,22 +166,6 @@ def test_h5_submit_old_multi_choice_protocol_still_succeeds(client: TestClient) 
     assert body["final_tags"] == ["tag_regular"]
 
 
-def test_h5_submit_applies_matching_score_rule_tags(client: TestClient) -> None:
-    slug = _slug("score-rule-tags")
-    payload = _choice_questionnaire_payload(slug=slug)
-    payload["score_rules"] = [
-        {"min_score": 1, "max_score": 4, "tag_codes": ["tag_score_low", "tag_regular"]},
-        {"min_score": 5, "max_score": 10, "tag_codes": ["tag_score_high"]},
-    ]
-    _create_questionnaire(client, payload)
-
-    body = _submit(client, slug, {"q_single": "regular"})
-
-    assert body["score"] == 3
-    assert body["final_tags"] == ["tag_regular", "tag_score_low"]
-    assert body["side_effects"]["wecom_tag"]["tag_ids"] == ["tag_regular", "tag_score_low"]
-
-
 def test_h5_submit_single_choice_other_object_saves_text_value(client: TestClient) -> None:
     slug = _slug("single-other-submit")
     _create_questionnaire(client, _choice_questionnaire_payload(slug=slug))

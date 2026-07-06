@@ -26,7 +26,7 @@ def test_messages_inventory_covers_known_repository_paths() -> None:
 
     assert "tests/test_customer_read_model_next_primary.py" in text
     assert "tests/test_messages_exact_routes.py" in text
-    assert "aicrm_next/production_compat/api.py" in text
+    assert "historical retired production_compat module" in text
     assert "deleted and locked" in text
     assert "no legacy forward" in text
 
@@ -53,4 +53,4 @@ def test_messages_inventory_search_references_are_explained() -> None:
         assert required in inventory
 
     assert "aicrm_next/production_compat/api.py" not in referenced_files
-    assert "aicrm_next/production_compat/api.py" in inventory
+    assert "historical retired production_compat module" in inventory

@@ -18,8 +18,8 @@ def test_route_matrix_covers_required_sidebar_profile_families():
     assert "/api/sidebar/*" in patterns
     assert "/api/admin/customers/profile" in patterns
     assert "/api/admin/customers/profile/*" in patterns
-    assert "/api/admin/automation-conversion/member" in patterns
-    assert "/api/admin/automation-conversion/member/*" in patterns
+    assert "/api/admin/automation-conversion/member" not in patterns
+    assert "/api/admin/automation-conversion/member/*" not in patterns
 
 
 def test_route_matrix_declares_future_next_owners_and_guarded_writes():

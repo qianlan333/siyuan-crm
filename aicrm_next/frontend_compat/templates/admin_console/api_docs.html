@@ -880,7 +880,7 @@ function apidocCopy(btn) {
     try {
       _mdData = JSON.parse(el.textContent);
     } catch (e) {
-      console.error('Failed to parse apidoc-md-data:', e);
+      el.dataset.parseError = e.message || 'parse failed';
       return null;
     }
     return _mdData;
@@ -903,7 +903,7 @@ function apidocCopy(btn) {
       md = (data.groups || {})[id.slice(6)];
     }
     if (!md) {
-      console.warn('No markdown found for', id);
+      btn.dataset.missingMarkdown = id;
       return;
     }
 
@@ -924,7 +924,6 @@ function apidocCopy(btn) {
         btn.innerHTML = btn.dataset.origHtml;
       }, 1500);
     }).catch(function(err) {
-      console.error('Copy failed:', err);
       alert('复制失败：' + err.message);
     });
   };

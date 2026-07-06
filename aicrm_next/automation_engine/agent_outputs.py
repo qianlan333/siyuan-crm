@@ -138,7 +138,7 @@ def normalize_agent_output_filters(filters: dict[str, Any] | None = None) -> dic
         "page_size": page_size,
         "offset": (page - 1) * page_size,
         "request_id": _text(source.get("request_id")),
-        "external_contact_id": _text(source.get("external_contact_id")),
+        "unionid": _text(source.get("unionid")),
         "userid": _text(source.get("userid")),
         "agent_code": _text(source.get("agent_code")),
         "output_type": output_type,
@@ -164,7 +164,7 @@ def agent_output_projection(output: dict[str, Any], *, visibility: str = "masked
     normalized_visibility = _text(visibility or "masked").lower()
     if normalized_visibility not in ALLOWED_AGENT_OUTPUT_VISIBILITY:
         raise ContractError("visibility must be masked or console")
-    external_contact_id = _text(item.get("external_contact_id"))
+    unionid = _text(item.get("unionid"))
     userid = _text(item.get("userid"))
     return {
         "id": _text(item.get("id") or item.get("output_id")),
@@ -172,7 +172,7 @@ def agent_output_projection(output: dict[str, Any], *, visibility: str = "masked
         "run_id": _text(item.get("run_id")),
         "request_id": _text(item.get("request_id")),
         "userid": userid if normalized_visibility == "console" else _mask_identifier(userid),
-        "external_contact_id": external_contact_id if normalized_visibility == "console" else _mask_identifier(external_contact_id),
+        "unionid": unionid if normalized_visibility == "console" else _mask_identifier(unionid),
         "agent_code": _text(item.get("agent_code")),
         "output_type": _text(item.get("output_type") or "metadata"),
         "rendered_output_text": _text(item.get("rendered_output_text")),

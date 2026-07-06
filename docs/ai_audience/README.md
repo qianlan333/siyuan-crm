@@ -1,0 +1,90 @@
+# AI Audience 人群包
+
+AI Audience 是 AI-CRM Next 内的运行时 SQL 人群包能力，用于把运营自然语言需求转换成可刷新、可预览、可外推、可群发复用的标准目标集合。它不恢复旧 automation program / Runtime V2，也不新增私信群发发送器。
+
+## 产品边界
+
+业务人群包不得通过 PR 新增。新增一个普通运营包，例如“某负责人企微未注册人群”，必须走运行时 External API 写入 DB 配置；如果新增一个具体包还需要迁移、代码或几百行 PR，说明流程错误。
+
+PR 只用于平台能力变更，包括：
+
+- 新增或修正底层 `audience_read.*` 数据源 view。
+- 新增 AI Audience 平台 API、刷新、外推、安全或审计能力。
+- 修改 SQL 安全边界、鉴权、prefix gate、运行时存储结构。
+
+普通业务包上线不需要提交 repo 文件。Codex 可以根据自然语言和 schema catalog 生成 Markdown spec 或 simple SQL，但生成物是运行时输入，不提交到仓库。`docs/ai_audience/examples/` 里的文件只是模板，不代表每个业务包都要新增一个 `.md`。
+
+## 运行时创建流程
+
+优先使用 Simple SQL Package：
+
+1. Codex 读取 schema catalog，生成只返回 `external_userid` 的 simple SQL。
+2. 调 `POST /api/external/ai-audience/simple/preview` 做 dry-run。
+3. 调 `POST /api/external/ai-audience/simple/apply` 创建或更新 package/version/webhook/senders，默认 `paused`。
+4. 页面确认后调 `POST /api/external/ai-audience/simple/{package_key}/activate` 启用。
+5. 不再使用时调 `POST /api/external/ai-audience/simple/{package_key}/archive` 归档。
+
+高级 Markdown spec 仍保留给复杂包：
+
+- `POST /api/external/ai-audience/spec/dry-run`
+- `POST /api/external/ai-audience/spec/apply`
+- `POST /api/external/ai-audience/spec/publish`
+- `POST /api/external/ai-audience/packages/{package_key}/archive`
+
+两条链路都使用 `AICRM_AI_AUDIENCE_SPEC_API_TOKEN`，并由服务端强制执行 `AICRM_AI_AUDIENCE_SPEC_ALLOWED_PREFIXES`、`AICRM_AI_AUDIENCE_SPEC_ALLOW_NON_VERIFY_PREFIX` 和 `AICRM_AI_AUDIENCE_SPEC_ALLOW_PUBLISH`。
+
+## Simple SQL Package
+
+Simple SQL 只需要返回 `external_userid`：
+
+```json
+{
+  "package_key": "audience_hyc_wecom_unregistered",
+  "name": "HuangYouCan 企微未注册人群",
+  "natural_language_definition": "负责人为 HuangYouCan，已经添加企业微信，但还没有完成注册的用户。",
+  "refresh_mode": "every_3m",
+  "sql": "SELECT DISTINCT wc.external_userid FROM audience_read.wecom_contacts_v1 wc LEFT JOIN audience_read.registration_status_v1 r ON r.external_userid = wc.external_userid WHERE wc.owner_userid = :owner_userid AND COALESCE(r.is_registered, false) = false",
+  "parameters": {
+    "owner_userid": "HuangYouCan"
+  },
+  "senders": [
+    {
+      "sender_userid": "HuangYouCan",
+      "priority": 1,
+      "status": "active"
+    }
+  ],
+  "outbound_webhook_url": ""
+}
+```
+
+Simple SQL 规则：
+
+- 只允许查询 `audience_read.*` catalog 视图。
+- 禁止 `SELECT *`、DML/DDL、`public.*`、`pg_sleep` 等危险函数。
+- SQL 用到的业务参数必须在 `parameters` 声明。
+- 系统参数由平台自动注入：`package_key`、`package_id`、`refresh_started_at`、`last_watermark_at`、`lookback_seconds`。
+- 平台会把 simple SQL 编译成 AI Audience 标准 SQL，并继续复用现有 package/version/refresh/member/outbound 表。
+
+Simple refresh mode 只允许：
+
+- `every_3m`
+- `daily_0200`
+- `manual`
+
+## 权限边界
+
+- `/api/admin/ai-audience/*` 只接受 admin session。
+- `/api/ai/audience/*` 只接受 internal token，不能给浏览器调用。
+- `/api/external/ai-audience/*` 只接受 External API token，不能绕过服务端 prefix gate。
+- API 不返回 SQL、inbound secret、outbound signing secret、payload 明细或成员隐私字段。
+- 企微群成员包使用 `audience_read.group_chat_members_v1`，只读取当前 `group_chats.raw_payload` 投影；群详情数据源更新机制不在 AI Audience 包内新增。
+
+## 群发边界
+
+一键群发只复用 User Ops 标准 batch-send：
+
+- `POST /api/admin/user-ops/batch-send/preview`
+- `POST /api/admin/user-ops/batch-send/execute`
+
+AI Audience 只通过 `target_source=ai_audience_package` 提供标准 target rows。发送人由 package sender whitelist 解析，禁止默认兜底。

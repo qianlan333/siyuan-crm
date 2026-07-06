@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
+from aicrm_next.platform_foundation.internal_events.customer_identity import emit_customer_phone_bound_event
+from aicrm_next.platform_foundation.internal_events.shadow import safe_emit
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
 from aicrm_next.shared.runtime import production_data_ready
 
@@ -86,6 +89,7 @@ def get_sidebar_write_projection_events() -> list[dict[str, Any]]:
 
 def execute_sidebar_write(command: SidebarWriteCommand) -> dict[str, Any]:
     _validate_command(command)
+    _validate_owner_scope(command)
     if production_data_ready() and not isinstance(command, BindMobileCommand):
         raise SidebarWriteProductionUnavailableError("sidebar write model is not production-ready for command execution")
     platform_command = Command(
@@ -133,6 +137,27 @@ def _validate_command(command: SidebarWriteCommand) -> None:
         raise SidebarWriteInputError("source_route is required")
 
 
+def _validate_owner_scope(command: SidebarWriteCommand) -> None:
+    owner_userid = str(command.payload.get("owner_userid") or "").strip()
+    if not owner_userid or production_data_ready():
+        return
+    customer = _repo.get_customer(command.external_userid)
+    if not customer:
+        return
+    candidates = {
+        str(customer.get("owner_userid") or "").strip(),
+        str(dict(customer.get("binding") or {}).get("owner_userid") or "").strip(),
+        str(dict(customer.get("identity") or {}).get("owner_userid") or "").strip(),
+    }
+    follow_users = customer.get("follow_users")
+    if isinstance(follow_users, list):
+        for item in follow_users:
+            if isinstance(item, dict):
+                candidates.add(str(item.get("userid") or item.get("user_id") or "").strip())
+    if owner_userid not in {candidate for candidate in candidates if candidate}:
+        raise SidebarWriteNotFoundError("customer not found")
+
+
 def _handle_bind_mobile(command: Command) -> dict[str, Any]:
     payload = dict(command.payload.get("payload") or {})
     mobile = str(payload.get("mobile") or "").strip()
@@ -149,12 +174,90 @@ def _handle_bind_mobile(command: Command) -> dict[str, Any]:
         )
     else:
         write = _repo.bind_mobile(command_id=command.command_id, external_userid=str(command.payload["external_userid"]), mobile=mobile)
-    response: dict[str, Any] = {"write_model_status": "updated", "write": write}
+    response: dict[str, Any] = {"write_model_status": str(write.get("write_model_status") or "updated"), "write": write}
     if write.get("binding"):
         response["binding"] = write.get("binding")
+    elif isinstance(write.get("changes"), dict) and isinstance(write["changes"].get("binding"), dict):
+        response["binding"] = write["changes"]["binding"]
     if write.get("lead_pool_merge"):
         response["lead_pool_merge"] = write.get("lead_pool_merge")
+    internal_event = _emit_customer_phone_bound_from_sidebar_bind(
+        command=command,
+        payload=payload,
+        mobile=mobile,
+        write=write,
+    )
+    response.update(_internal_event_response(internal_event))
     return response
+
+
+def _emit_customer_phone_bound_from_sidebar_bind(
+    *,
+    command: Command,
+    payload: dict[str, Any],
+    mobile: str,
+    write: dict[str, Any],
+) -> dict[str, Any]:
+    binding = _sidebar_binding_payload(write)
+    binding_status = _sidebar_binding_status(binding)
+    if not binding:
+        return {"status": "skipped", "reason": "sidebar_binding_payload_missing"}
+    request = BindMobileToExternalContactRequest(
+        external_userid=str(command.payload["external_userid"]),
+        mobile=mobile,
+        owner_userid=str(payload.get("owner_userid") or binding.get("owner_userid") or ""),
+        bind_by_userid=str(payload.get("bind_by_userid") or command.context.actor_id or ""),
+        customer_name=str(payload.get("customer_name") or binding.get("customer_name") or ""),
+        force_rebind=_as_bool(payload.get("force_rebind"), default=False),
+    )
+    binding_result = {
+        "ok": True,
+        "binding_status": binding_status,
+        "unionid": str(binding.get("unionid") or write.get("unionid") or ""),
+        "external_userid": str(binding.get("external_userid") or command.payload["external_userid"]),
+        "mobile": str(binding.get("mobile") or mobile),
+        "owner_userid": str(binding.get("owner_userid") or payload.get("owner_userid") or ""),
+        "follow_user_userid": str(binding.get("follow_user_userid") or binding.get("owner_userid") or payload.get("owner_userid") or ""),
+        "matched_by": str(binding.get("matched_by") or "sidebar_bind_mobile"),
+        "source_status": str(write.get("write_type") or write.get("write_model_status") or "sidebar_bind_mobile"),
+    }
+    return safe_emit(
+        "customer.phone_bound",
+        emit_customer_phone_bound_event,
+        request=request,
+        binding_result=binding_result,
+        source_module="sidebar_write.application",
+        source_route=command.context.source_route or "/api/sidebar/bind-mobile",
+    )
+
+
+def _sidebar_binding_payload(write: dict[str, Any]) -> dict[str, Any]:
+    binding = write.get("binding")
+    if isinstance(binding, dict):
+        return dict(binding)
+    changes = write.get("changes")
+    if isinstance(changes, dict) and isinstance(changes.get("binding"), dict):
+        return dict(changes["binding"])
+    return {}
+
+
+def _sidebar_binding_status(binding: dict[str, Any]) -> str:
+    status = str(binding.get("binding_status") or "").strip()
+    if status:
+        return status
+    if binding.get("is_bound") is True:
+        return "bound"
+    return ""
+
+
+def _internal_event_response(internal_event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "internal_event_status": str(internal_event.get("status") or ""),
+        "internal_event_id": str(internal_event.get("event_id") or ""),
+        "internal_event_reason": str(internal_event.get("reason") or ""),
+        "internal_event_error": str(internal_event.get("error") or ""),
+        "internal_event_consumer_run_count": int(internal_event.get("consumer_run_count") or 0),
+    }
 
 
 def _handle_upsert_lead_pool(command: Command) -> dict[str, Any]:

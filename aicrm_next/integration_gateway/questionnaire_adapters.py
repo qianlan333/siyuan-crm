@@ -581,12 +581,59 @@ class QuestionnaireSubmitSideEffectGateway:
         self._tag_adapter = tag_adapter or build_wecom_tag_adapter()
         self._push_adapter = push_adapter or build_questionnaire_external_push_adapter()
 
-    def apply_tags(self, *, questionnaire_id: int | str, submission_id: str, external_userid: str, tag_ids: list[str]) -> Json:
-        if not external_userid or not tag_ids:
+    def apply_tags(
+        self,
+        *,
+        questionnaire_id: int | str,
+        submission_id: str,
+        external_userid: str,
+        tag_ids: list[str],
+        unionid: str = "",
+        follow_user_userid: str = "",
+    ) -> Json:
+        from aicrm_next.customer_tags.local_projection import project_questionnaire_tags
+
+        local_projection = project_questionnaire_tags(
+            unionid=unionid,
+            external_userid=external_userid,
+            owner_userid=follow_user_userid,
+            tag_ids=tag_ids,
+            source="questionnaire_submit_pipeline",
+            questionnaire_id=questionnaire_id,
+            submission_id=submission_id,
+            idempotency_key=make_idempotency_key(
+                operation="questionnaire.tag.local_projection",
+                payload={
+                    "questionnaire_id": questionnaire_id,
+                    "submission_id": submission_id,
+                    "unionid": unionid,
+                    "external_userid": external_userid,
+                    "tag_ids": sorted(tag_ids),
+                },
+            ),
+        )
+        if not tag_ids:
             return self.record_side_effect_audit(
                 operation="apply_tags",
                 target={"questionnaire_id": questionnaire_id, "submission_id": submission_id, "external_userid": external_userid, "tag_ids": tag_ids},
-                result={"skipped": True, "reason": "missing_external_userid_or_tags"},
+                result={
+                    "skipped": True,
+                    "reason": "missing_tags",
+                    "local_projection": local_projection,
+                    "local_projection_updated": bool(local_projection.get("local_projection_updated")),
+                },
+            )
+        if not external_userid:
+            return self.record_side_effect_audit(
+                operation="apply_tags",
+                target={"questionnaire_id": questionnaire_id, "submission_id": submission_id, "external_userid": external_userid, "tag_ids": tag_ids},
+                result={
+                    "skipped": False,
+                    "reason": "identity_external_userid_missing",
+                    "external_effect_status": "blocked",
+                    "local_projection": local_projection,
+                    "local_projection_updated": bool(local_projection.get("local_projection_updated")),
+                },
             )
         from aicrm_next.customer_tags.live_mutation import execute_wecom_tag_mutation
         from aicrm_next.customer_tags.mutation_commands import PlanQuestionnaireTagSideEffectCommand
@@ -610,6 +657,11 @@ class QuestionnaireSubmitSideEffectGateway:
                 "source": "questionnaire_submit_pipeline",
                 "questionnaire_id": questionnaire_id,
                 "submission_id": submission_id,
+                "unionid": unionid,
+                "follow_user_userid": follow_user_userid,
+                "local_projection": local_projection,
+                "local_projection_updated": bool(local_projection.get("local_projection_updated")),
+                "bypass_push_capability": True,
             },
         )
         return execute_wecom_tag_mutation(command)
@@ -687,34 +739,18 @@ class QuestionnaireSubmitSideEffectGateway:
         return payload
 
     def emit_automation_questionnaire_result(self, *, questionnaire: dict[str, Any], submission: dict[str, Any], final_tags: list[str]) -> Json:
-        from aicrm_next.automation_engine.application import ApplyQuestionnaireResultCommand
-        from aicrm_next.automation_engine.dto import ApplyQuestionnaireResultRequest
-
         followup_type = "priority" if "tag_interest_ai_tools" in final_tags else "normal"
-        result = ApplyQuestionnaireResultCommand()(
-            ApplyQuestionnaireResultRequest(
-                person_id=submission.get("person_id"),
-                external_userid=submission.get("external_userid"),
-                mobile=submission.get("mobile"),
-                customer_name="问卷提交用户",
-                followup_type=followup_type,
-                questionnaire_id=questionnaire.get("id"),
-                submission_id=submission.get("submission_id"),
-                final_tags=final_tags,
-                source="questionnaire_submit_pipeline",
-                operator="system",
-                reason="questionnaire_submit_boundary",
-            )
-        )
         return self.record_side_effect_audit(
             operation="emit_automation_questionnaire_result",
             target={"questionnaire_id": questionnaire.get("id"), "submission_id": submission.get("submission_id"), "external_userid": submission.get("external_userid") or ""},
             result={
-                "ok": True,
-                "source_status": result.get("source_status", "fixture_boundary"),
-                "member_id": result.get("member", {}).get("member_id", ""),
+                "ok": False,
+                "source_status": "retired_automation_member_noop",
+                "retired": True,
+                "member_id": "",
                 "followup_type": followup_type,
-                "current_pool": result.get("member", {}).get("current_pool", ""),
+                "current_pool": "",
+                "message": "旧 automation_member 问卷分流已退场；请使用 AI Audience source-poke / refresh 链路。",
             },
         )
 

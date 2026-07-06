@@ -9,10 +9,10 @@ class EmptyRepo:
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict]:
         return []
 
-    def mark_sent(self, job_id: int, *, outbound_task_id=None, sent_count: int = 0, failed_count: int = 0) -> None:
+    def mark_sent(self, job_id: int, *, outbound_task_id=None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
         raise AssertionError("no job should be sent")
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error") -> None:
+    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
         raise AssertionError("no job should fail")
 
 

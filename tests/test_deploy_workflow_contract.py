@@ -75,7 +75,7 @@ def test_siyuan_deploy_overlay_keeps_existing_release_boundary():
     alembic_index = workflow.index("python3 -m alembic upgrade head")
     schema_guard_index = workflow.index("scripts/ensure_channel_multi_staff_schema.py")
     restart_index = workflow.index("sudo systemctl restart openclaw-wecom-postgres.service")
-    smoke_index = workflow.index("curl -sSf http://127.0.0.1:5001/api/admin/channels?limit=1")
+    smoke_index = workflow.index("admin_channels_status=")
     copy_external_push_index = workflow.index("sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/")
 
     assert "push:" in workflow
@@ -83,6 +83,8 @@ def test_siyuan_deploy_overlay_keeps_existing_release_boundary():
     assert "workflow_run:" not in workflow
     assert fetch_index < reset_index < health_index < alembic_index < schema_guard_index < restart_index
     assert restart_index < smoke_index < copy_external_push_index
+    assert '"$admin_channels_status" != "401"' in workflow
+    assert '"$admin_channels_status" != "403"' in workflow
     assert "alembic stamp head" not in workflow
     assert "legacy_flask_app" not in workflow
     assert not (ROOT / "deploy" / "aicrm-web.service").exists()

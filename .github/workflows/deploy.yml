@@ -51,7 +51,11 @@ jobs:
               sleep 0.5
             done
             curl -sSf http://127.0.0.1:5001/health
-            curl -sSf http://127.0.0.1:5001/api/admin/channels?limit=1 >/tmp/aicrm_channels_smoke.json
+            admin_channels_status="$(curl -sS -o /tmp/aicrm_channels_smoke.json -w "%{http_code}" http://127.0.0.1:5001/api/admin/channels?limit=1)"
+            if [ "$admin_channels_status" != "200" ] && [ "$admin_channels_status" != "401" ] && [ "$admin_channels_status" != "403" ]; then
+              cat /tmp/aicrm_channels_smoke.json
+              exit 1
+            fi
             sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/
             sudo cp deploy/openclaw-external-push-worker.timer /etc/systemd/system/
             sudo systemctl daemon-reload

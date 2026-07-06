@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from fastapi.testclient import TestClient
+
 from aicrm_next.main import create_app
 from aicrm_next.shared.runtime import require_signing_secret, runtime_health_state
 
@@ -15,13 +17,23 @@ def test_create_app_requires_secret_key_in_production(monkeypatch) -> None:
         create_app()
 
 
-def test_create_app_requires_wechat_shop_callback_token_in_production(monkeypatch) -> None:
+def test_missing_wechat_shop_callback_token_does_not_block_app_startup_but_rejects_callback(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
     monkeypatch.setenv("SECRET_KEY", "runtime-production-secret")
     monkeypatch.delenv("WECHAT_SHOP_CALLBACK_TOKEN", raising=False)
 
-    with pytest.raises(RuntimeError, match="WECHAT_SHOP_CALLBACK_TOKEN"):
-        create_app()
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    health = client.get("/health")
+    response = client.post(
+        "/api/wechat-shop/notify?signature=bad&timestamp=1777777777&nonce=nonce",
+        json={"order_info": {"order_id": "3705115058471208928"}},
+    )
+
+    assert health.status_code == 200
+    assert health.json()["wechat_shop_callback_token_present"] is False
+    assert response.status_code == 403
+    assert "token is not configured" in response.text
 
 
 def test_local_signing_secret_fallback_is_non_production_only(monkeypatch) -> None:

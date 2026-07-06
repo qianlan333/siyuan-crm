@@ -59,8 +59,6 @@ def require_signing_secret(
 
 def assert_required_runtime_secrets() -> None:
     require_signing_secret("SECRET_KEY", local_fallback="aicrm-next-local-secret")
-    if production_environment():
-        require_signing_secret("WECHAT_SHOP_CALLBACK_TOKEN", local_fallback="")
 
 
 def production_repository_required() -> bool:

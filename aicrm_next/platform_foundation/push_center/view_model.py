@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
+
 from . import ROUTE_OWNER
 from .projection import EFFECTIVE_STATUS_LABELS
 from .repository import PushCenterRepository
@@ -60,9 +62,13 @@ def job_list_item(job: dict[str, Any], *, include_linked_records: bool = False) 
 def build_sections_payload(params: dict[str, Any] | None = None, *, repository: PushCenterRepository | None = None) -> dict[str, Any]:
     repository = repository or PushCenterRepository()
     filters = push_center_filters(params)
+    try:
+        sections = repository.sections(filters)
+    except Exception as exc:
+        return _read_unavailable_payload(filters, exc, include_sections=True)
     return {
         "ok": True,
-        "sections": repository.sections(filters),
+        "sections": sections,
         "status_definitions": status_definitions_payload(),
         "filters": public_filters(filters),
         "route_owner": ROUTE_OWNER,
@@ -74,13 +80,18 @@ def build_jobs_payload(params: dict[str, Any] | None = None, *, repository: Push
     filters = push_center_filters(params)
     limit = _int((params or {}).get("limit"), default=50, minimum=1, maximum=200)
     offset = _int((params or {}).get("offset"), default=0, minimum=0, maximum=100000)
-    jobs, total = repository.list_jobs(filters, limit=limit, offset=offset)
+    try:
+        jobs, total = repository.list_jobs(filters, limit=limit, offset=offset)
+        counts = repository.counts(filters)
+        sections = repository.sections(filters)
+    except Exception as exc:
+        return _read_unavailable_payload(filters, exc, limit=limit, offset=offset, include_sections=True)
     return {
         "ok": True,
         "items": [job_list_item(job) for job in jobs],
         "total": total,
-        "counts": repository.counts(filters),
-        "sections": repository.sections(filters),
+        "counts": counts,
+        "sections": sections,
         "status_definitions": status_definitions_payload(),
         "filters": public_filters(filters),
         "limit": limit,
@@ -93,10 +104,15 @@ def build_jobs_payload(params: dict[str, Any] | None = None, *, repository: Push
 def build_stats_payload(params: dict[str, Any] | None = None, *, repository: PushCenterRepository | None = None) -> dict[str, Any]:
     repository = repository or PushCenterRepository()
     filters = push_center_filters(params)
+    try:
+        counts = repository.counts(filters)
+        sections = repository.sections(filters)
+    except Exception as exc:
+        return _read_unavailable_payload(filters, exc, include_sections=True)
     return {
         "ok": True,
-        "counts": repository.counts(filters),
-        "sections": repository.sections(filters),
+        "counts": counts,
+        "sections": sections,
         "status_definitions": status_definitions_payload(),
         "filters": public_filters(filters),
         "route_owner": ROUTE_OWNER,
@@ -106,7 +122,10 @@ def build_stats_payload(params: dict[str, Any] | None = None, *, repository: Pus
 
 def build_job_detail_payload(job_id: int | str, *, repository: PushCenterRepository | None = None) -> dict[str, Any] | None:
     repository = repository or PushCenterRepository()
-    job = repository.get_job(job_id)
+    try:
+        job = repository.get_job(job_id)
+    except Exception:
+        return None
     if not job:
         return None
     job_payload = job_list_item(job, include_linked_records=True)
@@ -124,6 +143,43 @@ def build_job_detail_payload(job_id: int | str, *, repository: PushCenterReposit
         "route_owner": ROUTE_OWNER,
         "real_external_call_executed": False,
     }
+
+
+def _read_unavailable_payload(
+    filters: dict[str, Any],
+    exc: Exception,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+    include_sections: bool = False,
+) -> dict[str, Any]:
+    empty_counts = {
+        "total": 0,
+        "by_effective_status": {},
+        "by_status": {},
+        "by_section": {},
+        "pending": 0,
+        "running": 0,
+        "sent": 0,
+        "failed": 0,
+    }
+    extra: dict[str, Any] = {
+        "counts": empty_counts,
+        "status_definitions": status_definitions_payload(),
+        "filters": public_filters(filters),
+        "limit": limit,
+        "offset": offset,
+    }
+    if include_sections:
+        extra["sections"] = []
+    return admin_read_unavailable_payload(
+        capability_owner="ai_crm_next/platform_foundation/push_center",
+        page_error="推送中心读模型暂不可用，请稍后重试。",
+        exc=exc,
+        items_keys=("items",),
+        count_keys=("total",),
+        extra=extra,
+    )
 
 
 def _raw_statuses(records: list[dict[str, Any]]) -> list[str]:

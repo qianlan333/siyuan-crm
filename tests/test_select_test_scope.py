@@ -47,6 +47,25 @@ def test_identity_contact_change_selects_pg_and_db_architecture_gate() -> None:
     assert result["architecture_gate"] == "db"
 
 
+def test_sidebar_write_change_selects_write_command_regression() -> None:
+    result = _select("aicrm_next/sidebar_write/repo.py")
+
+    assert "customer_read_model_sidebar" in result["matched_scopes"]
+    assert "tests/test_sidebar_write_commands.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "db"
+
+
+def test_signed_session_change_selects_sidebar_shared_runtime_slice() -> None:
+    result = _select("aicrm_next/shared/signed_session.py")
+
+    assert "shared_sidebar_runtime" in result["matched_scopes"]
+    assert "tests/test_sidebar_jssdk_adapter.py" in result["python_tests"]
+    assert "tests/test_shared_flask_config_retirement.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+
+
 def test_ai_assist_external_campaign_change_selects_focused_python_slice() -> None:
     result = _select("aicrm_next/ai_assist/external_campaigns.py")
 
@@ -63,6 +82,33 @@ def test_user_ops_change_selects_batch_send_contract_slice() -> None:
     assert "tests/test_user_ops_api.py" in result["python_tests"]
     assert "tests/test_user_ops_external_effect_enqueue.py" in result["python_tests"]
     assert "tests/test_user_ops_send_record_projection.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+
+
+def test_admin_read_override_selects_focused_slice_without_pg() -> None:
+    result = _select(
+        "aicrm_next/ai_audience_ops/admin_api.py",
+        "aicrm_next/automation_engine/group_ops/application.py",
+        "aicrm_next/ops_enrollment/api.py",
+    )
+
+    assert result["matched_scopes"] == ["admin_read_pages"]
+    assert "tests/test_ai_audience_admin_pages.py" in result["python_tests"]
+    assert "tests/test_group_ops_plans_api.py" in result["python_tests"]
+    assert "tests/test_user_ops_api.py" in result["python_tests"]
+    assert "tests/test_ai_audience_ops.py" not in result["python_tests"]
+    assert "tests/test_group_ops_queue_contract.py" not in result["python_tests"]
+    assert "tests/test_user_ops_application_contract.py" not in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+
+
+def test_admin_read_smoke_test_file_selects_admin_read_scope() -> None:
+    result = _select("tests/test_admin_read_pages_smoke.py")
+
+    assert "admin_read_pages" in result["matched_scopes"]
+    assert "tests/test_admin_read_pages_smoke.py" in result["python_tests"]
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "fast"
 

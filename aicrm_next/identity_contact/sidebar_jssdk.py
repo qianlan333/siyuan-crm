@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import os
-from urllib.parse import urlparse
+import secrets
+from time import time
+from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from aicrm_next.integration_gateway.wecom_jssdk_adapter import (
     SidebarJSSDKConfigError,
@@ -13,14 +16,31 @@ from aicrm_next.integration_gateway.wecom_jssdk_adapter import (
     build_sidebar_jssdk_config,
     normalize_jssdk_url,
 )
+from aicrm_next.integration_gateway.wecom_admin_auth_client import (
+    WeComAdminAuthClientError,
+    build_wecom_admin_auth_client,
+)
 from aicrm_next.shared.runtime import production_environment
 from aicrm_next.shared.signed_context import build_sidebar_owner_context_token, sidebar_owner_context_ttl_seconds
+from aicrm_next.shared.signed_session import (
+    ADMIN_SESSION_COOKIE,
+    DEFAULT_SESSION_MAX_AGE_SECONDS,
+    session_cookie_secure,
+    sign_session_payload,
+    sign_state_payload,
+    verify_session_payload,
+    verify_state_payload,
+)
 
 from .application import ListExternalContactOwnerCandidatesQuery
 
 
 router = APIRouter()
 DEFAULT_SIDEBAR_JSSDK_ALLOWED_HOSTS = {"youcangogogo.com", "www.youcangogogo.com"}
+SIDEBAR_VIEWER_COOKIE = "aicrm_sidebar_viewer_session"
+SIDEBAR_OAUTH_ENABLE_ENV = "AICRM_SIDEBAR_WECOM_OAUTH_ENABLE_REAL"
+SIDEBAR_OAUTH_REDIRECT_URI_ENV = "AICRM_SIDEBAR_OAUTH_REDIRECT_URI"
+ADMIN_AUTH_ENABLE_ENV = "AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL"
 
 
 @router.api_route("/api/sidebar/jssdk-config", methods=["GET", "HEAD", "OPTIONS"])
@@ -85,6 +105,135 @@ async def sidebar_jssdk_config(request: Request) -> Response:
     return JSONResponse(jsonable_encoder(payload), status_code=200)
 
 
+@router.api_route("/api/sidebar/oauth/start", methods=["GET", "OPTIONS"])
+def sidebar_oauth_start(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            {
+                "ok": True,
+                "route": "/api/sidebar/oauth/start",
+                "route_owner": "ai_crm_next",
+                "source_status": "next_sidebar_oauth",
+                "adapter_mode": "real_blocked",
+                "fallback_used": False,
+                "real_external_call_executed": False,
+                "allowed_methods": ["GET", "OPTIONS"],
+            },
+            status_code=200,
+        )
+
+    external_userid = _external_userid_from_request(request) or _external_userid_from_path(
+        str(request.query_params.get("next") or "")
+    )
+    next_path = _safe_sidebar_next_path(request.query_params.get("next"), external_userid=external_userid)
+    oauth = _sidebar_oauth_config(request)
+    if not external_userid:
+        return _sidebar_oauth_error_response("external_userid_missing", next_path, status_code=400)
+    if not oauth["enabled"]:
+        return _sidebar_oauth_error_response("sidebar_oauth_not_enabled", next_path, status_code=503)
+    missing = _sidebar_oauth_missing(oauth)
+    if missing:
+        return _sidebar_oauth_error_response("sidebar_oauth_config_missing", next_path, status_code=503)
+
+    state = sign_state_payload(
+        {
+            "next": next_path,
+            "external_userid": external_userid,
+            "nonce": secrets.token_urlsafe(16),
+            "iat": int(time()),
+        }
+    )
+    query = urlencode(
+        {
+            "appid": oauth["corp_id"],
+            "redirect_uri": oauth["redirect_uri"],
+            "response_type": "code",
+            "scope": "snsapi_base",
+            "state": state,
+        }
+    )
+    return RedirectResponse(
+        f"https://open.weixin.qq.com/connect/oauth2/authorize?{query}#wechat_redirect",
+        status_code=302,
+        headers=_sidebar_oauth_headers(real_external_call_executed=False),
+    )
+
+
+@router.api_route("/api/sidebar/oauth/callback", methods=["GET", "OPTIONS"])
+def sidebar_oauth_callback(request: Request) -> Response:
+    if request.method == "OPTIONS":
+        return JSONResponse(
+            {
+                "ok": True,
+                "route": "/api/sidebar/oauth/callback",
+                "route_owner": "ai_crm_next",
+                "source_status": "next_sidebar_oauth",
+                "adapter_mode": "real_blocked",
+                "fallback_used": False,
+                "real_external_call_executed": False,
+                "allowed_methods": ["GET", "OPTIONS"],
+            },
+            status_code=200,
+        )
+
+    state_payload = verify_state_payload(str(request.query_params.get("state") or ""))
+    external_userid = str((state_payload or {}).get("external_userid") or "").strip()
+    next_path = _safe_sidebar_next_path((state_payload or {}).get("next"), external_userid=external_userid)
+    if not state_payload:
+        return _sidebar_oauth_error_redirect(next_path, "invalid_state")
+    if not str(request.query_params.get("code") or "").strip():
+        return _sidebar_oauth_error_redirect(next_path, "missing_code")
+    oauth = _sidebar_oauth_config(request)
+    if not oauth["enabled"]:
+        return _sidebar_oauth_error_redirect(next_path, "sidebar_oauth_not_enabled")
+    if _sidebar_oauth_missing(oauth):
+        return _sidebar_oauth_error_redirect(next_path, "sidebar_oauth_config_missing")
+
+    client = build_wecom_admin_auth_client()
+    try:
+        token_payload = client.fetch_access_token(corp_id=oauth["corp_id"], corp_secret=oauth["corp_secret"])
+        if _wecom_errcode(token_payload):
+            return _sidebar_oauth_error_redirect(next_path, "wecom_access_token_failed")
+        access_token = str(token_payload.get("access_token") or "").strip()
+        if not access_token:
+            return _sidebar_oauth_error_redirect(next_path, "wecom_access_token_missing")
+        user_payload = client.fetch_user_info(access_token=access_token, code=str(request.query_params.get("code") or "").strip())
+        if _wecom_errcode(user_payload):
+            return _sidebar_oauth_error_redirect(next_path, "wecom_userinfo_failed")
+    except WeComAdminAuthClientError as exc:
+        return _sidebar_oauth_error_redirect(next_path, exc.error_code or "wecom_sidebar_oauth_failed")
+
+    viewer_userid = str(user_payload.get("UserId") or user_payload.get("userid") or user_payload.get("user_id") or "").strip()
+    if not viewer_userid:
+        return _sidebar_oauth_error_redirect(next_path, "wecom_userid_missing")
+    owner_candidates = _owner_userids_from_external_userid(external_userid)
+    if owner_candidates and viewer_userid not in owner_candidates:
+        return _sidebar_oauth_error_redirect(next_path, "viewer_not_in_contact_owner_scope")
+
+    response = RedirectResponse(
+        _append_query(next_path, {"sidebar_oauth": "1"}),
+        status_code=302,
+        headers=_sidebar_oauth_headers(real_external_call_executed=True),
+    )
+    response.set_cookie(
+        SIDEBAR_VIEWER_COOKIE,
+        sign_session_payload(
+            {
+                "auth_source": "wecom_sidebar_oauth",
+                "wecom_userid": viewer_userid,
+                "external_userid": external_userid,
+                "iat": int(time()),
+            }
+        ),
+        max_age=DEFAULT_SESSION_MAX_AGE_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=session_cookie_secure(),
+        path="/",
+    )
+    return response
+
+
 def _with_sidebar_owner_context(request: Request, payload: dict) -> dict:
     result = dict(payload)
     viewer_userid = _viewer_userid_from_request(request)
@@ -94,6 +243,7 @@ def _with_sidebar_owner_context(request: Request, payload: dict) -> dict:
     status = "issued"
     if viewer_userid and owner_candidates and viewer_userid not in owner_candidates:
         return _without_sidebar_owner_token(
+            request,
             result,
             status="viewer_not_in_contact_owner_scope",
             external_userid=external_userid,
@@ -106,6 +256,7 @@ def _with_sidebar_owner_context(request: Request, payload: dict) -> dict:
         status = "issued_identity_owner" if viewer_userid else "viewer_missing_multi_owner" if owner_candidates else "viewer_missing"
         if not viewer_userid:
             return _without_sidebar_owner_token(
+                request,
                 result,
                 status=status,
                 external_userid=external_userid,
@@ -134,6 +285,7 @@ def _with_sidebar_owner_context(request: Request, payload: dict) -> dict:
 
 
 def _without_sidebar_owner_token(
+    request: Request,
     payload: dict,
     *,
     status: str,
@@ -147,6 +299,11 @@ def _without_sidebar_owner_token(
     context = {"source": source, "owner_candidates_count": owner_candidates_count}
     if external_userid:
         context["external_userid"] = external_userid
+    oauth = _sidebar_oauth_metadata(request, external_userid)
+    if oauth["status"]:
+        context["sidebar_oauth_status"] = oauth["status"]
+    if oauth["url"]:
+        result["sidebar_oauth_url"] = oauth["url"]
     result["sidebar_owner_context"] = context
     return result
 
@@ -168,6 +325,14 @@ def _viewer_userid_from_request(request: Request) -> str:
         normalized = str(value or "").strip()
         if normalized:
             return normalized
+    session = verify_session_payload(request.cookies.get(ADMIN_SESSION_COOKIE))
+    session_userid = str((session or {}).get("wecom_userid") or "").strip()
+    if session_userid:
+        return session_userid
+    sidebar_session = verify_session_payload(request.cookies.get(SIDEBAR_VIEWER_COOKIE))
+    sidebar_session_userid = str((sidebar_session or {}).get("wecom_userid") or "").strip()
+    if sidebar_session_userid:
+        return sidebar_session_userid
     return ""
 
 
@@ -211,6 +376,127 @@ def _owner_userids_from_external_userid(external_userid: str) -> set[str]:
         return ListExternalContactOwnerCandidatesQuery()(external_userid=normalized_external)
     except Exception:
         return set()
+
+
+def _sidebar_oauth_metadata(request: Request, external_userid: str) -> dict[str, str]:
+    normalized_external = str(external_userid or "").strip()
+    if not normalized_external:
+        return {"status": "external_userid_missing", "url": ""}
+    oauth = _sidebar_oauth_config(request)
+    if not oauth["enabled"]:
+        return {"status": "disabled", "url": ""}
+    if _sidebar_oauth_missing(oauth):
+        return {"status": "config_missing", "url": ""}
+    next_path = _safe_sidebar_next_path(str(request.query_params.get("url") or ""), external_userid=normalized_external)
+    return {
+        "status": "ready",
+        "url": _append_query(
+            "/api/sidebar/oauth/start",
+            {"external_userid": normalized_external, "next": next_path},
+        ),
+    }
+
+
+def _sidebar_oauth_config(request: Request) -> dict[str, Any]:
+    request_base = f"{request.url.scheme}://{request.url.netloc}"
+    return {
+        "enabled": _truthy(os.getenv(SIDEBAR_OAUTH_ENABLE_ENV)) or _truthy(os.getenv(ADMIN_AUTH_ENABLE_ENV)),
+        "corp_id": str(os.getenv("WECOM_CORP_ID") or "").strip(),
+        "corp_secret": str(os.getenv("WECOM_SECRET") or "").strip(),
+        "redirect_uri": str(os.getenv(SIDEBAR_OAUTH_REDIRECT_URI_ENV) or "").strip()
+        or f"{request_base.rstrip('/')}/api/sidebar/oauth/callback",
+    }
+
+
+def _sidebar_oauth_missing(config: dict[str, Any]) -> list[str]:
+    missing = []
+    if not str(config.get("corp_id") or "").strip():
+        missing.append("WECOM_CORP_ID")
+    if not str(config.get("corp_secret") or "").strip():
+        missing.append("WECOM_SECRET")
+    if not str(config.get("redirect_uri") or "").strip():
+        missing.append(SIDEBAR_OAUTH_REDIRECT_URI_ENV)
+    return missing
+
+
+def _sidebar_oauth_error_response(error_code: str, next_path: str, *, status_code: int) -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": error_code,
+            "error_code": error_code,
+            "next": _append_query(next_path, {"sidebar_oauth_error": error_code}),
+            "route_owner": "ai_crm_next",
+            "source_status": "next_sidebar_oauth",
+            "fallback_used": False,
+            "real_external_call_executed": False,
+        },
+        status_code=status_code,
+        headers=_sidebar_oauth_headers(real_external_call_executed=False),
+    )
+
+
+def _sidebar_oauth_error_redirect(next_path: str, error_code: str) -> RedirectResponse:
+    return RedirectResponse(
+        _append_query(next_path, {"sidebar_oauth_error": error_code}),
+        status_code=302,
+        headers=_sidebar_oauth_headers(real_external_call_executed=False),
+    )
+
+
+def _sidebar_oauth_headers(*, real_external_call_executed: bool) -> dict[str, str]:
+    return {
+        "X-AICRM-Route-Owner": "ai_crm_next",
+        "X-AICRM-Fallback-Used": "false",
+        "X-AICRM-Real-External-Call-Executed": "true" if real_external_call_executed else "false",
+    }
+
+
+def _safe_sidebar_next_path(value: Any, *, external_userid: str = "") -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return _append_query("/sidebar/bind-mobile", {"external_userid": external_userid} if external_userid else {})
+    if "://" in raw:
+        parsed = urlparse(raw)
+        raw = urlunparse(("", "", parsed.path or "", "", parsed.query or "", ""))
+    if raw.startswith("//") or raw.startswith("\\") or not raw.startswith("/"):
+        raw = "/sidebar/bind-mobile"
+    parsed = urlparse(raw)
+    if parsed.path != "/sidebar/bind-mobile":
+        raw = "/sidebar/bind-mobile"
+        parsed = urlparse(raw)
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key not in {"sidebar_oauth_error"}]
+    cleaned = urlunparse(("", "", parsed.path, "", urlencode(query), ""))
+    return _append_query(cleaned or "/sidebar/bind-mobile", {"external_userid": external_userid} if external_userid and "external_userid=" not in cleaned else {})
+
+
+def _external_userid_from_path(value: str) -> str:
+    parsed = urlparse(str(value or ""))
+    params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    for key in ("external_userid", "externalUserid", "externalUserId", "user_id", "userId"):
+        normalized = str(params.get(key) or "").strip()
+        if normalized:
+            return normalized
+    return ""
+
+
+def _append_query(path: str, params: dict[str, str]) -> str:
+    parsed = urlparse(str(path or "/sidebar/bind-mobile"))
+    query = [(key, value) for key, value in parse_qsl(parsed.query, keep_blank_values=True) if key not in params]
+    for key, value in (params or {}).items():
+        normalized = str(value or "").strip()
+        if normalized:
+            query.append((key, normalized))
+    return urlunparse(("", "", parsed.path or "/sidebar/bind-mobile", "", urlencode(query), ""))
+
+
+def _truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _wecom_errcode(payload: dict[str, Any]) -> bool:
+    errcode = payload.get("errcode")
+    return errcode not in (None, 0, "0")
 
 
 def _validate_jssdk_url_host(request: Request, raw_url: str) -> None:

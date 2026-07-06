@@ -163,6 +163,49 @@ def test_connect_pooled_postgres_falls_back_for_psycopg_test_double(monkeypatch)
     assert calls == [("postgresql://test/test", {"autocommit": False})]
 
 
+def test_pooled_psycopg_connection_uses_cursor_row_factory_without_mutating_driver(monkeypatch) -> None:
+    from psycopg.rows import dict_row
+
+    cursor_calls: list[dict[str, object]] = []
+    executed: list[tuple[str, object | None]] = []
+
+    class FakeCursor:
+        def execute(self, query: str, params: object | None = None):
+            executed.append((query, params))
+            return self
+
+    class FakeDriverConnection:
+        row_factory = "tuple_row"
+
+        def cursor(self, **kwargs):
+            cursor_calls.append(kwargs)
+            return FakeCursor()
+
+    class FakePooledConnection:
+        def __init__(self) -> None:
+            self.driver_connection = FakeDriverConnection()
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    pooled = FakePooledConnection()
+
+    class FakeEngine:
+        def raw_connection(self):
+            return pooled
+
+    monkeypatch.setattr(db_session, "get_engine", lambda *args, **kwargs: FakeEngine())
+
+    connection = db_session.PooledPsycopgConnection("postgresql://test/test")
+    cursor = connection.execute("SELECT 1 WHERE id = %s", (1,))
+
+    assert isinstance(cursor, FakeCursor)
+    assert executed == [("SELECT 1 WHERE id = %s", (1,))]
+    assert cursor_calls == [{"row_factory": dict_row}]
+    assert pooled.driver_connection.row_factory == "tuple_row"
+
+
 def test_session_scope_cleanup_error_does_not_mask_business_exception(monkeypatch) -> None:
     class FailingCleanupSession:
         def rollback(self) -> None:

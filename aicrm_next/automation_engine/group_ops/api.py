@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from aicrm_next.shared.errors import ApplicationError, ContractError, NotFoundError
@@ -67,7 +68,7 @@ router = APIRouter()
 
 
 def _json_result(payload: dict) -> JSONResponse:
-    return JSONResponse(payload, status_code=int(payload.get("status_code") or 200))
+    return JSONResponse(jsonable_encoder(payload), status_code=int(payload.get("status_code") or 200))
 
 
 def _plan_id(value: int | str) -> int:

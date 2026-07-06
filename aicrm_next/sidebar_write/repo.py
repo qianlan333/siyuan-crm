@@ -243,10 +243,16 @@ class PostgresSidebarWriteRepository:
 
         with self._connect() as conn:
             identity = self._identity_row(conn, normalized_external_userid)
-            normalized_owner_userid = str(owner_userid or "").strip() or str((identity or {}).get("primary_owner_userid") or "").strip()
+            requested_owner_userid = str(owner_userid or "").strip()
+            normalized_owner_userid = requested_owner_userid or str((identity or {}).get("primary_owner_userid") or "").strip()
             normalized_bind_by_userid = str(bind_by_userid or "").strip() or normalized_owner_userid or "sidebar_bind"
             identity_owner_userid = str((identity or {}).get("primary_owner_userid") or "").strip()
-            if identity and str(owner_userid or "").strip() and identity_owner_userid and str(owner_userid or "").strip() != identity_owner_userid:
+            owner_candidates = self._contact_owner_userids(
+                conn,
+                normalized_external_userid,
+                identity_owner_userid=identity_owner_userid,
+            )
+            if identity and requested_owner_userid and owner_candidates and requested_owner_userid not in owner_candidates:
                 raise KeyError("customer not found")
 
             if not identity:
@@ -294,8 +300,8 @@ class PostgresSidebarWriteRepository:
                     mobile_source = 'sidebar_bind',
                     primary_owner_userid = COALESCE(NULLIF(%s, ''), primary_owner_userid),
                     profile_json = profile_json || jsonb_build_object(
-                        'sidebar_bind_by_userid', %s,
-                        'sidebar_external_userid', %s
+                        'sidebar_bind_by_userid', %s::text,
+                        'sidebar_external_userid', %s::text
                     ),
                     last_seen_at = NOW(),
                     updated_at = NOW()
@@ -370,6 +376,43 @@ class PostgresSidebarWriteRepository:
             (external_userid, external_userid, external_userid),
         ).fetchone()
         return dict(row) if row else None
+
+    def _contact_owner_userids(
+        self,
+        conn,
+        external_userid: str,
+        *,
+        identity_owner_userid: str = "",
+    ) -> set[str]:
+        candidates = {str(identity_owner_userid or "").strip()} if str(identity_owner_userid or "").strip() else set()
+        try:
+            rows = conn.execute(
+                """
+                SELECT DISTINCT owner_userid
+                FROM (
+                    SELECT COALESCE(NULLIF(user_id, ''), NULLIF(raw_follow_user ->> 'userid', '')) AS owner_userid
+                    FROM wecom_external_contact_follow_users
+                    WHERE external_userid = %s
+                      AND COALESCE(relation_status, 'active') = 'active'
+                    UNION ALL
+                    SELECT NULLIF(follow_user_userid, '') AS owner_userid
+                    FROM wecom_external_contact_identity_map
+                    WHERE external_userid = %s
+                ) owners
+                WHERE COALESCE(owner_userid, '') <> ''
+                """,
+                (external_userid, external_userid),
+            ).fetchall()
+        except Exception:
+            return candidates
+        for row in rows or []:
+            if isinstance(row, dict):
+                owner = str(row.get("owner_userid") or "").strip()
+            else:
+                owner = str(row[0] if row else "").strip()
+            if owner:
+                candidates.add(owner)
+        return candidates
 
     def _enqueue_identity_resolution(
         self,

@@ -98,6 +98,10 @@ def create_app() -> FastAPI:
         response.headers.setdefault("X-AICRM-Fallback-Used", "false")
         response.headers.setdefault("X-AICRM-App", "ai_crm_next")
         response.headers.setdefault("X-AICRM-Release-SHA", current_release_sha())
+        if request.url.path == "/sidebar/bind-mobile" or request.url.path.startswith("/api/sidebar/"):
+            response.headers.setdefault("Cache-Control", "no-store, max-age=0")
+            response.headers.setdefault("Pragma", "no-cache")
+            response.headers.setdefault("Expires", "0")
         return response
 
     app.mount(

@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from aicrm_next.admin_auth.guards import admin_api_auth_error
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
 
 from .service import AudiencePackageService
 
@@ -29,8 +30,14 @@ def admin_ai_audience_packages(request: Request) -> JSONResponse:
         payload = AudiencePackageService().list_admin_package_summaries(limit=200)
         status_code = 200
     except Exception as exc:
-        payload = {"ok": False, "error": "ai_audience_packages_unavailable", "detail": str(exc), "items": [], "total": 0}
-        status_code = 500
+        payload = admin_read_unavailable_payload(
+            capability_owner="aicrm_next/ai_audience_ops",
+            page_error="人群包读模型暂不可用，请稍后重试。",
+            exc=exc,
+            items_keys=("items",),
+            count_keys=("total",),
+        )
+        status_code = 200
     return JSONResponse(jsonable_encoder(payload), status_code=status_code, headers=_HEADERS)
 
 

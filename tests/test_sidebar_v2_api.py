@@ -153,6 +153,7 @@ def test_sidebar_v2_workbench_and_read_panels_are_next_owned(monkeypatch):
 
     for response in (workbench, questionnaires, products, orders):
         assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+        assert response.headers["Cache-Control"] == "no-store, max-age=0"
         payload = response.json()
         _assert_next(payload)
         assert "X-AICRM-Compatibility-Facade" not in response.headers

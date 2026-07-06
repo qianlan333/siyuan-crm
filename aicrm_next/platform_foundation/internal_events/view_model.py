@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
+
 from .models import InternalEvent, InternalEventConsumerAttempt, InternalEventConsumerRun
 from .config import consumer_metadata
 from .legacy_path_markers import legacy_path_marker_diagnostics
@@ -226,12 +228,15 @@ def build_events_payload(params: dict[str, Any] | None = None, *, repository: In
     filters = internal_event_filters(params)
     limit = _int((params or {}).get("limit"), default=50, minimum=1, maximum=200)
     offset = _int((params or {}).get("offset"), default=0, minimum=0, maximum=100000)
-    events, total = repository.list_events(filters, limit=limit, offset=offset)
-    items: list[dict[str, Any]] = []
-    for event in events:
-        runs, _ = repository.list_consumer_runs({"event_id": event.event_id}, limit=200)
-        items.append(event_list_item(event, runs))
-    metrics = repository.queue_metrics({})
+    try:
+        events, total = repository.list_events(filters, limit=limit, offset=offset)
+        items: list[dict[str, Any]] = []
+        for event in events:
+            runs, _ = repository.list_consumer_runs({"event_id": event.event_id}, limit=200)
+            items.append(event_list_item(event, runs))
+        metrics = repository.queue_metrics({})
+    except Exception as exc:
+        return _read_unavailable_payload(filters, exc, limit=limit, offset=offset)
     return {
         "ok": True,
         "items": items,
@@ -276,9 +281,28 @@ def build_event_detail_payload(event_id: str, *, service: InternalEventService |
 def build_diagnostics_payload(params: dict[str, Any] | None = None, *, service: InternalEventService | None = None) -> dict[str, Any]:
     service = service or InternalEventService()
     filters = internal_event_filters(params)
-    payload = service.diagnostics(filters)
-    payload.update(legacy_path_marker_diagnostics())
+    try:
+        payload = service.diagnostics(filters)
+        payload.update(legacy_path_marker_diagnostics())
+    except Exception as exc:
+        payload = _read_unavailable_payload(filters, exc)
     payload["filters"] = _public_filters(filters)
     payload["route_owner"] = ROUTE_OWNER
     payload["real_external_call_executed"] = False
     return payload
+
+
+def _read_unavailable_payload(filters: dict[str, Any], exc: Exception, *, limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    return admin_read_unavailable_payload(
+        capability_owner="ai_crm_next/platform_foundation/internal_events",
+        page_error="事件中心读模型暂不可用，请稍后重试。",
+        exc=exc,
+        items_keys=("items",),
+        count_keys=("total",),
+        extra={
+            "filters": _public_filters(filters),
+            "limit": limit,
+            "offset": offset,
+            "counts": {"total": 0, "due": 0, "failed_retryable": 0, "failed_terminal": 0},
+        },
+    )

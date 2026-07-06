@@ -20,7 +20,11 @@ def _workflow() -> str:
 
 def _is_siyuan_deploy_overlay() -> bool:
     source = _workflow()
-    return "scripts/ensure_channel_multi_staff_schema.py" in source and "workflow_run:" not in source
+    return (
+        "scripts/ensure_channel_multi_staff_schema.py" in source
+        and "sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/" in source
+        and not (ROOT / "deploy" / "aicrm-web.service").exists()
+    )
 
 
 def test_production_deploy_loads_postgres_env_before_alembic_upgrade():
@@ -71,18 +75,21 @@ def test_siyuan_deploy_overlay_keeps_existing_release_boundary():
 
     fetch_index = workflow.index("git fetch origin main:refs/remotes/origin/main")
     reset_index = workflow.index("git reset --hard refs/remotes/origin/main")
+    marker_index = workflow.index('printf \'%s\\n\' "$after_sha" > .release-sha')
     health_index = workflow.index("python3 app.py health")
     alembic_index = workflow.index("python3 -m alembic upgrade head")
     schema_guard_index = workflow.index("scripts/ensure_channel_multi_staff_schema.py")
     restart_index = workflow.index("sudo systemctl restart openclaw-wecom-postgres.service")
     smoke_index = workflow.index("admin_channels_status=")
+    admin_read_smoke_index = workflow.index("scripts/ops/check_admin_read_pages_smoke.py")
     copy_external_push_index = workflow.index("sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/")
 
-    assert "push:" in workflow
-    assert "- main" in workflow
-    assert "workflow_run:" not in workflow
-    assert fetch_index < reset_index < health_index < alembic_index < schema_guard_index < restart_index
-    assert restart_index < smoke_index < copy_external_push_index
+    assert "workflow_run:" in workflow
+    assert 'workflows: ["CI Fast"]' in workflow
+    assert "github.event.workflow_run.head_branch == 'main'" in workflow
+    assert "push:" not in workflow
+    assert fetch_index < reset_index < marker_index < health_index < alembic_index < schema_guard_index < restart_index
+    assert restart_index < smoke_index < admin_read_smoke_index < copy_external_push_index
     assert '"$admin_channels_status" != "401"' in workflow
     assert '"$admin_channels_status" != "403"' in workflow
     assert "alembic stamp head" not in workflow

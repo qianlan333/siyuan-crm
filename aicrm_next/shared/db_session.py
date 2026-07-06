@@ -223,12 +223,6 @@ class PooledPsycopgConnection:
         self._conn = getattr(self._pooled, "driver_connection", None) or getattr(self._pooled, "connection", None)
         if self._conn is None:
             self._conn = self._pooled
-        try:
-            from psycopg.rows import dict_row
-
-            self._conn.row_factory = dict_row
-        except Exception:
-            LOGGER.debug("failed to set pooled psycopg row_factory", exc_info=True)
 
     def __enter__(self):
         return self
@@ -243,10 +237,17 @@ class PooledPsycopgConnection:
             self.close()
 
     def cursor(self):
-        return self._conn.cursor()
+        try:
+            from psycopg.rows import dict_row
+
+            return self._conn.cursor(row_factory=dict_row)
+        except Exception:
+            LOGGER.debug("failed to open pooled psycopg dict cursor", exc_info=True)
+            return self._conn.cursor()
 
     def execute(self, query: str, params: object | None = None):
-        return self._conn.execute(query, params)
+        cursor = self.cursor()
+        return cursor.execute(query, params)
 
     def commit(self) -> None:
         self._conn.commit()

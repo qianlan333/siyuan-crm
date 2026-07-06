@@ -34,7 +34,7 @@ def test_user_ops_readonly_queries_are_next_native() -> None:
 
     assert overview["metrics"]["filtered_total"] == 3
     assert customers["total"] == 3
-    assert customers["items"][0]["external_userid"] == "wx_ext_001"
+    assert customers["items"][0]["unionid"] == "union_ops_001"
     assert "黄小璨" in filters["filter_options"]["tag"]
     assert send_records["ok"] is True
     assert send_records["records"]

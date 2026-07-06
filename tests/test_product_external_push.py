@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from aicrm_next.commerce import external_push_admin
+from aicrm_next.external_push import security, service
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_ORDER_PAID_PUSH, reset_external_effect_fixture_state
 
 
 def _public_dns(monkeypatch, ip: str = "93.184.216.34") -> None:
@@ -73,6 +76,19 @@ def test_webhook_url_security_rejects_private_targets(monkeypatch):
         external_push_admin.resolve_and_validate_public_https_url("https://example.com/foo")
 
 
+def test_external_push_admin_reuses_next_native_security_and_payload_helpers():
+    source = Path("aicrm_next/commerce/external_push_admin.py").read_text(encoding="utf-8")
+
+    assert "def _validate_webhook_url" not in source
+    assert "def _resolve_and_validate_public_https_url" not in source
+    assert "def _sign_webhook_payload" not in source
+    assert "def _redact_sensitive_fields" not in source
+    assert "def _build_external_push_payload" not in source
+    assert external_push_admin.resolve_and_validate_public_https_url is security.resolve_and_validate_public_https_url
+    assert external_push_admin._sign_webhook_payload is service.sign_webhook_payload
+    assert external_push_admin._redact_sensitive_fields is service.redact_sensitive_fields
+
+
 def test_external_push_payload_masks_stored_body_but_sends_full_payload():
     payload = external_push_admin._build_external_push_payload(
         "transaction.paid",
@@ -84,7 +100,7 @@ def test_external_push_payload_masks_stored_body_but_sends_full_payload():
             "payer_openid": "openid_product_push",
             "unionid": "unionid_product_push",
             "external_userid": "wm_product_push",
-            "mobile_snapshot": "13800000000",
+            "metadata_json": {"payer_identity": {"mobile": "13800000000"}},
         },
         {"id": 3, "product_code": "subscription_trial_month", "name": "外推商品", "amount_total": 9900},
         {"push_type": "premium", "day": 31, "frequency": 3, "remark": "69元1个月续费"},
@@ -92,6 +108,7 @@ def test_external_push_payload_masks_stored_body_but_sends_full_payload():
     )
 
     assert payload["phone_number"] == "13800000000"
+    assert payload["buyer"]["openid"] == "open***push"
     assert payload["buyer"]["unionid"] == "unionid_product_push"
     assert payload["submitted_at"] == "2026-06-01T15:30:10+08:00"
     redacted = external_push_admin._redact_sensitive_fields(payload)
@@ -102,7 +119,43 @@ def test_external_push_payload_masks_stored_body_but_sends_full_payload():
     assert "tenant" not in redacted
 
 
-def test_external_push_attempt_uses_mocked_http_and_updates_delivery(monkeypatch):
+def test_external_push_payload_resolves_openid_from_order_metadata_without_legacy_column():
+    payload = external_push_admin._build_external_push_payload(
+        "transaction.paid",
+        {
+            "id": 8,
+            "out_trade_no": "WXP_METADATA_PUSH",
+            "amount_total": 6900,
+            "paid_at": "2026-06-01T07:30:10+00:00",
+            "unionid": "unionid_metadata_push",
+            "external_userid": "wm_metadata_push",
+            "metadata_json": {"buyer_identity": {"openid": "openid_from_metadata", "mobile": "13900000000"}},
+        },
+        {"id": 4, "product_code": "subscription_trial_month", "name": "外推商品", "amount_total": 6900},
+        {"push_type": "premium", "day": 31, "frequency": 3, "remark": "69元1个月续费"},
+        delivery_id="deliv_metadata_push",
+    )
+
+    assert payload["buyer"]["openid"] == "open***data"
+    assert payload["phone_number"] == "13900000000"
+
+
+def test_external_push_payload_can_resolve_mobile_from_identity_table() -> None:
+    class FakeConn:
+        def execute(self, query, params):
+            assert "crm_user_identity" in query
+            assert params == ("unionid_product_push",)
+            return SimpleNamespace(fetchone=lambda: {"mobile": "13900000000"})
+
+    order = {"id": 7, "unionid": "unionid_product_push", "metadata_json": {}}
+    phone = external_push_admin._resolve_order_mobile(FakeConn(), order)
+
+    assert phone == "13900000000"
+
+
+def test_external_push_attempt_queues_external_effect_and_updates_delivery(monkeypatch):
+    reset_external_effect_fixture_state()
+    _public_dns(monkeypatch)
     updates: list[dict] = []
 
     class FakeConn:
@@ -123,7 +176,6 @@ def test_external_push_attempt_uses_mocked_http_and_updates_delivery(monkeypatch
             )
             return SimpleNamespace(fetchone=lambda: {"delivery_id": params[9], "status": params[0], "attempt_count": params[1]})
 
-    monkeypatch.setattr(external_push_admin, "_send_http_post", lambda *args, **kwargs: (200, '{"ok":true}', "https://example.com/hook"))
     monkeypatch.setattr(external_push_admin, "_jsonb", lambda value: value)
 
     result = external_push_admin._attempt_delivery(
@@ -134,10 +186,15 @@ def test_external_push_attempt_uses_mocked_http_and_updates_delivery(monkeypatch
     )
 
     assert result["ok"] is True
-    assert result["delivery"]["status"] == "success"
+    assert result["delivery"]["status"] == "retrying"
+    assert result["external_effect_job_id"]
+    assert result["real_external_call_executed"] is False
     assert updates[0]["request_headers"]["X-AICRM-Signature"].startswith("sha256=")
     assert updates[0]["request_body"]["phone_number"] == "138****0000"
-    assert updates[0]["response_status"] == 200
+    assert updates[0]["response_status"] is None
+    items, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH, "target_id": "deliv_attempt"})
+    assert total == 1
+    assert items[0].status == "queued"
 
 
 def test_external_push_test_payload_does_not_include_order_or_real_payment_fields():

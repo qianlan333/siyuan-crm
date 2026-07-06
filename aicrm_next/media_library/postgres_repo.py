@@ -7,7 +7,7 @@ from typing import Any
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
-from .repo import MediaLibraryRepository, normalize_tags
+from .repo import connect_media_library_db, normalize_tags
 from .variants import (
     THUMBNAIL_SIZE_TO_VARIANT,
     add_image_variant_urls,
@@ -77,12 +77,10 @@ class PostgresMediaLibraryRepository:
     def __init__(self, database_url: str) -> None:
         self._database_url = _psycopg_url(database_url)
         self._variants_table_available: bool | None = None
+        self._table_columns_cache: dict[str, set[str]] = {}
 
     def _connect(self):
-        import psycopg
-        from psycopg.rows import dict_row
-
-        return psycopg.connect(self._database_url, row_factory=dict_row)
+        return connect_media_library_db(self._database_url)
 
     def list_items(self, kind: str, *, limit: int, offset: int, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         filters = filters or {}
@@ -300,8 +298,9 @@ class PostgresMediaLibraryRepository:
             with conn.cursor() as cur:
                 cur.execute(f"SELECT count(*) AS total FROM {table}{where_sql}", tuple(params))
                 total = int((cur.fetchone() or {}).get("total") or 0)
+                available_columns = self._table_columns(cur, table)
                 cur.execute(
-                    f"SELECT * FROM {table}{where_sql} ORDER BY {order_by} LIMIT %s OFFSET %s",
+                    f"SELECT {self._list_columns(kind, available_columns)} FROM {table}{where_sql} ORDER BY {order_by} LIMIT %s OFFSET %s",
                     tuple(params + [limit, offset]),
                 )
                 raw_rows = [dict(row) for row in cur.fetchall() or []]
@@ -313,6 +312,88 @@ class PostgresMediaLibraryRepository:
                 if kind == "image":
                     self._attach_image_variant_dimensions(cur, rows)
         return {"items": rows, "total": total, "limit": limit, "offset": offset}
+
+    def _table_columns(self, cur: Any, table: str) -> set[str] | None:
+        if table in self._table_columns_cache:
+            return self._table_columns_cache[table]
+        try:
+            cur.execute(
+                """
+                SELECT column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = %s
+                """,
+                (table,),
+            )
+            columns = {str(row.get("column_name") or "").strip() for row in cur.fetchall() or []}
+        except Exception:
+            logger.debug("media library table column probe failed table=%s", table, exc_info=True)
+            return None
+        columns.discard("")
+        if not columns:
+            return None
+        self._table_columns_cache[table] = columns
+        return columns
+
+    def _list_columns(self, kind: str, available_columns: set[str] | None = None) -> str:
+        def column(name: str, fallback_sql: str) -> str:
+            if available_columns is None or name in available_columns:
+                return name
+            return f"{fallback_sql} AS {name}"
+
+        if kind == "image":
+            fields = [
+                ("id", "NULL::integer"),
+                ("name", "''"),
+                ("file_name", "''"),
+                ("source", "'upload'"),
+                ("source_url", "''"),
+                ("mime_type", "'image/png'"),
+                ("file_size", "0"),
+                ("thumb_media_id", "''"),
+                ("thumb_media_id_expires_at", "NULL::timestamp"),
+                ("enabled", "TRUE"),
+                ("description", "''"),
+                ("tags", "'[]'::jsonb"),
+                ("category", "''"),
+                ("ai_metadata", "'{}'::jsonb"),
+                ("width", "0"),
+                ("height", "0"),
+                ("created_at", "NULL::timestamp"),
+                ("updated_at", "NULL::timestamp"),
+            ]
+            return ", ".join(column(name, fallback) for name, fallback in fields)
+        if kind == "miniprogram":
+            fields = [
+                ("id", "NULL::integer"),
+                ("name", "''"),
+                ("appid", "''"),
+                ("pagepath", "''"),
+                ("title", "''"),
+                ("thumb_image_id", "NULL::integer"),
+                ("thumb_media_id", "''"),
+                ("thumb_media_id_expires_at", "NULL::timestamp"),
+                ("thumb_image_url", "''"),
+                ("enabled", "TRUE"),
+                ("created_at", "NULL::timestamp"),
+                ("updated_at", "NULL::timestamp"),
+            ]
+            return ", ".join(column(name, fallback) for name, fallback in fields)
+        fields = [
+            ("id", "NULL::integer"),
+            ("name", "''"),
+            ("file_name", "''"),
+            ("mime_type", "'application/octet-stream'"),
+            ("file_size", "0"),
+            ("media_id", "''"),
+            ("media_id_expires_at", "NULL::timestamp"),
+            ("tags", "'[]'::jsonb"),
+            ("enabled", "TRUE"),
+            ("created_at", "NULL::timestamp"),
+            ("updated_at", "NULL::timestamp"),
+        ]
+        return ", ".join(column(name, fallback) for name, fallback in fields)
 
     def _image_variants_table_exists(self, cur: Any) -> bool:
         if self._variants_table_available is not None:

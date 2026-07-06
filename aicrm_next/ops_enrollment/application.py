@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -7,12 +9,12 @@ from aicrm_next.integration_gateway.user_ops_adapters import (
     UserOpsBatchSendGateway,
     UserOpsDeferredJobGateway,
     UserOpsDndWriteGateway,
-    WeComMessageDispatchAdapter,
     build_user_ops_batch_send_gateway,
     build_user_ops_deferred_job_gateway,
     build_user_ops_dnd_gateway,
     build_wecom_message_dispatch_adapter,
 )
+from aicrm_next.ai_audience_ops.target_provider import AiAudienceTargetProvider
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
@@ -22,7 +24,17 @@ from aicrm_next.shared.runtime import fixture_mode
 from aicrm_next.shared.typing import JsonDict
 
 from .dto import BatchSendRequest, BroadcastPreviewRequest, DoNotDisturbRequest, ExportPreviewRequest, UserOpsListRequest
+from .effect_enqueue import (
+    USER_OPS_BATCH_SEND_ROUTE,
+    build_user_ops_external_effect_gateway,
+    user_ops_send_disabled,
+    user_ops_send_execution_mode,
+    user_ops_send_requires_approval,
+    user_ops_send_risk_level,
+    UserOpsExternalEffectEnqueueGateway,
+)
 from .repo import UserOpsRepository, build_user_ops_repository, resolve_user_ops_repo_backend
+from .send_record_projection import build_send_record_external_effect_projection
 from .user_ops import apply_filters, build_overview_cards, normalize_filters, resolve_batch_targets
 
 _REPO: UserOpsRepository | None = None
@@ -101,6 +113,39 @@ def _media_refs_from_batch_request(request: BatchSendRequest) -> list[JsonDict]:
     refs.extend({"kind": "image", "index": index} for index, _ in enumerate(request.images))
     refs.extend({"kind": "attachment", "index": index} for index, _ in enumerate(request.attachments))
     return refs
+
+
+def _generated_batch_send_idempotency_key(request: BatchSendRequest, preview: JsonDict) -> str:
+    payload = {
+        "selection_mode": request.selection_mode,
+        "filters": preview.get("filters") or {},
+        "target_unionids": preview.get("target_unionids") or [],
+        "content": request.content,
+        "images": request.images,
+        "attachments": request.attachments,
+        "operator": request.operator,
+        "target_source": request.target_source,
+        "target_source_id": request.target_source_id,
+    }
+    digest = hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return f"user_ops_batch_send:{digest[:32]}"
+
+
+def _is_ai_audience_batch_request(request: BatchSendRequest) -> bool:
+    return str(request.target_source or "").strip() == "ai_audience_package"
+
+
+def _batch_rows_for_request(request: BatchSendRequest, repo: UserOpsRepository | None) -> tuple[list[JsonDict], UserOpsRepository | None]:
+    request.filters = normalize_filters(request.filters)
+    if _is_ai_audience_batch_request(request):
+        package_id = int(request.target_source_id or 0)
+        if package_id <= 0:
+            raise ContractError("target_source_id is required")
+        return AiAudienceTargetProvider().rows_for_package(package_id), repo
+    active_repo = repo or _default_repo()
+    return apply_filters(active_repo.list_rows(), request.filters), active_repo
 
 
 def _user_ops_side_effect_safety() -> JsonDict:
@@ -198,6 +243,8 @@ def _mask_value(field: str, value: object) -> str:
     text = str(value or "")
     if not text:
         return ""
+    if field == "unionid":
+        return f"{text[:6]}***{text[-4:]}" if len(text) >= 12 else "***"
     if field == "mobile":
         return f"{text[:3]}****{text[-4:]}" if len(text) >= 7 else "***"
     if field == "external_userid":
@@ -210,6 +257,7 @@ def _mask_value(field: str, value: object) -> str:
 def _customer_summary(row: JsonDict) -> JsonDict:
     return {
         "id": row["id"],
+        "unionid": row["unionid"],
         "external_userid": row["external_userid"],
         "customer_name": row["customer_name"],
         "mobile_masked": _mask_value("mobile", row.get("mobile")),
@@ -257,9 +305,9 @@ def _timeline_for_customer(row: JsonDict) -> list[JsonDict]:
     return events
 
 
-def _find_projected_row(repo: UserOpsRepository, *, external_userid: str) -> JsonDict | None:
+def _find_projected_row(repo: UserOpsRepository, *, unionid: str) -> JsonDict | None:
     for row in repo.list_rows():
-        if str(row.get("external_userid") or "") == external_userid:
+        if str(row.get("unionid") or "") == unionid:
             return row
     return None
 
@@ -373,10 +421,10 @@ class GetUserOpsCustomerQuery:
     def __init__(self, repo: UserOpsRepository | None = None) -> None:
         self._repo = repo
 
-    def execute(self, external_userid: str) -> JsonDict:
+    def execute(self, unionid: str) -> JsonDict:
         repo = self._repo or _default_repo()
         try:
-            row = _find_projected_row(repo, external_userid=external_userid)
+            row = _find_projected_row(repo, unionid=unionid)
             if row is None:
                 raise NotFoundError("user ops customer not found")
             projected = _customer_summary(row)
@@ -385,6 +433,7 @@ class GetUserOpsCustomerQuery:
                 **_readonly_meta(),
                 "customer": projected,
                 "profile": {
+                    "unionid": projected["unionid"],
                     "external_userid": projected["external_userid"],
                     "customer_name": projected["customer_name"],
                     "owner_userid": projected["owner_userid"],
@@ -408,10 +457,10 @@ class GetUserOpsCustomerTimelineQuery:
     def __init__(self, repo: UserOpsRepository | None = None) -> None:
         self._repo = repo
 
-    def execute(self, external_userid: str, *, limit: int = 20, offset: int = 0) -> JsonDict:
+    def execute(self, unionid: str, *, limit: int = 20, offset: int = 0) -> JsonDict:
         repo = self._repo or _default_repo()
         try:
-            row = _find_projected_row(repo, external_userid=external_userid)
+            row = _find_projected_row(repo, unionid=unionid)
             if row is None:
                 raise NotFoundError("user ops customer not found")
             events = _timeline_for_customer(row)
@@ -419,7 +468,7 @@ class GetUserOpsCustomerTimelineQuery:
             return {
                 "ok": True,
                 **_readonly_meta(),
-                "external_userid": external_userid,
+                "unionid": unionid,
                 "items": page,
                 "timeline": page,
                 "total": len(events),
@@ -444,10 +493,9 @@ class PreviewUserOpsBatchSendCommand:
         self._batch_gateway = batch_gateway or build_user_ops_batch_send_gateway()
 
     def execute(self, request: BatchSendRequest) -> JsonDict:
-        repo = self._repo or _default_repo()
+        repo: UserOpsRepository | None = self._repo
         try:
-            request.filters = normalize_filters(request.filters)
-            rows = apply_filters(repo.list_rows(), request.filters)
+            rows, repo = _batch_rows_for_request(request, repo)
             preview = resolve_batch_targets(rows, request)
             gateway_result = self._batch_gateway.build_batch_send_preview(
                 selection_mode=request.selection_mode,
@@ -471,7 +519,7 @@ class PreviewUserOpsBatchSendCommand:
                 },
             }
         finally:
-            if _should_close_repo(self._repo):
+            if repo is not None and _should_close_repo(self._repo):
                 _close_repository(repo)
 
     __call__ = execute
@@ -623,11 +671,11 @@ def _build_export_preview_response(command: Command, *, request: ExportPreviewRe
     rows = apply_filters(repo.list_rows(), filters)
     requested_fields = [field.strip() for field in request.fields if field.strip()]
     is_controlled_default = _filters_are_empty(filter_payload) and not requested_fields
-    allowed_fields = ["external_userid", "customer_name", "mobile", "owner_userid", "class_term_no", "activation_bucket"]
+    allowed_fields = ["unionid", "external_userid", "customer_name", "mobile", "owner_userid", "class_term_no", "activation_bucket"]
     fields = [field for field in requested_fields if field in allowed_fields] or allowed_fields[:4]
     masked_sample = [
         {
-            field: _mask_value(field, row.get(field)) if field in {"external_userid", "customer_name", "mobile"} else str(row.get(field) or "")
+            field: _mask_value(field, row.get(field)) if field in {"unionid", "external_userid", "customer_name", "mobile"} else str(row.get(field) or "")
             for field in fields
         }
         for row in rows[:5]
@@ -673,68 +721,37 @@ class ExecuteUserOpsBatchSendCommand:
         self,
         repo: UserOpsRepository | None = None,
         batch_gateway: UserOpsBatchSendGateway | None = None,
-        dispatch_adapter: WeComMessageDispatchAdapter | None = None,
+        effect_gateway: UserOpsExternalEffectEnqueueGateway | None = None,
     ) -> None:
         self._repo = repo
         self._batch_gateway = batch_gateway or build_user_ops_batch_send_gateway()
-        self._dispatch_adapter = dispatch_adapter or build_wecom_message_dispatch_adapter()
+        self._effect_gateway = effect_gateway or build_user_ops_external_effect_gateway()
 
-    def execute(self, request: BatchSendRequest) -> JsonDict:
+    def execute(self, request: BatchSendRequest, *, idempotency_key: str = "") -> JsonDict:
         repo = self._repo or _default_repo()
         try:
             if not request.confirm:
                 raise ContractError("confirm=true is required")
+            if user_ops_send_disabled():
+                raise ContractError("user ops batch send execute is disabled")
             preview = PreviewUserOpsBatchSendCommand(repo, batch_gateway=self._batch_gateway)(request)
             if not preview["has_body"]:
                 raise ContractError("content is required")
+            if int(preview["eligible_count"] or 0) <= 0:
+                raise ContractError("no eligible targets")
 
             media_refs = _media_refs_from_batch_request(request)
-            execute_gateway_result = self._batch_gateway.execute_batch_send(
-                content=request.content,
-                targets=preview["final_targets"],
-                owner_buckets=preview["owner_buckets"],
-                operator=request.operator,
-                media_refs=media_refs,
-            )
-            if not execute_gateway_result["ok"]:
-                raise ContractError(execute_gateway_result["error_message"] or execute_gateway_result["error_code"])
-
-            task_results: list[JsonDict] = []
-            sender_userids: list[str] = []
-            for bucket in preview["owner_buckets"]:
-                dispatch_result = self._dispatch_adapter.send_private_message(
-                    owner_userid=str(bucket.get("owner_userid") or ""),
-                    external_userids=list(bucket.get("external_userids") or []),
-                    content=request.content,
-                    media_refs=media_refs,
-                )
-                if not dispatch_result["ok"]:
-                    raise ContractError(dispatch_result["error_message"] or dispatch_result["error_code"])
-                dispatch_payload = dispatch_result["result"]
-                sender_userid = str(bucket.get("sender_userid") or bucket.get("owner_userid") or "")
-                sender_userids.append(sender_userid)
-                task_results.append(
-                    {
-                        "owner_userid": bucket["owner_userid"],
-                        "sender_userid": sender_userid,
-                        "owner_display_name": bucket.get("owner_display_name") or sender_userid,
-                        "external_userids": bucket["external_userids"],
-                        "external_userid_count": len(bucket["external_userids"]),
-                        "target_count": bucket["target_count"],
-                        "task_id": dispatch_payload["task_id"],
-                        "status": dispatch_payload["status"],
-                        "status_label": dispatch_payload["status_label"],
-                        "error_message": dispatch_payload["error_message"],
-                        "dispatch_adapter": dispatch_payload["dispatch_adapter"],
-                        "adapter_contract": dispatch_result,
-                    }
-                )
-
-            sent_count = sum(result["target_count"] for result in task_results)
+            execute_idempotency_key = str(idempotency_key or "").strip() or _generated_batch_send_idempotency_key(request, preview)
+            requires_approval = user_ops_send_requires_approval()
+            execution_mode = user_ops_send_execution_mode()
+            risk_level = user_ops_send_risk_level()
+            initial_status = "planned" if requires_approval else "queued"
             record_payload = {
+                "idempotency_key": execute_idempotency_key,
+                "execution_backend": "external_effect_queue",
                 "selected_count": preview["selected_count"],
                 "eligible_count": preview["eligible_count"],
-                "sent_count": sent_count,
+                "sent_count": 0,
                 "skipped_count": preview["skipped_count"],
                 "skipped_reasons": preview["skipped_by_reason"],
                 "skipped_by_reason": preview["skipped_by_reason"],
@@ -743,45 +760,85 @@ class ExecuteUserOpsBatchSendCommand:
                 "include_do_not_disturb": preview["include_do_not_disturb"],
                 "content_preview": preview["content_preview"],
                 "image_count": preview["image_count"],
-                "sender_userids": sorted(set(sender_userids)),
+                "sender_userids": sorted({bucket["sender_userid"] for bucket in preview["owner_buckets"]}),
+                "target_unionids": preview["target_unionids"],
                 "filter_snapshot": preview["filters"],
                 "operator": request.operator,
-                "status": "created",
-                "status_label": "已创建任务",
-                "task_results": task_results,
+                "status": initial_status,
+                "status_label": "待审批" if requires_approval else "排队中",
+                "planned_count": preview["eligible_count"] if requires_approval else 0,
+                "queued_count": 0 if requires_approval else preview["eligible_count"],
+                "external_effect_status_summary": {},
+                "task_results": [],
             }
-            record_gateway_result = self._batch_gateway.create_send_record(payload=record_payload)
-            if not record_gateway_result["ok"]:
-                raise ContractError(record_gateway_result["error_message"] or record_gateway_result["error_code"])
-            record = repo.create_send_record(record_payload)
-            summary_gateway_result = self._batch_gateway.build_send_result_summary(
-                record_id=record["record_id"],
-                task_results=task_results,
-                sent_count=sent_count,
-                skipped_count=preview["skipped_count"],
+            record = repo.create_or_get_send_record_by_idempotency(
+                idempotency_key=execute_idempotency_key,
+                payload=record_payload,
             )
-            if not summary_gateway_result["ok"]:
-                raise ContractError(summary_gateway_result["error_message"] or summary_gateway_result["error_code"])
+            command_id = hashlib.sha256(execute_idempotency_key.encode("utf-8")).hexdigest()[:32]
+            job_results = self._effect_gateway.enqueue_wecom_private_message_jobs(
+                record_id=record["record_id"],
+                targets=preview["final_targets"],
+                content=request.content,
+                media_refs=media_refs,
+                operator=request.operator,
+                source_route=USER_OPS_BATCH_SEND_ROUTE,
+                idempotency_key=execute_idempotency_key,
+                command_id=command_id,
+                requires_approval=requires_approval,
+                execution_mode=execution_mode,
+                risk_level=risk_level,
+            )
+            failed_jobs = [job for job in job_results if not job.get("ok")]
+            if failed_jobs:
+                first = failed_jobs[0]
+                raise ContractError(first.get("error_message") or first.get("error_code") or "external effect enqueue failed")
+            updated_record = repo.attach_external_effect_jobs(record["record_id"], job_results)
+            external_effect_job_ids = [int(job["job_id"]) for job in job_results if int(job.get("job_id") or 0) > 0]
+            planned_count = int(updated_record.get("planned_count") or 0)
+            queued_count = int(updated_record.get("queued_count") or 0)
+            blocked_count = int(updated_record.get("blocked_count") or 0)
+            next_step = "requires_approval" if planned_count else ("blocked" if blocked_count else "external_effect_worker")
             execution_summary = {
-                "dispatch_adapter": "fake_wecom",
-                "task_count": len(task_results),
-                "sent_count": sent_count,
+                "backend": "external_effect_queue",
+                "external_effect_job_count": len(external_effect_job_ids),
+                "task_count": len(external_effect_job_ids),
+                "sent_count": int(updated_record.get("succeeded_count") or 0),
+                "planned_count": planned_count,
+                "queued_count": queued_count,
+                "blocked_count": blocked_count,
+                "external_effect_status_supported": True,
+                "wecom_delivery_status_supported": False,
                 "delivery_status_supported": False,
-                "adapter_contract": summary_gateway_result,
+                "requires_approval": requires_approval,
+                "execution_mode": execution_mode,
+                "next_step": next_step,
                 "side_effect_safety": _user_ops_side_effect_safety(),
             }
             return {
                 "ok": True,
                 **preview,
-                "record_id": record["record_id"],
-                "sent_count": sent_count,
+                "record_id": updated_record["record_id"],
+                "execution_backend": "external_effect_queue",
+                "external_effect_job_ids": external_effect_job_ids,
+                "external_effect_jobs": job_results,
+                "sent_count": int(updated_record.get("succeeded_count") or 0),
+                "planned_count": planned_count,
+                "queued_count": queued_count,
+                "blocked_count": blocked_count,
                 "execution_summary": execution_summary,
-                "task_results": task_results,
+                "task_results": job_results,
+                "real_external_call_executed": False,
+                "next_step": next_step,
+                "send_record_url": f"/api/admin/user-ops/send-records/{updated_record['record_id']}",
+                "external_effect_jobs_url": (
+                    "/api/admin/external-effects/jobs"
+                    f"?business_type=user_ops_batch_send&business_id={updated_record['record_id']}"
+                ),
+                "external_effect_status_supported": True,
+                "wecom_delivery_status_supported": False,
+                "delivery_status_supported": False,
                 "side_effect_safety": _user_ops_side_effect_safety(),
-                "adapter_contract": {
-                    "batch_send_execute": execute_gateway_result,
-                    "send_record": record_gateway_result,
-                },
             }
         finally:
             if _should_close_repo(self._repo):
@@ -827,15 +884,30 @@ class GetUserOpsSendRecordQuery:
             record = repo.get_send_record(record_id)
             if record is None:
                 raise NotFoundError("send record not found")
+            if record.get("execution_backend") == "external_effect_queue":
+                projection = build_send_record_external_effect_projection(
+                    record["record_id"],
+                    job_ids=repo.get_send_record_external_effect_job_ids(record["record_id"]),
+                )
+                refreshed = repo.refresh_send_record_external_effect_status(record["record_id"], projection)
+                if refreshed:
+                    record = refreshed
             task_results = record.get("task_results", [])
             record_summary = {key: value for key, value in record.items() if key != "task_results"}
+            external_effect_supported = bool(record.get("external_effect_status_supported"))
             return {
                 "ok": True,
                 **_readonly_meta(),
                 "record": record_summary,
                 "task_results": task_results,
+                "external_effect_status_supported": external_effect_supported,
+                "wecom_delivery_status_supported": False,
                 "delivery_status_supported": False,
-                "status_note": "当前只支持 fake dispatch 任务创建结果，不轮询企业微信送达状态。",
+                "status_note": (
+                    "当前支持 external_effect_job 执行状态投影，暂不支持企微终端送达状态。"
+                    if external_effect_supported
+                    else "旧发送记录只保留 legacy fake 任务创建结果，不轮询企业微信送达状态。"
+                ),
             }
         finally:
             if _should_close_repo(self._repo):
@@ -851,8 +923,42 @@ class RefreshUserOpsSendRecordStatusCommand:
     def execute(self, record_id: str) -> JsonDict:
         repo = self._repo or _default_repo()
         try:
-            detail = GetUserOpsSendRecordQuery(repo)(record_id)
-            return {"ok": True, **detail, "refreshed": False}
+            record = repo.get_send_record(record_id)
+            if record is None:
+                raise NotFoundError("send record not found")
+            if record.get("execution_backend") != "external_effect_queue":
+                detail = GetUserOpsSendRecordQuery(repo)(record_id)
+                return {"ok": True, **detail, "refreshed": False}
+            projection = build_send_record_external_effect_projection(
+                record["record_id"],
+                job_ids=repo.get_send_record_external_effect_job_ids(record["record_id"]),
+            )
+            refreshed = repo.refresh_send_record_external_effect_status(record["record_id"], projection)
+            if not refreshed:
+                raise NotFoundError("send record not found")
+            record_summary = {key: value for key, value in refreshed.items() if key != "task_results"}
+            summary = {
+                "planned_count": projection["planned_count"],
+                "queued_count": projection["queued_count"],
+                "dispatching_count": projection["dispatching_count"],
+                "succeeded_count": projection["succeeded_count"],
+                "failed_count": projection["failed_count"],
+                "blocked_count": projection["blocked_count"],
+                "cancelled_count": projection["cancelled_count"],
+            }
+            return {
+                "ok": True,
+                **_readonly_meta(),
+                "refreshed": True,
+                "record_id": refreshed["record_id"],
+                "status": projection["status"],
+                "summary": summary,
+                "record": record_summary,
+                "task_results": projection["task_results"],
+                "external_effect_status_supported": True,
+                "wecom_delivery_status_supported": False,
+                "delivery_status_supported": False,
+            }
         finally:
             if _should_close_repo(self._repo):
                 _close_repository(repo)
@@ -892,10 +998,9 @@ class SetUserOpsDoNotDisturbCommand:
     def execute(self, request: DoNotDisturbRequest) -> JsonDict:
         repo = self._repo or _default_repo()
         try:
-            external_userid = request.external_userid.strip()
-            mobile = request.mobile.strip()
-            if not external_userid and not mobile:
-                raise ContractError("external_userid or mobile is required")
+            unionid = request.unionid.strip()
+            if not unionid:
+                raise ContractError("unionid is required")
 
             action = request.action.strip().lower()
             is_active = request.is_active
@@ -904,27 +1009,24 @@ class SetUserOpsDoNotDisturbCommand:
 
             gateway_result = (
                 self._dnd_gateway.enable_do_not_disturb(
-                    external_userid=external_userid,
-                    mobile=mobile,
                     reason_code=request.reason_code.strip() or "manual_set",
                     reason_text=request.reason_text.strip() or "运营设置",
                     operator=request.operator,
+                    unionid=unionid,
                 )
                 if is_active
                 else self._dnd_gateway.cancel_do_not_disturb(
-                    external_userid=external_userid,
-                    mobile=mobile,
                     reason_code=request.reason_code.strip() or "manual_set",
                     reason_text=request.reason_text.strip() or "运营设置",
                     operator=request.operator,
+                    unionid=unionid,
                 )
             )
             if not gateway_result["ok"]:
                 raise ContractError(gateway_result["error_message"] or gateway_result["error_code"])
 
             row = repo.set_do_not_disturb(
-                external_userid=external_userid,
-                mobile=mobile,
+                unionid=unionid,
                 reason_code=request.reason_code.strip() or "manual_set",
                 reason_text=request.reason_text.strip() or "运营设置",
                 is_active=bool(is_active),
@@ -936,6 +1038,7 @@ class SetUserOpsDoNotDisturbCommand:
                 "ok": True,
                 "target": {
                     "id": row["id"],
+                    "unionid": row["unionid"],
                     "external_userid": row["external_userid"],
                     "mobile": row["mobile"],
                 },

@@ -4,7 +4,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
-from aicrm_next.questionnaire import h5_write
 from aicrm_next.questionnaire.h5_write import get_questionnaire_h5_write_audit_events
 from aicrm_next.questionnaire.oauth import COOKIE_NAME, build_questionnaire_h5_identity_cookie
 
@@ -58,6 +57,8 @@ def test_h5_submit_executes_next_commandbus_and_writes_submission_projection(cli
     assert body["identity"]["anonymous"] is False
     assert body["external_userid"] == "wx_ext_001"
     assert body["mobile"] == "13800138000"
+    assert body["mobile_binding"]["ok"] is True
+    assert body["mobile_binding"]["real_external_call_executed"] is False
 
     result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{body['submission_id']}")
     assert result.status_code == 200
@@ -134,55 +135,62 @@ def test_h5_submit_persists_when_identity_resolution_is_unavailable(client: Test
     assert body["success"] is True
     assert body["external_userid"] == "wm_identity_resolution_down_001"
     assert body["mobile"] == "13800138099"
-    assert body["binding_status"] == "identity_resolution_unavailable"
+    assert body["binding_status"] == "bound"
+    assert body["mobile_binding"]["source_status"] == "fixture_identity_binding"
 
 
-def test_questionnaire_live_tag_success_syncs_customer_tag_projection(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: list[dict] = []
+def test_h5_submit_syncs_mobile_binding_without_external_webhook_switch(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = []
 
-    class FakeWeComAdapter:
-        def mark_external_contact_tags(self, **payload):
-            calls.append({"kind": "wecom", **payload})
-            return {"errcode": 0, "errmsg": "ok"}
+    class FakeBindMobileCommand:
+        def __call__(self, request):
+            calls.append(request)
+            return {
+                "ok": True,
+                "source_status": "fixture_identity_binding",
+                "external_userid": request.external_userid,
+                "mobile": request.mobile,
+                "owner_userid": request.owner_userid or "HuangYouCan",
+                "person_id": "fixture_person_questionnaire",
+                "binding_status": "bound",
+                "side_effect_executed": False,
+            }
 
-    def fake_projection(**payload):
-        calls.append({"kind": "projection", **payload})
-        return {
-            "ok": True,
-            "contact_tags_upserted": len(payload["tag_ids"]),
-            "customer_list_updated": 1,
-            "customer_detail_updated": 1,
-            "tags_after": ["大健康", "创始人/老板/合伙人"],
-        }
-
-    monkeypatch.setattr(h5_write, "get_wecom_adapter", lambda: FakeWeComAdapter())
-    monkeypatch.setattr(h5_write, "apply_questionnaire_tag_projection", fake_projection)
-
-    result = h5_write._execute_questionnaire_tag_live(
-        questionnaire={"id": 12, "slug": "salon-research"},
-        submission={"submission_id": 462},
-        external_userid="wm_test",
-        follow_user_userid="owner_test",
-        final_tags=["tag_health", "tag_founder"],
-        diagnostics={"can_mark_tag": True},
+    monkeypatch.setattr(
+        "aicrm_next.questionnaire.h5_write.BindMobileToExternalContactCommand",
+        lambda: FakeBindMobileCommand(),
     )
 
-    assert result["ok"] is True
-    assert result["mark_tag_executed"] is True
-    assert result["wecom_result"] == {"errcode": 0, "errmsg": "ok"}
-    assert result["local_projection"]["ok"] is True
-    assert result["local_projection"]["contact_tags_upserted"] == 2
-    assert calls[0] == {
-        "kind": "wecom",
-        "external_userid": "wm_test",
-        "follow_user_userid": "owner_test",
-        "add_tags": ["tag_health", "tag_founder"],
-        "remove_tags": [],
-    }
-    assert calls[1]["kind"] == "projection"
-    assert calls[1]["external_userid"] == "wm_test"
-    assert calls[1]["follow_user_userid"] == "owner_test"
-    assert calls[1]["tag_ids"] == ["tag_health", "tag_founder"]
+    response = client.post(
+        "/api/h5/questionnaires/hxc-activation-v1/submit",
+        json={
+            "answers": {"q_activation": "activated"},
+            "identity": {
+                "external_userid": "wm_questionnaire_bind_001",
+                "mobile": "13800138123",
+            },
+        },
+        headers={"Idempotency-Key": "h5-submit-mobile-binding"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    _assert_next_command(body, "questionnaire.h5.submit")
+    assert body["external_push_mode"] == "queue"
+    assert body["external_push"]["attempted"] is False
+    assert body["mobile_binding"]["ok"] is True
+    assert body["mobile_binding"]["source_status"] == "fixture_identity_binding"
+    assert body["mobile_binding"]["real_external_call_executed"] is False
+    assert body["binding_status"] == "bound"
+    assert body["person_id"] == "fixture_person_questionnaire"
+    assert body["side_effects"]["mobile_binding"]["owner_userid"] == "HuangYouCan"
+    assert calls
+    assert calls[0].external_userid == "wm_questionnaire_bind_001"
+    assert calls[0].mobile == "13800138123"
+    assert calls[0].bind_by_userid == "questionnaire_h5_submit"
+    assert calls[0].force_rebind is True
 
 
 def test_h5_submit_rejects_repeated_identity(client: TestClient) -> None:

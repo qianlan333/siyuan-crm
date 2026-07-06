@@ -8,7 +8,6 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_active_automation_scripts_do_not_import_legacy_runtime() -> None:
     for rel_path in (
-        "scripts/run_automation_member_backfill.py",
         "scripts/run_automation_ops_scheduler.py",
         "scripts/run_broadcast_queue_worker.py",
     ):
@@ -20,7 +19,6 @@ def test_active_automation_scripts_do_not_import_legacy_runtime() -> None:
 
 def test_next_background_job_modules_are_the_active_owners() -> None:
     for rel_path in (
-        "aicrm_next/background_jobs/automation_member_backfill.py",
         "aicrm_next/background_jobs/automation_ops_scheduler.py",
         "aicrm_next/background_jobs/broadcast_queue_worker.py",
     ):

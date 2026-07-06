@@ -36,13 +36,6 @@ def run_automation_ops_scheduler(
     components: list[dict[str, Any]] = []
     errors: list[dict[str, Any]] = []
 
-    for component in (
-        _skipped("operation_task_scheduler", "next_native_owner_missing"),
-        _skipped("legacy_hxc_refresh", "next_native_owner_missing"),
-        _skipped("broadcast_feishu_hourly_report", "real_external_call_disabled"),
-    ):
-        components.append(component)
-
     try:
         runner = group_ops_runner or _run_group_ops
         group_ops = runner(now=scanned_at, operator=actor, dry_run=dry_run)

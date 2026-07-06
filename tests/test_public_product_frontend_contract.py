@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from aicrm_next.commerce.repo import reset_commerce_fixture_state
 from aicrm_next.main import create_app
 
 
@@ -12,20 +13,19 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def test_public_product_frontend_contains_detail_images_only_and_wechat_pay_cta(monkeypatch) -> None:
-    product = _client(monkeypatch).get("/p/test-product")
-    pay = _client(monkeypatch).get("/pay/test-product")
+def test_public_product_frontend_redirects_empty_material_and_keeps_checkout_contract(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    product = client.get("/p/test-product", follow_redirects=False)
+    pay = client.get("/pay/test-product")
 
-    assert 'data-route-owner="ai_crm_next"' in product.text
-    assert 'data-fallback-used="false"' in product.text
-    assert 'class="sticky-buy"' in product.text
-    assert "/pay/test-product" in product.text
-    assert 'class="hero-panel"' not in product.text
-    assert 'class="detail-card"' not in product.text
-    assert "当前页面只展示商品信息" not in product.text
+    assert product.status_code == 302
+    assert product.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert product.headers["X-AICRM-Fallback-Used"] == "false"
+    assert product.headers["location"] == "/pay/test-product"
 
     assert 'data-route-owner="ai_crm_next"' in pay.text
     assert "确认报名信息" in pay.text
+    assert "微信授权" in pay.text
     assert "/api/h5/wechat-pay/jsapi/orders" in pay.text
     assert "WeixinJSBridge.invoke" in pay.text
     assert 'id="leadQrModal"' in pay.text
@@ -34,6 +34,49 @@ def test_public_product_frontend_contains_detail_images_only_and_wechat_pay_cta(
     assert "showLeadQr(order" in pay.text
     assert "支付暂不可用" not in pay.text
     assert "不会创建订单" not in pay.text
+
+
+def test_public_product_frontend_material_page_contains_detail_images_and_cta(monkeypatch) -> None:
+    reset_commerce_fixture_state()
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "frontend-material-product",
+            "title": "前台带素材商品",
+            "price_cents": 100,
+            "enabled": True,
+            "status": "active",
+            "buy_button_text": "立即报名",
+            "slices": [
+                {"image_library_id": 1, "image_url": "data:image/png;base64,YQ==", "sort_order": 1},
+                {"image_library_id": 2, "image_url": "data:image/png;base64,Yg==", "sort_order": 2},
+            ],
+        },
+    )
+    assert created.status_code == 200
+
+    product = client.get("/p/frontend-material-product")
+
+    assert product.status_code == 200
+    assert 'data-route-owner="ai_crm_next"' in product.text
+    assert 'data-fallback-used="false"' in product.text
+    assert 'class="sticky-buy"' in product.text
+    assert 'class="slice-img"' in product.text
+    assert product.text.index('class="sticky-buy"') < product.text.index('class="slice-img"')
+    assert "data:image" not in product.text
+    assert (
+        '<img class="slice-img" src="/api/h5/product-images/frontend-material-product/1/variants/original" '
+        'loading="eager" decoding="async" fetchpriority="high" alt="">'
+    ) in product.text
+    assert (
+        '<img class="slice-img" src="/api/h5/product-images/frontend-material-product/2/variants/original" '
+        'loading="lazy" decoding="async" fetchpriority="low" alt="">'
+    ) in product.text
+    assert "/pay/frontend-material-product" in product.text
+    assert 'class="hero-panel"' not in product.text
+    assert 'class="detail-card"' not in product.text
+    assert "当前页面只展示商品信息" not in product.text
 
 
 def test_public_product_frontend_restores_slice_image_layout() -> None:
@@ -52,6 +95,13 @@ def test_public_product_frontend_restores_slice_image_layout() -> None:
                     "image_library_id": 1,
                     "image_url": "data:image/png;base64,YWFhYWFh",
                     "sort_order": 1,
+                    "width": 750,
+                    "height": 2400,
+                },
+                {
+                    "image_library_id": 2,
+                    "image_url": "data:image/png;base64,YmJiYmJi",
+                    "sort_order": 2,
                 }
             ],
             "detail_sections": [{"title": "服务说明", "body": "体验权益说明"}],
@@ -61,11 +111,97 @@ def test_public_product_frontend_restores_slice_image_layout() -> None:
 
     assert 'class="detail-media"' in html
     assert 'class="slice-img"' in html
-    assert "data:image/png;base64,YWFhYWFh" in html
+    assert "data:image" not in html
+    assert html.index('class="sticky-buy"') < html.index('class="slice-img"')
+    assert (
+        '<img class="slice-img" src="/api/h5/product-images/subscription_trial_month/1/variants/original" '
+        'loading="eager" decoding="async" fetchpriority="high" width="750" height="2400" alt="">'
+    ) in html
+    assert (
+        '<img class="slice-img" src="/api/h5/product-images/subscription_trial_month/2/variants/original" '
+        'loading="lazy" decoding="async" fetchpriority="low" alt="">'
+    ) in html
     assert '<section class="hero-panel">' not in html
     assert 'class="detail-card"' not in html
     assert 'class="sticky-buy"' in html
     assert "立即报名" in html
+
+
+def test_public_product_image_route_serves_only_bound_enabled_product_images(monkeypatch) -> None:
+    from aicrm_next.shared.errors import NotFoundError
+
+    reset_commerce_fixture_state()
+    calls: list[tuple[str, str]] = []
+
+    class FakeGetImageVariantQuery:
+        def __call__(self, image_id: str, variant_key: str) -> dict:
+            calls.append((image_id, variant_key))
+            if image_id != "1" or variant_key != "original":
+                raise NotFoundError("image variant not found")
+            return {
+                "ok": True,
+                "variant": {
+                    "bytes": b"public-product-image",
+                    "mime_type": "image/png",
+                    "etag": '"public-product-image-v1"',
+                },
+            }
+
+    monkeypatch.setattr("aicrm_next.public_product.service.GetImageVariantQuery", lambda: FakeGetImageVariantQuery())
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "public-image-product",
+            "title": "公开图片商品",
+            "price_cents": 100,
+            "enabled": True,
+            "status": "active",
+            "slices": [{"image_library_id": 1, "image_url": "data:image/png;base64,YQ==", "sort_order": 1}],
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.get("/api/h5/product-images/public-image-product/1/variants/original")
+
+    assert response.status_code == 200
+    assert response.content == b"public-product-image"
+    assert response.headers["content-type"].startswith("image/png")
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert response.headers["etag"] == '"public-product-image-v1"'
+    assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert response.headers["X-AICRM-Fallback-Used"] == "false"
+    assert calls == [("1", "original")]
+
+    cached = client.get(
+        "/api/h5/product-images/public-image-product/1/variants/original",
+        headers={"If-None-Match": response.headers["etag"]},
+    )
+    assert cached.status_code == 304
+    assert cached.headers["etag"] == '"public-product-image-v1"'
+
+    calls.clear()
+    unbound = client.get("/api/h5/product-images/public-image-product/2/variants/original")
+    assert unbound.status_code == 404
+    assert calls == []
+
+    unknown = client.get("/api/h5/product-images/unknown-product/1/variants/original")
+    assert unknown.status_code == 404
+
+    disabled_created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "disabled-image-product",
+            "title": "下架图片商品",
+            "price_cents": 100,
+            "enabled": False,
+            "status": "disabled",
+            "slices": [{"image_library_id": 1, "image_url": "data:image/png;base64,YQ==", "sort_order": 1}],
+        },
+    )
+    assert disabled_created.status_code == 200
+    disabled = client.get("/api/h5/product-images/disabled-image-product/1/variants/original")
+    assert disabled.status_code == 404
 
 
 def test_public_h5_order_payload_adds_lead_qr_only_after_paid() -> None:
@@ -158,12 +294,11 @@ def test_public_pay_landing_reopens_existing_paid_order(monkeypatch) -> None:
                         "trade_state": "SUCCESS",
                         "refund_status": "",
                         "refunded_amount_total": 0,
-                        "payer_openid": "op_paid",
                         "unionid": "un_paid",
                     }
                 )
-            if "SELECT lead_channel_id, lead_program_id" in query:
-                return Cursor({"lead_channel_id": 7, "lead_program_id": None})
+            if "SELECT lead_channel_id" in query:
+                return Cursor({"lead_channel_id": 7})
             if "FROM automation_channel c" in query:
                 return Cursor({"channel_id": 7, "channel_name": "已购引流", "qr_url": "https://example.com/paid-qr.png", "status": "active"})
             return Cursor(None)
@@ -217,11 +352,11 @@ def test_public_h5_create_order_returns_existing_paid_order(monkeypatch) -> None
                         "trade_state": "SUCCESS",
                         "refund_status": "",
                         "refunded_amount_total": 0,
-                        "payer_openid": "op_paid",
+                        "unionid": "un_paid",
                     }
                 )
-            if "SELECT lead_channel_id, lead_program_id" in query:
-                return Cursor({"lead_channel_id": None, "lead_program_id": None})
+            if "SELECT lead_channel_id" in query:
+                return Cursor({"lead_channel_id": None})
             return Cursor(None)
 
     class FailingClient:
@@ -242,7 +377,7 @@ def test_public_h5_create_order_returns_existing_paid_order(monkeypatch) -> None
     )
     monkeypatch.setattr(h5_wechat_pay, "WeChatPayClient", FailingClient)
     client = _client(monkeypatch)
-    client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_paid"}))
+    client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_paid", "unionid": "un_paid"}))
 
     response = client.post(
         "/api/h5/wechat-pay/jsapi/orders",
@@ -283,7 +418,7 @@ def test_public_h5_create_order_does_not_reuse_paid_order_from_mismatched_sideba
         def execute(self, query, params=()):
             queries.append((query, tuple(params)))
             if "FROM wechat_pay_orders" in query:
-                assert "op_current" in params
+                assert "un_current" in params
                 assert "ext_already_paid" not in params
                 return Cursor(None)
             if "INSERT INTO wechat_pay_orders" in query:
@@ -297,8 +432,7 @@ def test_public_h5_create_order_does_not_reuse_paid_order_from_mismatched_sideba
                         "currency": "CNY",
                         "status": "created",
                         "trade_state": "",
-                        "payer_openid": "op_current",
-                        "external_userid": "ext_already_paid",
+                        "unionid": "un_current",
                     }
                 )
             if "UPDATE wechat_pay_orders" in query and "prepay_id" in query:
@@ -312,8 +446,7 @@ def test_public_h5_create_order_does_not_reuse_paid_order_from_mismatched_sideba
                         "currency": "CNY",
                         "status": "paying",
                         "trade_state": "",
-                        "payer_openid": "op_current",
-                        "external_userid": "ext_already_paid",
+                        "unionid": "un_current",
                     }
                 )
             return Cursor(None)
@@ -354,7 +487,7 @@ def test_public_h5_create_order_does_not_reuse_paid_order_from_mismatched_sideba
     )
     monkeypatch.setattr(h5_wechat_pay, "WeChatPayClient", FakeClient)
     client = _client(monkeypatch)
-    client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_current"}))
+    client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_current", "unionid": "un_current"}))
 
     response = client.post(
         "/api/h5/wechat-pay/jsapi/orders",
@@ -388,13 +521,15 @@ def test_public_h5_paid_order_lookup_accepts_product_code_alias() -> None:
     _paid_order_for_product_identity(
         FakeConn(),
         product={"product_code": "subscription_trial_month"},
-        identity={"openid": "op_alias"},
+        identity={"openid": "op_alias", "unionid": "un_alias"},
     )
 
     assert "product_code IN" in captured["query"]
+    assert "payer_openid = %s" not in captured["query"]
+    assert "unionid = %s" in captured["query"]
     assert "subscription_trial_month" in captured["params"]
     assert "prd_20260518095708_9f77db" in captured["params"]
-    assert "op_alias" in captured["params"]
+    assert "un_alias" in captured["params"]
 
 
 def test_public_h5_paid_order_lookup_prefers_payment_identity_over_sidebar_external_userid() -> None:
@@ -415,10 +550,10 @@ def test_public_h5_paid_order_lookup_prefers_payment_identity_over_sidebar_exter
     _paid_order_for_product_identity(
         FakeConn(),
         product={"product_code": "premium_monthly_trial"},
-        identity={"openid": "op_current", "unionid": "", "external_userid": "ext_from_shared_card"},
+        identity={"openid": "op_current", "unionid": "un_current", "external_userid": "ext_from_shared_card"},
     )
 
-    assert "payer_openid = %s" in captured["query"]
+    assert "unionid = %s" in captured["query"]
     assert "external_userid = %s" not in captured["query"]
-    assert "op_current" in captured["params"]
+    assert "un_current" in captured["params"]
     assert "ext_from_shared_card" not in captured["params"]

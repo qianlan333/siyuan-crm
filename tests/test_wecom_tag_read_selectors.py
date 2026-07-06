@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 from pathlib import Path
+from time import time
 
 from fastapi.testclient import TestClient
 
+from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.main import create_app
 
 
 def _read(path: str) -> str:
     return Path(path).read_text(encoding="utf-8")
+
+
+def _admin_cookies() -> dict[str, str]:
+    return {
+        SESSION_COOKIE: sign_session(
+            {
+                "auth_source": "break_glass",
+                "login_type": "break_glass",
+                "username": "admin",
+                "display_name": "admin",
+                "roles": ["super_admin"],
+                "iat": int(time()),
+            }
+        )
+    }
 
 
 def test_questionnaire_and_adjacent_selectors_read_unified_tag_catalog_source() -> None:
@@ -118,9 +135,10 @@ def test_frontend_backend_contract_matrix_documents_real_entry_points() -> None:
         "/admin/channels/{channel_id}/edit",
         "/admin/automation-conversion",
         "/admin/automation-conversion/programs/{program_id}/setup",
+        "removed old automation program setup page",
+        "route now returns `404`",
         "data-api-tags=\"/api/admin/wecom/tags\"",
         "fetchJson('/api/admin/wecom/tags')",
-        "apiUrls.wecom_tags",
         "PostgresTagCatalogRepository",
         "wecom_tags_read_next_native",
         "wecom_tag_groups_read_next_native",
@@ -136,7 +154,7 @@ def test_frontend_entry_pages_expose_tag_api_urls_without_legacy_facade(monkeypa
     wecom_page = client.get("/admin/wecom-tags")
     questionnaire_new = client.get("/admin/questionnaires/new")
     channels_page = client.get("/admin/channels")
-    automation_page = client.get("/admin/automation-conversion")
+    automation_page = client.get("/admin/automation-conversion", cookies=_admin_cookies())
 
     for response in [wecom_page, questionnaire_new, channels_page, automation_page]:
         assert response.status_code != 500

@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import inspect
 
 
 revision = "0025_radar_pdf_preview_assets"
 down_revision = "0024_cloud_plan_approval"
 branch_labels = None
 depends_on = None
+
+
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    schema = None if bind.dialect.name == "sqlite" else "public"
+    return inspect(bind).has_table(table, schema=schema)
 
 
 def upgrade() -> None:
@@ -21,13 +28,14 @@ def upgrade() -> None:
         ADD COLUMN IF NOT EXISTS pdf_preview_error_message TEXT NOT NULL DEFAULT ''
         """
     )
+    link_reference = " REFERENCES radar_links(id) ON DELETE CASCADE" if _has_table("radar_links") else ""
     op.execute(
-        """
+        f"""
         CREATE TABLE IF NOT EXISTS radar_pdf_preview_assets (
             id BIGSERIAL PRIMARY KEY,
             media_item_id TEXT NOT NULL,
-            radar_link_id BIGINT REFERENCES radar_links(id) ON DELETE CASCADE,
-            link_id BIGINT NOT NULL REFERENCES radar_links(id) ON DELETE CASCADE,
+            radar_link_id BIGINT{link_reference},
+            link_id BIGINT NOT NULL{link_reference},
             source_file_hash TEXT NOT NULL DEFAULT '',
             page_no INTEGER NOT NULL,
             page_count INTEGER NOT NULL DEFAULT 0,

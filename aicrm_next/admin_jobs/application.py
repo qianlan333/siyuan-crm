@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import json
 import os
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any
 
-from aicrm_next.shared.runtime import production_data_ready
+from aicrm_next.message_archive.sync_service import execute_archive_sync
+from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 
 from .domain import (
     BROADCAST_SOURCE_TYPES,
@@ -28,6 +28,25 @@ from .repository import AdminJobsRepository, build_admin_jobs_repository, clean_
 
 TARGET_JOBS_ACTION = "jobs_console_action"
 TARGET_BROADCAST_JOB = "broadcast_job"
+
+
+def _record_legacy_marker(legacy_key: str, *, marker: str = "legacy_path_invoked", metadata: dict[str, Any] | None = None) -> None:
+    try:
+        LegacyWebhookCleanupService().record_runtime_marker(
+            legacy_key,
+            marker=marker,
+            operator="admin_jobs.application",
+            metadata=metadata or {},
+            real_external_call_executed=False,
+        )
+    except Exception:
+        pass
+
+
+def build_legacy_disabled_payload(legacy_key: str, *, error: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    payload = LegacyWebhookCleanupService().disabled_payload(legacy_key, error=error)
+    payload.update(extra or {})
+    return payload
 
 
 def _operator(value: Any) -> str:
@@ -289,7 +308,23 @@ def execute_jobs_action(*, action: str, form: Any, operator: str, repo: AdminJob
             preview = {"ok": True, "preview_only": True, "confirm_required": True, "request": request_payload}
             _audit(repo, operator=operator_value, action_type="preview_archive_sync", target_type=TARGET_JOBS_ACTION, target_id="archive_sync", before=request_payload, after=preview)
             return preview
-        payload = {"ok": True, "sync_run": {"id": "next-native-manual", "status": "success"}, "runner": "aicrm_next_admin_jobs"}
+        if os.getenv("AICRM_ENABLE_IN_PROCESS_ARCHIVE_SYNC", "").strip().lower() not in {"1", "true", "yes", "on"}:
+            return {
+                "ok": False,
+                "error_code": "in_process_archive_sync_disabled",
+                "message": "请使用 scripts/run_incremental_archive_sync.py 执行会话存档同步，避免企微 native SDK 运行在 Web 进程内。",
+                "runner": "scripts/run_incremental_archive_sync.py",
+                "reply_monitor_skipped": True,
+            }
+        payload = execute_archive_sync(
+            start_time=request_payload["start_time"],
+            end_time=request_payload["end_time"],
+            owner_userid=request_payload["owner_userid"],
+            cursor=request_payload["cursor"],
+            limit=normalized_int(form.get("limit"), default=100, minimum=1, maximum=1000),
+            max_pages=normalized_int(form.get("max_pages"), default=1000, minimum=1, maximum=10000),
+        )
+        payload["runner"] = "aicrm_next_admin_jobs"
         _audit(repo, operator=operator_value, action_type="run_archive_sync", target_type=TARGET_JOBS_ACTION, target_id="archive_sync", before=request_payload, after=payload)
         return payload
     if action == "ack-message-batch":
@@ -304,91 +339,12 @@ def execute_jobs_action(*, action: str, form: Any, operator: str, repo: AdminJob
         _audit(repo, operator=operator_value, action_type="ack_message_batch", target_type=TARGET_JOBS_ACTION, target_id=str(batch_id), before=before, after=result)
         return result
     if action == "run-deferred-jobs":
-        if not normalized_bool(form.get("confirm")):
-            raise ValueError("执行待处理作业前请先勾选确认")
-        limit = normalized_int(form.get("limit"), default=20)
-        payload = repo.run_due_deferred_jobs(limit=limit, operator=operator_value)
-        _audit(repo, operator=operator_value, action_type="run_deferred_jobs", target_type=TARGET_JOBS_ACTION, target_id=f"limit:{limit}", before={"limit": limit}, after=payload)
-        return payload
+        return LegacyWebhookCleanupService().disabled_payload("old_admin_jobs_deferred_run", error="legacy_deferred_jobs_runner_disabled")
     if action == "retry-webhook-delivery":
-        if not normalized_bool(form.get("confirm")):
-            raise ValueError("重试 webhook 投递前请先勾选确认")
-        delivery_id = normalized_int(form.get("delivery_id"), default=0, minimum=1, maximum=10**9)
-        before = repo.get_webhook_delivery(delivery_id)
-        if not before:
-            raise LookupError("delivery not found")
-        payload = retry_webhook_delivery(repo, before)
-        _audit(repo, operator=operator_value, action_type="retry_webhook_delivery", target_type=TARGET_JOBS_ACTION, target_id=str(delivery_id), before=before, after=payload)
-        return payload
+        return LegacyWebhookCleanupService().disabled_payload("old_customer_webhook_delivery_retry", error="legacy_webhook_retry_disabled")
     if action == "run-webhook-retries":
-        if not normalized_bool(form.get("confirm")):
-            raise ValueError("执行 webhook 自动重试前请先勾选确认")
-        limit = normalized_int(form.get("limit"), default=20)
-        deliveries = repo.due_webhook_deliveries(limit=limit)
-        results = [retry_webhook_delivery(repo, row) for row in deliveries]
-        payload = {"ok": True, "count": len(results), "retried_count": len(results), "success_count": sum(1 for item in results if item.get("ok")), "failed_count": sum(1 for item in results if not item.get("ok")), "deliveries": results}
-        _audit(repo, operator=operator_value, action_type="run_webhook_retries", target_type=TARGET_JOBS_ACTION, target_id=f"limit:{limit}", before={"limit": limit}, after=payload)
-        return payload
+        return LegacyWebhookCleanupService().disabled_payload("old_customer_webhook_delivery_retry", error="legacy_webhook_retry_disabled")
     raise ValueError("不支持的同步任务操作")
-
-
-def retry_webhook_delivery(repo: AdminJobsRepository, delivery: dict[str, Any]) -> dict[str, Any]:
-    if normalized_text(delivery.get("status")) == "success":
-        raise ValueError("delivery already succeeded")
-    now = datetime.now(timezone.utc)
-    attempt_count = int(delivery.get("attempt_count") or 0) + 1
-    max_attempts = max(1, int(delivery.get("max_attempts") or 3))
-    target_url = normalized_text(delivery.get("target_url"))
-    if not target_url:
-        updated = repo.update_webhook_delivery(
-            int(delivery["id"]),
-            {"status": "failed", "attempt_count": int(delivery.get("attempt_count") or 0), "last_error": "webhook_not_configured", "last_attempted_at": _iso(now), "next_retry_at": "", "response_status_code": None, "response_body_summary": ""},
-        )
-        return {"ok": False, "sent": False, "reason": "webhook_not_configured", "delivery": _webhook_row_view(updated or delivery)}
-    if not production_data_ready():
-        retryable = attempt_count < max_attempts
-        updated = repo.update_webhook_delivery(
-            int(delivery["id"]),
-            {"status": "retry_scheduled" if retryable else "exhausted", "attempt_count": attempt_count, "last_error": "fixture_retry_suppressed", "last_attempted_at": _iso(now), "next_retry_at": _iso(now + timedelta(seconds=60)) if retryable else "", "response_status_code": None, "response_body_summary": ""},
-        )
-        return {"ok": False, "sent": False, "reason": "fixture_retry_suppressed", "delivery": _webhook_row_view(updated or delivery)}
-    try:
-        import requests
-
-        payload = delivery.get("payload_json")
-        if isinstance(payload, str):
-            payload = json.loads(payload or "{}")
-        response = requests.post(target_url, json=payload or {}, headers=_webhook_headers(delivery), timeout=_webhook_timeout(delivery))
-        if 200 <= int(response.status_code) < 300:
-            updated = repo.update_webhook_delivery(int(delivery["id"]), {"status": "success", "attempt_count": attempt_count, "response_status_code": int(response.status_code), "response_body_summary": response.text[:500], "last_error": "", "last_attempted_at": _iso(now), "next_retry_at": ""})
-            return {"ok": True, "sent": True, "status_code": int(response.status_code), "delivery": _webhook_row_view(updated or delivery)}
-        retryable = attempt_count < max_attempts
-        updated = repo.update_webhook_delivery(int(delivery["id"]), {"status": "retry_scheduled" if retryable else "exhausted", "attempt_count": attempt_count, "response_status_code": int(response.status_code), "response_body_summary": response.text[:500], "last_error": f"http_status_{int(response.status_code)}", "last_attempted_at": _iso(now), "next_retry_at": _iso(now + timedelta(seconds=60)) if retryable else ""})
-        return {"ok": False, "sent": False, "status_code": int(response.status_code), "reason": f"http_status_{int(response.status_code)}", "delivery": _webhook_row_view(updated or delivery)}
-    except Exception as exc:
-        retryable = attempt_count < max_attempts
-        updated = repo.update_webhook_delivery(int(delivery["id"]), {"status": "retry_scheduled" if retryable else "exhausted", "attempt_count": attempt_count, "response_status_code": None, "response_body_summary": "", "last_error": str(exc)[:500], "last_attempted_at": _iso(now), "next_retry_at": _iso(now + timedelta(seconds=60)) if retryable else ""})
-        return {"ok": False, "sent": False, "reason": str(exc), "delivery": _webhook_row_view(updated or delivery)}
-
-
-def _webhook_timeout(delivery: dict[str, Any]) -> int:
-    event_type = normalized_text(delivery.get("event_type"))
-    key = "QUESTIONNAIRE_SUBMIT_WEBHOOK_TIMEOUT_SECONDS" if event_type == "questionnaire_submit" else "OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TIMEOUT_SECONDS"
-    return normalized_int(os.getenv(key), default=10, minimum=1, maximum=60)
-
-
-def _webhook_headers(delivery: dict[str, Any]) -> dict[str, str]:
-    event_type = normalized_text(delivery.get("event_type"))
-    key = "QUESTIONNAIRE_SUBMIT_WEBHOOK_TOKEN" if event_type == "questionnaire_submit" else "OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TOKEN"
-    token = normalized_text(os.getenv(key))
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
-
-
-def _iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S+00:00")
 
 
 def _beijing_time_label(value: Any) -> str:
@@ -434,8 +390,6 @@ def _broadcast_source_detail(row: dict[str, Any]) -> str:
         match = re.search(r"step[-_:]?(\d+)|:(\d+)$", source_id)
         step = next((item for item in (match.groups() if match else []) if item), "")
         return f"第 {step} 步" if step else "营销活动"
-    if source_type == "operation_task":
-        return "运营任务"
     if source_type == "cloud_plan":
         return "智能助手方案"
     return broadcast_source_type_label(source_type)
@@ -487,6 +441,7 @@ def _broadcast_job_view(row: dict[str, Any]) -> dict[str, Any]:
 def approve_broadcast_job(job_id: int, *, operator: str, repo: AdminJobsRepository | None = None) -> dict[str, Any]:
     repo = repo or build_admin_jobs_repository()
     before = repo.get_broadcast_job(job_id) or {}
+    _record_legacy_marker("old_broadcast_jobs_direct_approve_cancel", metadata={"operation": "approve_broadcast_job", "job_id_present": bool(job_id)})
     after = repo.approve_broadcast_job(job_id, approved_by=_operator(operator))
     if not after:
         raise ValueError("job not approvable (not waiting_approval)")
@@ -498,6 +453,7 @@ def approve_broadcast_job(job_id: int, *, operator: str, repo: AdminJobsReposito
 def cancel_broadcast_job(job_id: int, *, operator: str, reason: str = "", repo: AdminJobsRepository | None = None) -> dict[str, Any]:
     repo = repo or build_admin_jobs_repository()
     before = repo.get_broadcast_job(job_id) or {}
+    _record_legacy_marker("old_broadcast_jobs_direct_approve_cancel", metadata={"operation": "cancel_broadcast_job", "job_id_present": bool(job_id)})
     after = repo.cancel_broadcast_job(job_id, cancelled_by=_operator(operator), reason=normalized_text(reason))
     if not after:
         raise ValueError("job not cancelable (not queued or waiting_approval)")

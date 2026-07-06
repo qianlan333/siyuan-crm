@@ -19,7 +19,7 @@ def test_auth_wecom_inventory_documents_search_results_and_decisions() -> None:
         assert route in text
 
     assert "grep -R" in text
-    assert "tests/test_admin_slim_phase1.py" in text
+    assert "historical removed reference (test_admin_slim_phase1.py)" in text
     assert "aicrm_next/admin_config/api_docs_view_model.py" in text
     assert "deprecated" in text
     assert "external_call_blocked" in text

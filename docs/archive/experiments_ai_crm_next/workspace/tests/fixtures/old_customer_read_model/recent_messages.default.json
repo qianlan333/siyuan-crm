@@ -1,0 +1,15 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "messages": [
+      {
+        "msgid": "message_masked_001",
+        "msgtype": "text",
+        "content": "content_masked_001",
+        "send_time": "2026-05-18T10:15:00+08:00",
+        "external_userid": "external_user_masked_001"
+      }
+    ]
+  }
+}

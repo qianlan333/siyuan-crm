@@ -24,10 +24,11 @@ from .application import (
     build_jobs_payload,
     build_jobs_summary_payload,
     build_jobs_webhook_deliveries_payload,
+    build_legacy_disabled_payload,
     cancel_broadcast_job,
     execute_jobs_action,
 )
-from .domain import normalized_bool, normalized_text
+from .domain import normalized_bool, normalized_int, normalized_text
 from .notification_settings import (
     FEISHU_WEBHOOK_ERROR,
     FeishuWebhookValidationError,
@@ -37,6 +38,7 @@ from .notification_settings import (
     validate_feishu_webhook,
 )
 from aicrm_next.admin_shell import admin_path_for, shell_context
+from aicrm_next.shared.runtime import require_signing_secret
 
 router = APIRouter()
 
@@ -45,7 +47,11 @@ templates = Jinja2Templates(directory=_ADMIN_JOBS_TEMPLATE_DIR)
 
 
 def _secret_key() -> str:
-    return os.getenv("SECRET_KEY") or os.getenv("AICRM_NEXT_ACTION_TOKEN_SECRET") or "aicrm-next-dev-action-token"
+    return require_signing_secret(
+        "AICRM_NEXT_ACTION_TOKEN_SECRET",
+        fallback_env_keys=("SECRET_KEY",),
+        local_fallback="aicrm-next-dev-action-token",
+    ).decode("utf-8")
 
 
 def _sign(value: str) -> str:
@@ -207,6 +213,8 @@ async def api_admin_jobs_archive_sync_run(request: Request):
         "end_time": normalized_text(payload.get("end_time")),
         "owner_userid": normalized_text(payload.get("owner_userid")),
         "cursor": normalized_text(payload.get("cursor")),
+        "limit": normalized_text(payload.get("limit")),
+        "max_pages": normalized_text(payload.get("max_pages")),
         "confirm": normalized_bool(payload.get("confirm")),
     }
     try:
@@ -257,10 +265,11 @@ async def api_admin_jobs_deferred_jobs_run(request: Request):
     token_error = await _action_token_error(request, payload)
     if token_error:
         return JSONResponse({"ok": False, "error": token_error}, status_code=401)
-    try:
-        return _jsonable(execute_jobs_action(action="run-deferred-jobs", form={"limit": payload.get("limit"), "confirm": normalized_bool(payload.get("confirm"))}, operator=_operator_from_request(request, payload)))
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    body = build_legacy_disabled_payload(
+        "old_admin_jobs_deferred_run",
+        error="legacy_deferred_jobs_runner_disabled",
+    )
+    return JSONResponse(body, status_code=409)
 
 
 @router.get("/api/admin/jobs/webhook-deliveries")
@@ -274,10 +283,11 @@ async def api_admin_jobs_webhook_deliveries_run(request: Request):
     token_error = await _action_token_error(request, payload)
     if token_error:
         return JSONResponse({"ok": False, "error": token_error}, status_code=401)
-    try:
-        return _jsonable(execute_jobs_action(action="run-webhook-retries", form={"limit": payload.get("limit"), "confirm": normalized_bool(payload.get("confirm"))}, operator=_operator_from_request(request, payload)))
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    body = build_legacy_disabled_payload(
+        "old_customer_webhook_delivery_retry",
+        error="legacy_webhook_retry_disabled",
+    )
+    return JSONResponse(body, status_code=409)
 
 
 @router.post("/api/admin/jobs/webhook-deliveries/{delivery_id}/retry")
@@ -286,12 +296,12 @@ async def api_admin_jobs_webhook_delivery_retry(delivery_id: int, request: Reque
     token_error = await _action_token_error(request, payload)
     if token_error:
         return JSONResponse({"ok": False, "error": token_error}, status_code=401)
-    try:
-        return _jsonable(execute_jobs_action(action="retry-webhook-delivery", form={"delivery_id": delivery_id, "confirm": normalized_bool(payload.get("confirm"))}, operator=_operator_from_request(request, payload)))
-    except LookupError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=404)
-    except ValueError as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+    body = build_legacy_disabled_payload(
+        "old_customer_webhook_delivery_retry",
+        error="legacy_webhook_retry_disabled",
+        extra={"delivery_id": int(delivery_id)},
+    )
+    return JSONResponse(body, status_code=409)
 
 
 @router.get("/admin/broadcast-jobs", name="api.admin_broadcast_jobs", response_class=HTMLResponse)
@@ -376,6 +386,27 @@ async def api_admin_broadcast_jobs_feishu_hourly_report_run(request: Request):
         return JSONResponse({"ok": False, "error": token_error}, status_code=401)
     result = send_broadcast_job_hourly_feishu_report()
     return _jsonable({"ok": result.get("status") == "sent", **result})
+
+
+@router.post("/api/admin/jobs/order-identity-repair/run")
+async def api_admin_jobs_order_identity_repair_run(request: Request):
+    payload = await _request_payload(request)
+    token_error = await _cron_or_action_token_error(request, payload)
+    if token_error:
+        return JSONResponse({"ok": False, "error": token_error}, status_code=401)
+    return JSONResponse(
+        {
+            "ok": False,
+            "error": "order_identity_repair_retired",
+            "retired": True,
+            "message": "wechat_pay_order_identity_repair has been retired; paid order identity is handled by the current order/customer identity projection path.",
+            "replacement": "current_order_customer_identity_projection",
+            "route_owner": "ai_crm_next",
+            "real_external_call_executed": False,
+        },
+        status_code=410,
+    )
+    return _jsonable(result)
 
 
 @router.post("/api/admin/broadcast-jobs/{job_id}/approve")

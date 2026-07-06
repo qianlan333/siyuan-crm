@@ -1,0 +1,26 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "id": "prod_001",
+        "product_code": "course_masked_001",
+        "title": "product_masked_001",
+        "description": "masked fixture product",
+        "price_cents": 9900,
+        "currency": "CNY",
+        "enabled": true,
+        "page_slug": "course-masked-001",
+        "cover_image_id": "image_masked_001",
+        "detail_image_ids": ["image_masked_001"],
+        "buy_button_text": "立即购买",
+        "created_at": "2026-05-20T12:00:00Z",
+        "updated_at": "2026-05-20T12:00:00Z"
+      }
+    ],
+    "total": 1,
+    "limit": 50,
+    "offset": 0
+  }
+}

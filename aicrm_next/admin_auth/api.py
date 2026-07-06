@@ -9,14 +9,19 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from .service import (
+    CSRF_COOKIE,
     SESSION_COOKIE,
     SESSION_MAX_AGE_SECONDS,
+    admin_cookie_secure,
     authenticate_break_glass,
+    csrf_token_from_session,
     diagnostics_payload,
     login_context,
+    login_error_message,
     normalize_text,
     route_headers,
     safe_next_path,
+    session_payload_with_csrf,
     sign_session,
     verify_session,
 )
@@ -37,7 +42,11 @@ def admin_login_page(request: Request):
     next_path = safe_next_path(request.query_params.get("next"))
     if verify_session(request.cookies.get(SESSION_COOKIE)):
         return RedirectResponse(next_path, status_code=302, headers=route_headers())
-    context = login_context(request=request, next_path=next_path)
+    context = login_context(
+        request=request,
+        next_path=next_path,
+        page_error=login_error_message(request.query_params.get("auth_error")),
+    )
     return templates.TemplateResponse(request, "admin_console/login.html", context, headers=route_headers())
 
 
@@ -53,14 +62,26 @@ async def admin_login_submit(request: Request):
     if not result.ok or not result.session_payload:
         return _login_error(request, next_path=next_path, message="应急账号不可用，或用户名 / 密码错误。")
 
+    session_payload = session_payload_with_csrf(result.session_payload)
+    csrf_token = csrf_token_from_session(session_payload)
+    secure_cookie = admin_cookie_secure()
     response = RedirectResponse(next_path, status_code=302, headers=route_headers())
     response.set_cookie(
         SESSION_COOKIE,
-        sign_session(result.session_payload),
+        sign_session(session_payload),
         max_age=SESSION_MAX_AGE_SECONDS,
         httponly=True,
         samesite="lax",
-        secure=False,
+        secure=secure_cookie,
+        path="/",
+    )
+    response.set_cookie(
+        CSRF_COOKIE,
+        csrf_token,
+        max_age=SESSION_MAX_AGE_SECONDS,
+        httponly=False,
+        samesite="lax",
+        secure=secure_cookie,
         path="/",
     )
     return response
@@ -75,6 +96,7 @@ def admin_logout_options() -> JSONResponse:
 def admin_logout() -> RedirectResponse:
     response = RedirectResponse("/login", status_code=302, headers=route_headers())
     response.delete_cookie(SESSION_COOKIE, path="/")
+    response.delete_cookie(CSRF_COOKIE, path="/")
     return response
 
 

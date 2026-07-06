@@ -41,7 +41,7 @@ def test_run_due_missing_body_uses_controlled_default(monkeypatch):
 
     response = client.post(
         "/api/admin/cloud-orchestrator/campaigns/run-due",
-        headers={"Authorization": "Bearer timer-token"},
+        headers={"Authorization": "Bearer timer-token", "Idempotency-Key": "run-due-default-body"},
     )
 
     assert response.status_code == 200

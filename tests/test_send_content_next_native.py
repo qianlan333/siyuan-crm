@@ -19,10 +19,6 @@ def client(monkeypatch):
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def _operation_content(task: dict) -> dict:
-    return task["config"]["operation_content"]
-
-
 def test_send_content_validate_normalizes_ids_and_agent_text(client) -> None:
     response = client.post(
         "/api/admin/send-content/validate",
@@ -106,108 +102,22 @@ def test_material_picker_rejects_unknown_type_with_json(client) -> None:
     assert response.json() == {"ok": False, "error": "素材类型必须是 image、miniprogram 或 attachment"}
 
 
-def test_automation_task_detail_and_unified_send_content(client) -> None:
-    response = client.put(
-        "/api/admin/automation-conversion/tasks/1/send-content/unified",
-        json={
-            "content_package": {
-                "content_text": "  统一内容  ",
-                "image_library_ids": [12, 12],
-                "miniprogram_library_ids": [],
-                "attachment_library_ids": [56],
-            }
-        },
-    )
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [
+        ("get", "/api/admin/automation-conversion/tasks/1"),
+        ("put", "/api/admin/automation-conversion/tasks/1/send-strategy"),
+        ("put", "/api/admin/automation-conversion/tasks/1/send-content/unified"),
+        ("put", "/api/admin/automation-conversion/tasks/1/send-content/profile-segments/early_founder"),
+        ("put", "/api/admin/automation-conversion/tasks/1/send-content/behavior-segments/between_2_9"),
+        ("put", "/api/admin/automation-conversion/tasks/1/send-content/agent-materials"),
+        ("get", "/api/admin/automation-conversion/behavior-segment-rules"),
+    ],
+)
+def test_legacy_automation_task_content_routes_are_removed(client, method: str, path: str) -> None:
+    if method == "get":
+        response = client.get(path)
+    else:
+        response = getattr(client, method)(path, json={"content_package": {"content_text": "旧配置"}})
 
-    assert response.status_code == 200
-    operation_content = _operation_content(response.json()["task"])
-    assert operation_content["content_mode"] == "unified"
-    assert operation_content["unified_content_json"]["content_text"] == "统一内容"
-    assert operation_content["unified_content_json"]["image_library_ids"] == [12]
-
-    detail_response = client.get("/api/admin/automation-conversion/tasks/1")
-    assert detail_response.status_code == 200
-    assert _operation_content(detail_response.json()["task"])["content_mode"] == "unified"
-
-
-def test_automation_send_strategy_and_segment_content(client) -> None:
-    strategy_response = client.put(
-        "/api/admin/automation-conversion/tasks/1/send-strategy",
-        json={"content_mode": "profile_layered", "profile_segment_template_id": 1},
-    )
-    assert strategy_response.status_code == 200
-    assert _operation_content(strategy_response.json()["task"])["profile_segment_template_id"] == 1
-
-    segment_response = client.put(
-        "/api/admin/automation-conversion/tasks/1/send-content/profile-segments/early_founder",
-        json={
-            "segment_name": "早期个体创业者",
-            "profile_segment_template_id": 1,
-            "content_package": {"content_text": "画像分层内容"},
-        },
-    )
-
-    assert segment_response.status_code == 200
-    operation_content = _operation_content(segment_response.json()["task"])
-    assert operation_content["content_mode"] == "profile_layered"
-    assert operation_content["segment_contents_json"] == [
-        {
-            "segment_key": "early_founder",
-            "segment_name": "早期个体创业者",
-            "content_package": {
-                "content_text": "画像分层内容",
-                "image_library_ids": [],
-                "miniprogram_library_ids": [],
-                "attachment_library_ids": [],
-            },
-        }
-    ]
-
-
-def test_automation_behavior_rules_and_agent_materials(client) -> None:
-    rules_response = client.get("/api/admin/automation-conversion/behavior-segment-rules")
-    assert rules_response.status_code == 200
-    assert [item["segment_key"] for item in rules_response.json()["rules"][0]["segments"]] == [
-        "lt_2",
-        "between_2_9",
-        "gte_10",
-    ]
-
-    behavior_response = client.put(
-        "/api/admin/automation-conversion/tasks/1/send-content/behavior-segments/between_2_9",
-        json={"segment_name": "消息 2-9", "content_package": {"content_text": "消息数分层"}},
-    )
-    assert behavior_response.status_code == 200
-    assert _operation_content(behavior_response.json()["task"])["content_mode"] == "behavior_layered"
-
-    bad_behavior_response = client.put(
-        "/api/admin/automation-conversion/tasks/1/send-content/behavior-segments/unknown",
-        json={"content_package": {}},
-    )
-    assert bad_behavior_response.status_code == 400
-
-    agent_response = client.put(
-        "/api/admin/automation-conversion/tasks/1/send-content/agent-materials",
-        json={
-            "agent_code": "hxc_activation",
-            "content_package": {
-                "content_text": "生成要求",
-                "image_library_ids": [12],
-                "miniprogram_library_ids": [34],
-                "attachment_library_ids": [56],
-            },
-        },
-    )
-    assert agent_response.status_code == 200
-    agent_config = _operation_content(agent_response.json()["task"])["agent_config_json"]
-    assert agent_config == {
-        "agent_code": "hxc_activation",
-        "image_library_ids": [12],
-        "miniprogram_library_ids": [34],
-        "attachment_library_ids": [56],
-        "requirement": "生成要求",
-        "fallback_content": "",
-        "prompt": "",
-        "material_prompt": "",
-    }
-    assert "content_text" not in agent_config
+    assert response.status_code == 404

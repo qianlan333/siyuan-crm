@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import hashlib
 import hmac
 import json
@@ -15,13 +15,21 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from aicrm_next.commerce.domain import completion_redirect_projection, safe_completion_redirect_url
+from aicrm_next.commerce.external_push_admin import plan_order_paid_external_push_effect
+from aicrm_next.navigation_target import completion_action_for_target, completion_target_projection
 from aicrm_next.commerce.external_push_outbox import enqueue_transaction_paid_outbox
+from aicrm_next.commerce.order_expiration import close_expired_wechat_pay_orders, pending_order_expires_at_text
 from aicrm_next.commerce.product_code_aliases import product_code_filter_values
-from aicrm_next.commerce.wechat_pay_client import WeChatPayClient, WeChatPayClientConfig, WeChatPayClientError
+from aicrm_next.integration_gateway.wechat_pay_client import WeChatPayClient, WeChatPayClientConfig, WeChatPayClientError
 from aicrm_next.integration_gateway.wechat_oauth_client import WeChatOAuthClientError, build_wechat_oauth_client
+from aicrm_next.platform_foundation.command_bus import CommandContext
+from aicrm_next.platform_foundation.internal_events import InternalEventService, register_payment_succeeded_consumers
+from aicrm_next.platform_foundation.internal_events.config import event_type_allowed, payment_internal_events_enabled
+from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE
 from aicrm_next.questionnaire.oauth import questionnaire_h5_identity_from_cookies
-from aicrm_next.shared.runtime import production_data_ready, raw_database_url
+from aicrm_next.shared.runtime import production_data_ready
 
+from .repo import connect_h5_wechat_pay_db as _connect
 from .signed_context import append_ctx_query, load_sidebar_product_context_token
 from .sidebar_order_context import resolve_sidebar_order_context
 from .service import format_price, get_public_product, product_not_found_payload, route_headers
@@ -180,9 +188,11 @@ def payment_oauth_start_url(return_url: str) -> str:
 
 
 def payment_oauth_start(request: Request) -> RedirectResponse | JSONResponse:
+    return_url = _safe_return_url(request.query_params.get("return_url") or "/")
+    if _identity_from_request(request).get("openid"):
+        return RedirectResponse(return_url, status_code=302, headers=route_headers())
     if not _oauth_configured():
         return JSONResponse({"ok": False, "error": "wechat_pay_oauth_not_configured"}, status_code=501, headers=route_headers())
-    return_url = _safe_return_url(request.query_params.get("return_url") or "/")
     now = int(datetime.now(timezone.utc).timestamp())
     state = _signed_blob({"return_url": return_url, "nonce": secrets.token_urlsafe(16), "iat": now, "exp": now + STATE_TTL_SECONDS})
     authorize_url = _wechat_oauth_authorize_url(
@@ -211,6 +221,8 @@ def payment_oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
     if oauth_payload.get("errcode") not in (None, 0):
         return JSONResponse({"ok": False, "error": oauth_payload.get("errmsg") or "wechat_oauth_failed"}, status_code=502, headers=route_headers())
     openid = _normalized_text(oauth_payload.get("openid"))
+    if not openid:
+        return JSONResponse({"ok": False, "error": "wechat_oauth_openid_missing"}, status_code=502, headers=route_headers())
     unionid = _normalized_text(oauth_payload.get("unionid"))
     payer_name = ""
     access_token = _normalized_text(oauth_payload.get("access_token"))
@@ -256,6 +268,7 @@ def checkout_page_state(product: dict[str, Any], request: Request) -> dict[str, 
         "enabled": _env_bool("WECHAT_PAY_ENABLED", False),
         "require_mobile": bool(product.get("require_mobile")),
         "cta_text": _normalized_text(product.get("buy_button_text")) or "确认支付",
+        "completion_target": product.get("completion_target") or {},
         "completion_action": product.get("completion_action") or {"type": "default", "redirect_url": ""},
         "paid_order": paid_order,
         "price_display": format_price(product),
@@ -300,13 +313,6 @@ def _require_payment_ready() -> WeChatPayClientConfig:
     return config
 
 
-def _connect():
-    import psycopg
-    from psycopg.rows import dict_row
-
-    return psycopg.connect(raw_database_url(), row_factory=dict_row)
-
-
 def _jsonb(value: Any):
     from psycopg.types.json import Jsonb
 
@@ -318,7 +324,7 @@ def _out_trade_no() -> str:
 
 
 def _expires_at() -> str:
-    return (datetime.now(timezone.utc) + timedelta(minutes=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return pending_order_expires_at_text()
 
 
 def _safe_success_url(value: Any) -> str:
@@ -344,17 +350,112 @@ def _is_order_effectively_paid(row: dict[str, Any]) -> bool:
     return _normalized_text(row.get("status")) == "paid" or _normalized_text(row.get("trade_state")) == "SUCCESS"
 
 
+def _masked_mobile(value: Any) -> str:
+    text = _normalized_text(value)
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) >= 7:
+        return f"{digits[:3]}****{digits[-4:]}"
+    return ""
+
+
+def _payment_subject_id(order: dict[str, Any]) -> str:
+    return (
+        _normalized_text(order.get("external_userid"))
+        or _normalized_text(order.get("userid_snapshot"))
+        or _normalized_text(order.get("respondent_key"))
+    )
+
+
+def _emit_payment_succeeded_internal_event(
+    *,
+    order: dict[str, Any],
+    transaction: dict[str, Any],
+    outbox: dict[str, Any] | None,
+    source_route: str,
+) -> dict[str, Any] | None:
+    if not payment_internal_events_enabled() or not event_type_allowed(PAYMENT_SUCCEEDED_EVENT_TYPE):
+        return None
+    out_trade_no = _normalized_text(order.get("out_trade_no") or transaction.get("out_trade_no"))
+    aggregate_id = _normalized_text(order.get("id") or out_trade_no)
+    if not out_trade_no or not aggregate_id:
+        return None
+    subject_id = _payment_subject_id(order)
+    try:
+        register_payment_succeeded_consumers()
+        result = InternalEventService().emit_event(
+            event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
+            event_version=1,
+            aggregate_type="wechat_pay_order",
+            aggregate_id=aggregate_id,
+            subject_type="customer",
+            subject_id=subject_id,
+            idempotency_key=f"payment.succeeded:{out_trade_no}",
+            source_module="public_product.h5_wechat_pay",
+            source_command_id=out_trade_no,
+            correlation_id=out_trade_no,
+            context=CommandContext(
+                actor_id="wechat_pay_notify",
+                actor_type="system",
+                trace_id=out_trade_no,
+                request_id=_normalized_text(transaction.get("transaction_id")),
+                source_route=source_route or "/api/h5/wechat-pay/notify",
+            ),
+            payload={
+                "order": dict(order),
+                "transaction": dict(transaction or {}),
+                "domain_event_outbox_id": (outbox or {}).get("id"),
+                "legacy_event_aliases": ["transaction.paid", "payment_succeeded"],
+            },
+            payload_summary={
+                "out_trade_no": out_trade_no,
+                "order_id": order.get("id"),
+                "aggregate_id": aggregate_id,
+                "subject_type": "customer",
+                "subject_id": subject_id,
+                "product_code": order.get("product_code"),
+                "amount_total": int(order.get("amount_total") or order.get("payer_total") or 0),
+                "status": order.get("status"),
+                "trade_state": order.get("trade_state"),
+                "paid_at": str(order.get("paid_at") or ""),
+                "mobile_masked": _masked_mobile(order.get("mobile_snapshot")),
+                "domain_event_outbox_id": (outbox or {}).get("id"),
+            },
+        )
+        LOGGER.info(
+            "payment_succeeded_internal_event_ensured",
+            extra={"out_trade_no": out_trade_no, "event_id": (result.get("event") or {}).get("event_id")},
+        )
+        return result
+    except Exception:
+        LOGGER.exception("payment_succeeded_internal_event_failed", extra={"out_trade_no": out_trade_no})
+        return None
+
+
 def _completion_redirect_from_product(product: dict[str, Any]) -> dict[str, Any]:
-    return completion_redirect_projection(
+    completion_redirect = completion_redirect_projection(
         product.get("completion_redirect_enabled"),
         product.get("completion_redirect_url"),
     )
+    completion_target = completion_target_projection(
+        product.get("completion_target_json") if product.get("completion_target_json") is not None else product.get("completion_target"),
+        legacy_h5_url=completion_redirect.get("completion_redirect_url"),
+        legacy_enabled=completion_redirect.get("completion_redirect_enabled"),
+    )
+    return {
+        **completion_redirect,
+        **completion_target,
+        "completion_action": completion_action_for_target(
+            completion_target["completion_target"],
+            legacy_redirect_url=completion_redirect.get("completion_redirect_url"),
+            legacy_enabled=completion_redirect.get("completion_redirect_enabled"),
+        ),
+    }
 
 
 def _completion_redirect_for_product_code(conn: Any, product_code: str) -> dict[str, Any]:
     row = conn.execute(
         """
-        SELECT completion_redirect_enabled, completion_redirect_url
+        SELECT completion_redirect_enabled, completion_redirect_url, completion_target_json
         FROM wechat_pay_products
         WHERE product_code = %s
         LIMIT 1
@@ -363,7 +464,7 @@ def _completion_redirect_for_product_code(conn: Any, product_code: str) -> dict[
     ).fetchone()
     if not row:
         return completion_redirect_projection(False, "")
-    return completion_redirect_projection(row.get("completion_redirect_enabled"), row.get("completion_redirect_url"))
+    return _completion_redirect_from_product(dict(row))
 
 
 def _lead_qr_payload(row: dict[str, Any] | None) -> dict[str, Any]:
@@ -379,7 +480,7 @@ def _lead_qr_payload(row: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-def _resolve_lead_channel_qr(conn: Any, *, channel_id: int | None = None, program_id: int | None = None) -> dict[str, Any]:
+def _resolve_lead_channel_qr(conn: Any, *, channel_id: int | None = None) -> dict[str, Any]:
     if channel_id:
         row = conn.execute(
             """
@@ -404,39 +505,13 @@ def _resolve_lead_channel_qr(conn: Any, *, channel_id: int | None = None, progra
             (int(channel_id),),
         ).fetchone()
         return _lead_qr_payload(row)
-    if program_id:
-        row = conn.execute(
-            """
-            SELECT
-                c.id AS channel_id,
-                c.channel_name,
-                COALESCE(NULLIF(active_asset.qr_url, ''), NULLIF(c.qr_url, ''), '') AS qr_url,
-                c.status
-            FROM automation_channel c
-            LEFT JOIN LATERAL (
-                SELECT qa.qr_url
-                FROM automation_channel_qrcode_asset qa
-                WHERE qa.channel_id = c.id
-                  AND qa.status = 'active'
-                  AND NULLIF(qa.qr_url, '') IS NOT NULL
-                ORDER BY qa.generated_at DESC, qa.id DESC
-                LIMIT 1
-            ) active_asset ON TRUE
-            WHERE c.program_id = %s
-              AND c.status IN ('active', 'configured')
-            ORDER BY c.updated_at DESC NULLS LAST, c.id DESC
-            LIMIT 1
-            """,
-            (int(program_id),),
-        ).fetchone()
-        return _lead_qr_payload(row)
     return {}
 
 
 def _lead_qr_for_product_code(conn: Any, product_code: str) -> dict[str, Any]:
     product = conn.execute(
         """
-        SELECT lead_channel_id, lead_program_id
+        SELECT lead_channel_id
         FROM wechat_pay_products
         WHERE product_code = %s
         LIMIT 1
@@ -446,28 +521,53 @@ def _lead_qr_for_product_code(conn: Any, product_code: str) -> dict[str, Any]:
     if not product:
         return {}
     channel_id = int(product.get("lead_channel_id") or 0) or None
-    program_id = int(product.get("lead_program_id") or 0) or None
-    return _resolve_lead_channel_qr(conn, channel_id=channel_id, program_id=program_id)
+    return _resolve_lead_channel_qr(conn, channel_id=channel_id)
+
+
+def _resolve_unionid_for_payment_identity(conn: Any, identity: dict[str, str]) -> str:
+    unionid = _normalized_text(identity.get("unionid"))
+    if unionid:
+        return unionid
+    clauses: list[str] = []
+    params: list[Any] = []
+    openid = _normalized_text(identity.get("openid"))
+    if openid:
+        clauses.append("(primary_openid = %s OR jsonb_exists(openids_json, %s))")
+        params.extend([openid, openid])
+    external_userid = _normalized_text(identity.get("external_userid"))
+    if external_userid:
+        clauses.append("(primary_external_userid = %s OR jsonb_exists(external_userids_json, %s))")
+        params.extend([external_userid, external_userid])
+    if not clauses:
+        return ""
+    row = conn.execute(
+        f"""
+        SELECT unionid
+        FROM crm_user_identity
+        WHERE {" OR ".join(clauses)}
+        ORDER BY
+            CASE
+                WHEN primary_external_userid = %s THEN 0
+                WHEN primary_openid = %s THEN 1
+                ELSE 2
+            END,
+            last_seen_at DESC NULLS LAST,
+            updated_at DESC NULLS LAST
+        LIMIT 1
+        """,
+        tuple([*params, external_userid, openid]),
+    ).fetchone()
+    return _normalized_text((row or {}).get("unionid"))
 
 
 def _paid_order_for_product_identity(conn: Any, *, product: dict[str, Any], identity: dict[str, str]) -> dict[str, Any] | None:
     product_codes = product_code_filter_values(product.get("product_code"))
-    identity_clauses: list[str] = []
-    params: list[Any] = list(product_codes)
-    openid = _normalized_text(identity.get("openid"))
-    if openid:
-        identity_clauses.append("payer_openid = %s")
-        params.append(openid)
     unionid = _normalized_text(identity.get("unionid"))
-    if unionid:
-        identity_clauses.append("unionid = %s")
-        params.append(unionid)
-    external_userid = _normalized_text(identity.get("external_userid"))
-    if external_userid and not identity_clauses:
-        identity_clauses.append("external_userid = %s")
-        params.append(external_userid)
-    if not product_codes or not identity_clauses:
+    if not unionid:
+        unionid = _resolve_unionid_for_payment_identity(conn, identity)
+    if not product_codes or not unionid:
         return None
+    params: list[Any] = [*product_codes, unionid]
     product_placeholders = ", ".join(["%s"] * len(product_codes))
     row = conn.execute(
         f"""
@@ -479,7 +579,7 @@ def _paid_order_for_product_identity(conn: Any, *, product: dict[str, Any], iden
             COALESCE(refund_status, '') = 'full_refunded'
             OR (amount_total > 0 AND COALESCE(refunded_amount_total, 0) >= amount_total)
           )
-          AND ({" OR ".join(identity_clauses)})
+          AND unionid = %s
         ORDER BY paid_at DESC NULLS LAST, updated_at DESC NULLS LAST, created_at DESC NULLS LAST, id DESC
         LIMIT 1
         """,
@@ -520,6 +620,17 @@ def _order_payload(
     completion = dict(effective_completion.get("completion_redirect") or {})
     completion_url = safe_completion_redirect_url(completion.get("url") or effective_completion.get("completion_redirect_url"))
     completion_enabled = bool(completion.get("enabled")) and bool(completion_url)
+    completion_target = (effective_completion.get("completion_target") or effective_completion.get("completion_target_json") or {}) if isinstance(effective_completion, dict) else {}
+    target_enabled = bool(completion_target.get("enabled")) if isinstance(completion_target, dict) else False
+    completion_action = (
+        completion_action_for_target(
+            completion_target,
+            legacy_redirect_url=completion_url,
+            legacy_enabled=completion_enabled,
+        )
+        if isinstance(completion_target, dict) and completion_target
+        else ({"type": "redirect", "redirect_url": completion_url} if completion_enabled else {"type": "default", "redirect_url": ""})
+    )
     status = _normalized_text(row.get("status"))
     if _is_order_fully_refunded(row):
         status = "full_refunded"
@@ -539,9 +650,10 @@ def _order_payload(
         "completion_redirect_enabled": bool(effective_completion.get("completion_redirect_enabled")),
         "completion_redirect_url": completion_url,
         "completion_redirect": {"enabled": completion_enabled, "url": completion_url if completion_enabled else ""},
-        "completion_action": {"type": "redirect", "redirect_url": completion_url} if completion_enabled else {"type": "default", "redirect_url": ""},
+        "completion_target": completion_target if isinstance(completion_target, dict) else {},
+        "completion_action": completion_action,
     }
-    if _is_order_effectively_paid(row) and not completion_enabled and lead_qr and lead_qr.get("qr_url"):
+    if _is_order_effectively_paid(row) and not completion_enabled and not target_enabled and lead_qr and lead_qr.get("qr_url"):
         payload["lead_qr"] = lead_qr
         payload["completion_action"] = {"type": "lead_qr", "redirect_url": ""}
     return payload
@@ -552,12 +664,11 @@ def _insert_order(conn: Any, *, product: dict[str, Any], identity: dict[str, str
         """
         INSERT INTO wechat_pay_orders (
             out_trade_no, order_source, client_order_ref, product_code, product_name, description,
-            amount_total, currency, payer_openid, respondent_key, unionid, external_userid,
-            userid_snapshot, mobile_snapshot, payer_name_snapshot, status, success_url, metadata_json,
+            amount_total, currency, unionid, payer_name_snapshot, status, success_url, metadata_json,
             request_meta_json, expires_at, created_at, updated_at
         )
         VALUES (
-            %s, 'h5_checkout', '', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, 'h5_checkout', '', %s, %s, %s, %s, %s, %s, %s,
             'created', %s, %s::jsonb, %s::jsonb, %s::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         RETURNING *
@@ -569,15 +680,21 @@ def _insert_order(conn: Any, *, product: dict[str, Any], identity: dict[str, str
             product.get("description") or product["title"],
             int(product.get("price_cents") or 0),
             product.get("currency") or "CNY",
-            identity.get("openid") or "",
-            identity.get("respondent_key") or "",
             identity.get("unionid") or "",
-            identity.get("external_userid") or "",
-            identity.get("owner_userid") or "",
-            mobile,
             identity.get("payer_name") or "",
             _safe_success_url(product.get("completion_redirect_url")),
-            _jsonb({"completion_redirect": product.get("completion_redirect") or {}}),
+            _jsonb(
+                {
+                    "completion_redirect": product.get("completion_redirect") or {},
+                    "payer_identity": {
+                        "openid": identity.get("openid") or "",
+                        "respondent_key": identity.get("respondent_key") or "",
+                        "external_userid": identity.get("external_userid") or "",
+                        "owner_userid": identity.get("owner_userid") or "",
+                        "mobile": mobile,
+                    },
+                }
+            ),
             _jsonb(request_meta or {}),
             _expires_at(),
         ),
@@ -610,12 +727,11 @@ def _mark_order_failed(conn: Any, out_trade_no: str, error_message: str) -> None
     )
 
 
-def _apply_transaction(conn: Any, transaction: dict[str, Any]) -> dict[str, Any]:
+def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: str = "/api/h5/wechat-pay/notify") -> dict[str, Any]:
     trade_no = _normalized_text(transaction.get("out_trade_no"))
     trade_state = _normalized_text(transaction.get("trade_state"))
     status = "paid" if trade_state == "SUCCESS" else ("closed" if trade_state in {"CLOSED", "REVOKED"} else "paying")
     amount = transaction.get("amount") if isinstance(transaction.get("amount"), dict) else {}
-    payer = transaction.get("payer") if isinstance(transaction.get("payer"), dict) else {}
     previous = conn.execute("SELECT * FROM wechat_pay_orders WHERE out_trade_no = %s LIMIT 1", (trade_no,)).fetchone()
     was_paid = _normalized_text((previous or {}).get("status")) == "paid" or _normalized_text((previous or {}).get("trade_state")) == "SUCCESS"
     order = conn.execute(
@@ -625,7 +741,6 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any]) -> dict[str, Any]
             trade_state = %s,
             transaction_id = %s,
             bank_type = %s,
-            payer_openid = COALESCE(NULLIF(%s, ''), payer_openid),
             payer_total = %s,
             paid_at = CASE WHEN %s = 'SUCCESS' THEN NULLIF(%s, '')::timestamptz ELSE paid_at END,
             notify_payload_json = %s::jsonb,
@@ -639,7 +754,6 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any]) -> dict[str, Any]
             trade_state,
             _normalized_text(transaction.get("transaction_id")),
             _normalized_text(transaction.get("bank_type")),
-            _normalized_text(payer.get("openid")),
             int(amount.get("payer_total") or amount.get("total") or 0),
             trade_state,
             _normalized_text(transaction.get("success_time")),
@@ -651,6 +765,13 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any]) -> dict[str, Any]
     is_paid = _normalized_text(order_payload.get("status")) == "paid" or _normalized_text(order_payload.get("trade_state")) == "SUCCESS"
     if is_paid:
         outbox = enqueue_transaction_paid_outbox(conn, order_payload)
+        _emit_payment_succeeded_internal_event(
+            order=order_payload,
+            transaction=transaction,
+            outbox=outbox,
+            source_route=source_route,
+        )
+        _plan_order_paid_external_effect_job(conn, order=order_payload, transaction=transaction, outbox=outbox)
         LOGGER.info(
             "wechat_pay_transaction_paid_outbox_ensured",
             extra={
@@ -661,14 +782,27 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any]) -> dict[str, Any]
                 "was_paid": was_paid,
             },
         )
-        if not was_paid:
-            try:
-                from aicrm_next.automation_runtime_v2.bridge import process_payment_succeeded_event
-
-                process_payment_succeeded_event(order=order_payload, transaction=transaction)
-            except Exception:
-                LOGGER.exception("automation_runtime_v2_payment_event_failed", extra={"out_trade_no": trade_no})
     return order_payload
+
+
+def _plan_order_paid_external_effect_job(conn: Any, *, order: dict[str, Any], transaction: dict[str, Any], outbox: dict[str, Any] | None) -> None:
+    out_trade_no = _normalized_text(order.get("out_trade_no"))
+    try:
+        result = plan_order_paid_external_push_effect(
+            conn,
+            order=order,
+            transaction=transaction,
+            outbox=outbox,
+            source_module="public_product.h5_wechat_pay",
+            source_route="/api/h5/wechat-pay/notify",
+        )
+        if result.get("skipped"):
+            LOGGER.info(
+                "wechat_pay_order_external_push_skipped",
+                extra={"out_trade_no": out_trade_no, "reason": result.get("reason")},
+            )
+    except Exception:
+        LOGGER.exception("wechat_pay_external_effect_job_failed", extra={"out_trade_no": out_trade_no})
 
 
 def create_jsapi_order_response(request: Request, payload: dict[str, Any]) -> JSONResponse:
@@ -767,13 +901,15 @@ def order_status_response(out_trade_no: str, request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "error": "production_database_required"}, status_code=503, headers=route_headers())
     trade_no = _normalized_text(out_trade_no)
     with _connect() as conn:
+        close_expired_wechat_pay_orders(conn=conn, out_trade_no=trade_no, limit=1)
         order = conn.execute("SELECT * FROM wechat_pay_orders WHERE out_trade_no = %s LIMIT 1", (trade_no,)).fetchone()
         if not order:
             return JSONResponse({"ok": False, "error": "order_not_found"}, status_code=404, headers=route_headers())
+        conn.commit()
         if _normalized_text(request.query_params.get("refresh")).lower() in {"1", "true", "yes", "on"}:
             try:
                 transaction = WeChatPayClient(_client_config()).query_order_by_out_trade_no(trade_no)
-                order = _apply_transaction(conn, transaction)
+                order = _apply_transaction(conn, transaction, source_route=f"/api/h5/wechat-pay/orders/{trade_no}")
                 conn.commit()
             except Exception as exc:
                 conn.rollback()
@@ -792,14 +928,14 @@ def order_status_response(out_trade_no: str, request: Request) -> JSONResponse:
     )
 
 
-async def notify_response(request: Request) -> JSONResponse:
-    body = (await request.body()).decode("utf-8")
+def notify_response(request: Request, body: bytes) -> JSONResponse:
+    body_text = body.decode("utf-8")
     try:
-        transaction = WeChatPayClient(_client_config()).verify_and_decrypt_notification(body=body, headers=dict(request.headers))
+        transaction = WeChatPayClient(_client_config()).verify_and_decrypt_notification(body=body_text, headers=dict(request.headers))
         if not production_data_ready():
             raise RuntimeError("production_database_required")
         with _connect() as conn:
-            _apply_transaction(conn, transaction)
+            _apply_transaction(conn, transaction, source_route="/api/h5/wechat-pay/notify")
             conn.commit()
         return JSONResponse({"code": "SUCCESS", "message": "成功"})
     except Exception as exc:

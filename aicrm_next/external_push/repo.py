@@ -158,6 +158,19 @@ class SQLAlchemyExternalPushRepository:
             "currency": _normalized_text(order.get("currency")) or "CNY",
         }
 
+    def resolve_identity_mobile_by_unionid(self, unionid: str) -> str:
+        row = self._one(
+            """
+            SELECT mobile
+            FROM crm_user_identity
+            WHERE unionid = :unionid
+              AND COALESCE(mobile, '') <> ''
+            LIMIT 1
+            """,
+            {"unionid": _normalized_text(unionid)},
+        )
+        return _normalized_text((row or {}).get("mobile"))
+
     def insert_outbox_event(
         self,
         *,

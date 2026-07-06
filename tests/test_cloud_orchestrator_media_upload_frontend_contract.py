@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NEXT_PLAN_TEMPLATE = ROOT / "aicrm_next/frontend_compat/templates/admin_console/cloud_plan_review.html"
 NEXT_PLAN_JS = ROOT / "aicrm_next/frontend_compat/static/admin_console/cloud_plan_review.js"
 NEXT_CAMPAIGN_TEMPLATE = ROOT / "aicrm_next/frontend_compat/templates/admin_console/cloud_campaigns_workspace.html"
-INVENTORY = ROOT / "docs/architecture/cloud_orchestrator_media_upload_route_inventory.md"
+INVENTORY = ROOT / "docs/archive/route_inventory/cloud_orchestrator_media_upload_route_inventory.md"
 
 
 def test_cloud_plan_review_uses_material_picker_not_direct_legacy_upload_url():

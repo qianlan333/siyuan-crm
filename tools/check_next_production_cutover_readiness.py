@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -13,13 +12,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.check_next_production_runtime_gaps import run_check as run_gap_check
-from tools.check_next_timer_route_readiness import run_check as run_timer_check
 from tools.check_active_automation_run_due_guardrails import run_check as run_active_automation_guardrail_check
 
 
 def run_check() -> dict[str, Any]:
     gaps = run_gap_check()
-    timers = run_timer_check()
     active_guardrails = run_active_automation_guardrail_check()
     route_404_blockers = gaps.get("route_404_blockers", [])
     content_blockers = gaps.get("content_blockers", [])
@@ -27,35 +24,29 @@ def run_check() -> dict[str, Any]:
     callback_ready = not any("callback" in item or "api/wecom/events" in item for item in route_404_blockers)
     payment_routes_ready = not any("wechat-pay" in item or "alipay" in item for item in route_404_blockers)
     oauth_routes_ready = not any("oauth" in item for item in route_404_blockers) and not oauth_blockers
-    timer_routes_ready = timers.get("ok", False)
-    dry_run_db_sentinel_ok = bool((timers.get("dry_run_db_sentinel") or {}).get("ok"))
+    active_guardrails_ok = bool(active_guardrails.get("ok"))
+    active_guardrail_db_sentinel_ok = bool((active_guardrails.get("db_sentinel") or {}).get("ok"))
     legacy_fallbacks_still_required = [
         "5013 callback fallback until Next callback observation window passes",
-        "legacy payment/OAuth/WeCom/automation domain services via Next compatibility facade",
+        "legacy payment/OAuth/WeCom domain services via Next compatibility facade",
     ]
     result = {
-        "ok": gaps.get("ok", False) and timer_routes_ready and active_guardrails.get("ok", False),
+        "ok": gaps.get("ok", False) and active_guardrails_ok,
         "database_mode": gaps.get("database_mode"),
         "fixture_in_production": False,
         "route_404_blockers": route_404_blockers,
         "content_blockers": content_blockers,
         "oauth_blockers": oauth_blockers,
         "callback_ready": callback_ready,
-        "timer_routes_ready": timer_routes_ready,
-        "dry_run_db_sentinel_ok": dry_run_db_sentinel_ok,
         "payment_routes_ready": payment_routes_ready,
         "oauth_routes_ready": oauth_routes_ready,
         "legacy_fallbacks_still_required": legacy_fallbacks_still_required,
-        "safe_to_enable_timers": bool(timers.get("safe_to_enable_timers"))
-        and bool(gaps.get("automation_production_data_ready"))
-        and dry_run_db_sentinel_ok
-        and bool(active_guardrails.get("ok"))
-        and bool((active_guardrails.get("db_sentinel") or {}).get("ok")),
+        "safe_to_enable_timers": False,
         "safe_to_remove_5013_callback_fallback": False,
         "production_config_modified": gaps.get("production_config_modified", False),
         "runtime_gap_check": gaps,
-        "timer_check": timers,
-        "active_automation_guardrails_ok": bool(active_guardrails.get("ok")),
+        "active_automation_guardrails_ok": active_guardrails_ok,
+        "active_guardrail_db_sentinel_ok": active_guardrail_db_sentinel_ok,
         "active_automation_guardrails": active_guardrails,
     }
     return result
@@ -74,12 +65,11 @@ def write_outputs(result: dict[str, Any], output_md: str | None, output_json: st
             f"- content_blockers: {result['content_blockers']}",
             f"- oauth_blockers: {result['oauth_blockers']}",
             f"- callback_ready: {result['callback_ready']}",
-            f"- timer_routes_ready: {result['timer_routes_ready']}",
-            f"- dry_run_db_sentinel_ok: {result['dry_run_db_sentinel_ok']}",
             f"- payment_routes_ready: {result['payment_routes_ready']}",
             f"- oauth_routes_ready: {result['oauth_routes_ready']}",
             f"- safe_to_enable_timers: {result['safe_to_enable_timers']}",
             f"- active_automation_guardrails_ok: {result['active_automation_guardrails_ok']}",
+            f"- active_guardrail_db_sentinel_ok: {result['active_guardrail_db_sentinel_ok']}",
             f"- safe_to_remove_5013_callback_fallback: {result['safe_to_remove_5013_callback_fallback']}",
             "",
             "## Legacy Fallbacks Still Required",

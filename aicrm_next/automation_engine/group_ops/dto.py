@@ -102,6 +102,9 @@ class GroupOpsRunDueRequest(BaseModel):
     allow_node_ids: list[int] = Field(default_factory=list)
     max_outbound_tasks: int = 0
     scheduled_at: str | None = None
+    external_effect_test_loopback: bool = False
+    test_receiver_response_status: int = 200
+    test_receiver_base_url: str = ""
 
 
 class GroupOpsWebhookReceiveRequest(BaseModel):
@@ -118,6 +121,9 @@ class GroupOpsWebhookReceiveRequest(BaseModel):
     actions: dict[str, dict[str, Any]] = Field(default_factory=dict)
     rule: dict[str, Any] = Field(default_factory=dict)
     payload: dict[str, Any] = Field(default_factory=dict)
+    external_effect_test_loopback: bool = False
+    test_receiver_response_status: int = 200
+    test_receiver_base_url: str = ""
 
 
 class GroupOpsMembersRequest(BaseModel):

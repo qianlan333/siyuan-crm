@@ -40,16 +40,16 @@ DELETED_LOW_RISK_EXACT = {
     "wecom_ability" + "_service/LEGACY_FROZEN.md",
     "wecom_ability" + "_service/__init__.py",
 }
+DELETED_PRODUCTION_COMPAT_PREFIX = "aicrm_next/production_compat/"
 RUNTIME_FALLBACK_ALLOWED_EXACT: set[str] = set()
 LOW_RISK_EXACT = {
     "README.md",
     "requirements.txt",
     "aicrm_next/automation_engine/channels_api.py",
-    "aicrm_next/automation_runtime_v2/bridge.py",
-    "aicrm_next/automation_runtime_v2/channel_binding_service.py",
+    "aicrm_next/ai_audience_ops/agent_copywriting.py",
+    "aicrm_next/ai_audience_ops/agent_gateway.py",
     "scripts/run_lint.py",
-    "scripts/smoke_automation_runtime_v2.py",
-    "tests/automation_runtime_v2_test_helpers.py",
+    "tests/test_ai_audience_agent_copywriting.py",
     "aicrm_next/customer_read_model/api.py",
     "aicrm_next/automation_engine/api.py",
     "docs/claude_code_integration/README.md",
@@ -67,10 +67,6 @@ AUTOPILOT_DELIVERABLE_RUNTIME_PATHS = {
     "aicrm_next/automation_engine/application.py",
     "aicrm_next/automation_engine/dto.py",
     "aicrm_next/automation_engine/repo.py",
-    "aicrm_next/automation_engine/task_group_sqlalchemy_repository.py",
-    "aicrm_next/automation_engine/workflow_sqlalchemy_repository.py",
-    "aicrm_next/automation_engine/workflow_node_sqlalchemy_repository.py",
-    "aicrm_next/automation_engine/task_sqlalchemy_repository.py",
     "aicrm_next/automation_engine/agent_sqlalchemy_repository.py",
     "aicrm_next/automation_engine/agent_output_sqlalchemy_repository.py",
     "aicrm_next/automation_engine/agent_run_sqlalchemy_repository.py",
@@ -85,10 +81,7 @@ AUTOPILOT_DELIVERABLE_RUNTIME_PATHS = {
     "aicrm_next/integration_gateway/legacy_flask_facade.py",
     "aicrm_next/integration_gateway/wecom_group_adapter.py",
     "aicrm_next/customer_tags/api.py",
-    "aicrm_next/customer_tags/application.py",
     "aicrm_next/customer_tags/dto.py",
-    "aicrm_next/customer_tags/wecom_tag_adapter.py",
-    "aicrm_next/customer_tags/wecom_tag_contract.py",
     "aicrm_next/customer_tags/wecom_tag_live_adapter.py",
     "aicrm_next/integration_gateway/wecom_tag_live_gateway.py",
     "aicrm_next/integration_gateway/wecom_contact_callback_adapter.py",
@@ -121,13 +114,12 @@ POLICY_FILES_CAN_DEFINE_STOP_TERMS = {
         "docs/development/codex_task_template.md",
         "docs/development/phase_execution_state.yaml",
         "docs/development/autonomous_stop_conditions.yaml",
-        "aicrm_next/automation_runtime_v2/bridge.py",
+        "aicrm_next/ai_audience_ops/agent_copywriting.py",
+        "aicrm_next/ai_audience_ops/agent_gateway.py",
         "aicrm_next/integration_gateway/legacy_flask_facade.py",
         "scripts/codex_autopilot_tick.sh",
-        "scripts/smoke_automation_runtime_v2.py",
         "tools/check_autonomous_development_loop.py",
         "tools/check_automerge_eligibility.py",
-        "tools/check_reply_monitor_run_due_readiness.py",
         "tools/collect_server_readonly_evidence.py",
         "tools/run_codex_autopilot_tick.py",
     }
@@ -252,7 +244,7 @@ def _has_owner_approval(path: str | None) -> bool:
 def _protected_path_reason(path: str) -> str | None:
     if path in RUNTIME_FALLBACK_ALLOWED_EXACT:
         return None
-    if path == "aicrm_next/production_compat/api.py":
+    if path.startswith(DELETED_PRODUCTION_COMPAT_PREFIX) and not (ROOT / path).exists():
         return None
     if path in PROTECTED_EXACT:
         return f"protected exact path: {path}"

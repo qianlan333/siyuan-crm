@@ -194,9 +194,9 @@ def diff_hits_stop_condition(paths: set[str], terms: set[str]) -> list[str]:
         "docs/claude_code_integration/troubleshooting.md",
         "docs/mcp_usage.md",
         "aicrm_next/automation_engine/channels_api.py",
-        "aicrm_next/automation_runtime_v2/bridge.py",
+        "aicrm_next/ai_audience_ops/agent_copywriting.py",
+        "aicrm_next/ai_audience_ops/agent_gateway.py",
         "scripts/codex_autopilot_tick.sh",
-        "scripts/smoke_automation_runtime_v2.py",
         "tools/check_autonomous_development_loop.py",
         "tools/check_automerge_eligibility.py",
         "tools/run_codex_autopilot_tick.py",
@@ -214,18 +214,7 @@ def diff_hits_stop_condition(paths: set[str], terms: set[str]) -> list[str]:
         full = ROOT / path
         if not full.exists() or not full.is_file():
             continue
-        if path == "aicrm_next/production_compat/api.py":
-            code, stdout, _ = run_command(["git", "diff", "--unified=0", "--", path])
-            if code != 0:
-                stdout = ""
-            diff_lines = [
-                line[1:]
-                for line in stdout.splitlines()
-                if line.startswith(("+", "-")) and not line.startswith(("+++", "---"))
-            ]
-            matched = text_hits_stop_condition("\n".join(diff_lines), terms)
-        else:
-            matched = text_hits_stop_condition(full.read_text(encoding="utf-8", errors="ignore"), terms)
+        matched = text_hits_stop_condition(full.read_text(encoding="utf-8", errors="ignore"), terms)
         hits.extend(f"{path}: {term}" for term in matched)
     return hits
 

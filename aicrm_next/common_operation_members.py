@@ -12,25 +12,9 @@ from aicrm_next.shared.operation_members import (
     normalize_scope,
     operation_members_payload,
 )
-from aicrm_next.shared.runtime import raw_database_url
+from aicrm_next.platform_foundation.repository import connect_operation_members_db as _connect
 
 router = APIRouter()
-
-
-def _psycopg_url(url: str) -> str:
-    if url.startswith("postgresql+psycopg://"):
-        return "postgresql://" + url[len("postgresql+psycopg://") :]
-    return url
-
-
-def _connect():
-    database_url = _psycopg_url(raw_database_url())
-    if not database_url.startswith(("postgresql://", "postgres://")):
-        return None
-    import psycopg
-    from psycopg.rows import dict_row
-
-    return psycopg.connect(database_url, row_factory=dict_row)
 
 
 def _fetch_rows(conn: Any, sql: str, *, source: str, priority: int) -> list[dict[str, Any]]:
@@ -130,10 +114,6 @@ def list_operation_member_rows() -> list[dict[str, Any]]:
             (
                 "SELECT DISTINCT owner_staff_id AS user_id FROM automation_channel WHERE COALESCE(owner_staff_id, '') <> ''",
                 "channel_owner_field",
-            ),
-            (
-                "SELECT DISTINCT owner_staff_id AS user_id FROM automation_member WHERE COALESCE(owner_staff_id, '') <> ''",
-                "automation_member_owner_field",
             ),
             (
                 "SELECT DISTINCT follow_user_userid AS user_id FROM wecom_external_contact_identity_map WHERE COALESCE(follow_user_userid, '') <> ''",

@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def test_sidebar_jssdk_inventory_covers_frontend_api_backend_contract() -> None:
-    inventory = Path("docs/architecture/sidebar_jssdk_route_inventory.md").read_text(encoding="utf-8")
+    inventory = Path("docs/archive/route_inventory/sidebar_jssdk_route_inventory.md").read_text(encoding="utf-8")
 
     for marker in [
         "Frontend ↔ API ↔ Backend Contract Matrix",

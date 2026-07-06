@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
+from aicrm_next.automation_engine import channels_api
 from aicrm_next.main import create_app
 
 
@@ -22,6 +23,12 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.setenv("SECRET_KEY", "channel-radar-tag-pages-native-test")
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.delenv("DATABASE_URL", raising=False)
+    channels_api._FIXTURE_CHANNELS.clear()
+    channels_api._FIXTURE_CHANNEL_ASSIGNEES.clear()
+    channels_api._FIXTURE_ASSIGNMENT_EVENTS.clear()
+    channels_api._NEXT_ID = 1
+    channels_api._NEXT_ASSIGNEE_ID = 1
+    channels_api._NEXT_ASSIGNMENT_EVENT_ID = 1
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
@@ -112,6 +119,81 @@ def test_channel_radar_and_tag_pages_keep_existing_static_and_api_contracts(monk
     assert 'data-api-tags="/api/admin/wecom/tags"' in wecom_tags.text
     assert 'data-api-groups="/api/admin/wecom/tag-groups"' in wecom_tags.text
     assert 'data-api-sync="/api/admin/wecom/tags/sync"' in wecom_tags.text
+
+
+def test_channel_center_page_routes_keep_form_contract(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/channels",
+        json={"channel_name": "二级编辑页渠道", "channel_code": "edit-contract", "owner_staff_id": "sales_01"},
+    )
+    assert created.status_code == 201
+    channel_id = created.json()["channel"]["id"]
+
+    list_page = client.get("/admin/channels")
+    new_page = client.get("/admin/channels/new")
+    edit_page = client.get(f"/admin/channels/{channel_id}/edit")
+
+    assert list_page.status_code == 200
+    assert "渠道码中心" in list_page.text
+    assert "渠道总数" in list_page.text
+    assert "渠道资产" in list_page.text
+    assert "企微获客助手链接" in list_page.text
+    assert "渠道用户" in list_page.text
+
+    assert new_page.status_code == 200
+    assert 'data-channel-admission-page="channel-form"' in new_page.text
+    assert 'data-is-edit="0"' in new_page.text
+    assert 'data-api-create="/api/admin/channels"' in new_page.text
+    assert "channel_code_form.html" not in new_page.text
+
+    assert edit_page.status_code == 200
+    for token in [
+        'data-channel-admission-page="channel-form"',
+        'data-is-edit="1"',
+        f'data-api-detail="/api/admin/channels/{channel_id}"',
+        "渠道码中心",
+        "基础配置",
+        "渠道载体",
+        "客服分配",
+        "欢迎语素材",
+        "入渠标签",
+    ]:
+        assert token in edit_page.text
+
+
+def test_channel_center_api_routes_keep_unified_contract(monkeypatch) -> None:
+    def fake_generate(command):
+        return {
+            "ok": True,
+            "channel_id": command.channel_id,
+            "scene_value": "aqr_contract",
+            "qr_url": "https://wework.qpic.cn/contract",
+            "qrcode_asset_id": 1,
+            "source": "test",
+        }
+
+    monkeypatch.setattr("aicrm_next.channel_entry.api.generate_channel_qrcode", fake_generate)
+    client = _client(monkeypatch)
+
+    created = client.post("/api/admin/channels", json={"channel_name": "API 契约", "channel_code": "api-contract"})
+    assert created.status_code == 201
+    channel_id = created.json()["channel"]["id"]
+
+    checks = [
+        client.get("/api/admin/channels?limit=300"),
+        client.get(f"/api/admin/channels/{channel_id}"),
+        client.patch(f"/api/admin/channels/{channel_id}", json={"status": "inactive"}),
+        client.post(f"/api/admin/channels/{channel_id}/qrcode/generate", json={}),
+        client.get(f"/api/admin/channels/{channel_id}/contacts?limit=20"),
+        client.get("/api/admin/wecom/tags"),
+        client.get("/api/admin/common/operation-members?scope=channel_code&page_size=100"),
+    ]
+    assert [response.status_code for response in checks] == [200, 200, 200, 200, 200, 200, 200]
+    assert checks[0].json()["channels"]
+    assert checks[2].json()["channel"]["status"] == "inactive"
+    assert checks[3].json()["ok"] is True
+    assert checks[4].json()["contacts"] == []
 
 
 def test_channel_radar_and_tag_pages_are_removed_from_frontend_compat_inventory() -> None:

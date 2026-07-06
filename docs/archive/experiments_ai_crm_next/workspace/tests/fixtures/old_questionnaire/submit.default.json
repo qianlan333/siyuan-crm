@@ -1,0 +1,15 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "submission_id": "submission_masked_001",
+    "questionnaire_id": 1,
+    "slug": "questionnaire_masked_001",
+    "external_userid": "external_user_masked_001",
+    "person_id": "person_masked_001",
+    "score": 10,
+    "final_tags": ["tag_masked_001"],
+    "redirect_url": "/masked_redirect",
+    "result_message": "提交成功"
+  }
+}

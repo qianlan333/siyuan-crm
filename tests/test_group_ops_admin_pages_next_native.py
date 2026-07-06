@@ -23,13 +23,33 @@ def test_group_ops_admin_pages_render_from_next_native_bundle(monkeypatch) -> No
     assert list_response.status_code == 200
     assert detail_response.status_code == 200
     assert groups_response.status_code == 200
+    assert list_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert detail_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert groups_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
     assert 'id="group-ops-app"' in list_response.text
     assert 'data-page-mode="list"' in list_response.text
     assert 'data-page-mode="detail"' in detail_response.text
     assert 'data-plan-id="7"' in detail_response.text
     assert 'data-page-mode="groups"' in groups_response.text
+    for label in ["基础配置", "绑定群", "Webhook", "标准编排"]:
+        assert label in detail_response.text
+    for forbidden in [
+        "p1-diagnostics-toggle",
+        "groupOpsP1StatusApp",
+        "groupOpsP1StatusPayload",
+        "data-p1-diagnostics",
+        "Group Ops evidence",
+        "governance_missing",
+        "evidence_incomplete",
+        "PASS_90_PLUS_CANDIDATE",
+        "通过弹窗选择当前运营成员名下客户群",
+        "配置运营成员、群包和计划内容",
+    ]:
+        assert forbidden not in detail_response.text
     assert "/static/group-ops/admin_console/group_ops.css" in list_response.text
     assert "/static/group-ops/admin_console/group_ops.js" in list_response.text
+    assert "/static/group-ops/admin_console/group_ops.css" in detail_response.text
+    assert "/static/group-ops/admin_console/group_ops.js" in detail_response.text
     assert "admin_console/material_picker.js" in list_response.text
     assert "admin_console/send_content_composer.js" in list_response.text
 

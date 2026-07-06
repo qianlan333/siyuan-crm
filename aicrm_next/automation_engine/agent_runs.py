@@ -9,13 +9,11 @@ from aicrm_next.shared.errors import ContractError
 AGENT_RUN_ROUTE_FAMILY = "/api/admin/automation-conversion/agent-runs*"
 MAX_AGENT_RUN_PAGE_SIZE = 100
 ALLOWED_AGENT_RUN_STATUSES = {"completed", "failed", "queued", "running", "cancelled"}
-ALLOWED_AGENT_RUN_TRIGGERS = {"manual", "fixture", "workflow", "system", "replay"}
+ALLOWED_AGENT_RUN_TRIGGERS = {"manual", "fixture", "system", "replay", "ai_audience_ops"}
 ALLOWED_AGENT_RUN_VISIBILITY = {"masked", "console"}
 DANGEROUS_AGENT_RUN_FIELDS = {
     "run_creation",
     "run_execution",
-    "workflow_execution",
-    "task_execution",
     "execute",
     "execution",
     "replay",
@@ -44,8 +42,6 @@ def agent_run_side_effect_safety() -> dict[str, bool]:
         "real_replay_executed": False,
         "real_orchestration_executed": False,
         "real_agent_output_generated": False,
-        "real_workflow_executed": False,
-        "real_task_executed": False,
         "real_llm_call_executed": False,
         "real_deepseek_call_executed": False,
         "real_openclaw_call_executed": False,
@@ -123,10 +119,8 @@ def normalize_agent_run_filters(filters: dict[str, Any] | None = None) -> dict[s
         "agent_code": _text(source.get("agent_code")),
         "run_status": run_status,
         "trigger_source": trigger_source,
-        "external_contact_id": _text(source.get("external_contact_id")),
+        "unionid": _text(source.get("unionid")),
         "userid": _text(source.get("userid")),
-        "task_id": source.get("task_id"),
-        "workflow_id": source.get("workflow_id"),
         "started_after": _text(source.get("started_after")),
         "started_before": _text(source.get("started_before")),
         "has_error": source.get("has_error"),
@@ -148,7 +142,7 @@ def agent_run_projection(run: dict[str, Any], *, visibility: str = "masked") -> 
     normalized_visibility = _text(visibility or "masked").lower()
     if normalized_visibility not in ALLOWED_AGENT_RUN_VISIBILITY:
         raise ContractError("visibility must be masked or console")
-    external_contact_id = _text(item.get("external_contact_id"))
+    unionid = _text(item.get("unionid"))
     userid = _text(item.get("userid"))
     return {
         "id": _text(item.get("id") or item.get("run_id")),
@@ -157,10 +151,8 @@ def agent_run_projection(run: dict[str, Any], *, visibility: str = "masked") -> 
         "agent_code": _text(item.get("agent_code")),
         "run_status": _text(item.get("run_status") or "completed"),
         "trigger_source": _text(item.get("trigger_source") or "fixture"),
-        "external_contact_id": external_contact_id if normalized_visibility == "console" else _mask_identifier(external_contact_id),
+        "unionid": unionid if normalized_visibility == "console" else _mask_identifier(unionid),
         "userid": userid if normalized_visibility == "console" else _mask_identifier(userid),
-        "task_id": int(item.get("task_id") or 0),
-        "workflow_id": int(item.get("workflow_id") or 0),
         "started_at": _text(item.get("started_at")),
         "finished_at": _text(item.get("finished_at")),
         "duration_ms": int(item.get("duration_ms") or 0),

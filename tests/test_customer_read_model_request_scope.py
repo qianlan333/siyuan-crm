@@ -171,7 +171,7 @@ def test_customer_routes_use_request_scoped_session_and_do_not_close_injected_re
 def test_sidebar_customer_context_reuses_one_request_scoped_repo(monkeypatch) -> None:
     client, session, read_repos, live_repos = _client_with_request_scope(monkeypatch)
 
-    response = client.get("/api/sidebar/customer-context?external_userid=wx_ext_001")
+    response = client.get("/api/sidebar/customer-context?external_userid=wx_ext_001&owner_userid=owner-a")
 
     assert response.status_code == 200
     payload = response.json()

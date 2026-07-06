@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime
 from typing import Any, Protocol
 
 from aicrm_next.shared.postgres_connection import get_db
@@ -48,6 +47,7 @@ class IdentityBridgeRepository(Protocol):
         *,
         external_userid: str,
         person_id: int,
+        mobile: str = "",
         bind_by_userid: str,
         owner_userid: str,
         force_rebind: bool = False,
@@ -100,21 +100,40 @@ class PostgresIdentityBridgeRepository:
     def identity_bridge_state(self, external_userid: str) -> dict[str, Any]:
         row = get_db().execute(
             """
-            SELECT im.external_userid,
-                   COALESCE(im.unionid, '') AS unionid,
-                   COALESCE(im.openid, '') AS openid,
-                   im.updated_at,
-                   CASE WHEN b.external_userid IS NULL THEN FALSE ELSE TRUE END AS mobile_bound
-            FROM wecom_external_contact_identity_map im
-            LEFT JOIN external_contact_bindings b
-              ON b.external_userid = im.external_userid
-            WHERE im.external_userid = ?
-            ORDER BY im.updated_at DESC, im.id DESC
+            SELECT primary_external_userid AS external_userid,
+                   unionid,
+                   primary_openid AS openid,
+                   updated_at,
+                   COALESCE(mobile, '') <> '' AS mobile_bound
+            FROM crm_user_identity
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
+            ORDER BY updated_at DESC
             LIMIT 1
             """,
-            (_text(external_userid),),
+            (_text(external_userid), _text(external_userid)),
         ).fetchone()
         if not row:
+            pending = get_db().execute(
+                """
+                SELECT external_userid, openid, reason, updated_at
+                FROM crm_user_identity_resolution_queue
+                WHERE external_userid = ? AND status = 'pending'
+                ORDER BY updated_at DESC, id DESC
+                LIMIT 1
+                """,
+                (_text(external_userid),),
+            ).fetchone()
+            if pending:
+                payload = _row_dict(pending)
+                return {
+                    **payload,
+                    "exists": False,
+                    "unionid_present": False,
+                    "openid_present": bool(_text(payload.get("openid"))),
+                    "mobile_bound": False,
+                    "reason": _text(payload.get("reason")) or "identity_pending_resolution",
+                }
             return {"exists": False, "reason": "identity_missing"}
         payload = _row_dict(row)
         payload["exists"] = True
@@ -161,47 +180,187 @@ class PostgresIdentityBridgeRepository:
         external_userid = _text(record.get("external_userid"))
         if not external_userid:
             raise IdentityBridgeRepositoryError("external_userid is required")
+        unionid = _text(record.get("unionid"))
+        if not unionid:
+            self.enqueue_identity_resolution(record, reason="missing_unionid")
+            return 0
         row = get_db().execute(
             """
-            INSERT INTO wecom_external_contact_identity_map (
-                corp_id, external_userid, unionid, openid, follow_user_userid,
-                name, type, avatar, gender, status, raw_profile,
-                first_seen_at, last_seen_at, created_at, updated_at
+            INSERT INTO crm_user_identity (
+                unionid,
+                openids_json,
+                external_userids_json,
+                customer_name,
+                avatar,
+                gender,
+                profile_json,
+                follow_users_json,
+                primary_external_userid,
+                primary_openid,
+                primary_owner_userid,
+                identity_status,
+                unionid_resolved_at,
+                last_polled_at,
+                legacy_sources_json,
+                first_seen_at,
+                last_seen_at,
+                created_at,
+                updated_at
             ) VALUES (
-                ?, ?, NULLIF(?, ''), COALESCE(NULLIF(?, ''), ''), NULLIF(?, ''),
-                NULLIF(?, ''), ?, NULLIF(?, ''), ?, NULLIF(?, ''), ?::jsonb,
-                NOW(), NOW(), NOW(), NOW()
+                ?,
+                CASE WHEN CAST(? AS text) = '' THEN '[]'::jsonb ELSE jsonb_build_array(CAST(? AS text)) END,
+                jsonb_build_array(CAST(? AS text)),
+                ?,
+                ?,
+                ?,
+                jsonb_strip_nulls(jsonb_build_object(
+                    'name', NULLIF(?, ''),
+                    'avatar', NULLIF(?, ''),
+                    'gender', CAST(? AS text),
+                    'type', CAST(? AS text),
+                    'raw_profile', ?::jsonb
+                )),
+                CASE WHEN CAST(? AS text) = '' THEN '[]'::jsonb ELSE jsonb_build_array(jsonb_build_object('userid', CAST(? AS text))) END,
+                ?,
+                ?,
+                ?,
+                ?,
+                NOW(),
+                NOW(),
+                jsonb_build_object('wecom_external_contact_detail', TRUE),
+                NOW(),
+                NOW(),
+                NOW(),
+                NOW()
             )
-            ON CONFLICT (corp_id, external_userid) DO UPDATE SET
-                unionid = COALESCE(NULLIF(EXCLUDED.unionid, ''), wecom_external_contact_identity_map.unionid),
-                openid = COALESCE(NULLIF(EXCLUDED.openid, ''), wecom_external_contact_identity_map.openid),
-                follow_user_userid = COALESCE(NULLIF(EXCLUDED.follow_user_userid, ''), wecom_external_contact_identity_map.follow_user_userid),
-                name = COALESCE(NULLIF(EXCLUDED.name, ''), wecom_external_contact_identity_map.name),
-                type = EXCLUDED.type,
-                avatar = COALESCE(NULLIF(EXCLUDED.avatar, ''), wecom_external_contact_identity_map.avatar),
-                gender = EXCLUDED.gender,
-                status = COALESCE(NULLIF(EXCLUDED.status, ''), wecom_external_contact_identity_map.status),
-                raw_profile = EXCLUDED.raw_profile,
+            ON CONFLICT (unionid) DO UPDATE SET
+                openids_json = (
+                    SELECT COALESCE(jsonb_agg(DISTINCT value), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(crm_user_identity.openids_json || EXCLUDED.openids_json) AS merged(value)
+                ),
+                external_userids_json = (
+                    SELECT COALESCE(jsonb_agg(DISTINCT value), '[]'::jsonb)
+                    FROM jsonb_array_elements_text(crm_user_identity.external_userids_json || EXCLUDED.external_userids_json) AS merged(value)
+                ),
+                customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), crm_user_identity.customer_name),
+                avatar = COALESCE(NULLIF(EXCLUDED.avatar, ''), crm_user_identity.avatar),
+                gender = COALESCE(EXCLUDED.gender, crm_user_identity.gender),
+                profile_json = crm_user_identity.profile_json || EXCLUDED.profile_json,
+                follow_users_json = CASE
+                    WHEN jsonb_array_length(EXCLUDED.follow_users_json) > 0 THEN EXCLUDED.follow_users_json
+                    ELSE crm_user_identity.follow_users_json
+                END,
+                primary_external_userid = COALESCE(NULLIF(EXCLUDED.primary_external_userid, ''), crm_user_identity.primary_external_userid),
+                primary_openid = COALESCE(NULLIF(EXCLUDED.primary_openid, ''), crm_user_identity.primary_openid),
+                primary_owner_userid = COALESCE(NULLIF(EXCLUDED.primary_owner_userid, ''), crm_user_identity.primary_owner_userid),
+                identity_status = COALESCE(NULLIF(EXCLUDED.identity_status, ''), crm_user_identity.identity_status),
+                unionid_resolved_at = COALESCE(crm_user_identity.unionid_resolved_at, EXCLUDED.unionid_resolved_at),
+                last_polled_at = NOW(),
+                legacy_sources_json = crm_user_identity.legacy_sources_json || EXCLUDED.legacy_sources_json,
                 last_seen_at = NOW(),
                 updated_at = NOW()
-            RETURNING id
+            RETURNING 1 AS id
             """,
             (
-                _text(record.get("corp_id")),
-                external_userid,
-                _text(record.get("unionid")),
+                unionid,
                 _text(record.get("openid")),
-                _text(record.get("follow_user_userid")),
+                _text(record.get("openid")),
+                external_userid,
                 _text(record.get("name")),
-                record.get("type"),
                 _text(record.get("avatar")),
                 record.get("gender"),
-                _text(record.get("status")) or "active",
+                _text(record.get("name")),
+                _text(record.get("avatar")),
+                record.get("gender"),
+                record.get("type"),
                 _text(record.get("raw_profile")) or "{}",
+                _text(record.get("follow_user_userid")),
+                _text(record.get("follow_user_userid")),
+                external_userid,
+                _text(record.get("openid")),
+                _text(record.get("follow_user_userid")),
+                _text(record.get("status")) or "active",
             ),
         ).fetchone()
+        self.mark_identity_resolution_resolved(external_userid=external_userid, unionid=unionid)
         get_db().commit()
         return int((row or {}).get("id") or 0)
+
+    def enqueue_identity_resolution(self, record: dict[str, Any], *, reason: str) -> None:
+        external_userid = _text(record.get("external_userid"))
+        source_key = external_userid or _text(record.get("openid")) or _text(record.get("mobile"))
+        get_db().execute(
+            """
+            INSERT INTO crm_user_identity_resolution_queue (
+                source_type,
+                source_key,
+                corp_id,
+                external_userid,
+                openid,
+                mobile,
+                payload_json,
+                reason,
+                status,
+                first_seen_at,
+                last_seen_at,
+                created_at,
+                updated_at
+            ) VALUES (
+                'wecom_external_contact',
+                ?,
+                ?,
+                ?,
+                ?,
+                ?,
+                ?::jsonb,
+                ?,
+                'pending',
+                NOW(),
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            ON CONFLICT (source_type, source_key) WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
+            DO UPDATE SET
+                corp_id = COALESCE(NULLIF(EXCLUDED.corp_id, ''), crm_user_identity_resolution_queue.corp_id),
+                external_userid = COALESCE(NULLIF(EXCLUDED.external_userid, ''), crm_user_identity_resolution_queue.external_userid),
+                openid = COALESCE(NULLIF(EXCLUDED.openid, ''), crm_user_identity_resolution_queue.openid),
+                mobile = COALESCE(NULLIF(EXCLUDED.mobile, ''), crm_user_identity_resolution_queue.mobile),
+                payload_json = crm_user_identity_resolution_queue.payload_json || EXCLUDED.payload_json,
+                reason = EXCLUDED.reason,
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            """,
+            (
+                source_key,
+                _text(record.get("corp_id")),
+                external_userid,
+                _text(record.get("openid")),
+                _text(record.get("mobile")),
+                _json_dumps(record),
+                _text(reason) or "identity_unresolved",
+            ),
+        )
+        get_db().commit()
+
+    def mark_identity_resolution_resolved(self, *, external_userid: str, unionid: str) -> None:
+        external = _text(external_userid)
+        resolved_unionid = _text(unionid)
+        if not external or not resolved_unionid:
+            return
+        get_db().execute(
+            """
+            UPDATE crm_user_identity_resolution_queue
+            SET status = 'resolved',
+                payload_json = payload_json || jsonb_build_object('resolved_unionid', CAST(? AS text)),
+                resolved_unionid = ?,
+                resolved_at = NOW(),
+                last_seen_at = NOW(),
+                updated_at = NOW()
+            WHERE external_userid = ? AND status = 'pending'
+            """,
+            (resolved_unionid, resolved_unionid, external),
+        )
 
     def replace_external_contact_follow_users(
         self,
@@ -211,21 +370,21 @@ class PostgresIdentityBridgeRepository:
         preferred_userid: str = "",
     ) -> None:
         db = get_db()
-        corp = _text(corp_id)
         external = _text(external_userid)
         normalized = [dict(item or {}) for item in list(follow_users or []) if _text((item or {}).get("userid"))]
-        existing_primary = db.execute(
-            """
-            SELECT user_id
-            FROM wecom_external_contact_follow_users
-            WHERE corp_id = ? AND external_userid = ? AND is_primary = TRUE
-            ORDER BY updated_at DESC, id DESC
-            LIMIT 1
-            """,
-            (corp, external),
-        ).fetchone()
         userids = {_text(item.get("userid")) for item in normalized}
         preferred = _text(preferred_userid)
+        existing_primary = db.execute(
+            """
+            SELECT primary_owner_userid AS user_id
+            FROM crm_user_identity
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (external, external),
+        ).fetchone()
         old_primary = _text((existing_primary or {}).get("user_id"))
         if preferred and preferred in userids:
             primary = preferred
@@ -238,121 +397,88 @@ class PostgresIdentityBridgeRepository:
 
         db.execute(
             """
-            UPDATE wecom_external_contact_follow_users
-            SET relation_status = 'inactive',
-                is_primary = FALSE,
+            UPDATE crm_user_identity
+            SET follow_users_json = ?::jsonb,
+                primary_owner_userid = COALESCE(NULLIF(?, ''), primary_owner_userid),
                 updated_at = NOW()
-            WHERE corp_id = ? AND external_userid = ?
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
             """,
-            (corp, external),
+            (_json_dumps(normalized), primary, external, external),
         )
-        for item in normalized:
-            userid = _text(item.get("userid"))
-            db.execute(
-                """
-                INSERT INTO wecom_external_contact_follow_users (
-                    corp_id, external_userid, user_id, relation_status, is_primary,
-                    remark, description, add_way, state, oper_userid, createtime,
-                    raw_follow_user, created_at, updated_at
-                ) VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?::jsonb, NOW(), NOW())
-                ON CONFLICT (corp_id, external_userid, user_id) DO UPDATE SET
-                    relation_status = 'active',
-                    is_primary = EXCLUDED.is_primary,
-                    remark = EXCLUDED.remark,
-                    description = EXCLUDED.description,
-                    add_way = EXCLUDED.add_way,
-                    state = EXCLUDED.state,
-                    oper_userid = EXCLUDED.oper_userid,
-                    createtime = EXCLUDED.createtime,
-                    raw_follow_user = EXCLUDED.raw_follow_user,
-                    updated_at = NOW()
-                """,
-                (
-                    corp,
-                    external,
-                    userid,
-                    userid == primary,
-                    _text(item.get("remark")),
-                    _text(item.get("description")),
-                    item.get("add_way"),
-                    _text(item.get("state")),
-                    _text(item.get("oper_userid")),
-                    item.get("createtime"),
-                    _json_dumps(item),
-                ),
-            )
         db.commit()
 
     def refresh_external_contact_identity_owner(self, corp_id: str, external_userid: str) -> None:
         db = get_db()
         row = db.execute(
             """
-            SELECT user_id
-            FROM wecom_external_contact_follow_users
-            WHERE corp_id = ? AND external_userid = ? AND relation_status = 'active'
-            ORDER BY is_primary DESC, updated_at DESC, id DESC
+            SELECT elem->>'userid' AS user_id
+            FROM crm_user_identity,
+                 jsonb_array_elements(follow_users_json) AS elem
+            WHERE (primary_external_userid = ? OR jsonb_exists(external_userids_json, ?))
+              AND COALESCE(elem->>'userid', '') <> ''
             LIMIT 1
             """,
-            (_text(corp_id), _text(external_userid)),
+            (_text(external_userid), _text(external_userid)),
         ).fetchone()
         owner = _text((row or {}).get("user_id"))
         if owner:
             db.execute(
                 """
-                UPDATE wecom_external_contact_identity_map
-                SET follow_user_userid = ?,
-                    status = 'active',
+                UPDATE crm_user_identity
+                SET primary_owner_userid = ?,
+                    identity_status = 'active',
                     last_seen_at = NOW(),
                     updated_at = NOW()
-                WHERE corp_id = ? AND external_userid = ?
+                WHERE primary_external_userid = ?
+                   OR jsonb_exists(external_userids_json, ?)
                 """,
-                (owner, _text(corp_id), _text(external_userid)),
+                (owner, _text(external_userid), _text(external_userid)),
             )
             db.commit()
 
     def get_contact_binding_status(self, external_userid: str, owner_userid: str = "") -> dict[str, Any]:
         external = _text(external_userid)
-        row = get_db().execute(
+        identity = get_db().execute(
             """
-            SELECT b.external_userid,
-                   b.person_id,
-                   b.first_bound_by_userid,
-                   b.first_owner_userid,
-                   b.last_owner_userid,
-                   b.created_at,
-                   b.updated_at,
-                   p.mobile,
-                   p.third_party_user_id,
-                   c.owner_userid,
-                   c.customer_name,
-                   c.remark
-            FROM external_contact_bindings b
-            JOIN people p ON p.id = b.person_id
-            LEFT JOIN contacts c ON c.external_userid = b.external_userid
-            WHERE b.external_userid = ?
+            SELECT unionid,
+                   mobile,
+                   primary_external_userid AS external_userid,
+                   primary_owner_userid AS owner_userid,
+                   customer_name,
+                   remark
+            FROM crm_user_identity
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
+            ORDER BY updated_at DESC
             LIMIT 1
             """,
-            (external,),
+            (external, external),
         ).fetchone()
-        if row:
-            payload = _row_dict(row)
-            payload["is_bound"] = True
-            payload["display_name"] = _text(payload.get("customer_name")) or _text(payload.get("remark")) or external
-            return payload
-        contact = get_db().execute(
-            """
-            SELECT external_userid, owner_userid, customer_name, remark
-            FROM contacts
-            WHERE external_userid = ?
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (external,),
-        ).fetchone()
-        payload = _row_dict(contact)
+        if identity and _text(identity.get("mobile")):
+            payload = _row_dict(identity)
+            return {
+                "is_bound": True,
+                "person_id": "",
+                "unionid": _text(payload.get("unionid")),
+                "external_userid": external,
+                "owner_userid": _text(owner_userid) or _text(payload.get("owner_userid")),
+                "customer_name": _text(payload.get("customer_name")),
+                "remark": _text(payload.get("remark")),
+                "display_name": _text(payload.get("customer_name")) or external,
+                "mobile": _text(payload.get("mobile")),
+                "third_party_user_id": "",
+                "first_bound_by_userid": "",
+                "first_owner_userid": "",
+                "last_owner_userid": _text(owner_userid) or _text(payload.get("owner_userid")),
+                "created_at": None,
+                "updated_at": None,
+            }
+        payload = _row_dict(identity)
         return {
             "is_bound": False,
-            "person_id": None,
+            "person_id": "",
+            "unionid": _text(payload.get("unionid")),
             "external_userid": external,
             "owner_userid": _text(owner_userid) or _text(payload.get("owner_userid")),
             "customer_name": _text(payload.get("customer_name")),
@@ -368,86 +494,47 @@ class PostgresIdentityBridgeRepository:
         }
 
     def _identity_sources(self, external_userid: str) -> tuple[list[str], list[str]]:
-        rows = get_db().execute(
+        identity = get_db().execute(
             """
-            SELECT COALESCE(openid, '') AS openid, COALESCE(unionid, '') AS unionid
-            FROM wecom_external_contact_identity_map
-            WHERE external_userid = ?
+            SELECT unionid, openids_json
+            FROM crm_user_identity
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
+            ORDER BY updated_at DESC
+            LIMIT 1
             """,
-            (_text(external_userid),),
-        ).fetchall()
-        openids = sorted({_text(row.get("openid")) for row in rows if _text(row.get("openid"))})
-        unionids = sorted({_text(row.get("unionid")) for row in rows if _text(row.get("unionid"))})
+            (_text(external_userid), _text(external_userid)),
+        ).fetchone()
+        if not identity:
+            return [], []
+        raw_openids = identity.get("openids_json") or []
+        if isinstance(raw_openids, str):
+            try:
+                raw_openids = json.loads(raw_openids)
+            except json.JSONDecodeError:
+                raw_openids = []
+        openids = sorted({_text(value) for value in raw_openids if _text(value)})
+        unionids = [_text(identity.get("unionid"))] if _text(identity.get("unionid")) else []
         return openids, unionids
 
     def get_unique_mobile_candidate_from_identity_sources(self, external_userid: str) -> dict[str, Any] | None:
         external = _text(external_userid)
-        openids, unionids = self._identity_sources(external)
         row = get_db().execute(
             """
-            WITH candidates AS (
-                SELECT
-                    CASE
-                        WHEN LENGTH(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')) = 13
-                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%%'
-                        THEN SUBSTRING(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') FROM 3)
-                        ELSE regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')
-                    END AS mobile,
-                    'wechat_pay_orders' AS source,
-                    created_at AS matched_at
-                FROM wechat_pay_orders
-                WHERE COALESCE(mobile_snapshot, '') <> ''
-                  AND (status = 'paid' OR trade_state = 'SUCCESS')
-                  AND (
-                    external_userid = ?
-                    OR payer_openid = ANY(?::text[])
-                    OR unionid = ANY(?::text[])
-                    OR respondent_key = ANY(?::text[])
-                  )
-                UNION ALL
-                SELECT
-                    CASE
-                        WHEN LENGTH(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')) = 13
-                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%%'
-                        THEN SUBSTRING(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') FROM 3)
-                        ELSE regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')
-                    END AS mobile,
-                    'questionnaire_submissions' AS source,
-                    submitted_at AS matched_at
-                FROM questionnaire_submissions
-                WHERE COALESCE(mobile_snapshot, '') <> ''
-                  AND (
-                    external_userid = ?
-                    OR openid = ANY(?::text[])
-                    OR unionid = ANY(?::text[])
-                    OR respondent_key = ANY(?::text[])
-                    OR respondent_key = ANY(?::text[])
-                  )
-            ),
-            grouped AS (
-                SELECT mobile,
-                       COUNT(*) AS matched_count,
-                       MAX(matched_at) AS latest_matched_at,
-                       ARRAY_AGG(DISTINCT source ORDER BY source) AS sources
-                FROM candidates
-                WHERE mobile ~ '^1[3-9][0-9]{9}$'
-                GROUP BY mobile
+            SELECT mobile_normalized AS mobile,
+                   1 AS matched_count,
+                   last_seen_at AS latest_matched_at,
+                   ARRAY['crm_user_identity'] AS sources
+            FROM crm_user_identity
+            WHERE (
+                primary_external_userid = ?
+                OR jsonb_exists(external_userids_json, ?)
             )
-            SELECT *
-            FROM grouped
-            ORDER BY latest_matched_at DESC NULLS LAST
+              AND COALESCE(mobile_normalized, '') ~ '^1[3-9][0-9]{9}$'
+            ORDER BY last_seen_at DESC NULLS LAST, updated_at DESC NULLS LAST
+            LIMIT 1
             """,
-            (
-                external,
-                openids,
-                unionids,
-                unionids,
-                external,
-                openids,
-                unionids,
-                unionids,
-                openids,
-            ),
+            (external, external),
         ).fetchall()
         if len(row) != 1:
             return None
@@ -456,14 +543,11 @@ class PostgresIdentityBridgeRepository:
     def list_unbound_external_userids_with_identity_sources(self, limit: int = 500) -> list[str]:
         rows = get_db().execute(
             """
-            SELECT DISTINCT im.external_userid
-            FROM wecom_external_contact_identity_map im
-            LEFT JOIN external_contact_bindings b ON b.external_userid = im.external_userid
-            WHERE b.external_userid IS NULL
-              AND im.external_userid IS NOT NULL
-              AND im.external_userid <> ''
-              AND (COALESCE(im.unionid, '') <> '' OR COALESCE(im.openid, '') <> '')
-            ORDER BY im.external_userid
+            SELECT DISTINCT primary_external_userid AS external_userid
+            FROM crm_user_identity
+            WHERE COALESCE(primary_external_userid, '') <> ''
+              AND COALESCE(mobile, '') = ''
+            ORDER BY primary_external_userid
             LIMIT ?
             """,
             (max(1, int(limit or 500)),),
@@ -474,63 +558,43 @@ class PostgresIdentityBridgeRepository:
         normalized = _normalize_mobile(mobile)
         if not normalized:
             raise IdentityBridgeRepositoryError("valid mobile is required")
-        row = get_db().execute(
-            "SELECT id, mobile FROM people WHERE mobile = ? LIMIT 1",
-            (normalized,),
-        ).fetchone()
-        if row:
-            return int(row.get("id") or 0), _text(row.get("mobile"))
-        inserted = get_db().execute(
-            """
-            INSERT INTO people (mobile, third_party_user_id, created_at, updated_at)
-            VALUES (?, '', NOW(), NOW())
-            RETURNING id, mobile
-            """,
-            (normalized,),
-        ).fetchone()
-        return int((inserted or {}).get("id") or 0), _text((inserted or {}).get("mobile"))
+        return 0, normalized
 
     def upsert_external_contact_binding_record(
         self,
         *,
         external_userid: str,
         person_id: int,
+        mobile: str = "",
         bind_by_userid: str,
         owner_userid: str,
         force_rebind: bool = False,
     ) -> dict[str, Any]:
         db = get_db()
         external = _text(external_userid)
-        existing = db.execute(
+        normalized_mobile = _normalize_mobile(mobile)
+        db.execute(
             """
-            SELECT external_userid, person_id
-            FROM external_contact_bindings
-            WHERE external_userid = ?
-            LIMIT 1
+            UPDATE crm_user_identity
+            SET mobile = COALESCE(NULLIF(?, ''), mobile),
+                mobile_normalized = COALESCE(NULLIF(?, ''), mobile_normalized),
+                mobile_verified = TRUE,
+                mobile_source = COALESCE(NULLIF(mobile_source, ''), 'legacy_binding'),
+                primary_owner_userid = COALESCE(NULLIF(?, ''), primary_owner_userid),
+                legacy_person_id = COALESCE(NULLIF(legacy_person_id, ''), ?),
+                updated_at = NOW()
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
             """,
-            (external,),
-        ).fetchone()
-        if existing and force_rebind:
-            db.execute(
-                """
-                UPDATE external_contact_bindings
-                SET person_id = ?,
-                    last_owner_userid = ?,
-                    updated_at = NOW()
-                WHERE external_userid = ?
-                """,
-                (int(person_id), _text(owner_userid), external),
-            )
-        elif not existing:
-            db.execute(
-                """
-                INSERT INTO external_contact_bindings (
-                    external_userid, person_id, first_bound_by_userid,
-                    first_owner_userid, last_owner_userid, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, NOW(), NOW())
-                """,
-                (external, int(person_id), _text(bind_by_userid), _text(owner_userid), _text(owner_userid)),
-            )
+            (
+                normalized_mobile,
+                normalized_mobile,
+                _text(owner_userid),
+                str(person_id or ""),
+                external,
+                external,
+            ),
+        )
         db.commit()
         return self.get_contact_binding_status(external, owner_userid)
 
@@ -541,41 +605,19 @@ class PostgresIdentityBridgeRepository:
         external = _text(external_userid)
         row = get_db().execute(
             """
-            SELECT owner_userid
-            FROM contacts
-            WHERE external_userid = ?
-            ORDER BY id DESC
+            SELECT primary_owner_userid
+            FROM crm_user_identity
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
+            ORDER BY updated_at DESC
             LIMIT 1
             """,
-            (external,),
+            (external, external),
         ).fetchone()
-        owner = _text((row or {}).get("owner_userid"))
+        owner = _text((row or {}).get("primary_owner_userid"))
         if owner:
             return owner
-        row = get_db().execute(
-            """
-            SELECT follow_user_userid
-            FROM wecom_external_contact_identity_map
-            WHERE external_userid = ?
-            ORDER BY updated_at DESC, id DESC
-            LIMIT 1
-            """,
-            (external,),
-        ).fetchone()
-        owner = _text((row or {}).get("follow_user_userid"))
-        if owner:
-            return owner
-        row = get_db().execute(
-            """
-            SELECT user_id
-            FROM wecom_external_contact_follow_users
-            WHERE external_userid = ? AND relation_status = 'active'
-            ORDER BY is_primary DESC, updated_at DESC, id DESC
-            LIMIT 1
-            """,
-            (external,),
-        ).fetchone()
-        return _text((row or {}).get("user_id"))
+        return ""
 
     def table_columns(self, table_name: str) -> set[str]:
         try:
@@ -593,32 +635,12 @@ class PostgresIdentityBridgeRepository:
             return set()
 
     def merge_lead_pool_after_mobile_bind(self, *, external_userid: str, mobile: str, owner_userid: str) -> dict[str, Any]:
-        columns = self.table_columns("user_ops_pool_current")
-        required = {"external_userid"}
-        writable = [name for name in ("mobile", "owner_userid", "updated_at") if name in columns]
-        if not required.issubset(columns) or not writable:
-            return {"status": "skipped", "reason": "table_or_column_missing", "updated_count": 0}
-        assignments: list[str] = []
-        params: list[Any] = []
-        if "mobile" in writable:
-            assignments.append("mobile = ?")
-            params.append(_normalize_mobile(mobile))
-        if "owner_userid" in writable:
-            assignments.append("owner_userid = ?")
-            params.append(_text(owner_userid))
-        if "updated_at" in writable:
-            assignments.append(f"updated_at = {_now_sql()}")
-        params.append(_text(external_userid))
-        cursor = get_db().execute(
-            f"""
-            UPDATE user_ops_pool_current
-            SET {", ".join(assignments)}
-            WHERE external_userid = ?
-            """,
-            tuple(params),
-        )
-        get_db().commit()
-        return {"status": "updated", "updated_count": max(0, int(cursor.rowcount or 0))}
+        return {
+            "status": "skipped",
+            "reason": "customer_mobile_bound_event_required",
+            "updated_count": 0,
+            "action_type": "customer_mobile_bound_event",
+        }
 
     def backfill_questionnaire_submissions_for_mobile_binding(
         self,
@@ -631,58 +653,10 @@ class PostgresIdentityBridgeRepository:
         normalized = _normalize_mobile(mobile)
         if not external or not normalized:
             return {"status": "skipped", "reason": "invalid_external_userid_or_mobile", "updated_count": 0}
-        openids, unionids = self._identity_sources(external)
-        ids = get_db().execute(
-            """
-            WITH candidates AS (
-                SELECT id
-                FROM questionnaire_submissions
-                WHERE COALESCE(external_userid, '') = ''
-                  AND (
-                    CASE
-                        WHEN LENGTH(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')) = 13
-                             AND regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') LIKE '86%%'
-                        THEN SUBSTRING(regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g') FROM 3)
-                        ELSE regexp_replace(COALESCE(mobile_snapshot, ''), '[^0-9]', '', 'g')
-                    END = ?
-                    OR openid = ANY(?::text[])
-                    OR unionid = ANY(?::text[])
-                    OR respondent_key = ANY(?::text[])
-                    OR respondent_key = ANY(?::text[])
-                  )
-                ORDER BY submitted_at DESC NULLS LAST, id DESC
-                LIMIT 200
-            )
-            UPDATE questionnaire_submissions qs
-            SET external_userid = ?,
-                follow_user_userid = CASE
-                    WHEN COALESCE(qs.follow_user_userid, '') = '' THEN ?
-                    ELSE qs.follow_user_userid
-                END,
-                matched_by = CASE
-                    WHEN COALESCE(qs.matched_by, '') = '' THEN 'mobile'
-                    ELSE qs.matched_by
-                END
-            FROM candidates
-            WHERE qs.id = candidates.id
-            RETURNING qs.id
-            """,
-            (
-                normalized,
-                openids,
-                unionids,
-                unionids,
-                openids,
-                external,
-                _text(follow_user_userid),
-            ),
-        ).fetchall()
-        get_db().commit()
-        count = len(ids)
         return {
-            "status": "updated" if count else "skipped",
-            "reason": "" if count else "no_matching_submission",
-            "updated_count": count,
+            "status": "skipped",
+            "reason": "questionnaire_submissions_unionid_only",
+            "updated_count": 0,
             "external_userid": external,
             "mobile_masked": _mask_mobile(normalized),
         }

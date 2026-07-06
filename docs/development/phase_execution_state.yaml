@@ -1,4 +1,4 @@
-version: 15
+version: 16
 status: active
 
 autopilot:
@@ -35,6 +35,7 @@ completed_runtime_fallback_tracks:
   - media_material_libraries_next_ownership
   - sidebar_customer_broad_fallback_narrowing
   - sidebar_customer_readonly_cleanup
+  - automation_member_manual_send_focus_sop_retired
 
 remaining_runtime_fallback_tracks:
   product_specific_migration_required:
@@ -43,7 +44,6 @@ remaining_runtime_fallback_tracks:
     - wecom_tags_tag_groups
     - payment_checkout_orders_public_products
     - automation_runtime_run_due_reply_monitor_jobs
-    - automation_member_manual_send_focus_sop
     - sidebar_write_external_paths
     - hxc_dashboard_cloud_orchestrator
   handling_rule: migrate only when the related product capability is actively being developed
@@ -51,7 +51,7 @@ remaining_runtime_fallback_tracks:
 protected_runtime_boundaries:
   - app.py
   - aicrm_next/main.py
-  - aicrm_next/production_compat/api.py high-risk and retained fallback entries only
+  - aicrm_next/production_compat/ deleted package must not return
   - deleted legacy package must not return
   - migrations/deploy/nginx/systemd
   - payment/OAuth/WeCom callback/public submit/product/checkout/order/image upload/runtime/outbound paths

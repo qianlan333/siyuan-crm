@@ -1,0 +1,22 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "id": 1,
+        "slug": "questionnaire_masked_001",
+        "title": "questionnaire_title_masked_001",
+        "description": "questionnaire_description_masked_001",
+        "enabled": true,
+        "redirect_url": "/masked_redirect",
+        "created_at": "2026-05-20T10:00:00Z",
+        "updated_at": "2026-05-20T10:00:00Z",
+        "question_count": 1
+      }
+    ],
+    "total": 1,
+    "limit": 50,
+    "offset": 0
+  }
+}

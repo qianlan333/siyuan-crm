@@ -7,6 +7,7 @@ import re
 from typing import Any, Protocol
 from uuid import uuid4
 
+from aicrm_next.navigation_target.service import normalize_completion_target_for_storage
 from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.repository_provider import assert_repository_allowed
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
@@ -23,6 +24,13 @@ class QuestionnaireRepository(Protocol):
     def list_questions(self, questionnaire_id: int) -> list[dict[str, Any]] | None: ...
     def get_results_summary(self, questionnaire_id: int) -> dict[str, Any] | None: ...
     def list_submissions(self, questionnaire_id: int, *, limit: int = 20, offset: int = 0) -> tuple[list[dict[str, Any]], int] | None: ...
+    def list_external_submissions(
+        self,
+        *,
+        filters: dict[str, Any],
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]: ...
     def save_questionnaire(self, payload: dict[str, Any], questionnaire_id: int | None = None) -> dict[str, Any]: ...
     def set_enabled(self, questionnaire_id: int, enabled: bool) -> dict[str, Any] | None: ...
     def delete_questionnaire(self, questionnaire_id: int) -> bool: ...
@@ -233,6 +241,7 @@ def _questionnaire_payload(payload: dict[str, Any], *, slug: str) -> dict[str, A
     external_push = _external_push_payload(payload)
     assessment_config = _json_dict(payload.get("assessment_config") or payload.get("result_config"))
     title = _text(payload.get("title") or payload.get("name")).strip()
+    completion_target = normalize_completion_target_for_storage(payload, legacy_url_key="redirect_url")
     return {
         "slug": slug,
         "name": _text(payload.get("name") or title).strip(),
@@ -240,6 +249,7 @@ def _questionnaire_payload(payload: dict[str, Any], *, slug: str) -> dict[str, A
         "description": _text(payload.get("description")),
         "is_disabled": _as_bool(payload.get("is_disabled"), default=not _as_bool(payload.get("enabled"), default=True)),
         "redirect_url": _text(payload.get("redirect_url")),
+        "completion_target_json": completion_target,
         "answer_display_mode": _text(payload.get("answer_display_mode") or "all_in_one") or "all_in_one",
         "assessment_enabled": _as_bool(payload.get("assessment_enabled")),
         "assessment_config": assessment_config,
@@ -314,6 +324,60 @@ def _answers_from_snapshots(answer_snapshots: list[dict[str, Any]]) -> dict[str,
         else:
             answers[key] = selected[0] if len(selected) == 1 else selected
     return answers
+
+
+def _external_answer_projection(answer: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "question_title_snapshot": _text(answer.get("question_title_snapshot")),
+        "selected_option_texts_snapshot": _json_list(answer.get("selected_option_texts_snapshot")),
+        "text_value": _text(answer.get("text_value")),
+        "score_contribution": float(answer.get("score_contribution") or 0),
+    }
+
+
+def _external_submission_projection(row: dict[str, Any], answers: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    return {
+        "mobile": _text(row.get("mobile") or row.get("mobile_snapshot")),
+        "unionid": _text(row.get("unionid")),
+        "external_userid": _text(row.get("external_userid")),
+        "submitted_at": _timestamp(row.get("submitted_at") or row.get("created_at")),
+        "questionnaire_id": int(row.get("questionnaire_id") or 0),
+        "questionnaire_title": _text(row.get("questionnaire_title") or row.get("title") or row.get("name")),
+        "final_tags": _json_list(row.get("final_tags")),
+        "assessment_result_snapshot": _json_dict(row.get("assessment_result_snapshot")),
+        "answers": [_external_answer_projection(dict(answer)) for answer in answers or []],
+    }
+
+
+def _parse_comparable_timestamp(value: Any) -> datetime | None:
+    text = _text(value).strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).replace(tzinfo=None)
+        return datetime.fromisoformat(text.replace(" ", "T")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+
+def _matches_external_submission_filters(row: dict[str, Any], filters: dict[str, Any]) -> bool:
+    if _text(filters.get("mobile")) and _text(row.get("mobile") or row.get("mobile_snapshot")) != _text(filters.get("mobile")):
+        return False
+    if _text(filters.get("unionid")) and _text(row.get("unionid")) != _text(filters.get("unionid")):
+        return False
+    if _text(filters.get("external_userid")) and _text(row.get("external_userid")) != _text(filters.get("external_userid")):
+        return False
+    if filters.get("questionnaire_id") not in (None, "") and int(row.get("questionnaire_id") or 0) != int(filters.get("questionnaire_id") or 0):
+        return False
+    submitted_at = _parse_comparable_timestamp(row.get("submitted_at") or row.get("created_at"))
+    submitted_from = _parse_comparable_timestamp(filters.get("submitted_from"))
+    submitted_to = _parse_comparable_timestamp(filters.get("submitted_to"))
+    if submitted_from and (not submitted_at or submitted_at < submitted_from):
+        return False
+    if submitted_to and (not submitted_at or submitted_at > submitted_to):
+        return False
+    return True
 
 
 def _mobile_answer(questions: list[dict[str, Any]], answers: dict[str, Any]) -> str:
@@ -512,6 +576,32 @@ class InMemoryQuestionnaireRepository:
             rows.append(row)
         return rows[int(offset) : int(offset) + int(limit)], len(rows)
 
+    def list_external_submissions(
+        self,
+        *,
+        filters: dict[str, Any],
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        questionnaire_by_id = {int(item["id"]): item for item in self._questionnaires}
+        rows: list[dict[str, Any]] = []
+        for item in self._submissions:
+            questionnaire = questionnaire_by_id.get(int(item.get("questionnaire_id") or 0))
+            if not questionnaire:
+                continue
+            row = deepcopy(item)
+            row.setdefault("submitted_at", row.get("created_at"))
+            row.setdefault("mobile", row.get("mobile_snapshot") or row.get("mobile"))
+            row.setdefault("assessment_result_snapshot", (row.get("result_json") or {}).get("assessment_result") if isinstance(row.get("result_json"), dict) else {})
+            row["questionnaire_title"] = _text(questionnaire.get("title") or questionnaire.get("name"))
+            if "answer_snapshots" not in row:
+                row["answer_snapshots"] = _answer_snapshots(questionnaire.get("questions") or [], dict(row.get("answers") or {}))
+            if _matches_external_submission_filters(row, filters):
+                rows.append(row)
+        rows.sort(key=lambda item: (_text(item.get("submitted_at") or item.get("created_at")), _text(item.get("submission_id"))), reverse=True)
+        page = rows[int(offset) : int(offset) + int(limit)]
+        return [_external_submission_projection(row, row.get("answer_snapshots") or []) for row in page], len(rows)
+
     def save_questionnaire(self, payload: dict[str, Any], questionnaire_id: int | None = None) -> dict[str, Any]:
         now = _now()
         if questionnaire_id is None:
@@ -535,6 +625,10 @@ class InMemoryQuestionnaireRepository:
                 "description": str(payload.get("description") or ""),
                 "enabled": bool(payload.get("enabled", item.get("enabled", True))),
                 "redirect_url": str(payload.get("redirect_url") or ""),
+                "completion_target_json": deepcopy(
+                    payload.get("completion_target_json")
+                    or normalize_completion_target_for_storage(payload, legacy_url_key="redirect_url")
+                ),
                 "submit_button_text": str(payload.get("submit_button_text") or "提交"),
                 "answer_display_mode": str(payload.get("answer_display_mode") or item.get("answer_display_mode") or "all_in_one"),
                 "assessment_enabled": bool(payload.get("assessment_enabled", item.get("assessment_enabled", False))),
@@ -753,6 +847,7 @@ class PostgresQuestionnaireReadRepository:
             "status": "disabled" if not enabled else "published",
             "version": int(row.get("version") or 1),
             "redirect_url": _text(row.get("redirect_url")),
+            "completion_target_json": _json_dict(row.get("completion_target_json")),
             "answer_display_mode": _text(row.get("answer_display_mode") or "all_in_one"),
             "assessment_enabled": bool(row.get("assessment_enabled")),
             "assessment_config": _json_dict(row.get("assessment_config")),
@@ -924,13 +1019,19 @@ class PostgresQuestionnaireReadRepository:
             )
             rows = conn.execute(
                 """
-                SELECT id, questionnaire_id, respondent_key, openid, unionid, external_userid,
-                       follow_user_userid, matched_by, mobile_snapshot, source_channel, campaign_id,
-                       staff_id, total_score, final_tags, result_token, redirect_url_snapshot,
-                       submitted_at
-                FROM questionnaire_submissions
-                WHERE questionnaire_id = %s
-                ORDER BY submitted_at DESC, id DESC
+                SELECT qs.id, qs.questionnaire_id, '' AS respondent_key,
+                       COALESCE(identity.primary_openid, '') AS openid,
+                       qs.unionid,
+                       COALESCE(identity.primary_external_userid, '') AS external_userid,
+                       qs.follow_user_userid, qs.matched_by,
+                       COALESCE(identity.mobile, '') AS mobile_snapshot,
+                       qs.source_channel, qs.campaign_id,
+                       qs.staff_id, qs.total_score, qs.final_tags, qs.result_token, qs.redirect_url_snapshot,
+                       qs.submitted_at
+                FROM questionnaire_submissions qs
+                LEFT JOIN crm_user_identity identity ON identity.unionid = qs.unionid
+                WHERE qs.questionnaire_id = %s
+                ORDER BY qs.submitted_at DESC, qs.id DESC
                 LIMIT %s OFFSET %s
                 """,
                 (int(questionnaire_id), int(limit), int(offset)),
@@ -976,6 +1077,97 @@ class PostgresQuestionnaireReadRepository:
                 "answers": answers_by_submission.get(int(row.get("id") or 0), {}),
                 "answer_snapshots": answer_snapshots_by_submission.get(int(row.get("id") or 0), []),
             }
+            for row in rows
+        ]
+        return items, total
+
+    def list_external_submissions(
+        self,
+        *,
+        filters: dict[str, Any],
+        limit: int = 100,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int]:
+        clauses = ["1 = 1"]
+        params: list[Any] = []
+        if _text(filters.get("mobile")).strip():
+            clauses.append("(identity.mobile = %s OR identity.mobile_normalized = %s)")
+            mobile = _text(filters.get("mobile")).strip()
+            params.extend([mobile, mobile])
+        if _text(filters.get("unionid")).strip():
+            clauses.append("qs.unionid = %s")
+            params.append(_text(filters.get("unionid")).strip())
+        if _text(filters.get("external_userid")).strip():
+            clauses.append("(identity.primary_external_userid = %s OR jsonb_exists(identity.external_userids_json, %s))")
+            external_userid = _text(filters.get("external_userid")).strip()
+            params.extend([external_userid, external_userid])
+        if filters.get("questionnaire_id") not in (None, ""):
+            clauses.append("qs.questionnaire_id = %s")
+            params.append(int(filters.get("questionnaire_id") or 0))
+        if _text(filters.get("submitted_from")).strip():
+            clauses.append("qs.submitted_at >= %s")
+            params.append(_text(filters.get("submitted_from")).strip())
+        if _text(filters.get("submitted_to")).strip():
+            clauses.append("qs.submitted_at <= %s")
+            params.append(_text(filters.get("submitted_to")).strip())
+
+        where_sql = " AND ".join(clauses)
+        with self._connect() as conn:
+            total = int(
+                (
+                    conn.execute(
+                        f"""
+                        SELECT COUNT(*) AS total
+                        FROM questionnaire_submissions qs
+                        LEFT JOIN crm_user_identity identity ON identity.unionid = qs.unionid
+                        WHERE {where_sql}
+                        """,
+                        tuple(params),
+                    ).fetchone()
+                    or {}
+                ).get("total")
+                or 0
+            )
+            rows = conn.execute(
+                f"""
+                SELECT
+                    qs.id,
+                    qs.questionnaire_id,
+                    qs.unionid,
+                    COALESCE(identity.primary_external_userid, '') AS external_userid,
+                    COALESCE(identity.mobile, '') AS mobile_snapshot,
+                    qs.submitted_at,
+                    qs.final_tags,
+                    qs.assessment_result_snapshot,
+                    COALESCE(NULLIF(q.title, ''), NULLIF(q.name, ''), '') AS questionnaire_title
+                FROM questionnaire_submissions qs
+                LEFT JOIN crm_user_identity identity ON identity.unionid = qs.unionid
+                LEFT JOIN questionnaires q ON q.id = qs.questionnaire_id
+                WHERE {where_sql}
+                ORDER BY qs.submitted_at DESC, qs.id DESC
+                LIMIT %s OFFSET %s
+                """,
+                tuple(params + [int(limit), int(offset)]),
+            ).fetchall()
+            row_ids = [int(row["id"]) for row in rows]
+            answer_rows = []
+            if row_ids:
+                answer_rows = conn.execute(
+                    """
+                    SELECT submission_id, question_title_snapshot, selected_option_texts_snapshot,
+                           text_value, score_contribution
+                    FROM questionnaire_submission_answers
+                    WHERE submission_id = ANY(%s)
+                    ORDER BY submission_id ASC, id ASC
+                    """,
+                    (row_ids,),
+                ).fetchall()
+
+        answers_by_submission: dict[int, list[dict[str, Any]]] = {}
+        for answer in answer_rows:
+            answers_by_submission.setdefault(int(answer.get("submission_id") or 0), []).append(dict(answer))
+        items = [
+            _external_submission_projection(dict(row), answers_by_submission.get(int(row.get("id") or 0), []))
             for row in rows
         ]
         return items, total
@@ -1034,13 +1226,13 @@ class PostgresQuestionnaireReadRepository:
                     row = conn.execute(
                         """
                         INSERT INTO questionnaires (
-                            slug, name, title, description, is_disabled, redirect_url,
+                            slug, name, title, description, is_disabled, redirect_url, completion_target_json,
                             answer_display_mode, assessment_enabled, assessment_config,
                             external_push_enabled, external_push_url, external_push_type, external_push_expires_at_ts,
                             external_push_day, external_push_frequency, external_push_remark, external_push_custom_params,
                             created_at, updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         RETURNING id
                         """,
                         (
@@ -1050,6 +1242,7 @@ class PostgresQuestionnaireReadRepository:
                             normalized["description"],
                             normalized["is_disabled"],
                             normalized["redirect_url"],
+                            _jsonb(normalized["completion_target_json"]),
                             normalized["answer_display_mode"],
                             normalized["assessment_enabled"],
                             _jsonb(normalized["assessment_config"]),
@@ -1069,7 +1262,7 @@ class PostgresQuestionnaireReadRepository:
                         """
                         UPDATE questionnaires
                         SET slug = %s, name = %s, title = %s, description = %s, is_disabled = %s,
-                            redirect_url = %s, answer_display_mode = %s, assessment_enabled = %s,
+                            redirect_url = %s, completion_target_json = %s, answer_display_mode = %s, assessment_enabled = %s,
                             assessment_config = %s, external_push_enabled = %s, external_push_url = %s,
                             external_push_type = %s, external_push_expires_at_ts = %s, external_push_day = %s,
                             external_push_frequency = %s, external_push_remark = %s,
@@ -1083,6 +1276,7 @@ class PostgresQuestionnaireReadRepository:
                             normalized["description"],
                             normalized["is_disabled"],
                             normalized["redirect_url"],
+                            _jsonb(normalized["completion_target_json"]),
                             normalized["answer_display_mode"],
                             normalized["assessment_enabled"],
                             _jsonb(normalized["assessment_config"]),
@@ -1246,30 +1440,39 @@ class PostgresQuestionnaireReadRepository:
         score = float(payload.get("score") or (payload.get("result_json") or {}).get("score") or 0)
         assessment_result = _json_dict((payload.get("result_json") or {}).get("assessment_result"))
         redirect_url = _text(payload.get("redirect_url") or "")
+        unionid = _text(payload.get("unionid") or respondent_identity.get("unionid"))
+        if not unionid:
+            self._enqueue_identity_resolution(
+                {
+                    "source_type": "questionnaire_submission",
+                    "questionnaire_id": questionnaire_id,
+                    "respondent_key": _text(payload.get("respondent_key") or respondent_identity.get("respondent_key")),
+                    "openid": _text(payload.get("openid") or respondent_identity.get("openid")),
+                    "external_userid": _text(payload.get("external_userid") or respondent_identity.get("external_userid")),
+                    "mobile": mobile_snapshot,
+                    "slug": _text(payload.get("slug")),
+                },
+                reason="missing_unionid",
+            )
+            raise RepositoryProviderError("identity_pending_unionid")
 
         with self._connect() as conn:
             with conn.transaction():
                 row = conn.execute(
                     """
                     INSERT INTO questionnaire_submissions (
-                        questionnaire_id, identity_map_id, respondent_key, openid, unionid, external_userid,
-                        follow_user_userid, matched_by, mobile_snapshot, source_channel, campaign_id,
+                        questionnaire_id, unionid, follow_user_userid, matched_by, source_channel, campaign_id,
                         staff_id, total_score, final_tags, assessment_result_snapshot, result_token,
                         redirect_url_snapshot, submitted_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                     RETURNING id, submitted_at
                     """,
                     (
                         questionnaire_id,
-                        int(payload["identity_map_id"]) if payload.get("identity_map_id") else None,
-                        _text(payload.get("respondent_key") or respondent_identity.get("respondent_key")),
-                        _text(payload.get("openid") or respondent_identity.get("openid")),
-                        _text(payload.get("unionid") or respondent_identity.get("unionid")),
-                        _text(payload.get("external_userid") or respondent_identity.get("external_userid")),
+                        unionid,
                         _text(payload.get("follow_user_userid")),
                         _text(payload.get("matched_by")),
-                        mobile_snapshot,
                         _text(source.get("source_channel")),
                         _text(source.get("campaign_id")),
                         _text(source.get("staff_id")),
@@ -1322,7 +1525,7 @@ class PostgresQuestionnaireReadRepository:
             "follow_user_userid": _text(payload.get("follow_user_userid")),
             "matched_by": _text(payload.get("matched_by")),
             "openid": _text(payload.get("openid") or respondent_identity.get("openid")),
-            "unionid": _text(payload.get("unionid") or respondent_identity.get("unionid")),
+            "unionid": unionid,
             "mobile": mobile_snapshot,
             "mobile_snapshot": mobile_snapshot,
             "source_channel": _text(source.get("source_channel")),
@@ -1338,6 +1541,65 @@ class PostgresQuestionnaireReadRepository:
             "updated_at": _text(payload.get("updated_at") or submitted_at),
             "answer_snapshots": answer_snapshots,
         }
+
+    def _enqueue_identity_resolution(self, payload: dict[str, Any], *, reason: str) -> None:
+        source_key = (
+            _text(payload.get("respondent_key"))
+            or _text(payload.get("openid"))
+            or _text(payload.get("external_userid"))
+            or _text(payload.get("mobile"))
+            or f"questionnaire:{int(payload.get('questionnaire_id') or 0)}"
+        )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO crm_user_identity_resolution_queue (
+                    source_type,
+                    source_key,
+                    external_userid,
+                    openid,
+                    mobile,
+                    payload_json,
+                    reason,
+                    status,
+                    first_seen_at,
+                    last_seen_at,
+                    created_at,
+                    updated_at
+                ) VALUES (
+                    'questionnaire_submission',
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    'pending',
+                    NOW(),
+                    NOW(),
+                    NOW(),
+                    NOW()
+                )
+                ON CONFLICT (source_type, source_key) WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
+                DO UPDATE SET
+                    external_userid = COALESCE(NULLIF(EXCLUDED.external_userid, ''), crm_user_identity_resolution_queue.external_userid),
+                    openid = COALESCE(NULLIF(EXCLUDED.openid, ''), crm_user_identity_resolution_queue.openid),
+                    mobile = COALESCE(NULLIF(EXCLUDED.mobile, ''), crm_user_identity_resolution_queue.mobile),
+                    payload_json = crm_user_identity_resolution_queue.payload_json || EXCLUDED.payload_json,
+                    reason = EXCLUDED.reason,
+                    last_seen_at = NOW(),
+                    updated_at = NOW()
+                """,
+                (
+                    source_key,
+                    _text(payload.get("external_userid")),
+                    _text(payload.get("openid")),
+                    _text(payload.get("mobile")),
+                    _jsonb(payload),
+                    _text(reason) or "identity_unresolved",
+                ),
+            )
+            conn.commit()
 
     def get_submission(self, submission_id: str) -> dict[str, Any] | None:
         normalized_id = str(submission_id or "").strip()
@@ -1401,18 +1663,36 @@ class PostgresQuestionnaireReadRepository:
         clauses: list[str] = []
         params: list[Any] = [int(questionnaire_id)]
         for field, value in candidates:
-            column = "mobile_snapshot" if field == "mobile" else field
-            clauses.append(f"{column} = %s")
-            params.append(value)
+            if field == "unionid":
+                clauses.append("qs.unionid = %s")
+                params.append(value)
+            elif field == "mobile":
+                clauses.append("(identity.mobile = %s OR identity.mobile_normalized = %s)")
+                params.extend([value, value])
+            elif field == "external_userid":
+                clauses.append("(identity.primary_external_userid = %s OR jsonb_exists(identity.external_userids_json, %s))")
+                params.extend([value, value])
+            elif field == "openid":
+                clauses.append("(identity.primary_openid = %s OR jsonb_exists(identity.openids_json, %s))")
+                params.extend([value, value])
+            elif field == "respondent_key":
+                continue
+        if not clauses:
+            return None
         with self._connect() as conn:
             row = conn.execute(
                 f"""
-                SELECT id, questionnaire_id, respondent_key, openid, unionid, external_userid,
-                       mobile_snapshot, total_score, final_tags, result_token, redirect_url_snapshot,
-                       submitted_at
-                FROM questionnaire_submissions
-                WHERE questionnaire_id = %s AND ({" OR ".join(clauses)})
-                ORDER BY submitted_at DESC, id DESC
+                SELECT qs.id, qs.questionnaire_id, '' AS respondent_key,
+                       COALESCE(identity.primary_openid, '') AS openid,
+                       qs.unionid,
+                       COALESCE(identity.primary_external_userid, '') AS external_userid,
+                       COALESCE(identity.mobile, '') AS mobile_snapshot,
+                       qs.total_score, qs.final_tags, qs.result_token, qs.redirect_url_snapshot,
+                       qs.submitted_at
+                FROM questionnaire_submissions qs
+                LEFT JOIN crm_user_identity identity ON identity.unionid = qs.unionid
+                WHERE qs.questionnaire_id = %s AND ({" OR ".join(clauses)})
+                ORDER BY qs.submitted_at DESC, qs.id DESC
                 LIMIT 1
                 """,
                 tuple(params),

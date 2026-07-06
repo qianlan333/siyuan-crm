@@ -48,7 +48,6 @@ def test_mcp_metadata_initialize_and_current_tool_list(monkeypatch) -> None:
         "resolve_customer",
         "get_customer_context",
         "get_recent_messages",
-        "get_automation_context",
     }
     assert tools["adapter_contract"]["mcp_tool"]["result"]["side_effect_safety"]["real_mcp_external_call_executed"] is False
 
@@ -72,3 +71,13 @@ def test_unknown_legacy_mcp_tool_returns_structured_error(monkeypatch) -> None:
 
     assert payload["error"]["code"] == -32000
     assert "unknown MCP tool" in payload["error"]["message"]
+
+
+def test_retired_automation_context_mcp_aliases_are_not_mapped(monkeypatch) -> None:
+    client = make_client(monkeypatch)
+
+    for name in ("get_automation_context", "member_context", "automation_member_context"):
+        payload = mcp_call(client, name, {"member_id": "member_001"})
+
+        assert payload["error"]["code"] == -32000
+        assert "unknown MCP tool" in payload["error"]["message"]

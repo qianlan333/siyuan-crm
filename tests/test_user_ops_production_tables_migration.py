@@ -10,10 +10,8 @@ MIGRATION = ROOT / "migrations" / "versions" / "0029_user_ops_prod_tables.py"
 TABLES = {
     "user_ops_pool_current_next": [
         "id",
-        "person_id",
-        "mobile",
-        "external_userid",
-        "customer_name",
+        "unionid",
+        "customer_name_snapshot",
         "owner_userid",
         "owner_display_name",
         "class_term_no",
@@ -21,15 +19,13 @@ TABLES = {
         "source_type",
         "activation_bucket",
         "activation_bucket_label",
-        "is_mobile_bound",
         "auto_do_not_disturb_reasons_json",
         "created_at",
         "updated_at",
     ],
     "user_ops_do_not_disturb_next": [
         "id",
-        "external_userid",
-        "mobile",
+        "unionid",
         "source_type",
         "reason_code",
         "reason_text",
@@ -42,6 +38,7 @@ TABLES = {
         "id",
         "record_key",
         "task_type",
+        "target_unionids_json",
         "outbound_task_ids_json",
         "task_results_json",
         "selected_count",
@@ -63,13 +60,11 @@ TABLES = {
 }
 
 INDEXES = [
-    "ix_user_ops_pool_current_next_external_userid",
-    "ix_user_ops_pool_current_next_mobile",
+    "ix_user_ops_pool_current_next_unionid",
     "ix_user_ops_pool_current_next_owner_userid",
     "ix_user_ops_pool_current_next_class_term_no",
     "ix_user_ops_pool_current_next_activation_bucket",
-    "ix_user_ops_dnd_next_external_userid",
-    "ix_user_ops_dnd_next_mobile",
+    "ix_user_ops_dnd_next_unionid",
     "ix_user_ops_dnd_next_active_reason",
     "ix_user_ops_send_records_next_record_key",
     "ix_user_ops_send_records_next_created_at",
@@ -118,6 +113,9 @@ def test_user_ops_production_tables_migration_contains_schema_contract() -> None
     assert "JSONB NOT NULL DEFAULT '{}'::jsonb" in source
     assert "BIGSERIAL PRIMARY KEY" in source
     assert "record_key VARCHAR(80) NOT NULL UNIQUE" in source
+    assert "person_id VARCHAR" not in source
+    assert "external_userid VARCHAR" not in source
+    assert "mobile VARCHAR" not in source
 
 
 def test_user_ops_production_tables_migration_does_not_seed_fixture_data() -> None:

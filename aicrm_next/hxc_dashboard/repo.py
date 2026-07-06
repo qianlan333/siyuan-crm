@@ -35,14 +35,16 @@ def _now_iso() -> str:
 def _fixture_rows() -> list[dict[str, Any]]:
     return [
         {
-            "customer_id": "ext_hxc_001",
+            "customer_id": "union_hxc_001",
+            "unionid": "union_hxc_001",
             "external_userid": "ext_hxc_001",
             "owner_userid": "QianLan",
             "funnel_state": "hxc_member",
             "do_not_disturb": False,
         },
         {
-            "customer_id": "ext_hxc_002",
+            "customer_id": "union_hxc_002",
+            "unionid": "union_hxc_002",
             "external_userid": "ext_hxc_002",
             "owner_userid": "QianLan",
             "funnel_state": "hxc_user",
@@ -75,9 +77,10 @@ class InMemoryHxcDashboardBroadcastRepository:
         selected = {str(item or "").strip() for item in selected_customer_ids if str(item or "").strip()}
         rows = []
         for row in self._rows:
+            unionid = str(row.get("unionid") or "").strip()
             external_userid = str(row.get("external_userid") or "").strip()
-            customer_id = str(row.get("customer_id") or external_userid or "").strip()
-            if selected and external_userid not in selected and customer_id not in selected:
+            customer_id = str(row.get("customer_id") or unionid or external_userid or "").strip()
+            if selected and unionid not in selected and external_userid not in selected and customer_id not in selected:
                 continue
             rows.append(deepcopy(row))
         return _build_audience_preview(rows)
@@ -132,24 +135,39 @@ def build_hxc_dashboard_broadcast_repository() -> HxcDashboardBroadcastRepositor
     return assert_repository_allowed(_FIXTURE_REPO, capability_owner="hxc_dashboard_broadcast")
 
 
+def connect_hxc_dashboard_broadcast_db(database_url: str) -> Any:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    return psycopg.connect(database_url, row_factory=dict_row)
+
+
 def _build_audience_preview(rows: list[dict[str, Any]]) -> dict[str, Any]:
     skipped_by_reason: dict[str, int] = {}
     eligible_external_userids: list[str] = []
+    eligible_unionids: list[str] = []
     for row in rows:
+        unionid = str(row.get("unionid") or "").strip()
         external_userid = str(row.get("external_userid") or "").strip()
+        if not unionid:
+            skipped_by_reason["missing_unionid"] = skipped_by_reason.get("missing_unionid", 0) + 1
+            continue
         if not external_userid:
             skipped_by_reason["missing_external_userid"] = skipped_by_reason.get("missing_external_userid", 0) + 1
             continue
         if bool(row.get("do_not_disturb")):
             skipped_by_reason["do_not_disturb"] = skipped_by_reason.get("do_not_disturb", 0) + 1
             continue
+        if unionid not in eligible_unionids:
+            eligible_unionids.append(unionid)
         if external_userid not in eligible_external_userids:
             eligible_external_userids.append(external_userid)
     return {
         "audience_total": len(rows),
-        "eligible_count": len(eligible_external_userids),
+        "eligible_count": len(eligible_unionids),
         "skipped_count": sum(skipped_by_reason.values()),
         "skipped_by_reason": skipped_by_reason,
+        "eligible_unionids": eligible_unionids,
         "eligible_external_userids": eligible_external_userids,
     }
 

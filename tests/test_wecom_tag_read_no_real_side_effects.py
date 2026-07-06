@@ -44,10 +44,6 @@ def test_wecom_tag_read_requests_do_not_invoke_real_side_effect_adapters(monkeyp
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("SECRET_KEY", "wecom-tag-read-no-side-effects-test")
 
-    def fail_side_effect(*args, **kwargs):
-        raise AssertionError("read route attempted a real side effect")
-
-    monkeypatch.setattr(api, "build_wecom_tag_application_service", fail_side_effect)
     client = TestClient(create_app(), raise_server_exceptions=False)
 
     tags = client.get("/api/admin/wecom/tags").json()

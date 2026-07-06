@@ -25,9 +25,8 @@ def upgrade() -> None:
             program_id BIGINT NULL,
             channel_id BIGINT NULL,
             binding_id BIGINT NULL,
-            external_userid TEXT,
+            unionid TEXT NOT NULL DEFAULT '',
             phone TEXT,
-            person_id BIGINT NULL,
             source_type TEXT NOT NULL,
             source_id TEXT NOT NULL,
             occurred_at TIMESTAMPTZ NOT NULL,
@@ -44,16 +43,15 @@ def upgrade() -> None:
         """
     )
     op.execute("CREATE INDEX IF NOT EXISTS idx_automation_event_v2_program_event ON automation_event_v2 (program_id, event_type, occurred_at)")
-    op.execute("CREATE INDEX IF NOT EXISTS idx_automation_event_v2_external ON automation_event_v2 (external_userid)")
+    op.execute("CREATE INDEX IF NOT EXISTS idx_automation_event_v2_unionid ON automation_event_v2 (unionid) WHERE unionid <> ''")
 
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS automation_membership_v2 (
             id BIGSERIAL PRIMARY KEY,
             program_id BIGINT NOT NULL,
-            external_userid TEXT NOT NULL,
+            unionid TEXT NOT NULL,
             phone TEXT NOT NULL DEFAULT '',
-            person_id BIGINT NULL,
             source_channel_id BIGINT NULL,
             source_binding_id BIGINT NULL,
             status TEXT NOT NULL DEFAULT 'active',
@@ -63,10 +61,11 @@ def upgrade() -> None:
             exited_at TIMESTAMPTZ NULL,
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            CONSTRAINT uq_automation_membership_v2_program_external UNIQUE (program_id, external_userid)
+            CONSTRAINT uq_automation_membership_v2_program_unionid UNIQUE (program_id, unionid)
         )
         """
     )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_automation_membership_v2_unionid ON automation_membership_v2 (unionid) WHERE unionid <> ''")
     op.execute("CREATE INDEX IF NOT EXISTS idx_automation_membership_v2_program_stage ON automation_membership_v2 (program_id, current_stage, status)")
 
     op.execute(

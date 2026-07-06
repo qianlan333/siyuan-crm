@@ -99,6 +99,32 @@ def test_h5_pay_oauth_callback_uses_native_client_and_sets_cookie(monkeypatch) -
     assert calls["userinfo"] == {"access_token": "token_should_not_be_cookie", "openid": "op_pay_001"}
 
 
+def test_h5_pay_oauth_start_skips_wechat_when_identity_cookie_exists(monkeypatch) -> None:
+    class FakeOAuthClient:
+        def exchange_code(self, *, app_id: str, app_secret: str, code: str):
+            return {"openid": "op_pay_cached", "unionid": "un_pay_cached", "access_token": "token_cached"}
+
+        def fetch_userinfo(self, *, access_token: str, openid: str):
+            return {"openid": openid, "unionid": "un_pay_cached", "nickname": "已授权用户"}
+
+    h5_wechat_pay.set_h5_wechat_pay_oauth_client_factory(lambda: FakeOAuthClient())
+    client = _client(monkeypatch)
+    callback = client.get(
+        f"/api/h5/wechat-pay/oauth/callback?state={_state('/pay/demo')}&code=oauth-code-cached",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 302
+
+    response = client.get(
+        "/api/h5/wechat-pay/oauth/start?return_url=/pay/demo",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/pay/demo"
+    assert "open.weixin.qq.com" not in response.headers["location"]
+
+
 def test_h5_pay_oauth_callback_fetches_userinfo_when_unionid_missing(monkeypatch) -> None:
     class FakeOAuthClient:
         def exchange_code(self, *, app_id: str, app_secret: str, code: str):
@@ -181,6 +207,61 @@ def test_h5_pay_oauth_callback_wechat_error_payload(monkeypatch) -> None:
 
     assert response.status_code == 502
     assert response.json()["error"] == "invalid code"
+
+
+def test_h5_pay_oauth_callback_missing_openid_does_not_loop_to_checkout(monkeypatch) -> None:
+    class FakeOAuthClient:
+        def exchange_code(self, *, app_id: str, app_secret: str, code: str):
+            return {"access_token": "token_without_openid"}
+
+        def fetch_userinfo(self, *, access_token: str, openid: str):
+            raise AssertionError("userinfo cannot be fetched without openid")
+
+    h5_wechat_pay.set_h5_wechat_pay_oauth_client_factory(lambda: FakeOAuthClient())
+    response = _client(monkeypatch).get(
+        f"/api/h5/wechat-pay/oauth/callback?state={_state('/pay/test-product')}&code=missing-openid",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 502
+    assert response.json()["error"] == "wechat_oauth_openid_missing"
+    assert "location" not in response.headers
+    assert h5_wechat_pay.COOKIE_NAME not in response.headers.get("set-cookie", "")
+
+
+def test_empty_material_checkout_oauth_round_trip_enters_pay_without_auth_loop(monkeypatch) -> None:
+    class FakeOAuthClient:
+        def exchange_code(self, *, app_id: str, app_secret: str, code: str):
+            return {"openid": "op_empty_material", "unionid": "un_empty_material", "access_token": "token_empty_material"}
+
+        def fetch_userinfo(self, *, access_token: str, openid: str):
+            return {"openid": openid, "unionid": "un_empty_material", "nickname": "无素材支付用户"}
+
+    h5_wechat_pay.set_h5_wechat_pay_oauth_client_factory(lambda: FakeOAuthClient())
+    client = _client(monkeypatch)
+
+    product = client.get("/p/test-product", follow_redirects=False)
+    assert product.status_code == 302
+    assert product.headers["location"] == "/pay/test-product"
+
+    before_auth = client.get(product.headers["location"], follow_redirects=False)
+    assert before_auth.status_code == 200
+    assert ">微信授权</a>" in before_auth.text
+
+    start = client.get("/api/h5/wechat-pay/oauth/start?return_url=/pay/test-product", follow_redirects=False)
+    state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
+    callback = client.get(
+        f"/api/h5/wechat-pay/oauth/callback?state={state}&code=empty-material-code",
+        follow_redirects=False,
+    )
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/pay/test-product"
+    assert h5_wechat_pay.COOKIE_NAME in callback.headers["set-cookie"]
+
+    after_auth = client.get(callback.headers["location"], follow_redirects=False)
+    assert after_auth.status_code == 200
+    assert ">微信授权</a>" not in after_auth.text
+    assert '<button id="payButton"' in after_auth.text
 
 
 def test_h5_pay_runtime_has_no_legacy_oauth_helper() -> None:

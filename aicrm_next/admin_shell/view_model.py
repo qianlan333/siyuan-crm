@@ -31,6 +31,30 @@ class AdminShellApiClient:
                 "description": "自动化运营页优先使用生产数据。",
                 "href": admin_path_for("api.admin_automation_conversion"),
             },
+            {
+                "label": "数据健康",
+                "value": "checks",
+                "description": "查看 schema drift、队列积压和事实归属检查。",
+                "href": admin_path_for("api.admin_data_health_page"),
+            },
+            {
+                "label": "数据质量规则",
+                "value": "rules",
+                "description": "按运营分组查看 identity、支付、问卷、投递和客户投影规则。",
+                "href": admin_path_for("api.admin_data_quality_page"),
+            },
+            {
+                "label": "投递排障",
+                "value": "lineage",
+                "description": "按 unionid、trace 或任务 ID 查询投递链路。",
+                "href": admin_path_for("api.admin_delivery_lineage_page"),
+            },
+            {
+                "label": "增长运营",
+                "value": "read model",
+                "description": "统一查看 program、成员、任务和触达 read model。",
+                "href": admin_path_for("api.admin_growth_orchestration_page"),
+            },
         ]
 
     def shell_context_payload(self) -> dict[str, Any]:

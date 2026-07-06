@@ -1,0 +1,26 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "generated_at": "2026-05-20T00:00:00+08:00",
+    "filters": {
+      "wecom_status": "",
+      "mobile_binding_status": "",
+      "activation_bucket": "",
+      "class_term_no": "",
+      "keyword": "",
+      "mobile": "",
+      "owner_userid": ""
+    },
+    "cards": [
+      {"key": "lead_pool_total_count", "label": "引流品总数", "value": 3},
+      {"key": "wecom_added_count", "label": "已加微", "value": 2},
+      {"key": "wecom_not_added_count", "label": "未加微", "value": 1},
+      {"key": "mobile_bound_count", "label": "已绑手机号", "value": 2},
+      {"key": "mobile_unbound_count", "label": "未绑手机号", "value": 1},
+      {"key": "huangxiaocan_activated_count", "label": "黄小璨已激活", "value": 1},
+      {"key": "huangxiaocan_not_activated_count", "label": "黄小璨未激活", "value": 1},
+      {"key": "pending_input_count", "label": "激活待录入", "value": 1}
+    ]
+  }
+}

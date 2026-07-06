@@ -3,14 +3,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from typing import Any
 
 from .audit import record_audit_event
 from .idempotency import get_or_create, make_idempotency_key
 from .media_contracts import AdapterMode, Json
 
 
-VALID_MODES = {"fake", "disabled", "staging", "production"}
+VALID_MODES = {"fake", "disabled", "staging"}
 
 
 def _normalise_mode(value: str | None, *, default: AdapterMode = "fake") -> AdapterMode:
@@ -18,10 +17,6 @@ def _normalise_mode(value: str | None, *, default: AdapterMode = "fake") -> Adap
     if mode not in VALID_MODES:
         return default
     return mode  # type: ignore[return-value]
-
-
-def _env_true(name: str) -> bool:
-    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _digest(value: str | bytes) -> str:
@@ -88,27 +83,6 @@ class _GuardedMediaAdapter:
                 audit_id=audit["audit_id"],
                 error_code="adapter_disabled",
                 error_message=f"{self.adapter_name} is disabled",
-            )
-        if self.mode == "production":
-            error_code = "production_guard_failed" if not _env_true(self.production_flag) else "production_not_implemented"
-            audit = record_audit_event(
-                adapter=self.adapter_name,
-                operation=operation,
-                mode=self.mode,
-                idempotency_key=idempotency_key,
-                side_effect_executed=False,
-                status="blocked",
-                error_code=error_code,
-            )
-            return _base_result(
-                ok=False,
-                adapter=self.adapter_name,
-                mode=self.mode,
-                operation=operation,
-                idempotency_key=idempotency_key,
-                audit_id=audit["audit_id"],
-                error_code=error_code,
-                error_message=f"{self.adapter_name} production mode is not enabled for real outbound calls",
             )
         return None
 

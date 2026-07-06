@@ -39,7 +39,7 @@ READINESS_GET_ROUTES = [
     "/api/admin/image-library",
     "/api/admin/attachment-library",
     "/api/admin/miniprogram-library",
-    "/api/admin/automation-conversion/overview",
+    "/api/admin/ai-audience/packages",
     "/api/h5/wechat/oauth/start?next=/admin",
     "/api/h5/wechat-pay/oauth/start?next=/admin",
 ]
@@ -47,9 +47,6 @@ READINESS_GET_ROUTES = [
 READINESS_POST_ROUTES = [
     "/wecom/external-contact/callback",
     "/api/wecom/events",
-    "/api/admin/automation-conversion/reply-monitor/run-due",
-    "/api/admin/automation-conversion/reply-monitor/capture",
-    "/api/admin/automation-conversion/jobs/run-due",
     "/api/admin/cloud-orchestrator/campaigns/run-due",
     "/api/h5/wechat-pay/notify",
     "/api/h5/wechat-pay/jsapi/orders",
@@ -218,25 +215,26 @@ def _questionnaire_content_blockers(routes: dict[str, Any], *, local_probe_datab
 def _automation_content_blockers(routes: dict[str, Any], *, local_probe_database: bool) -> tuple[list[str], list[str]]:
     warnings: list[str] = []
     blockers: list[str] = []
-    result = routes.get("GET /api/admin/automation-conversion/overview") or {}
-    payload = result.get("json") if isinstance(result.get("json"), dict) else {}
-    status = int(result.get("status_code") or 0)
-    if status >= 500:
-        item = f"automation_production_data_unavailable status={status}"
+    page_result = routes.get("GET /admin/automation-conversion") or {}
+    api_result = routes.get("GET /api/admin/ai-audience/packages") or {}
+    page_status = int(page_result.get("status_code") or 0)
+    api_status = int(api_result.get("status_code") or 0)
+    if page_status >= 500:
+        item = f"ai_audience_admin_page_unavailable status={page_status}"
         if local_probe_database:
             warnings.append(f"{item} in local probe DB")
         else:
             blockers.append(item)
-        return blockers, warnings
-    generated_at = str(payload.get("generated_at") or "").strip().lower()
-    status_value = str(payload.get("status") or "").strip().lower()
-    source_status = str(payload.get("source_status") or "").strip().lower()
-    if generated_at == "fixture":
-        blockers.append("automation_generated_at_fixture")
-    if status_value == "partial":
-        blockers.append("automation_status_partial")
-    if source_status in FIXTURE_STATUS_VALUES:
-        blockers.append(f"automation_fixture_source_status={source_status}")
+    if api_status >= 500:
+        item = f"ai_audience_admin_api_unavailable status={api_status}"
+        if local_probe_database:
+            warnings.append(f"{item} in local probe DB")
+        else:
+            blockers.append(item)
+    if page_status == 404:
+        blockers.append("ai_audience_admin_page_missing")
+    if api_status == 404:
+        blockers.append("ai_audience_admin_api_missing")
     return blockers, warnings
 
 
@@ -271,10 +269,13 @@ def run_check() -> dict[str, Any]:
     oauth_blockers = _oauth_blockers(routes)
     content_blockers = questionnaire_blockers + automation_blockers
     warnings = questionnaire_warnings + automation_warnings
-    timer_disabled = [
+    forbidden_retired_timer_units = [
         "aicrm-reply-monitor-run-due.timer",
         "aicrm-reply-monitor-capture.timer",
         "aicrm-automation-jobs-run-due.timer",
+    ]
+    active_timer_units = [
+        "openclaw-ai-audience-scheduler.timer",
         "aicrm-campaign-run-due.timer",
     ]
     result = {
@@ -289,7 +290,10 @@ def run_check() -> dict[str, Any]:
         "warnings": warnings,
         "questionnaire_production_data_ready": not questionnaire_blockers and not questionnaire_warnings,
         "automation_production_data_ready": not automation_blockers and not automation_warnings,
-        "timers_currently_disabled": timer_disabled,
+        "timers_currently_disabled": [],
+        "retired_timers_currently_disabled": [],
+        "forbidden_retired_timer_units": forbidden_retired_timer_units,
+        "active_timer_units": active_timer_units,
         "callback_currently_has_5013_fallback": True,
         "fixture_only_modules_present": _static_fixture_modules(),
         "fake_or_disabled_adapter_warning": "D7 fake/staging-disabled adapters remain contract-only unless production env enables real adapters.",

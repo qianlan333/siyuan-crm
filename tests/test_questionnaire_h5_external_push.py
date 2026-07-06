@@ -4,17 +4,15 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
-from aicrm_next.questionnaire import external_push
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH
+from aicrm_next.platform_foundation.external_effects.repo import reset_external_effect_fixture_state
+from aicrm_next.questionnaire.h5_write import reset_questionnaire_h5_write_fixture_state
 from aicrm_next.questionnaire.repo import build_questionnaire_repository
-
-
-class _Response:
-    status_code = 200
-    text = '{"ok":true,"message":"accepted"}'
 
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    reset_questionnaire_h5_write_fixture_state()
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
@@ -22,6 +20,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_h5_submit_executes_configured_questionnaire_external_push(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    reset_external_effect_fixture_state()
     repo = build_questionnaire_repository()
     questionnaire = repo._questionnaires[0]  # type: ignore[attr-defined]
     questionnaire["external_push_config"] = {
@@ -41,38 +40,36 @@ def test_h5_submit_executes_configured_questionnaire_external_push(client: TestC
         }
     ]
 
-    captured: dict[str, object] = {}
-
-    def fake_post(url: str, **kwargs):
-        captured["url"] = url
-        captured["kwargs"] = kwargs
-        return _Response()
-
-    monkeypatch.setattr(external_push.requests, "post", fake_post)
-
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {"phone": "13800138000"}},
+        json={"answers": {"phone": "13770938680"}},
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["real_external_call_executed"] is True
-    assert body["external_push"]["status"] == "success"
-    assert body["side_effect_plan"]["adapter_mode"] == "real_enabled"
+    assert body["real_external_call_executed"] is False
+    assert body["external_push"]["status"] == "queued"
+    assert body["external_push"]["legacy_outbound_disabled"] is True
+    assert body["tag_apply"]["status"] == "failed"
+    assert body["tag_apply"]["error_code"] == "tag_ids_missing"
+    assert body["tag_apply"]["wecom_api_called"] is False
+    assert body["side_effect_plan"]["adapter_mode"] == "real_mark_tag"
     assert body["side_effect_plan"]["requires_approval"] is False
-    assert "external_push.executed" in body["side_effect_plan"]["payload"]["planned_effects"]
+    assert "external_push.queued" in body["side_effect_plan"]["payload"]["planned_effects"]
+    assert body["external_effect_job_status"] == "queued"
 
-    assert captured["url"] == "https://hooks.example.com/questionnaire"
-    request_json = captured["kwargs"]["json"]  # type: ignore[index]
-    assert request_json["phone_number"] == "13800138000"
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH})
+    assert total == 1
+    job = jobs[0]
+    assert job.status == "queued"
+    assert job.execution_mode == "execute"
+    assert job.payload_json["webhook_url"] == "https://hooks.example.com/questionnaire"
+    assert isinstance(job.payload_json["signature"], dict)
+    request_json = job.payload_json["body"]
+    assert request_json["phone_number"] == "13770938680"
     assert request_json["type"] == "subscription"
     assert request_json["expires_at_ts"] == 1810310400
     assert request_json["remark"] == "499会员黄小璨激活专用"
 
-    logs = repo._external_push_logs  # type: ignore[attr-defined]
-    assert len(logs) == 1
-    assert logs[0]["status"] == "success"
-    assert logs[0]["response_status_code"] == 200
-    assert logs[0]["request_payload"]["phone_number"] == "13800138000"
+    assert repo._external_push_logs == []  # type: ignore[attr-defined]

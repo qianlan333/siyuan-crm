@@ -19,7 +19,7 @@ PostgreSQL schema bootstrap is a no-op.
 from __future__ import annotations
 
 from alembic import op
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 revision: str = "0003"
 down_revision: str | None = "0002"
@@ -38,7 +38,16 @@ def _has_column(table: str, column: str) -> bool:
     return bool(row)
 
 
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    schema = None if bind.dialect.name == "sqlite" else "public"
+    return inspect(bind).has_table(table, schema=schema)
+
+
 def upgrade() -> None:
+    if not _has_table("automation_member"):
+        return
+
     for column in ("profile_segment_key", "behavior_tier_key", "segment_refreshed_at"):
         if not _has_column("automation_member", column):
             op.execute(f"ALTER TABLE automation_member ADD COLUMN {column} TEXT NOT NULL DEFAULT ''")
@@ -52,6 +61,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    if not _has_table("automation_member"):
+        return
+
     op.execute("DROP INDEX IF EXISTS idx_automation_member_segments")
     op.execute("ALTER TABLE automation_member DROP COLUMN IF EXISTS segment_refreshed_at")
     op.execute("ALTER TABLE automation_member DROP COLUMN IF EXISTS behavior_tier_key")

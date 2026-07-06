@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import os
 
+from aicrm_next.shared.release import current_release_sha
+
 
 def _env_flag(name: str, *, default: bool = False) -> bool:
     value = str(os.getenv(name, "") or "").strip().lower()
@@ -12,6 +14,10 @@ def _env_flag(name: str, *, default: bool = False) -> bool:
 
 def raw_database_url() -> str:
     return str(os.getenv("DATABASE_URL", "") or "").strip()
+
+
+def runtime_setting(name: str, default: str = "") -> str:
+    return str(os.getenv(name, default) or "").strip()
 
 
 def database_mode() -> str:
@@ -33,6 +39,28 @@ def production_environment() -> bool:
         str(os.getenv("FLASK_ENV", "") or "").strip().lower(),
     }
     return bool(values & {"prod", "production"})
+
+
+def require_signing_secret(
+    env_key: str = "SECRET_KEY",
+    *,
+    local_fallback: str,
+    fallback_env_keys: tuple[str, ...] = (),
+) -> bytes:
+    for key in (env_key, *fallback_env_keys):
+        value = runtime_setting(key)
+        if value:
+            return value.encode("utf-8")
+    if production_environment():
+        keys = ", ".join((env_key, *fallback_env_keys))
+        raise RuntimeError(f"{keys} must be configured in production")
+    return local_fallback.encode("utf-8")
+
+
+def assert_required_runtime_secrets() -> None:
+    require_signing_secret("SECRET_KEY", local_fallback="aicrm-next-local-secret")
+    if production_environment():
+        require_signing_secret("WECHAT_SHOP_CALLBACK_TOKEN", local_fallback="")
 
 
 def production_repository_required() -> bool:
@@ -61,6 +89,8 @@ def runtime_health_state() -> dict:
         "ok": not degraded,
         "status": "degraded" if degraded else "ok",
         "service": "aicrm-next",
+        "secret_key_present": bool(runtime_setting("SECRET_KEY")),
+        "wechat_shop_callback_token_present": bool(runtime_setting("WECHAT_SHOP_CALLBACK_TOKEN")),
         "database": mode,
         "database_mode": mode,
         "fixture_mode": fixture,
@@ -79,7 +109,7 @@ def runtime_health_state() -> dict:
 
 def runtime_route_map_state() -> dict:
     return {
-        "web_release_sha": str(os.getenv("RELEASE_SHA") or os.getenv("GIT_SHA") or "unknown").strip() or "unknown",
+        "web_release_sha": current_release_sha(),
         "worker_release_sha": str(os.getenv("WORKER_RELEASE_SHA") or "unknown").strip() or "unknown",
         "route_owner": "ai_crm_next",
         "app_name": "aicrm-next",

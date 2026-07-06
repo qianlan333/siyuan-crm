@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from aicrm_next.identity_contact.application import (
     GetSidebarContactBindingStatusQuery,
+    ListExternalContactOwnerCandidatesQuery,
     ResolvePersonIdentityQuery,
 )
 from aicrm_next.identity_contact.dto import IdentityResolution, ResolvePersonIdentityRequest
@@ -49,6 +50,32 @@ def test_identity_resolution_query_uses_postgres_repository_when_production_read
     assert result.identity_map_id == 75550
     assert result.follow_user_userid == "owner_live_001"
     assert result.matched_by == "unionid"
+
+
+def test_external_contact_owner_candidates_use_fixture_repository():
+    owners = ListExternalContactOwnerCandidatesQuery().execute(external_userid="wx_ext_001")
+
+    assert owners == {"ZhaoYanFang"}
+
+
+def test_external_contact_owner_candidates_use_postgres_repository_when_production_ready(monkeypatch):
+    class FakeFixtureRepository:
+        def list_external_contact_owner_userids(self, external_userid):  # pragma: no cover - should not be used
+            raise AssertionError("fixture repository should not resolve production owners")
+
+    class FakePostgresRepository:
+        def list_external_contact_owner_userids(self, external_userid):
+            assert external_userid == "wx_ext_live"
+            return {"owner-a", "owner-b"}
+
+    monkeypatch.setattr("aicrm_next.identity_contact.application.production_data_ready", lambda: True)
+
+    owners = ListExternalContactOwnerCandidatesQuery(
+        repo=FakeFixtureRepository(),
+        postgres_repo=FakePostgresRepository(),
+    ).execute(external_userid=" wx_ext_live ")
+
+    assert owners == {"owner-a", "owner-b"}
 
 
 def test_sidebar_contact_binding_status_query_is_next_owned():

@@ -6,28 +6,30 @@ from uuid import uuid4
 
 from aicrm_next.identity_contact.application import BindMobileToExternalContactCommand, ResolvePersonIdentityQuery
 from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest, ResolvePersonIdentityRequest
-from aicrm_next.channel_entry.wecom_adapter import (
-    WeComAdapterBlocked,
-    WeComApiError,
-    get_wecom_adapter,
-    wecom_adapter_diagnostics,
+from aicrm_next.customer_tags.local_projection import (
+    project_questionnaire_tags,
+    reset_customer_tag_local_projection_fixture_state,
+    validate_questionnaire_tag_ids,
 )
-from aicrm_next.customer_tags.live_mutation import execute_wecom_tag_mutation
-from aicrm_next.customer_tags.mutation_commands import PlanQuestionnaireTagSideEffectCommand
-from aicrm_next.customer_tags.questionnaire_projection import (
-    QuestionnaireTagProjectionError,
-    apply_questionnaire_tag_projection,
+from aicrm_next.integration_gateway.wecom_channel_entry_client import (
+    ProductionWeComAdapter,
+    WeComApiError,
+    missing_wecom_config,
 )
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
+from aicrm_next.platform_foundation.internal_events.shadow import emit_questionnaire_submitted_shadow_event, safe_emit
 from aicrm_next.platform_foundation.command_bus.models import utcnow_iso
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
 from aicrm_next.shared.errors import ContractError, NotFoundError
-from aicrm_next.shared.repository_provider import RepositoryProviderError, blocked_production_payload
+from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.runtime import production_data_ready
 
-from .domain import score_and_tags, validate_required_answers
-from .external_push import deliver_questionnaire_external_push
+from .domain import normalize_questionnaire, score_and_tags, validate_required_answers
+from .external_push import (
+    QUESTIONNAIRE_EXTERNAL_PUSH_MODE,
+    plan_questionnaire_external_push_effect,
+)
 from .repo import QuestionnaireRepository, build_questionnaire_repository
 
 
@@ -122,6 +124,7 @@ def reset_questionnaire_h5_write_fixture_state() -> None:
     _audit_ledger = InMemoryAuditLedger()
     _side_effect_plans = InMemorySideEffectPlanRepository()
     _diagnostics = []
+    reset_customer_tag_local_projection_fixture_state()
     _command_bus = CommandBus(audit_hook=_audit_hook)
     _register_handlers()
 
@@ -279,10 +282,11 @@ def _handle_submit(command: Command) -> dict[str, Any]:
             **identity_payload,
             "person_id": identity.person_id if identity else None,
             "external_userid": (identity.external_userid if identity else identity_payload.get("external_userid")) or "",
+            "unionid": identity_payload.get("unionid") or (identity.unionid if identity else "") or "",
             "mobile": (identity.mobile if identity else "") or identity_payload.get("mobile") or "",
             "binding_status": identity.binding_status if identity else ("identity_resolution_unavailable" if identity_resolution_error else "unresolved"),
             "identity_map_id": identity.identity_map_id if identity else None,
-            "follow_user_userid": (identity.follow_user_userid if identity else identity_payload.get("follow_user_userid")) or "",
+            "follow_user_userid": (identity.follow_user_userid if identity else "") or identity_payload.get("follow_user_userid") or "",
             "matched_by": (identity.matched_by if identity else identity_payload.get("matched_by")) or "",
         }
         if repo.find_submission_for_identity(int(item["id"]), resolved_identity):
@@ -300,7 +304,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
                 "respondent_key": identity_payload.get("respondent_key") or "",
                 "external_userid": resolved_identity.get("external_userid") or "",
                 "openid": identity_payload.get("openid") or "",
-                "unionid": identity_payload.get("unionid") or "",
+                "unionid": resolved_identity.get("unionid") or "",
                 "mobile": resolved_identity.get("mobile") or "",
                 "answers": answers,
                 "answers_json": answers,
@@ -321,6 +325,15 @@ def _handle_submit(command: Command) -> dict[str, Any]:
                 "updated_at": utcnow_iso(),
             }
         )
+        mobile_binding = _sync_questionnaire_mobile_binding(command=command, submission=submission)
+        if mobile_binding.get("ok") and not mobile_binding.get("skipped"):
+            submission = {
+                **submission,
+                "binding_status": mobile_binding.get("binding_status") or "bound",
+                "person_id": mobile_binding.get("person_id") or submission.get("person_id"),
+                "mobile": mobile_binding.get("mobile") or submission.get("mobile"),
+                "follow_user_userid": mobile_binding.get("owner_userid") or submission.get("follow_user_userid"),
+            }
     except NotFoundError:
         raise
     except ContractError:
@@ -331,13 +344,39 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         if production_data_ready():
             raise QuestionnaireH5WriteProductionUnavailableError(str(exc)) from exc
         raise
-    external_push_result = deliver_questionnaire_external_push(
-        repo=repo,
+    internal_event = safe_emit(
+        "questionnaire.submitted",
+        emit_questionnaire_submitted_shadow_event,
+        command=command,
+        questionnaire=item,
+        submission=submission,
+        score=score,
+        final_tags=final_tags,
+    )
+    external_push_mode = QUESTIONNAIRE_EXTERNAL_PUSH_MODE
+    external_push_config = dict(item.get("external_push_config") or {})
+    external_push_result = {
+        "enabled": bool(external_push_config.get("enabled") or item.get("external_push_enabled")),
+        "attempted": False,
+        "ok": True,
+        "reason": "queued_external_effect",
+        "status": "queued",
+        "mode": external_push_mode,
+        "legacy_outbound_disabled": True,
+        "external_effect_required": True,
+        "real_external_call_executed": False,
+    }
+    external_effect_job = plan_questionnaire_external_push_effect(
         questionnaire=item,
         submission=submission,
         computed_result=result,
+        context=command.context,
+        source_command_id=command.command_id,
+        source_event_id=str((external_push_result.get("log") or {}).get("id") or ""),
+        idempotency_key=f"{command.idempotency_key or command.command_id}:external-effect:webhook.questionnaire_submission.push",
+        mode=external_push_mode,
+        external_push_result=external_push_result,
     )
-    bind_mobile_result = _bind_mobile_from_submission(submission)
     tag_side_effect = _plan_questionnaire_tag_side_effect(
         command=command,
         questionnaire=item,
@@ -352,9 +391,8 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         external_push_result=external_push_result,
         tag_side_effect=tag_side_effect,
     )
-    real_external_call_executed = bool(external_push_result.get("attempted")) or bool(
-        tag_side_effect.get("real_external_call_executed")
-    )
+    real_external_call_executed = bool(tag_side_effect.get("real_external_call_executed"))
+    questionnaire_projection = normalize_questionnaire(item)
     return {
         "ok": True,
         "success": True,
@@ -372,15 +410,26 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         "score": score,
         "final_tags": final_tags,
         "redirect_url": item.get("redirect_url") or f"/s/{item['slug']}/submitted",
+        "completion_target": questionnaire_projection["completion_target"],
+        "completion_target_enabled": questionnaire_projection["completion_target_enabled"],
+        "completion_target_type": questionnaire_projection["completion_target_type"],
         "write_model_status": "submitted",
         "external_push": external_push_result,
+        "external_push_mode": external_push_mode,
+        "tag_apply": tag_side_effect,
+        "mobile_binding": mobile_binding,
         "real_external_call_executed": real_external_call_executed,
         "side_effect_plan": _plan_response(side_effect_plan),
         "side_effects": {
+            "mobile_binding": mobile_binding,
             "wecom_tag": tag_side_effect,
             "external_push": external_push_result,
-            "mobile_binding": bind_mobile_result,
         },
+        "external_effect_job_id": external_effect_job.get("id") if external_effect_job else None,
+        "external_effect_job_status": external_effect_job.get("status") if external_effect_job else "",
+        "external_effect_job": external_effect_job,
+        "internal_event_id": internal_event.get("event_id") or "",
+        "internal_event_status": internal_event.get("status") or "",
     }
 
 
@@ -442,6 +491,7 @@ def _identity_payload(raw: Any) -> dict[str, Any]:
     identity = dict(raw or {}) if isinstance(raw, dict) else {}
     return {
         "external_userid": str(identity.get("external_userid") or "").strip(),
+        "follow_user_userid": str(identity.get("follow_user_userid") or identity.get("owner_userid") or "").strip(),
         "openid": str(identity.get("openid") or "").strip(),
         "unionid": str(identity.get("unionid") or "").strip(),
         "mobile": str(identity.get("mobile") or "").strip(),
@@ -462,46 +512,6 @@ def _mobile_answer_from_questions(questionnaire: dict[str, Any], answers: dict[s
     return ""
 
 
-def _bind_mobile_from_submission(submission: dict[str, Any]) -> dict[str, Any]:
-    external_userid = str(submission.get("external_userid") or "").strip()
-    mobile = str(submission.get("mobile") or submission.get("mobile_snapshot") or "").strip()
-    if not external_userid or not mobile:
-        return {
-            "ok": True,
-            "skipped": True,
-            "reason": "missing_external_userid_or_mobile",
-            "real_external_call_executed": False,
-        }
-    owner_userid = str(submission.get("follow_user_userid") or submission.get("staff_id") or "").strip()
-    try:
-        payload = BindMobileToExternalContactCommand()(
-            BindMobileToExternalContactRequest(
-                external_userid=external_userid,
-                mobile=mobile,
-                owner_userid=owner_userid or None,
-                bind_by_userid=owner_userid or "questionnaire_h5_submit",
-                force_rebind=False,
-            )
-        )
-        return {
-            "ok": True,
-            "skipped": False,
-            "source_status": "identity_mobile_bound",
-            "external_userid": external_userid,
-            "binding_status": payload.get("binding_status") or "bound",
-            "real_external_call_executed": False,
-        }
-    except Exception as exc:
-        return {
-            "ok": False,
-            "skipped": False,
-            "source_status": "identity_mobile_bind_failed",
-            "external_userid": external_userid,
-            "error": str(exc),
-            "real_external_call_executed": False,
-        }
-
-
 def _public_identity(submission: dict[str, Any]) -> dict[str, Any]:
     return {
         "external_userid": submission.get("external_userid") or "",
@@ -516,6 +526,63 @@ def _public_identity(submission: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sync_questionnaire_mobile_binding(*, command: Command, submission: dict[str, Any]) -> dict[str, Any]:
+    external_userid = str(submission.get("external_userid") or "").strip()
+    mobile = str(submission.get("mobile") or submission.get("mobile_snapshot") or "").strip()
+    if not external_userid or not mobile:
+        return {
+            "ok": True,
+            "skipped": True,
+            "reason": "missing_external_userid_or_mobile",
+            "external_userid": external_userid,
+            "mobile": mobile,
+            "source_status": "questionnaire_mobile_binding",
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "real_external_call_executed": False,
+        }
+    try:
+        result = BindMobileToExternalContactCommand()(
+            BindMobileToExternalContactRequest(
+                external_userid=external_userid,
+                mobile=mobile,
+                owner_userid=str(submission.get("follow_user_userid") or "").strip(),
+                bind_by_userid="questionnaire_h5_submit",
+                customer_name="问卷提交用户",
+                force_rebind=True,
+            )
+        )
+    except Exception as exc:
+        return {
+            "ok": False,
+            "skipped": False,
+            "reason": "mobile_binding_failed",
+            "error": str(exc),
+            "external_userid": external_userid,
+            "mobile": mobile,
+            "source_status": "questionnaire_mobile_binding_failed",
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "real_external_call_executed": False,
+        }
+    return {
+        "ok": bool(result.get("ok", True)),
+        "skipped": False,
+        "reason": "",
+        "external_userid": str(result.get("external_userid") or external_userid),
+        "mobile": str(result.get("mobile") or mobile),
+        "owner_userid": str(result.get("owner_userid") or submission.get("follow_user_userid") or ""),
+        "person_id": result.get("person_id"),
+        "binding_status": str(result.get("binding_status") or "bound"),
+        "source_status": str(result.get("source_status") or "questionnaire_mobile_binding"),
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "side_effect_executed": bool(result.get("side_effect_executed")),
+        "real_external_call_executed": False,
+        "command_id": command.command_id,
+    }
+
+
 def _create_submit_side_effect_plan(
     *,
     command: Command,
@@ -527,13 +594,14 @@ def _create_submit_side_effect_plan(
 ) -> SideEffectPlan:
     external_push_config = dict(questionnaire.get("external_push_config") or {})
     external_push_attempted = bool(external_push_result.get("attempted"))
-    tag_real_call_executed = bool(tag_side_effect.get("real_external_call_executed"))
-    any_real_call_executed = external_push_attempted or tag_real_call_executed
+    tag_planned_effects = _questionnaire_tag_planned_effects(tag_side_effect)
+    external_work_queued = external_push_result.get("status") == "queued"
+    tag_apply_status = str(tag_side_effect.get("status") or "").strip()
     return _side_effect_plans.create_plan(
         command_id=command.command_id,
         effect_type="questionnaire.h5.submit.side_effects",
         adapter_name="questionnaire_submit",
-        adapter_mode="real_enabled" if any_real_call_executed else "real_blocked",
+        adapter_mode="real_enabled" if external_push_attempted or tag_side_effect.get("wecom_api_called") else "real_mark_tag",
         target_type="questionnaire_submission",
         target_id=str(submission.get("submission_id") or ""),
         payload={
@@ -545,27 +613,65 @@ def _create_submit_side_effect_plan(
                 "external_push_configured": bool(external_push_config.get("enabled")),
                 "external_push_attempted": external_push_attempted,
                 "external_push_status": external_push_result.get("status") or "",
+                "external_push_mode": external_push_result.get("mode") or external_push_result.get("external_push_mode") or "",
                 "external_push_log_id": (external_push_result.get("log") or {}).get("id") if isinstance(external_push_result.get("log"), dict) else None,
                 "questionnaire_tag_effect_type": tag_side_effect.get("effect_type") or "",
-                "questionnaire_tag_real_call_executed": tag_real_call_executed,
-                "questionnaire_tag_status": tag_side_effect.get("source_status") or "",
+                "questionnaire_tag_apply_status": tag_apply_status,
+                "questionnaire_tag_error_code": tag_side_effect.get("error_code") or "",
+                "questionnaire_tag_local_projection_status": tag_side_effect.get("local_projection_status") or "",
+                "questionnaire_tag_wecom_api_called": bool(tag_side_effect.get("wecom_api_called")),
+                "questionnaire_tag_mark_tag_executed": bool(tag_side_effect.get("mark_tag_executed")),
             },
             "planned_effects": [
                 effect
                 for effect in [
-                    ("wecom.tag.executed" if tag_real_call_executed else "wecom.tag.plan") if final_tags else "",
-                    "external_push.executed" if external_push_attempted else ("external_push.skipped" if external_push_config.get("enabled") else ""),
-                    "automation.questionnaire_result.plan",
+                    *tag_planned_effects,
+                    (
+                        "external_push.executed"
+                        if external_push_attempted
+                        else (
+                            "external_push.queued"
+                            if external_push_result.get("status") == "queued"
+                            else ("external_push.skipped" if external_push_config.get("enabled") else "")
+                        )
+                    ),
+                    "automation.questionnaire_result.recorded",
                 ]
                 if effect
             ],
-            "real_external_call_executed": any_real_call_executed,
+            "real_external_call_executed": external_push_attempted or bool(tag_side_effect.get("real_external_call_executed")),
+            "tag_apply": tag_side_effect,
         },
-        status="executed" if any_real_call_executed else "planned",
+        status=(
+            "executed"
+            if external_push_attempted or tag_apply_status == "succeeded"
+            else ("failed" if tag_apply_status == "failed" else ("queued" if external_work_queued else "skipped"))
+        ),
         risk_level="medium",
-        requires_approval=not any_real_call_executed,
-        executed_at=utcnow_iso() if any_real_call_executed else "",
+        requires_approval=False,
+        executed_at=utcnow_iso() if external_push_attempted or tag_side_effect.get("wecom_api_called") else "",
     )
+
+
+def _questionnaire_tag_planned_effects(tag_side_effect: dict[str, Any]) -> list[str]:
+    if not tag_side_effect:
+        return []
+    effects: list[str] = []
+    local_status = str(tag_side_effect.get("local_projection_status") or "").strip()
+    tag_status = str(tag_side_effect.get("status") or "").strip()
+    if local_status == "updated":
+        effects.append("wecom.tag.contact_tags_mirror.updated")
+    elif local_status == "skipped":
+        effects.append("wecom.tag.contact_tags_mirror.skipped")
+    elif local_status:
+        effects.append(f"wecom.tag.contact_tags_mirror.{local_status}")
+    if tag_status == "succeeded":
+        effects.append("wecom.tag.mark_tag.succeeded")
+    elif tag_status == "failed":
+        effects.append("wecom.tag.mark_tag.failed")
+    elif tag_status == "skipped":
+        effects.append("wecom.tag.mark_tag.skipped")
+    return effects
 
 
 def _plan_questionnaire_tag_side_effect(
@@ -575,216 +681,180 @@ def _plan_questionnaire_tag_side_effect(
     submission: dict[str, Any],
     final_tags: list[str],
 ) -> dict[str, Any]:
-    external_userid = str(submission.get("external_userid") or "").strip()
-    if not external_userid or not final_tags:
-        return {
-            "ok": True,
-            "source_status": "next_command",
-            "route_owner": "ai_crm_next",
-            "fallback_used": False,
-            "effect_type": "questionnaire.tag.apply",
-            "adapter_mode": "real_blocked",
-            "real_external_call_executed": False,
-            "wecom_api_called": False,
-            "skipped": True,
-            "reason": "missing_external_userid_or_tags",
-        }
-    follow_user_userid = str(submission.get("follow_user_userid") or submission.get("staff_id") or "").strip()
-    diagnostics = wecom_adapter_diagnostics()
-    if bool(diagnostics.get("can_mark_tag")):
-        if not follow_user_userid:
-            return {
-                "ok": False,
-                "source_status": "next_live_wecom",
-                "route_owner": "ai_crm_next",
-                "fallback_used": False,
-                "effect_type": "questionnaire.tag.apply",
-                "adapter_mode": "real_enabled",
-                "external_userid": external_userid,
-                "tag_ids": list(final_tags),
-                "real_external_call_executed": False,
-                "wecom_api_called": False,
-                "live_call_executed": False,
-                "mark_tag_executed": False,
-                "skipped": True,
-                "reason": "missing_follow_user_userid",
-                "diagnostics": diagnostics,
-            }
-        return _execute_questionnaire_tag_live(
-            questionnaire=questionnaire,
-            submission=submission,
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            diagnostics=diagnostics,
-        )
-    return execute_wecom_tag_mutation(
-        PlanQuestionnaireTagSideEffectCommand(
-            idempotency_key=f"{command.idempotency_key or command.command_id}:questionnaire-tag-apply",
-            actor_id="questionnaire_h5_submit",
-            actor_type="system",
-            external_userid=external_userid,
-            tag_ids=final_tags,
-            source_route=command.context.source_route or "/api/h5/questionnaires/{slug}/submit",
-            source_context={
-                "source": "questionnaire_h5_submit",
-                "questionnaire_id": int(questionnaire["id"]),
-                "submission_id": submission.get("submission_id") or "",
-                "slug": questionnaire.get("slug") or "",
-            },
-            trace_id=command.context.trace_id,
-        )
+    return _execute_questionnaire_tag_apply(
+        command=command,
+        questionnaire=questionnaire,
+        submission=submission,
+        final_tags=final_tags,
     )
 
 
-def _execute_questionnaire_tag_live(
+def _execute_questionnaire_tag_apply(
     *,
+    command: Command,
     questionnaire: dict[str, Any],
     submission: dict[str, Any],
-    external_userid: str,
-    follow_user_userid: str,
     final_tags: list[str],
-    diagnostics: dict[str, Any],
 ) -> dict[str, Any]:
-    attempted = bool(final_tags)
-    try:
-        payload = get_wecom_adapter().mark_external_contact_tags(
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            add_tags=final_tags,
-            remove_tags=[],
-        )
-        success = int(payload.get("errcode") or 0) == 0
-        local_projection = _sync_questionnaire_tag_projection(
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            enabled=success,
-        )
-        return {
-            "ok": success,
-            "source_status": "wecom_live_mark_tag_completed" if success else "wecom_live_mark_tag_failed",
-            "route_owner": "ai_crm_next",
-            "fallback_used": False,
-            "effect_type": "questionnaire.tag.apply",
-            "adapter_mode": "real_enabled",
-            "external_userid": external_userid,
-            "follow_user_userid": follow_user_userid,
-            "tag_ids": list(final_tags),
-            "source_context": {
-                "source": "questionnaire_h5_submit",
-                "questionnaire_id": int(questionnaire["id"]),
-                "submission_id": submission.get("submission_id") or "",
-                "slug": questionnaire.get("slug") or "",
-            },
-            "wecom_result": {
-                "errcode": payload.get("errcode"),
-                "errmsg": payload.get("errmsg") or "",
-            },
-            "real_external_call_executed": attempted,
-            "wecom_api_called": attempted,
-            "live_call_executed": attempted,
-            "mark_tag_executed": success,
-            "unmark_tag_executed": False,
-            "local_projection": local_projection,
-            "diagnostics": diagnostics,
-        }
-    except WeComAdapterBlocked as exc:
-        return _questionnaire_tag_live_error(
-            error_code=exc.reason,
-            error_message=str(exc),
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            attempted=False,
-            diagnostics=diagnostics,
-        )
-    except WeComApiError as exc:
-        payload = dict(exc.payload or {})
-        return _questionnaire_tag_live_error(
-            error_code=str(payload.get("errcode") or "wecom_api_error"),
-            error_message=str(payload.get("errmsg") or exc.message),
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            attempted=attempted,
-            diagnostics=diagnostics,
-        )
-    except Exception as exc:
-        return _questionnaire_tag_live_error(
-            error_code=exc.__class__.__name__,
-            error_message=str(exc),
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            final_tags=final_tags,
-            attempted=attempted,
-            diagnostics=diagnostics,
-        )
-
-
-def _questionnaire_tag_live_error(
-    *,
-    error_code: str,
-    error_message: str,
-    external_userid: str,
-    follow_user_userid: str,
-    final_tags: list[str],
-    attempted: bool,
-    diagnostics: dict[str, Any],
-) -> dict[str, Any]:
-    return {
+    external_userid = str(submission.get("external_userid") or "").strip()
+    unionid = str(submission.get("unionid") or "").strip()
+    follow_user_userid = str(submission.get("follow_user_userid") or "").strip()
+    tag_validation = validate_questionnaire_tag_ids(final_tags)
+    tag_ids = list(tag_validation.get("tag_ids") or [])
+    base = {
         "ok": False,
-        "source_status": "wecom_live_mark_tag_failed",
+        "source_status": "tag_apply",
         "route_owner": "ai_crm_next",
         "fallback_used": False,
         "effect_type": "questionnaire.tag.apply",
-        "adapter_mode": "real_enabled" if attempted else "real_blocked",
+        "adapter_mode": "real_mark_tag",
+        "execution_mode": "execute",
+        "requires_approval": False,
         "external_userid": external_userid,
         "follow_user_userid": follow_user_userid,
-        "tag_ids": list(final_tags),
-        "error_code": error_code,
-        "error": error_message,
-        "real_external_call_executed": attempted,
-        "wecom_api_called": attempted,
-        "live_call_executed": attempted,
+        "tag_ids": tag_ids,
+        "wecom_api_called": False,
+        "real_external_call_executed": False,
         "mark_tag_executed": False,
-        "unmark_tag_executed": False,
-        "diagnostics": diagnostics,
+        "local_projection": {},
+        "local_projection_updated": False,
+        "local_projection_status": "skipped",
+        "contact_tags_mirror_status": "skipped",
+        "external_effect_status": "",
+        "external_effect_job": None,
+        "external_effect_job_id": None,
+    }
+    if not tag_ids or tag_validation.get("ok") is False:
+        return {
+            **base,
+            "status": "failed",
+            "error_code": "tag_ids_missing",
+            "error_message": "Questionnaire final_tags are empty or invalid.",
+            "reason": "tag_ids_missing",
+            "tag_validation": tag_validation,
+            "skipped": False,
+        }
+    if not external_userid:
+        return {
+            **base,
+            "status": "failed",
+            "error_code": "missing_external_userid",
+            "error_message": "external_userid is required for WeCom mark_tag.",
+            "reason": "missing_external_userid",
+            "skipped": False,
+        }
+    if not follow_user_userid:
+        return {
+            **base,
+            "status": "failed",
+            "error_code": "owner_userid_missing",
+            "error_message": "follow_user_userid is required for WeCom mark_tag.",
+            "reason": "owner_userid_missing",
+            "skipped": False,
+        }
+    missing = missing_wecom_config()
+    if missing:
+        return {
+            **base,
+            "status": "failed",
+            "error_code": "missing_wecom_config",
+            "error_message": "missing_wecom_config:" + ",".join(missing),
+            "missing_config": missing,
+            "reason": "missing_wecom_config",
+            "skipped": False,
+        }
+    request_payload = {
+        "userid": follow_user_userid,
+        "external_userid": external_userid,
+        "add_tag": tag_ids,
+    }
+    try:
+        response = ProductionWeComAdapter().mark_external_contact_tags(
+            external_userid=external_userid,
+            follow_user_userid=follow_user_userid,
+            add_tags=tag_ids,
+            remove_tags=[],
+        )
+    except Exception as exc:
+        error = _questionnaire_tag_error(exc)
+        return {
+            **base,
+            "status": "failed",
+            "error_code": error["error_code"],
+            "error_message": error["error_message"],
+            "reason": error["error_code"],
+            "retryable": bool(error.get("retryable")),
+            "wecom_api_called": bool(error.get("wecom_api_called")),
+            "real_external_call_executed": bool(error.get("wecom_api_called")),
+            "request_payload": request_payload,
+            "response_summary": error.get("response_summary") or {},
+            "skipped": False,
+        }
+    projection_idempotency_key = f"{command.idempotency_key or command.command_id}:questionnaire-tag-local-projection"
+    local_projection = project_questionnaire_tags(
+        unionid=unionid,
+        external_userid=external_userid,
+        owner_userid=follow_user_userid,
+        tag_ids=tag_ids,
+        source="questionnaire_h5_submit",
+        questionnaire_id=int(questionnaire["id"]),
+        submission_id=str(submission.get("submission_id") or ""),
+        idempotency_key=projection_idempotency_key,
+    )
+    return {
+        **base,
+        "ok": True,
+        "status": "succeeded",
+        "error_code": "",
+        "error_message": "",
+        "reason": "",
+        "retryable": False,
+        "wecom_api_called": True,
+        "real_external_call_executed": True,
+        "mark_tag_executed": True,
+        "request_payload": request_payload,
+        "wecom_response": dict(response or {}),
+        "response_summary": {
+            "errcode": int((response or {}).get("errcode") or 0) if isinstance(response, dict) else 0,
+            "errmsg_present": bool(str((response or {}).get("errmsg") or "").strip()) if isinstance(response, dict) else False,
+        },
+        "local_projection": local_projection,
+        "local_projection_updated": bool(local_projection.get("local_projection_updated")),
+        "local_projection_status": local_projection.get("local_projection_status") or "skipped",
+        "contact_tags_mirror_status": local_projection.get("local_projection_status") or "skipped",
+        "skipped": False,
     }
 
 
-def _sync_questionnaire_tag_projection(
-    *,
-    external_userid: str,
-    follow_user_userid: str,
-    final_tags: list[str],
-    enabled: bool,
-) -> dict[str, Any]:
-    if not enabled:
+def _questionnaire_tag_error(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, WeComApiError):
+        payload = dict(exc.payload or {})
+        errcode = int(payload.get("errcode") or 0)
+        if errcode:
+            return {
+                "error_code": f"wecom_error_{errcode}",
+                "error_message": str(payload.get("errmsg") or exc.message or exc)[:500],
+                "retryable": errcode in {-1, 42001, 45009, 45011},
+                "wecom_api_called": True,
+                "response_summary": {
+                    "errcode": errcode,
+                    "errmsg_present": bool(str(payload.get("errmsg") or "").strip()),
+                },
+            }
         return {
-            "ok": False,
-            "skipped": True,
-            "reason": "wecom_mark_tag_not_successful",
-            "external_userid": external_userid,
-            "follow_user_userid": follow_user_userid,
-            "tag_ids": list(final_tags),
+            "error_code": "network_error",
+            "error_message": str(exc.message or exc)[:500],
+            "retryable": True,
+            "wecom_api_called": True,
+            "response_summary": {},
         }
-    try:
-        return apply_questionnaire_tag_projection(
-            external_userid=external_userid,
-            follow_user_userid=follow_user_userid,
-            tag_ids=final_tags,
-        )
-    except QuestionnaireTagProjectionError as exc:
-        return {
-            "ok": False,
-            "skipped": False,
-            "reason": "questionnaire_tag_projection_failed",
-            "error": str(exc),
-            "external_userid": external_userid,
-            "follow_user_userid": follow_user_userid,
-            "tag_ids": list(final_tags),
-        }
+    return {
+        "error_code": "network_error",
+        "error_message": str(exc)[:500],
+        "retryable": True,
+        "wecom_api_called": True,
+        "response_summary": {},
+    }
 
 
 def _plan_response(plan: SideEffectPlan) -> dict[str, Any]:

@@ -519,19 +519,11 @@
   <article class="admin-card">
     <div class="admin-card-head">
       <div>
-        <h2>手动执行待处理作业</h2>
-        <p>执行前会要求确认，执行后会返回结果摘要。</p>
+        <h2>待处理作业执行已退场</h2>
+        <p>旧的待处理作业 runner 已停用；新自动化运营请使用 AI 人群包、内部事件和外推任务队列。</p>
       </div>
     </div>
-    <form method="post" action="{{ url_for('api.admin_console_jobs_action') }}" class="admin-form-stack" data-jobs-form>
-      <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
-      <input type="hidden" name="return_tab" value="deferred">
-      <input type="hidden" name="action" value="run-deferred-jobs">
-      <label class="admin-field"><span>执行数量上限</span><input type="number" name="limit" min="1" max="200" value="20"></label>
-      <label class="admin-field"><span>操作人</span><input type="text" name="operator" placeholder="填写本次执行人"></label>
-      <label class="admin-check-line"><input type="checkbox" name="confirm" value="1"><span>我确认执行当前待处理作业</span></label>
-      <button class="admin-button admin-button--primary" type="submit" data-jobs-submit data-loading-label="执行作业中...">手动执行待处理作业</button>
-    </form>
+    <div class="admin-empty">这里只保留历史待处理作业的只读排查入口，不再提供手动执行按钮。</div>
   </article>
 </section>
 
@@ -610,22 +602,11 @@
   <article class="admin-card">
     <div class="admin-card-head">
       <div>
-        <h2>执行到期重试</h2>
-        <p>按当前重试配置扫描 `retry_scheduled` 且已到时间的记录并执行重试。</p>
+        <h2>Webhook 重试执行已退场</h2>
+        <p>旧客户 Webhook 重试 runner 已停用；新外推请使用 External Effect 队列的重试与审计能力。</p>
       </div>
     </div>
-    <form method="post" action="{{ url_for('api.admin_console_jobs_action') }}" class="admin-form-stack" data-jobs-form>
-      <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
-      <input type="hidden" name="return_tab" value="webhooks">
-      <input type="hidden" name="action" value="run-webhook-retries">
-      <input type="hidden" name="webhook_event_type" value="{{ jobs_payload.webhook_filters.event_type }}">
-      <input type="hidden" name="webhook_status" value="{{ jobs_payload.webhook_filters.status }}">
-      <input type="hidden" name="webhook_limit" value="{{ jobs_payload.webhook_filters.limit }}">
-      <label class="admin-field"><span>执行数量上限</span><input type="number" name="limit" min="1" max="200" value="20"></label>
-      <label class="admin-field"><span>操作人</span><input type="text" name="operator" placeholder="填写本次执行人"></label>
-      <label class="admin-check-line"><input type="checkbox" name="confirm" value="1"><span>我确认执行到期 Webhook 重试</span></label>
-      <button class="admin-button admin-button--primary" type="submit" data-jobs-submit data-loading-label="执行重试中...">执行到期重试</button>
-    </form>
+    <div class="admin-empty">这里只保留旧 Webhook 投递记录的只读排查入口，不再提供手动重试按钮。</div>
   </article>
 </section>
 
@@ -693,18 +674,7 @@
           <td>{{ item.created_at }}<br>{{ item.updated_at }}</td>
           <td>
             {% if item.can_retry %}
-            <form method="post" action="{{ url_for('api.admin_console_jobs_action') }}" class="admin-form-inline" data-jobs-form>
-              <input type="hidden" name="admin_action_token" value="{{ admin_action_token }}">
-              <input type="hidden" name="return_tab" value="webhooks">
-              <input type="hidden" name="action" value="retry-webhook-delivery">
-              <input type="hidden" name="delivery_id" value="{{ item.id }}">
-              <input type="hidden" name="webhook_event_type" value="{{ jobs_payload.webhook_filters.event_type }}">
-              <input type="hidden" name="webhook_status" value="{{ jobs_payload.webhook_filters.status }}">
-              <input type="hidden" name="webhook_limit" value="{{ jobs_payload.webhook_filters.limit }}">
-              <input type="hidden" name="confirm" value="1">
-              <input type="hidden" name="operator" value="crm_console">
-              <button class="admin-button admin-button--secondary" type="submit" data-jobs-submit data-loading-label="重试中...">重试</button>
-            </form>
+            <span class="admin-muted">重试已退场</span>
             {% else %}
             <span class="admin-muted">-</span>
             {% endif %}

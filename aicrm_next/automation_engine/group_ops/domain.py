@@ -24,7 +24,16 @@ NODE_STATUSES = {"draft", "active", "disabled"}
 GROUP_BINDING_STATUSES = {"active", "removed"}
 WEBHOOK_EVENT_STATUSES = {"accepted", "queued", "duplicate", "rejected", "failed"}
 WEBHOOK_SEND_MODES = {"queued"}
-ACTION_TYPES = {"enqueue", "add_to_audience", "publish_task", "send_message", "record_only"}
+ACTION_TYPES = {
+    "enqueue",
+    "add_to_audience",
+    "publish_task",
+    "send_message",
+    "send_group_message",
+    "group_notice",
+    "webhook_notify",
+    "record_only",
+}
 SCHEDULED_TIME_PATTERN = re.compile(r"^(?:[01]\d|2[0-3]):[0-5]\d$")
 
 

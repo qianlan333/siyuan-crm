@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import json
 import re
 from typing import Any
 
@@ -241,79 +242,94 @@ class PostgresSidebarWriteRepository:
             raise ValueError("external_userid is required")
 
         with self._connect() as conn:
-            profile = self._contact_profile(conn, normalized_external_userid)
-            normalized_owner_userid = str(owner_userid or "").strip() or str(profile.get("owner_userid") or "").strip()
+            identity = self._identity_row(conn, normalized_external_userid)
+            normalized_owner_userid = str(owner_userid or "").strip() or str((identity or {}).get("primary_owner_userid") or "").strip()
             normalized_bind_by_userid = str(bind_by_userid or "").strip() or normalized_owner_userid or "sidebar_bind"
-            existing = self._binding_row(conn, normalized_external_userid)
+            identity_owner_userid = str((identity or {}).get("primary_owner_userid") or "").strip()
+            if identity and str(owner_userid or "").strip() and identity_owner_userid and str(owner_userid or "").strip() != identity_owner_userid:
+                raise KeyError("customer not found")
 
-            if existing and str(existing.get("mobile") or "").strip() == normalized_mobile:
-                binding = self._binding_response(existing, profile=profile, owner_userid=normalized_owner_userid)
+            if not identity:
+                resolution = self._enqueue_identity_resolution(
+                    conn,
+                    command_id=command_id,
+                    external_userid=normalized_external_userid,
+                    mobile=normalized_mobile,
+                    owner_userid=normalized_owner_userid,
+                    bind_by_userid=normalized_bind_by_userid,
+                )
+                conn.commit()
                 return {
                     "external_userid": normalized_external_userid,
-                    "write_type": "binding_noop",
-                    "write_model_status": "updated",
-                    "updated_at": str(existing.get("updated_at") or ""),
+                    "write_type": "identity_pending",
+                    "write_model_status": "pending_identity",
+                    "updated_at": "",
                     "changes": {},
-                    "binding": binding,
-                    "lead_pool_merge": {"ok": True, "merge_applied": False, "action_type": "lead_pool_noop"},
+                    "binding": {},
+                    "identity_resolution": resolution,
                 }
 
-            if existing and str(existing.get("mobile") or "").strip() != normalized_mobile and not force_rebind:
-                raise ValueError("external_userid already bound to another mobile")
+            existing_mobile = str(identity.get("mobile") or "").strip()
+            if existing_mobile == normalized_mobile:
+                binding = self._binding_response(identity, owner_userid=normalized_owner_userid)
+                return {
+                    "external_userid": normalized_external_userid,
+                    "unionid": str(identity.get("unionid") or "").strip(),
+                    "write_type": "binding_noop",
+                    "write_model_status": "updated",
+                    "updated_at": str(identity.get("updated_at") or ""),
+                    "changes": {},
+                    "binding": binding,
+                    "lead_pool_merge": {"ok": True, "merge_applied": False, "action_type": "customer_mobile_bound_event"},
+                }
+            if existing_mobile and existing_mobile != normalized_mobile and not force_rebind:
+                raise ValueError("unionid already bound to another mobile")
 
-            person = self._get_or_create_person(conn, normalized_mobile)
-            if existing:
-                conn.execute(
-                    """
-                    UPDATE external_contact_bindings
-                    SET person_id = %s,
-                        last_owner_userid = %s,
-                        updated_at = NOW()
-                    WHERE external_userid = %s
-                    """,
-                    (person["id"], normalized_owner_userid, normalized_external_userid),
-                )
-            else:
-                conn.execute(
-                    """
-                    INSERT INTO external_contact_bindings (
-                        external_userid,
-                        person_id,
-                        first_bound_by_userid,
-                        first_owner_userid,
-                        last_owner_userid,
-                        created_at,
-                        updated_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, NOW(), NOW())
-                    """,
-                    (
-                        normalized_external_userid,
-                        person["id"],
-                        normalized_bind_by_userid,
-                        normalized_owner_userid,
-                        normalized_owner_userid,
+            updated = conn.execute(
+                """
+                UPDATE crm_user_identity
+                SET mobile = %s,
+                    mobile_normalized = %s,
+                    mobile_verified = TRUE,
+                    mobile_source = 'sidebar_bind',
+                    primary_owner_userid = COALESCE(NULLIF(%s, ''), primary_owner_userid),
+                    profile_json = profile_json || jsonb_build_object(
+                        'sidebar_bind_by_userid', %s,
+                        'sidebar_external_userid', %s
                     ),
-                )
-
-            lead_pool_merge = self._merge_lead_pool(
-                conn,
-                external_userid=normalized_external_userid,
-                owner_userid=normalized_owner_userid,
-                mobile=normalized_mobile,
-                customer_name=str(profile.get("customer_name") or "").strip(),
-            )
+                    last_seen_at = NOW(),
+                    updated_at = NOW()
+                WHERE unionid = %s
+                RETURNING
+                    unionid,
+                    primary_external_userid,
+                    external_userids_json,
+                    mobile,
+                    mobile_normalized,
+                    mobile_source,
+                    primary_owner_userid,
+                    customer_name,
+                    remark,
+                    created_at,
+                    updated_at
+                """,
+                (
+                    normalized_mobile,
+                    normalized_mobile,
+                    normalized_owner_userid,
+                    normalized_bind_by_userid,
+                    normalized_external_userid,
+                    identity["unionid"],
+                ),
+            ).fetchone()
+            if not updated:
+                raise RuntimeError("crm_user_identity mobile bind failed")
             conn.commit()
 
-            updated = self._binding_row(conn, normalized_external_userid) or {
-                "external_userid": normalized_external_userid,
-                "person_id": person["id"],
-                "mobile": normalized_mobile,
-                "third_party_user_id": person.get("third_party_user_id") or "",
-            }
-            binding = self._binding_response(updated, profile=profile, owner_userid=normalized_owner_userid)
+            binding = self._binding_response(dict(updated), owner_userid=normalized_owner_userid)
             return {
                 "external_userid": normalized_external_userid,
+                "unionid": str(updated.get("unionid") or "").strip(),
                 "write_type": "binding_update",
                 "write_model_status": "updated",
                 "updated_at": str(updated.get("updated_at") or ""),
@@ -323,158 +339,109 @@ class PostgresSidebarWriteRepository:
                         "is_bound": True,
                         "mobile": normalized_mobile,
                         "binding_status": "bound",
+                        "unionid": str(updated.get("unionid") or "").strip(),
                     },
                 },
                 "binding": binding,
-                "lead_pool_merge": lead_pool_merge,
+                "lead_pool_merge": {"ok": True, "merge_applied": False, "action_type": "customer_mobile_bound_event"},
             }
 
-    def _contact_profile(self, conn, external_userid: str) -> JsonDict:
-        row = conn.execute(
-            """
-            SELECT customer_name, owner_userid, remark
-            FROM contacts
-            WHERE external_userid = %s
-            LIMIT 1
-            """,
-            (external_userid,),
-        ).fetchone()
-        return dict(row or {})
-
-    def _binding_row(self, conn, external_userid: str) -> JsonDict | None:
+    def _identity_row(self, conn, external_userid: str) -> JsonDict | None:
         row = conn.execute(
             """
             SELECT
-                b.external_userid,
-                b.person_id,
-                b.first_bound_by_userid,
-                b.first_owner_userid,
-                b.last_owner_userid,
-                b.created_at,
-                b.updated_at,
-                p.mobile,
-                p.third_party_user_id
-            FROM external_contact_bindings b
-            JOIN people p ON p.id = b.person_id
-            WHERE b.external_userid = %s
+                unionid,
+                primary_external_userid,
+                external_userids_json,
+                mobile,
+                mobile_normalized,
+                mobile_source,
+                primary_owner_userid,
+                customer_name,
+                remark,
+                created_at,
+                updated_at
+            FROM crm_user_identity
+            WHERE primary_external_userid = %s
+                   OR jsonb_exists(external_userids_json, %s)
+            ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END
             LIMIT 1
             """,
-            (external_userid,),
+            (external_userid, external_userid, external_userid),
         ).fetchone()
         return dict(row) if row else None
 
-    def _get_or_create_person(self, conn, mobile: str) -> JsonDict:
-        existing = conn.execute(
-            """
-            SELECT id, third_party_user_id
-            FROM people
-            WHERE mobile = %s
-            ORDER BY id ASC
-            LIMIT 1
-            """,
-            (mobile,),
-        ).fetchone()
-        if existing:
-            return dict(existing)
-        created = conn.execute(
-            """
-            INSERT INTO people (mobile, third_party_user_id, created_at, updated_at)
-            VALUES (%s, '', NOW(), NOW())
-            RETURNING id, third_party_user_id
-            """,
-            (mobile,),
-        ).fetchone()
-        if not created:
-            raise RuntimeError("person create failed")
-        return dict(created)
-
-    def _merge_lead_pool(
+    def _enqueue_identity_resolution(
         self,
         conn,
         *,
+        command_id: str,
         external_userid: str,
-        owner_userid: str,
         mobile: str,
-        customer_name: str,
+        owner_userid: str,
+        bind_by_userid: str,
     ) -> JsonDict:
-        external_row = self._lead_pool_row(conn, "external_userid", external_userid)
-        mobile_row = self._lead_pool_row(conn, "mobile", mobile)
-        merge_applied = bool(external_row and (not external_row.get("mobile") or (mobile_row and mobile_row.get("id") != external_row.get("id"))))
-        if external_row and mobile_row and int(external_row["id"]) != int(mobile_row["id"]):
-            conn.execute("DELETE FROM user_ops_lead_pool_current WHERE id = %s", (external_row["id"],))
-            target_row = mobile_row
-            action_type = "lead_pool_merge_upsert"
-        else:
-            target_row = mobile_row or external_row
-            action_type = "lead_pool_update" if target_row else "lead_pool_insert"
-
-        if target_row:
-            conn.execute(
-                """
-                UPDATE user_ops_lead_pool_current
-                SET mobile = %s,
-                    external_userid = %s,
-                    customer_name = %s,
-                    owner_userid = %s,
-                    is_wecom_added = TRUE,
-                    is_mobile_bound = TRUE,
-                    last_entry_source = 'mobile_bind',
-                    updated_at = NOW()
-                WHERE id = %s
-                """,
-                (mobile, external_userid, customer_name, owner_userid, target_row["id"]),
+        source_key = f"sidebar_bind_mobile:{external_userid}:{command_id}"
+        conn.execute(
+            """
+            INSERT INTO crm_user_identity_resolution_queue (
+                source_type,
+                source_key,
+                external_userid,
+                mobile,
+                payload_json,
+                reason,
+                status,
+                next_attempt_at,
+                first_seen_at,
+                last_seen_at,
+                created_at,
+                updated_at
             )
-        else:
-            conn.execute(
-                """
-                INSERT INTO user_ops_lead_pool_current (
-                    mobile,
-                    external_userid,
-                    customer_name,
-                    owner_userid,
-                    is_wecom_added,
-                    is_mobile_bound,
-                    first_entry_source,
-                    last_entry_source,
-                    created_at,
-                    updated_at
-                )
-                VALUES (%s, %s, %s, %s, TRUE, TRUE, 'mobile_bind', 'mobile_bind', NOW(), NOW())
-                """,
-                (mobile, external_userid, customer_name, owner_userid),
-            )
-
-        return {"ok": True, "merge_applied": merge_applied, "action_type": action_type}
-
-    def _lead_pool_row(self, conn, column: str, value: str) -> JsonDict | None:
-        row = conn.execute(
-            f"""
-            SELECT id, mobile, external_userid, class_term_no, class_term_label, huangxiaocan_activation_state
-            FROM user_ops_lead_pool_current
-            WHERE {column} = %s
-            LIMIT 1
+            VALUES ('sidebar_bind_mobile', %s, %s, %s, CAST(%s AS jsonb), 'missing_unionid', 'pending', NOW(), NOW(), NOW(), NOW(), NOW())
+            ON CONFLICT (source_type, source_key) WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
+            DO UPDATE SET
+                external_userid = COALESCE(NULLIF(EXCLUDED.external_userid, ''), crm_user_identity_resolution_queue.external_userid),
+                mobile = COALESCE(NULLIF(EXCLUDED.mobile, ''), crm_user_identity_resolution_queue.mobile),
+                payload_json = crm_user_identity_resolution_queue.payload_json || EXCLUDED.payload_json,
+                reason = EXCLUDED.reason,
+                last_seen_at = NOW(),
+                updated_at = NOW()
             """,
-            (value,),
-        ).fetchone()
-        return dict(row) if row else None
+            (
+                source_key,
+                external_userid,
+                mobile,
+                json.dumps(
+                    {
+                        "external_userid": external_userid,
+                        "mobile": mobile,
+                        "owner_userid": owner_userid,
+                        "bind_by_userid": bind_by_userid,
+                        "source": "sidebar_bind_mobile",
+                    },
+                    ensure_ascii=True,
+                    sort_keys=True,
+                ),
+            ),
+        )
+        return {"status": "pending", "reason": "identity_pending_unionid", "source_key": source_key}
 
-    def _binding_response(self, row: JsonDict, *, profile: JsonDict, owner_userid: str) -> JsonDict:
-        external_userid = str(row.get("external_userid") or "").strip()
-        display_name = str(profile.get("customer_name") or profile.get("remark") or "").strip() or f"客户 {external_userid[-6:]}"
+    def _binding_response(self, row: JsonDict, *, owner_userid: str) -> JsonDict:
+        unionid = str(row.get("unionid") or "").strip()
+        external_userid = str(row.get("primary_external_userid") or "").strip()
+        display_name = str(row.get("customer_name") or row.get("remark") or "").strip() or f"客户 {unionid[-6:]}"
         return {
             "is_bound": True,
-            "person_id": row.get("person_id"),
+            "unionid": unionid,
             "external_userid": external_userid,
-            "owner_userid": owner_userid or str(profile.get("owner_userid") or "").strip() or str(row.get("last_owner_userid") or row.get("first_owner_userid") or "").strip(),
-            "customer_name": str(profile.get("customer_name") or "").strip(),
-            "remark": str(profile.get("remark") or "").strip(),
+            "owner_userid": owner_userid or str(row.get("primary_owner_userid") or "").strip(),
+            "customer_name": str(row.get("customer_name") or "").strip(),
+            "remark": str(row.get("remark") or "").strip(),
             "display_name": display_name,
             "mobile": str(row.get("mobile") or "").strip(),
-            "third_party_user_id": str(row.get("third_party_user_id") or "").strip(),
-            "first_bound_by_userid": str(row.get("first_bound_by_userid") or "").strip(),
-            "first_owner_userid": str(row.get("first_owner_userid") or "").strip(),
-            "last_owner_userid": str(row.get("last_owner_userid") or "").strip(),
+            "mobile_source": str(row.get("mobile_source") or "sidebar_bind").strip(),
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
-            "detail_url": f"/admin/customers/{external_userid}",
+            "detail_url": f"/admin/customers/{unionid}",
         }

@@ -8,65 +8,21 @@
 该 Skill 优先级高于一般开发习惯；如果未读取该 Skill，不应开始前端实现。后续任何前端任务的最终回复必须输出
 `Frontend Skill Checklist`。
 
-## 生产直连（直接查日志/数据/文件）
+## 架构开发第一入口
 
-📖 **完整能力手册**：[docs/claude_prod_query_capabilities.md](docs/claude_prod_query_capabilities.md) — 所有子命令、白名单边界、查询配方、典型 cookbook 都在这里。
+所有 AI-CRM 开发任务都必须先阅读并遵守
+[docs/development/ai_crm_next_architecture_skill.md](docs/development/ai_crm_next_architecture_skill.md)。
+这是 AI-CRM Next 架构、生产安全、legacy freeze、外呼审批和 PR 输出格式的 canonical preflight。
 
-服务器: `ubuntu@www.youcangogogo.com`，SSH 别名 `crm-prod`，走 forced-command sandbox（`/usr/local/bin/claude-debug.sh`）。
+## 生产诊断入口
 
-**入口脚本**：[scripts/prod.sh](scripts/prod.sh)。所有跟生产相关的查询都走它，不要自己拼 ssh 命令。
+主仓入口不记录具体生产 host、SSH alias、identity、本机权限配置、白名单命令、
+生产路径或查询 cookbook。需要生产诊断时，先确认任务已获得生产读取授权，再使用
+私有 ops handoff 中的当前入口；不要在 PR、issue、公开文档或 agent entry 里新增
+连接细节。
 
-### 常用
+本文件只保留安全边界：
 
-```bash
-# 看应用日志（systemd）
-scripts/prod.sh logs openclaw-wecom-postgres 200
-
-# 项目自己的日志文件
-scripts/prod.sh tail "/home/ubuntu/极简 crm/logs/app.log" 100
-
-# 数据库状态
-scripts/prod.sh pg-status
-
-# 查任意 SQL（只读）
-scripts/prod.sh psql "SELECT count(*) FROM users WHERE created_at > '2026-05-01';"
-
-# 多行 SQL
-cat <<'SQL' | scripts/prod.sh psql-stdin
-SELECT u.id, u.name, count(o.id)
-FROM users u LEFT JOIN orders o ON o.user_id = u.id
-GROUP BY 1,2 ORDER BY 3 DESC LIMIT 20;
-SQL
-
-# 读项目配置/上传文件
-scripts/prod.sh cat "/home/ubuntu/极简 crm/app.py"
-scripts/prod.sh ls "/home/ubuntu/极简 crm"
-
-# 健康检查 / 进程 / 磁盘
-scripts/prod.sh health
-scripts/prod.sh ps
-scripts/prod.sh disk
-```
-
-### 真只读，不可能写
-
-- sandbox 走 PG `claude_ro` 账号 + `default_transaction_read_only=on`，所有写/DDL 在数据库层硬拒
-- `.env / .pem / .pgpass / authorized_keys` 等敏感文件被 sandbox 黑名单拒
-- `prod.sh` 还有客户端 `--write` 关键字检测但纯属冗余——PG 会先拒
-- 要做写操作直接告诉用户"我无法执行写，请你登服务器跑 X"
-
-### sandbox 子命令清单
-
-`logs / status / tail / health / pg-status / git-status / ps / disk / mem / whoami / psql / psql-stdin / cat / ls`
-
-`cat` 和 `ls` 限定路径白名单：`/home/ubuntu/`、`/var/log/`、`/etc/nginx/`。
-
-### 一次性配置（首次拿到这个仓库后做一次）
-
-1. 本地 `~/.ssh/config` 需有 `Host crm-prod` 段（`HostName www.youcangogogo.com`、`User ubuntu`、`IdentityFile ~/.ssh/claude_crm_debug`）。
-2. 在 `.claude/settings.local.json` 的 `permissions.allow` 加：
-   ```json
-   "Bash(scripts/prod.sh:*)",
-   "Bash(ssh crm-prod:*)"
-   ```
-3. 服务器侧若 `psql/cat/ls` 报 `unknown subcommand`，按 [docs/claude_prod_sandbox_extension.md](docs/claude_prod_sandbox_extension.md) 扩 sandbox。
+- 生产诊断默认只读；任何写操作、DDL、部署切换、systemd/nginx 修改都需要单独人工审批。
+- 不把本地 checker、dry-run 或只读诊断写成 production canary evidence。
+- 真实外呼按架构门禁处理：WeCom External Effect 仅限 PR #1505 批准范围；Payment / OAuth / OpenClaw / MCP / Webhook 仍需单独审批。

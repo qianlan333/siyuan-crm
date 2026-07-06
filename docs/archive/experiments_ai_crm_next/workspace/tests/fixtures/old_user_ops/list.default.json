@@ -1,0 +1,71 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "id": 101,
+        "mobile": "mobile_masked_001",
+        "external_userid": "external_user_masked_001",
+        "customer_name": "customer_masked_001",
+        "owner_userid": "owner_001",
+        "owner_display_name": "脱敏顾问A",
+        "class_term_no": "2026-05-A",
+        "class_term_label": "2026 五月 A 班",
+        "source_type": "lead_pool",
+        "created_at": "2026-05-01T09:00:00+08:00",
+        "updated_at": "2026-05-18T10:00:00+08:00",
+        "is_added_wecom": true,
+        "is_wecom_added": true,
+        "is_mobile_bound": true,
+        "activation_bucket": "activated",
+        "activation_bucket_label": "黄小璨已激活",
+        "huangxiaocan_activation_state": "activated",
+        "huangxiaocan_activation_state_label": "黄小璨已激活",
+        "do_not_disturb": false,
+        "do_not_disturb_reasons": [],
+        "can_open_customer_detail": true,
+        "can_batch_send": true
+      },
+      {
+        "id": 102,
+        "mobile": "mobile_masked_002",
+        "external_userid": "",
+        "customer_name": "customer_masked_002",
+        "owner_userid": "owner_001",
+        "owner_display_name": "脱敏顾问A",
+        "class_term_no": "2026-05-B",
+        "class_term_label": "2026 五月 B 班",
+        "source_type": "questionnaire",
+        "created_at": "2026-05-02T09:00:00+08:00",
+        "updated_at": "2026-05-18T11:00:00+08:00",
+        "is_added_wecom": false,
+        "is_wecom_added": false,
+        "is_mobile_bound": true,
+        "activation_bucket": "not_activated",
+        "activation_bucket_label": "黄小璨未激活",
+        "huangxiaocan_activation_state": "not_activated",
+        "huangxiaocan_activation_state_label": "黄小璨未激活",
+        "do_not_disturb": false,
+        "do_not_disturb_reasons": [],
+        "can_open_customer_detail": false,
+        "can_batch_send": false
+      }
+    ],
+    "total": 2,
+    "filters": {
+      "wecom_status": "",
+      "mobile_binding_status": "",
+      "activation_bucket": "",
+      "class_term_no": "",
+      "keyword": "",
+      "mobile": "",
+      "owner_userid": ""
+    },
+    "filter_options": {
+      "class_term_no": ["2026-05-A", "2026-05-B"],
+      "owner_userid": ["owner_001"]
+    },
+    "meta": {"source": "old_fixture", "generated_at": "2026-05-20T00:00:00+08:00"}
+  }
+}

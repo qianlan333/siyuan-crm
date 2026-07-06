@@ -3,8 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import re
 from typing import Any
-from urllib.parse import urlparse
 
+from aicrm_next.navigation_target import completion_action_for_target, completion_target_projection, normalize_completion_target, safe_completion_url
+from aicrm_next.navigation_target.domain import h5_url_for_legacy_fields
 from aicrm_next.shared.errors import ContractError
 
 PRODUCT_CODE_PATTERN = re.compile(r"^[A-Za-z0-9_-]{3,80}$")
@@ -41,17 +42,7 @@ def normalize_status(status: str | None) -> str:
 
 
 def safe_completion_redirect_url(value: Any) -> str:
-    normalized = str(value or "").strip()
-    if not normalized:
-        return ""
-    if normalized.startswith("/") and not normalized.startswith("//") and "\\" not in normalized and not any(
-        char.isspace() for char in normalized
-    ):
-        return normalized
-    parsed = urlparse(normalized)
-    if parsed.scheme != "https" or not parsed.netloc:
-        return ""
-    return normalized
+    return safe_completion_url(value)
 
 
 def completion_redirect_projection(enabled: Any, url: Any) -> dict[str, Any]:
@@ -82,10 +73,46 @@ def validate_completion_redirect(enabled: Any, url: Any) -> dict[str, Any]:
     }
 
 
+def _enabled_page_material_item(item: Any) -> bool:
+    if isinstance(item, str):
+        return bool(item.strip())
+    if not isinstance(item, dict):
+        return False
+    if item.get("enabled") is False:
+        return False
+    return any(str(item.get(key) or "").strip() for key in ("image_url", "data_url", "url", "src", "source_url"))
+
+
+def _configured_page_slice(item: Any) -> bool:
+    if _enabled_page_material_item(item):
+        return True
+    if not isinstance(item, dict) or item.get("enabled") is False:
+        return False
+    return any(str(item.get(key) or "").strip() for key in ("image_library_id", "library_image_id", "asset_id"))
+
+
+def has_product_page_material(product: dict[str, Any]) -> bool:
+    if not isinstance(product, dict):
+        return False
+    return any(_configured_page_slice(item) for item in list(product.get("slices") or [])) or any(
+        _enabled_page_material_item(item) for item in list(product.get("detail_images") or [])
+    )
+
+
 def preview_product(product: dict[str, Any]) -> dict[str, Any]:
+    completion_target = completion_target_projection(
+        product.get("completion_target_json") if product.get("completion_target_json") is not None else product.get("completion_target"),
+        legacy_h5_url=product.get("completion_redirect_url"),
+        legacy_enabled=product.get("completion_redirect_enabled"),
+    )
     completion_redirect = completion_redirect_projection(
         product.get("completion_redirect_enabled"),
         product.get("completion_redirect_url"),
+    )
+    completion_action = completion_action_for_target(
+        completion_target["completion_target"],
+        legacy_redirect_url=completion_redirect.get("completion_redirect_url"),
+        legacy_enabled=completion_redirect.get("completion_redirect_enabled"),
     )
     return {
         "id": product.get("id", ""),
@@ -105,4 +132,33 @@ def preview_product(product: dict[str, Any]) -> dict[str, Any]:
         "cta_text": product.get("cta_text") or product.get("buy_button_text", "立即购买"),
         "require_mobile": bool(product.get("require_mobile")),
         **completion_redirect,
+        **completion_target,
+        "completion_action": completion_action,
+    }
+
+
+def normalize_product_completion_target(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_target = payload.get("completion_target")
+    if raw_target is None:
+        raw_target = payload.get("completion_target_json")
+    legacy_url = payload.get("completion_redirect_url")
+    if raw_target is None:
+        raw_legacy_url = str(legacy_url or "").strip()
+        safe_legacy_url = safe_completion_redirect_url(raw_legacy_url)
+        if bool(payload.get("completion_redirect_enabled")) and raw_legacy_url and not safe_legacy_url:
+            raise ContractError("completion_redirect_url must be an https URL or safe internal path")
+        legacy_url = safe_legacy_url
+    target = normalize_completion_target(
+        raw_target,
+        legacy_h5_url=legacy_url,
+        legacy_enabled=payload.get("completion_redirect_enabled"),
+    )
+    legacy_url = h5_url_for_legacy_fields(target)
+    legacy_enabled = bool(target.get("enabled")) and bool(legacy_url)
+    if raw_target is None:
+        legacy_enabled = bool(payload.get("completion_redirect_enabled")) and bool(legacy_url)
+    return {
+        "completion_target_json": target,
+        "completion_redirect_enabled": legacy_enabled,
+        "completion_redirect_url": legacy_url,
     }

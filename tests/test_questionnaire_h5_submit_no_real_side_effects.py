@@ -6,18 +6,19 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
-from aicrm_next.questionnaire.h5_write import get_questionnaire_h5_side_effect_plans
+from aicrm_next.questionnaire.h5_write import get_questionnaire_h5_side_effect_plans, reset_questionnaire_h5_write_fixture_state
 
 
 @pytest.fixture()
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    reset_questionnaire_h5_write_fixture_state()
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
     return TestClient(create_app())
 
 
-def test_h5_submit_returns_side_effect_plan_only(client: TestClient) -> None:
+def test_h5_submit_returns_explicit_tag_failure_without_owner_userid(client: TestClient) -> None:
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
         json={"answers": {"q_activation": "activated"}, "identity": {"external_userid": "wx_ext_001"}},
@@ -26,32 +27,29 @@ def test_h5_submit_returns_side_effect_plan_only(client: TestClient) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["real_external_call_executed"] is False
+    assert body["tag_apply"]["status"] == "failed"
+    assert body["tag_apply"]["error_code"] == "owner_userid_missing"
+    assert body["tag_apply"]["wecom_api_called"] is False
+    assert body["tag_apply"]["local_projection_updated"] is False
     plan = body["side_effect_plan"]
-    assert plan["adapter_mode"] == "real_blocked"
-    assert plan["requires_approval"] is True
+    assert plan["adapter_mode"] == "real_mark_tag"
+    assert plan["requires_approval"] is False
     assert plan["real_external_call_executed"] is False
     assert plan["payload"]["real_external_call_executed"] is False
-    assert "wecom.tag.plan" in plan["payload"]["planned_effects"]
+    assert "wecom.tag.contact_tags_mirror.skipped" in plan["payload"]["planned_effects"]
+    assert "wecom.tag.mark_tag.failed" in plan["payload"]["planned_effects"]
 
     plans = get_questionnaire_h5_side_effect_plans()
     assert all(item["real_external_call_executed"] is False for item in plans)
 
 
-def test_h5_write_source_has_no_real_external_call_markers() -> None:
-    for path in [
-        Path("aicrm_next/questionnaire/h5_write.py"),
-        Path("aicrm_next/questionnaire/api.py"),
-    ]:
-        text = path.read_text(encoding="utf-8")
-        forbidden = [
-            '"real_external_call_executed": True',
-            "'real_external_call_executed': True",
-            "requests.post(",
-            "httpx.post(",
-            "X-AICRM-Compatibility-Facade",
-        ]
-        for marker in forbidden:
-            assert marker not in text
+def test_h5_write_source_executes_real_wecom_mark_tag_without_compat_facade() -> None:
+    text = Path("aicrm_next/questionnaire/h5_write.py").read_text(encoding="utf-8")
+    assert "ProductionWeComAdapter" in text
+    assert ".mark_external_contact_tags(" in text
+    assert "execute_wecom_tag_mutation" not in text
+    assert "PlanQuestionnaireTagSideEffectCommand" not in text
+    assert "X-AICRM-Compatibility-Facade" not in text
 
 
 def test_public_h5_read_source_has_no_legacy_public_identity_helpers() -> None:
@@ -74,4 +72,4 @@ def test_public_h5_read_source_has_no_legacy_public_identity_helpers() -> None:
 
 
 def test_production_compat_no_longer_registers_h5_submit_or_diagnostics_exact_routes() -> None:
-    assert not (Path("aicrm_next/production_compat") / "api.py").exists()
+    assert not Path("aicrm_next/production_compat").exists()

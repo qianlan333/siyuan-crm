@@ -3,27 +3,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from aicrm_next.background_jobs.automation_member_backfill import run_automation_member_backfill
 from aicrm_next.background_jobs.automation_ops_scheduler import run_automation_ops_scheduler
 from aicrm_next.background_jobs.broadcast_queue_worker import run_broadcast_queue_worker
 from aicrm_next.background_jobs.external_contact_sync import run_external_contact_sync
-
-
-class FakeAutomationMemberRepo:
-    def __init__(self) -> None:
-        self.rows = [
-            {"external_userid": "wm_1", "mobile": "13800138000", "person_id": 1, "owner_userid": "owner_1"},
-            {"external_userid": "wm_2", "mobile": "13800138001", "person_id": 2, "owner_userid": "owner_2"},
-        ]
-        self.writes: list[tuple[dict[str, Any], bool]] = []
-
-    def list_sidebar_bound_contacts(self, *, limit: int, offset: int = 0, external_userid: str = "") -> list[dict[str, Any]]:
-        rows = [row for row in self.rows if not external_userid or row["external_userid"] == external_userid]
-        return rows[offset : offset + limit]
-
-    def upsert_campaign_ready_member(self, row: dict[str, Any], *, dry_run: bool) -> dict[str, Any]:
-        self.writes.append((row, dry_run))
-        return {"ok": True, "status": "insert" if row["external_userid"] == "wm_1" else "update"}
 
 
 class FakeBroadcastRepo:
@@ -42,11 +24,11 @@ class FakeBroadcastRepo:
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]:
         return self.jobs[:limit]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0) -> None:
-        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count})
+    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
+        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count, "claim_token": claim_token})
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error") -> None:
-        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type})
+    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
+        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type, "claim_token": claim_token})
 
 
 class FakeDispatcher:
@@ -95,34 +77,11 @@ class FakeContactRepo:
         return {"contacts_total": len(self.upserts), "identity_map_total": len(self.upserts)}
 
 
-def test_automation_member_backfill_dry_run_uses_repo_without_external_calls() -> None:
-    repo = FakeAutomationMemberRepo()
-    result = run_automation_member_backfill(limit=10, dry_run=True, repo=repo)
-
-    assert result["ok"] is True
-    assert result["processed"] == 2
-    assert result["created"] == 1
-    assert result["updated"] == 1
-    assert all(dry_run for _row, dry_run in repo.writes)
-
-
-def test_automation_member_backfill_failure_is_structured() -> None:
-    result = run_automation_member_backfill(limit=0, dry_run=True, repo=FakeAutomationMemberRepo())
-
-    assert result["ok"] is False
-    assert result["errors"][0]["code"] == "invalid_limit"
-
-
 def test_automation_ops_scheduler_dry_run_returns_structured_skips() -> None:
     result = run_automation_ops_scheduler(dry_run=True, group_ops_runner=lambda **kwargs: {"component": "group_ops_scheduler", "status": "skipped", "reason": "dry_run"})
 
     assert result["ok"] is True
-    assert {item["component"] for item in result["components"]} >= {
-        "operation_task_scheduler",
-        "legacy_hxc_refresh",
-        "broadcast_feishu_hourly_report",
-        "group_ops_scheduler",
-    }
+    assert result["components"] == [{"component": "group_ops_scheduler", "status": "skipped", "reason": "dry_run"}]
 
 
 def test_broadcast_queue_worker_fake_dispatch_success() -> None:
@@ -132,7 +91,13 @@ def test_broadcast_queue_worker_fake_dispatch_success() -> None:
     assert result["ok"] is True
     assert result["claimed"] == 1
     assert result["sent_ok"] == 1
-    assert repo.sent == [{"job_id": 11, "outbound_task_id": 101, "sent_count": 2, "failed_count": 0}]
+    assert {key: repo.sent[0][key] for key in ("job_id", "outbound_task_id", "sent_count", "failed_count")} == {
+        "job_id": 11,
+        "outbound_task_id": 101,
+        "sent_count": 2,
+        "failed_count": 0,
+    }
+    assert repo.sent[0]["claim_token"]
 
 
 def test_broadcast_queue_worker_failure_path_is_structured() -> None:

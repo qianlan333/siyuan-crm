@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any
 
+import pytest
 
-class RecordingQueueGateway:
-    def __init__(self, seen: set[str] | None = None) -> None:
-        self.calls: list[dict[str, Any]] = []
-        self.seen = seen if seen is not None else set()
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WECOM_MESSAGE_GROUP_SEND, reset_external_effect_fixture_state
 
-    def enqueue_group_message(self, **kwargs):
-        self.calls.append(kwargs)
-        self.seen.add(f"group_ops:{kwargs['source_id']}:{kwargs['scheduled_at']}")
-        return 9000 + len(self.calls)
+
+@pytest.fixture(autouse=True)
+def reset_external_effects():
+    reset_external_effect_fixture_state()
 
 
 class FakeGroupOpsRepo:
@@ -78,45 +77,49 @@ def _node(**overrides):
     }
 
 
-def _run(repo, queue=None, seen=None, now=None):
+def _run(repo, seen=None, now=None):
     from aicrm_next.automation_engine.group_ops.scheduler import run_group_ops_due_scheduler
 
     seen = seen if seen is not None else set()
-    queue = queue or RecordingQueueGateway(seen)
-    return run_group_ops_due_scheduler(
-        repo=repo,
-        queue_gateway=queue,
-        duplicate_checker=lambda key: key in seen,
-        now=now or datetime(2026, 5, 28, 10, 1, tzinfo=timezone.utc),
-        operator="pytest-scheduler",
-    ), queue
+    old_mode = os.environ.get("AICRM_GROUP_OPS_OUTBOUND_MODE")
+    os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = "shadow"
+    try:
+        return run_group_ops_due_scheduler(
+            repo=repo,
+            duplicate_checker=lambda key: key in seen or any(job.idempotency_key == key for job in _wecom_group_jobs()),
+            now=now or datetime(2026, 5, 28, 10, 1, tzinfo=timezone.utc),
+            operator="pytest-scheduler",
+        )
+    finally:
+        if old_mode is None:
+            os.environ.pop("AICRM_GROUP_OPS_OUTBOUND_MODE", None)
+        else:
+            os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = old_mode
 
 
-def test_active_standard_plan_due_node_enqueues_broadcast_job():
+def _wecom_group_jobs():
+    return ExternalEffectService().list_jobs({"effect_type": WECOM_MESSAGE_GROUP_SEND}, limit=20)[0]
+
+
+def test_active_standard_plan_due_node_enqueues_external_effect_job():
     repo = FakeGroupOpsRepo(plans=[_plan()], groups={1: [_group()]}, nodes={1: [_node()]})
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    call = queue.calls[0]
-    assert call["scheduled_at"] == "2026-05-28T10:00:00+08:00"
-    assert call["chat_ids"] == ["wrOgAAA001"]
-    assert call["content_payload"]["channel"] == "wecom_customer_group"
-    assert call["content_payload"]["sender"] == "owner_001"
-    assert call["content_payload"]["chat_ids"] == ["wrOgAAA001"]
-    assert call["content_payload"]["text"]["content"] == "hello group"
-    assert "attachments" in call["content_payload"]
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert len(jobs) == 1
+    assert jobs[0].scheduled_at == "2026-05-28T02:00:00Z"
+    assert jobs[0].payload_json["chat_ids"] == ["wrOgAAA001"]
+    assert jobs[0].payload_json["content_payload"]["channel"] == "wecom_customer_group"
+    assert jobs[0].payload_json["content_payload"]["sender"] == "owner_001"
+    assert jobs[0].payload_json["content_payload"]["text"]["content"] == "hello group"
+    assert "attachments" in jobs[0].payload_json["content_payload"]
 
 
-def test_group_ops_scheduler_uses_next_queue_gateway_payload_contract():
+def test_group_ops_scheduler_uses_external_effect_payload_contract():
     from aicrm_next.automation_engine.group_ops.scheduler import run_group_ops_due_scheduler
-    from aicrm_next.integration_gateway.wecom_group_adapter import NextGroupOpsQueueGateway
-
-    captured: dict[str, Any] = {}
-
-    def fake_insert_job(**kwargs):
-        captured.update(kwargs)
-        return 4321
 
     repo = FakeGroupOpsRepo(
         plans=[_plan(owner_userid="owner_live")],
@@ -130,24 +133,30 @@ def test_group_ops_scheduler_uses_next_queue_gateway_payload_contract():
             ]
         },
     )
-    queue = NextGroupOpsQueueGateway(insert_job_fn=fake_insert_job)
 
-    summary = run_group_ops_due_scheduler(
-        repo=repo,
-        queue_gateway=queue,
-        duplicate_checker=lambda key: False,
-        now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc),
-        operator="pytest-scheduler",
-    )
+    old_mode = os.environ.get("AICRM_GROUP_OPS_OUTBOUND_MODE")
+    os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = "shadow"
+    try:
+        summary = run_group_ops_due_scheduler(
+            repo=repo,
+            duplicate_checker=lambda key: False,
+            now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc),
+            operator="pytest-scheduler",
+        )
+    finally:
+        if old_mode is None:
+            os.environ.pop("AICRM_GROUP_OPS_OUTBOUND_MODE", None)
+        else:
+            os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = old_mode
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert captured["channel"] == "wecom_customer_group"
-    assert captured["target_kind"] == "chat_id"
-    assert captured["content_payload"]["channel"] == "wecom_customer_group"
-    assert captured["content_payload"]["chat_ids"] == ["chat_001", "chat_002"]
-    assert captured["content_payload"]["sender"] == "owner_live"
-    assert captured["content_payload"]["text"]["content"] == "hello exact groups"
-    assert captured["content_payload"]["attachments"] == [{"msgtype": "image", "image": {"media_id": "img_001"}}]
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].payload_json["chat_ids"] == ["chat_001", "chat_002"]
+    assert jobs[0].payload_json["content_payload"]["channel"] == "wecom_customer_group"
+    assert jobs[0].payload_json["content_payload"]["sender"] == "owner_live"
+    assert jobs[0].payload_json["content_payload"]["text"]["content"] == "hello exact groups"
+    assert jobs[0].payload_json["content_payload"]["attachments"] == [{"msgtype": "image", "image": {"media_id": "img_001"}}]
 
 
 def test_group_ops_due_at_uses_business_timezone():
@@ -157,10 +166,12 @@ def test_group_ops_due_at_uses_business_timezone():
         nodes={1: [_node(scheduled_time="13:00", trigger_time_label="13:00")]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["scheduled_at"] == "2026-05-29T13:00:00+08:00"
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].scheduled_at == "2026-05-29T05:00:00Z"
 
 
 def test_group_ops_future_node_uses_business_timezone():
@@ -170,12 +181,10 @@ def test_group_ops_future_node_uses_business_timezone():
         nodes={1: [_node(scheduled_time="14:00", trigger_time_label="14:00")]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
 
     assert summary["group_ops_enqueued_jobs"] == 0
     assert summary["group_ops_skipped_future"] == 1
-    assert queue.calls == []
-
 
 def test_group_ops_day_index_uses_business_date():
     repo = FakeGroupOpsRepo(
@@ -184,30 +193,28 @@ def test_group_ops_day_index_uses_business_date():
         nodes={1: [_node(day_index=2, scheduled_time="13:00", trigger_time_label="13:00")]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 30, 5, 10, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 30, 5, 10, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["scheduled_at"] == "2026-05-30T13:00:00+08:00"
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].scheduled_at == "2026-05-30T05:00:00Z"
 
 
 def test_future_due_node_does_not_enqueue():
     repo = FakeGroupOpsRepo(plans=[_plan()], groups={1: [_group()]}, nodes={1: [_node(scheduled_time="20:00")]})
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
     assert summary["group_ops_enqueued_jobs"] == 0
     assert summary["group_ops_skipped_future"] == 1
-    assert queue.calls == []
-
 
 def test_disabled_plan_does_not_enqueue():
     repo = FakeGroupOpsRepo(plans=[_plan(status="disabled")], groups={1: [_group()]}, nodes={1: [_node()]})
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
     assert summary["group_ops_scanned_plans"] == 0
-    assert queue.calls == []
-
 
 def test_draft_or_disabled_node_does_not_enqueue():
     repo = FakeGroupOpsRepo(
@@ -216,52 +223,46 @@ def test_draft_or_disabled_node_does_not_enqueue():
         nodes={1: [_node(id=10, status="draft"), _node(id=11, status="disabled")]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
     assert summary["group_ops_enqueued_jobs"] == 0
-    assert queue.calls == []
-
 
 def test_plan_without_bound_groups_does_not_enqueue():
     repo = FakeGroupOpsRepo(plans=[_plan()], groups={1: []}, nodes={1: [_node()]})
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
     assert summary["group_ops_enqueued_jobs"] == 0
-    assert queue.calls == []
-
 
 def test_scheduler_is_idempotent_on_repeated_runs():
-    seen: set[str] = set()
-    queue = RecordingQueueGateway(seen)
     repo = FakeGroupOpsRepo(plans=[_plan()], groups={1: [_group()]}, nodes={1: [_node()]})
 
-    first, _ = _run(repo, queue=queue, seen=seen, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
-    second, _ = _run(repo, queue=queue, seen=seen, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    first = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    second = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert first["group_ops_enqueued_jobs"] == 1
+    assert first["group_ops_enqueued_jobs"] == 0
+    assert first["group_ops_external_effect_jobs"] == 1
     assert second["group_ops_enqueued_jobs"] == 0
+    assert second["group_ops_external_effect_jobs"] == 0
     assert second["group_ops_skipped_duplicate"] == 1
-    assert len(queue.calls) == 1
-
+    assert len(_wecom_group_jobs()) == 1
 
 def test_group_ops_scheduler_idempotent_after_timezone_fix():
-    seen: set[str] = set()
-    queue = RecordingQueueGateway(seen)
     repo = FakeGroupOpsRepo(
         plans=[_plan(created_at="2026-05-29T05:05:00+00:00")],
         groups={1: [_group(created_at="2026-05-29T05:05:00+00:00")]},
         nodes={1: [_node(scheduled_time="13:00", trigger_time_label="13:00")]},
     )
 
-    first, _ = _run(repo, queue=queue, seen=seen, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
-    second, _ = _run(repo, queue=queue, seen=seen, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
+    first = _run(repo, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
+    second = _run(repo, now=datetime(2026, 5, 29, 5, 10, tzinfo=timezone.utc))
 
-    assert first["group_ops_enqueued_jobs"] == 1
+    assert first["group_ops_enqueued_jobs"] == 0
+    assert first["group_ops_external_effect_jobs"] == 1
     assert second["group_ops_enqueued_jobs"] == 0
+    assert second["group_ops_external_effect_jobs"] == 0
     assert second["group_ops_skipped_duplicate"] == 1
-    assert len(queue.calls) == 1
-
+    assert len(_wecom_group_jobs()) == 1
 
 def test_groups_with_same_due_at_merge_into_one_job():
     repo = FakeGroupOpsRepo(
@@ -270,11 +271,13 @@ def test_groups_with_same_due_at_merge_into_one_job():
         nodes={1: [_node()]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["chat_ids"] == ["wrOgAAA001", "wrOgAAA002"]
-    assert queue.calls[0]["content_payload"]["chat_ids"] == ["wrOgAAA001", "wrOgAAA002"]
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].payload_json["chat_ids"] == ["wrOgAAA001", "wrOgAAA002"]
+    assert jobs[0].payload_json["content_payload"]["chat_ids"] == ["wrOgAAA001", "wrOgAAA002"]
 
 
 def test_groups_with_different_due_at_do_not_merge():
@@ -289,10 +292,12 @@ def test_groups_with_different_due_at_do_not_merge():
         nodes={1: [_node()]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 2
-    assert [call["chat_ids"] for call in queue.calls] == [["wrOgAAA001"], ["wrOgAAA002"]]
+    jobs = sorted(_wecom_group_jobs(), key=lambda job: job.id)
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 2
+    assert [job.payload_json["chat_ids"] for job in jobs] == [["wrOgAAA001"], ["wrOgAAA002"]]
 
 
 def test_group_ops_content_package_text_enqueues():
@@ -314,10 +319,12 @@ def test_group_ops_content_package_text_enqueues():
         },
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["content_payload"]["text"]["content"] == "package hello group"
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].payload_json["content_payload"]["text"]["content"] == "package hello group"
 
 
 def test_group_ops_content_package_text_and_resolved_attachments_enqueue(monkeypatch):
@@ -350,10 +357,12 @@ def test_group_ops_content_package_text_and_resolved_attachments_enqueue(monkeyp
         },
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    content_payload = queue.calls[0]["content_payload"]
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    content_payload = jobs[0].payload_json["content_payload"]
     assert content_payload["text"]["content"] == "package hello group"
     assert content_payload["sender"] == "owner_001"
     assert content_payload["channel"] == "wecom_customer_group"
@@ -370,11 +379,13 @@ def test_group_ops_text_and_attachment_enqueues():
         nodes={1: [_node(attachments=[{"msgtype": "file", "file": {"media_id": "file-media-001"}}])]},
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["content_payload"]["text"]["content"] == "hello group"
-    assert queue.calls[0]["content_payload"]["attachments"] == [{"msgtype": "file", "file": {"media_id": "file-media-001"}}]
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].payload_json["content_payload"]["text"]["content"] == "hello group"
+    assert jobs[0].payload_json["content_payload"]["attachments"] == [{"msgtype": "file", "file": {"media_id": "file-media-001"}}]
 
 
 def test_group_ops_bad_node_does_not_block_good_node(monkeypatch):
@@ -408,10 +419,12 @@ def test_group_ops_bad_node_does_not_block_good_node(monkeypatch):
         },
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["content_payload"]["text"]["content"] == "good node"
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].payload_json["content_payload"]["text"]["content"] == "good node"
     assert summary["errors"] == [
         {
             "scope": "group_ops_node",
@@ -455,10 +468,12 @@ def test_group_ops_unresolvable_content_package_records_node_error(monkeypatch):
         },
     )
 
-    summary, queue = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
+    summary = _run(repo, now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc))
 
-    assert summary["group_ops_enqueued_jobs"] == 1
-    assert queue.calls[0]["content_payload"]["text"]["content"] == "good node"
+    jobs = _wecom_group_jobs()
+    assert summary["group_ops_enqueued_jobs"] == 0
+    assert summary["group_ops_external_effect_jobs"] == 1
+    assert jobs[0].payload_json["content_payload"]["text"]["content"] == "good node"
     assert summary["errors"][0]["scope"] == "group_ops_node"
     assert summary["errors"][0]["node_id"] == 9
     assert "image_library_resolve_failed:id=404" in summary["errors"][0]["error"]
@@ -466,13 +481,11 @@ def test_group_ops_unresolvable_content_package_records_node_error(monkeypatch):
 
 def test_scheduler_injected_duplicate_checker_still_wins():
     repo = FakeGroupOpsRepo(plans=[_plan()], groups={1: [_group()]}, nodes={1: [_node()]})
-    queue = RecordingQueueGateway()
 
     from aicrm_next.automation_engine.group_ops.scheduler import run_group_ops_due_scheduler
 
     summary = run_group_ops_due_scheduler(
         repo=repo,
-        queue_gateway=queue,
         duplicate_checker=lambda key: True,
         now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc),
         operator="pytest-scheduler",
@@ -480,8 +493,6 @@ def test_scheduler_injected_duplicate_checker_still_wins():
 
     assert summary["group_ops_enqueued_jobs"] == 0
     assert summary["group_ops_skipped_duplicate"] == 1
-    assert queue.calls == []
-
 
 def test_scheduler_default_duplicate_checker_has_no_legacy_imports():
     from pathlib import Path

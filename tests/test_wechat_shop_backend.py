@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
-from aicrm_next.commerce.wechat_shop_client import WeChatShopClient, WeChatShopClientError
+from aicrm_next.commerce.wechat_shop_client import WeChatShopClient, WeChatShopClientConfig, WeChatShopClientError
 from aicrm_next.commerce.wechat_shop_service import (
     fixture_wechat_shop_order,
     fixture_wechat_shop_refunds,
@@ -12,6 +14,7 @@ from aicrm_next.commerce.wechat_shop_service import (
     sync_wechat_shop_orders_window,
 )
 from aicrm_next.main import create_app
+from aicrm_next.commerce.wechat_shop_signature import verify_signature
 
 
 def _client(monkeypatch) -> TestClient:
@@ -35,7 +38,7 @@ def _mock_order(
     transaction_id: str = "shop_tx_001",
     finish_aftersale_sku_cnt: int = 0,
     deliver_method: int = 3,
-    buyer_mobile: str = "13800138000",
+    buyer_mobile: str = "13520436848",
     product_title: str = "微信小店虚拟课程",
     sku_id: str = "sku_shop_001",
 ) -> None:
@@ -80,6 +83,39 @@ def _mock_order(
     monkeypatch.setattr(WeChatShopClient, "get_order", fake_get_order)
 
 
+def test_commerce_wechat_shop_client_facade_has_no_direct_http_call() -> None:
+    source = Path("aicrm_next/commerce/wechat_shop_client.py").read_text(encoding="utf-8")
+
+    assert "requests.post" not in source
+    assert "import requests" not in source
+
+
+def test_wechat_shop_client_uses_injected_http_post_without_real_http() -> None:
+    calls: list[dict] = []
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"errcode":0,"order":{"order_id":"shop-order-001"}}'
+
+        def json(self):
+            return {"errcode": 0, "order": {"order_id": "shop-order-001"}}
+
+    def fake_post(url, *, json, headers, timeout):
+        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+        return FakeResponse()
+
+    client = WeChatShopClient(
+        WeChatShopClientConfig(appid="wx-shop", appsecret="secret", api_base="https://api.weixin.qq.com"),
+        http_post=fake_post,
+    )
+
+    result = client.get_order("shop-order-001", "access-token")
+
+    assert result["order"]["order_id"] == "shop-order-001"
+    assert calls[0]["url"].endswith("/channels/ec/order/get?access_token=access-token")
+    assert calls[0]["json"] == {"order_id": "shop-order-001"}
+
+
 def test_wechat_shop_provider_is_accepted_by_unified_orders(monkeypatch) -> None:
     client = _client(monkeypatch)
 
@@ -114,6 +150,43 @@ def test_wechat_shop_notify_records_large_order_id_as_string(monkeypatch) -> Non
     events = client.get(f"/api/admin/wechat-shop/events?order_id={order_id}").json()
     assert events["events"][0]["order_id"] == order_id
     assert "e+" not in events["events"][0]["order_id"].lower()
+
+
+def test_wechat_shop_notify_rejects_bad_signature_in_production(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "wechat-shop-prod-signature-test")
+    monkeypatch.setenv("WECHAT_SHOP_CALLBACK_TOKEN", "wechat-shop-token")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    response = client.post(
+        "/api/wechat-shop/notify?signature=bad&timestamp=1777777777&nonce=nonce",
+        json={"order_info": {"order_id": "3705115058471208928"}},
+    )
+
+    assert response.status_code == 403
+
+
+def test_wechat_shop_notify_insert_failure_returns_retryable_status(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    monkeypatch.setenv("WECHAT_SHOP_CALLBACK_TOKEN", "wechat-shop-token")
+    monkeypatch.setattr("aicrm_next.commerce.wechat_shop_service._insert_event", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("db down")))
+
+    timestamp = "1777777777"
+    nonce = "nonce"
+    parts = ["wechat-shop-token", timestamp, nonce]
+    import hashlib
+
+    signature = hashlib.sha1("".join(sorted(parts)).encode("utf-8")).hexdigest()
+
+    response = client.post(
+        f"/api/wechat-shop/notify?signature={signature}&timestamp={timestamp}&nonce={nonce}",
+        json={"order_info": {"order_id": "3705115058471208928"}},
+    )
+
+    assert response.status_code == 500
+    assert response.text != "success"
+    assert verify_signature("wechat-shop-token", timestamp, nonce, signature)
 
 
 def test_wechat_shop_paid_order_maps_to_unified_paid_status(monkeypatch) -> None:
@@ -166,7 +239,7 @@ def test_wechat_shop_subscription_product_is_canonicalized(monkeypatch) -> None:
 
 def test_wechat_shop_buyer_mobile_is_available_for_filtering_and_export(monkeypatch) -> None:
     order_id = "3705115058471208123"
-    mobile = "13800138000"
+    mobile = "13520436848"
     _mock_order(monkeypatch, order_id=order_id, buyer_mobile=mobile)
     client = _client(monkeypatch)
 

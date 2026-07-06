@@ -126,6 +126,14 @@ def _category_error(exc: Exception) -> JSONResponse:
     return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
 
+def _push_capability_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, KeyError):
+        return JSONResponse({"ok": False, "error": "push_capability_not_found"}, status_code=404)
+    if isinstance(exc, PermissionError):
+        return JSONResponse({"ok": False, "error": "push_capability_not_toggleable"}, status_code=409)
+    return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+
+
 @router.get("/admin/config", name="api.admin_config", response_class=HTMLResponse)
 def admin_config_home(request: Request):
     payload = AdminConfigReadService().build_home_payload()
@@ -149,6 +157,23 @@ def admin_config_category_detail(request: Request, category_key: str):
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="config category not found") from exc
     category = detail["category"]
+    if _text(category.get("special_view")) == "push_capabilities":
+        return templates.TemplateResponse(
+            request,
+            "admin_console/config_push_capabilities.html",
+            _config_context(
+                request,
+                active_tab="overview",
+                page_title="推送能力配置",
+                page_summary="运营只管理业务推送能力开关；工程参数由后端派生和保护。",
+                config_category_detail=detail,
+                push_capabilities_api="/api/admin/config/push-capabilities",
+                push_capabilities_scheduler_api="/api/admin/config/push-capabilities/scheduler",
+                push_center_stats_api="/api/admin/push-center/stats",
+                push_center_sections_api="/api/admin/push-center/sections",
+                push_center_jobs_api="/api/admin/push-center/jobs",
+            ),
+        )
     return templates.TemplateResponse(
         request,
         "admin_console/config_category_detail.html",
@@ -360,6 +385,60 @@ def api_admin_config_app_settings(request: Request) -> dict[str, Any]:
         ),
         "source_status": "next_read_model",
         "fallback_used": False,
+    }
+
+
+@router.get("/api/admin/config/push-capabilities", name="api.admin_config_push_capabilities")
+def api_admin_config_push_capabilities() -> dict[str, Any]:
+    return AdminConfigReadService().get_push_capabilities()
+
+
+@router.patch("/api/admin/config/push-capabilities/scheduler", name="api.admin_config_patch_push_scheduler")
+async def api_admin_config_patch_push_scheduler(request: Request):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "payload must be an object"}, status_code=400)
+    token_error = _token_error_from_payload(request, payload)
+    if token_error:
+        return JSONResponse({"ok": False, "error": token_error}, status_code=401)
+    if "enabled" not in payload:
+        return JSONResponse({"ok": False, "error": "enabled is required"}, status_code=400)
+    result = AdminConfigWriteCommand().set_external_effect_scheduler_enabled(
+        _bool(payload.get("enabled")),
+        operator=_operator_from_request(request, payload=payload),
+    )
+    return {
+        "ok": True,
+        "scheduler": result["scheduler"],
+        "route_owner": "ai_crm_next",
+        "real_external_call_executed": False,
+    }
+
+
+@router.patch("/api/admin/config/push-capabilities/{capability_key}", name="api.admin_config_patch_push_capability")
+async def api_admin_config_patch_push_capability(capability_key: str, request: Request):
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        return JSONResponse({"ok": False, "error": "payload must be an object"}, status_code=400)
+    token_error = _token_error_from_payload(request, payload)
+    if token_error:
+        return JSONResponse({"ok": False, "error": token_error}, status_code=401)
+    if "enabled" not in payload:
+        return JSONResponse({"ok": False, "error": "enabled is required"}, status_code=400)
+    try:
+        result = AdminConfigWriteCommand().set_push_capability_enabled(
+            capability_key,
+            _bool(payload.get("enabled")),
+            operator=_operator_from_request(request, payload=payload),
+        )
+    except (KeyError, PermissionError, ValueError) as exc:
+        return _push_capability_error(exc)
+    return {
+        "ok": True,
+        "capability": result["capability"],
+        "derived_gates": result["derived_gates"],
+        "route_owner": "ai_crm_next",
+        "real_external_call_executed": False,
     }
 
 

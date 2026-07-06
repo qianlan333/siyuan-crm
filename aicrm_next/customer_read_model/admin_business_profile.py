@@ -72,7 +72,10 @@ def _questionnaire_answer_text(row: dict[str, Any]) -> str:
 def _questionnaire_answers_from_submissions(*, external_userid: str, mobile: str = "") -> list[JsonDict]:
     if not external_userid and not mobile:
         return []
-    rows = SidebarV2SqlRepository().list_questionnaire_answers(external_userid=external_userid, mobile=mobile)
+    try:
+        rows = SidebarV2SqlRepository().list_questionnaire_answers(external_userid=external_userid, mobile=mobile)
+    except Exception:
+        return []
     answers: list[JsonDict] = []
     seen: set[tuple[str, str, str]] = set()
     for row in rows:
@@ -98,36 +101,56 @@ def _questionnaire_answers_from_submissions(*, external_userid: str, mobile: str
 
 
 def get_customer_business_profile(
-    external_userid: str,
+    external_userid: str = "",
     *,
+    unionid: str | None = None,
     limit: int = 20,
     customer_repo: CustomerReadRepository | None = None,
     live_source_repo: CustomerReadRepository | None = None,
 ) -> JsonDict:
     requested_limit = max(1, min(int(limit or 20), 20))
+    resolved_unionid = _text(unionid)
+    resolved_external_userid = _text(external_userid)
     context_query = GetCustomerContextQuery(customer_repo, live_source_repo=live_source_repo)
-    profile_result = GetAdminCustomerProfileQuery(context_query)(external_userid=external_userid)
+    profile_result = GetAdminCustomerProfileQuery(context_query)(
+        unionid=resolved_unionid or None,
+        external_userid=resolved_external_userid or None,
+    )
+    if not profile_result.get("ok") and resolved_unionid and not resolved_external_userid:
+        resolved_external_userid = resolved_unionid
+        resolved_unionid = ""
+        profile_result = GetAdminCustomerProfileQuery(context_query)(external_userid=resolved_external_userid)
     if not profile_result.get("ok"):
         payload = dict(profile_result)
         payload.setdefault("route_owner", ROUTE_OWNER)
         payload.setdefault("fallback_used", False)
         return payload
-    tags_result = GetAdminCustomerProfileTagsQuery(context_query)(external_userid=external_userid)
-    messages_result = ListRecentMessagesQuery(customer_repo, live_source_repo=live_source_repo)(
-        RecentMessagesRequest(external_userid=external_userid, limit=requested_limit)
-    )
     profile = dict(profile_result.get("profile") or profile_result.get("customer") or {})
+    resolved_unionid = _text(profile.get("unionid") or resolved_unionid)
+    resolved_external_userid = _text(profile.get("external_userid") or profile.get("user_id") or resolved_external_userid)
+    tags_result = GetAdminCustomerProfileTagsQuery(context_query)(
+        unionid=resolved_unionid or None,
+        external_userid=resolved_external_userid or None,
+    )
+    messages_result = ListRecentMessagesQuery(customer_repo, live_source_repo=live_source_repo)(
+        RecentMessagesRequest(
+            unionid=resolved_unionid or None,
+            external_userid=resolved_external_userid or None,
+            limit=requested_limit,
+        )
+    )
     tags = list(tags_result.get("tags") or [])
     recent_messages = list(messages_result.get("messages") or messages_result.get("items") or [])[:requested_limit]
     questionnaire_answers = _questionnaire_answers(profile)
     if not questionnaire_answers:
         questionnaire_answers = _questionnaire_answers_from_submissions(
-            external_userid=external_userid,
+            external_userid=resolved_external_userid,
             mobile=_text(profile.get("mobile")),
         )
     return {
         "ok": True,
-        "external_userid": external_userid,
+        "unionid": resolved_unionid,
+        "external_userid": resolved_external_userid,
         "business_profile": {
             "tags": tags,
             "recent_messages": recent_messages,

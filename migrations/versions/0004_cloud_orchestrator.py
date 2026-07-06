@@ -30,7 +30,7 @@ no-op.
 from __future__ import annotations
 
 from alembic import op
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 
 revision: str = "0004"
@@ -51,9 +51,20 @@ def _has_column(table: str, column: str) -> bool:
     return bool(row)
 
 
+def _has_table(table: str) -> bool:
+    bind = op.get_bind()
+    schema = None if bind.dialect.name == "sqlite" else "public"
+    return inspect(bind).has_table(table, schema=schema)
+
+
 def _add_column(table: str, column_def: str, column_name: str) -> None:
-    if not _has_column(table, column_name):
+    if _has_table(table) and not _has_column(table, column_name):
         op.execute(f"ALTER TABLE {table} ADD COLUMN {column_def}")
+
+
+def _create_index_if_table_exists(table: str, sql: str) -> None:
+    if _has_table(table):
+        op.execute(sql)
 
 
 def upgrade() -> None:
@@ -140,7 +151,7 @@ def upgrade() -> None:
             id BIGSERIAL PRIMARY KEY,
             budget_id BIGINT NOT NULL,
             member_id BIGINT,
-            external_contact_id TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
             consumed_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             source_kind TEXT NOT NULL DEFAULT '',
             source_id TEXT NOT NULL DEFAULT '',
@@ -156,8 +167,8 @@ def upgrade() -> None:
     )
     op.execute(
         """
-        CREATE INDEX IF NOT EXISTS idx_automation_frequency_consumption_external_window
-        ON automation_frequency_consumption (external_contact_id, budget_id, consumed_at DESC)
+        CREATE INDEX IF NOT EXISTS idx_automation_frequency_consumption_unionid_window
+        ON automation_frequency_consumption (unionid, budget_id, consumed_at DESC)
         """
     )
     op.execute(
@@ -359,89 +370,100 @@ def upgrade() -> None:
     )
 
     # 索引：触达日志按 trace 查、按 member+sent_at 查
-    op.execute(
+    _create_index_if_table_exists(
+        "automation_touch_delivery_log",
         """
         CREATE INDEX IF NOT EXISTS idx_automation_touch_delivery_trace
         ON automation_touch_delivery_log (trace_id, created_at DESC, id DESC)
-        """
+        """,
     )
-    op.execute(
+    _create_index_if_table_exists(
+        "automation_touch_delivery_log",
         """
         CREATE INDEX IF NOT EXISTS idx_automation_touch_delivery_member_sent
         ON automation_touch_delivery_log (member_id, sent_at DESC, id DESC)
-        """
+        """,
     )
-    op.execute(
+    _create_index_if_table_exists(
+        "outbound_tasks",
         """
         CREATE INDEX IF NOT EXISTS idx_outbound_tasks_trace
         ON outbound_tasks (trace_id, id DESC)
-        """
+        """,
     )
-    op.execute(
+    _create_index_if_table_exists(
+        "automation_agent_run",
         """
         CREATE INDEX IF NOT EXISTS idx_automation_agent_run_trace
         ON automation_agent_run (trace_id, created_at DESC, id DESC)
-        """
+        """,
     )
-    op.execute(
+    _create_index_if_table_exists(
+        "automation_agent_config",
         """
         CREATE INDEX IF NOT EXISTS idx_automation_agent_config_scenario
         ON automation_agent_config (scenario_code, enabled, updated_at DESC, id DESC)
-        """
+        """,
     )
-    op.execute(
+    _create_index_if_table_exists(
+        "automation_workflow",
         """
         CREATE INDEX IF NOT EXISTS idx_automation_workflow_review
         ON automation_workflow (review_status, status, updated_at DESC, id DESC)
-        """
+        """,
     )
 
     # ----- 互动聚合视图 -------------------------------------------------------
 
     op.execute("DROP VIEW IF EXISTS automation_member_interaction_stats")
-    op.execute(
-        """
-        CREATE VIEW automation_member_interaction_stats AS
-        SELECT
-            m.id AS member_id,
-            m.external_contact_id,
-            m.phone,
-            m.current_pool,
-            m.current_audience_code,
-            m.profile_segment_key,
-            m.behavior_tier_key,
-            m.last_ai_push_at,
-            m.ai_cooldown_until,
-            (
-                SELECT MAX(sent_at) FROM automation_touch_delivery_log d
-                WHERE d.member_id = m.id AND d.status = 'sent'
-            ) AS last_outbound_at,
-            (
-                SELECT COUNT(*) FROM automation_touch_delivery_log d
-                WHERE d.member_id = m.id AND d.status = 'sent'
-            ) AS outbound_count_total,
-            (
-                SELECT COUNT(*) FROM automation_touch_delivery_log d
-                WHERE d.member_id = m.id AND d.status = 'sent'
-                  AND d.sent_at >= to_char(NOW() - INTERVAL '7 days', 'YYYY-MM-DD"T"HH24:MI:SS')
-            ) AS outbound_count_7d,
-            (
-                SELECT COUNT(*) FROM automation_touch_delivery_log d
-                WHERE d.member_id = m.id AND d.status = 'sent'
-                  AND d.sent_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD"T"HH24:MI:SS')
-            ) AS outbound_count_30d,
-            (
-                SELECT MAX(pushed_at) FROM automation_ai_push_log p
-                WHERE p.member_id = m.id
-            ) AS last_ai_push_log_at,
-            (
-                SELECT COUNT(*) FROM automation_ai_push_log p
-                WHERE p.member_id = m.id
-                  AND p.pushed_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD"T"HH24:MI:SS')
-            ) AS ai_push_count_30d
-        FROM automation_member m
-        """
-    )
+    if (
+        _has_table("automation_member")
+        and _has_table("automation_touch_delivery_log")
+        and _has_table("automation_ai_push_log")
+    ):
+        op.execute(
+            """
+            CREATE VIEW automation_member_interaction_stats AS
+            SELECT
+                m.id AS member_id,
+                m.external_contact_id,
+                m.phone,
+                m.current_pool,
+                m.current_audience_code,
+                m.profile_segment_key,
+                m.behavior_tier_key,
+                m.last_ai_push_at,
+                m.ai_cooldown_until,
+                (
+                    SELECT MAX(sent_at) FROM automation_touch_delivery_log d
+                    WHERE d.member_id = m.id AND d.status = 'sent'
+                ) AS last_outbound_at,
+                (
+                    SELECT COUNT(*) FROM automation_touch_delivery_log d
+                    WHERE d.member_id = m.id AND d.status = 'sent'
+                ) AS outbound_count_total,
+                (
+                    SELECT COUNT(*) FROM automation_touch_delivery_log d
+                    WHERE d.member_id = m.id AND d.status = 'sent'
+                      AND d.sent_at >= to_char(NOW() - INTERVAL '7 days', 'YYYY-MM-DD"T"HH24:MI:SS')
+                ) AS outbound_count_7d,
+                (
+                    SELECT COUNT(*) FROM automation_touch_delivery_log d
+                    WHERE d.member_id = m.id AND d.status = 'sent'
+                      AND d.sent_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD"T"HH24:MI:SS')
+                ) AS outbound_count_30d,
+                (
+                    SELECT MAX(pushed_at) FROM automation_ai_push_log p
+                    WHERE p.member_id = m.id
+                ) AS last_ai_push_log_at,
+                (
+                    SELECT COUNT(*) FROM automation_ai_push_log p
+                    WHERE p.member_id = m.id
+                      AND p.pushed_at >= to_char(NOW() - INTERVAL '30 days', 'YYYY-MM-DD"T"HH24:MI:SS')
+                ) AS ai_push_count_30d
+            FROM automation_member m
+            """
+        )
 
 
 def downgrade() -> None:
@@ -475,4 +497,5 @@ def downgrade() -> None:
         ("automation_agent_run", "trace_id"),
         ("automation_agent_config", "scenario_code"),
     ):
-        op.execute(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}")
+        if _has_table(table):
+            op.execute(f"ALTER TABLE {table} DROP COLUMN IF EXISTS {column}")

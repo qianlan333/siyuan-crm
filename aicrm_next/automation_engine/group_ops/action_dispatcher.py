@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from aicrm_next.integration_gateway.fake_adapters import FakeWeComDispatchAdapter
+from aicrm_next.platform_foundation.internal_events.legacy_path_markers import mark_legacy_path_invoked
+from aicrm_next.platform_foundation.internal_events.shadow import emit_broadcast_task_created_shadow_event, safe_emit
 from aicrm_next.shared.errors import ContractError
 from aicrm_next.shared.postgres_connection import get_db
 
@@ -30,11 +32,40 @@ def _recipient_external_userid(input_data: dict[str, Any]) -> str:
     )
 
 
+def _recipient_unionid(input_data: dict[str, Any]) -> str:
+    recipient = input_data.get("recipient") if isinstance(input_data.get("recipient"), dict) else {}
+    return clean_text(recipient.get("unionid") or recipient.get("unionId") or input_data.get("unionid") or input_data.get("unionId"))
+
+
+def _resolve_unionid_by_external_userid(external_userid: str) -> str:
+    external_userid = clean_text(external_userid)
+    if not external_userid:
+        return ""
+    try:
+        db = get_db()
+        row = db.execute(
+            """
+            SELECT unionid
+            FROM crm_user_identity
+            WHERE primary_external_userid = ?
+               OR jsonb_exists(external_userids_json, ?)
+            ORDER BY CASE WHEN primary_external_userid = ? THEN 0 ELSE 1 END,
+                     updated_at DESC
+            LIMIT 1
+            """,
+            (external_userid, external_userid, external_userid),
+        ).fetchone()
+    except Exception:
+        return ""
+    return clean_text((row or {}).get("unionid"))
+
+
 def _recipient_snapshot(input_data: dict[str, Any]) -> dict[str, str]:
     recipient = input_data.get("recipient") if isinstance(input_data.get("recipient"), dict) else {}
     return {
         "user_id": clean_text(recipient.get("userId") or recipient.get("user_id")),
         "external_user_id": _recipient_external_userid(input_data),
+        "unionid": _recipient_unionid(input_data),
         "wechat_user_id": clean_text(recipient.get("wechatUserId") or recipient.get("wechat_user_id")),
         "group_id": clean_text(recipient.get("groupId") or recipient.get("group_id")),
     }
@@ -65,6 +96,7 @@ class GroupOpsActionCommand:
     plan_id: int
     trigger_event_id: str
     external_userid: str
+    unionid: str
     sender: str
     created_by: str
     content: str
@@ -102,7 +134,7 @@ class NextOutboundMessageQueueGateway:
         payload = {
             "channel": "wecom_private",
             "sender": command.sender,
-            "external_userid": [command.external_userid],
+            "unionids": [command.unionid] if command.unionid else [],
             "text": {"content": command.content} if command.content else {},
             "action": command.action,
             "recipient": command.recipient,
@@ -137,6 +169,8 @@ class NextOutboundMessageQueueGateway:
         return dict(row) if row else None
 
     def _insert_broadcast_job(self, *, command: GroupOpsActionCommand, source_id: str, payload: dict[str, Any]) -> int:
+        if not command.unionid:
+            raise ContractError("unionid is required for group ops broadcast job")
         db = get_db()
         row = db.execute(
             """
@@ -144,14 +178,14 @@ class NextOutboundMessageQueueGateway:
                 source_type, source_id, source_table, scheduled_for, priority, batch_key,
                 business_domain, idempotency_key, channel, target_kind, retry_policy_json, metadata_json,
                 status, requires_approval,
-                target_external_userids, target_count, target_summary,
+                target_unionids_json, target_count, target_summary,
                 content_type, content_payload, content_summary,
                 trace_id, created_by
             ) VALUES (
                 'workflow', ?, 'automation_group_ops_plans', ?, 100, '',
-                'group_ops', ?, 'wecom_private', 'external_userid', '{}'::jsonb, CAST(? AS jsonb),
+                'group_ops', ?, 'wecom_private', 'unionid', '{}'::jsonb, CAST(? AS jsonb),
                 'queued', FALSE,
-                CAST(? AS jsonb), 1, '1 external contact',
+                CAST(? AS jsonb), 1, '1 unionid',
                 'private_message', CAST(? AS jsonb), ?,
                 ?, ?
             )
@@ -163,7 +197,7 @@ class NextOutboundMessageQueueGateway:
                 _now_iso(),
                 command.idempotency_key,
                 _json_dumps({"recipient": command.recipient, "action_type": command.action["action_type"]}),
-                _json_dumps([command.external_userid]),
+                _json_dumps([command.unionid]),
                 _json_dumps(payload),
                 command.content[:500],
                 command.idempotency_key,
@@ -171,7 +205,37 @@ class NextOutboundMessageQueueGateway:
             ),
         ).fetchone()
         db.commit()
-        return int((row or {}).get("id") or 0)
+        job_id = int((row or {}).get("id") or 0)
+        if job_id:
+            mark_legacy_path_invoked(
+                legacy_path="broadcast_task.legacy_group_ops_private_queue",
+                replacement_event_type="broadcast_task.created",
+                replacement_consumer="broadcast_queue_projection_consumer",
+                source_module="automation_engine.group_ops.action_dispatcher",
+                source_route="NextOutboundMessageQueueGateway.enqueue_private_message",
+                aggregate_id=command.idempotency_key,
+                reason="group_ops_private_queue_replaced_by_broadcast_task_created",
+            )
+            safe_emit(
+                "broadcast_task.created",
+                emit_broadcast_task_created_shadow_event,
+                job={
+                    "id": job_id,
+                    "source_type": "workflow",
+                    "source_table": "automation_group_ops_plans",
+                    "source_id": source_id,
+                    "idempotency_key": command.idempotency_key,
+                    "target_count": 1,
+                    "batch_key": f"group_ops:{command.plan_id}",
+                    "trace_id": command.idempotency_key,
+                    "created_by": command.created_by,
+                },
+                source_module="automation_engine.group_ops.action_dispatcher",
+                source_route="group_ops.action_dispatcher.enqueue_private_message",
+                operator=command.created_by,
+                source="group_ops_private_message",
+            )
+        return job_id
 
 
 class NextPrivateMessageTaskGateway:
@@ -295,26 +359,42 @@ class GroupOpsActionDispatcher:
                 "side_effect_executed": False,
                 "audit": audit,
             }
+        if action_type in {"send_group_message", "group_notice", "webhook_notify"}:
+            audit = self._audit.record(command=command, action_type=action_type, status="planned", side_effect_executed=False)
+            return {
+                "ok": True,
+                "status": "planned",
+                "action_ref_id": "",
+                "side_effect_executed": False,
+                "wecom_send_executed": False,
+                "real_group_notice_executed": False,
+                "audit": audit,
+            }
         raise ContractError(f"unsupported group ops action: {action_type}")
 
     def _command(self, input_data: dict[str, Any], action: dict[str, Any]) -> GroupOpsActionCommand:
         external_userid = _recipient_external_userid(input_data)
         if not external_userid and action["action_type"] in {"enqueue", "publish_task", "send_message"}:
             raise ContractError(f"external_user_id is required for {action['action_type']}")
+        unionid = _recipient_unionid(input_data) or _resolve_unionid_by_external_userid(external_userid)
         content = clean_text(action.get("content"))
         if action["action_type"] == "send_message" and not content:
             raise ContractError("content is required for send_message")
         sender = _operator(input_data)
         if action["action_type"] == "send_message" and not sender:
             raise ContractError("operatorMemberId or operatorAccount is required for send_message")
+        recipient = _recipient_snapshot(input_data)
+        if unionid:
+            recipient["unionid"] = unionid
         return GroupOpsActionCommand(
             plan_id=int(input_data.get("planId") or input_data.get("plan_id") or 0),
             trigger_event_id=clean_text(input_data.get("triggerEventId") or input_data.get("trigger_event_id")),
             external_userid=external_userid,
+            unionid=unionid,
             sender=sender,
             created_by=_created_by(input_data),
             content=content,
             action=dict(action),
-            recipient=_recipient_snapshot(input_data),
+            recipient=recipient,
             idempotency_key=_action_idempotency_key(input_data, action),
         )

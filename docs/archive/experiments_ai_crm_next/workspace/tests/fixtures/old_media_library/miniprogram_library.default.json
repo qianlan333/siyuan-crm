@@ -1,0 +1,23 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "id": "miniprogram_masked_001",
+        "title": "miniprogram_masked_001",
+        "appid": "appid_masked_001",
+        "page_path": "pages/masked/index",
+        "thumb_image_id": "image_masked_001",
+        "description": "masked fixture mini program",
+        "tags": ["fixture"],
+        "enabled": true,
+        "created_at": "2026-05-20T12:00:00Z",
+        "updated_at": "2026-05-20T12:00:00Z"
+      }
+    ],
+    "total": 1,
+    "limit": 100,
+    "offset": 0
+  }
+}

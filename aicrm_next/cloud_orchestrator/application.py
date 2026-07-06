@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
+from aicrm_next.platform_foundation.internal_events.shadow import (
+    emit_broadcast_task_created_shadow_event,
+    emit_ops_plan_approved_shadow_event,
+    safe_emit,
+)
 from aicrm_next.send_content.application import normalize_send_content_package
 
 from .repository import CloudPlanRepository, build_cloud_plan_repository
@@ -24,6 +29,16 @@ def _clean_offset(value: int) -> int:
         return max(0, int(value))
     except (TypeError, ValueError):
         return 0
+
+
+def _internal_event_response(internal_event: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "internal_event_id": internal_event.get("event_id") or "",
+        "internal_event_status": internal_event.get("status") or "",
+        "internal_event_reason": internal_event.get("reason") or "",
+        "internal_event_error": internal_event.get("error") or "",
+        "internal_event_consumer_run_count": int(internal_event.get("consumer_run_count") or 0),
+    }
 
 
 class ListCloudPlansQuery:
@@ -90,7 +105,25 @@ class ApproveCloudPlanCommand:
         plan = self._repo.approve_plan(plan_id, operator=operator)
         if not plan:
             raise CloudPlanNotFoundError("plan not found")
-        return {"ok": True, "plan": plan, "stats": self._repo.plan_stats(plan_id)}
+        stats = self._repo.plan_stats(plan_id)
+        broadcast_enqueue = self._repo.create_or_reuse_recipient_broadcast_jobs(plan_id, operator=operator)
+        internal_event = safe_emit(
+            "ops_plan.approved",
+            emit_ops_plan_approved_shadow_event,
+            plan=plan,
+            stats=stats,
+            operator=operator,
+            aggregate_type="cloud_orchestrator_plan",
+            source_module="cloud_orchestrator.application",
+            source_route="/api/admin/cloud-orchestrator/plans/{plan_id}/approve",
+        )
+        return {
+            "ok": True,
+            "plan": plan,
+            "stats": stats,
+            "broadcast_enqueue": broadcast_enqueue,
+            **_internal_event_response(internal_event),
+        }
 
     __call__ = execute
 
@@ -114,7 +147,36 @@ class ApproveCloudPlanRecipientCommand:
 
     def execute(self, plan_id: str, recipient_id: int, *, operator: str) -> dict[str, Any]:
         result = self._repo.approve_recipient(plan_id, recipient_id, operator=operator)
-        return {"ok": True, **result, "stats": self._repo.plan_stats(plan_id)}
+        internal_event = {"status": ""}
+        if result.get("status") in {"approved", "already_approved"} and result.get("job_id"):
+            recipient = result.get("recipient") if isinstance(result.get("recipient"), dict) else {}
+            internal_event = safe_emit(
+                "broadcast_task.created",
+                emit_broadcast_task_created_shadow_event,
+                job={
+                    "id": result.get("job_id"),
+                    "source_type": "cloud_plan",
+                    "source_table": "cloud_broadcast_plan_recipients",
+                    "source_id": f"{plan_id}:{int(recipient_id)}",
+                    "idempotency_key": f"cloud_plan_recipient:{plan_id}:{int(recipient_id)}",
+                    "target_count": 1,
+                    "batch_key": f"cloud_plan_recipient:{plan_id}",
+                    "trace_id": plan_id,
+                    "created_by": operator,
+                    "recipient_id": int(recipient_id),
+                    "external_userid": recipient.get("external_userid"),
+                },
+                source_module="cloud_orchestrator.application",
+                source_route="/api/admin/cloud-orchestrator/plans/{plan_id}/recipients/{recipient_id}/approve",
+                operator=operator,
+                source="cloud_plan_recipient_approval",
+            )
+        return {
+            "ok": True,
+            **result,
+            "stats": self._repo.plan_stats(plan_id),
+            **_internal_event_response(internal_event),
+        }
 
     __call__ = execute
 

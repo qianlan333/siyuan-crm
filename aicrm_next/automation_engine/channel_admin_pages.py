@@ -37,7 +37,7 @@ async def admin_channels_page(request: Request) -> Response:
     context = shell_context(
         request=request,
         page_title="渠道码中心",
-        page_summary="独立管理普通二维码和企微获客助手链接；绑定自动化运营请进入对应方案的入口渠道页。",
+        page_summary="独立管理普通二维码和企微获客助手链接；渠道进入事实会进入 AI 人群包查询层。",
         active_endpoint="api.admin_channels_page",
     )
     context.update(
@@ -51,7 +51,7 @@ async def admin_channels_page(request: Request) -> Response:
             "state_items": [
                 "普通二维码支持下载二维码",
                 "企微获客助手链接支持复制链接和分享链接",
-                "绑定自动化运营只在方案入口渠道页完成",
+                "渠道进入记录可供 AI 人群包增量刷新使用",
             ],
             "actions": [
                 {"label": "新建渠道", "href": admin_path_for("api.admin_channel_new_page"), "variant": "primary"},
@@ -61,7 +61,6 @@ async def admin_channels_page(request: Request) -> Response:
                 "api_urls": {
                     "channels": "/api/admin/channels?limit=300",
                     "contacts_base": "/api/admin/channels/0/contacts",
-                    "bindings_base": "/api/admin/channels/0/bindings",
                 }
             },
         }
@@ -74,7 +73,7 @@ async def admin_channel_new_page(request: Request) -> Response:
     context = shell_context(
         request=request,
         page_title="新建渠道",
-        page_summary="创建渠道资产本身，不在渠道中心绑定自动化运营。普通二维码和企微获客助手链接按载体类型显示不同操作。",
+        page_summary="创建渠道资产本身；普通二维码和企微获客助手链接按载体类型显示不同操作。",
         active_endpoint="api.admin_channels_page",
     )
     context.update(
@@ -125,7 +124,7 @@ async def admin_channel_edit_page(request: Request, channel_id: int) -> Response
     context = shell_context(
         request=request,
         page_title="编辑渠道",
-        page_summary="维护渠道本体、欢迎语和素材配置；不会在这里绑定自动化运营。",
+        page_summary="维护渠道本体、欢迎语、素材配置、标签和客服分配。",
         active_endpoint="api.admin_channels_page",
     )
     context.update(

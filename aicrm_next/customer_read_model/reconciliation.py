@@ -46,32 +46,32 @@ def reconcile_customer_read_model(
     sample_limit: int = 5,
 ) -> CustomerReadModelReconciliationRun:
     source_by_id = {
-        str(item.get("external_userid") or "").strip(): item
+        str(item.get("unionid") or dict(item.get("identity") or {}).get("unionid") or "").strip(): item
         for item in source_customers
-        if str(item.get("external_userid") or "").strip()
+        if str(item.get("unionid") or dict(item.get("identity") or {}).get("unionid") or "").strip()
     }
     target_customers = target_repo.list_customers(limit=None, offset=0)
     target_by_id = {
-        str(item.get("external_userid") or "").strip(): item
+        str(item.get("unionid") or dict(item.get("identity") or {}).get("unionid") or "").strip(): item
         for item in target_customers
-        if str(item.get("external_userid") or "").strip()
+        if str(item.get("unionid") or dict(item.get("identity") or {}).get("unionid") or "").strip()
     }
     source_ids = set(source_by_id)
     target_ids = set(target_by_id)
     missing_in_target = sorted(source_ids - target_ids)
     missing_in_source = sorted(target_ids - source_ids)
     field_diffs: list[JsonDict] = []
-    for external_userid in sorted(source_ids & target_ids):
-        source = source_by_id[external_userid]
-        target = target_by_id[external_userid]
-        for field in ("customer_name", "owner_userid", "mobile", "binding_status"):
-            source_value = source.get(field)
-            target_value = target.get(field)
+    for unionid in sorted(source_ids & target_ids):
+        source = source_by_id[unionid]
+        target = target_by_id[unionid]
+        for field_name in ("customer_name", "owner_userid", "mobile", "binding_status"):
+            source_value = source.get(field_name)
+            target_value = target.get(field_name)
             if source_value != target_value:
                 field_diffs.append(
                     {
-                        "external_userid": mask_sample(external_userid),
-                        "field": field,
+                        "unionid": mask_sample(unionid),
+                        "field": field_name,
                         "source": mask_sample(source_value),
                         "target": mask_sample(target_value),
                     }

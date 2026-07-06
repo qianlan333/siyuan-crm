@@ -1,0 +1,24 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [
+      {
+        "id": "image_masked_001",
+        "name": "image_masked_001",
+        "file_name": "image_masked_001.png",
+        "content_type": "image/png",
+        "file_size": 16,
+        "width": 1,
+        "height": 1,
+        "data_url": "data:image/png;base64,ZmFrZQ==",
+        "tags": ["commerce"],
+        "created_at": "2026-05-20T12:00:00Z",
+        "updated_at": "2026-05-20T12:00:00Z"
+      }
+    ],
+    "total": 1,
+    "limit": 100,
+    "offset": 0
+  }
+}

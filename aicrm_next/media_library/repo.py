@@ -468,6 +468,19 @@ def build_media_library_repository() -> MediaLibraryRepository:
     return assert_repository_allowed(_GLOBAL_REPO, capability_owner="media_library")
 
 
+def _psycopg_url(url: str) -> str:
+    if url.startswith("postgresql+psycopg://"):
+        return "postgresql://" + url[len("postgresql+psycopg://") :]
+    return url
+
+
+def connect_media_library_db(database_url: str) -> Any:
+    import psycopg
+    from psycopg.rows import dict_row
+
+    return psycopg.connect(_psycopg_url(database_url), row_factory=dict_row)
+
+
 def reset_media_library_fixture_state() -> None:
     global _GLOBAL_REPO
     _GLOBAL_REPO = InMemoryMediaLibraryRepository()

@@ -17,7 +17,7 @@ from .commands import (
     UpdateWeComTagGroupCommand,
     WeComTagWriteCommand,
 )
-from .write_repo import WeComTagWriteRepository
+from .write_repo import PostgresWeComTagWriteRepository, WeComTagWriteRepository
 
 
 class WeComTagWriteInputError(ValueError):
@@ -83,7 +83,7 @@ def get_wecom_tag_write_projection_events() -> list[dict[str, Any]]:
 
 def execute_wecom_tag_write(command: WeComTagWriteCommand) -> dict[str, Any]:
     _validate_command(command)
-    if production_environment() or production_data_ready():
+    if production_environment() and not production_data_ready():
         raise WeComTagWriteProductionUnavailableError("wecom tag write model is not production-ready for command execution")
 
     platform_command = Command(
@@ -142,7 +142,7 @@ def _handle_create_tag(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
     if not str(requested.get("group_id") or "").strip():
         raise ValueError("group_id is required")
-    tag = _repo.create_tag(
+    tag = _write_repository().create_tag(
         command_id=command.command_id,
         group_id=str(requested.get("group_id") or "").strip(),
         tag_name=str(requested.get("tag_name") or "").strip(),
@@ -153,20 +153,20 @@ def _handle_create_tag(command: Command) -> dict[str, Any]:
 
 def _handle_update_tag(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
-    tag = _repo.update_tag(command_id=command.command_id, tag_id=str(command.payload.get("target_id") or ""), tag_name=str(requested.get("tag_name") or "").strip())
+    tag = _write_repository().update_tag(command_id=command.command_id, tag_id=str(command.payload.get("target_id") or ""), tag_name=str(requested.get("tag_name") or "").strip())
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag.update", target_type="wecom_tag", target_id=tag["tag_id"], payload_summary={"tag_id": tag["tag_id"], "tag_name": tag["tag_name"]}, risk_level="medium")
     return {"target_id": tag["tag_id"], "tag": tag, "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_delete_tag(command: Command) -> dict[str, Any]:
-    tag = _repo.delete_tag(command_id=command.command_id, tag_id=str(command.payload.get("target_id") or ""))
+    tag = _write_repository().delete_tag(command_id=command.command_id, tag_id=str(command.payload.get("target_id") or ""))
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag.delete", target_type="wecom_tag", target_id=tag["tag_id"], payload_summary={"tag_id": tag["tag_id"], "group_id": tag["group_id"]}, risk_level="high")
     return {"target_id": tag["tag_id"], "tag": tag, "deleted": True, "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_create_group(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
-    result = _repo.create_group(
+    result = _write_repository().create_group(
         command_id=command.command_id,
         group_name=str(requested.get("group_name") or "").strip(),
         first_tag_name=str(requested.get("first_tag_name") or "").strip(),
@@ -178,22 +178,28 @@ def _handle_create_group(command: Command) -> dict[str, Any]:
 
 def _handle_update_group(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
-    group = _repo.update_group(command_id=command.command_id, group_id=str(command.payload.get("target_id") or ""), group_name=str(requested.get("group_name") or "").strip())
+    group = _write_repository().update_group(command_id=command.command_id, group_id=str(command.payload.get("target_id") or ""), group_name=str(requested.get("group_name") or "").strip())
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag_group.update", target_type="wecom_tag_group", target_id=group["group_id"], payload_summary={"group_id": group["group_id"], "group_name": group["group_name"]}, risk_level="medium")
     return {"target_id": group["group_id"], "group": group, "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_delete_group(command: Command) -> dict[str, Any]:
-    result = _repo.delete_group(command_id=command.command_id, group_id=str(command.payload.get("target_id") or ""))
+    result = _write_repository().delete_group(command_id=command.command_id, group_id=str(command.payload.get("target_id") or ""))
     group = result["group"]
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag_group.delete", target_type="wecom_tag_group", target_id=group["group_id"], payload_summary={"group_id": group["group_id"], "deleted_tag_count": len(result.get("deleted_tag_ids") or [])}, risk_level="high")
     return {"target_id": group["group_id"], "group": group, "deleted": True, "deleted_tag_ids": result.get("deleted_tag_ids") or [], "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_sync_catalog(command: Command) -> dict[str, Any]:
-    sync = _repo.sync_catalog(command_id=command.command_id)
+    sync = _write_repository().sync_catalog(command_id=command.command_id)
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag.sync", target_type="wecom_tag_catalog", target_id="catalog", payload_summary={"operation": "sync_catalog", "local_only": True}, risk_level="high")
     return {"target_id": "catalog", "sync": sync, "write_model_status": "local_projection_updated", "local_projection_updated": True, "sync_executed": False, "side_effect_plan": _plan_response(plan)}
+
+
+def _write_repository() -> WeComTagWriteRepository | PostgresWeComTagWriteRepository:
+    if production_data_ready():
+        return PostgresWeComTagWriteRepository()
+    return _repo
 
 
 def _create_side_effect_plan(

@@ -59,7 +59,7 @@ def admin_group_ops_plan_detail(request: Request, plan_id: int) -> Response:
     context = _group_ops_page_context(
         request,
         page_title="群运营计划",
-        page_summary="配置运营成员、群包和计划内容。",
+        page_summary="按基础配置、绑定群和计划类型维护群运营计划。",
         page_mode="detail",
         plan_id=int(plan_id),
     )

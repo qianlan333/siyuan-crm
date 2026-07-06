@@ -20,10 +20,8 @@ def upgrade() -> None:
         """
         CREATE TABLE IF NOT EXISTS user_ops_pool_current_next (
             id INTEGER PRIMARY KEY,
-            person_id VARCHAR(80),
-            mobile VARCHAR(32),
-            external_userid VARCHAR(128),
-            customer_name VARCHAR(255) NOT NULL DEFAULT '',
+            unionid VARCHAR(128) NOT NULL,
+            customer_name_snapshot VARCHAR(255) NOT NULL DEFAULT '',
             owner_userid VARCHAR(128),
             owner_display_name VARCHAR(255) NOT NULL DEFAULT '',
             class_term_no VARCHAR(80),
@@ -31,7 +29,6 @@ def upgrade() -> None:
             source_type VARCHAR(80) NOT NULL DEFAULT 'lead_pool',
             activation_bucket VARCHAR(40) NOT NULL DEFAULT 'pending_input',
             activation_bucket_label VARCHAR(80) NOT NULL DEFAULT '激活待录入',
-            is_mobile_bound BOOLEAN NOT NULL DEFAULT FALSE,
             auto_do_not_disturb_reasons_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -39,12 +36,8 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_user_ops_pool_current_next_external_userid "
-        "ON user_ops_pool_current_next (external_userid)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_user_ops_pool_current_next_mobile "
-        "ON user_ops_pool_current_next (mobile)"
+        "CREATE INDEX IF NOT EXISTS ix_user_ops_pool_current_next_unionid "
+        "ON user_ops_pool_current_next (unionid)"
     )
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_user_ops_pool_current_next_owner_userid "
@@ -63,8 +56,7 @@ def upgrade() -> None:
         """
         CREATE TABLE IF NOT EXISTS user_ops_do_not_disturb_next (
             id BIGSERIAL PRIMARY KEY,
-            external_userid VARCHAR(128),
-            mobile VARCHAR(32),
+            unionid VARCHAR(128) NOT NULL,
             source_type VARCHAR(40) NOT NULL DEFAULT 'manual',
             reason_code VARCHAR(80) NOT NULL DEFAULT 'manual_set',
             reason_text TEXT NOT NULL DEFAULT '运营设置',
@@ -76,12 +68,8 @@ def upgrade() -> None:
         """
     )
     op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_external_userid "
-        "ON user_ops_do_not_disturb_next (external_userid)"
-    )
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_mobile "
-        "ON user_ops_do_not_disturb_next (mobile)"
+        "CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_unionid "
+        "ON user_ops_do_not_disturb_next (unionid)"
     )
     op.execute(
         "CREATE INDEX IF NOT EXISTS ix_user_ops_dnd_next_active_reason "
@@ -94,6 +82,7 @@ def upgrade() -> None:
             id BIGSERIAL PRIMARY KEY,
             record_key VARCHAR(80) NOT NULL UNIQUE,
             task_type VARCHAR(80) NOT NULL DEFAULT 'user_ops_batch_send',
+            target_unionids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             outbound_task_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             task_results_json JSONB NOT NULL DEFAULT '[]'::jsonb,
             selected_count INTEGER NOT NULL DEFAULT 0,
@@ -134,12 +123,10 @@ def downgrade() -> None:
     op.execute("DROP INDEX IF EXISTS ix_user_ops_send_records_next_record_key")
     op.execute("DROP TABLE IF EXISTS user_ops_send_records_next")
     op.execute("DROP INDEX IF EXISTS ix_user_ops_dnd_next_active_reason")
-    op.execute("DROP INDEX IF EXISTS ix_user_ops_dnd_next_mobile")
-    op.execute("DROP INDEX IF EXISTS ix_user_ops_dnd_next_external_userid")
+    op.execute("DROP INDEX IF EXISTS ix_user_ops_dnd_next_unionid")
     op.execute("DROP TABLE IF EXISTS user_ops_do_not_disturb_next")
     op.execute("DROP INDEX IF EXISTS ix_user_ops_pool_current_next_activation_bucket")
     op.execute("DROP INDEX IF EXISTS ix_user_ops_pool_current_next_class_term_no")
     op.execute("DROP INDEX IF EXISTS ix_user_ops_pool_current_next_owner_userid")
-    op.execute("DROP INDEX IF EXISTS ix_user_ops_pool_current_next_mobile")
-    op.execute("DROP INDEX IF EXISTS ix_user_ops_pool_current_next_external_userid")
+    op.execute("DROP INDEX IF EXISTS ix_user_ops_pool_current_next_unionid")
     op.execute("DROP TABLE IF EXISTS user_ops_pool_current_next")

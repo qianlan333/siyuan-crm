@@ -16,7 +16,7 @@ from aicrm_next.integration_gateway.payment_adapters import (
 )
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
-from .domain import completion_redirect_projection, preview_product, validate_completion_redirect, validate_quantity
+from .domain import completion_redirect_projection, normalize_product_completion_target, preview_product, validate_quantity
 from .dto import CheckoutRequest, PaymentNotifyRequest, ProductUpsertRequest
 from .repo import CommerceRepository, build_commerce_repository
 
@@ -45,9 +45,10 @@ def _payment_side_effect_safety() -> dict[str, Any]:
 
 def _product_payload_summary(payload: ProductUpsertRequest | dict[str, Any]) -> dict[str, Any]:
     data = payload.model_dump() if isinstance(payload, ProductUpsertRequest) else dict(payload)
+    completion_fields = normalize_product_completion_target(data)
     completion_redirect = completion_redirect_projection(
-        data.get("completion_redirect_enabled"),
-        data.get("completion_redirect_url"),
+        completion_fields.get("completion_redirect_enabled"),
+        completion_fields.get("completion_redirect_url"),
     )
     return {
         "product_code": data.get("product_code", ""),
@@ -100,13 +101,10 @@ class UpsertProductCommand:
         self._product_write_gateway = product_write_gateway or build_product_write_gateway()
 
     def __call__(self, payload: ProductUpsertRequest, product_id: str | None = None) -> dict[str, Any]:
-        normalized_redirect = validate_completion_redirect(
-            payload.completion_redirect_enabled,
-            payload.completion_redirect_url,
-        )
+        completion_fields = normalize_product_completion_target(payload.model_dump())
         product_payload = {
             **payload.model_dump(),
-            **normalized_redirect,
+            **completion_fields,
         }
         gateway_result = (
             self._product_write_gateway.update_product(
@@ -223,6 +221,7 @@ class CheckoutCommand:
                     product.get("completion_redirect_enabled"),
                     product.get("completion_redirect_url"),
                 ),
+                "completion_target_json": product.get("completion_target_json") or product.get("completion_target"),
             }
         )
         if self._provider == "wechat":
@@ -280,6 +279,7 @@ class CheckoutCommand:
                 product.get("completion_redirect_enabled"),
                 product.get("completion_redirect_url"),
             ),
+            "completion_target": product.get("completion_target"),
             "checkout_url": checkout_payload["checkout_url"],
             "qr_code_url": checkout_payload["qr_code_url"],
             "provider_payload": {

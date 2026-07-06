@@ -65,7 +65,6 @@ def test_runtime_diagnosis_reports_real_adapter_readiness(monkeypatch):
     monkeypatch.setattr("aicrm_next.channel_entry.repo.find_confirmed_channel_by_scene_alias", lambda corp_id, scene: None)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.find_channel_by_historical_scene_value", lambda scene: None)
     monkeypatch.setattr("aicrm_next.channel_entry.repo.list_channel_scene_aliases", lambda channel_id: [{"id": 1, "scene_value": "scene-a", "source": "current_scene"}])
-    monkeypatch.setattr("aicrm_next.channel_entry.repo.list_active_bindings_for_channel", lambda channel_id: [{"id": 20, "program_id": 30, "program_status": "archived"}])
     monkeypatch.setattr("aicrm_next.channel_entry.repo.list_channel_entry_effect_logs", lambda **kwargs: [{"effect_type": "welcome_message", "reason": "missing_wecom_config"}])
     monkeypatch.setattr("aicrm_next.channel_entry.repo.list_recent_events", lambda scene, limit=20: [])
 
@@ -78,4 +77,4 @@ def test_runtime_diagnosis_reports_real_adapter_readiness(monkeypatch):
     assert result["can_mark_tag"] is False
     assert result["can_create_contact_way"] is False
     assert result["missing_config"] == ["WECOM_CONTACT_SECRET"]
-    assert result["expected_program_admission_result"] == "program_archived"
+    assert "expected_program_admission_result" not in result

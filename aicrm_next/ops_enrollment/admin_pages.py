@@ -40,7 +40,7 @@ def admin_user_ops_ui(request: Request):
         context,
         payload=payload,
         title="客户激活 / 客户列表",
-        summary="生产客户、问卷、订单和自动化成员统计。",
+        summary="生产客户、问卷、订单和 AI 人群包统计。",
     )
     return templates.TemplateResponse(request, "admin_console/real_data_page.html", context)
 

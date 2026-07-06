@@ -44,19 +44,6 @@ class PostgresExternalContactSyncRepository:
         with connect() as conn:
             conn.execute(
                 """
-                INSERT INTO contacts (external_userid, customer_name, owner_userid, remark, description, updated_at)
-                VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                ON CONFLICT (external_userid) DO UPDATE
-                SET customer_name = COALESCE(NULLIF(EXCLUDED.customer_name, ''), contacts.customer_name),
-                    owner_userid = COALESCE(NULLIF(EXCLUDED.owner_userid, ''), contacts.owner_userid),
-                    remark = COALESCE(NULLIF(EXCLUDED.remark, ''), contacts.remark),
-                    description = COALESCE(NULLIF(EXCLUDED.description, ''), contacts.description),
-                    updated_at = CURRENT_TIMESTAMP
-                """,
-                (external_userid, name, owner_userid, _text(detail.get("remark")), _text(detail.get("description"))),
-            )
-            conn.execute(
-                """
                 INSERT INTO wecom_external_contact_identity_map (
                     corp_id, external_userid, unionid, openid, follow_user_userid,
                     name, status, raw_profile, first_seen_at, last_seen_at, created_at, updated_at
@@ -93,11 +80,11 @@ class PostgresExternalContactSyncRepository:
 
     def counts(self) -> dict[str, int]:
         with connect() as conn:
-            contacts = conn.execute("SELECT COUNT(*) AS total FROM contacts").fetchone()
             identities = conn.execute("SELECT COUNT(*) AS total FROM wecom_external_contact_identity_map").fetchone()
+            identity_total = int(identities["total"] if identities else 0)
             return {
-                "contacts_total": int(contacts["total"] if contacts else 0),
-                "identity_map_total": int(identities["total"] if identities else 0),
+                "contacts_total": identity_total,
+                "identity_map_total": identity_total,
             }
 
 

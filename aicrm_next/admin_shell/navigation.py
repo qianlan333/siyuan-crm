@@ -15,6 +15,10 @@ class AdminRoute:
 
 ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
     "api.admin_console_dashboard": AdminRoute("api.admin_console_dashboard", "/admin"),
+    "api.admin_p1_group_ops_workspace": AdminRoute(
+        "api.admin_p1_group_ops_workspace",
+        "/admin/p1/group-ops-workspace",
+    ),
     "api.admin_console_customers": AdminRoute("api.admin_console_customers", "/admin/customers"),
     "api.admin_owner_migration_page": AdminRoute("api.admin_owner_migration_page", "/admin/owner-migration"),
     "api.admin_owner_migration_action": AdminRoute("api.admin_owner_migration_action", "/admin/owner-migration"),
@@ -49,12 +53,16 @@ ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
     "api.admin_radar_links": AdminRoute("api.admin_radar_links", "/admin/radar-links"),
     "api.admin_radar_link_new": AdminRoute("api.admin_radar_link_new", "/admin/radar-links/new"),
     "api.admin_automation_conversion": AdminRoute("api.admin_automation_conversion", "/admin/automation-conversion"),
+    "api.admin_automation_agents_page": AdminRoute("api.admin_automation_agents_page", "/admin/automation-agents"),
     "api.admin_group_ops_ui": AdminRoute("api.admin_group_ops_ui", "/admin/automation-conversion/group-ops/ui"),
     "api.admin_group_ops_groups_ui": AdminRoute(
         "api.admin_group_ops_groups_ui",
         "/admin/automation-conversion/group-ops/groups/ui",
     ),
     "api.admin_jobs": AdminRoute("api.admin_jobs", "/admin/jobs"),
+    "api.admin_push_center_page": AdminRoute("api.admin_push_center_page", "/admin/push-center"),
+    "api.admin_internal_events_page": AdminRoute("api.admin_internal_events_page", "/admin/internal-events"),
+    "api.admin_webhook_inbox_page": AdminRoute("api.admin_webhook_inbox_page", "/admin/webhook-inbox"),
     "api.admin_broadcast_jobs": AdminRoute("api.admin_broadcast_jobs", "/admin/broadcast-jobs"),
     "api.admin_console_jobs_action": AdminRoute("api.admin_console_jobs_action", "/admin/jobs/actions"),
     "api.admin_wechat_pay_transactions_page": AdminRoute(
@@ -81,6 +89,13 @@ ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
     "api.admin_api_docs": AdminRoute("api.admin_api_docs", "/admin/api-docs"),
     "api.admin_console_api_docs": AdminRoute("api.admin_console_api_docs", "/admin/api-docs"),
     "api.admin_console_jobs": AdminRoute("api.admin_console_jobs", "/admin/jobs"),
+    "api.admin_data_health_page": AdminRoute("api.admin_data_health_page", "/admin/data-health"),
+    "api.admin_data_quality_page": AdminRoute("api.admin_data_quality_page", "/admin/data-quality"),
+    "api.admin_delivery_lineage_page": AdminRoute("api.admin_delivery_lineage_page", "/admin/delivery-lineage"),
+    "api.admin_growth_orchestration_page": AdminRoute(
+        "api.admin_growth_orchestration_page",
+        "/admin/growth-orchestration",
+    ),
     "api.admin_dashboard_shell_context": AdminRoute(
         "api.admin_dashboard_shell_context",
         "/api/admin/dashboard/shell-context",
@@ -111,28 +126,9 @@ def admin_path_for(name: str, **path_params: object) -> str:
         return "/admin/wechat-shop/transactions/" + str(path_params.get("order_id", "")).strip()
     if name == "api.admin_console_questionnaire_detail":
         return "/admin/questionnaires/" + str(path_params.get("questionnaire_id", "")).strip()
-
-    program_id = str(path_params.get("program_id") or "").strip()
-    program_route_map = {
-        "api.admin_automation_program_setup": "setup",
-        "api.admin_automation_program_overview": "overview",
-        "api.admin_automation_program_members": "members",
-        "api.admin_automation_program_update": "update",
-        "api.admin_automation_program_copy_form": "copy",
-        "api.admin_automation_program_copy": "copy",
-        "api.admin_automation_program_pause": "pause",
-        "api.admin_automation_program_activate": "activate",
-        "api.admin_automation_program_archive": "archive",
-        "api.admin_automation_program_entry_channels": "entry-channels",
-    }
-    if name in program_route_map and program_id:
-        base = f"/admin/automation-conversion/programs/{program_id}/{program_route_map[name]}"
-        query = {
-            key: value
-            for key, value in path_params.items()
-            if key != "program_id" and value not in (None, "")
-        }
-        return base + (f"?{urlencode(query)}" if query else "")
+    if name == "api.admin_growth_orchestration_detail_page":
+        program_key = quote(str(path_params.get("program_key", "")).strip(), safe="")
+        return f"/admin/growth-orchestration/{program_key}"
 
     route = ADMIN_ROUTE_REGISTRY.get(name)
     base = route.path if route else "#"
@@ -174,6 +170,14 @@ ADMIN_NAV_GROUPS: list[dict[str, Any]] = [
         "title": "配置及后台",
         "items": [
             {"key": "jobs", "label": "同步任务配置 / 同步任务", "endpoint": "api.admin_jobs"},
+            {"key": "push_center", "label": "推送中心", "endpoint": "api.admin_push_center_page"},
+            {"key": "internal_events", "label": "事件中心", "endpoint": "api.admin_internal_events_page"},
+            {"key": "webhook_inbox", "label": "Webhook Inbox", "endpoint": "api.admin_webhook_inbox_page"},
+            {"key": "data_health", "label": "数据健康", "endpoint": "api.admin_data_health_page"},
+            {"key": "data_quality", "label": "数据质量规则", "endpoint": "api.admin_data_quality_page"},
+            {"key": "delivery_lineage", "label": "投递排障", "endpoint": "api.admin_delivery_lineage_page"},
+            {"key": "growth_orchestration", "label": "增长运营", "endpoint": "api.admin_growth_orchestration_page"},
+            {"key": "automation_agents", "label": "自动化话术", "endpoint": "api.admin_automation_agents_page"},
             {"key": "owner_migration", "label": "负责人迁移", "endpoint": "api.admin_owner_migration_page"},
             {"key": "config", "label": "配置", "endpoint": "api.admin_config"},
             {"key": "api_docs", "label": "API 文档", "endpoint": "api.admin_api_docs"},

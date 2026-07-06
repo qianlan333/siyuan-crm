@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INVENTORY = ROOT / "docs/architecture/cloud_orchestrator_media_upload_route_inventory.md"
+INVENTORY = ROOT / "docs/archive/route_inventory/cloud_orchestrator_media_upload_route_inventory.md"
 
 
 def test_cloud_orchestrator_media_upload_inventory_exists_and_has_matrix():

@@ -1,0 +1,77 @@
+name: Full Regression
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Nightly full regression at 02:00 Asia/Shanghai.
+    - cron: "0 18 * * *"
+
+concurrency:
+  group: full-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  full-python:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.5"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run full architecture gates
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+        run: bash scripts/ci/run_architecture_gates.sh --mode full
+
+      - name: Run full pytest regression
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test
+          AICRM_PYTEST_FIXTURE_DEFAULT: "1"
+        run: python -m pytest tests/ -n auto --dist=loadfile -v --tb=short --timeout=120 --timeout-method=thread
+
+  full-frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Run full frontend regression
+        run: |
+          npm ci
+          npm run typecheck
+          npm run build:frontend
+          git diff --exit-code
+          npm run test:frontend:all

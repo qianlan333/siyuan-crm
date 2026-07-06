@@ -206,12 +206,14 @@
 
 ## 如果模型要继续阅读当前实现
 
-D4 legacy retirement note: `wecom_ability_service/http/admin_user_ops.py` is no longer a current route-owner file. AI-CRM Next owns the User Ops readonly surface; the legacy domain helpers below remain relevant only for DND, batch-send, deferred jobs, and other write/external fallback paths.
+D4 legacy retirement note: the old User Ops route-owner file is no longer a
+current implementation path. AI-CRM Next owns the User Ops readonly surface;
+historical DND, batch-send, deferred-job, and write/external fallback evidence
+is retained in the archived route inventory.
 
 建议先读：
 
-1. [`wecom_ability_service/templates/admin_user_ops.html`](../wecom_ability_service/templates/admin_user_ops.html)
+1. [`aicrm_next/frontend_compat/templates/admin_user_ops.html`](aicrm_next/frontend_compat/templates/admin_user_ops.html)
 2. [`aicrm_next/ops_enrollment`](../aicrm_next/ops_enrollment)
-3. [`wecom_ability_service/domains/user_ops/page_service.py`](../wecom_ability_service/domains/user_ops/page_service.py)
-4. [`wecom_ability_service/services.py`](../wecom_ability_service/services.py)
-5. [`tests/test_user_ops_api.py`](../tests/test_user_ops_api.py)
+3. [`docs/archive/route_inventory/user_ops_route_inventory.md`](archive/route_inventory/user_ops_route_inventory.md)
+4. [`tests/test_user_ops_api.py`](../tests/test_user_ops_api.py)

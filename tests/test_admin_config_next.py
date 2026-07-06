@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from aicrm_next.main import create_app
+from aicrm_next.platform_foundation.external_effects.adapters import webhook_execution_settings, wecom_execution_settings
+from aicrm_next.platform_foundation.external_effects.realtime import realtime_wakeup_state
 from aicrm_next.shared.db_session import reset_engine_cache_for_tests
 
 
@@ -363,6 +365,19 @@ def test_config_category_detail_returns_blocks_and_masks_sensitive_fields(monkey
     assert any(field["key"] == "WECOM_CALLBACK_TOKEN" for field in fields)
 
 
+def test_retired_reply_monitor_chat_settings_are_not_exposed(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+
+    response = client.get("/api/admin/config/categories/ai_automation")
+
+    assert response.status_code == 200
+    fields = [field for block in response.json()["config"]["blocks"] for field in block["fields"]]
+    keys = {field["key"] for field in fields}
+    assert "DEEPSEEK_ENABLED" in keys
+    assert "AUTOMATION_INTERNAL_API_TOKEN" in keys
+    assert not {key for key in keys if key.startswith("LAOHUANG_CHAT_")}
+
+
 def test_config_category_enabled_update_uses_app_settings_and_preserves_auth_tables(monkeypatch, tmp_path) -> None:
     client = _prepare_client(monkeypatch, tmp_path)
     database_url = _db_url(monkeypatch)
@@ -445,6 +460,110 @@ def test_config_category_settings_save_skips_empty_sensitive_and_rejects_cross_c
     assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECHAT_PAY_API_V3_KEY'") == "original-v3-secret"
     assert cross_category.status_code == 400
     assert "not in category" in cross_category.json()["error"]
+
+
+def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+    database_url = _db_url(monkeypatch)
+    token = _token(client.get("/admin/config/app-settings").text)
+
+    detail_page = client.get("/admin/config/detail/webhooks_push")
+    assert detail_page.status_code == 200
+    assert "推送能力配置" in detail_page.text
+    assert "/api/admin/config/push-capabilities" in detail_page.text
+    assert "/api/admin/push-center/stats" in detail_page.text
+    assert "/api/admin/push-center/legacy-deprecations" not in detail_page.text
+    assert "Webhook 队列真实执行" not in detail_page.text
+    assert "AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES" not in detail_page.text
+
+    rejected_legacy_save = client.put(
+        "/api/admin/config/categories/webhooks_push/settings",
+        json={
+            "admin_action_token": token,
+            "operator": "webhook-runtime-test",
+            "settings": {
+                "AICRM_QUESTIONNAIRE_EXTERNAL_PUSH_MODE": "queue",
+                "AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE": True,
+                "AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES": "webhook.questionnaire_submission.push",
+                "AICRM_EXTERNAL_EFFECT_WEBHOOK_TIMEOUT_SECONDS": "9",
+                "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE": True,
+                "AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS": "HuangYouCan",
+                "AICRM_EXTERNAL_EFFECT_ALLOWED_TARGET_EXTERNAL_USERIDS": "wm_fixture_a",
+                "AICRM_EXTERNAL_EFFECT_ALLOWED_GROUP_OPS_WEBHOOK_KEYS": "测试运营计划-ce2519",
+                "AICRM_EXTERNAL_EFFECT_ALLOWED_GROUP_CHAT_IDS": "wr_chat_fixture",
+                "AICRM_EXTERNAL_EFFECT_TEST_RECEIVER_ENABLED": True,
+                "AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY": True,
+                "AICRM_EXTERNAL_EFFECT_ALLOWED_BASE_HOSTS": "www.youcangogogo.com,youcangogogo.com",
+                "AICRM_EXTERNAL_EFFECT_PAYMENT_EXECUTE": True,
+                "AICRM_EXTERNAL_EFFECT_FEISHU_EXECUTE": False,
+                "AICRM_EXTERNAL_EFFECT_OPENCLAW_EXECUTE": False,
+                "AICRM_EXTERNAL_EFFECT_MEDIA_UPLOAD_EXECUTE": False,
+            },
+        },
+    )
+
+    assert rejected_legacy_save.status_code == 400
+    assert "push capabilities API" in rejected_legacy_save.json()["error"]
+
+    saved = client.patch(
+        "/api/admin/config/push-capabilities/questionnaire_external_push",
+        headers={"X-Admin-Action-Token": token},
+        json={"enabled": True, "operator": "webhook-runtime-test"},
+    )
+
+    assert saved.status_code == 200
+    assert saved.json()["capability"]["enabled"] is True
+    assert saved.json()["derived_gates"]["allowed_effect_types"] == ["webhook.questionnaire_submission.push"]
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE'") == "true"
+    execution = webhook_execution_settings()
+    assert execution["enabled"] is True
+    assert execution["allowed_types"] == ["webhook.questionnaire_submission.push"]
+    wecom_execution = wecom_execution_settings()
+    assert wecom_execution["enabled"] is False
+    assert wecom_execution["execution_mode"] == "disabled"
+    assert "wecom_execution_disabled" in wecom_execution["blocking_reasons"]
+    assert saved.json()["derived_gates"]["wecom_execute"] is False
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE'") == "false"
+
+    welcome_saved = client.patch(
+        "/api/admin/config/push-capabilities/welcome_message",
+        headers={"X-Admin-Action-Token": token},
+        json={"enabled": True, "operator": "webhook-runtime-test"},
+    )
+
+    assert welcome_saved.status_code == 200
+    assert welcome_saved.json()["capability"]["enabled"] is True
+    assert "wecom.welcome_message.send" in welcome_saved.json()["derived_gates"]["allowed_effect_types"]
+    assert "wecom.message.private.send" in welcome_saved.json()["derived_gates"]["allowed_effect_types"]
+    assert welcome_saved.json()["derived_gates"]["realtime_enabled"] is True
+    assert welcome_saved.json()["derived_gates"]["realtime_allowed_types"] == ["wecom.welcome_message.send"]
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'AICRM_EXTERNAL_EFFECT_REALTIME_ENABLED'") == "true"
+    assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'AICRM_EXTERNAL_EFFECT_REALTIME_ALLOWED_TYPES'") == "wecom.welcome_message.send"
+    assert realtime_wakeup_state()["channel_entry_missing_types"] == ["wecom.contact.tag.mark", "wecom.profile.update"]
+
+    rejected = client.put(
+        "/api/admin/config/categories/webhooks_push/settings",
+        json={
+            "admin_action_token": token,
+            "operator": "webhook-runtime-test",
+            "settings": {"AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES": "*"},
+        },
+    )
+
+    assert rejected.status_code == 400
+    assert "push capabilities API" in rejected.json()["error"]
+
+    rejected_host = client.put(
+        "/api/admin/config/categories/webhooks_push/settings",
+        json={
+            "admin_action_token": token,
+            "operator": "webhook-runtime-test",
+            "settings": {"AICRM_EXTERNAL_EFFECT_ALLOWED_BASE_HOSTS": "localhost"},
+        },
+    )
+
+    assert rejected_host.status_code == 400
+    assert "push capabilities API" in rejected_host.json()["error"]
 
 
 def test_config_category_check_and_invalid_category_are_controlled(monkeypatch, tmp_path) -> None:
@@ -627,3 +746,17 @@ def test_admin_config_routes_no_longer_forward_to_legacy_facade() -> None:
     assert "legacy_flask_facade" not in admin_config_source
     assert "forward_to_legacy_flask" not in admin_config_source
     assert "wecom_ability" + "_service" not in admin_config_source
+
+
+def test_marketing_automation_config_page_points_to_ai_audience_not_legacy_programs() -> None:
+    template = (ROOT / "aicrm_next/frontend_compat/templates/admin_console/config_marketing_automation.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "AI 自动化运营入口" in template
+    assert "进入 AI 自动化运营" in template
+    assert "automation_program_overview_href" not in template
+    assert "自动化转化兼容入口" not in template
+    assert "进入数据概览" not in template
+    assert "按方案维护" not in template
+    assert "任务流与节点" not in template

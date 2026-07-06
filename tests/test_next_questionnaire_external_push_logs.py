@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH
 from aicrm_next.questionnaire.external_push_logs import (
     get_questionnaire_external_push_retry_side_effect_plans,
     reset_questionnaire_external_push_retry_state,
@@ -70,11 +71,15 @@ def test_next_external_push_retry_defaults_to_side_effect_plan_and_is_idempotent
     first_body = first.json()
     assert first_body["source_status"] == "next_command"
     assert first_body["fallback_used"] is False
-    assert first_body["adapter_mode"] == "real_blocked"
+    assert first_body["adapter_mode"] == "external_effect_queue"
     assert first_body["real_external_call_executed"] is False
     assert first_body["log"]["status"] == "planned"
+    assert first_body["log"]["failure_reason"] == "external_effect_job_queued"
     assert first_body["side_effect_plan"]["effect_type"] == "questionnaire.external_push.retry"
     assert first_body["side_effect_plan"]["requires_approval"] is True
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH})
+    assert total == 1
+    assert jobs[0].status == "queued"
 
     assert second.status_code == 200
     assert second.json()["skipped"] is True
@@ -98,37 +103,29 @@ def test_next_external_push_batch_retry_only_processes_failed_selected_logs(clie
     body = response.json()
     assert body["source_status"] == "next_command"
     assert body["fallback_used"] is False
-    assert body["adapter_mode"] == "real_blocked"
+    assert body["adapter_mode"] == "external_effect_queue"
     assert body["selected_count"] == 3
     assert body["retried_count"] == 2
     assert body["planned_count"] == 2
     assert body["skipped_count"] == 1
     assert body["real_external_call_executed"] is False
     assert len(repo._external_push_logs) == 5  # type: ignore[attr-defined]
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH})
+    assert total == 2
+    assert {job.status for job in jobs} == {"queued"}
 
     scoped = client.get("/admin/questionnaires/1/external-push-logs?status=planned_current")
     assert scoped.status_code == 200
     assert "已生成补发计划" in scoped.text
 
 
-def test_next_external_push_retry_real_delivery_requires_explicit_gate(
+def test_next_external_push_retry_real_delivery_gate_still_queues_without_direct_http(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     source = _seed_log()
-    captured: dict[str, object] = {}
-
-    class Response:
-        status_code = 200
-        text = '{"ok":true}'
-
-    def fake_post(url: str, **kwargs):
-        captured["url"] = url
-        captured["kwargs"] = kwargs
-        return Response()
 
     monkeypatch.setenv("AICRM_QUESTIONNAIRE_EXTERNAL_PUSH_RETRY_REAL_ENABLED", "true")
-    monkeypatch.setattr("aicrm_next.questionnaire.external_push_logs.requests.post", fake_post)
 
     response = client.post(
         f"/admin/questionnaires/external-push-logs/{source['id']}/retry",
@@ -137,8 +134,10 @@ def test_next_external_push_retry_real_delivery_requires_explicit_gate(
 
     assert response.status_code == 200
     body = response.json()
-    assert body["adapter_mode"] == "real_enabled"
-    assert body["real_external_call_executed"] is True
-    assert body["side_effect_plan"]["requires_approval"] is False
-    assert body["log"]["status"] == "success"
-    assert captured["url"] == "https://hooks.example.com/questionnaire"
+    assert body["adapter_mode"] == "external_effect_queue"
+    assert body["real_external_call_executed"] is False
+    assert body["side_effect_plan"]["requires_approval"] is True
+    assert body["log"]["status"] == "planned"
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH})
+    assert total == 1
+    assert jobs[0].payload_json["webhook_url"] == "https://hooks.example.com/questionnaire"

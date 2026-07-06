@@ -71,9 +71,14 @@ EXECUTE_REQUIRED_KEYS = [
     "skipped_summary",
     "include_do_not_disturb",
     "image_count",
+    "execution_backend",
+    "external_effect_job_ids",
+    "planned_count",
+    "queued_count",
     "execution_summary",
     "skip_summary",
-    "task_results",
+    "external_effect_status_supported",
+    "wecom_delivery_status_supported",
     "filters",
 ]
 SEND_RECORDS_REQUIRED_KEYS = ["ok", "items", "limit", "offset", "total"]
@@ -281,8 +286,10 @@ def compare_semantic_flags(endpoint_name: str, payload: JsonDict) -> list[JsonDi
         summary = payload.get("execution_summary")
         if not isinstance(summary, dict):
             issues.append({"rule": "execute_execution_summary", "severity": "fail"})
-        if "task_results" not in payload:
-            issues.append({"rule": "execute_task_results", "severity": "fail"})
+        elif summary.get("backend") != "external_effect_queue":
+            issues.append({"rule": "execute_external_effect_backend", "severity": "fail"})
+        if "external_effect_job_ids" not in payload:
+            issues.append({"rule": "execute_external_effect_job_ids", "severity": "fail"})
     if endpoint_name.startswith("send_records"):
         items = payload.get("items")
         if not isinstance(items, list):

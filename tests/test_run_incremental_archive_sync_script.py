@@ -45,18 +45,51 @@ def test_run_incremental_archive_sync_uses_internal_http_helper(monkeypatch, cap
     monkeypatch.setenv("APP_HOST", "archive.local")
     monkeypatch.setenv("APP_PORT", "5002")
     monkeypatch.setenv("WECOM_DEFAULT_OWNER_USERID", "zhangsan")
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "archive-token")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_CURSOR", "30651")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_LIMIT", "200")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_MAX_PAGES", "20")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_MODE", "http")
     monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
 
     body = module.run()
 
     assert json.loads(body) == {"ok": True, "synced_count": 5}
     assert captured["url"] == "http://archive.local:5002/api/archive/sync"
-    assert captured["timeout"] == 120
+    assert captured["timeout"] == 600
     assert captured["headers"]["content-type"] == "application/json"
+    assert captured["headers"]["authorization"] == "Bearer archive-token"
     assert captured["body"] == {
         "start_time": "2000-01-01 00:00:00",
         "end_time": "2099-12-31 23:59:59",
         "owner_userid": "zhangsan",
-        "cursor": "",
+        "cursor": "30651",
+        "limit": 200,
+        "max_pages": 20,
     }
     assert json.loads(capsys.readouterr().out.strip()) == {"ok": True, "synced_count": 5}
+
+
+def test_run_incremental_archive_sync_defaults_to_direct_process(monkeypatch, capsys):
+    module = _load_script_module()
+    captured: dict[str, object] = {}
+
+    def fake_execute(**kwargs):
+        captured.update(kwargs)
+        return {"ok": True, "source_status": "next_archive_sync", "reply_monitor_skipped": True}
+
+    monkeypatch.setenv("WECOM_DEFAULT_OWNER_USERID", "HuangYouCan")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_CURSOR", "30651")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_LIMIT", "100")
+    monkeypatch.setenv("WECOM_ARCHIVE_SYNC_MAX_PAGES", "3")
+    monkeypatch.delenv("WECOM_ARCHIVE_SYNC_MODE", raising=False)
+    monkeypatch.setattr("aicrm_next.message_archive.sync_service.execute_archive_sync", fake_execute)
+
+    body = module.run()
+
+    assert json.loads(body)["ok"] is True
+    assert captured["owner_userid"] == "HuangYouCan"
+    assert captured["cursor"] == "30651"
+    assert captured["limit"] == 100
+    assert captured["max_pages"] == 3
+    assert json.loads(capsys.readouterr().out.strip())["reply_monitor_skipped"] is True

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
 from copy import deepcopy
-from types import SimpleNamespace
 
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_GENERIC_PUSH, WEBHOOK_ORDER_PAID_PUSH
+from aicrm_next.platform_foundation.external_effects.repo import reset_external_effect_fixture_state
 from aicrm_next.external_push import repo, security, service
 
 
@@ -20,7 +20,7 @@ class FakeExternalPushRepository:
             "external_userid": "wm_product_push",
             "payer_openid": "openid_product_push",
             "unionid": "unionid_product_push",
-            "mobile_snapshot": "13800000000",
+            "metadata_json": {"payer_identity": {"mobile": "13800000000"}},
         }
         self.product = {
             "id": 202,
@@ -64,6 +64,7 @@ class FakeExternalPushRepository:
         self.due_deliveries: list[dict] = []
         self.outbox_statuses: list[tuple[int, str]] = []
         self.updated_deliveries: list[dict] = []
+        self.identity_mobiles = {"unionid_product_push": "13900000000"}
 
     def list_due_outbox_events(self, *, limit: int = 20):
         assert limit > 0
@@ -82,6 +83,9 @@ class FakeExternalPushRepository:
 
     def get_product_for_order(self, order: dict):
         return deepcopy(self.product) if order else {}
+
+    def resolve_identity_mobile_by_unionid(self, unionid: str):
+        return self.identity_mobiles.get(unionid, "")
 
     def get_product_by_id(self, product_id: int):
         return deepcopy(self.product) if int(product_id) == int(self.product["id"]) else None
@@ -138,10 +142,6 @@ class FakeExternalPushRepository:
         return [deepcopy(self.delivery)] if int(order_id) == int(self.order["id"]) else []
 
 
-def _fake_response(status_code: int, text: str):
-    return SimpleNamespace(status_code=status_code, text=text, is_redirect=False, headers={})
-
-
 def _allow_no_dns(monkeypatch) -> None:
     monkeypatch.setattr(service, "resolve_and_validate_public_https_url", lambda url: url)
 
@@ -173,56 +173,65 @@ def test_signature_is_stable_and_sensitive_payload_is_redacted() -> None:
 
 
 def test_run_due_events_success_updates_delivery_and_outbox(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
     repository = FakeExternalPushRepository()
-    sent_payloads: list[dict] = []
     _allow_no_dns(monkeypatch)
 
-    def fake_post(*args, **kwargs):
-        sent_payloads.append(json.loads(kwargs["data"].decode("utf-8")))
-        return _fake_response(200, '{"ok":true}')
-
-    monkeypatch.setattr(service.requests, "post", fake_post)
-
     result = service.run_due_external_push_events(limit=5, repository=repository)
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH})
 
     assert result["ok"] is True
     assert result["scanned_count"] == 1
     assert result["success_count"] == 1
     assert repository.outbox_statuses == [(repository.outbox["id"], "success")]
-    assert repository.delivery["status"] == "success"
-    assert repository.delivery["attempt_count"] == 1
+    assert repository.delivery["status"] == "retrying"
+    assert repository.delivery["attempt_count"] == 0
     assert repository.delivery["request_headers"]["X-AICRM-Signature"].startswith("sha256=")
     assert repository.delivery["request_body"]["phone_number"] == "138****0000"
     assert repository.delivery["request_body"]["buyer"]["phone"] == "138****0000"
-    assert sent_payloads[0]["phone_number"] == "13800000000"
-    assert sent_payloads[0]["buyer"]["phone"] == "13800000000"
-    assert sent_payloads[0]["event"] == "transaction.paid"
+    assert total == 1
+    assert jobs[0].status == "queued"
+    assert jobs[0].execution_mode == "execute"
+    assert jobs[0].payload_json["body"]["phone_number"] == "13800000000"
+    assert jobs[0].payload_json["body"]["buyer"]["phone"] == "13800000000"
+    assert jobs[0].payload_json["body"]["event"] == "transaction.paid"
+    assert result["items"][0]["real_external_call_executed"] is False
 
 
-def test_run_due_events_handles_http_failure_as_retry(monkeypatch) -> None:
+def test_external_push_payload_falls_back_to_identity_mobile(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
     repository = FakeExternalPushRepository()
+    repository.order["metadata_json"] = {}
     _allow_no_dns(monkeypatch)
-    monkeypatch.setattr(service.requests, "post", lambda *args, **kwargs: _fake_response(500, "x" * 9000))
+
+    result = service.run_due_external_push_events(limit=5, repository=repository)
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH})
+
+    assert result["ok"] is True
+    assert total == 1
+    assert jobs[0].payload_json["body"]["phone_number"] == "13900000000"
+    assert jobs[0].payload_json["body"]["buyer"]["phone"] == "13900000000"
+
+
+def test_run_due_events_invalid_url_fails_without_external_call(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
+    repository = FakeExternalPushRepository()
+    repository.config["webhook_url"] = "http://127.0.0.1/hook"
+    repository.delivery["request_url"] = "http://127.0.0.1/hook"
 
     result = service.run_due_external_push_events(limit=5, repository=repository)
 
     assert result["failed_count"] == 1
     assert repository.outbox_statuses == [(repository.outbox["id"], "success")]
-    assert repository.delivery["status"] == "retrying"
-    assert repository.delivery["response_status"] == 500
-    assert len(repository.delivery["response_body"].encode("utf-8")) <= service.MAX_BODY_BYTES
-    assert repository.delivery["next_retry_at"]
+    assert repository.delivery["status"] == "failed"
+    assert repository.delivery["response_status"] is None
+    assert repository.delivery["next_retry_at"] == ""
+    assert ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH})[1] == 0
 
 
 def test_run_due_events_skips_missing_config_without_http_call(monkeypatch) -> None:
     repository = FakeExternalPushRepository()
     repository.config = {}
-    monkeypatch.setattr(
-        service.requests,
-        "post",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected external call")),
-    )
-
     result = service.run_due_external_push_events(limit=5, repository=repository)
 
     assert result["skipped_count"] == 1
@@ -231,6 +240,7 @@ def test_run_due_events_skips_missing_config_without_http_call(monkeypatch) -> N
 
 
 def test_run_due_retries_uses_existing_delivery_and_mocked_http(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
     repository = FakeExternalPushRepository()
     failed_delivery = deepcopy(repository.delivery)
     failed_delivery["status"] = "retrying"
@@ -238,28 +248,28 @@ def test_run_due_retries_uses_existing_delivery_and_mocked_http(monkeypatch) -> 
     failed_delivery["request_body"] = {}
     repository.due_deliveries = [failed_delivery]
     _allow_no_dns(monkeypatch)
-    monkeypatch.setattr(service.requests, "post", lambda *args, **kwargs: _fake_response(200, "ok"))
 
     result = service.run_due_external_push_retries(limit=3, repository=repository)
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH})
 
     assert result["ok"] is True
     assert result["retried_count"] == 1
-    assert repository.delivery["status"] == "success"
-    assert repository.delivery["attempt_count"] == 2
+    assert repository.delivery["status"] == "retrying"
+    assert repository.delivery["attempt_count"] == 1
+    assert total == 1
+    assert jobs[0].payload_json["legacy_delivery_id"] == "deliv_next_native"
 
 
 def test_send_product_external_push_test_uses_test_event_payload(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
     repository = FakeExternalPushRepository()
-    sent_payloads: list[dict] = []
     _allow_no_dns(monkeypatch)
-    monkeypatch.setattr(
-        service.requests,
-        "post",
-        lambda *args, **kwargs: (sent_payloads.append(json.loads(kwargs["data"].decode("utf-8"))) or _fake_response(200, "ok")),
-    )
 
     result = service.send_product_external_push_test(repository.product["id"], repository=repository)
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_GENERIC_PUSH})
 
     assert result["ok"] is True
     assert repository.delivery["event_type"] == "external_push.test"
-    assert sent_payloads[0]["event"] == "external_push.test"
+    assert result["real_external_call_executed"] is False
+    assert total == 1
+    assert jobs[0].payload_json["body"]["event"] == "external_push.test"

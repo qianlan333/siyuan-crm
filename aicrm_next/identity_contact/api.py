@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
+
+from aicrm_next.shared.signed_context import load_sidebar_owner_context_token
 
 from .application import GetSidebarContactBindingStatusQuery, ResolvePersonIdentityQuery
 from .dto import ResolvePersonIdentityRequest
 
 router = APIRouter()
+SIDEBAR_OWNER_TOKEN_HEADER = "x-aicrm-sidebar-owner-token"
 
 
 def _identity_error(*, error_code: str, message: str, source_status: str, status_code: int) -> JSONResponse:
@@ -149,12 +152,15 @@ def admin_identity_links(
 
 @router.get("/api/sidebar/contact-binding-status")
 def sidebar_contact_binding_status(
+    request: Request,
     external_userid: str | None = None,
     owner_userid: str | None = None,
 ):
+    resolved_owner_userid = _sidebar_owner_userid_from_request(request, owner_userid=owner_userid)
     result = GetSidebarContactBindingStatusQuery()(
         external_userid=external_userid,
-        owner_userid=owner_userid,
+        owner_userid=resolved_owner_userid,
+        require_owner_scope=True,
     )
     status_code = int(result.pop("status_code", 200) or 200)
     return JSONResponse(result, status_code=status_code)
@@ -162,12 +168,28 @@ def sidebar_contact_binding_status(
 
 @router.get("/api/sidebar/binding-status")
 def sidebar_binding_status(
+    request: Request,
     external_userid: str | None = None,
     owner_userid: str | None = None,
 ):
+    resolved_owner_userid = _sidebar_owner_userid_from_request(request, owner_userid=owner_userid)
     result = GetSidebarContactBindingStatusQuery()(
         external_userid=external_userid,
-        owner_userid=owner_userid,
+        owner_userid=resolved_owner_userid,
+        require_owner_scope=True,
     )
     status_code = int(result.pop("status_code", 200) or 200)
     return JSONResponse(result, status_code=status_code)
+
+
+def _sidebar_owner_userid_from_request(request: Request, *, owner_userid: str | None = None) -> str:
+    token = (
+        str(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER) or "").strip()
+        or str(request.query_params.get("sidebar_owner_token") or "").strip()
+        or str(request.query_params.get("owner_token") or "").strip()
+    )
+    token_result = load_sidebar_owner_context_token(token)
+    if token_result.get("ok"):
+        context = dict(token_result.get("context") or {})
+        return str(context.get("owner_userid") or context.get("viewer_userid") or "").strip()
+    return str(owner_userid or "").strip()

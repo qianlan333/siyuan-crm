@@ -5,6 +5,10 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 from urllib.parse import urlsplit
+
+from aicrm_next.platform_foundation.command_bus import CommandContext
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, FEISHU_WEBHOOK_NOTIFY
+from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from zoneinfo import ZoneInfo
 
 from .domain import normalized_bool, normalized_text
@@ -25,6 +29,19 @@ class FeishuWebhookValidationError(ValueError):
 
 
 HourlyReportSender = Callable[[str, str], dict[str, Any]]
+
+
+def _record_legacy_marker(legacy_key: str, *, metadata: dict[str, Any] | None = None) -> None:
+    try:
+        LegacyWebhookCleanupService().record_runtime_marker(
+            legacy_key,
+            marker="legacy_path_invoked",
+            operator="admin_jobs.notification_settings",
+            metadata=metadata or {},
+            real_external_call_executed=False,
+        )
+    except Exception:
+        pass
 
 
 def validate_feishu_webhook_url(webhook_url: str) -> None:
@@ -139,6 +156,7 @@ def validate_feishu_webhook(
     repo: AdminJobsRepository | None = None,
     sender: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    _record_legacy_marker("old_broadcast_jobs_feishu_hourly_report", metadata={"operation": "validate_feishu_webhook", "enabled": bool(enabled)})
     repo = repo or build_admin_jobs_repository()
     try:
         validate_feishu_webhook_url(webhook_url)
@@ -181,29 +199,37 @@ def validate_feishu_webhook(
 
 def send_feishu_webhook_message(webhook_url: str, text: str) -> dict[str, Any]:
     validate_feishu_webhook_url(webhook_url)
-    import requests
-
-    response = requests.post(
-        normalized_text(webhook_url),
-        json={"msg_type": "text", "content": {"text": normalized_text(text)}},
-        headers={"Content-Type": "application/json"},
-        timeout=10,
+    job = ExternalEffectService().plan_effect(
+        effect_type=FEISHU_WEBHOOK_NOTIFY,
+        adapter_name="feishu_webhook",
+        operation="notify",
+        target_type="feishu_webhook",
+        target_id="admin_jobs_notification",
+        business_type="admin_notification",
+        business_id="feishu_hourly_report",
+        payload={
+            "webhook_url": normalized_text(webhook_url),
+            "body": {"msg_type": "text", "content": {"text": normalized_text(text)}},
+        },
+        payload_summary={
+            "webhook_url_present": bool(normalized_text(webhook_url)),
+            "text_length": len(normalized_text(text)),
+        },
+        context=CommandContext(
+            actor_id="admin_jobs",
+            actor_type="system",
+            trace_id="feishu_hourly_report",
+            source_route="admin_jobs.notification_settings.send_feishu_webhook_message",
+        ),
+        source_module="admin_jobs.notification_settings",
+        idempotency_key=f"feishu-webhook-notify:{__import__('hashlib').sha1((normalized_text(webhook_url) + normalized_text(text)).encode('utf-8')).hexdigest()}",
     )
-    if not (200 <= int(response.status_code) < 300):
-        return {"ok": False, "status_code": int(response.status_code)}
-    payload: dict[str, Any] = {}
-    try:
-        parsed = response.json()
-        payload = parsed if isinstance(parsed, dict) else {}
-    except ValueError:
-        payload = {}
-    code = payload.get("code")
-    status_code = payload.get("StatusCode")
-    if code not in (None, 0) and str(code) != "0":
-        return {"ok": False, "status_code": int(response.status_code)}
-    if status_code not in (None, 0) and str(status_code) != "0":
-        return {"ok": False, "status_code": int(response.status_code)}
-    return {"ok": True, "status_code": int(response.status_code)}
+    return {
+        "ok": True,
+        "queued": True,
+        "external_effect_job_id": job.get("id"),
+        "real_external_call_executed": False,
+    }
 
 
 def get_previous_hour_window(time_zone: str = "Asia/Shanghai", now: datetime | None = None) -> dict[str, Any]:
@@ -286,6 +312,7 @@ def send_broadcast_job_hourly_feishu_report(
     repo: AdminJobsRepository | None = None,
     sender: HourlyReportSender | None = None,
 ) -> dict[str, Any]:
+    _record_legacy_marker("old_broadcast_jobs_feishu_hourly_report", metadata={"operation": "send_broadcast_job_hourly_feishu_report"})
     repo = repo or build_admin_jobs_repository()
     setting = repo.get_broadcast_notification_setting(FEISHU_CHANNEL)
     if not setting or not normalized_text(setting.get("webhook_url")):

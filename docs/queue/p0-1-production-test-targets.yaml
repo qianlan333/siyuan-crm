@@ -1,0 +1,107 @@
+version: 1
+name: p0-1-production-full-chain-targets
+description: >
+  P0-1 External Effect Queue 全业务链条线上测试目标清单。
+  任何板块如果 missing required fields，则禁止真实 execute。
+
+global_rules:
+  require_external_effect_job: true
+  require_push_center_visible: true
+  require_attempt_record: true
+  forbid_legacy_real_execution: true
+  forbid_batch_without_explicit_target: true
+  require_batch_size_one_for_real_execute: true
+  require_manual_confirmation_before_execute: true
+
+sections:
+  ai_assist:
+    enabled_for_real_execute: true
+    owner_userid: HuangYouCan
+    allowed_external_userids:
+      - wmbNXyCwAAXhagLBNjtlFj2jbQevWinQ
+    allowed_effect_types:
+      - wecom.message.private.send
+    required_checks:
+      - campaign_created
+      - external_effect_job_created
+      - push_center_visible
+      - run_due_preview
+      - run_due_dry_run
+      - run_due_execute_batch_size_1
+      - attempt_succeeded
+
+  private_broadcast:
+    enabled_for_real_execute: false
+    reason: "需要补明确测试客户名单后才能真实 execute"
+    allowed_effect_types:
+      - wecom.message.private.send
+
+  group_ops:
+    enabled_for_real_execute: true
+    owner_userid: HuangYouCan
+    allowed_webhook_keys:
+      - 测试运营计划-ce2519
+    allowed_effect_types:
+      - wecom.message.group.send
+    required_checks:
+      - webhook_accepted
+      - external_effect_job_created
+      - push_center_visible
+      - run_due_preview
+      - run_due_dry_run
+      - run_due_execute_batch_size_1
+      - attempt_succeeded
+
+  group_broadcast:
+    enabled_for_real_execute: false
+    reason: "需要补明确测试群 chat_id 后才能真实 execute"
+    allowed_effect_types:
+      - wecom.message.broadcast.send
+
+  questionnaire:
+    enabled_for_real_execute: false
+    reason: "先只验证入队和 Push Center 明细，真实 webhook 需单独灰度"
+    allowed_effect_types:
+      - webhook.questionnaire_submission.push
+
+  order:
+    enabled_for_real_execute: false
+    reason: "先只验证入队和 Push Center 明细，真实订单 webhook 需单独灰度"
+    allowed_effect_types:
+      - webhook.order_paid.push
+
+  customer_webhook:
+    enabled_for_real_execute: false
+    reason: "只验证 retry / retry-due 入队"
+    allowed_effect_types:
+      - webhook.customer_automation.retry
+      - webhook.customer_automation.retry_due
+
+  tags:
+    enabled_for_real_execute: false
+    reason: "真实标签变更需单独灰度"
+    allowed_effect_types:
+      - wecom.contact.tag.mark
+      - wecom.contact.tag.unmark
+
+  welcome:
+    enabled_for_real_execute: false
+    reason: "缺测试渠道入口和测试客户，禁止真实 execute"
+    allowed_effect_types:
+      - wecom.welcome_message.send
+
+  payment:
+    enabled_for_real_execute: false
+    reason: "只允许 synthetic order 查询，真实支付查询需单独灰度"
+    allowed_effect_types:
+      - payment.wechat.order.query
+      - payment.wechat.refund.query
+
+  integrations:
+    enabled_for_real_execute: false
+    reason: "Feishu / OpenClaw 只验证 planned / blocked job"
+    allowed_effect_types:
+      - feishu.webhook.notify
+      - openclaw.context.push
+      - media.storage.upload
+      - wecom.media.upload

@@ -6,7 +6,7 @@ import sys
 try:
     from scripts.script_runtime import REPO_ROOT
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from script_runtime import REPO_ROOT
+    from script_runtime import REPO_ROOT  # type: ignore[no-redef]
 
 ROOT = REPO_ROOT
 TARGETS = [
@@ -17,7 +17,15 @@ TARGETS = [
 
 
 def main() -> int:
-    command = [sys.executable, "-m", "mypy", "--config-file", str(ROOT / "pyproject.toml"), *TARGETS]
+    command = [
+        sys.executable,
+        "-m",
+        "mypy",
+        "--config-file",
+        str(ROOT / "pyproject.toml"),
+        "--explicit-package-bases",
+        *TARGETS,
+    ]
     return subprocess.run(command, cwd=ROOT).returncode
 
 

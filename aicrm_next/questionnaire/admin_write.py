@@ -8,6 +8,7 @@ from uuid import uuid4
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
+from aicrm_next.navigation_target.service import normalize_completion_target_for_storage
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
 from .domain import admin_detail_projection, summary_projection
@@ -407,6 +408,7 @@ def _normalize_upsert_payload(payload: dict[str, Any]) -> dict[str, Any]:
         assessment_config = raw.get("result_config") or {}
     if not isinstance(assessment_config, dict):
         raise QuestionnaireAdminWriteInputError("assessment_config must be an object")
+    completion_target = normalize_completion_target_for_storage(raw, legacy_url_key="redirect_url")
     return {
         "slug": slug,
         "name": _normalized_text(raw.get("name") or title),
@@ -415,6 +417,7 @@ def _normalize_upsert_payload(payload: dict[str, Any]) -> dict[str, Any]:
         "enabled": not is_disabled,
         "is_disabled": is_disabled,
         "redirect_url": _normalized_text(raw.get("redirect_url")),
+        "completion_target_json": completion_target,
         "submit_button_text": _normalized_text(raw.get("submit_button_text") or "提交"),
         "answer_display_mode": answer_display_mode,
         "assessment_enabled": _normalized_bool(raw.get("assessment_enabled")),
@@ -618,12 +621,12 @@ def _handle_export_download(command: Command) -> dict[str, Any]:
 
 def _mask_submission(row: dict[str, Any], fields: list[str]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
-    for field in fields:
-        value = row.get(field)
-        if field in {"mobile", "external_userid", "openid", "unionid", "respondent_key"} and value:
-            payload[field] = "masked"
+    for field_name in fields:
+        value = row.get(field_name)
+        if field_name in {"mobile", "external_userid", "openid", "unionid", "respondent_key"} and value:
+            payload[field_name] = "masked"
         else:
-            payload[field] = value
+            payload[field_name] = value
     return payload
 
 
@@ -634,12 +637,12 @@ def _export_rows(
     requested_fields: list[str],
 ) -> tuple[list[str], list[dict[str, Any]]]:
     question_headers = _export_question_headers(questionnaire, submissions)
-    requested = [field for field in requested_fields if field and field not in {"matched_by", "answers"}]
+    requested = [field_name for field_name in requested_fields if field_name and field_name not in {"matched_by", "answers"}]
     base_fields = requested or list(_EXPORT_BASE_FIELDS)
-    for field in _EXPORT_BASE_FIELDS:
-        if field not in base_fields and field == "unionid":
+    for field_name in _EXPORT_BASE_FIELDS:
+        if field_name not in base_fields and field_name == "unionid":
             insert_at = base_fields.index("mobile") if "mobile" in base_fields else len(base_fields)
-            base_fields.insert(insert_at, field)
+            base_fields.insert(insert_at, field_name)
     fields = [*base_fields, *[header for _, header in question_headers]]
     rows: list[dict[str, Any]] = []
     for submission in submissions:

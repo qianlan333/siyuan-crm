@@ -46,12 +46,12 @@ def test_run_due_routes_do_not_forward_to_legacy_or_execute_runtime(monkeypatch)
     reset_campaign_read_fixture_state()
     reset_run_due_fixture_state()
     client = TestClient(create_app(), raise_server_exceptions=False)
-    headers = {"Authorization": "Bearer test-token"}
-
     for path in [
         "/api/admin/cloud-orchestrator/campaigns/run-due/preview",
         "/api/admin/cloud-orchestrator/campaigns/run-due",
     ]:
+        idempotency_key = "run-due-no-legacy-preview" if path.endswith("/preview") else "run-due-no-legacy-plan"
+        headers = {"Authorization": "Bearer test-token", "Idempotency-Key": idempotency_key}
         response = client.post(path, json={"batch_size": 10, "dry_run": True}, headers=headers)
         assert response.status_code == 200
         assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"

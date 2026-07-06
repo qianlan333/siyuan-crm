@@ -12,6 +12,7 @@ def test_public_product_pay_inventory_covers_required_boundaries() -> None:
     assert "Frontend <-> API <-> Backend Contract Matrix" in text
     for route in [
         "/p/{product_or_slug}",
+        "/api/h5/product-images/{product_code}/{image_id}/variants/{variant_key}",
         "/pay/{product_or_slug}",
         "/api/products/{path}",
         "/api/products/list",
@@ -25,6 +26,7 @@ def test_public_product_pay_inventory_covers_required_boundaries() -> None:
         "wildcard_router rollback removed",
         "legacy_fallback_allowed=false",
         "deletion_locked",
+        "only serves media library variants for images already attached",
         "Next-owned H5 WeChat Pay may create JSAPI orders",
         "Do not change admin/alipay/checkout/orders/provider ownership",
     ]:

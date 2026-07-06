@@ -26,7 +26,7 @@ class ProductionUserOpsRepository:
         return [
             {
                 "id": 1,
-                "person_id": "person_001",
+                "unionid": "union_ops_001",
                 "mobile": "13800138000",
                 "external_userid": "wx_ext_001",
                 "customer_name": "张小蓝",

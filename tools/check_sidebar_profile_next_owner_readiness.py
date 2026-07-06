@@ -138,30 +138,6 @@ ROUTE_MATRIX: list[dict[str, Any]] = [
         "expected_endpoint_module": "aicrm_next.customer_read_model.api",
         "next_exact_owner_status": "next exact readonly",
     },
-    {
-        "route_pattern": "/api/admin/automation-conversion/member",
-        "probe_method": "GET",
-        "probe_path": "/api/admin/automation-conversion/member",
-        "current_owner": "next exact readonly",
-        "future_next_owner": "automation_engine",
-        "data_source": "next automation read model",
-        "access": "readonly_automation_member_detail",
-        "write_guard": "n/a",
-        "expected_facade": "",
-        "next_exact_owner_status": "next exact readonly",
-    },
-    {
-        "route_pattern": "/api/admin/automation-conversion/member/*",
-        "probe_method": "OPTIONS",
-        "probe_path": "/api/admin/automation-conversion/member/put-in-pool",
-        "current_owner": "next command",
-        "future_next_owner": "automation_engine",
-        "data_source": "automation_engine command adapter",
-        "access": "write_automation_member_state",
-        "write_guard": "guarded_invalid_payload_probe_only",
-        "expected_facade": "",
-        "next_exact_owner_status": "next command",
-    },
 ]
 
 

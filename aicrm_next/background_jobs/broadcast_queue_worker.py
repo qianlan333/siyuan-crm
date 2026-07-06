@@ -6,6 +6,13 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
+from aicrm_next.platform_foundation.external_effects.execution_gates import (
+    WECOM_EXECUTION_DISABLED_CODE,
+    explicit_wecom_execution_disabled,
+    wecom_execution_disabled_message,
+)
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 from .db import connect, has_database_url, int_value, json_list, utcnow
 
 
@@ -15,8 +22,8 @@ class BroadcastDispatcher(Protocol):
 
 class BroadcastQueueRepository(Protocol):
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]: ...
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0) -> None: ...
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error") -> None: ...
+    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None: ...
+    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None: ...
 
 
 class SafeSkippedBroadcastDispatcher:
@@ -47,8 +54,19 @@ class PostgresBroadcastQueueRepository:
                 WITH due AS (
                     SELECT id
                     FROM broadcast_jobs
-                    WHERE status = 'queued'
-                      AND scheduled_for <= %s
+                    WHERE scheduled_for <= %s
+                      AND (
+                        status = 'queued'
+                        OR (
+                            status = 'claimed'
+                            AND lease_expires_at IS NOT NULL
+                            AND lease_expires_at <= %s
+                        )
+                        OR (
+                            status = 'failed_retryable'
+                            AND (next_retry_at IS NULL OR next_retry_at <= %s)
+                        )
+                      )
                     ORDER BY priority ASC, scheduled_for ASC, id ASC
                     FOR UPDATE SKIP LOCKED
                     LIMIT %s
@@ -64,11 +82,12 @@ class PostgresBroadcastQueueRepository:
                 WHERE bj.id = due.id
                 RETURNING bj.*
                 """,
-                (now, int(limit), now, claim_token, now + timedelta(seconds=int(lease_seconds))),
+                (now, now, now, int(limit), now, claim_token, now + timedelta(seconds=int(lease_seconds))),
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0) -> None:
+    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
+        token = str(claim_token or "")
         with connect() as conn:
             conn.execute(
                 """
@@ -77,25 +96,88 @@ class PostgresBroadcastQueueRepository:
                     outbound_task_id = %s,
                     sent_count = %s,
                     failed_count = %s,
+                    claim_token = '',
+                    lease_expires_at = NULL,
+                    next_retry_at = NULL,
                     sent_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
+                  AND (%s = '' OR claim_token = %s)
                 """,
-                (outbound_task_id, int(sent_count), int(failed_count), int(job_id)),
+                (outbound_task_id, int(sent_count), int(failed_count), int(job_id), token, token),
             )
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error") -> None:
+    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
+        error_text = str(error or "")[:1000]
+        token = str(claim_token or "")
+        terminal_failure = failure_type in {"identity_external_userid_missing", "invalid_payload", "cancelled"}
+        retry_delay_seconds = int(os.getenv("BROADCAST_QUEUE_RETRY_DELAY_SECONDS", "300"))
         with connect() as conn:
             conn.execute(
                 """
                 UPDATE broadcast_jobs
-                SET status = 'failed',
+                SET status = CASE
+                        WHEN %s THEN 'blocked'
+                        WHEN attempt_count >= COALESCE(max_attempts, 3) THEN 'failed_terminal'
+                        ELSE 'failed_retryable'
+                    END,
                     failure_type = %s,
                     last_error = %s,
+                    claim_token = '',
+                    lease_expires_at = NULL,
+                    next_retry_at = CASE
+                        WHEN %s OR attempt_count >= COALESCE(max_attempts, 3) THEN NULL
+                        ELSE CURRENT_TIMESTAMP + (%s * INTERVAL '1 second')
+                    END,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
+                  AND (%s = '' OR claim_token = %s)
                 """,
-                (failure_type, str(error or "")[:1000], int(job_id)),
+                (terminal_failure, failure_type, error_text, terminal_failure, retry_delay_seconds, int(job_id), token, token),
+            )
+            conn.execute(
+                """
+                UPDATE cloud_broadcast_plan_recipients r
+                SET send_status = 'failed',
+                    last_error = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM broadcast_jobs j
+                WHERE j.id = %s
+                  AND j.source_type = 'cloud_plan'
+                  AND j.source_table = 'cloud_broadcast_plan_recipients'
+                  AND (%s = '' OR j.claim_token = %s)
+                  AND r.broadcast_job_id = j.id
+                  AND r.send_status IN ('pending', 'queued', 'sending')
+                """,
+                (error_text, int(job_id), token, token),
+            )
+            conn.execute(
+                """
+                UPDATE cloud_broadcast_plan_recipient_messages m
+                SET status = 'failed',
+                    last_error = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM cloud_broadcast_plan_recipients r
+                JOIN broadcast_jobs j ON j.id = r.broadcast_job_id
+                WHERE j.id = %s
+                  AND j.source_type = 'cloud_plan'
+                  AND j.source_table = 'cloud_broadcast_plan_recipients'
+                  AND (%s = '' OR j.claim_token = %s)
+                  AND m.plan_id = r.plan_id
+                  AND m.recipient_id = r.id
+                  AND m.status IN ('pending', 'queued')
+                """,
+                (error_text, int(job_id), token, token),
+            )
+            conn.execute(
+                """
+                UPDATE broadcast_jobs
+                SET claim_token = '',
+                    lease_expires_at = NULL
+                WHERE id = %s
+                  AND (%s = '' OR claim_token = %s)
+                """,
+                (int(job_id), token, token),
             )
 
 
@@ -116,7 +198,7 @@ def _summary(*, limit: int, dry_run: bool) -> dict[str, Any]:
 
 
 def _count_targets(job: dict[str, Any]) -> int:
-    return len(json_list(job.get("target_external_userids"))) or int_value(job.get("target_count"))
+    return len(json_list(job.get("target_unionids_json"))) or int_value(job.get("target_count"))
 
 
 def _json_dict(value: Any) -> dict[str, Any]:
@@ -168,10 +250,6 @@ def _is_wecom_private_job(job: dict[str, Any], payload: dict[str, Any]) -> bool:
             and _text(job.get("source_table")) == "campaign_members"
             and _text(job.get("content_type")) == "private_message"
         )
-        or (
-            _text(job.get("source_type")) == "automation_runtime_v2"
-            and _text(job.get("target_kind")) == "external_userid"
-        )
     )
 
 
@@ -209,9 +287,32 @@ def _record_outbound_task(
     return int((row or {}).get("id") or 0) or None
 
 
-def _extract_private_targets(job: dict[str, Any], payload: dict[str, Any]) -> list[str]:
-    values = _json_list(job.get("target_external_userids")) or _json_list(payload.get("target_external_userids"))
+def _extract_target_unionids(job: dict[str, Any], payload: dict[str, Any]) -> list[str]:
+    values = _json_list(job.get("target_unionids_json")) or _json_list(payload.get("target_unionids"))
     return [_text(item) for item in values if _text(item)]
+
+
+def _resolve_private_targets_by_unionid(unionids: list[str]) -> tuple[list[str], list[str]]:
+    unique_unionids = []
+    for unionid in unionids:
+        if unionid and unionid not in unique_unionids:
+            unique_unionids.append(unionid)
+    if not unique_unionids:
+        return [], []
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT unionid, primary_external_userid
+            FROM crm_user_identity
+            WHERE unionid = ANY(%s)
+              AND COALESCE(primary_external_userid, '') <> ''
+            """,
+            (unique_unionids,),
+        ).fetchall()
+    by_unionid = {_text(dict(row).get("unionid")): _text(dict(row).get("primary_external_userid")) for row in rows}
+    targets = [by_unionid[unionid] for unionid in unique_unionids if by_unionid.get(unionid)]
+    missing = [unionid for unionid in unique_unionids if not by_unionid.get(unionid)]
+    return targets, missing
 
 
 def _extract_private_text(payload: dict[str, Any]) -> str:
@@ -226,9 +327,90 @@ def _extract_private_text(payload: dict[str, Any]) -> str:
     )
 
 
+def _configured_wecom_sender(fallback: str = "") -> str:
+    raw = runtime_setting("AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS", "")
+    candidates = [
+        item.strip()
+        for item in raw.replace("\n", ",").replace(" ", ",").split(",")
+        if item.strip()
+    ]
+    return candidates[0] if candidates else _text(fallback)
+
+
 def _extract_private_sender(payload: dict[str, Any]) -> str:
     campaign = payload.get("campaign") if isinstance(payload.get("campaign"), dict) else {}
-    return _text(payload.get("sender_userid") or payload.get("owner_userid") or campaign.get("owner_userid"))
+    fallback = _text(payload.get("sender_userid") or payload.get("owner_userid") or campaign.get("owner_userid"))
+    return _configured_wecom_sender(fallback)
+
+
+def _load_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any]:
+    if _text(payload.get("message_mode")) != "recipient_messages":
+        return {}
+    plan_id = _text(payload.get("plan_id"))
+    recipient_id = int_value(payload.get("recipient_id"))
+    if not plan_id or not recipient_id:
+        return {}
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT id, recipient_id, content_text, content_payload_json, attachments_json
+            FROM cloud_broadcast_plan_recipient_messages
+            WHERE plan_id = %s
+              AND recipient_id = %s
+              AND status IN ('queued', 'pending')
+            ORDER BY sequence_index ASC, id ASC
+            LIMIT 1
+            """,
+            (plan_id, recipient_id),
+        ).fetchone()
+    if not row:
+        return {}
+    return {
+        "cloud_plan_message_id": int_value(row.get("id")),
+        "content_text": _text(row.get("content_text")),
+        "content_payload_json": _json_dict(row.get("content_payload_json")),
+        "attachments": _json_list(row.get("attachments_json")),
+    }
+
+
+def _with_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any]:
+    message = _load_cloud_plan_recipient_message(payload)
+    if not message:
+        return payload
+    hydrated = dict(payload)
+    if message.get("content_text"):
+        hydrated["content_text"] = message.get("content_text")
+    if message.get("content_payload_json"):
+        hydrated["content_payload_json"] = message.get("content_payload_json")
+    if message.get("attachments"):
+        hydrated["attachments"] = message.get("attachments")
+    if message.get("cloud_plan_message_id"):
+        hydrated["cloud_plan_message_id"] = message.get("cloud_plan_message_id")
+    return hydrated
+
+
+def _mark_cloud_plan_recipient_message_sent(payload: dict[str, Any], *, outbound_task_id: int | None) -> None:
+    message_id = int_value(payload.get("cloud_plan_message_id"))
+    recipient_id = int_value(payload.get("recipient_id"))
+    if not message_id or not recipient_id:
+        return
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE cloud_broadcast_plan_recipient_messages
+            SET status = 'sent', sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (message_id,),
+        )
+        conn.execute(
+            """
+            UPDATE cloud_broadcast_plan_recipients
+            SET send_status = 'sent', updated_at = CURRENT_TIMESTAMP
+            WHERE id = %s
+            """,
+            (recipient_id,),
+        )
 
 
 def _merge_content_package(target: dict[str, Any], source: Any) -> None:
@@ -287,33 +469,32 @@ def _normalize_private_attachments_for_wecom(attachments: list[dict[str, Any]]) 
     return normalized
 
 
-def _realtest_guard(*, sender_userid: str, targets: list[str], content_text: str) -> tuple[bool, str]:
-    if "【RuntimeV2真实链路测试】" not in content_text and "runtime_v2_realtest_" not in content_text:
-        return True, ""
-    if sender_userid not in {"HuangYouCan", "QianLan"}:
-        return False, "realtest_sender_not_allowed"
-    allowed_targets = [
-        item.strip()
-        for item in os.getenv("AICRM_RUNTIME_V2_REALTEST_ALLOWED_EXTERNAL_USERIDS", "").split(",")
-        if item.strip()
-    ]
-    if not allowed_targets:
-        return False, "realtest_target_not_configured"
-    if targets != allowed_targets:
-        return False, "realtest_target_not_allowed"
-    return True, ""
-
-
 def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     from aicrm_next.integration_gateway.wecom_private_adapter import build_wecom_private_message_adapter
 
-    targets = _extract_private_targets(job, payload)
+    if explicit_wecom_execution_disabled():
+        return {
+            "ok": False,
+            "error": wecom_execution_disabled_message(),
+            "failure_type": WECOM_EXECUTION_DISABLED_CODE,
+            "side_effect_executed": False,
+        }
+    payload = _with_cloud_plan_recipient_message(payload)
+    target_unionids = _extract_target_unionids(job, payload)
+    targets, missing_unionids = _resolve_private_targets_by_unionid(target_unionids)
     target_count = int_value(job.get("target_count"))
     sender_userid = _extract_private_sender(payload)
     content_text = _extract_private_text(payload)
-    if not targets:
-        return {"ok": False, "error": "target_external_userids_missing", "failure_type": "validation_failed"}
-    if target_count != len(targets):
+    if not target_unionids:
+        return {"ok": False, "error": "target_unionids_missing", "failure_type": "validation_failed"}
+    if missing_unionids:
+        return {
+            "ok": False,
+            "error": "identity_external_userid_missing",
+            "failure_type": "identity_external_userid_missing",
+            "missing_unionids": missing_unionids,
+        }
+    if target_count != len(target_unionids):
         return {"ok": False, "error": "target_count_mismatch", "failure_type": "validation_failed"}
     if not sender_userid:
         return {"ok": False, "error": "sender_userid_missing", "failure_type": "validation_failed"}
@@ -326,16 +507,17 @@ def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dic
         attachments = _normalize_private_attachments_for_wecom(attachments)
     except Exception as exc:
         return {"ok": False, "error": str(exc), "failure_type": "material_resolve_failed"}
+    direct_attachments = _json_list(payload.get("attachments")) or _json_list(payload.get("attachments_json"))
+    if direct_attachments:
+        attachments = direct_attachments + attachments
     if not content_text and not attachments:
         return {"ok": False, "error": "content_text_or_attachment_missing", "failure_type": "validation_failed"}
-    ok, reason = _realtest_guard(sender_userid=sender_userid, targets=targets, content_text=content_text)
-    if not ok:
-        return {"ok": False, "error": reason, "failure_type": "validation_failed"}
     request_payload = {
         "job_id": int_value(job.get("id")),
         "source_type": _text(job.get("source_type")),
         "source_id": _text(job.get("source_id")),
         "sender_userid": sender_userid,
+        "target_unionids": target_unionids,
         "external_userids": targets,
         "content_hash": _json_dict(payload.get("rendered_content")).get("content_hash") or "",
         "content_preview": content_text[:120],
@@ -370,6 +552,7 @@ def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dic
         }
     if not outbound_task_id:
         return {"ok": False, "error": "outbound_task_record_missing", "failure_type": "handler_error"}
+    _mark_cloud_plan_recipient_message_sent(payload, outbound_task_id=outbound_task_id)
     return {
         "ok": True,
         "sent_count": len(targets),
@@ -382,6 +565,13 @@ def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dic
 def _dispatch_wecom_customer_group(job: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     from aicrm_next.integration_gateway.wecom_group_adapter import build_wecom_group_message_adapter
 
+    if explicit_wecom_execution_disabled():
+        return {
+            "ok": False,
+            "error": wecom_execution_disabled_message(),
+            "failure_type": WECOM_EXECUTION_DISABLED_CODE,
+            "side_effect_executed": False,
+        }
     existing_outbound_task_id = int_value(job.get("outbound_task_id"))
     if existing_outbound_task_id:
         return {
@@ -438,32 +628,37 @@ def run_broadcast_queue_worker(
         current_time = current_time.replace(tzinfo=timezone.utc)
     lease = int(lease_seconds or int(os.getenv("BROADCAST_QUEUE_LEASE_SECONDS", "900")))
     try:
-        jobs = repo.claim_due_jobs(limit=int(limit), now=current_time, claim_token=f"{os.getpid()}:{uuid.uuid4().hex}", lease_seconds=lease)
+        claim_token = f"{os.getpid()}:{uuid.uuid4().hex}"
+        jobs = repo.claim_due_jobs(limit=int(limit), now=current_time, claim_token=claim_token, lease_seconds=lease)
         summary["claimed"] = len(jobs)
         for job in jobs:
             job_id = int(job.get("id") or 0)
-            outcome = dispatcher.dispatch(job)
-            if outcome.get("ok"):
-                sent_count = int_value(outcome.get("sent_count")) or _count_targets(job)
-                repo.mark_sent(
-                    job_id,
-                    outbound_task_id=outcome.get("outbound_task_id") or outcome.get("task_id"),
-                    sent_count=sent_count,
-                    failed_count=int_value(outcome.get("failed_count")),
-                )
-                summary["sent_ok"] += 1
-                summary["results"].append({"id": job_id, "status": "sent", "sent_count": sent_count})
-                continue
-            reason = str(outcome.get("reason") or outcome.get("error") or "next_native_dispatch_failed")
-            repo.mark_failed(
-                job_id,
-                error=reason,
-                failure_type=str(outcome.get("failure_type") or ("next_native_dispatch_skipped" if outcome.get("status") == "skipped" else "handler_error")),
-            )
-            summary["sent_failed"] += 1
-            if outcome.get("status") == "skipped":
-                summary["skipped"] += 1
-            summary["results"].append({"id": job_id, "status": outcome.get("status") or "failed", "reason": reason, "failure_type": outcome.get("failure_type") or ""})
+            try:
+                outcome = dispatcher.dispatch(job)
+                if outcome.get("ok"):
+                    sent_count = int_value(outcome.get("sent_count")) or _count_targets(job)
+                    repo.mark_sent(
+                        job_id,
+                        outbound_task_id=outcome.get("outbound_task_id") or outcome.get("task_id"),
+                        sent_count=sent_count,
+                        failed_count=int_value(outcome.get("failed_count")),
+                        claim_token=claim_token,
+                    )
+                    summary["sent_ok"] += 1
+                    summary["results"].append({"id": job_id, "status": "sent", "sent_count": sent_count})
+                    continue
+                reason = str(outcome.get("reason") or outcome.get("error") or "next_native_dispatch_failed")
+                failure_type = str(outcome.get("failure_type") or ("next_native_dispatch_skipped" if outcome.get("status") == "skipped" else "handler_error"))
+                repo.mark_failed(job_id, error=reason, failure_type=failure_type, claim_token=claim_token)
+                summary["sent_failed"] += 1
+                if outcome.get("status") == "skipped":
+                    summary["skipped"] += 1
+                summary["results"].append({"id": job_id, "status": outcome.get("status") or "failed_retryable", "reason": reason, "failure_type": failure_type})
+            except Exception as exc:
+                reason = str(exc)
+                repo.mark_failed(job_id, error=reason, failure_type="handler_exception", claim_token=claim_token)
+                summary["sent_failed"] += 1
+                summary["results"].append({"id": job_id, "status": "failed_retryable", "reason": reason, "failure_type": "handler_exception"})
         return summary
     except Exception as exc:
         return {**summary, "ok": False, "errors": [{"code": "broadcast_queue_worker_failed", "message": str(exc)}]}

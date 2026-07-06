@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from aicrm_next.channel_entry.application import generate_channel_qrcode
 from aicrm_next.channel_entry.schemas import GenerateChannelQrCodeCommand
 from aicrm_next.channel_entry.wecom_adapter import get_wecom_adapter, set_wecom_adapter
 from aicrm_next.main import create_app
+
+
+def _iter_api_routes(routes):
+    for route in routes:
+        original_router = getattr(route, "original_router", None)
+        nested = getattr(route, "routes", None) or getattr(original_router, "routes", None)
+        if nested:
+            yield from _iter_api_routes(nested)
+        elif isinstance(route, APIRoute):
+            yield route
 
 
 def test_generate_channel_qrcode_calls_wecom_and_writes_scene_alias(monkeypatch):
@@ -148,5 +159,5 @@ def test_generate_qrcode_route_is_next_channel_entry_owned(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["source"] == "aicrm_next.channel_entry"
-    paths = {route.path: route.endpoint.__module__ for route in client.app.routes if hasattr(route, "endpoint")}
+    paths = {route.path: route.endpoint.__module__ for route in _iter_api_routes(client.app.routes)}
     assert paths["/api/admin/channels/{channel_id:int}/qrcode/generate"] == "aicrm_next.channel_entry.api"

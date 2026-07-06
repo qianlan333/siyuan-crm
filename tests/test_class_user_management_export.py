@@ -19,3 +19,19 @@ def test_class_user_management_export_returns_local_csv_without_external_storage
     assert "客户昵称" in response.text
     assert "Class User Local" in response.text
     assert "signed" in response.text
+
+
+def test_class_user_management_export_blocks_fixture_csv_in_production_data_mode(monkeypatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://class-user:class-user@127.0.0.1:1/class_user")
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "false")
+    monkeypatch.setenv("SECRET_KEY", "class-user-management-export-test")
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    response = client.get("/api/admin/class-user-management/export?signup_status=signed")
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["ok"] is False
+    assert payload["source_status"] == "production_unavailable"
+    assert payload["error"] == "class_user_management_export_requires_real_read_model"
+    assert "Class User Local" not in response.text

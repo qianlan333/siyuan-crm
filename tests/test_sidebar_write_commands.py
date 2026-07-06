@@ -125,6 +125,32 @@ def test_sidebar_write_routes_return_controlled_errors(client: TestClient) -> No
     assert unknown_customer.json()["fallback_used"] is False
 
 
+def test_sidebar_write_routes_filter_by_owner_userid(client: TestClient) -> None:
+    allowed = client.post(
+        "/api/sidebar/lead-pool/upsert-class-term",
+        json={
+            "external_userid": "wx_ext_001",
+            "owner_userid": "ZhaoYanFang",
+            "class_term": "term-2026-06",
+            "status": "active",
+        },
+    )
+    blocked = client.post(
+        "/api/sidebar/lead-pool/upsert-class-term",
+        json={
+            "external_userid": "wx_ext_001",
+            "owner_userid": "LiuXiao",
+            "class_term": "term-2026-06",
+            "status": "active",
+        },
+    )
+
+    assert allowed.status_code == 200
+    assert blocked.status_code == 404
+    assert blocked.json()["source_status"] == "not_found"
+    assert blocked.json()["fallback_used"] is False
+
+
 def test_sidebar_write_production_unavailable_does_not_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:1/aicrm_sidebar")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
@@ -156,29 +182,21 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
 
     class FakeConnection:
         def __init__(self):
-            self.people = [
-                {"id": 3, "mobile": "13800138123", "third_party_user_id": "tp_old"},
-                {"id": 7, "mobile": "13800138000", "third_party_user_id": "tp_existing"},
-            ]
-            self.bindings = {
+            self.identities = {
                 "wm_prod_sidebar_001": {
-                    "external_userid": "wm_prod_sidebar_001",
-                    "person_id": 3,
-                    "first_bound_by_userid": "sales_old",
-                    "first_owner_userid": "sales_old",
-                    "last_owner_userid": "sales_old",
+                    "unionid": "union_prod_sidebar_001",
+                    "primary_external_userid": "wm_prod_sidebar_001",
+                    "external_userids_json": [{"external_userid": "wm_prod_sidebar_001"}],
+                    "mobile": "13800138123",
+                    "mobile_normalized": "13800138123",
+                    "mobile_source": "legacy_migration",
+                    "customer_name": "生产侧边栏客户",
+                    "primary_owner_userid": "sales_09",
+                    "remark": "侧边栏",
                     "created_at": "2026-06-01T00:00:00Z",
                     "updated_at": "2026-06-01T00:00:00Z",
                 }
             }
-            self.contacts = {
-                "wm_prod_sidebar_001": {
-                    "customer_name": "生产侧边栏客户",
-                    "owner_userid": "sales_09",
-                    "remark": "侧边栏",
-                }
-            }
-            self.lead_pool = [{"id": 11, "mobile": "", "external_userid": "wm_prod_sidebar_001"}]
             self.commits = 0
 
         def __enter__(self):
@@ -189,43 +207,20 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
 
         def execute(self, sql, params=()):
             compact_sql = " ".join(sql.split())
-            if "FROM contacts" in compact_sql:
-                return FakeResult(self.contacts.get(params[0]))
-            if "FROM external_contact_bindings b JOIN people p" in compact_sql:
-                binding = self.bindings.get(params[0])
-                if not binding:
-                    return FakeResult(None)
-                person = next(item for item in self.people if item["id"] == binding["person_id"])
-                return FakeResult({**binding, "mobile": person["mobile"], "third_party_user_id": person["third_party_user_id"]})
-            if "FROM people WHERE mobile" in compact_sql:
-                return FakeResult(next((item for item in self.people if item["mobile"] == params[0]), None))
-            if compact_sql.startswith("INSERT INTO people"):
-                row = {"id": len(self.people) + 1, "mobile": params[0], "third_party_user_id": ""}
-                self.people.append(row)
-                return FakeResult({"id": row["id"], "third_party_user_id": row["third_party_user_id"]})
-            if compact_sql.startswith("UPDATE external_contact_bindings"):
-                binding = self.bindings[params[2]]
-                binding["person_id"] = params[0]
-                binding["last_owner_userid"] = params[1]
-                binding["updated_at"] = "2026-06-10T13:25:00Z"
-                return FakeResult(None)
-            if "FROM user_ops_lead_pool_current WHERE external_userid" in compact_sql:
-                return FakeResult(next((item for item in self.lead_pool if item.get("external_userid") == params[0]), None))
-            if "FROM user_ops_lead_pool_current WHERE mobile" in compact_sql:
-                return FakeResult(next((item for item in self.lead_pool if item.get("mobile") == params[0]), None))
-            if compact_sql.startswith("UPDATE user_ops_lead_pool_current"):
-                row = next(item for item in self.lead_pool if item["id"] == params[4])
+            if "FROM crm_user_identity" in compact_sql:
+                return FakeResult(self.identities.get(params[0]))
+            if compact_sql.startswith("UPDATE crm_user_identity"):
+                row = next(item for item in self.identities.values() if item["unionid"] == params[5])
                 row.update(
                     {
                         "mobile": params[0],
-                        "external_userid": params[1],
-                        "customer_name": params[2],
-                        "owner_userid": params[3],
-                        "is_wecom_added": True,
-                        "is_mobile_bound": True,
+                        "mobile_normalized": params[1],
+                        "mobile_source": "sidebar_bind",
+                        "primary_owner_userid": params[2] or row["primary_owner_userid"],
+                        "updated_at": "2026-06-10T13:25:00Z",
                     }
                 )
-                return FakeResult(None)
+                return FakeResult(row)
             raise AssertionError(f"unexpected SQL: {compact_sql}")
 
         def commit(self):
@@ -252,7 +247,7 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
             "external_userid": "wm_prod_sidebar_001",
             "owner_userid": "sales_09",
             "bind_by_userid": "sales_09",
-            "mobile": "13800138000",
+            "mobile": "17380533527",
             "force_rebind": True,
         },
     )
@@ -263,8 +258,9 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
     assert body["source_status"] == "next_command"
     assert body["fallback_used"] is False
     assert body["real_external_call_executed"] is False
-    assert body["binding"]["mobile"] == "13800138000"
+    assert body["binding"]["mobile"] == "17380533527"
+    assert body["binding"]["unionid"] == "union_prod_sidebar_001"
     assert body["binding"]["owner_userid"] == "sales_09"
-    assert body["lead_pool_merge"]["action_type"] == "lead_pool_update"
+    assert body["lead_pool_merge"]["action_type"] == "customer_mobile_bound_event"
     assert "production-ready for command execution" not in response.text
     assert connections[0].commits == 1

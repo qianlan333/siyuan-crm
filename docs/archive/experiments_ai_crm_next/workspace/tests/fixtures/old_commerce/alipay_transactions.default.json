@@ -1,0 +1,11 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "items": [],
+    "total": 0,
+    "limit": 50,
+    "offset": 0,
+    "filters": {}
+  }
+}

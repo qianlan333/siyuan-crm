@@ -99,8 +99,36 @@
     box-shadow: var(--shadow);
   }
 
+  .questionnaire-toast.is-busy {
+    padding-left: 44px;
+    border: 1px solid rgba(147, 197, 253, 0.88);
+    background: rgba(29, 78, 216, 0.96);
+    box-shadow: 0 18px 48px rgba(37, 99, 235, 0.28);
+    font-weight: 850;
+  }
+
+  .questionnaire-toast.is-busy::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 16px;
+    width: 14px;
+    height: 14px;
+    margin-top: -7px;
+    border: 2px solid rgba(255, 255, 255, 0.46);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: questionnaire-toast-spin 0.8s linear infinite;
+  }
+
   .questionnaire-toast.is-error {
     background: rgba(173, 80, 55, 0.96);
+  }
+
+  @keyframes questionnaire-toast-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .questionnaire-share-modal {
@@ -239,6 +267,7 @@
       <thead>
         <tr>
           <th>问卷名称</th>
+          <th>提交后动作</th>
           <th>创建时间</th>
           <th>提交数</th>
           <th>操作</th>
@@ -246,13 +275,13 @@
       </thead>
       <tbody id="questionnaire-table-body">
         <tr>
-          <td colspan="4">问卷列表加载中...</td>
+          <td colspan="5">问卷列表加载中...</td>
         </tr>
       </tbody>
     </table>
   </div>
 </section>
-<div id="questionnaire-toast" class="questionnaire-toast" hidden></div>
+<div id="questionnaire-toast" class="questionnaire-toast" role="status" aria-live="polite" hidden></div>
 <div id="questionnaire-share-modal" class="questionnaire-share-modal" aria-hidden="true" hidden>
   <div class="questionnaire-share-panel" role="dialog" aria-modal="true" aria-labelledby="questionnaire-share-title">
     <div class="questionnaire-share-head">
@@ -336,6 +365,14 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 
+  function completionTargetLabel(item) {
+    const target = item.completion_target || {};
+    if (!target.enabled) return '沿用原跳转';
+    if (target.target_type === 'mini_program') return '打开微信小程序';
+    if (target.target_type === 'url_link') return '打开小程序 URL Link';
+    return '跳转 H5 页面';
+  }
+
   function filteredQuestionnaires() {
     const keyword = state.query.trim().toLowerCase();
     return [...state.questionnaires]
@@ -377,16 +414,33 @@
     }
   }
 
-  function showToast(message, isError = false) {
+  function showToast(message, isError = false, options = {}) {
     if (!message) return;
+    const isBusy = Boolean(options.busy);
+    const isPersistent = Boolean(options.persistent);
     toastEl.textContent = message;
     toastEl.hidden = false;
-    toastEl.className = `questionnaire-toast${isError ? ' is-error' : ''}`;
+    toastEl.className = `questionnaire-toast${isError ? ' is-error' : ''}${isBusy ? ' is-busy' : ''}`;
     clearTimeout(toastTimer);
-    toastTimer = window.setTimeout(() => {
-      toastEl.hidden = true;
-      toastEl.className = 'questionnaire-toast';
-    }, isError ? 5600 : 3200);
+    if (!isPersistent) {
+      toastTimer = window.setTimeout(() => {
+        toastEl.hidden = true;
+        toastEl.className = 'questionnaire-toast';
+      }, isError ? 5600 : 3200);
+    }
+  }
+
+  function setExportButtonBusy(button, isBusy) {
+    if (!button) return;
+    if (isBusy) {
+      button.dataset.originalLabel = button.textContent;
+      button.disabled = true;
+      button.textContent = '导出中...';
+      return;
+    }
+    button.disabled = false;
+    button.textContent = button.dataset.originalLabel || '下载数据';
+    delete button.dataset.originalLabel;
   }
 
   function safeDownloadName(value) {
@@ -455,6 +509,7 @@
             </span>
           </div>
         </td>
+        <td><span class="questionnaire-row-muted">${escapeHtml(completionTargetLabel(item))}</span></td>
         <td><span class="questionnaire-row-muted">${escapeHtml(formatDateTime(item.created_at))}</span></td>
         <td>${escapeHtml(String(item.submission_count || 0))}</td>
         <td>
@@ -546,22 +601,28 @@
     return asciiMatch ? asciiMatch[1] : fallback;
   }
 
-  async function downloadQuestionnaireData(questionnaireId) {
-    const response = await fetch(`/api/admin/questionnaires/${questionnaireId}/export`);
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(String(data.error || data.message || '下载失败，请稍后重试'));
+  async function downloadQuestionnaireData(questionnaireId, button) {
+    setExportButtonBusy(button, true);
+    showToast('导出中，请稍候...', false, { persistent: true, busy: true });
+    try {
+      const response = await fetch(`/api/admin/questionnaires/${questionnaireId}/export`);
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(String(data.error || data.message || '下载失败，请稍后重试'));
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = downloadFilenameFromResponse(response, `questionnaire-${questionnaireId}-submissions.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      showToast('下载已开始');
+    } finally {
+      setExportButtonBusy(button, false);
     }
-    const blob = await response.blob();
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = downloadFilenameFromResponse(response, `questionnaire-${questionnaireId}-submissions.csv`);
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(url);
-    showToast('下载已开始');
   }
 
   searchEl.addEventListener('input', (event) => {
@@ -599,7 +660,7 @@
       return;
     }
     if (button.dataset.action === 'export') {
-      downloadQuestionnaireData(item.id).catch((error) => showToast(error.message || '下载失败，请稍后重试', true));
+      downloadQuestionnaireData(item.id, button).catch((error) => showToast(error.message || '下载失败，请稍后重试', true));
     }
   });
 

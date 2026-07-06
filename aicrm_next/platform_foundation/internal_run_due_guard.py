@@ -7,27 +7,18 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-AUTOMATION_JOBS_RUN_DUE_PATH = "/api/admin/automation-conversion/jobs/run-due"
-AUTOMATION_JOBS_RUN_DUE_PREVIEW_PATH = "/api/admin/automation-conversion/jobs/run-due/preview"
-REPLY_MONITOR_RUN_DUE_PATH = "/api/admin/automation-conversion/reply-monitor/run-due"
-REPLY_MONITOR_CAPTURE_PATH = "/api/admin/automation-conversion/reply-monitor/capture"
 CLOUD_CAMPAIGN_RUN_DUE_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due"
 CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due/preview"
 
 INTERNAL_TIMER_PATHS = frozenset(
     {
-        AUTOMATION_JOBS_RUN_DUE_PATH,
-        AUTOMATION_JOBS_RUN_DUE_PREVIEW_PATH,
-        REPLY_MONITOR_RUN_DUE_PATH,
-        REPLY_MONITOR_CAPTURE_PATH,
         CLOUD_CAMPAIGN_RUN_DUE_PATH,
         CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH,
     }
 )
-RUN_DUE_EXECUTION_PATHS = frozenset({AUTOMATION_JOBS_RUN_DUE_PATH, CLOUD_CAMPAIGN_RUN_DUE_PATH})
-PREVIEW_PATHS = frozenset({AUTOMATION_JOBS_RUN_DUE_PREVIEW_PATH, CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH})
+RUN_DUE_EXECUTION_PATHS = frozenset({CLOUD_CAMPAIGN_RUN_DUE_PATH})
+PREVIEW_PATHS = frozenset({CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH})
 
-AUTOMATION_ALLOWLIST_FIELDS = ("allow_task_ids", "allow_workflow_ids", "allow_node_ids")
 CAMPAIGN_ALLOWLIST_FIELDS = ("allow_campaign_ids",)
 
 _SAFE_LOCAL_DB_SENTINELS = ("127.0.0.1:1", "localhost:1")
@@ -227,7 +218,7 @@ def _is_dry_run_or_preview(request: Request, payload: dict[str, Any], path: str)
 def _allowlist_fields(path: str) -> tuple[str, ...]:
     if path == CLOUD_CAMPAIGN_RUN_DUE_PATH:
         return CAMPAIGN_ALLOWLIST_FIELDS
-    return AUTOMATION_ALLOWLIST_FIELDS
+    return ()
 
 
 def _has_nonempty_value(value: Any) -> bool:

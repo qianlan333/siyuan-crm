@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from fastapi import APIRouter
 from fastapi.routing import APIRoute
@@ -32,6 +32,8 @@ _GROUPS = [
     _GroupSpec("materials-send-content", "素材 / 发送内容", "图片、附件、小程序素材库，以及发送内容校验、预览和素材选择器。"),
     _GroupSpec("commerce", "交易 / 商品", "商品页、下单、订单查询、微信支付、支付宝与后台交易管理。"),
     _GroupSpec("ai-assist-compat", "AI 助手 / 兼容代理", "AI 助手契约、云编排、定时任务兼容代理与外部适配入口。"),
+    _GroupSpec("push-center", "推送中心", "统一推送任务查询与执行明细。"),
+    _GroupSpec("external-effects", "外部动作队列排障", "External Effect Queue 的排障查询、diagnostics、run-due 和测试 receiver API。"),
     _GroupSpec("other", "其他 API", "当前 FastAPI 注册表中尚未归入固定业务分组的公开 API。"),
 ]
 _GROUP_BY_ID = {group.id: group for group in _GROUPS}
@@ -64,7 +66,6 @@ _PATH_LABELS = {
     "automation-conversion": "自动化运营",
     "contract": "运行契约",
     "pools": "池",
-    "action-templates": "动作模板",
     "task-groups": "任务组",
     "workflows": "工作流",
     "workflow-nodes": "工作流节点",
@@ -103,8 +104,14 @@ _PATH_LABELS = {
     "notify": "支付通知",
     "ai-assist": "AI 助手",
     "cloud-orchestrator": "云编排",
-    "reply-monitor": "回复监听",
     "jobs": "后台任务",
+    "push-center": "推送中心",
+    "external-effects": "外部动作队列",
+    "troubleshooting": "排障",
+    "diagnostics": "诊断",
+    "test-receipts": "测试回执",
+    "test-receiver": "测试接收端",
+    "test-loopback": "Loopback 测试",
 }
 
 _AUTH_LABEL_MD = {
@@ -116,6 +123,8 @@ _AUTH_LABEL_MD = {
 
 
 def _router_sources(frontend_router: APIRouter | None = None) -> list[APIRouter]:
+    from aicrm_next.ai_audience_ops.admin_api import router as ai_audience_admin_router
+    from aicrm_next.ai_audience_ops.api import router as ai_audience_router
     from aicrm_next.ai_assist.api import router as ai_assist_router
     from aicrm_next.admin_shell.routes import router as admin_shell_router
     from aicrm_next.automation_engine.api import router as automation_router
@@ -130,6 +139,8 @@ def _router_sources(frontend_router: APIRouter | None = None) -> list[APIRouter]
     from aicrm_next.media_library.api import router as media_library_router
     from aicrm_next.ops_enrollment.api import router as user_ops_router
     from aicrm_next.platform_foundation.api import router as platform_router
+    from aicrm_next.platform_foundation.external_effects.api import router as external_effects_router
+    from aicrm_next.platform_foundation.push_center.api import router as push_center_router
     from aicrm_next.public_product.api import router as public_product_router
     from aicrm_next.questionnaire.api import router as questionnaire_router
     from aicrm_next.send_content.api import router as send_content_router
@@ -150,8 +161,12 @@ def _router_sources(frontend_router: APIRouter | None = None) -> list[APIRouter]
         public_product_router,
         commerce_router,
         media_library_router,
+        ai_audience_admin_router,
+        ai_audience_router,
         ai_assist_router,
         send_content_router,
+        push_center_router,
+        external_effects_router,
     ]
     if frontend_router is not None:
         routers.append(frontend_router)
@@ -162,8 +177,17 @@ def _normalize_path(path: str) -> str:
     return re.sub(r"\{([^}:]+):[^}]+\}", r"{\1}", path)
 
 
-def _path_for_route(route: APIRoute) -> str:
-    return _normalize_path(str(getattr(route, "path_format", None) or route.path))
+def _path_for_route(route: APIRoute, prefix: str = "") -> str:
+    path = _join_paths(prefix, str(getattr(route, "path_format", None) or route.path))
+    return _normalize_path(path)
+
+
+def _join_paths(prefix: str, path: str) -> str:
+    if not prefix:
+        return path
+    if not path:
+        return prefix
+    return f"{prefix.rstrip('/')}/{path.lstrip('/')}"
 
 
 def _should_document(path: str) -> bool:
@@ -246,11 +270,15 @@ def _group_id_for(path: str) -> str:
         return "commerce"
     if (
         path.startswith("/api/admin/ai-assist")
+        or path.startswith("/api/admin/ai-audience")
+        or path.startswith("/api/ai/audience")
         or path.startswith("/api/admin/cloud-orchestrator")
-        or path.startswith("/api/admin/automation-conversion/reply-monitor")
-        or path.startswith("/api/admin/automation-conversion/jobs")
     ):
         return "ai-assist-compat"
+    if path.startswith("/api/admin/push-center"):
+        return "push-center"
+    if path.startswith("/api/admin/external-effects") or path.startswith("/api/external-effects"):
+        return "external-effects"
     if path.startswith("/api/admin/automation-conversion"):
         return "automation"
     return "other"
@@ -481,14 +509,23 @@ def _endpoint_from_route(route: APIRoute, method: str, path: str) -> dict[str, A
     }
 
 
+def _iter_api_routes(routes: Iterable[Any], prefix: str = "") -> Iterable[tuple[APIRoute, str]]:
+    for route in routes:
+        context = getattr(route, "include_context", None)
+        included_router = getattr(route, "original_router", None) or getattr(context, "included_router", None)
+        if included_router is not None and hasattr(included_router, "routes"):
+            yield from _iter_api_routes(getattr(included_router, "routes", ()), _join_paths(prefix, getattr(context, "prefix", "")))
+            continue
+        if isinstance(route, APIRoute):
+            yield route, prefix
+
+
 def _iter_route_endpoints(frontend_router: APIRouter | None = None) -> list[dict[str, Any]]:
     endpoints: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
     for router in _router_sources(frontend_router):
-        for route in router.routes:
-            if not isinstance(route, APIRoute):
-                continue
-            path = _path_for_route(route)
+        for route, prefix in _iter_api_routes(router.routes):
+            path = _path_for_route(route, prefix)
             if not _should_document(path):
                 continue
             for method in sorted(route.methods or [], key=lambda item: _METHOD_ORDER.get(item, 99)):

@@ -12,7 +12,7 @@ from aicrm_next.shared.repository_provider import RepositoryProviderError, block
 from aicrm_next.shared.runtime import production_data_ready
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
-from .domain import admin_detail_projection, extract_submission_mobile, score_and_tags, summary_projection, validate_required_answers
+from .domain import admin_detail_projection, extract_submission_mobile, normalize_questionnaire, score_and_tags, summary_projection, validate_required_answers
 from .dto import OAuthCallbackRequest, OAuthStartRequest, QuestionnaireSubmitRequest, QuestionnaireUpsertRequest
 from .oauth import QuestionnaireOAuthAdapter, build_questionnaire_oauth_adapter
 from .public_access import (
@@ -161,6 +161,41 @@ class ListQuestionnaireSubmissionsQuery:
             raise NotFoundError("questionnaire not found")
         rows, total = result
         return {"ok": True, **_read_meta(repo), "questionnaire_id": int(questionnaire_id), "items": rows, "submissions": rows, "total": total, "limit": limit, "offset": offset}
+
+    __call__ = execute
+
+
+class ListExternalQuestionnaireSubmissionsQuery:
+    def __init__(self, repo: QuestionnaireRepository | None = None) -> None:
+        self._repo = repo
+
+    def execute(self, *, filters: dict[str, Any], limit: int = 100, offset: int = 0) -> dict[str, Any]:
+        repo, unavailable = _repo_or_payload(self._repo)
+        if unavailable:
+            return {**unavailable, "items": [], "total": 0, "limit": limit, "offset": offset, "filters": dict(filters or {})}
+        assert repo is not None
+        try:
+            rows, total = repo.list_external_submissions(filters=dict(filters or {}), limit=limit, offset=offset)
+        except Exception as exc:
+            if production_data_ready():
+                return {
+                    **_production_unavailable(exc),
+                    "items": [],
+                    "total": 0,
+                    "limit": limit,
+                    "offset": offset,
+                    "filters": dict(filters or {}),
+                }
+            raise
+        return {
+            "ok": True,
+            **_read_meta(repo),
+            "items": rows,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "filters": dict(filters or {}),
+        }
 
     __call__ = execute
 
@@ -374,8 +409,10 @@ class SubmitQuestionnaireCommand:
                 "respondent_identity": dict(payload.respondent_identity),
                 "person_id": identity.person_id if identity else None,
                 "external_userid": (identity.external_userid if identity else payload.respondent_identity.get("external_userid")) or "",
+                "unionid": (identity.unionid if identity else payload.respondent_identity.get("unionid")) or "",
                 "mobile": (identity.mobile if identity else resolved_mobile or payload.respondent_identity.get("mobile")) or "",
                 "binding_status": identity.binding_status if identity else "unresolved",
+                "follow_user_userid": (identity.follow_user_userid if identity else payload.respondent_identity.get("follow_user_userid")) or "",
                 "score": score,
                 "final_tags": final_tags,
             }
@@ -386,6 +423,8 @@ class SubmitQuestionnaireCommand:
             submission_id=submission["submission_id"],
             external_userid=submission.get("external_userid") or "",
             tag_ids=final_tags,
+            unionid=submission.get("unionid") or "",
+            follow_user_userid=submission.get("follow_user_userid") or "",
         )
         external_push_config = item.get("external_push_config") if isinstance(item.get("external_push_config"), dict) else {}
         webhook_url = str(external_push_config.get("webhook_url") or "") if external_push_config.get("enabled") else ""
@@ -406,6 +445,7 @@ class SubmitQuestionnaireCommand:
             final_tags=final_tags,
         )
         automation_event = self._automation_event_from_gateway(automation_gateway_result)
+        questionnaire_projection = normalize_questionnaire(item)
         return {
             "ok": True,
             "submission_id": submission["submission_id"],
@@ -418,6 +458,9 @@ class SubmitQuestionnaireCommand:
             "score": score,
             "final_tags": final_tags,
             "redirect_url": item.get("redirect_url") or f"/s/{item['slug']}/submitted",
+            "completion_target": questionnaire_projection["completion_target"],
+            "completion_target_enabled": questionnaire_projection["completion_target_enabled"],
+            "completion_target_type": questionnaire_projection["completion_target_type"],
             "result_message": "提交成功",
             "automation_event": automation_event,
             "side_effect_safety": self._side_effect_gateway.side_effect_safety(),

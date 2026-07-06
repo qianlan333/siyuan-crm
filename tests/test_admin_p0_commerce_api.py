@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from aicrm_next.admin_config.api_docs_view_model import build_api_docs_view_model
 from aicrm_next.commerce.admin_exports import reset_export_jobs_for_tests
+from aicrm_next.commerce.admin_unified_orders import list_orders
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
 from aicrm_next.customer_read_model import admin_business_profile, api as customer_api
 from aicrm_next.main import create_app
@@ -44,7 +45,7 @@ def test_admin_p0_routes_are_in_api_docs() -> None:
         ("POST", "/api/admin/refunds"): "交易 / 商品",
         ("GET", "/api/admin/customers/{external_userid}/orders"): "客户 / 身份 / 侧边栏",
         ("GET", "/api/admin/customers/{external_userid}/commerce-summary"): "客户 / 身份 / 侧边栏",
-        ("GET", "/api/admin/customers/{external_userid}/business-profile"): "客户 / 身份 / 侧边栏",
+        ("GET", "/api/admin/customers/{unionid}/business-profile"): "客户 / 身份 / 侧边栏",
         ("GET", "/api/admin/identity/resolve"): "客户 / 身份 / 侧边栏",
         ("GET", "/api/admin/identity/links/{identity_key}"): "客户 / 身份 / 侧边栏",
         ("GET", "/api/admin/webhooks/events"): "认证 / 回调",
@@ -77,6 +78,61 @@ def test_unified_orders_list_detail_and_items(monkeypatch) -> None:
     assert items["total"] == 1
     assert items["items"][0]["quantity"] == 1
     assert items["items"][0]["order_no"] == "order_masked_001"
+
+
+def test_unified_orders_paginate_by_created_at_not_paid_at(monkeypatch) -> None:
+    rows_by_provider = {
+        "wechat": [
+            {
+                "order_no": "wx-newer-001",
+                "provider": "wechat",
+                "created_at": "2026-06-26 21:41:21",
+                "paid_at": "2026-06-26 21:41:21",
+                "amount_total": 99900,
+                "status": "paid",
+            },
+            {
+                "order_no": "wx-newer-002",
+                "provider": "wechat",
+                "created_at": "2026-06-26 20:39:28",
+                "paid_at": "2026-06-26 20:39:28",
+                "amount_total": 99900,
+                "status": "paid",
+            },
+        ],
+        "alipay": [],
+        "wechat_shop": [
+            {
+                "order_no": "shop-old-created-late-paid",
+                "provider": "wechat_shop",
+                "created_at": "2026-06-18 23:07:46",
+                "paid_at": "2026-06-30 02:32:35",
+                "amount_total": 990,
+                "status": "paid",
+            }
+        ],
+    }
+
+    def fake_execute(self, filters, *, limit=50, offset=0):
+        rows = rows_by_provider[self.provider]
+        return {
+            "ok": True,
+            "items": rows[offset : offset + limit],
+            "total": len(rows),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    monkeypatch.setattr(
+        "aicrm_next.commerce.admin_unified_orders.CommerceAdminTransactionListReadModel.execute",
+        fake_execute,
+    )
+
+    first_page = list_orders(provider="all", limit=2, offset=0)
+    second_page = list_orders(provider="all", limit=2, offset=2)
+
+    assert [item["order_no"] for item in first_page["items"]] == ["wx-newer-001", "wx-newer-002"]
+    assert [item["order_no"] for item in second_page["items"]] == ["shop-old-created-late-paid"]
 
 
 def test_payments_and_refunds(monkeypatch) -> None:
@@ -121,7 +177,7 @@ def test_product_share_uses_real_qr_svg(monkeypatch) -> None:
     payload = client.get(f"/api/admin/wechat-pay/products/{product['id']}/share").json()
 
     share = payload["share"]
-    assert share["url"].endswith(f"/p/{product['product_code']}")
+    assert share["url"].endswith(f"/pay/{product['product_code']}")
     assert share["qr_data_url"].startswith("data:image/svg+xml;base64,")
     svg = base64.b64decode(share["qr_data_url"].split(",", 1)[1]).decode("utf-8")
     assert 'xmlns="http://www.w3.org/2000/svg"' in svg
@@ -129,11 +185,27 @@ def test_product_share_uses_real_qr_svg(monkeypatch) -> None:
     assert "PRODUCT" not in svg
     assert product["product_code"] not in svg
 
+    material = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "share_material_product",
+            "title": "带素材商品",
+            "price_cents": 100,
+            "enabled": True,
+            "status": "active",
+            "buy_button_text": "立即购买",
+            "slices": [{"image_library_id": 1, "image_url": "data:image/png;base64,YQ==", "sort_order": 1}],
+        },
+    ).json()["product"]
+    material_share = client.get(f"/api/admin/wechat-pay/products/{material['id']}/share").json()["share"]
+    assert material_share["url"].endswith("/p/share_material_product")
+
 
 def test_customer_business_profile_orders_and_summary(monkeypatch) -> None:
     client = _client(monkeypatch)
-    profile = client.get("/api/admin/customers/wx_ext_001/business-profile").json()
+    profile = client.get("/api/admin/customers/union_customer_001/business-profile").json()
     assert profile["ok"] is True
+    assert profile["unionid"] == "union_customer_001"
     assert set(profile["business_profile"]) == {"tags", "recent_messages", "questionnaire_answers"}
     assert profile["counts"]["recent_messages"] <= 20
     assert isinstance(profile["business_profile"]["tags"], list)

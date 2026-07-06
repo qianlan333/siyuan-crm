@@ -49,6 +49,9 @@ def test_customer_acquisition_links_create_final_url_without_real_wecom_call(mon
     assert parsed.fragment == "frag"
     assert parse_qs(parsed.query)["customer_channel"] == [link["customer_channel"]]
     assert parse_qs(parsed.query)["foo"] == ["1"]
+    assert "program_id" not in link
+    assert "workflow_id" not in link
+    assert "initial_audience_code" not in link
 
 
 def test_customer_acquisition_links_list_update_delete_and_actions_are_safe_mode(monkeypatch) -> None:
@@ -65,6 +68,9 @@ def test_customer_acquisition_links_list_update_delete_and_actions_are_safe_mode
         f"/api/admin/wecom-customer-acquisition-links/{created['id']}",
         json={"description": "updated", "initial_audience_code": "operating"},
     ).json()
+    assert "initial_audience_code" not in patched["link"]
+    assert "program_id" not in patched["link"]
+    assert "workflow_id" not in patched["link"]
     deleted = client.delete(f"/api/admin/wecom-customer-acquisition-links/{created['id']}").json()
     enabled = client.post(f"/api/admin/wecom-customer-acquisition-links/{created['id']}/enable").json()
     synced = client.post(f"/api/admin/wecom-customer-acquisition-links/{created['id']}/sync").json()

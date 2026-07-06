@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 
-INVENTORY = Path("docs/architecture/sidebar_write_route_inventory.md")
+INVENTORY = Path("docs/archive/route_inventory/sidebar_write_route_inventory.md")
 
 WRITE_ROUTES = {
     "/api/sidebar/bind-mobile": "BindMobileCommand",

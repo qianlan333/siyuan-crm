@@ -1,0 +1,43 @@
+{
+  "status_code": 200,
+  "payload": {
+    "ok": true,
+    "customers": [
+      {
+        "external_userid": "external_user_masked_001",
+        "customer_name": "customer_masked_001",
+        "owner_userid": "owner_masked_001",
+        "owner_display_name": "owner_display_masked_001",
+        "mobile": "mobile_masked_001",
+        "is_bound": true,
+        "binding_status": "bound",
+        "tags": ["tag_masked_001"],
+        "class_user_status": {"current_status": "lead_trial", "activation_bucket": "activated"},
+        "last_message_at": "2026-05-18T10:15:00+08:00",
+        "last_touch_at": "2026-05-18T10:20:00+08:00",
+        "updated_at": "2026-05-18T10:20:00+08:00"
+      }
+    ],
+    "items": [
+      {
+        "external_userid": "external_user_masked_001",
+        "customer_name": "customer_masked_001",
+        "owner_userid": "owner_masked_001",
+        "owner_display_name": "owner_display_masked_001",
+        "mobile": "mobile_masked_001",
+        "is_bound": true,
+        "binding_status": "bound",
+        "tags": ["tag_masked_001"],
+        "class_user_status": {"current_status": "lead_trial", "activation_bucket": "activated"},
+        "last_message_at": "2026-05-18T10:15:00+08:00",
+        "last_touch_at": "2026-05-18T10:20:00+08:00",
+        "updated_at": "2026-05-18T10:20:00+08:00"
+      }
+    ],
+    "count": 1,
+    "total": 1,
+    "limit": 50,
+    "offset": 0,
+    "filters": {}
+  }
+}

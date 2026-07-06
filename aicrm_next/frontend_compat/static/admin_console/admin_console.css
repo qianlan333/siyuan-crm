@@ -2128,6 +2128,7 @@ body.admin-shell {
 
 .admin-button--primary {
   background: var(--brand);
+  color: #fff;
   box-shadow: 0 8px 20px rgba(51, 112, 255, 0.22);
 }
 

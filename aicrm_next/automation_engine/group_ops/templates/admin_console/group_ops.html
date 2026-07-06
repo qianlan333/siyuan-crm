@@ -13,6 +13,12 @@
   data-page-mode="{{ group_ops_page_mode }}"
   data-plan-id="{{ group_ops_plan_id }}"
 ></div>
+{% if group_ops_page_mode == "list" %}
+<div id="groupOpsP1StatusApp" hidden></div>
+{% endif %}
+{% if group_ops_page_mode == "detail" %}
+<template id="groupOpsDetailPanelLabels">基础配置 绑定群 Webhook 标准编排</template>
+{% endif %}
 {% endblock %}
 
 {% block scripts_extra %}

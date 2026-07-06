@@ -12,7 +12,6 @@ from aicrm_next.admin_read_model.application import (
     GetAdminProductsPageQuery,
     GetAdminTransactionsPageQuery,
     GetAdminWeComTagsPageQuery,
-    page_row_count,
 )
 
 

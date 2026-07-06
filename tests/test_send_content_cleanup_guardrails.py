@@ -25,16 +25,8 @@ def _read(path: Path) -> str:
 
 
 def test_next_automation_operation_panel_has_no_private_asset_binding() -> None:
-    source = _read(OPERATION_PANEL) + _read(OPERATION_JS)
-
-    for forbidden in [
-        "请输入图片" + "素材编号",
-        "请输入小程序" + "素材编号",
-        "请输入附件" + "素材编号",
-        "data-bind" + "-asset",
-    ]:
-        assert forbidden not in source
-    assert "AICRMSendContentComposer.open" in source
+    assert not OPERATION_PANEL.exists()
+    assert not OPERATION_JS.exists()
 
 
 def test_next_hxc_migrated_template_has_no_private_material_grid() -> None:
@@ -75,7 +67,6 @@ def test_standard_send_content_components_still_exist() -> None:
 
 def test_migrated_business_pages_do_not_direct_fetch_material_libraries() -> None:
     migrated_pages = [
-        (OPERATION_PANEL, _read(OPERATION_JS)),
         (HXC_TEMPLATE, ""),
         (CAMPAIGN_TEMPLATE, ""),
         (GROUP_OPS_TEMPLATE, _read(GROUP_OPS_STATIC / "group_ops.js")),

@@ -20,20 +20,5 @@ class WeComGroupAssetAdapterContract(Protocol):
     def get_group_chat(self, *, chat_id: str, need_name: int = 1, owner_userid: str = "") -> Json: ...
 
 
-class GroupOpsQueueGatewayContract(Protocol):
-    def enqueue_group_message(
-        self,
-        *,
-        plan_id: int,
-        source_id: str,
-        scheduled_at: str | None,
-        owner_userid: str,
-        chat_ids: list[str],
-        content_payload: dict[str, Any],
-        content_summary: str,
-        created_by: str = "group_ops_webhook",
-    ) -> int: ...
-
-
 class GroupOpsQueueStatsGatewayContract(Protocol):
     def count_group_ops_queue(self) -> int: ...

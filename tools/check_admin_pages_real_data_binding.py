@@ -132,13 +132,13 @@ def _has_real_data(route: str, html: str) -> tuple[bool, int]:
 def _api_contracts(client: TestClient) -> list[str]:
     blockers: list[str] = []
     production_probe = bool(os.getenv("DATABASE_URL")) or str(os.getenv("AICRM_NEXT_ENV", "")).lower() in {"prod", "production"}
-    overview = client.get("/api/admin/automation-conversion/overview")
-    if overview.status_code == 200:
-        payload = overview.json()
-        if production_probe and str(payload.get("generated_at") or "").lower() == "fixture":
-            blockers.append("automation_overview_generated_at_fixture")
-        if production_probe and str(payload.get("status") or "").lower() == "partial":
-            blockers.append("automation_overview_status_partial")
+    ai_audience = client.get("/api/admin/ai-audience/packages")
+    if ai_audience.status_code == 200:
+        payload = ai_audience.json()
+        if not bool(payload.get("ok")):
+            blockers.append("ai_audience_packages_not_ok")
+        if not isinstance(payload.get("items"), list):
+            blockers.append("ai_audience_packages_items_missing")
     questionnaires = client.get("/api/admin/questionnaires")
     if questionnaires.status_code == 200:
         payload = questionnaires.json()

@@ -3,13 +3,20 @@ from __future__ import annotations
 from html import escape
 import json
 from typing import Any
+from urllib.parse import quote
 
 from aicrm_next.commerce.domain import preview_product
 from aicrm_next.commerce.repo import build_commerce_repository
-from aicrm_next.shared.errors import NotFoundError
+from aicrm_next.media_library.application import GetImageVariantQuery
+from aicrm_next.shared.errors import ContractError, NotFoundError
 
 
-PUBLIC_PRODUCT_ROUTES = ("/p/{path:path}", "/pay/{path:path}", "/api/products/{path:path}")
+PUBLIC_PRODUCT_ROUTES = (
+    "/p/{path:path}",
+    "/pay/{path:path}",
+    "/api/products/{path:path}",
+    "/api/h5/product-images/{path:path}",
+)
 PAYMENT_ACTION_SEGMENTS = {"checkout", "payment", "pay", "order", "orders", "jsapi", "notify", "return"}
 
 
@@ -129,11 +136,43 @@ def product_not_found_payload(path: Any) -> dict[str, Any]:
     }
 
 
+def _positive_int_text(value: Any) -> str:
+    try:
+        normalized = int(value or 0)
+    except (TypeError, ValueError):
+        return ""
+    return str(normalized) if normalized > 0 else ""
+
+
+def _product_slice_image_ids(product: dict[str, Any]) -> set[str]:
+    image_ids: set[str] = set()
+    for item in list(product.get("slices") or []):
+        if not isinstance(item, dict) or item.get("enabled") is False:
+            continue
+        image_id = _positive_int_text(item.get("image_library_id") or item.get("library_image_id") or item.get("asset_id"))
+        if image_id:
+            image_ids.add(image_id)
+    return image_ids
+
+
+def public_product_image_variant(product_code: Any, image_id: Any, variant_key: Any) -> dict[str, Any]:
+    product = get_public_product(product_code)
+    normalized_image_id = _positive_int_text(image_id)
+    if not normalized_image_id or normalized_image_id not in _product_slice_image_ids(product):
+        raise NotFoundError("public product image not found")
+    try:
+        payload = GetImageVariantQuery()(normalized_image_id, str(variant_key or "").strip())
+    except (ContractError, NotFoundError, TypeError, ValueError) as exc:
+        raise NotFoundError("public product image not found") from exc
+    variant = payload.get("variant") if isinstance(payload, dict) else None
+    if not isinstance(variant, dict):
+        raise NotFoundError("public product image not found")
+    return variant
+
+
 def render_product_page(product: dict[str, Any], *, context_token: str = "", context_status: str = "") -> str:
     title = escape(str(product.get("title") or "商品详情"))
-    description = escape(str(product.get("description") or ""))
     cta = escape(str(product.get("buy_button_text") or product.get("cta_text") or "立即报名"))
-    product_code = escape(str(product.get("product_code") or ""))
     checkout_url = escape(_append_query(f"/pay/{product.get('product_code') or ''}", "ctx", context_token) if context_token else f"/pay/{product.get('product_code') or ''}", quote=True)
     media = _render_detail_media(product)
     return f"""<!doctype html>
@@ -145,9 +184,6 @@ def render_product_page(product: dict[str, Any], *, context_token: str = "", con
   {_product_page_styles()}
 </head>
 <body class="product-body">
-  <main class="product-page" data-route-owner="ai_crm_next" data-fallback-used="false">
-    {media}
-  </main>
   <nav class="sticky-buy" aria-label="商品操作">
     <div>
       <div class="sticky-title">{title}</div>
@@ -155,6 +191,9 @@ def render_product_page(product: dict[str, Any], *, context_token: str = "", con
     </div>
     <a class="cta" href="{checkout_url}" data-context-status="{escape(str(context_status or ('valid' if context_token else 'missing')), quote=True)}">{cta}</a>
   </nav>
+  <main class="product-page" data-route-owner="ai_crm_next" data-fallback-used="false">
+    {media}
+  </main>
 </body>
 </html>"""
 
@@ -225,6 +264,12 @@ def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> s
       <div class="success-tick">✓</div>
       <div class="success-title">支付成功</div>
       <div class="success-desc" id="successDesc">报名成功</div>
+      <div id="weappLaunchPanel" class="weapp-launch-panel" hidden>
+        <div class="weapp-launch-title">正在打开小程序</div>
+        <div class="weapp-launch-desc" id="weappLaunchDesc">请点击下方按钮继续。</div>
+        <div id="weappLaunchHost"></div>
+        <a id="weappFallbackLink" class="fallback-link" href="#">无法打开？点击备用链接</a>
+      </div>
       {qr_button_html}
     </section>
   </main>
@@ -260,35 +305,51 @@ def render_not_found_page(path: Any) -> str:
 </html>"""
 
 
-def _detail_image_source(item: Any) -> str:
+def _detail_image_source(item: Any, product_code: str = "") -> str:
     if isinstance(item, str):
-        return item.strip()
+        source = item.strip()
+        return "" if source.lower().startswith("data:image/") else source
     if isinstance(item, dict):
+        image_id = _positive_int_text(item.get("image_library_id") or item.get("library_image_id") or item.get("asset_id"))
+        if image_id and product_code:
+            return f"/api/h5/product-images/{quote(product_code, safe='')}/{quote(image_id, safe='')}/variants/original"
         for key in ("image_url", "data_url", "url", "src"):
             value = str(item.get(key) or "").strip()
             if value:
+                if value.lower().startswith("data:image/"):
+                    return ""
                 return value
     return ""
 
 
-def _detail_image_sources(product: dict[str, Any]) -> list[str]:
-    sources: list[str] = []
+def _detail_image_items(product: dict[str, Any]) -> list[dict[str, Any]]:
+    product_code = str(product.get("product_code") or "").strip()
+    items: list[dict[str, Any]] = []
     for group_key in ("slices", "detail_images"):
         for item in list(product.get(group_key) or []):
-            source = _detail_image_source(item)
+            source = _detail_image_source(item, product_code)
             if source:
-                sources.append(source)
-    return sources
+                width = _positive_int_text(item.get("width") if isinstance(item, dict) else None)
+                height = _positive_int_text(item.get("height") if isinstance(item, dict) else None)
+                items.append({"source": source, "width": width, "height": height})
+    return items
 
 
 def _render_detail_media(product: dict[str, Any]) -> str:
-    sources = _detail_image_sources(product)
-    if not sources:
+    items = _detail_image_items(product)
+    if not items:
         return ""
-    images = "\n".join(
-        f'      <img class="slice-img" src="{escape(source, quote=True)}" loading="lazy" alt="">'
-        for source in sources
-    )
+    image_tags: list[str] = []
+    for index, item in enumerate(items):
+        loading = "eager" if index == 0 else "lazy"
+        fetchpriority = "high" if index == 0 else "low"
+        size_attrs = ""
+        if item.get("width") and item.get("height"):
+            size_attrs = f' width="{escape(item["width"], quote=True)}" height="{escape(item["height"], quote=True)}"'
+        image_tags.append(
+            f'      <img class="slice-img" src="{escape(item["source"], quote=True)}" loading="{loading}" decoding="async" fetchpriority="{fetchpriority}"{size_attrs} alt="">'
+        )
+    images = "\n".join(image_tags)
     return f"""
     <section class="detail-media" aria-label="商品详情图">
 {images}
@@ -340,7 +401,7 @@ def _product_page_styles() -> str:
     html, body { margin: 0; min-height: 100%; background: #fff; color: var(--text); font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif; letter-spacing: 0; }
     .product-page { width: min(100%, 750px); min-height: 100vh; margin: 0 auto; background: #fff; padding-bottom: 88px; }
     .detail-media { background: #fff; }
-    .slice-img { width: 100%; display: block; background: #fff; }
+    .slice-img { width: 100%; display: block; background: #fff; min-height: 80px; object-fit: cover; }
     .sticky-buy {
       position: fixed; left: 50%; bottom: 0; transform: translateX(-50%); z-index: 20;
       width: min(100%, 750px); padding: 10px 14px 12px; background: rgba(255, 253, 248, .96);
@@ -410,6 +471,15 @@ def _pay_page_styles() -> str:
     .success-tick { width: 66px; height: 66px; border-radius: 50%; background: var(--green-bg); color: var(--green); display: flex; align-items: center; justify-content: center; font-size: 34px; font-weight: 900; margin: 18px auto; }
     .success-title { font-size: 22px; font-weight: 950; }
     .success-desc { color: var(--muted); margin: 8px 0 0; }
+    .weapp-launch-panel[hidden] { display: none; }
+    .weapp-launch-panel {
+      display: grid; gap: 10px; margin-top: 16px; padding: 14px;
+      border: 1px solid var(--line); border-radius: 8px; background: #fff;
+      text-align: left;
+    }
+    .weapp-launch-title { color: var(--text); font-size: 15px; font-weight: 900; }
+    .weapp-launch-desc { color: var(--muted); font-size: 13px; line-height: 1.6; }
+    .fallback-link { display: inline-flex; color: #3370ff; font-size: 14px; font-weight: 800; text-decoration: none; }
     .qr-modal {
       position: fixed; inset: 0; background: rgba(16, 32, 58, .48); backdrop-filter: blur(4px);
       z-index: 40; display: none; align-items: center; justify-content: center; padding: 22px;
@@ -447,6 +517,10 @@ def _pay_page_script(state_json: str) -> str:
       const leadQrImage = document.getElementById("leadQrImage");
       const showLeadQrButton = document.getElementById("showLeadQrButton");
       const closeQrButton = document.getElementById("closeQrButton");
+      const weappLaunchPanel = document.getElementById("weappLaunchPanel");
+      const weappLaunchHost = document.getElementById("weappLaunchHost");
+      const weappLaunchDesc = document.getElementById("weappLaunchDesc");
+      const weappFallbackLink = document.getElementById("weappFallbackLink");
       let activeOrderNo = "";
       let paidOrder = state.paid_order || null;
 
@@ -548,8 +622,66 @@ def _pay_page_script(state_json: str) -> str:
         return /^https:\\/\\//.test(url) || /^\\/(?!\\/)[^\\s\\\\]*$/.test(url);
       }}
 
+      function escapeAttr(value) {{
+        return String(value || "")
+          .replace(/&/g, "&amp;")
+          .replace(/"/g, "&quot;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+      }}
+
+      function fallbackUrlFromTarget(target) {{
+        if (!target || !target.enabled) return "";
+        const link = target.url_link || {{}};
+        return String(target.fallback_url || target.h5_url || link.url || "");
+      }}
+
+      function dynamicUrlLinkResolverUrl(target, fallbackUrl) {{
+        const link = target && target.url_link ? target.url_link : {{}};
+        const sourceUrl = String(link.source_url || "").trim();
+        if (!/^https:\\/\\/[^\\s\\\\]+$/i.test(sourceUrl)) return "";
+        const params = new URLSearchParams();
+        params.set("source_url", sourceUrl);
+        params.set("response_url_key", String(link.response_url_key || "url_link"));
+        const candidateFallback = String(fallbackUrl || fallbackUrlFromTarget(target) || "").trim();
+        if (candidateFallback && isSafeRedirectUrl(candidateFallback)) params.set("fallback_url", candidateFallback);
+        return "/api/h5/navigation-target/url-link/resolve?" + params.toString();
+      }}
+
+      function miniProgramActionFromTarget(target, order) {{
+        if (!target || !target.enabled || target.target_type !== "mini_program") return null;
+        const mini = target.mini_program || {{}};
+        const fallbackUrl = fallbackUrlFromTarget(target) || String((order && order.success_url) || "");
+        if (!mini.path || (!mini.username && !mini.appid)) {{
+          return fallbackUrl && isSafeRedirectUrl(fallbackUrl) ? {{ type: "redirect", redirect_url: fallbackUrl }} : null;
+        }}
+        return {{ type: "mini_program", navigation_target: target, fallback_url: fallbackUrl }};
+      }}
+
+      function urlLinkActionFromTarget(target, order) {{
+        if (!target || !target.enabled || target.target_type !== "url_link") return null;
+        const link = target.url_link || {{}};
+        const fallbackUrl = fallbackUrlFromTarget(target) || String((order && order.success_url) || "");
+        if (link.source_url) return {{ type: "url_link", navigation_target: target, fallback_url: fallbackUrl }};
+        if (link.url && isSafeRedirectUrl(link.url)) return {{ type: "redirect", redirect_url: link.url }};
+        return fallbackUrl && isSafeRedirectUrl(fallbackUrl) ? {{ type: "redirect", redirect_url: fallbackUrl }} : null;
+      }}
+
       function completionActionFromOrder(order) {{
         const action = order && order.completion_action ? order.completion_action : {{}};
+        if (action && action.type === "mini_program" && action.navigation_target) {{
+          const miniAction = miniProgramActionFromTarget(action.navigation_target, order);
+          if (miniAction) return miniAction;
+        }}
+        if (action && action.type === "url_link" && action.navigation_target) {{
+          const linkAction = urlLinkActionFromTarget(action.navigation_target, order);
+          if (linkAction) return linkAction;
+        }}
+        const target = order && order.completion_target ? order.completion_target : {{}};
+        const linkAction = urlLinkActionFromTarget(target, order);
+        if (linkAction) return linkAction;
+        const miniAction = miniProgramActionFromTarget(target, order);
+        if (miniAction) return miniAction;
         const actionUrl = String((action && action.redirect_url) || "");
         if (action && action.type === "redirect" && actionUrl && isSafeRedirectUrl(actionUrl)) {{
           return {{ type: "redirect", redirect_url: actionUrl }};
@@ -561,6 +693,53 @@ def _pay_page_script(state_json: str) -> str:
           return {{ type: "redirect", redirect_url: fallbackUrl }};
         }}
         return {{ type: "default", redirect_url: "" }};
+      }}
+
+      function openMiniProgram(action) {{
+        const target = (action && action.navigation_target) || {{}};
+        const mini = target.mini_program || {{}};
+        const fallbackUrl = String(action.fallback_url || fallbackUrlFromTarget(target) || "");
+        const safeFallback = fallbackUrl && isSafeRedirectUrl(fallbackUrl) ? fallbackUrl : "#";
+        if (weappLaunchPanel) weappLaunchPanel.hidden = false;
+        if (weappLaunchHost) weappLaunchHost.innerHTML = "";
+        if (weappFallbackLink) weappFallbackLink.href = safeFallback;
+        if (weappLaunchDesc) weappLaunchDesc.textContent = "请点击下方按钮继续。";
+        if (!/MicroMessenger/i.test(navigator.userAgent || "") || typeof customElements === "undefined" || !customElements.get("wx-open-launch-weapp") || !mini.username || !mini.path) {{
+          if (weappLaunchDesc) weappLaunchDesc.textContent = "无法直接打开，点击备用链接。";
+          return;
+        }}
+        const path = String(mini.path || "/") + (mini.query ? "?" + mini.query : "");
+        if (weappLaunchHost) {{
+          weappLaunchHost.innerHTML = `
+            <wx-open-launch-weapp
+              id="launch-weapp"
+              username="${{escapeAttr(mini.username)}}"
+              path="${{escapeAttr(path)}}">
+              <template>
+                <style>
+                  .weapp-launch-button {{
+                    width: 100%;
+                    height: 48px;
+                    border: 0;
+                    border-radius: 8px;
+                    background: #3370ff;
+                    color: #fff;
+                    font-size: 16px;
+                    font-weight: 800;
+                  }}
+                </style>
+                <button class="weapp-launch-button">打开小程序</button>
+              </template>
+            </wx-open-launch-weapp>
+          `;
+          const launcher = weappLaunchHost.querySelector("#launch-weapp");
+          if (launcher) {{
+            launcher.addEventListener("error", function() {{
+              if (weappLaunchDesc) weappLaunchDesc.textContent = "无法直接打开，点击备用链接。";
+            }});
+            launcher.addEventListener("launch", function() {{ setState("正在打开小程序...", "success"); }});
+          }}
+        }}
       }}
 
       function leadQrFromOrder(order) {{
@@ -586,6 +765,24 @@ def _pay_page_script(state_json: str) -> str:
         const autoShowQr = !options || options.autoShowQr !== false;
         paidOrder = order || paidOrder || {{}};
         const completionAction = completionActionFromOrder(paidOrder);
+        if (completionAction.type === "url_link") {{
+          const resolverUrl = dynamicUrlLinkResolverUrl(completionAction.navigation_target, completionAction.fallback_url);
+          if (resolverUrl) {{
+            setState("报名成功，正在打开小程序...", "success");
+            window.location.href = resolverUrl;
+            return;
+          }}
+        }}
+        if (completionAction.type === "mini_program") {{
+          setState("报名成功，正在打开小程序...", "success");
+          if (checkoutCard) checkoutCard.style.display = "none";
+          if (successBox) successBox.classList.add("show");
+          if (successDesc) {{
+            successDesc.textContent = "已购买 " + state.product.name + "，支付金额 ¥" + (Number(state.product.amount_total || 0) / 100).toFixed(2) + "。";
+          }}
+          openMiniProgram(completionAction);
+          return;
+        }}
         if (completionAction.type === "redirect" && completionAction.redirect_url) {{
           setState("报名成功，正在跳转...", "success");
           window.location.href = completionAction.redirect_url;

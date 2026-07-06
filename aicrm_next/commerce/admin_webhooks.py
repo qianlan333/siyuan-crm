@@ -4,9 +4,10 @@ import json
 from datetime import datetime
 from typing import Any
 
-from aicrm_next.shared.runtime import database_mode, raw_database_url
+from aicrm_next.shared.runtime import database_mode
 
 from .admin_unified_orders import ROUTE_OWNER, normalize_limit, normalize_offset
+from .repo import connect_commerce_db
 
 
 def _text(value: Any) -> str:
@@ -30,10 +31,7 @@ def _payload_preview(value: Any) -> str:
 
 
 def _connect():
-    import psycopg
-    from psycopg.rows import dict_row
-
-    return psycopg.connect(raw_database_url(), row_factory=dict_row)
+    return connect_commerce_db()
 
 
 def _source_tables(source: str) -> list[tuple[str, str]]:

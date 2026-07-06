@@ -30,6 +30,13 @@ def test_get_login_renders_next_page_with_wecom_links_and_form_target(monkeypatc
     assert "本地应急入口状态" in response.text
 
 
+def test_get_login_renders_wecom_auth_error(monkeypatch) -> None:
+    response = _client(monkeypatch).get("/login?auth_error=wecom_admin_auth_not_enabled")
+
+    assert response.status_code == 200
+    assert "企业微信扫码登录还未启用真实授权" in response.text
+
+
 def test_login_uses_safe_next_and_redirects_when_session_cookie_is_valid(monkeypatch) -> None:
     client = _client(monkeypatch)
     client.cookies.set(SESSION_COOKIE, sign_session({"username": "bg-admin", "login_type": "break_glass", "iat": 4_102_444_800}))

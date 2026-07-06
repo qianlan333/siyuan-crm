@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from html import unescape
 from pathlib import Path
+from time import time
 
 from fastapi.testclient import TestClient
 
+from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.main import create_app
 from tools import check_admin_pages_real_data_binding as checker
 
@@ -17,6 +18,21 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
     return TestClient(create_app())
+
+
+def _admin_cookies() -> dict[str, str]:
+    return {
+        SESSION_COOKIE: sign_session(
+            {
+                "auth_source": "break_glass",
+                "login_type": "break_glass",
+                "username": "admin",
+                "display_name": "admin",
+                "roles": ["super_admin"],
+                "iat": int(time()),
+            }
+        )
+    }
 
 
 def test_admin_pages_do_not_render_forbidden_state_markers(monkeypatch):
@@ -241,432 +257,73 @@ def test_questionnaire_new_page_renders_editor_shell(monkeypatch):
     assert "Not Found" not in response.text
 
 
-def test_automation_conversion_page_uses_next_program_repository_without_fixture_repo(monkeypatch):
-    import aicrm_next.automation_engine.admin_pages as admin_pages
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
+def test_automation_conversion_page_is_ai_audience_native_page(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-    monkeypatch.delenv("AICRM_NEXT_ALLOW_FIXTURE_REPO_IN_PROD", raising=False)
-    monkeypatch.setattr(
-        admin_pages,
-        "list_automation_programs_payload",
-        lambda: {
-            "ok": True,
-            "items": [
-                {
-                    "program": {
-                        "id": 7,
-                        "program_name": "真实自动化运营方案",
-                        "program_code": "real_program_v1",
-                        "status": "active",
-                        "updated_at": "2026-05-22T00:00:00Z",
-                    },
-                    "summary": {
-                        "channel_count": 3,
-                        "workflow_count": 9,
-                        "latest_execution_at": "2026-05-22T01:00:00Z",
-                    },
-                }
-            ],
-            "default_program": {"id": 7, "program_name": "真实自动化运营方案"},
-            "total": 1,
-            "source_status": "next_postgres",
-        },
-    )
 
-    response = TestClient(create_app(), raise_server_exceptions=False).get("/admin/automation-conversion")
+    response = TestClient(create_app(), raise_server_exceptions=False).get("/admin/automation-conversion", cookies=_admin_cookies())
 
     assert response.status_code == 200
-    assert "真实自动化运营方案" in response.text
-    assert "fixture_repository_blocked_in_production" not in response.text
-    assert "next_local_preview" not in response.text
-    assert 'href="/admin/automation-conversion/programs/7/setup?step=basic">编辑</a>' in response.text
-    assert 'href="/admin/automation-conversion/programs/7/overview">数据概览</a>' in response.text
-    assert 'action="/admin/automation-conversion/programs/7/copy"' in response.text
-    assert 'action="/admin/automation-conversion/programs/7/pause"' in response.text
+    assert "AI 自动化运营" in response.text
+    assert "人群包列表" in response.text
+    assert "/api/admin/ai-audience/packages" in response.text
+    assert "方案列表" not in response.text
+    assert "automation_program_member" not in response.text
+    assert "复制自动化运营方案" not in response.text
 
 
-def test_automation_program_setup_overview_and_copy_render_next_pages(monkeypatch):
-    import aicrm_next.automation_engine.admin_pages as admin_pages
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
+def test_automation_conversion_legacy_page_is_retired(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-    program_data = {
-        "program": {
-            "id": 7,
-            "program_name": "真实自动化运营方案",
-            "program_code": "real_program_v1",
-            "status": "active",
-            "description": "生产方案",
-            "updated_at": "2026-05-22T00:00:00Z",
-            "config_json": {},
-        },
-        "summary": {
-            "channel_count": 3,
-            "workflow_count": 9,
-            "latest_execution_at": "2026-05-22T01:00:00Z",
-            "publish_status_label": "入口已发布",
-        },
-    }
-    monkeypatch.setattr(admin_pages, "get_automation_program_with_summary", lambda program_id: program_data)
-    monkeypatch.setattr(
-        admin_pages,
-        "get_automation_program_overview_payload",
-        lambda program_id: {
-            **program_data,
-            "audience_segments": [{"key": "operating", "label": "运营中", "count": 8}],
-            "stage_segments": [{"key": "questionnaire_review", "label": "问卷审核", "count": 3}],
-            "profile_segments": [{"key": "high", "label": "高意向", "count": 5}],
-            "behavior_segments": [{"key": "gte_10", "label": "10 次及以上互动", "count": 2}],
-        },
-    )
 
-    client = TestClient(create_app(), raise_server_exceptions=False)
-    setup_response = client.get("/admin/automation-conversion/programs/7/setup?step=basic")
-    overview_response = client.get("/admin/automation-conversion/programs/7/overview")
-    copy_response = client.get("/admin/automation-conversion/programs/7/copy")
+    response = TestClient(create_app(), raise_server_exceptions=False).get("/admin/automation-conversion/legacy", cookies=_admin_cookies())
 
-    assert setup_response.status_code == 200
-    assert "配置向导" in setup_response.text
-    assert "第 1 步" in setup_response.text
-    assert "基础信息" in setup_response.text
-    assert 'action="/admin/automation-conversion/programs/7/update"' in setup_response.text
-    assert overview_response.status_code == 200
-    assert "方案人数统计" in overview_response.text
-    assert "当前方案总人数" in overview_response.text
-    assert "问卷审核" in overview_response.text
-    assert "查看 list" in overview_response.text
-    assert "/admin/automation-conversion/programs/7/members?stage=all&page=1&page_size=20" in unescape(
-        overview_response.text
-    )
-    assert "方案概览" not in overview_response.text
-    assert "运行概况" not in overview_response.text
-    assert copy_response.status_code == 200
-    assert "复制自动化运营方案" in copy_response.text
-    assert 'action="/admin/automation-conversion/programs/7/copy"' in copy_response.text
+    assert response.status_code == 404
 
 
-def test_automation_program_setup_steps_render_configured_data(monkeypatch):
-    import aicrm_next.automation_engine.admin_pages as admin_pages
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
+def test_automation_program_pages_are_retired(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-    program_data = {
-        "program": {
-            "id": 7,
-            "program_name": "202605沙龙商业修行峰会",
-            "program_code": "202505",
-            "status": "active",
-            "description": "生产方案",
-            "updated_at": "2026-05-22T00:00:00Z",
-            "config_json": {},
-        },
-        "summary": {
-            "channel_count": 1,
-            "workflow_count": 1,
-            "latest_execution_at": "2026-05-23 09:00:00",
-            "publish_status_label": "完整自动化已发布",
-        },
-    }
-    setup_payload = {
-        **program_data,
-        "step": "basic",
-        "steps": admin_pages.SETUP_STEPS,
-        "is_default_program": False,
-        "basic": {},
-        "entry_channel": {"qrcode": {"channel_name": "默认渠道二维码"}},
-        "entry": {
-            "channels": [
-                {
-                    "id": 31,
-                    "binding_id": 101,
-                    "channel_name": "默认渠道二维码",
-                    "channel_code": "aqr_260521_b91c",
-                    "channel_type": "qrcode",
-                    "carrier_type": "qrcode",
-                    "status": "active",
-                    "binding_status": "active",
-                    "initial_audience_label": "待填问卷",
-                    "qr_url": "https://wework.qpic.cn/example",
-                    "scene_value": "aqr_260521_b91c",
-                    "welcome_message": "欢迎来到峰会",
-                    "updated_at": "2026-05-23T09:00:00Z",
-                },
-                {
-                    "id": 32,
-                    "binding_id": 102,
-                    "channel_name": "获客助手链接",
-                    "channel_code": "wca_260521_b91c",
-                    "channel_type": "wecom_customer_acquisition",
-                    "carrier_type": "link",
-                    "status": "active",
-                    "binding_status": "active",
-                    "customer_channel": "wca_260521_b91c",
-                    "final_url": "https://work.weixin.qq.com/ca/example",
-                },
-            ],
-            "candidate_channels": [
-                {
-                    "id": 33,
-                    "channel_name": "候选渠道二维码",
-                    "channel_code": "aqr_260522_cand",
-                    "channel_type": "qrcode",
-                    "carrier_type": "qrcode",
-                    "status": "active",
-                    "scene_value": "aqr_260522_cand",
-                    "qr_url": "https://wework.qpic.cn/candidate",
-                }
-            ],
-            "api_urls": {
-                "bindings": "/api/admin/automation-conversion/programs/7/channel-bindings",
-                "binding_base": "/api/admin/automation-conversion/programs/7/channel-bindings/0",
-            },
-            "qrcode_channel": {
-                "id": 31,
-                "binding_id": 101,
-                "channel_name": "默认渠道二维码",
-                "channel_code": "aqr_260521_b91c",
-                "channel_type": "qrcode",
-                "carrier_type": "qrcode",
-                "status": "active",
-                "binding_status": "active",
-                "initial_audience_label": "待填问卷",
-                "qr_url": "https://wework.qpic.cn/example",
-                "scene_value": "aqr_260521_b91c",
-                "welcome_message": "欢迎来到峰会",
-            },
-            "customer_acquisition_links": [
-                {
-                    "link_name": "获客助手链接",
-                    "link_id": "link_001",
-                    "initial_audience_code": "operating",
-                    "status": "active",
-                    "final_url": "https://work.weixin.qq.com/ca/example",
-                    "last_event_at": "2026-05-23T10:00:00Z",
-                }
-            ],
-        },
-        "segmentation": {
-            "questionnaire_id": 9,
-            "available_questionnaires": [
-                {
-                    "id": 9,
-                    "title": "信息收集测试",
-                    "status": "published",
-                    "question_count": 1,
-                    "questions": [
-                        {
-                            "id": 19,
-                            "title": "你当前最关注什么",
-                            "options": [{"id": 1, "option_text": "先了解"}],
-                        }
-                    ],
-                }
-            ],
-            "question_rows": [
-                {
-                    "id": 19,
-                    "title": "你当前最关注什么",
-                    "options": [{"id": 1, "option_text": "先了解"}],
-                }
-            ],
-            "selected_questionnaire": {"title": "信息收集测试"},
-            "default_strategy": "normal_question_rules",
-            "normal_question_rules": {
-                "segmentation_question_id": 19,
-                "selected_question": {"id": 19, "title": "你当前最关注什么"},
-                "segmentation_question_title": "你当前最关注什么",
-                "category_rows": [
-                    {
-                        "category_name": "入门用户",
-                        "description": "刚开始了解",
-                        "option_ids": [1],
-                        "option_snapshots": [{"id": 1, "option_text": "先了解"}],
-                    }
-                ],
-                "unassigned_options": [],
-            },
-            "score_segments": {
-                "enabled": True,
-                "rows": [{"segment_name": "高意向", "segment_key": "high", "min_score": 80, "max_score": 100}],
-            },
-            "profile_dimension": {"template_id": 9},
-        },
-        "audience_entry_rule": {
-            "normalized_cards": {
-                "channel_enter": {
-                    "event_label": "入口进入后",
-                    "condition_type": "any_entry_channel",
-                    "condition_options": {"any_entry_channel": "任一当前方案入口"},
-                    "target_audience_code": "pending_questionnaire",
-                    "target_options": {"pending_questionnaire": "待填问卷"},
-                    "enabled": True,
-                },
-                "questionnaire_submitted": {
-                    "event_label": "问卷提交后",
-                    "condition_type": "questionnaire_id_matched",
-                    "condition_options": {"questionnaire_id_matched": "当前方案问卷提交"},
-                    "target_audience_code": "operating",
-                    "target_options": {"operating": "运营中"},
-                    "enabled": True,
-                },
-            },
-            "manual_cards": [{"event_label": "成交标记", "target_label": "已转化"}],
-        },
-        "operations": {
-            "active_count": 1,
-            "tasks": [
-                {
-                    "id": 8,
-                    "task_name": "首日欢迎触达",
-                    "description": "入池后第一天触达",
-                    "group_name": "峰会跟进",
-                    "status": "active",
-                    "trigger_type": "scheduled_daily",
-                    "send_time": "09:30",
-                    "target_audience_label": "运营中",
-                    "content_mode": "unified",
-                    "updated_at": "2026-05-23T11:00:00Z",
-                }
-            ],
-        },
-        "publish_check": {
-            "entry": {"passed": True, "items": [{"label": "至少有一个当前方案入口", "passed": True, "message": "已完成"}]},
-            "full": {"passed": True, "items": [{"label": "存在启用中的运营任务", "passed": True, "message": "已完成"}]},
-        },
-    }
-
-    monkeypatch.setattr(admin_pages, "get_automation_program_with_summary", lambda program_id: program_data)
-    monkeypatch.setattr(
-        admin_pages,
-        "get_automation_program_setup_payload",
-        lambda program_id, *, step="basic": {**setup_payload, "step": step},
-    )
     client = TestClient(create_app(), raise_server_exceptions=False)
 
-    assertions = {
-        "entry": ["默认渠道二维码", "aqr_260521_b91c", "获客助手链接", "https://wework.qpic.cn/example"],
-        "segmentation": ["信息收集测试", "你当前最关注什么", "入门用户", "高意向"],
-        "entry-rule": ["扫码进入", "当前方案入口", "问卷审核", "已转化"],
-        "operations": ["运营编排", "data-operation-task-root", "data-task-list", "data-save-task"],
-        "publish": ["入口发布检查", "至少有一个当前方案入口", "完整自动化发布检查", "存在启用中的运营任务"],
-    }
-    for step, markers in assertions.items():
-        response = client.get(f"/admin/automation-conversion/programs/7/setup?step={step}")
-        assert response.status_code == 200, step
-        for marker in markers:
-            assert marker in response.text, (step, marker)
-        assert "Not Found" not in response.text
-    publish_response = client.get("/admin/automation-conversion/programs/7/setup?step=publish")
-    assert 'data-publish-full' in publish_response.text
-    assert "/api/admin/automation-conversion/programs/7/publish-full" in publish_response.text
-    assert "发布入口" not in publish_response.text
-    assert "查看概览" not in publish_response.text
-    assert publish_response.text.count("发布完整自动化") == 1
-    entry_response = client.get("/admin/automation-conversion/programs/7/setup?step=entry")
-    assert "前往入口渠道页" in entry_response.text
-    assert "绑定已有渠道码" in entry_response.text
-    assert "候选渠道二维码" in entry_response.text
-    assert 'data-open-bind-modal' in entry_response.text
-    assert 'data-confirm-bind' in entry_response.text
-    assert 'data-bind-channel-checkbox' in entry_response.text
-    assert 'data-unbind-channel' in entry_response.text
-    assert '"candidate_channels"' in entry_response.text
-    assert '"bindings"' in entry_response.text
-    assert "/api/admin/automation-conversion/programs/7/channel-bindings" in entry_response.text
-    assert "/api/admin/automation-conversion/programs/7/channel-bindings/0" in entry_response.text
-    assert "当前二维码入口" not in entry_response.text
-    assert "入口配置块" not in entry_response.text
+    for path in [
+        "/admin/automation-conversion/programs/7/setup?step=basic",
+        "/admin/automation-conversion/programs/7/overview",
+        "/admin/automation-conversion/programs/7/copy",
+        "/admin/automation-conversion/programs/7/entry-channels",
+    ]:
+        response = client.get(path, cookies=_admin_cookies())
+        assert response.status_code == 410, path
+        assert "旧自动化运营方案页面已下架，请使用 AI 自动化运营人群包" in response.text
 
 
-def test_automation_program_entry_channels_page_uses_next_binding_payload(monkeypatch):
-    import aicrm_next.automation_engine.admin_pages as admin_pages
-
-    monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
-    monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
-    monkeypatch.delenv("DATABASE_URL", raising=False)
+def test_automation_program_api_routes_are_retired(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
+    client = TestClient(create_app(), raise_server_exceptions=False)
 
-    program_data = {
-        "program": {
-            "id": 7,
-            "program_name": "202605沙龙商业修行峰会",
-            "program_code": "202505",
-            "status": "active",
-            "description": "生产方案",
-        },
-        "summary": {"channel_count": 2, "workflow_count": 1},
-    }
-    monkeypatch.setattr(admin_pages, "get_automation_program_with_summary", lambda program_id: program_data)
-    monkeypatch.setattr(
-        admin_pages,
-        "list_program_channel_bindings_resource",
-        lambda program_id: [
-            {
-                "id": 101,
-                "program_id": program_id,
-                "channel_id": 31,
-                "binding_status": "active",
-                "channel": {
-                    "id": 31,
-                    "channel_name": "默认渠道二维码",
-                    "channel_code": "aqr_260521_b91c",
-                    "channel_type": "qrcode",
-                    "carrier_type": "qrcode",
-                    "status": "active",
-                    "scene_value": "aqr_260521_b91c",
-                    "qr_url": "https://wework.qpic.cn/example",
-                },
-            },
-            {
-                "id": 102,
-                "program_id": program_id,
-                "channel_id": 32,
-                "binding_status": "active",
-                "channel": {
-                    "id": 32,
-                    "channel_name": "获客助手链接",
-                    "channel_code": "wca_260521_b91c",
-                    "channel_type": "wecom_customer_acquisition",
-                    "carrier_type": "link",
-                    "status": "active",
-                    "customer_channel": "wca_260521_b91c",
-                    "final_url": "https://work.weixin.qq.com/ca/example",
-                },
-            },
-        ],
-    )
-    monkeypatch.setattr(
-        admin_pages,
-        "list_program_entry_candidate_channels",
-        lambda program_id: [
-            {
-                "id": 33,
-                "channel_name": "候选渠道",
-                "channel_code": "aqr_260522_cand",
-                "channel_type": "qrcode",
-                "carrier_type": "qrcode",
-                "status": "active",
-                "scene_value": "aqr_260522_cand",
-                "qr_url": "https://wework.qpic.cn/candidate",
-            }
-        ],
-    )
+    retired_program_paths = [
+        ("get", "/api/admin/automation-conversion/programs"),
+        ("post", "/api/admin/automation-conversion/programs/7/channel-bindings"),
+    ]
+    for method, path in retired_program_paths:
+        response = getattr(client, method)(path, cookies=_admin_cookies())
+        if "/programs" in path:
+            assert response.status_code == 404, path
+            continue
+        assert response.status_code == 410, path
+        error = response.json()["error"]
+        assert error.startswith(("legacy_automation_", "legacy_program_"))
+        assert error.endswith("_retired")
 
-    response = TestClient(create_app(), raise_server_exceptions=False).get("/admin/automation-conversion/programs/7/entry-channels")
-
-    assert response.status_code == 200
-    assert "绑定已有渠道码" in response.text
-    assert "默认渠道二维码" in response.text
-    assert "获客助手链接" in response.text
-    assert "候选渠道" in response.text
-    assert "/api/admin/automation-conversion/programs/7/channel-bindings" in response.text
+    removed_action_paths = [
+        ("get", "/api/admin/automation-conversion/contract"),
+        ("get", "/api/admin/automation-conversion/overview"),
+        ("get", "/api/admin/automation-conversion/pools"),
+        ("get", "/api/admin/automation-conversion/execution-records"),
+        ("post", "/api/admin/automation-conversion/tasks/run-due"),
+        ("post", "/api/admin/automation-conversion/execution-items/12/send-via-bazhuayu"),
+        ("post", "/api/admin/automation-conversion/jobs/run-due"),
+    ]
+    for method, path in removed_action_paths:
+        response = getattr(client, method)(path, cookies=_admin_cookies())
+        assert response.status_code == 404, path
 
 
 def test_admin_login_route_is_next_owned_when_production_facade_is_enabled(monkeypatch):
@@ -696,177 +353,8 @@ def test_admin_login_route_is_next_owned_when_production_facade_is_enabled(monke
     assert "/auth/wecom/start" in response.text
 
 
-def test_automation_program_summary_derives_publish_state_from_next_readiness():
-    from aicrm_next.automation_engine.programs import _program_summary
-
-    entry = _program_summary(
-        {"id": 7, "status": "active"},
-        {"channel_count": 1, "entry_publish_ready": True, "full_publish_ready": False},
-    )
-    full = _program_summary(
-        {"id": 8, "status": "active"},
-        {"channel_count": 1, "entry_publish_ready": True, "full_publish_ready": True},
-    )
-
-    assert entry["publish_status"] == "entry"
-    assert entry["publish_status_label"] == "入口已发布"
-    assert full["publish_status"] == "full"
-    assert full["publish_status_label"] == "完整自动化已发布"
-
-
-def test_admin_wecom_tag_read_routes_stay_next_native(monkeypatch):
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-
-    async def fake_forward(request):
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(
-            {
-                "ok": True,
-                "forwarded": f"{request.method}:{request.url.path}",
-                "items": [{"tag_id": "et-tag-001", "tag_name": "高意向", "group_name": "客户分层"}],
-            },
-            headers={"X-AICRM-Compatibility-Facade": "legacy_flask_facade"},
-        )
-
-    client = TestClient(create_app(), raise_server_exceptions=False)
-    tags_response = client.get("/api/admin/wecom/tags")
-    groups_response = client.get("/api/admin/wecom/tag-groups")
-
-    for response in [tags_response, groups_response]:
-        payload = response.json()
-        assert response.status_code in {200, 503}
-        assert "X-AICRM-Compatibility-Facade" not in response.headers
-        assert payload.get("route_owner", "ai_crm_next") == "ai_crm_next"
-        assert payload.get("fallback_used") is False
-        assert payload.get("real_external_call_executed") is False
-
-
-def test_admin_cloud_orchestrator_campaign_write_routes_do_not_forward_to_legacy(monkeypatch):
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-
-    async def fake_forward(request):
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(
-            {
-                "ok": True,
-                "forwarded": f"{request.method}:{request.url.path}:{request.url.query}",
-                "campaigns": [{"campaign_code": "camp_probe", "review_status": "pending_review"}],
-            },
-            headers={"X-AICRM-Compatibility-Facade": "legacy_flask_facade"},
-        )
-    client = TestClient(create_app(), raise_server_exceptions=False)
-
-    next_cases = [
-        ("GET", "/api/admin/cloud-orchestrator/campaigns?review_status=pending_review"),
-        ("GET", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/approve"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/start"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/batch-start"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/pause"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/reject"),
-        ("DELETE", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture"),
-        ("GET", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/members"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/steps"),
-        ("PATCH", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/steps/1"),
-        ("POST", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/steps/1"),
-        ("DELETE", "/api/admin/cloud-orchestrator/campaigns/camp_next_read_fixture/steps/1"),
-    ]
-
-    for method, path in next_cases:
-        response = client.request(method, path, json={"content_text": "updated"})
-        assert response.status_code != 500, (method, path, response.text)
-        assert "X-AICRM-Compatibility-Facade" not in response.headers
-
-    run_due = client.post("/api/admin/cloud-orchestrator/campaigns/run-due", json={})
-    assert run_due.status_code in {200, 503}
-    assert "X-AICRM-Compatibility-Facade" not in run_due.headers
-    assert run_due.json()["fallback_used"] is False
-
-
-def test_admin_cloud_orchestrator_media_upload_route_uses_next_adapter(monkeypatch):
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-    monkeypatch.setenv("AICRM_NEXT_CLOUD_ORCHESTRATOR_MEDIA_UPLOAD_MODE", "fake")
-
-    async def fake_forward(request):
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(
-            {
-                "ok": True,
-                "forwarded": f"{request.method}:{request.url.path}:{request.url.query}",
-                "media_id": "media-live-probe",
-            },
-            headers={"X-AICRM-Compatibility-Facade": "legacy_flask_facade"},
-        )
-
-    response = TestClient(create_app(), raise_server_exceptions=False).post(
-        "/api/admin/cloud-orchestrator/media/upload",
-        files={"image": ("probe.png", b"\x89PNG\r\n\x1a\n", "image/png")},
-    )
-
-    assert response.status_code == 200
-    assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
-    assert response.json()["source_status"] == "next_cloud_orchestrator_media_upload"
-    assert response.json()["fallback_used"] is False
-    assert response.json()["real_external_call_executed"] is False
-    assert response.json()["wecom_media_upload_executed"] is False
-    assert response.json()["media_id"].startswith("fake_wecom_media_")
-
-
-def test_admin_hxc_dashboard_routes_are_next_owned_when_production_facade_is_enabled(monkeypatch):
-
-    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
-    monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    monkeypatch.setenv("SECRET_KEY", "admin-pages-real-data-binding-test")
-
-    async def fake_forward(request):
-        from fastapi.responses import JSONResponse
-
-        return JSONResponse(
-            {
-                "ok": True,
-                "forwarded": f"{request.method}:{request.url.path}:{request.url.query}",
-            },
-            headers={"X-AICRM-Compatibility-Facade": "legacy_flask_facade"},
-        )
-    client = TestClient(create_app(), raise_server_exceptions=False)
-
-    page_response = client.get("/admin/hxc-dashboard")
-    refresh_response = client.post("/api/admin/hxc-dashboard/refresh", json={"trigger_source": "probe"})
-    send_config_response = client.get("/api/admin/hxc-dashboard/send-config")
-
-    assert page_response.status_code == 200
-    assert page_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
-    assert "X-AICRM-Compatibility-Facade" not in page_response.headers
-    assert "用户激活漏斗看板" in page_response.text
-    assert refresh_response.status_code == 200
-    assert refresh_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
-    assert "X-AICRM-Compatibility-Facade" not in refresh_response.headers
-    assert refresh_response.json()["source_status"] == "next_hxc_refresh_plan"
-    assert refresh_response.json()["fallback_used"] is False
-    assert send_config_response.status_code == 200
-    assert send_config_response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
-    assert "X-AICRM-Compatibility-Facade" not in send_config_response.headers
-    assert send_config_response.json()["source_status"] == "next_hxc_send_config"
-    assert send_config_response.json()["fallback_used"] is False
-
-
-def test_real_data_binding_checker_returns_ok():
+def test_real_data_binding_checker_returns_ok(monkeypatch):
+    monkeypatch.setattr(checker, "_git_modified_files", lambda: [])
     result = checker.run_check()
 
     assert isinstance(result["ok"], bool)
@@ -878,7 +366,7 @@ def test_api_docs_page_lists_real_route_groups(monkeypatch):
     response = _client(monkeypatch).get("/admin/api-docs")
 
     assert response.status_code == 200
-    assert "/api/admin/automation-conversion/jobs/run-due" in response.text
+    assert "/api/admin/ai-audience/packages" in response.text
     assert "/api/wechat-pay/notify" in response.text
     assert checker._row_count(response.text) >= 10
 

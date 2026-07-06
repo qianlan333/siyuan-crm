@@ -216,6 +216,7 @@ def webhook_route_contracts() -> tuple[WebhookRouteContract, ...]:
         W("/api/h5/wechat/oauth/callback", ("OPTIONS",), "wechat_oauth_callback_options", "staging_disabled", "read_model", "OAuth preflight mirrors callback boundary"),
         W("/api/h5/radar/oauth/callback", ("GET",), "radar_oauth_callback", "staging_disabled", "read_model", "Radar OAuth callback adapter remains staging-disabled"),
         W("/auth/wecom/callback", ("GET", "OPTIONS"), "auth_wecom_callback", "staging_disabled", "read_model", "WeCom auth callback adapter remains staging-disabled"),
+        W("/api/sidebar/oauth/callback", ("GET",), "sidebar_oauth_callback", "staging_disabled", "read_model", "Sidebar OAuth callback resolves viewer identity only and does not enqueue background jobs"),
         W("/api/automation/group-ops/plans/{plan_id}/webhook", ("GET",), "get_group_ops_webhook_config", "none", "read_model", "admin/read configuration route only"),
         W("/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook", ("GET",), "get_group_ops_webhook_config", "none", "read_model", "admin/read configuration route only"),
         W("/api/automation/group-ops/plans/{plan_id}/webhook/reset-token", ("POST",), "regenerate_group_ops_webhook", "none", "command", "token rotation command records state only"),

@@ -1780,6 +1780,28 @@ routes:
   data_source: read_model
   requires_auth: false
   rollback: previous_release
+- path: /api/sidebar/oauth/start
+  methods:
+  - GET
+  route_name: sidebar_oauth_start
+  capability_owner: identity_contact
+  runtime_owner: ai_crm_next
+  layer: integration
+  external_effects: staging_disabled
+  data_source: read_model
+  requires_auth: false
+  rollback: previous_release
+- path: /api/sidebar/oauth/callback
+  methods:
+  - GET
+  route_name: sidebar_oauth_callback
+  capability_owner: identity_contact
+  runtime_owner: ai_crm_next
+  layer: webhook
+  external_effects: staging_disabled
+  data_source: read_model
+  requires_auth: false
+  rollback: previous_release
 - path: /api/admin/wecom/tags
   methods:
   - GET

@@ -7,6 +7,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from aicrm_next.admin_auth.guards import admin_api_auth_error
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
 
 from .application import AutomationAgentAdminService
 
@@ -41,7 +42,17 @@ def _response(payload: dict[str, Any], *, status_code: int = 200) -> JSONRespons
 def list_automation_agents(request: Request) -> JSONResponse:
     if auth := admin_api_auth_error(request):
         return auth
-    return _response(AutomationAgentAdminService().list_agents())
+    try:
+        payload = AutomationAgentAdminService().list_agents()
+    except Exception as exc:
+        payload = admin_read_unavailable_payload(
+            capability_owner="aicrm_next/automation_agents",
+            page_error="自动化话术读模型暂不可用，请稍后重试。",
+            exc=exc,
+            items_keys=("items",),
+            count_keys=("total",),
+        )
+    return _response(payload)
 
 
 @router.post("/api/admin/automation-agents", name="api.admin_automation_agent_create")

@@ -62,6 +62,32 @@ def _unique(items: Iterable[str]) -> list[str]:
     return result
 
 
+def _exclusive_scope_override_matches(
+    manifest: dict,
+    scopes_by_name: dict[str, dict],
+    path: str,
+) -> list[dict] | None:
+    overrides = manifest.get("exclusive_scope_overrides", [])
+    if not isinstance(overrides, list):
+        raise SystemExit("manifest.exclusive_scope_overrides must be a list")
+    for override in overrides:
+        patterns = override.get("paths", [])
+        if not any(_matches(path, pattern) for pattern in patterns):
+            continue
+        selected_scopes: list[dict] = []
+        missing_names: list[str] = []
+        for name in override.get("scopes", []):
+            scope = scopes_by_name.get(str(name))
+            if scope is None:
+                missing_names.append(str(name))
+                continue
+            selected_scopes.append(scope)
+        if missing_names:
+            raise SystemExit(f"Unknown override scope(s) for {path}: {', '.join(missing_names)}")
+        return selected_scopes
+    return None
+
+
 def _git_diff_names(*args: str) -> list[str]:
     completed = subprocess.run(
         ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", *args],
@@ -128,17 +154,22 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
     changed_files = _unique(_normalize_path(path) for path in changed_files if path.strip())
     high_risk_paths = manifest.get("high_risk_paths", [])
     frontend_build_paths = manifest.get("frontend_build_paths", [])
+    scopes_by_name = {str(scope.get("name")): scope for scope in scopes}
 
     matched_scopes: list[dict] = []
     matched_scope_names: set[str] = set()
     unmatched: list[str] = []
 
     for path in changed_files:
-        path_matches: list[dict] = []
-        for scope in scopes:
-            patterns = scope.get("paths", [])
-            if any(_matches(path, pattern) for pattern in patterns):
-                path_matches.append(scope)
+        override_matches = _exclusive_scope_override_matches(manifest, scopes_by_name, path)
+        if override_matches is None:
+            path_matches: list[dict] = []
+            for scope in scopes:
+                patterns = scope.get("paths", [])
+                if any(_matches(path, pattern) for pattern in patterns):
+                    path_matches.append(scope)
+        else:
+            path_matches = override_matches
         if not path_matches:
             unmatched.append(path)
             continue

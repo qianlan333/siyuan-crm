@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Header, HTTPException
 
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
 from aicrm_next.shared.errors import ContractError, NotFoundError
 
 from .application import (
@@ -229,7 +230,17 @@ def user_ops_do_not_disturb(request: DoNotDisturbRequest) -> dict:
 
 @router.get("/api/admin/user-ops/send-records")
 def user_ops_send_records(limit: int = 20, offset: int = 0) -> dict:
-    return ListUserOpsSendRecordsQuery()(limit=limit, offset=offset)
+    try:
+        return ListUserOpsSendRecordsQuery()(limit=limit, offset=offset)
+    except Exception as exc:
+        return admin_read_unavailable_payload(
+            capability_owner="aicrm_next/ops_enrollment",
+            page_error="发送记录读模型暂不可用，请稍后重试。",
+            exc=exc,
+            items_keys=("items", "records"),
+            count_keys=("count", "total"),
+            extra={"limit": limit, "offset": offset},
+        )
 
 
 @router.get("/api/admin/user-ops/send-records/{record_id}")

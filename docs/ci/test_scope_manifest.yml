@@ -24,6 +24,21 @@
     "package.json",
     "package-lock.json"
   ],
+  "exclusive_scope_overrides": [
+    {
+      "paths": [
+        "aicrm_next/ai_audience_ops/admin_api.py",
+        "aicrm_next/automation_engine/group_ops/api.py",
+        "aicrm_next/automation_engine/group_ops/application.py",
+        "aicrm_next/ops_enrollment/api.py",
+        "aicrm_next/platform_foundation/internal_events/view_model.py",
+        "aicrm_next/platform_foundation/push_center/view_model.py"
+      ],
+      "scopes": [
+        "admin_read_pages"
+      ]
+    }
+  ],
   "scopes": [
     {
       "name": "commerce",
@@ -95,6 +110,7 @@
     {
       "name": "customer_read_model_sidebar",
       "paths": [
+        "aicrm_next/main.py",
         "aicrm_next/customer_read_model/**",
         "aicrm_next/sidebar_write/**",
         "aicrm_next/frontend_compat/templates/sidebar_customer_workbench.html",
@@ -105,6 +121,7 @@
       ],
       "python_tests": [
         "tests/test_sidebar_v2_api.py",
+        "tests/test_sidebar_write_commands.py",
         "tests/test_customer_read_model_request_scope.py",
         "tests/test_sidebar_workbench_frontend.py",
         "tests/test_sidebar_jssdk_frontend_contract.py"
@@ -231,6 +248,42 @@
       "architecture_gate": "none"
     },
     {
+      "name": "admin_read_pages",
+      "paths": [
+        "aicrm_next/ai_audience_ops/admin_api.py",
+        "aicrm_next/automation_agents/admin_api.py",
+        "aicrm_next/automation_engine/group_ops/api.py",
+        "aicrm_next/automation_engine/group_ops/application.py",
+        "aicrm_next/customer_tags/api.py",
+        "aicrm_next/ops_enrollment/api.py",
+        "aicrm_next/platform_foundation/internal_events/view_model.py",
+        "aicrm_next/platform_foundation/push_center/view_model.py",
+        "aicrm_next/shared/admin_read_fallback.py",
+        "scripts/ops/check_admin_read_pages_smoke.py",
+        "tests/test_admin_read_pages_smoke.py"
+      ],
+      "python_tests": [
+        "tests/test_push_center.py",
+        "tests/test_internal_event_admin_api.py",
+        "tests/test_internal_event_admin_page.py",
+        "tests/test_group_ops_plans_api.py",
+        "tests/test_wecom_tag_read_selectors.py",
+        "tests/test_admin_wecom_tags_management.py",
+        "tests/test_automation_agents_admin_api.py",
+        "tests/test_ai_audience_admin_pages.py",
+        "tests/test_user_ops_admin_pages_native.py",
+        "tests/test_user_ops_api.py",
+        "tests/test_data_health_checks.py",
+        "tests/test_admin_shell_native.py",
+        "tests/test_router_registry_contract.py",
+        "tests/test_delivery_lineage_api.py",
+        "tests/test_growth_orchestration_programs.py",
+        "tests/test_admin_read_pages_smoke.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
       "name": "migration_db",
       "paths": [
         "migrations/**",
@@ -275,6 +328,7 @@
       "paths": [
         "aicrm_next/shared/db_session.py",
         "aicrm_next/shared/signed_context.py",
+        "aicrm_next/shared/signed_session.py",
         "tests/test_shared_db_session.py",
         "tests/test_shared_flask_config_retirement.py"
       ],

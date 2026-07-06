@@ -5,6 +5,7 @@ import time
 from typing import Any
 
 from aicrm_next.integration_gateway.wecom_group_contract import WeComGroupAssetAdapterContract
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
 from aicrm_next.shared.errors import ApplicationError, ContractError, NotFoundError
 from aicrm_next.shared.repository_provider import RepositoryProviderError, blocked_production_payload
 
@@ -123,6 +124,21 @@ def _production_unavailable() -> dict[str, Any]:
         }
     )
     return payload
+
+
+def _read_production_unavailable(exc: Exception) -> dict[str, Any]:
+    return admin_read_unavailable_payload(
+        capability_owner=CAPABILITY_OWNER,
+        page_error="群运营读模型暂不可用，请稍后重试。",
+        exc=exc,
+        items_keys=("items",),
+        count_keys=("total",),
+        extra={
+            "queue_count": 0,
+            "side_effect_safety": group_ops_side_effect_safety(),
+            "capability_owner": CAPABILITY_OWNER,
+        },
+    )
 
 
 def _repo_or_block(repo: GroupOpsRepository | None) -> GroupOpsRepository | None:
@@ -267,20 +283,23 @@ class ListGroupOpsPlansQuery:
         repo = _repo_or_block(self._repo)
         if repo is None:
             return _production_unavailable()
-        rows, total = repo.list_plans(
-            {
-                "keyword": request.keyword,
-                "plan_type": normalize_plan_type(request.plan_type) if clean_text(request.plan_type) else "",
-                "operator_member_id": request.operator_member_id,
-                "status": request.status,
-                "limit": clamp_limit(request.limit),
-                "offset": max(0, int(request.offset or 0)),
-            }
-        )
-        items = [
-            plan_list_item(plan, groups=repo.list_bound_groups(int(plan["id"])), owner_name=clean_text(plan.get("owner_name")))
-            for plan in rows
-        ]
+        try:
+            rows, total = repo.list_plans(
+                {
+                    "keyword": request.keyword,
+                    "plan_type": normalize_plan_type(request.plan_type) if clean_text(request.plan_type) else "",
+                    "operator_member_id": request.operator_member_id,
+                    "status": request.status,
+                    "limit": clamp_limit(request.limit),
+                    "offset": max(0, int(request.offset or 0)),
+                }
+            )
+            items = [
+                plan_list_item(plan, groups=repo.list_bound_groups(int(plan["id"])), owner_name=clean_text(plan.get("owner_name")))
+                for plan in rows
+            ]
+        except RepositoryProviderError as exc:
+            return _read_production_unavailable(exc)
         return _response({"items": items, "total": total, "queue_count": _queue_count()}, repo=repo)
 
 
@@ -501,20 +520,23 @@ class ListGroupOpsGroupsQuery:
         repo = _repo_or_block(self._repo)
         if repo is None:
             return _production_unavailable()
-        rows, total = repo.list_group_assets(
-            {
-                "keyword": request.keyword,
-                "owner_userid": request.owner_userid,
-                "plan_id": request.plan_id or 0,
-                "bind_status": request.bind_status,
-                "limit": clamp_limit(request.limit),
-                "offset": max(0, int(request.offset or 0)),
-            }
-        )
-        items = [
-            group_asset_item(row, plan_name=clean_text(row.get("plan_name")), bind_status=clean_text(row.get("bind_status") or "unbound"))
-            for row in rows
-        ]
+        try:
+            rows, total = repo.list_group_assets(
+                {
+                    "keyword": request.keyword,
+                    "owner_userid": request.owner_userid,
+                    "plan_id": request.plan_id or 0,
+                    "bind_status": request.bind_status,
+                    "limit": clamp_limit(request.limit),
+                    "offset": max(0, int(request.offset or 0)),
+                }
+            )
+            items = [
+                group_asset_item(row, plan_name=clean_text(row.get("plan_name")), bind_status=clean_text(row.get("bind_status") or "unbound"))
+                for row in rows
+            ]
+        except RepositoryProviderError as exc:
+            return _read_production_unavailable(exc)
         return _response({"items": items, "total": total}, repo=repo)
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from aicrm_next.shared import postgres_connection, runtime, signed_context
+from aicrm_next.shared import postgres_connection, runtime, signed_context, signed_session
 
 
 class _FakeConnection:
@@ -31,6 +31,19 @@ def test_shared_signed_context_has_no_flask_config_imports(monkeypatch) -> None:
     assert owner_result["ok"] is True
     assert owner_result["context"]["viewer_userid"] == "viewer_001"
     source = Path("aicrm_next/shared/signed_context.py").read_text(encoding="utf-8")
+    assert "current_app" not in source
+    assert "flask" not in source
+
+
+def test_shared_signed_session_has_no_flask_config_imports(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "shared-session-secret")
+
+    token = signed_session.sign_session_payload({"wecom_userid": "viewer_001", "iat": 4102444800})
+    result = signed_session.verify_session_payload(token, max_age_seconds=4102444800)
+
+    assert result is not None
+    assert result["wecom_userid"] == "viewer_001"
+    source = Path("aicrm_next/shared/signed_session.py").read_text(encoding="utf-8")
     assert "current_app" not in source
     assert "flask" not in source
 

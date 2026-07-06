@@ -1,12 +1,13 @@
 name: Deploy to Production
 
 on:
-  push:
-    branches:
-      - main
+  workflow_run:
+    workflows: ["CI Fast"]
+    types: [completed]
 
 jobs:
   deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main'
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
@@ -17,6 +18,7 @@ jobs:
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             set -e
+            set -o pipefail
             cd '/home/ubuntu/极简 crm'
             if ! git diff --quiet || ! git diff --cached --quiet || [ -n "$(git ls-files --others --exclude-standard)" ]; then
               git stash push --include-untracked -m "deploy-backup-$(date -u +%Y%m%dT%H%M%SZ)"
@@ -25,6 +27,7 @@ jobs:
             git fetch origin main:refs/remotes/origin/main
             git reset --hard refs/remotes/origin/main
             after_sha="$(git rev-parse HEAD)"
+            printf '%s\n' "$after_sha" > .release-sha
             set -a
             source /home/ubuntu/.openclaw-wecom-pg.env
             set +a
@@ -54,6 +57,11 @@ jobs:
             admin_channels_status="$(curl -sS -o /tmp/aicrm_channels_smoke.json -w "%{http_code}" http://127.0.0.1:5001/api/admin/channels?limit=1)"
             if [ "$admin_channels_status" != "200" ] && [ "$admin_channels_status" != "401" ] && [ "$admin_channels_status" != "403" ]; then
               cat /tmp/aicrm_channels_smoke.json
+              exit 1
+            fi
+            if ! python scripts/ops/check_admin_read_pages_smoke.py --base-url http://127.0.0.1:5001 --require-admin-cookie | tee /tmp/aicrm-admin-read-pages-smoke.json; then
+              sudo systemctl status openclaw-wecom-postgres.service --no-pager || true
+              sudo journalctl -u openclaw-wecom-postgres.service -n 120 --no-pager || true
               exit 1
             fi
             sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/

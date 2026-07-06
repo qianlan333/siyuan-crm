@@ -174,11 +174,15 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
 
     class FakeResult:
-        def __init__(self, row=None):
+        def __init__(self, row=None, rows=None):
             self._row = row
+            self._rows = list(rows or ([] if row is None else [row]))
 
         def fetchone(self):
             return self._row
+
+        def fetchall(self):
+            return self._rows
 
     class FakeConnection:
         def __init__(self):
@@ -209,7 +213,11 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
             compact_sql = " ".join(sql.split())
             if "FROM crm_user_identity" in compact_sql:
                 return FakeResult(self.identities.get(params[0]))
+            if "FROM wecom_external_contact_follow_users" in compact_sql:
+                return FakeResult(rows=[{"owner_userid": "sales_09"}])
             if compact_sql.startswith("UPDATE crm_user_identity"):
+                assert "'sidebar_bind_by_userid', %s::text" in compact_sql
+                assert "'sidebar_external_userid', %s::text" in compact_sql
                 row = next(item for item in self.identities.values() if item["unionid"] == params[5])
                 row.update(
                     {
@@ -263,4 +271,106 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
     assert body["binding"]["owner_userid"] == "sales_09"
     assert body["lead_pool_merge"]["action_type"] == "customer_mobile_bound_event"
     assert "production-ready for command execution" not in response.text
+    assert connections[0].commits == 1
+
+
+def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
+    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+
+    class FakeResult:
+        def __init__(self, row=None, rows=None):
+            self._row = row
+            self._rows = list(rows or ([] if row is None else [row]))
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConnection:
+        def __init__(self):
+            self.identity = {
+                "unionid": "union_meixin",
+                "primary_external_userid": "wmbNXyCwAA48u3o0zHSMvMrGAHbBrHxw",
+                "external_userids_json": ["wmbNXyCwAA48u3o0zHSMvMrGAHbBrHxw"],
+                "mobile": "",
+                "mobile_normalized": "",
+                "mobile_source": "",
+                "customer_name": "美心",
+                "primary_owner_userid": "ZhaoYanFang",
+                "remark": "",
+                "created_at": "2026-07-03T15:22:55+08:00",
+                "updated_at": "2026-07-03T15:22:55+08:00",
+            }
+            self.commits = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=()):
+            compact_sql = " ".join(sql.split())
+            if "FROM crm_user_identity" in compact_sql:
+                return FakeResult(self.identity)
+            if "FROM wecom_external_contact_follow_users" in compact_sql:
+                return FakeResult(
+                    rows=[
+                        {"owner_userid": "HuangYouCan"},
+                        {"owner_userid": "ZhaoYanFang"},
+                    ]
+                )
+            if compact_sql.startswith("UPDATE crm_user_identity"):
+                assert "'sidebar_bind_by_userid', %s::text" in compact_sql
+                assert "'sidebar_external_userid', %s::text" in compact_sql
+                self.identity.update(
+                    {
+                        "mobile": params[0],
+                        "mobile_normalized": params[1],
+                        "mobile_source": "sidebar_bind",
+                        "primary_owner_userid": params[2] or self.identity["primary_owner_userid"],
+                        "updated_at": "2026-07-06T21:55:00+08:00",
+                    }
+                )
+                return FakeResult(self.identity)
+            raise AssertionError(f"unexpected SQL: {compact_sql}")
+
+        def commit(self):
+            self.commits += 1
+
+    connections: list[FakeConnection] = []
+
+    def connect(*_args, **_kwargs):
+        connection = FakeConnection()
+        connections.append(connection)
+        return connection
+
+    psycopg = types.ModuleType("psycopg")
+    psycopg.connect = connect
+    rows = types.ModuleType("psycopg.rows")
+    rows.dict_row = object()
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/sidebar/bind-mobile",
+        json={
+            "external_userid": "wmbNXyCwAA48u3o0zHSMvMrGAHbBrHxw",
+            "owner_userid": "HuangYouCan",
+            "bind_by_userid": "HuangYouCan",
+            "mobile": "18826079430",
+            "force_rebind": True,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["binding"]["mobile"] == "18826079430"
+    assert body["binding"]["owner_userid"] == "HuangYouCan"
+    assert body["binding"]["unionid"] == "union_meixin"
+    assert body["write_model_status"] == "updated"
     assert connections[0].commits == 1

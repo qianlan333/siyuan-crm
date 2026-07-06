@@ -15,6 +15,7 @@ def test_sidebar_workbench_v2_page_is_next_owned(client):
 
     assert response.status_code == 200
     assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
+    assert response.headers["Cache-Control"] == "no-store, max-age=0"
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert "客户侧边栏 V2 工作台" in html
     assert 'data-workbench-url="/api/sidebar/v2/workbench"' in html
@@ -42,6 +43,7 @@ def test_sidebar_workbench_static_contract_has_next_surface_only():
     assert "requestPanelJson" in script
     assert "PANEL_TIMEOUT_MS" in script
     assert "PANEL_CACHE_TTL_MS" in script
+    assert 'cache: "no-store"' in script
     assert "sidebar_owner_token" in script
     assert "data-material-thumb-img" in script
     assert "data-order-detail-url" in script

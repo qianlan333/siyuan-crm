@@ -7,6 +7,8 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
+from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
+
 from .admin_write import (
     WeComTagWriteInputError,
     WeComTagWriteNotFoundError,
@@ -29,7 +31,7 @@ from .live_mutation import (
     tag_execution_status,
 )
 from .mutation_commands import PlanWeComTagMarkCommand, PlanWeComTagUnmarkCommand, WeComTagMutationCommand
-from .read_model import TagCatalogUnavailable, build_tag_catalog_repository
+from .read_model import build_tag_catalog_repository
 from .sync_service import WeComTagSyncError, execute_wecom_tag_catalog_sync
 
 
@@ -39,31 +41,15 @@ write_router = APIRouter()
 
 
 def _production_unavailable(exc: Exception) -> JSONResponse:
-    return JSONResponse(
-        jsonable_encoder(
-            {
-                "ok": True,
-                "degraded": True,
-                "error": "",
-                "error_code": "production_unavailable",
-                "source_status": "production_unavailable",
-                "read_model_status": "unavailable",
-                "route_owner": "ai_crm_next",
-                "fallback_used": False,
-                "real_external_call_executed": False,
-                "sync_executed": False,
-                "fixture_used": False,
-                "page_error": "当前未获取到企微标签，可手工填写 tag_id",
-                "groups": [],
-                "tags": [],
-                "items": [],
-                "count": 0,
-                "total_tags": 0,
-                "tag_limit": 1000,
-            }
-        ),
-        status_code=200,
+    payload = admin_read_unavailable_payload(
+        capability_owner="aicrm_next/customer_tags",
+        page_error="当前未获取到企微标签，可手工填写 tag_id",
+        exc=exc,
+        items_keys=("groups", "tags", "items"),
+        count_keys=("count", "total_tags"),
+        extra={"sync_executed": False, "fixture_used": False, "tag_limit": 1000},
     )
+    return JSONResponse(jsonable_encoder(payload), status_code=200)
 
 
 def _read_catalog_payload() -> dict:
@@ -75,7 +61,7 @@ def _read_catalog_payload() -> dict:
 def list_admin_wecom_tags_read_model():
     try:
         return _read_catalog_payload()
-    except TagCatalogUnavailable as exc:
+    except Exception as exc:
         return _production_unavailable(exc)
 
 
@@ -86,7 +72,7 @@ def get_admin_wecom_tag_read_model(tag_id: str):
         raise HTTPException(status_code=404, detail="Not Found")
     try:
         payload = _read_catalog_payload()
-    except TagCatalogUnavailable as exc:
+    except Exception as exc:
         return _production_unavailable(exc)
     tags = [tag for tag in payload["tags"] if str(tag.get("tag_id") or "").strip() == normalized]
     groups = [
@@ -101,7 +87,7 @@ def get_admin_wecom_tag_read_model(tag_id: str):
 def list_admin_wecom_tag_groups_read_model():
     try:
         payload = _read_catalog_payload()
-    except TagCatalogUnavailable as exc:
+    except Exception as exc:
         return _production_unavailable(exc)
     return {**payload, "items": payload["groups"], "count": len(payload["groups"])}
 
@@ -110,7 +96,7 @@ def list_admin_wecom_tag_groups_read_model():
 def get_admin_wecom_tag_group_read_model(group_id: str):
     try:
         payload = _read_catalog_payload()
-    except TagCatalogUnavailable as exc:
+    except Exception as exc:
         return _production_unavailable(exc)
     normalized = str(group_id or "").strip()
     groups = [group for group in payload["groups"] if str(group.get("group_id") or "").strip() == normalized]

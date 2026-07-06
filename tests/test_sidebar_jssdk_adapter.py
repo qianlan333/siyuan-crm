@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import hashlib
+from time import time
 from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
+from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
+from aicrm_next.auth_wecom.service import sign_auth_state
 from aicrm_next.integration_gateway.wecom_jssdk_adapter import (
     build_sidebar_jssdk_config,
     list_sidebar_jssdk_attempts,
     normalize_jssdk_url,
     reset_sidebar_jssdk_attempts,
 )
+from aicrm_next.identity_contact.sidebar_jssdk import SIDEBAR_VIEWER_COOKIE
 from aicrm_next.main import create_app
 from aicrm_next.shared.signed_context import load_sidebar_owner_context_token
 
@@ -189,7 +193,38 @@ def test_jssdk_api_requires_viewer_when_external_contact_has_multiple_owners(mon
         "external_userid": "wx_ext_multi_owner",
         "source": "sidebar_jssdk_viewer_required",
         "owner_candidates_count": 2,
+        "sidebar_oauth_status": "disabled",
     }
+
+
+def test_jssdk_api_exposes_sidebar_oauth_when_multi_owner_viewer_is_missing(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "sidebar-owner-token-multi-owner-oauth")
+    monkeypatch.setenv("AICRM_SIDEBAR_WECOM_OAUTH_ENABLE_REAL", "1")
+    monkeypatch.setenv("WECOM_CORP_ID", "ww-test")
+    monkeypatch.setenv("WECOM_SECRET", "secret")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        "aicrm_next.identity_contact.sidebar_jssdk._owner_userids_from_external_userid",
+        lambda external_userid: {"ZhaoYanFang", "HuangYouCan"},
+    )
+    client = TestClient(create_app(), raise_server_exceptions=False, base_url="https://www.youcangogogo.com")
+
+    response = client.get(
+        "/api/sidebar/jssdk-config",
+        params={
+            "url": "https://www.youcangogogo.com/sidebar/bind-mobile?external_userid=wx_ext_multi_owner",
+            "external_userid": "wx_ext_multi_owner",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sidebar_owner_token_status"] == "viewer_missing_multi_owner"
+    assert payload["sidebar_owner_context"]["sidebar_oauth_status"] == "ready"
+    assert payload["sidebar_oauth_url"].startswith("/api/sidebar/oauth/start?")
+    oauth_query = parse_qs(urlparse(payload["sidebar_oauth_url"]).query)
+    assert oauth_query["external_userid"] == ["wx_ext_multi_owner"]
+    assert oauth_query["next"] == ["/sidebar/bind-mobile?external_userid=wx_ext_multi_owner"]
 
 
 def test_jssdk_api_issues_viewer_token_when_viewer_is_in_owner_candidates(monkeypatch) -> None:
@@ -220,6 +255,138 @@ def test_jssdk_api_issues_viewer_token_when_viewer_is_in_owner_candidates(monkey
     assert token_result["context"]["viewer_userid"] == "HuangYouCan"
 
 
+def test_jssdk_api_uses_admin_session_wecom_userid_for_multi_owner_viewer(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "sidebar-owner-token-admin-session")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        "aicrm_next.identity_contact.sidebar_jssdk._owner_userids_from_external_userid",
+        lambda external_userid: {"ZhaoYanFang", "HuangYouCan"},
+    )
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    client.cookies.set(
+        SESSION_COOKIE,
+        sign_session({"wecom_userid": "HuangYouCan", "username": "HuangYouCan", "iat": int(time())}),
+    )
+
+    response = client.get(
+        "/api/sidebar/jssdk-config",
+        params={
+            "url": "http://127.0.0.1:5001/sidebar/bind-mobile",
+            "external_userid": "wx_ext_multi_owner",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sidebar_owner_token_status"] == "issued"
+    assert payload["sidebar_owner_context"]["owner_userid"] == "HuangYouCan"
+    assert payload["sidebar_owner_context"]["owner_candidates_count"] == 2
+    token_result = load_sidebar_owner_context_token(payload["sidebar_owner_token"])
+    assert token_result["ok"] is True
+    assert token_result["context"]["viewer_userid"] == "HuangYouCan"
+
+
+def test_sidebar_oauth_callback_sets_viewer_cookie_and_unblocks_owner_token(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "sidebar-oauth-cookie")
+    monkeypatch.setenv("AICRM_SIDEBAR_WECOM_OAUTH_ENABLE_REAL", "1")
+    monkeypatch.setenv("WECOM_CORP_ID", "ww-test")
+    monkeypatch.setenv("WECOM_SECRET", "secret")
+    monkeypatch.setenv("AICRM_ADMIN_SESSION_COOKIE_SECURE", "0")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        "aicrm_next.identity_contact.sidebar_jssdk._owner_userids_from_external_userid",
+        lambda external_userid: {"ZhaoYanFang", "HuangYouCan"},
+    )
+
+    class FakeWeComAuthClient:
+        def fetch_access_token(self, *, corp_id: str, corp_secret: str) -> dict:
+            assert corp_id == "ww-test"
+            assert corp_secret == "secret"
+            return {"errcode": 0, "access_token": "access-token"}
+
+        def fetch_user_info(self, *, access_token: str, code: str) -> dict:
+            assert access_token == "access-token"
+            assert code == "oauth-code"
+            return {"errcode": 0, "UserId": "HuangYouCan"}
+
+    monkeypatch.setattr(
+        "aicrm_next.identity_contact.sidebar_jssdk.build_wecom_admin_auth_client",
+        lambda: FakeWeComAuthClient(),
+    )
+    client = TestClient(create_app(), raise_server_exceptions=False, base_url="https://www.youcangogogo.com")
+    state = sign_auth_state(
+        {
+            "external_userid": "wx_ext_multi_owner",
+            "next": "/sidebar/bind-mobile?external_userid=wx_ext_multi_owner",
+            "nonce": "nonce",
+            "iat": int(time()),
+        }
+    )
+
+    callback = client.get(
+        "/api/sidebar/oauth/callback",
+        params={"state": state, "code": "oauth-code"},
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/sidebar/bind-mobile?external_userid=wx_ext_multi_owner&sidebar_oauth=1"
+    assert SIDEBAR_VIEWER_COOKIE in callback.headers["set-cookie"]
+    response = client.get(
+        "/api/sidebar/jssdk-config",
+        params={
+            "url": "https://www.youcangogogo.com/sidebar/bind-mobile?external_userid=wx_ext_multi_owner&sidebar_oauth=1",
+            "external_userid": "wx_ext_multi_owner",
+        },
+    )
+    payload = response.json()
+    assert payload["sidebar_owner_token_status"] == "issued"
+    assert payload["sidebar_owner_context"]["owner_userid"] == "HuangYouCan"
+
+
+def test_sidebar_oauth_callback_rejects_viewer_outside_contact_owner_scope(monkeypatch) -> None:
+    monkeypatch.setenv("SECRET_KEY", "sidebar-oauth-scope")
+    monkeypatch.setenv("AICRM_SIDEBAR_WECOM_OAUTH_ENABLE_REAL", "1")
+    monkeypatch.setenv("WECOM_CORP_ID", "ww-test")
+    monkeypatch.setenv("WECOM_SECRET", "secret")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setattr(
+        "aicrm_next.identity_contact.sidebar_jssdk._owner_userids_from_external_userid",
+        lambda external_userid: {"HuangYouCan"},
+    )
+
+    class FakeWeComAuthClient:
+        def fetch_access_token(self, *, corp_id: str, corp_secret: str) -> dict:
+            return {"errcode": 0, "access_token": "access-token"}
+
+        def fetch_user_info(self, *, access_token: str, code: str) -> dict:
+            return {"errcode": 0, "UserId": "OtherOwner"}
+
+    monkeypatch.setattr(
+        "aicrm_next.identity_contact.sidebar_jssdk.build_wecom_admin_auth_client",
+        lambda: FakeWeComAuthClient(),
+    )
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    state = sign_auth_state(
+        {
+            "external_userid": "wx_ext_multi_owner",
+            "next": "/sidebar/bind-mobile?external_userid=wx_ext_multi_owner",
+            "nonce": "nonce",
+            "iat": int(time()),
+        }
+    )
+
+    callback = client.get(
+        "/api/sidebar/oauth/callback",
+        params={"state": state, "code": "oauth-code"},
+        follow_redirects=False,
+    )
+
+    assert callback.status_code == 302
+    assert callback.headers["location"] == "/sidebar/bind-mobile?external_userid=wx_ext_multi_owner&sidebar_oauth_error=viewer_not_in_contact_owner_scope"
+    assert SIDEBAR_VIEWER_COOKIE not in callback.headers.get("set-cookie", "")
+
+
 def test_jssdk_api_does_not_issue_token_when_viewer_is_outside_owner_candidates(monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "sidebar-owner-token-viewer-rejected")
     monkeypatch.delenv("DATABASE_URL", raising=False)
@@ -246,6 +413,7 @@ def test_jssdk_api_does_not_issue_token_when_viewer_is_outside_owner_candidates(
         "external_userid": "wx_ext_multi_owner",
         "source": "sidebar_jssdk_viewer_scope_rejected",
         "owner_candidates_count": 2,
+        "sidebar_oauth_status": "disabled",
     }
 
 

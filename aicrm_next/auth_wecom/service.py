@@ -33,6 +33,7 @@ from aicrm_next.shared.runtime import require_signing_secret
 
 
 REAL_AUTH_ENV = "AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL"
+AUTH_MODE_ENV = "AICRM_NEXT_WECOM_ADMIN_AUTH_MODE"
 STATE_MAX_AGE_SECONDS = 10 * 60
 
 
@@ -82,7 +83,7 @@ def build_config(*, request_base_url: str = "") -> WeComAuthConfig:
     if not redirect_uri and request_base_url:
         redirect_uri = f"{request_base_url.rstrip('/')}/auth/wecom/callback"
     return WeComAuthConfig(
-        enabled=_truthy(os.getenv(REAL_AUTH_ENV)),
+        enabled=_real_auth_enabled(),
         corp_id=normalize_text(os.getenv("WECOM_CORP_ID")),
         agent_id=normalize_text(os.getenv("WECOM_AGENT_ID")),
         corp_secret=normalize_text(os.getenv("WECOM_SECRET")),
@@ -265,6 +266,13 @@ def _wecom_errcode(payload: dict[str, Any]) -> bool:
 
 def _truthy(value: Any) -> bool:
     return normalize_text(value).lower() in {"1", "true", "yes", "on"}
+
+
+def _real_auth_enabled() -> bool:
+    explicit_gate = normalize_text(os.getenv(REAL_AUTH_ENV))
+    if explicit_gate:
+        return _truthy(explicit_gate)
+    return normalize_text(os.getenv(AUTH_MODE_ENV)).lower() == "live"
 
 
 def _bool(value: Any) -> bool:

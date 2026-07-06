@@ -87,6 +87,15 @@ def break_glass_enabled() -> bool:
     return normalize_text(os.getenv("ADMIN_BREAK_GLASS_LOGIN_ENABLED")).lower() in {"1", "true", "yes", "on"}
 
 
+def wecom_auth_mode_label() -> str:
+    explicit_gate = normalize_text(os.getenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL"))
+    if explicit_gate:
+        return "live" if _truthy_env(explicit_gate) else "next_safe_mode"
+    if normalize_text(os.getenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE")).lower() == "live":
+        return "live"
+    return "next_safe_mode"
+
+
 def admin_user_count() -> int:
     value = normalize_text(os.getenv("AICRM_NEXT_ADMIN_AUTH_USER_COUNT"))
     try:
@@ -104,7 +113,7 @@ def login_context(*, request: Any, next_path: Any = "", page_error: str = "", pa
         "page_error": page_error,
         "next_path": safe_next,
         "login_links": wecom_login_links(safe_next),
-        "wecom_auth_mode": "next_safe_mode",
+        "wecom_auth_mode": wecom_auth_mode_label(),
         "wecom_corp_id": normalize_text(os.getenv("WECOM_CORP_ID")),
         "wecom_agent_id": normalize_text(os.getenv("WECOM_AGENT_ID")),
         "admin_user_count": admin_user_count(),
@@ -114,6 +123,10 @@ def login_context(*, request: Any, next_path: Any = "", page_error: str = "", pa
         "real_external_call_executed": False,
         "url_for": _login_url_for,
     }
+
+
+def _truthy_env(value: Any) -> bool:
+    return normalize_text(value).lower() in {"1", "true", "yes", "on"}
 
 
 def login_error_message(error_code: Any) -> str:

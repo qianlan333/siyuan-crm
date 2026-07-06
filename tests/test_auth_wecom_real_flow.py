@@ -24,13 +24,18 @@ class FakeWeComAdminAuthClient:
         return {"errcode": 0, "UserId": "HuangYouCan"}
 
 
-def _prepare_client(monkeypatch, tmp_path) -> tuple[TestClient, FakeWeComAdminAuthClient]:
+def _prepare_client(monkeypatch, tmp_path, *, real_auth_env: str = "explicit_gate") -> tuple[TestClient, FakeWeComAdminAuthClient]:
     database_url = f"sqlite+pysqlite:///{tmp_path / 'wecom_auth.sqlite3'}"
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("SECRET_KEY", "wecom-admin-auth-test-secret")
-    monkeypatch.setenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", "true")
+    monkeypatch.delenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", raising=False)
+    monkeypatch.delenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", raising=False)
+    if real_auth_env == "mode_live":
+        monkeypatch.setenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", "live")
+    else:
+        monkeypatch.setenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", "true")
     monkeypatch.setenv("WECOM_CORP_ID", "ww-test-corp")
     monkeypatch.setenv("WECOM_AGENT_ID", "1000023")
     monkeypatch.setenv("WECOM_SECRET", "secret_for_test")
@@ -110,6 +115,7 @@ def _prepare_client(monkeypatch, tmp_path) -> tuple[TestClient, FakeWeComAdminAu
 
 def test_html_start_redirects_to_login_error_when_real_wecom_auth_is_disabled(monkeypatch) -> None:
     monkeypatch.delenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", raising=False)
+    monkeypatch.delenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", raising=False)
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
 
@@ -124,6 +130,20 @@ def test_html_start_redirects_to_login_error_when_real_wecom_auth_is_disabled(mo
         response.headers["location"]
         == "/login?next=%2Fadmin%2Fautomation-conversion&auth_error=wecom_admin_auth_not_enabled"
     )
+
+
+def test_real_wecom_auth_start_accepts_live_mode_env(monkeypatch, tmp_path) -> None:
+    client, _ = _prepare_client(monkeypatch, tmp_path, real_auth_env="mode_live")
+
+    response = client.get("/auth/wecom/start?mode=qr&next=/admin/automation-conversion", follow_redirects=False)
+    location = response.headers["location"]
+    parsed = urlparse(location)
+    params = parse_qs(parsed.query)
+
+    assert response.status_code == 302
+    assert f"{parsed.scheme}://{parsed.netloc}{parsed.path}" == "https://open.work.weixin.qq.com/wwopen/sso/qrConnect"
+    assert params["appid"] == ["ww-test-corp"]
+    assert params["agentid"] == ["1000023"]
 
 
 def test_real_wecom_auth_start_and_callback_signs_admin_session(monkeypatch, tmp_path) -> None:

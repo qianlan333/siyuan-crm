@@ -7562,3 +7562,14 @@ routes:
   data_source: command
   requires_auth: false
   rollback: previous_release
+- path: /{filename}
+  methods:
+  - GET
+  route_name: wechat_domain_verification_file
+  capability_owner: platform_foundation
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: static
+  requires_auth: false
+  rollback: previous_release

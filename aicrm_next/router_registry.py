@@ -61,6 +61,7 @@ from .platform_foundation.external_effects.api import router as external_effects
 from .platform_foundation.internal_events.api import router as internal_events_router
 from .platform_foundation.legacy_cleanup.api import router as legacy_cleanup_router
 from .platform_foundation.push_center.api import router as push_center_router
+from .platform_foundation.verification_files import router as verification_files_router
 from .platform_foundation.webhook_inbox.api import router as webhook_inbox_router
 from .public_product.api import router as public_product_router
 from .questionnaire.admin_pages import router as questionnaire_admin_pages_router
@@ -137,6 +138,7 @@ ROUTER_SPECS: tuple[RouterSpec, ...] = (
     RouterSpec("send_content", "send_content", send_content_router),
     RouterSpec("admin_jobs", "admin_jobs", admin_jobs_router),
     RouterSpec("owner_migration", "owner_migration", owner_migration_router),
+    RouterSpec("platform_foundation", "verification_files", verification_files_router, "WeChat and WeCom root verification files"),
 )
 
 

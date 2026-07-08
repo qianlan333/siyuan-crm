@@ -10,7 +10,7 @@ import aicrm_next.customer_tags.write_repo as write_repo
 from aicrm_next.main import create_app
 
 
-def test_wecom_tag_write_sources_do_not_call_legacy_or_real_wecom() -> None:
+def test_wecom_tag_write_sources_do_not_call_legacy_or_direct_http() -> None:
     sources = "\n".join(
         inspect.getsource(obj)
         for obj in [
@@ -32,8 +32,6 @@ def test_wecom_tag_write_sources_do_not_call_legacy_or_real_wecom() -> None:
         "X-AICRM-Compatibility-Facade",
         "requests.",
         "httpx.",
-        "WeComTagLiveGateway",
-        "list_wecom_tags_live",
         "mark_tags_live",
         "mark_external_contact_tags",
     ]
@@ -77,31 +75,44 @@ def test_wecom_tag_write_blocks_production_fixture_claims(monkeypatch) -> None:
     assert response.json()["real_external_call_executed"] is False
 
 
-def test_wecom_tag_write_uses_postgres_projection_in_production_data_mode(monkeypatch) -> None:
+def test_wecom_tag_write_creates_real_wecom_tag_and_syncs_projection_in_production_data_mode(monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "wecom-tag-write-production-postgres")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
     monkeypatch.setenv("DATABASE_URL", "postgresql://prod_user:prod_pass@db.internal:5432/prod_crm")
     admin_write.reset_wecom_tag_write_fixture_state()
 
-    class FakePostgresWeComTagWriteRepository:
+    class FakeGateway:
         def __init__(self) -> None:
             self.calls: list[dict] = []
 
-        def create_tag(self, *, command_id: str, group_id: str, tag_name: str) -> dict:
-            self.calls.append({"command_id": command_id, "group_id": group_id, "tag_name": tag_name})
+        def add_corp_tag_live(self, *, group_id: str = "", group_name: str = "", tags: list[dict], group_order=None, agentid=None) -> dict:
+            self.calls.append({"operation": "add_corp_tag_live", "group_id": group_id, "group_name": group_name, "tags": tags})
             return {
-                "tag_id": "tag_next_prod",
-                "tag_group_id": group_id,
-                "tag_name": tag_name,
-                "group_id": group_id,
-                "group_name": "AI-CRM 专用",
-                "order": 3,
-                "status": "active",
-                "source": "production_postgres_tag_catalog",
+                "errcode": 0,
+                "errmsg": "ok",
+                "tag_group": {
+                    "group_id": group_id,
+                    "group_name": "AI-CRM 专用",
+                    "tag": [{"id": "etb_live_tag", "name": tags[0]["name"], "order": 3}],
+                },
             }
 
-    fake_repo = FakePostgresWeComTagWriteRepository()
-    monkeypatch.setattr(admin_write, "PostgresWeComTagWriteRepository", lambda: fake_repo)
+    fake_gateway = FakeGateway()
+    sync_calls: list[dict] = []
+
+    def fake_sync(*, operator: str = "", gateway=None) -> dict:
+        sync_calls.append({"operator": operator, "gateway": gateway})
+        return {
+            "ok": True,
+            "source_status": "next_live_remote_synced",
+            "sync_model_status": "test_projection",
+            "real_external_call_executed": True,
+            "sync_executed": True,
+            "upserted_tags": 1,
+        }
+
+    monkeypatch.setattr(admin_write, "build_wecom_tag_live_gateway", lambda: fake_gateway)
+    monkeypatch.setattr(admin_write, "execute_wecom_tag_catalog_sync", fake_sync)
 
     response = TestClient(create_app(), raise_server_exceptions=False).post(
         "/api/admin/wecom/tags",
@@ -112,9 +123,15 @@ def test_wecom_tag_write_uses_postgres_projection_in_production_data_mode(monkey
     assert response.status_code == 200
     assert payload["ok"] is True
     assert payload["source_status"] == "next_command"
-    assert payload["write_model_status"] == "local_projection_updated"
-    assert payload["target_id"] == "tag_next_prod"
+    assert payload["write_model_status"] == "live_wecom_synced"
+    assert payload["target_id"] == "etb_live_tag"
     assert payload["fallback_used"] is False
-    assert payload["real_external_call_executed"] is False
-    assert payload["side_effect_plan"]["adapter_mode"] == "real_blocked"
-    assert fake_repo.calls[0]["group_id"] == "group_prod"
+    assert payload["real_external_call_executed"] is True
+    assert payload["sync_executed"] is True
+    assert payload["local_only"] is False
+    assert payload["side_effect_plan"]["adapter_mode"] == "live_wecom_tag_write"
+    assert payload["side_effect_plan"]["real_external_call_executed"] is True
+    assert fake_gateway.calls[0]["group_id"] == "group_prod"
+    assert fake_gateway.calls[0]["tags"] == [{"name": "AI联盟用户"}]
+    assert sync_calls[0]["operator"] == "wecom_tag_admin"
+    assert sync_calls[0]["gateway"] is fake_gateway

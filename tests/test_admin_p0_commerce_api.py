@@ -67,7 +67,9 @@ def test_unified_orders_list_detail_and_items(monkeypatch) -> None:
     assert alipay["ok"] is True
     assert merged["ok"] is True
     assert merged["providers"] == ["wechat", "alipay", "wechat_shop"]
-    assert {"id", "provider", "customer", "order_no", "amount_total", "can_refund"}.issubset(merged["items"][0])
+    item = merged["items"][0]
+    assert {"id", "provider", "customer", "order_no", "amount_total", "can_refund", "payer_name"}.issubset(item)
+    assert "name" in item["customer"]
 
     missing = client.get("/api/admin/orders/not_found_order")
     assert missing.status_code == 404

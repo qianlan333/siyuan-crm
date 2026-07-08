@@ -57,6 +57,8 @@ def test_wechat_product_admin_pages_keep_existing_routes_and_sections(next_clien
         assert response.status_code == 200
         _assert_next_headers(response)
 
+    assert "已售卖数量" in list_page.text
+    assert "<th>贴图</th>" not in list_page.text
     assert 'data-mode="edit"' in edit_page.text
     for text in ("商品管理", "售卖信息", "页面素材", "购买后动作", "外部推送"):
         assert text in edit_page.text
@@ -118,6 +120,8 @@ def test_wechat_product_admin_api_contract_routes_remain_available(next_client, 
 
     listed = _assert_admin_response(next_client.get("/api/admin/wechat-pay/products?limit=100"))
     assert listed["ok"] is True
+    listed_product = listed["items"][0]
+    assert {"paid_order_count", "refund_order_count", "sold_count", "slice_count"}.issubset(listed_product)
 
     created = _assert_admin_response(next_client.post("/api/admin/wechat-pay/products", json=_product_payload()))
     product = created["product"]

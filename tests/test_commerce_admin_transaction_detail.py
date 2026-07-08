@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 from starlette.routing import Match
 
@@ -44,12 +46,17 @@ def test_admin_transaction_pages_resolve_to_commerce_not_frontend_compat(monkeyp
 def test_unified_orders_page_exposes_payment_channel_dimension(monkeypatch) -> None:
     response = _client(monkeypatch).get("/admin/orders")
     html = response.text
+    template = Path("aicrm_next/commerce/templates/admin_orders.html").read_text(encoding="utf-8")
 
     assert response.status_code == 200
     assert "交易管理" in html
     assert "支付渠道" in html
+    assert "付款人 / 客户身份" in html
     assert "/api/admin/orders" in html
     assert "微信小店" in html
+    assert 'colspan="8"' in template
+    assert 'return row.payer_name || customer.name || "未记录付款人";' in template
+    assert "row.userid || row.external_userid || row.unionid || customer.userid || customer.external_userid || customer.unionid" in template
 
 
 def test_wechat_transaction_detail_page_is_next_readonly(monkeypatch) -> None:

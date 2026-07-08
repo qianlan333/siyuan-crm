@@ -1452,7 +1452,7 @@ class PostgresCloudPlanRepository:
                 ) VALUES (
                     %s, %s, %s, %s, 1, 'approved', 'pending', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
-                ON CONFLICT (plan_id, unionid) DO UPDATE SET
+                ON CONFLICT (plan_id, unionid) WHERE unionid <> '' DO UPDATE SET
                     owner_userid = EXCLUDED.owner_userid,
                     planned_message_count = 1,
                     updated_at = CURRENT_TIMESTAMP

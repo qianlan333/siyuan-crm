@@ -7,6 +7,8 @@ from aicrm_next.platform_foundation.command_bus import Command, CommandBus, Comm
 from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRepository, SideEffectPlan
 from aicrm_next.shared.runtime import production_data_ready, production_environment
 
+from aicrm_next.integration_gateway.wecom_tag_live_gateway import build_wecom_tag_live_gateway
+
 from .commands import (
     CreateWeComTagCommand,
     CreateWeComTagGroupCommand,
@@ -17,6 +19,7 @@ from .commands import (
     UpdateWeComTagGroupCommand,
     WeComTagWriteCommand,
 )
+from .sync_service import execute_wecom_tag_catalog_sync
 from .write_repo import PostgresWeComTagWriteRepository, WeComTagWriteRepository
 
 
@@ -142,6 +145,8 @@ def _handle_create_tag(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
     if not str(requested.get("group_id") or "").strip():
         raise ValueError("group_id is required")
+    if production_data_ready():
+        return _handle_live_create_tag(command, requested)
     tag = _write_repository().create_tag(
         command_id=command.command_id,
         group_id=str(requested.get("group_id") or "").strip(),
@@ -153,12 +158,16 @@ def _handle_create_tag(command: Command) -> dict[str, Any]:
 
 def _handle_update_tag(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
+    if production_data_ready():
+        return _handle_live_update_tag(command, requested)
     tag = _write_repository().update_tag(command_id=command.command_id, tag_id=str(command.payload.get("target_id") or ""), tag_name=str(requested.get("tag_name") or "").strip())
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag.update", target_type="wecom_tag", target_id=tag["tag_id"], payload_summary={"tag_id": tag["tag_id"], "tag_name": tag["tag_name"]}, risk_level="medium")
     return {"target_id": tag["tag_id"], "tag": tag, "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_delete_tag(command: Command) -> dict[str, Any]:
+    if production_data_ready():
+        return _handle_live_delete_tag(command)
     tag = _write_repository().delete_tag(command_id=command.command_id, tag_id=str(command.payload.get("target_id") or ""))
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag.delete", target_type="wecom_tag", target_id=tag["tag_id"], payload_summary={"tag_id": tag["tag_id"], "group_id": tag["group_id"]}, risk_level="high")
     return {"target_id": tag["tag_id"], "tag": tag, "deleted": True, "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
@@ -166,6 +175,8 @@ def _handle_delete_tag(command: Command) -> dict[str, Any]:
 
 def _handle_create_group(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
+    if production_data_ready():
+        return _handle_live_create_group(command, requested)
     result = _write_repository().create_group(
         command_id=command.command_id,
         group_name=str(requested.get("group_name") or "").strip(),
@@ -178,12 +189,16 @@ def _handle_create_group(command: Command) -> dict[str, Any]:
 
 def _handle_update_group(command: Command) -> dict[str, Any]:
     requested = dict(command.payload.get("payload") or {})
+    if production_data_ready():
+        return _handle_live_update_group(command, requested)
     group = _write_repository().update_group(command_id=command.command_id, group_id=str(command.payload.get("target_id") or ""), group_name=str(requested.get("group_name") or "").strip())
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag_group.update", target_type="wecom_tag_group", target_id=group["group_id"], payload_summary={"group_id": group["group_id"], "group_name": group["group_name"]}, risk_level="medium")
     return {"target_id": group["group_id"], "group": group, "write_model_status": "local_projection_updated", "local_projection_updated": True, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_delete_group(command: Command) -> dict[str, Any]:
+    if production_data_ready():
+        return _handle_live_delete_group(command)
     result = _write_repository().delete_group(command_id=command.command_id, group_id=str(command.payload.get("target_id") or ""))
     group = result["group"]
     plan = _create_side_effect_plan(command=command, effect_type="wecom.tag_group.delete", target_type="wecom_tag_group", target_id=group["group_id"], payload_summary={"group_id": group["group_id"], "deleted_tag_count": len(result.get("deleted_tag_ids") or [])}, risk_level="high")
@@ -200,6 +215,185 @@ def _write_repository() -> WeComTagWriteRepository | PostgresWeComTagWriteReposi
     if production_data_ready():
         return PostgresWeComTagWriteRepository()
     return _repo
+
+
+def _live_gateway():
+    return build_wecom_tag_live_gateway()
+
+
+def _sync_live_projection(*, command: Command, gateway) -> dict[str, Any]:
+    return execute_wecom_tag_catalog_sync(operator=str(command.context.actor_id or "wecom_tag_admin"), gateway=gateway)
+
+
+def _handle_live_create_tag(command: Command, requested: dict[str, Any]) -> dict[str, Any]:
+    group_id = str(requested.get("group_id") or "").strip()
+    tag_name = str(requested.get("tag_name") or "").strip()
+    if not tag_name:
+        raise ValueError("tag_name is required")
+    gateway = _live_gateway()
+    live_result = gateway.add_corp_tag_live(group_id=group_id, tags=[{"name": tag_name}])
+    sync = _sync_live_projection(command=command, gateway=gateway)
+    tag = _tag_from_add_result(live_result, group_id=group_id, tag_name=tag_name)
+    plan = _create_live_side_effect_plan(
+        command=command,
+        effect_type="wecom.tag.create",
+        target_type="wecom_tag",
+        target_id=tag["tag_id"],
+        payload_summary={"group_id": group_id, "tag_name": tag_name},
+    )
+    return _live_write_response(target_id=tag["tag_id"], side_effect_plan=plan, sync=sync, tag=tag)
+
+
+def _handle_live_update_tag(command: Command, requested: dict[str, Any]) -> dict[str, Any]:
+    tag_id = str(command.payload.get("target_id") or "").strip()
+    tag_name = str(requested.get("tag_name") or "").strip()
+    if not tag_id:
+        raise ValueError("tag_id is required")
+    if not tag_name:
+        raise ValueError("tag_name is required")
+    before = _write_repository().get_tag(tag_id) or {"tag_id": tag_id, "group_id": ""}
+    gateway = _live_gateway()
+    gateway.edit_corp_tag_live(tag_or_group_id=tag_id, name=tag_name)
+    sync = _sync_live_projection(command=command, gateway=gateway)
+    tag = {**before, "tag_name": tag_name, "source": "live_wecom_tag_write"}
+    plan = _create_live_side_effect_plan(
+        command=command,
+        effect_type="wecom.tag.update",
+        target_type="wecom_tag",
+        target_id=tag_id,
+        payload_summary={"tag_id": tag_id, "tag_name": tag_name},
+    )
+    return _live_write_response(target_id=tag_id, side_effect_plan=plan, sync=sync, tag=tag)
+
+
+def _handle_live_delete_tag(command: Command) -> dict[str, Any]:
+    tag_id = str(command.payload.get("target_id") or "").strip()
+    if not tag_id:
+        raise ValueError("tag_id is required")
+    tag = _write_repository().get_tag(tag_id) or {"tag_id": tag_id, "group_id": ""}
+    gateway = _live_gateway()
+    gateway.delete_corp_tag_live(tag_ids=[tag_id])
+    sync = _sync_live_projection(command=command, gateway=gateway)
+    plan = _create_live_side_effect_plan(
+        command=command,
+        effect_type="wecom.tag.delete",
+        target_type="wecom_tag",
+        target_id=tag_id,
+        payload_summary={"tag_id": tag_id, "group_id": tag.get("group_id") or ""},
+        risk_level="high",
+    )
+    return _live_write_response(target_id=tag_id, side_effect_plan=plan, sync=sync, tag=tag, deleted=True)
+
+
+def _handle_live_create_group(command: Command, requested: dict[str, Any]) -> dict[str, Any]:
+    group_name = str(requested.get("group_name") or "").strip()
+    first_tag_name = str(requested.get("first_tag_name") or "").strip()
+    if not group_name:
+        raise ValueError("group_name is required")
+    if not first_tag_name:
+        raise ValueError("first_tag_name is required for live WeCom tag-group creation")
+    gateway = _live_gateway()
+    live_result = gateway.add_corp_tag_live(group_name=group_name, tags=[{"name": first_tag_name}])
+    sync = _sync_live_projection(command=command, gateway=gateway)
+    group = _group_from_add_result(live_result, group_name=group_name)
+    tag = _tag_from_add_result(live_result, group_id=group["group_id"], tag_name=first_tag_name)
+    plan = _create_live_side_effect_plan(
+        command=command,
+        effect_type="wecom.tag_group.create",
+        target_type="wecom_tag_group",
+        target_id=group["group_id"],
+        payload_summary={"group_name": group_name, "first_tag_requested": True},
+    )
+    return _live_write_response(target_id=group["group_id"], side_effect_plan=plan, sync=sync, group=group, tags=[tag])
+
+
+def _handle_live_update_group(command: Command, requested: dict[str, Any]) -> dict[str, Any]:
+    group_id = str(command.payload.get("target_id") or "").strip()
+    group_name = str(requested.get("group_name") or "").strip()
+    if not group_id:
+        raise ValueError("group_id is required")
+    if not group_name:
+        raise ValueError("group_name is required")
+    before = _write_repository().get_group(group_id) or {"group_id": group_id}
+    gateway = _live_gateway()
+    gateway.edit_corp_tag_live(tag_or_group_id=group_id, name=group_name)
+    sync = _sync_live_projection(command=command, gateway=gateway)
+    group = {**before, "group_name": group_name, "source": "live_wecom_tag_write"}
+    plan = _create_live_side_effect_plan(
+        command=command,
+        effect_type="wecom.tag_group.update",
+        target_type="wecom_tag_group",
+        target_id=group_id,
+        payload_summary={"group_id": group_id, "group_name": group_name},
+    )
+    return _live_write_response(target_id=group_id, side_effect_plan=plan, sync=sync, group=group)
+
+
+def _handle_live_delete_group(command: Command) -> dict[str, Any]:
+    group_id = str(command.payload.get("target_id") or "").strip()
+    if not group_id:
+        raise ValueError("group_id is required")
+    group = _write_repository().get_group(group_id) or {"group_id": group_id}
+    gateway = _live_gateway()
+    gateway.delete_corp_tag_live(group_ids=[group_id])
+    sync = _sync_live_projection(command=command, gateway=gateway)
+    plan = _create_live_side_effect_plan(
+        command=command,
+        effect_type="wecom.tag_group.delete",
+        target_type="wecom_tag_group",
+        target_id=group_id,
+        payload_summary={"group_id": group_id},
+        risk_level="high",
+    )
+    return _live_write_response(target_id=group_id, side_effect_plan=plan, sync=sync, group=group, deleted=True)
+
+
+def _tag_from_add_result(live_result: dict[str, Any], *, group_id: str, tag_name: str) -> dict[str, Any]:
+    group = dict(live_result.get("tag_group") or {})
+    tags = list(group.get("tag") or [])
+    selected = next((dict(tag or {}) for tag in tags if str((tag or {}).get("name") or (tag or {}).get("tag_name") or "").strip() == tag_name), dict(tags[0] or {}) if tags else {})
+    tag_id = str(selected.get("id") or selected.get("tag_id") or "").strip()
+    if not tag_id:
+        raise ValueError("live WeCom tag creation did not return tag id")
+    return {
+        "tag_id": tag_id,
+        "tag_group_id": str(group.get("group_id") or group_id or "").strip(),
+        "tag_name": str(selected.get("name") or selected.get("tag_name") or tag_name).strip(),
+        "group_id": str(group.get("group_id") or group_id or "").strip(),
+        "group_name": str(group.get("group_name") or "").strip(),
+        "order": int(selected.get("order") or 0),
+        "status": "active",
+        "source": "live_wecom_tag_write",
+    }
+
+
+def _group_from_add_result(live_result: dict[str, Any], *, group_name: str) -> dict[str, Any]:
+    group = dict(live_result.get("tag_group") or {})
+    group_id = str(group.get("group_id") or "").strip()
+    if not group_id:
+        raise ValueError("live WeCom tag-group creation did not return group id")
+    return {
+        "group_id": group_id,
+        "tag_group_id": group_id,
+        "group_key": group_id,
+        "group_name": str(group.get("group_name") or group_name).strip(),
+        "tag_count": len(list(group.get("tag") or [])),
+        "source": "live_wecom_tag_write",
+    }
+
+
+def _live_write_response(*, target_id: str, side_effect_plan: SideEffectPlan, sync: dict[str, Any], **payload: Any) -> dict[str, Any]:
+    return {
+        "target_id": target_id,
+        "write_model_status": "live_wecom_synced",
+        "local_projection_updated": True,
+        "real_external_call_executed": True,
+        "sync_executed": True,
+        "local_only": False,
+        "sync": sync,
+        "side_effect_plan": _plan_response(side_effect_plan),
+        **payload,
+    }
 
 
 def _create_side_effect_plan(
@@ -228,11 +422,39 @@ def _create_side_effect_plan(
     )
 
 
+def _create_live_side_effect_plan(
+    *,
+    command: Command,
+    effect_type: str,
+    target_type: str,
+    target_id: str,
+    payload_summary: dict[str, Any],
+    risk_level: str = "medium",
+) -> SideEffectPlan:
+    return _side_effect_plans.create_plan(
+        command_id=command.command_id,
+        effect_type=effect_type,
+        adapter_name="wecom_tag_admin",
+        adapter_mode="live_wecom_tag_write",
+        target_type=target_type,
+        target_id=target_id,
+        payload={
+            "payload_summary": payload_summary,
+            "real_external_call_executed": True,
+            "sync_executed": True,
+        },
+        status="succeeded",
+        risk_level=risk_level,
+        requires_approval=False,
+    )
+
+
 def _plan_response(plan: SideEffectPlan) -> dict[str, Any]:
     payload = plan.to_dict()
     summary = dict(payload.pop("payload") or {})
     payload["payload_summary"] = summary.get("payload_summary") or {}
-    payload["real_external_call_executed"] = False
+    payload["real_external_call_executed"] = bool(summary.get("real_external_call_executed"))
+    payload["sync_executed"] = bool(summary.get("sync_executed"))
     return payload
 
 
@@ -246,9 +468,9 @@ def _response_from_result(result: CommandResult, payload: dict[str, Any]) -> dic
         "write_model_status": payload.get("write_model_status") or "local_projection_updated",
         "route_owner": "ai_crm_next",
         "fallback_used": False,
-        "real_external_call_executed": False,
+        "real_external_call_executed": bool(payload.get("real_external_call_executed")),
         "sync_executed": bool(payload.get("sync_executed") or False),
-        "local_only": True,
+        "local_only": bool(payload.get("local_only", True)),
         "audit_recorded": True,
         "command_result_status": result.status,
         "target_id": payload.get("target_id") or "",

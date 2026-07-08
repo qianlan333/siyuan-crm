@@ -328,7 +328,12 @@ def _int_value(value: Any) -> int:
 def _postgres_order_select() -> str:
     return f"""
         id, out_trade_no, transaction_id, payer_name_snapshot,
-        COALESCE((SELECT identity.mobile FROM crm_user_identity identity WHERE identity.unionid = wechat_pay_orders.unionid LIMIT 1), '') AS mobile_snapshot,
+        COALESCE(
+            (SELECT identity.mobile FROM crm_user_identity identity WHERE identity.unionid = wechat_pay_orders.unionid LIMIT 1),
+            NULLIF(metadata_json #>> '{{payer_identity,mobile}}', ''),
+            NULLIF(metadata_json #>> '{{buyer_identity,mobile}}', ''),
+            ''
+        ) AS mobile_snapshot,
         '' AS userid_snapshot,
         COALESCE((SELECT identity.primary_external_userid FROM crm_user_identity identity WHERE identity.unionid = wechat_pay_orders.unionid LIMIT 1), '') AS external_userid,
         unionid, '' AS respondent_key, product_name, product_code, amount_total, currency,

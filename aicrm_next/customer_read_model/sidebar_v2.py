@@ -327,10 +327,22 @@ class SidebarV2SqlRepository:
                 WHERE COALESCE(identity.unionid, '') <> ''
             ),
             matching_orders AS (
-                SELECT identity.mobile AS mobile_snapshot, '' AS userid_snapshot, paid_at, created_at, o.id::text AS id
+                SELECT mobile.mobile_snapshot, '' AS userid_snapshot, paid_at, created_at, o.id::text AS id
                 FROM wechat_pay_orders o
                 JOIN identity_scope identity ON identity.unionid = o.unionid
-                WHERE COALESCE(identity.mobile, '') <> ''
+                CROSS JOIN LATERAL (
+                    SELECT regexp_replace(
+                        COALESCE(
+                            NULLIF(identity.mobile, ''),
+                            NULLIF(o.metadata_json #>> '{payer_identity,mobile}', ''),
+                            NULLIF(o.metadata_json #>> '{buyer_identity,mobile}', '')
+                        ),
+                        '[^0-9]',
+                        '',
+                        'g'
+                    ) AS mobile_snapshot
+                ) mobile
+                WHERE COALESCE(mobile.mobile_snapshot, '') <> ''
                   AND (status = 'paid' OR trade_state = 'SUCCESS')
                 UNION ALL
                 SELECT identity.mobile AS mobile_snapshot, '' AS userid_snapshot, o.paid_at, o.created_at, o.order_id::text AS id

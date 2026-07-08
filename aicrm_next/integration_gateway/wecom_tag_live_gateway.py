@@ -60,6 +60,60 @@ class WeComTagLiveGateway:
             return self._post("/cgi-bin/externalcontact/get_corp_tag_list", {})
         return dict(client.list_wecom_tags_live() if hasattr(client, "list_wecom_tags_live") else client.list_tags({}) or {})
 
+    def add_corp_tag_live(
+        self,
+        *,
+        group_id: str = "",
+        group_name: str = "",
+        tags: list[Json],
+        group_order: int | None = None,
+        agentid: int | None = None,
+    ) -> Json:
+        client = self._build_client()
+        payload: Json = {"tag": list(tags or [])}
+        if str(group_id or "").strip():
+            payload["group_id"] = str(group_id or "").strip()
+        if str(group_name or "").strip():
+            payload["group_name"] = str(group_name or "").strip()
+        if group_order is not None:
+            payload["order"] = int(group_order)
+        if agentid is not None:
+            payload["agentid"] = int(agentid)
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/add_corp_tag", payload)
+        if hasattr(client, "add_corp_tag_live"):
+            return dict(client.add_corp_tag_live(group_id=group_id, group_name=group_name, tags=tags, group_order=group_order, agentid=agentid) or {})
+        if hasattr(client, "add_corp_tag"):
+            return dict(client.add_corp_tag(payload) or {})
+        raise RuntimeError("client does not support add_corp_tag")
+
+    def edit_corp_tag_live(self, *, tag_or_group_id: str, name: str, order: int | None = None) -> Json:
+        client = self._build_client()
+        payload: Json = {"id": str(tag_or_group_id or "").strip(), "name": str(name or "").strip()}
+        if order is not None:
+            payload["order"] = int(order)
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/edit_corp_tag", payload)
+        if hasattr(client, "edit_corp_tag_live"):
+            return dict(client.edit_corp_tag_live(tag_or_group_id=tag_or_group_id, name=name, order=order) or {})
+        if hasattr(client, "edit_corp_tag"):
+            return dict(client.edit_corp_tag(payload) or {})
+        raise RuntimeError("client does not support edit_corp_tag")
+
+    def delete_corp_tag_live(self, *, tag_ids: list[str] | None = None, group_ids: list[str] | None = None) -> Json:
+        client = self._build_client()
+        payload: Json = {
+            "tag_id": [str(item or "").strip() for item in list(tag_ids or []) if str(item or "").strip()],
+            "group_id": [str(item or "").strip() for item in list(group_ids or []) if str(item or "").strip()],
+        }
+        if client is self:
+            return self._post("/cgi-bin/externalcontact/del_corp_tag", payload)
+        if hasattr(client, "delete_corp_tag_live"):
+            return dict(client.delete_corp_tag_live(tag_ids=tag_ids, group_ids=group_ids) or {})
+        if hasattr(client, "del_corp_tag"):
+            return dict(client.del_corp_tag(payload) or {})
+        raise RuntimeError("client does not support del_corp_tag")
+
     def mark_tags_live(self, *, external_userid: str, tag_ids: list[str], operator: str) -> Json:
         client = self._build_client()
         payload = {"userid": operator, "external_userid": external_userid, "add_tag": list(tag_ids)}

@@ -139,6 +139,40 @@ def test_wecom_tag_gateway_accepts_existing_wecom_contact_env_names(monkeypatch)
     assert "corpsecret=contact_secret" in captured["url"]
 
 
+def test_wecom_tag_gateway_supports_live_corp_tag_crud_client_contract() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        def add_corp_tag(self, payload):
+            self.calls.append({"operation": "add", "payload": payload})
+            return {"errcode": 0, "tag_group": {"group_id": payload["group_id"], "tag": [{"id": "etb_tag", "name": payload["tag"][0]["name"]}]}}
+
+        def edit_corp_tag(self, payload):
+            self.calls.append({"operation": "edit", "payload": payload})
+            return {"errcode": 0}
+
+        def del_corp_tag(self, payload):
+            self.calls.append({"operation": "delete", "payload": payload})
+            return {"errcode": 0}
+
+    fake = FakeClient()
+    gateway = WeComTagLiveGateway(client=fake)
+
+    add = gateway.add_corp_tag_live(group_id="group_a", tags=[{"name": "同行圈体验版"}])
+    edit = gateway.edit_corp_tag_live(tag_or_group_id="etb_tag", name="同行圈体验版更新")
+    delete = gateway.delete_corp_tag_live(tag_ids=["etb_tag"])
+
+    assert add["tag_group"]["tag"][0]["id"] == "etb_tag"
+    assert edit["errcode"] == 0
+    assert delete["errcode"] == 0
+    assert fake.calls == [
+        {"operation": "add", "payload": {"tag": [{"name": "同行圈体验版"}], "group_id": "group_a"}},
+        {"operation": "edit", "payload": {"id": "etb_tag", "name": "同行圈体验版更新"}},
+        {"operation": "delete", "payload": {"tag_id": ["etb_tag"], "group_id": []}},
+    ]
+
+
 def test_shared_database_url_prefers_runtime_database_url(monkeypatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db.local:5432/app")
 

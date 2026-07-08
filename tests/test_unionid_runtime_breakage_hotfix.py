@@ -106,6 +106,11 @@ def test_automation_agent_webhook_item_upsert_matches_partial_index() -> None:
     assert "ON CONFLICT (batch_id, unionid) WHERE unionid <> '' DO UPDATE" in source
 
 
+def test_cloud_plan_recipient_upsert_matches_partial_index() -> None:
+    source = _read("aicrm_next/cloud_orchestrator/repository.py")
+    assert "ON CONFLICT (plan_id, unionid) WHERE unionid <> '' DO UPDATE" in source
+
+
 def test_unionid_runtime_sql_guard_blocks_removed_identity_columns() -> None:
     h5_source = _read("aicrm_next/public_product/h5_wechat_pay.py")
     questionnaire_source = _read("aicrm_next/questionnaire/repo.py")

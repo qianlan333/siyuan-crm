@@ -483,7 +483,12 @@ def _postgres_order_select(provider: str) -> str:
         """.format(buyer_mobile_sql=WECHAT_SHOP_BUYER_MOBILE_SQL, openid_sql=WECHAT_SHOP_OPENID_SQL)
     return f"""
         o.id, o.out_trade_no, o.transaction_id, o.payer_name_snapshot,
-        COALESCE((SELECT identity.mobile FROM crm_user_identity identity WHERE identity.unionid = o.unionid LIMIT 1), '') AS mobile_snapshot,
+        COALESCE(
+            (SELECT identity.mobile FROM crm_user_identity identity WHERE identity.unionid = o.unionid LIMIT 1),
+            NULLIF(o.metadata_json #>> '{{payer_identity,mobile}}', ''),
+            NULLIF(o.metadata_json #>> '{{buyer_identity,mobile}}', ''),
+            ''
+        ) AS mobile_snapshot,
         '' AS userid_snapshot,
         COALESCE((SELECT identity.primary_external_userid FROM crm_user_identity identity WHERE identity.unionid = o.unionid LIMIT 1), '') AS external_userid,
         o.unionid, '' AS respondent_key, o.product_name, o.product_code, o.amount_total, o.currency,

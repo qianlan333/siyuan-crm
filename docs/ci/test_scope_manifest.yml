@@ -27,6 +27,14 @@
   "exclusive_scope_overrides": [
     {
       "paths": [
+        "aicrm_next/integration_gateway/wecom_tag_live_gateway.py"
+      ],
+      "scopes": [
+        "wecom_tag_catalog_write"
+      ]
+    },
+    {
+      "paths": [
         "aicrm_next/ai_audience_ops/admin_api.py",
         "aicrm_next/automation_engine/group_ops/api.py",
         "aicrm_next/automation_engine/group_ops/application.py",
@@ -47,13 +55,19 @@
         "aicrm_next/public_product/**",
         "tests/test_wechat_products_admin_page_contract.py",
         "tests/test_product_external_push.py",
+        "tests/test_admin_p0_commerce_api.py",
+        "tests/test_commerce_admin_transaction_detail.py",
+        "tests/test_h5_wechat_pay_mobile_projection.py",
         "tests/test_wechat_pay_*.py",
         "tests/test_public_product_*.py",
         "tests/test_next_h5_wechat_pay_external_push_outbox.py"
       ],
       "python_tests": [
+        "tests/test_admin_p0_commerce_api.py",
+        "tests/test_commerce_admin_transaction_detail.py",
         "tests/test_wechat_products_admin_page_contract.py",
         "tests/test_product_external_push.py",
+        "tests/test_h5_wechat_pay_mobile_projection.py",
         "tests/test_public_product_no_real_payment.py",
         "tests/test_public_product_h5_pay_oauth_native.py",
         "tests/test_public_product_api_contract.py"
@@ -174,6 +188,24 @@
       "architecture_gate": "db"
     },
     {
+      "name": "cloud_plan_repository",
+      "paths": [
+        "aicrm_next/cloud_orchestrator/repository.py",
+        "tests/test_internal_events_broadcast_task_slice.py",
+        "tests/test_ops_plan_broadcast_planner_consumer.py",
+        "tests/test_unionid_identity_refactor_schema.py",
+        "tests/test_unionid_runtime_breakage_hotfix.py"
+      ],
+      "python_tests": [
+        "tests/test_unionid_runtime_breakage_hotfix.py",
+        "tests/test_unionid_identity_refactor_schema.py",
+        "tests/test_ops_plan_broadcast_planner_consumer.py",
+        "tests/test_internal_events_broadcast_task_slice.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
       "name": "user_ops",
       "paths": [
         "aicrm_next/ops_enrollment/**",
@@ -224,6 +256,25 @@
       ],
       "needs_postgres": true,
       "architecture_gate": "db"
+    },
+    {
+      "name": "wecom_tag_catalog_write",
+      "paths": [
+        "aicrm_next/customer_tags/admin_write.py",
+        "aicrm_next/integration_gateway/wecom_tag_live_gateway.py",
+        "tests/test_wecom_tag_next_sync.py",
+        "tests/test_wecom_tag_write_*.py"
+      ],
+      "python_tests": [
+        "tests/test_wecom_tag_write_no_real_side_effects.py",
+        "tests/test_wecom_tag_next_sync.py",
+        "tests/test_wecom_tag_write_commands.py",
+        "tests/test_wecom_tag_write_idempotency.py",
+        "tests/test_wecom_tag_write_inventory.py",
+        "tests/test_wecom_tag_read_selectors.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
     },
     {
       "name": "frontend_p1",

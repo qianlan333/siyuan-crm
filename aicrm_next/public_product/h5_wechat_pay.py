@@ -727,6 +727,96 @@ def _mark_order_failed(conn: Any, out_trade_no: str, error_message: str) -> None
     )
 
 
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _order_metadata_identity(order: dict[str, Any]) -> dict[str, Any]:
+    metadata = _json_object(order.get("metadata_json"))
+    for key in ("payer_identity", "buyer_identity"):
+        identity = metadata.get(key)
+        if isinstance(identity, dict):
+            return identity
+    return {}
+
+
+def _project_order_mobile_to_identity(conn: Any, order: dict[str, Any], *, source_route: str) -> dict[str, Any]:
+    identity = _order_metadata_identity(order)
+    mobile = "".join(ch for ch in _normalized_text(identity.get("mobile")) if ch.isdigit())
+    unionid = _normalized_text(order.get("unionid") or identity.get("unionid"))
+    if not unionid:
+        return {"ok": True, "projected": False, "reason": "missing_unionid"}
+    if not mobile:
+        return {"ok": True, "projected": False, "reason": "missing_mobile"}
+    if not (len(mobile) == 11 and mobile.startswith("1")):
+        return {"ok": True, "projected": False, "reason": "invalid_mobile"}
+
+    external_userid = _normalized_text(identity.get("external_userid"))
+    owner_userid = _normalized_text(identity.get("owner_userid"))
+    customer_name = _normalized_text(order.get("payer_name_snapshot") or identity.get("payer_name"))
+    row = conn.execute(
+        """
+        UPDATE crm_user_identity
+        SET mobile = %s,
+            mobile_normalized = %s,
+            mobile_verified = TRUE,
+            mobile_source = CASE
+                WHEN COALESCE(NULLIF(mobile_source, ''), '') = '' THEN 'wechat_pay_order'
+                ELSE mobile_source
+            END,
+            primary_external_userid = COALESCE(NULLIF(primary_external_userid, ''), NULLIF(%s, ''), primary_external_userid),
+            primary_owner_userid = COALESCE(NULLIF(primary_owner_userid, ''), NULLIF(%s, ''), primary_owner_userid),
+            customer_name = COALESCE(NULLIF(customer_name, ''), NULLIF(%s, ''), customer_name),
+            profile_json = COALESCE(profile_json, '{}'::jsonb) || %s::jsonb,
+            last_seen_at = NOW(),
+            updated_at = NOW()
+        WHERE unionid = %s
+          AND (COALESCE(mobile, '') = '' OR mobile = %s OR mobile_normalized = %s)
+        RETURNING unionid, mobile, primary_external_userid, primary_owner_userid
+        """,
+        (
+            mobile,
+            mobile,
+            external_userid,
+            owner_userid,
+            customer_name,
+            _jsonb(
+                {
+                    "wechat_pay_mobile_projection": {
+                        "out_trade_no": _normalized_text(order.get("out_trade_no")),
+                        "source_route": source_route,
+                    }
+                }
+            ),
+            unionid,
+            mobile,
+            mobile,
+        ),
+    ).fetchone()
+    if not row:
+        return {"ok": True, "projected": False, "reason": "identity_missing_or_mobile_conflict", "unionid": unionid}
+    return {"ok": True, "projected": True, "unionid": unionid, "mobile": mobile}
+
+
+def _safe_project_order_mobile_to_identity(conn: Any, order: dict[str, Any], *, source_route: str) -> dict[str, Any]:
+    try:
+        return _project_order_mobile_to_identity(conn, order, source_route=source_route)
+    except Exception:
+        LOGGER.exception(
+            "wechat_pay_order_mobile_projection_failed",
+            extra={"out_trade_no": _normalized_text(order.get("out_trade_no")), "source_route": source_route},
+        )
+        return {"ok": False, "projected": False, "reason": "projection_error"}
+
+
 def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: str = "/api/h5/wechat-pay/notify") -> dict[str, Any]:
     trade_no = _normalized_text(transaction.get("out_trade_no"))
     trade_state = _normalized_text(transaction.get("trade_state"))
@@ -764,6 +854,7 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: 
     order_payload = dict(order or {})
     is_paid = _normalized_text(order_payload.get("status")) == "paid" or _normalized_text(order_payload.get("trade_state")) == "SUCCESS"
     if is_paid:
+        mobile_projection = _safe_project_order_mobile_to_identity(conn, order_payload, source_route=source_route)
         outbox = enqueue_transaction_paid_outbox(conn, order_payload)
         _emit_payment_succeeded_internal_event(
             order=order_payload,
@@ -780,6 +871,8 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: 
                 "event_type": "transaction.paid",
                 "outbox_created": bool(outbox),
                 "was_paid": was_paid,
+                "mobile_projected": bool(mobile_projection.get("projected")),
+                "mobile_projection_reason": _normalized_text(mobile_projection.get("reason")),
             },
         )
     return order_payload

@@ -5,13 +5,15 @@ import pytest
 import aicrm_next.commerce.application as commerce_application
 import aicrm_next.public_product.service as public_product_service
 from aicrm_next.commerce.application import (
+    CheckoutCommand,
     DeleteProductCommand,
     GetProductQuery,
     GetPublicProductQuery,
+    NotifyPaymentCommand,
     SetProductEnabledCommand,
     UpsertProductCommand,
 )
-from aicrm_next.commerce.dto import ProductUpsertRequest
+from aicrm_next.commerce.dto import CheckoutRequest, PaymentNotifyRequest, ProductUpsertRequest
 from aicrm_next.commerce.repo import InMemoryCommerceRepository, reset_commerce_fixture_state
 from aicrm_next.shared.errors import ContractError
 
@@ -42,6 +44,11 @@ def _assert_next_payment_contract(response) -> dict:
     assert payload["real_external_call_executed"] is False
     assert payload["payment_request_executed"] is False
     return payload
+
+
+def _listed_product(repo: InMemoryCommerceRepository, product_code: str) -> dict:
+    payload = repo.list_products(limit=100, offset=0)
+    return next(item for item in payload["items"] if item["product_code"] == product_code)
 
 
 def test_admin_product_api_uses_next_fixture_routes(next_client):
@@ -111,6 +118,61 @@ def test_next_product_commands_preserve_delete_and_redirect_contracts():
         DeleteProductCommand(repo)("prod_000")
 
     assert DeleteProductCommand(repo)(created["id"])["deleted"] is True
+
+
+def test_product_list_sold_count_follows_paid_orders_and_refund_requests():
+    repo = InMemoryCommerceRepository()
+
+    seeded = _listed_product(repo, "course_masked_001")
+    assert seeded["paid_order_count"] == 1
+    assert seeded["refund_order_count"] == 0
+    assert seeded["sold_count"] == 1
+
+    product = UpsertProductCommand(repo)(
+        ProductUpsertRequest(
+            **_product_payload(
+                product_code="sales_count_product",
+                title="销量统计商品",
+                page_slug="sales-count-product",
+            )
+        )
+    )["product"]
+    assert product["sold_count"] == 0
+
+    checkout = CheckoutCommand("wechat", repo)(
+        CheckoutRequest(
+            product_code="sales_count_product",
+            buyer_identity={"mobile": "13800138000", "openid": "op_sales_count"},
+            return_url="/pay/sales-count-product",
+        )
+    )
+    assert _listed_product(repo, "sales_count_product")["sold_count"] == 0
+
+    NotifyPaymentCommand("wechat", repo)(
+        PaymentNotifyRequest(
+            order_no=checkout["order_no"],
+            payment_status="paid",
+            transaction_id="transaction_sales_count",
+            provider_payload={"notify_id": "notify_sales_count"},
+        )
+    )
+    paid = _listed_product(repo, "sales_count_product")
+    assert paid["paid_order_count"] == 1
+    assert paid["refund_order_count"] == 0
+    assert paid["sold_count"] == 1
+
+    repo.request_refund(
+        "wechat",
+        checkout["order_no"],
+        {
+            "out_refund_no": "refund_sales_count",
+            "amount": {"refund": 100},
+        },
+    )
+    refunded = _listed_product(repo, "sales_count_product")
+    assert refunded["paid_order_count"] == 1
+    assert refunded["refund_order_count"] == 1
+    assert refunded["sold_count"] == 0
 
 
 def test_product_completion_target_admin_update_preview_and_order_payload():

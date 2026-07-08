@@ -13,6 +13,7 @@ from aicrm_next.shared.runtime import production_data_ready, raw_database_url
 
 from .domain import completion_redirect_projection, normalize_product_completion_target, normalize_status, now_iso, validate_price_cents
 from .domain import validate_product_code
+from .refund_status import active_wechat_refund_sql
 
 
 def connect_commerce_db(database_url: str | None = None):
@@ -37,6 +38,45 @@ class CommerceRepository(Protocol):
     def apply_notify(self, order_no: str, provider: str, status: str, transaction_id: str | None) -> dict[str, Any]: ...
     def list_transactions(self, provider: str, filters: dict[str, Any], *, limit: int, offset: int) -> dict[str, Any]: ...
     def request_refund(self, provider: str, order_no: str, payload: dict[str, Any]) -> dict[str, Any]: ...
+
+
+_REFUND_RELATED_ORDER_STATUSES = {"requested", "processing", "refund_processing", "partial_refunded", "full_refunded"}
+
+
+def _int_or_zero(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _order_is_paid(order: dict[str, Any]) -> bool:
+    return (
+        str(order.get("payment_status") or order.get("status") or "").strip().lower() == "paid"
+        or str(order.get("trade_state") or "").strip().upper() == "SUCCESS"
+        or bool(order.get("paid_at"))
+    )
+
+
+def _order_is_refund_related(order: dict[str, Any]) -> bool:
+    refund_status = str(order.get("refund_status") or "").strip().lower()
+    return (
+        refund_status in _REFUND_RELATED_ORDER_STATUSES
+        or _int_or_zero(order.get("refunded_amount_total")) > 0
+        or _int_or_zero(order.get("active_refund_amount_total")) > 0
+    )
+
+
+def _product_sales_counts(orders: list[dict[str, Any]], product_code: str) -> dict[str, int]:
+    code = str(product_code or "").strip()
+    matched = [order for order in orders if str(order.get("product_code") or "").strip() == code]
+    paid_order_count = sum(1 for order in matched if _order_is_paid(order))
+    refund_order_count = sum(1 for order in matched if _order_is_refund_related(order))
+    return {
+        "paid_order_count": paid_order_count,
+        "refund_order_count": refund_order_count,
+        "sold_count": max(0, paid_order_count - refund_order_count),
+    }
 
 
 def _seed_products() -> list[dict[str, Any]]:
@@ -416,6 +456,7 @@ class InMemoryCommerceRepository:
             legacy_redirect_url=completion_redirect.get("completion_redirect_url"),
             legacy_enabled=completion_redirect.get("completion_redirect_enabled"),
         )
+        sales_counts = _product_sales_counts(self._orders, str(item.get("product_code") or ""))
         return {
             **deepcopy(item),
             "title": title,
@@ -431,6 +472,7 @@ class InMemoryCommerceRepository:
             "lead_channel_id": _positive_int_or_none(item.get("lead_channel_id")),
             "slices": slices,
             "slice_count": len(slices),
+            **sales_counts,
             **completion_redirect,
             "completion_target_json": completion_target["completion_target_json"],
             "completion_target": completion_target["completion_target_json"],
@@ -579,12 +621,44 @@ class PostgresCommerceRepository:
         with self._connect() as conn:
             with conn.cursor() as cur:
                 rows = cur.execute(
-                    """
-                    SELECT p.*, count(s.id) AS slice_count
+                    f"""
+                    WITH slice_counts AS (
+                        SELECT product_id, count(*) AS slice_count
+                        FROM wechat_pay_product_page_slices
+                        WHERE enabled = TRUE
+                        GROUP BY product_id
+                    ),
+                    order_counts AS (
+                        SELECT
+                            o.product_code,
+                            count(*) FILTER (
+                                WHERE o.status = 'paid'
+                                   OR o.trade_state = 'SUCCESS'
+                                   OR o.paid_at IS NOT NULL
+                            ) AS paid_order_count,
+                            count(*) FILTER (
+                                WHERE COALESCE(o.refund_status, '') IN ('requested', 'processing', 'refund_processing', 'partial_refunded', 'full_refunded')
+                                   OR COALESCE(o.refunded_amount_total, 0) > 0
+                                   OR EXISTS (
+                                       SELECT 1
+                                       FROM wechat_pay_refunds r
+                                       WHERE r.order_id = o.id
+                                         AND {active_wechat_refund_sql("r")}
+                                   )
+                            ) AS refund_order_count
+                        FROM wechat_pay_orders o
+                        WHERE COALESCE(o.product_code, '') <> ''
+                        GROUP BY o.product_code
+                    )
+                    SELECT
+                        p.*,
+                        COALESCE(sc.slice_count, 0) AS slice_count,
+                        COALESCE(oc.paid_order_count, 0) AS paid_order_count,
+                        COALESCE(oc.refund_order_count, 0) AS refund_order_count,
+                        GREATEST(0, COALESCE(oc.paid_order_count, 0) - COALESCE(oc.refund_order_count, 0)) AS sold_count
                     FROM wechat_pay_products p
-                    LEFT JOIN wechat_pay_product_page_slices s
-                      ON s.product_id = p.id AND s.enabled = TRUE
-                    GROUP BY p.id
+                    LEFT JOIN slice_counts sc ON sc.product_id = p.id
+                    LEFT JOIN order_counts oc ON oc.product_code = p.product_code
                     ORDER BY p.updated_at DESC, p.id DESC
                     LIMIT %s OFFSET %s
                     """,
@@ -1003,6 +1077,10 @@ class PostgresCommerceRepository:
         cta = str(row.get("cta_text") or "立即购买")
         status = str(row.get("status") or ("active" if row.get("enabled") else "disabled"))
         slices = slices or []
+        paid_order_count = _int_or_zero(row.get("paid_order_count"))
+        refund_order_count = _int_or_zero(row.get("refund_order_count"))
+        raw_sold_count = row.get("sold_count")
+        sold_count = max(0, _int_or_zero(raw_sold_count)) if raw_sold_count not in (None, "") else max(0, paid_order_count - refund_order_count)
         completion_redirect = completion_redirect_projection(
             row.get("completion_redirect_enabled"),
             row.get("completion_redirect_url"),
@@ -1041,6 +1119,9 @@ class PostgresCommerceRepository:
             "lead_channel_id": _positive_int_or_none(row.get("lead_channel_id")),
             "slices": slices,
             "slice_count": int(row.get("slice_count") or len(slices)),
+            "paid_order_count": paid_order_count,
+            "refund_order_count": refund_order_count,
+            "sold_count": sold_count,
             **completion_redirect,
             "completion_target_json": completion_target["completion_target_json"],
             "completion_target": completion_target["completion_target_json"],

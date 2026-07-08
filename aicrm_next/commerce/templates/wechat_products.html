@@ -120,7 +120,7 @@
       <table class="admin-table product-table">
         <thead>
           <tr>
-            <th>商品编码</th><th>商品名称</th><th>价格</th><th>状态</th><th>贴图</th><th>更新时间</th><th>操作</th>
+            <th>商品编码</th><th>商品名称</th><th>价格</th><th>状态</th><th>已售卖数量</th><th>更新时间</th><th>操作</th>
           </tr>
         </thead>
         <tbody id="productRows">
@@ -130,7 +130,7 @@
             <td>{{ product.title or product.name }}</td>
             <td>{{ "%.2f"|format((product.price_cents or product.amount_total or 0) / 100) }} {{ product.currency or "CNY" }}</td>
             <td><span class="product-pill {{ product.status }}">{{ {"active":"已上架","draft":"草稿","disabled":"已下架"}.get(product.status, product.status) }}</span></td>
-            <td>{{ product.slice_count or 0 }}</td>
+            <td>{{ product.sold_count or 0 }}</td>
             <td>{{ product.updated_at }}</td>
             <td>
               <div class="product-actions">
@@ -656,7 +656,7 @@
         <td>${esc(item.title || item.name)}</td>
         <td>${money(item.price_cents || item.amount_total)} ${esc(item.currency || "CNY")}</td>
         <td><span class="product-pill ${esc(status)}">${esc({active:"已上架",draft:"草稿",disabled:"已下架"}[status] || status)}</span></td>
-        <td>${Number(item.slice_count || 0)}</td>
+        <td>${Number(item.sold_count || 0)}</td>
         <td>${esc(item.updated_at || "")}</td>
         <td><div class="product-actions">
           <a class="admin-button admin-button--ghost" href="/admin/wechat-pay/products/${encodeURIComponent(item.id)}/edit">编辑</a>

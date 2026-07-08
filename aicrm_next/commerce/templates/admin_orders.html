@@ -41,7 +41,7 @@
   }
 
   .orders-table {
-    min-width: 980px;
+    min-width: 1180px;
   }
 
   .orders-summary,
@@ -59,6 +59,10 @@
   .orders-mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 13px;
+    font-weight: 800;
+  }
+
+  .orders-strong {
     font-weight: 800;
   }
 
@@ -185,9 +189,9 @@
     <div class="orders-card-body">
       <div class="admin-table-wrap">
         <table class="admin-table orders-table">
-          <thead><tr><th>创建时间</th><th>微信/平台单号</th><th>商品名</th><th>金额</th><th>状态</th><th>支付渠道</th><th>操作</th></tr></thead>
+          <thead><tr><th>创建时间</th><th>微信/平台单号</th><th>付款人 / 客户身份</th><th>商品名</th><th>金额</th><th>状态</th><th>支付渠道</th><th>操作</th></tr></thead>
           <tbody id="rows">
-            <tr><td colspan="7" class="orders-muted">正在加载订单...</td></tr>
+            <tr><td colspan="8" class="orders-muted">正在加载订单...</td></tr>
           </tbody>
         </table>
       </div>
@@ -230,14 +234,27 @@
   }
 
   function renderLoading() {
-    $("rows").innerHTML = '<tr><td colspan="7" class="orders-muted">正在加载订单...</td></tr>';
+    $("rows").innerHTML = '<tr><td colspan="8" class="orders-muted">正在加载订单...</td></tr>';
     $("empty").classList.remove("is-visible");
+  }
+
+  function payerName(row) {
+    const customer = row.customer || {};
+    return row.payer_name || customer.name || "未记录付款人";
+  }
+
+  function customerIdentityLine(row) {
+    const customer = row.customer || {};
+    const mobile = row.mobile || customer.mobile || "未记录手机号";
+    const identity = row.userid || row.external_userid || row.unionid || customer.userid || customer.external_userid || customer.unionid || "-";
+    return `${mobile} · ${identity}`;
   }
 
   function render(items) {
     $("rows").innerHTML = items.map((row) => `<tr>
       <td>${esc(row.created_at)}</td>
       <td><span class="orders-mono">${esc(row.merchant_order_no || row.out_trade_no || row.order_no)}</span><div class="orders-sub">${esc(row.platform_transaction_no || row.transaction_id || "")}</div></td>
+      <td><div class="orders-strong">${esc(payerName(row))}</div><div class="orders-sub">${esc(customerIdentityLine(row))}</div></td>
       <td>${esc(row.product_name)}</td>
       <td class="orders-mono">¥${esc(row.amount_yuan)}</td>
       <td><span class="orders-pill ${esc(row.status)}">${esc(row.status_label)}</span></td>

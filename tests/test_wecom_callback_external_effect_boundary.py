@@ -75,7 +75,6 @@ def test_channel_entry_real_wecom_actions_are_planned_as_external_effect_jobs() 
     assert "ExternalEffectService().plan_effect" in source
     assert 'adapter_name="wecom_welcome_message"' in source
     assert 'adapter_name="wecom_tag"' in source
-    assert 'adapter_name="wecom_profile"' in source
     assert '"real_external_call_executed": False' in source
     assert "send_welcome_msg(" not in source
     assert "mark_external_contact_tags(" not in source

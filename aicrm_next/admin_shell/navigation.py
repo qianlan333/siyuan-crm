@@ -74,6 +74,10 @@ ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
         "api.admin_wechat_pay_products_page",
         "/admin/wechat-pay/products",
     ),
+    "api.admin_service_period_products_page": AdminRoute(
+        "api.admin_service_period_products_page",
+        "/admin/service-period-products",
+    ),
     "api.admin_alipay_transactions_page": AdminRoute("api.admin_alipay_transactions_page", "/admin/alipay/transactions"),
     "api.admin_image_library_workspace": AdminRoute("api.admin_image_library_workspace", "/admin/image-library"),
     "api.admin_miniprogram_library_workspace": AdminRoute(
@@ -156,6 +160,7 @@ ADMIN_NAV_GROUPS: list[dict[str, Any]] = [
         "items": [
             {"key": "wechat_pay_transactions", "label": "交易管理", "endpoint": "api.admin_orders_page"},
             {"key": "wechat_pay_products", "label": "商品管理", "endpoint": "api.admin_wechat_pay_products_page"},
+            {"key": "service_period_products", "label": "周期商品管理", "endpoint": "api.admin_service_period_products_page"},
         ],
     },
     {

@@ -213,6 +213,10 @@ def _append_query(path: str, key: str, value: str) -> str:
 def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> str:
     title = escape(str(product.get("title") or "支付入口"))
     state_json = json.dumps(page_state, ensure_ascii=False).replace("</", "<\\/")
+    identity_ready = bool(page_state.get("identity_ready"))
+    paid_order = page_state.get("paid_order")
+    show_mobile_input = bool(identity_ready and page_state.get("require_mobile") and not paid_order)
+    cta_text = escape(str(product.get("buy_button_text") or "立即报名"))
     require_mobile_html = (
         """
       <div class="pay-mobile" id="mobileBlock">
@@ -220,21 +224,29 @@ def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> s
         <input id="mobileInput" inputmode="numeric" maxlength="11" placeholder="请输入手机号">
         <div class="error-text" id="mobileError"></div>
       </div>"""
-        if page_state.get("require_mobile")
+        if show_mobile_input
         else ""
     )
-    action_html = (
-        f'<a class="button-link" href="{escape(str(page_state.get("oauth_start_url") or ""), quote=True)}">微信授权</a>'
-        if not page_state.get("identity_ready")
-        else f'<button id="payButton" class="pay-action" type="button" {"disabled" if not page_state.get("enabled") else ""}>{escape(str(page_state.get("cta_text") or "确认支付"))}</button>'
-    )
+    if paid_order:
+        action_html = ""
+    elif not identity_ready:
+        action_html = f'<a class="button-link" href="{escape(str(page_state.get("oauth_start_url") or ""), quote=True)}">授权登录</a>'
+    else:
+        action_html = f'<button id="payButton" class="pay-action" type="button" {"disabled" if not page_state.get("enabled") else ""}>{cta_text}</button>'
     completion_action = page_state.get("completion_action") if isinstance(page_state.get("completion_action"), dict) else {}
     qr_button_html = (
         ""
         if completion_action.get("type") == "redirect"
         else '<button class="qr-reopen-button" id="showLeadQrButton" type="button">查看领取二维码</button>'
     )
-    state_message = "当前支付暂未启用。" if not page_state.get("enabled") else ("需要先完成微信授权。" if not page_state.get("identity_ready") else "已就绪。")
+    if paid_order:
+        state_message = "已报名，正在打开报名成功页。"
+    elif not page_state.get("enabled"):
+        state_message = "当前支付暂未启用。"
+    elif not identity_ready:
+        state_message = "需要先完成微信授权。"
+    else:
+        state_message = "已就绪。"
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>

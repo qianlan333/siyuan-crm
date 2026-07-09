@@ -433,6 +433,19 @@ repositories:
     capability_owner: aicrm_next.send_content
     table_reads: []
     table_writes: []
+  aicrm_next/service_period/repo.py:
+    capability_owner: aicrm_next.service_period
+    table_reads:
+      - crm_user_identity
+      - service_period_entitlements
+      - service_period_events
+      - service_period_products
+      - wechat_pay_orders
+      - wechat_pay_products
+    table_writes:
+      - service_period_entitlements
+      - service_period_events
+      - service_period_products
   aicrm_next/sidebar_write/repo.py:
     capability_owner: aicrm_next.sidebar_write
     table_reads:

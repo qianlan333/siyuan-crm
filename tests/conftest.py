@@ -197,6 +197,9 @@ _TABLES_TO_TRUNCATE = [
     "external_effect_job",
     "external_push_config",
     "domain_event_outbox",
+    "service_period_events",
+    "service_period_entitlements",
+    "service_period_products",
     "wechat_pay_product_page_slices",
     "wechat_pay_products",
     "wechat_pay_order_export_jobs",
@@ -753,6 +756,33 @@ def _bootstrap_next_test_baseline_schema(url: str) -> None:
         ADD COLUMN IF NOT EXISTS completion_target_json JSONB
         """,
         """
+        CREATE TABLE IF NOT EXISTS service_period_products (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+            trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
+            link_slug TEXT NOT NULL,
+            membership_config_id TEXT NOT NULL DEFAULT '',
+            membership_config_name TEXT NOT NULL DEFAULT '',
+            duration_days INTEGER NOT NULL CHECK (duration_days > 0),
+            deleted BOOLEAN NOT NULL DEFAULT FALSE,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_service_period_products_trade_product_id
+        ON service_period_products (trade_product_id)
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_service_period_products_link_slug
+        ON service_period_products (link_slug)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_service_period_products_updated
+        ON service_period_products (tenant_id, deleted, updated_at DESC, id DESC)
+        """,
+        """
         CREATE TABLE IF NOT EXISTS wechat_pay_orders (
             id BIGSERIAL PRIMARY KEY,
             out_trade_no TEXT NOT NULL DEFAULT '',
@@ -806,6 +836,74 @@ def _bootstrap_next_test_baseline_schema(url: str) -> None:
             created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS service_period_entitlements (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+            service_product_id BIGINT NOT NULL REFERENCES service_period_products(id) ON DELETE RESTRICT,
+            trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
+            unionid TEXT NOT NULL,
+            external_userid_snapshot TEXT NOT NULL DEFAULT '',
+            mobile_snapshot TEXT NOT NULL DEFAULT '',
+            membership_config_id TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','expired','disabled','refunded')),
+            start_at TIMESTAMPTZ NOT NULL,
+            end_at TIMESTAMPTZ NOT NULL,
+            last_order_id BIGINT,
+            last_out_trade_no TEXT NOT NULL DEFAULT '',
+            renewal_count INTEGER NOT NULL DEFAULT 0,
+            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE (tenant_id, service_product_id, unionid)
+        )
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_service_period_entitlements_product_status_end
+        ON service_period_entitlements (service_product_id, status, end_at)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_service_period_entitlements_unionid
+        ON service_period_entitlements (unionid)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_service_period_entitlements_last_order
+        ON service_period_entitlements (last_order_id)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS service_period_events (
+            id BIGSERIAL PRIMARY KEY,
+            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
+            event_id TEXT NOT NULL UNIQUE,
+            service_product_id BIGINT NOT NULL REFERENCES service_period_products(id) ON DELETE RESTRICT,
+            entitlement_id BIGINT REFERENCES service_period_entitlements(id) ON DELETE SET NULL,
+            trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
+            order_id BIGINT,
+            out_trade_no TEXT NOT NULL DEFAULT '',
+            unionid TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL CHECK (event_type IN ('activated','renewed','expired','disabled','refunded','grant_failed_missing_unionid','membership_sync_failed','admin_adjusted')),
+            duration_days INTEGER NOT NULL DEFAULT 0,
+            before_start_at TIMESTAMPTZ,
+            before_end_at TIMESTAMPTZ,
+            after_start_at TIMESTAMPTZ,
+            after_end_at TIMESTAMPTZ,
+            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_service_period_events_event_once
+        ON service_period_events (tenant_id, event_type, out_trade_no)
+        WHERE out_trade_no <> ''
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_service_period_events_product_created
+        ON service_period_events (service_product_id, created_at DESC, id DESC)
+        """,
+        """
+        CREATE INDEX IF NOT EXISTS idx_service_period_events_unionid_created
+        ON service_period_events (unionid, created_at DESC, id DESC)
         """,
         """
         CREATE TABLE IF NOT EXISTS wechat_pay_order_events (

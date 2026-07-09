@@ -3107,6 +3107,67 @@ tables:
       - tests/test_data_table_lifecycle_guard.py
     notes: Retired order identity repair queue. The only remaining CREATE TABLE statement is 0091 downgrade support.
 
+  service_period_products:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    read_owners:
+      - aicrm_next.service_period
+      - aicrm_next.commerce
+    replacement: none; service period semantic binding over wechat_pay_products
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.service_period.api
+      - aicrm_next.service_period.application
+      - aicrm_next.service_period.payment_consumer
+    migration_source: 0095_service_period_products
+    pii_level: internal_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_service_period_schema.py
+    notes: Stores duration/link/membership snapshot for service period products while trade fields remain in wechat_pay_products.
+
+  service_period_entitlements:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    read_owners:
+      - aicrm_next.service_period
+    replacement: none; current entitlement state for service period products
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.service_period.api
+      - aicrm_next.service_period.application
+      - aicrm_next.service_period.payment_consumer
+    migration_source: 0095_service_period_products
+    pii_level: direct_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_service_period_schema.py
+    notes: Unionid-first current service period credential. Repeated purchases extend end_at and preserve event history.
+
+  service_period_events:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    read_owners:
+      - aicrm_next.service_period
+    replacement: none; immutable-ish service period event ledger
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.service_period.api
+      - aicrm_next.service_period.application
+      - aicrm_next.service_period.payment_consumer
+    migration_source: 0095_service_period_products
+    pii_level: direct_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_service_period_schema.py
+    notes: Idempotent activation, renewal, expiry, refund/disable/admin-adjustment and failure event log for service period changes.
+
   wechat_pay_orders:
     domain: commerce
     lifecycle: canonical
@@ -3116,6 +3177,7 @@ tables:
       - aicrm_next.customer_read_model
       - aicrm_next.external_push
       - aicrm_next.platform_foundation.internal_events
+      - aicrm_next.service_period
     replacement: none; active production schema table registered during schema drift closeout
     drop_candidate: false
     drop_after: ""
@@ -3152,6 +3214,7 @@ tables:
     write_owner: aicrm_next.commerce.wechat_pay_service
     read_owners:
       - aicrm_next.external_push
+      - aicrm_next.service_period
     replacement: none; active production schema table registered during schema drift closeout
     drop_candidate: false
     drop_after: ""

@@ -206,6 +206,7 @@ def _should_document(path: str) -> bool:
         or path.startswith("/auth/wecom/")
         or path.startswith("/p/")
         or path.startswith("/pay/")
+        or path.startswith("/s/")
     )
 
 
@@ -255,13 +256,16 @@ def _group_id_for(path: str) -> str:
         return "materials-send-content"
     if (
         path.startswith("/api/admin/wechat-pay")
+        or path.startswith("/api/admin/service-period-products")
         or path.startswith("/api/admin/alipay")
         or path.startswith("/api/admin/orders")
         or path.startswith("/api/admin/payments")
         or path.startswith("/api/admin/refunds")
         or path.startswith("/api/products")
+        or path.startswith("/api/h5/service-period-products")
         or path.startswith("/p/")
         or path.startswith("/pay/")
+        or path.startswith("/s/")
         or path.startswith("/api/checkout/")
         or path.startswith("/api/orders/")
         or path.startswith("/api/wechat-pay/")
@@ -410,6 +414,8 @@ def _request_example(method: str, path: str, params: list[dict[str, Any]]) -> st
 def _response_example(path: str) -> str:
     if path.startswith("/p/"):
         return "HTTP 200 text/html 商品页"
+    if path.startswith("/s/"):
+        return "HTTP 200 text/html 周期商品页"
     if path in {"/login", "/logout"} or path.startswith("/auth/wecom/"):
         return "HTTP 302 → 目标页面"
     return json.dumps({"ok": True, "route_owner": "ai_crm_next"}, ensure_ascii=False)
@@ -476,8 +482,10 @@ def _auth_for(method: str, path: str, route: APIRoute) -> str:
         path.startswith("/api/h5/questionnaires")
         or path.startswith("/api/h5/wechat/oauth")
         or path.startswith("/api/products")
+        or path.startswith("/api/h5/service-period-products")
         or path.startswith("/p/")
         or path.startswith("/pay/")
+        or path.startswith("/s/")
         or path.startswith("/api/checkout/")
         or path.startswith("/api/orders/")
     ):

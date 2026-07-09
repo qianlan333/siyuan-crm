@@ -39,6 +39,46 @@ def _preferred_owner_userid(owner_userid: str, detail: dict[str, Any]) -> str:
     return ""
 
 
+def _sync_profile_description_with_external_userid(
+    adapter: Any,
+    *,
+    external_userid: str,
+    owner_userid: str,
+) -> dict[str, Any]:
+    external = text(external_userid)
+    owner = text(owner_userid)
+    if not external:
+        return {"status": "skipped", "reason": "external_userid_missing"}
+    if not owner:
+        return {"status": "skipped", "reason": "owner_userid_missing", "description_source": "external_userid"}
+    updater = getattr(adapter, "update_external_contact_remark", None)
+    if not callable(updater):
+        return {
+            "status": "skipped",
+            "reason": "adapter_missing_update_external_contact_remark",
+            "description_source": "external_userid",
+        }
+    payload = {"userid": owner, "external_userid": external, "description": external}
+    try:
+        result = updater(payload)
+    except Exception as exc:
+        reason, failure = _adapter_failure(exc)
+        return {"status": "failed", "reason": reason, **failure, "description_source": "external_userid"}
+    if int((result or {}).get("errcode") or 0) != 0:
+        return {
+            "status": "failed",
+            "reason": "wecom_api_error",
+            "wecom_result": dict(result or {}),
+            "description_source": "external_userid",
+        }
+    return {
+        "status": "success",
+        "description_source": "external_userid",
+        "description": external,
+        "real_external_call_executed": True,
+    }
+
+
 def _age_seconds(value: Any) -> int | None:
     if not isinstance(value, datetime):
         return None
@@ -209,12 +249,19 @@ class IdentityBridgeService:
             detail_payload = dict(detail or {})
             owner_userid = _preferred_owner_userid(owner_userid, detail_payload)
             effective_corp_id = text(corp_id) or text(os.getenv("WECOM_CORP_ID"))
-            return self._sync_external_contact_identity_for_detail(
+            profile_description = _sync_profile_description_with_external_userid(
+                adapter,
+                external_userid=external_userid,
+                owner_userid=owner_userid,
+            )
+            result = self._sync_external_contact_identity_for_detail(
                 detail_payload=detail_payload,
                 external_userid=external_userid,
                 owner_userid=owner_userid,
                 corp_id=effective_corp_id,
             )
+            result["profile_description"] = profile_description
+            return result
         except Exception as exc:
             reason, failure = _adapter_failure(exc)
             return {"status": "failed", "reason": reason, **failure}

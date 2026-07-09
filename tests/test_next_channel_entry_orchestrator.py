@@ -7,7 +7,6 @@ from aicrm_next.platform_foundation.external_effects import (
     ExternalEffectService,
     WECOM_CONTACT_TAG_MARK,
     WECOM_MESSAGE_PRIVATE_SEND,
-    WECOM_PROFILE_UPDATE,
     WECOM_WELCOME_MESSAGE_SEND,
     reset_external_effect_fixture_state,
 )
@@ -59,18 +58,14 @@ def test_active_channel_baseline_emits_only_channel_entry_without_program_admiss
     assert calls[0] == "contact"
     assert result["welcome_message"]["queued"] is True
     assert result["entry_tag"]["queued"] is True
-    assert result["profile_description"]["queued"] is True
-    assert result["profile_description"]["description"] == "wm-a"
     assert result["welcome_message"]["immediate_dispatch_scheduled"] is False
     assert result["welcome_message"]["welcome_effect_cancelled_for_fallback"] is True
     assert result["welcome_message"]["fallback_message"]["queued"] is True
     assert result["welcome_message"]["fallback_message"]["effect_type"] == WECOM_MESSAGE_PRIVATE_SEND
     assert result["entry_tag"]["immediate_dispatch_scheduled"] is False
-    assert result["profile_description"]["immediate_dispatch_scheduled"] is False
     assert [item[1:] for item in wakeups] == [
         ("channel_entry_welcome_message", "wecom.welcome_message.send"),
         ("channel_entry_tag_mark", "wecom.contact.tag.mark"),
-        ("channel_entry_profile_update", "wecom.profile.update"),
     ]
     assert all(job_id > 0 for job_id, _, _ in wakeups)
     assert "program_member_written" not in result
@@ -141,7 +136,6 @@ def test_entry_without_unionid_still_queues_external_userid_effects(monkeypatch)
     assert "contact" not in calls
     assert result["welcome_message"]["queued"] is True
     assert result["entry_tag"]["queued"] is True
-    assert result["profile_description"]["queued"] is True
 
     welcome_jobs, _ = ExternalEffectService().list_jobs(
         {"effect_type": WECOM_WELCOME_MESSAGE_SEND, "target_id": "wm-no-union"},
@@ -155,18 +149,12 @@ def test_entry_without_unionid_still_queues_external_userid_effects(monkeypatch)
         {"effect_type": WECOM_CONTACT_TAG_MARK, "target_id": "wm-no-union"},
         limit=10,
     )
-    profile_jobs, _ = ExternalEffectService().list_jobs(
-        {"effect_type": WECOM_PROFILE_UPDATE, "target_id": "wm-no-union"},
-        limit=10,
-    )
     assert welcome_jobs[0].target_type == "external_userid"
     assert fallback_jobs[0].target_type == "external_userid"
     assert tag_jobs[0].target_type == "external_userid"
-    assert profile_jobs[0].target_type == "external_userid"
     assert "target_unionid" not in welcome_jobs[0].payload_json
     assert "target_unionid" not in fallback_jobs[0].payload_json
     assert "target_unionid" not in tag_jobs[0].payload_json
-    assert "target_unionid" not in profile_jobs[0].payload_json
 
 
 def test_channel_disabled_has_no_baseline_side_effects(monkeypatch):
@@ -195,4 +183,3 @@ def test_channel_entry_without_unionid_records_runtime_entry(monkeypatch):
     assert result["channel_contact"] == {"attempted": False, "deferred": True, "reason": "identity_pending_unionid"}
     assert result["welcome_message"]["queued"] is True
     assert result["entry_tag"]["queued"] is True
-    assert result["profile_description"]["queued"] is True

@@ -26,6 +26,7 @@ from .questionnaire.admin_write import reset_questionnaire_admin_write_fixture_s
 from .questionnaire.h5_write import reset_questionnaire_h5_write_fixture_state
 from .questionnaire.repo import reset_questionnaire_fixture_state
 from .radar_links.repo import reset_radar_links_fixture_state
+from .service_period import reset_service_period_fixture_state
 from .sidebar_write import reset_sidebar_write_fixture_state
 
 
@@ -42,6 +43,7 @@ FIXTURE_RESET_STEPS: tuple[FixtureResetStep, ...] = (
     FixtureResetStep("automation", reset_automation_fixture_state),
     FixtureResetStep("group_ops", reset_group_ops_fixture_state),
     FixtureResetStep("commerce", reset_commerce_fixture_state),
+    FixtureResetStep("service_period", reset_service_period_fixture_state),
     FixtureResetStep("media_library", reset_media_library_fixture_state),
     FixtureResetStep("admin_jobs", reset_admin_jobs_fixture_state),
     FixtureResetStep("hxc_dashboard", reset_hxc_dashboard_fixture_state),

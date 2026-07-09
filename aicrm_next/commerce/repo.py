@@ -41,6 +41,7 @@ class CommerceRepository(Protocol):
 
 
 _REFUND_RELATED_ORDER_STATUSES = {"requested", "processing", "refund_processing", "partial_refunded", "full_refunded"}
+_SERVICE_PERIOD_PRODUCT_OWNER = "service_period"
 
 
 def _int_or_zero(value: Any) -> int:
@@ -77,6 +78,11 @@ def _product_sales_counts(orders: list[dict[str, Any]], product_code: str) -> di
         "refund_order_count": refund_order_count,
         "sold_count": max(0, paid_order_count - refund_order_count),
     }
+
+
+def _is_service_period_trade_product(item: dict[str, Any]) -> bool:
+    metadata = item.get("metadata_json") if isinstance(item.get("metadata_json"), dict) else {}
+    return str(metadata.get("aicrm_product_owner") or "").strip() == _SERVICE_PERIOD_PRODUCT_OWNER
 
 
 def _seed_products() -> list[dict[str, Any]]:
@@ -239,7 +245,11 @@ class InMemoryCommerceRepository:
         self._external_push: dict[str, dict[str, Any]] = {}
 
     def list_products(self, *, limit: int, offset: int) -> dict[str, Any]:
-        rows = [self._serialize_product(item) for item in self._products if not item.get("deleted")]
+        rows = [
+            self._serialize_product(item)
+            for item in self._products
+            if not item.get("deleted") and not _is_service_period_trade_product(item)
+        ]
         return {"items": rows[offset : offset + limit], "total": len(rows), "limit": limit, "offset": offset}
 
     def get_product(self, product_id: str) -> dict[str, Any] | None:
@@ -517,6 +527,14 @@ def _normalize_slices(value: Any) -> list[dict[str, Any]]:
         if not image_id or image_id in seen:
             continue
         seen.add(image_id)
+        image_url = _lightweight_slice_image_url(
+            image_id,
+            item.get("source_url"),
+            item.get("image_url"),
+            item.get("data_url"),
+            item.get("url"),
+            item.get("src"),
+        )
         normalized.append(
             {
                 "id": str(item.get("id") or ""),
@@ -526,22 +544,31 @@ def _normalize_slices(value: Any) -> list[dict[str, Any]]:
                 "file_name": str(item.get("file_name") or ""),
                 "file_size": int(item.get("file_size") or 0),
                 "mime_type": str(item.get("mime_type") or "image/png"),
-                "image_url": str(item.get("image_url") or item.get("data_url") or item.get("source_url") or ""),
+                "image_url": image_url,
+                "thumb_url": _image_variant_url(image_id, "thumb_320"),
+                "preview_url": _image_variant_url(image_id, "mobile_1080"),
+                "original_url": _image_variant_url(image_id, "original"),
                 "enabled": bool(item.get("enabled", True)),
             }
         )
     return normalized
 
 
+def _image_variant_url(image_id: Any, variant_key: str) -> str:
+    normalized = _positive_int_or_none(image_id)
+    return f"/api/admin/image-library/{normalized}/variants/{variant_key}" if normalized else ""
+
+
+def _lightweight_slice_image_url(image_id: Any, *candidates: Any) -> str:
+    for candidate in candidates:
+        url = str(candidate or "").strip()
+        if url and not url.lower().startswith("data:"):
+            return url
+    return _image_variant_url(image_id, "mobile_1080")
+
+
 def _image_public_url(row: dict[str, Any]) -> str:
-    source_url = str(row.get("source_url") or "").strip()
-    if source_url:
-        return source_url
-    data_base64 = str(row.get("data_base64") or "").strip()
-    if not data_base64:
-        return ""
-    mime_type = str(row.get("mime_type") or "image/png").strip() or "image/png"
-    return f"data:{mime_type};base64,{data_base64}"
+    return _lightweight_slice_image_url(row.get("image_library_id"), row.get("source_url"))
 
 
 def _empty_external_push_config() -> dict[str, Any]:
@@ -659,12 +686,29 @@ class PostgresCommerceRepository:
                     FROM wechat_pay_products p
                     LEFT JOIN slice_counts sc ON sc.product_id = p.id
                     LEFT JOIN order_counts oc ON oc.product_code = p.product_code
+                    WHERE COALESCE(p.metadata_json->>'aicrm_product_owner', '') <> 'service_period'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM service_period_products sp
+                          WHERE sp.trade_product_id = p.id
+                      )
                     ORDER BY p.updated_at DESC, p.id DESC
                     LIMIT %s OFFSET %s
                     """,
                     (limit, offset),
                 ).fetchall()
-                total_row = cur.execute("SELECT count(*) AS total FROM wechat_pay_products").fetchone() or {}
+                total_row = cur.execute(
+                    """
+                    SELECT count(*) AS total
+                    FROM wechat_pay_products p
+                    WHERE COALESCE(p.metadata_json->>'aicrm_product_owner', '') <> 'service_period'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM service_period_products sp
+                          WHERE sp.trade_product_id = p.id
+                      )
+                    """
+                ).fetchone() or {}
         return {
             "items": [self._serialize_product(row) for row in rows],
             "total": int(total_row.get("total") or 0),
@@ -1061,7 +1105,9 @@ class PostgresCommerceRepository:
         raise ContractError("refund writes are not available from the native commerce repository yet")
 
     def _metadata_from_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        metadata = payload.get("metadata_json") if isinstance(payload.get("metadata_json"), dict) else {}
         return {
+            **metadata,
             "description": str(payload.get("description") or ""),
             "page_slug": str(payload.get("page_slug") or payload.get("product_code") or ""),
             "cover_image_id": payload.get("cover_image_id"),
@@ -1142,9 +1188,7 @@ class PostgresCommerceRepository:
                 s.enabled,
                 image.name,
                 image.file_name,
-                image.source,
                 image.source_url,
-                image.data_base64,
                 image.mime_type,
                 image.file_size
             FROM wechat_pay_product_page_slices s
@@ -1165,6 +1209,9 @@ class PostgresCommerceRepository:
                 "mime_type": str(row.get("mime_type") or "image/png"),
                 "file_size": int(row.get("file_size") or 0),
                 "image_url": _image_public_url(row),
+                "thumb_url": _image_variant_url(row.get("image_library_id"), "thumb_320"),
+                "preview_url": _image_variant_url(row.get("image_library_id"), "mobile_1080"),
+                "original_url": _image_variant_url(row.get("image_library_id"), "original"),
                 "enabled": bool(row.get("enabled")),
             }
             for row in rows

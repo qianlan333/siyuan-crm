@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import aicrm_next.commerce.api as commerce_api
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
 
@@ -227,6 +229,40 @@ def test_wechat_product_update_preserves_read_product_body_contract(next_client)
     assert product["lead_channel_id"] == 1
     assert product["completion_target"]["enabled"] is True
     assert product["completion_target"]["h5_url"] == "/paid/updated"
+
+
+def test_wechat_product_admin_omits_inline_slice_image_data(next_client) -> None:
+    reset_commerce_fixture_state()
+    created = _assert_admin_response(
+        next_client.post(
+            "/api/admin/wechat-pay/products",
+            json=_product_payload(
+                product_code="contract_product_light_slices",
+                slices=[
+                    {"image_library_id": 11, "image_url": "data:image/png;base64,YQ==", "sort_order": 1},
+                    {"image_library_id": 12, "data_url": "data:image/png;base64,Yg==", "sort_order": 2},
+                ],
+            ),
+        )
+    )
+    product_id = created["product"]["id"]
+
+    detail = _assert_admin_response(next_client.get(f"/api/admin/wechat-pay/products/{product_id}"))
+    detail_text = json.dumps(detail, ensure_ascii=False)
+    assert "data:image" not in detail_text
+    assert "data_base64" not in detail_text
+    slices = detail["product"]["slices"]
+    assert [item["image_library_id"] for item in slices] == [11, 12]
+    assert [item["sort_order"] for item in slices] == [1, 2]
+    assert all(not str(item.get("image_url") or "").startswith("data:") for item in slices)
+
+    edit_page = next_client.get(f"/admin/wechat-pay/products/{product_id}/edit")
+    assert edit_page.status_code == 200
+    assert "data:image" not in edit_page.text
+    assert "data_base64" not in edit_page.text
+
+    share = _assert_admin_response(next_client.get(f"/api/admin/wechat-pay/products/{product_id}/share"))
+    assert share["share"]["url"].endswith("/p/contract_product_light_slices")
 
 
 def test_wechat_product_external_push_update_contract(next_client) -> None:

@@ -374,3 +374,197 @@ def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monke
     assert body["binding"]["unionid"] == "union_meixin"
     assert body["write_model_status"] == "updated"
     assert connections[0].commits == 1
+
+
+def test_sidebar_profile_fields_execute_postgres_projection_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
+    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+
+    class FakeResult:
+        def __init__(self, row=None, rows=None):
+            self._row = row
+            self._rows = list(rows or ([] if row is None else [row]))
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConnection:
+        def __init__(self):
+            self.identity = {
+                "unionid": "union_prod_sidebar_001",
+                "primary_external_userid": "wm_prod_sidebar_001",
+                "external_userids_json": ["wm_prod_sidebar_001"],
+                "mobile": "13800138123",
+                "primary_owner_userid": "sales_09",
+                "customer_name": "生产侧边栏客户",
+                "remark": "",
+                "created_at": "2026-06-01T00:00:00Z",
+                "updated_at": "2026-06-01T00:00:00Z",
+            }
+            self.profile_fields = {}
+            self.commits = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=()):
+            compact_sql = " ".join(sql.split())
+            if "FROM crm_user_identity" in compact_sql:
+                return FakeResult(self.identity)
+            if "FROM wecom_external_contact_follow_users" in compact_sql:
+                return FakeResult(rows=[{"owner_userid": "sales_09"}])
+            if compact_sql.startswith("INSERT INTO sidebar_customer_profile_fields"):
+                self.profile_fields = {
+                    "source": params[1],
+                    "industry": params[2],
+                    "industry_description": params[3],
+                    "needs_blockers_followup": params[4],
+                    "updated_by": params[5],
+                    "updated_at": "2026-07-08T12:00:00+08:00",
+                }
+                return FakeResult(self.profile_fields)
+            raise AssertionError(f"unexpected SQL: {compact_sql}")
+
+        def commit(self):
+            self.commits += 1
+
+    connections: list[FakeConnection] = []
+
+    def connect(*_args, **_kwargs):
+        connection = FakeConnection()
+        connections.append(connection)
+        return connection
+
+    psycopg = types.ModuleType("psycopg")
+    psycopg.connect = connect
+    rows = types.ModuleType("psycopg.rows")
+    rows.dict_row = object()
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
+
+    client = TestClient(create_app())
+    response = client.put(
+        "/api/sidebar/v2/profile",
+        json={
+            "external_userid": "wm_prod_sidebar_001",
+            "owner_userid": "sales_09",
+            "source": "朋友圈投放",
+            "industry": "教育培训",
+            "industry_description": "AI 课程咨询",
+            "needs_blockers_followup": "需要补发体验课资料",
+            "updated_by": "sales_09",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["write_model_status"] == "updated"
+    assert body["real_external_call_executed"] is False
+    assert body["side_effect_plan"]["adapter_mode"] == "real_blocked"
+    assert body["write"]["changes"]["profile_fields"]["industry"] == "教育培训"
+    assert "production-ready for command execution" not in response.text
+    assert connections[0].profile_fields["needs_blockers_followup"] == "需要补发体验课资料"
+    assert connections[0].commits == 1
+
+
+def test_sidebar_material_send_uses_postgres_plan_and_cached_media_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
+    monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+
+    class FakeResult:
+        def __init__(self, row=None, rows=None):
+            self._row = row
+            self._rows = list(rows or ([] if row is None else [row]))
+
+        def fetchone(self):
+            return self._row
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConnection:
+        def __init__(self):
+            self.identity = {
+                "unionid": "union_prod_sidebar_001",
+                "primary_external_userid": "wm_prod_sidebar_001",
+                "external_userids_json": ["wm_prod_sidebar_001"],
+                "mobile": "13800138123",
+                "primary_owner_userid": "sales_09",
+                "customer_name": "生产侧边栏客户",
+                "remark": "",
+                "created_at": "2026-06-01T00:00:00Z",
+                "updated_at": "2026-06-01T00:00:00Z",
+            }
+            self.material_plan_json = ""
+            self.commits = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=()):
+            compact_sql = " ".join(sql.split())
+            if "FROM crm_user_identity" in compact_sql and compact_sql.startswith("SELECT"):
+                return FakeResult(self.identity)
+            if "FROM wecom_external_contact_follow_users" in compact_sql:
+                return FakeResult(rows=[{"owner_userid": "sales_09"}])
+            if "FROM image_library" in compact_sql:
+                assert params == (42,)
+                return FakeResult({"id": 42, "title": "AI 分享海报", "media_id": "media-real-image-001"})
+            if compact_sql.startswith("UPDATE crm_user_identity"):
+                assert "last_material_send_plan" in compact_sql
+                self.material_plan_json = params[0]
+                return FakeResult({"updated_at": "2026-07-08T12:05:00+08:00"})
+            raise AssertionError(f"unexpected SQL: {compact_sql}")
+
+        def commit(self):
+            self.commits += 1
+
+    connections: list[FakeConnection] = []
+
+    def connect(*_args, **_kwargs):
+        connection = FakeConnection()
+        connections.append(connection)
+        return connection
+
+    psycopg = types.ModuleType("psycopg")
+    psycopg.connect = connect
+    rows = types.ModuleType("psycopg.rows")
+    rows.dict_row = object()
+    monkeypatch.setitem(sys.modules, "psycopg", psycopg)
+    monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/sidebar/v2/materials/send",
+        json={
+            "external_userid": "wm_prod_sidebar_001",
+            "owner_userid": "sales_09",
+            "type": "image",
+            "material_id": "42",
+            "operator": "sales_09",
+            "delivery_mode": "chat_toolbar",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["write_model_status"] == "planned"
+    assert body["media_id"] == "media-real-image-001"
+    assert body["real_external_call_executed"] is False
+    assert body["side_effect_plan"]["adapter_mode"] == "real_blocked"
+    assert body["side_effect_plan"]["real_external_call_executed"] is False
+    assert '"material_id": "42"' in connections[0].material_plan_json
+    assert '"media_id": "media-real-image-001"' in connections[0].material_plan_json
+    assert "production-ready for command execution" not in response.text
+    assert connections[0].commits == 1

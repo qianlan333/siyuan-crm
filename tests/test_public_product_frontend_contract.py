@@ -25,7 +25,7 @@ def test_public_product_frontend_redirects_empty_material_and_keeps_checkout_con
 
     assert 'data-route-owner="ai_crm_next"' in pay.text
     assert "确认报名信息" in pay.text
-    assert "微信授权" in pay.text
+    assert "授权登录" in pay.text
     assert "/api/h5/wechat-pay/jsapi/orders" in pay.text
     assert "WeixinJSBridge.invoke" in pay.text
     assert 'id="leadQrModal"' in pay.text
@@ -34,6 +34,68 @@ def test_public_product_frontend_redirects_empty_material_and_keeps_checkout_con
     assert "showLeadQr(order" in pay.text
     assert "支付暂不可用" not in pay.text
     assert "不会创建订单" not in pay.text
+
+
+def test_public_pay_landing_hides_mobile_before_oauth_for_mobile_required_product(monkeypatch) -> None:
+    monkeypatch.setenv("WECHAT_PAY_ENABLED", "1")
+    reset_commerce_fixture_state()
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "oauth-mobile-required",
+            "title": "需手机号授权商品",
+            "price_cents": 990,
+            "enabled": True,
+            "status": "active",
+            "require_mobile": True,
+            "buy_button_text": "立即报名",
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.get("/pay/oauth-mobile-required")
+
+    assert response.status_code == 200
+    assert "授权登录" in response.text
+    assert "需要先完成微信授权。" in response.text
+    assert 'id="mobileInput"' not in response.text
+    assert 'id="payButton"' not in response.text
+    assert "/api/h5/wechat-pay/oauth/start" in response.text
+
+
+def test_public_pay_landing_shows_mobile_after_oauth_for_mobile_required_product(monkeypatch) -> None:
+    from aicrm_next.public_product import h5_wechat_pay
+
+    monkeypatch.setenv("WECHAT_PAY_ENABLED", "1")
+    reset_commerce_fixture_state()
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "authed-mobile-required",
+            "title": "已授权手机号商品",
+            "price_cents": 990,
+            "enabled": True,
+            "status": "active",
+            "require_mobile": True,
+            "buy_button_text": "立即报名",
+        },
+    )
+    assert created.status_code == 200
+    client.cookies.set(
+        h5_wechat_pay.COOKIE_NAME,
+        h5_wechat_pay._signed_blob({"openid": "op_authed", "unionid": "un_authed", "payer_name": "已授权用户"}),
+    )
+
+    response = client.get("/pay/authed-mobile-required")
+
+    assert response.status_code == 200
+    assert 'id="mobileInput"' in response.text
+    assert "立即报名" in response.text
+    assert "已就绪。" in response.text
+    assert "授权登录" not in response.text
+    assert 'id="payButton"' in response.text
 
 
 def test_public_product_frontend_material_page_contains_detail_images_and_cta(monkeypatch) -> None:
@@ -305,18 +367,36 @@ def test_public_pay_landing_reopens_existing_paid_order(monkeypatch) -> None:
 
     monkeypatch.setattr(h5_wechat_pay, "production_data_ready", lambda: True)
     monkeypatch.setattr(h5_wechat_pay, "_connect", lambda: FakeConn())
+    monkeypatch.setenv("WECHAT_PAY_ENABLED", "1")
+    reset_commerce_fixture_state()
     client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "paid-mobile-required",
+            "title": "已购手机号商品",
+            "price_cents": 990,
+            "enabled": True,
+            "status": "active",
+            "require_mobile": True,
+            "buy_button_text": "立即报名",
+        },
+    )
+    assert created.status_code == 200
     client.cookies.set(
         h5_wechat_pay.COOKIE_NAME,
         h5_wechat_pay._signed_blob({"openid": "op_paid", "unionid": "un_paid", "payer_name": "已购用户"}),
     )
 
-    response = client.get("/pay/test-product")
+    response = client.get("/pay/paid-mobile-required")
 
     assert response.status_code == 200
     assert '"paid_order": null' not in response.text
     assert "WXP_ALREADY_PAID" in response.text
     assert "https://example.com/paid-qr.png" in response.text
+    assert 'id="mobileInput"' not in response.text
+    assert 'id="payButton"' not in response.text
+    assert "已报名，正在打开报名成功页。" in response.text
     assert "showPaid(state.paid_order, { autoShowQr: false })" in response.text
 
 

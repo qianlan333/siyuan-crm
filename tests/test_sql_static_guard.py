@@ -103,6 +103,34 @@ CREATE TABLE IF NOT EXISTS business_contacts (
     assert "external_userid" in violations[0].detail
 
 
+def test_sql_static_guard_allows_service_period_mobile_snapshot(tmp_path: Path) -> None:
+    manifest = _write_manifest(
+        tmp_path,
+        baseline_prefix="0073",
+        extra_table="""
+  service_period_entitlements:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    replacement: none
+    drop_candidate: false
+""",
+    )
+    _write(
+        tmp_path / "migrations" / "versions" / "0095_service_period_products.py",
+        '''
+SQL = """
+CREATE TABLE IF NOT EXISTS service_period_entitlements (
+    id BIGSERIAL PRIMARY KEY,
+    mobile_snapshot TEXT NOT NULL DEFAULT ''
+)
+"""
+''',
+    )
+
+    assert check_sql_static_guard(root=tmp_path, manifest_path=manifest) == []
+
+
 def test_runtime_public_retired_table_reference_fails(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
     _write(

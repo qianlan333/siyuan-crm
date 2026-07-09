@@ -183,6 +183,10 @@ def _identity_from_request(request: Request) -> dict[str, str]:
     return {}
 
 
+def h5_payment_identity_from_request(request: Request) -> dict[str, str]:
+    return _identity_from_request(request)
+
+
 def payment_oauth_start_url(return_url: str) -> str:
     return f"/api/h5/wechat-pay/oauth/start?{urlencode({'return_url': _safe_return_url(return_url)})}"
 
@@ -659,7 +663,16 @@ def _order_payload(
     return payload
 
 
-def _insert_order(conn: Any, *, product: dict[str, Any], identity: dict[str, str], mobile: str, out_trade_no: str, request_meta: dict[str, Any] | None = None) -> dict[str, Any]:
+def _insert_order(
+    conn: Any,
+    *,
+    product: dict[str, Any],
+    identity: dict[str, str],
+    mobile: str,
+    out_trade_no: str,
+    request_meta: dict[str, Any] | None = None,
+    order_source: str = "h5_checkout",
+) -> dict[str, Any]:
     row = conn.execute(
         """
         INSERT INTO wechat_pay_orders (
@@ -668,13 +681,14 @@ def _insert_order(conn: Any, *, product: dict[str, Any], identity: dict[str, str
             request_meta_json, expires_at, created_at, updated_at
         )
         VALUES (
-            %s, 'h5_checkout', '', %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, '', %s, %s, %s, %s, %s, %s, %s,
             'created', %s, %s::jsonb, %s::jsonb, %s::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         RETURNING *
         """,
         (
             out_trade_no,
+            _normalized_text(order_source) or "h5_checkout",
             product["product_code"],
             product["title"],
             product.get("description") or product["title"],
@@ -898,18 +912,31 @@ def _plan_order_paid_external_effect_job(conn: Any, *, order: dict[str, Any], tr
         LOGGER.exception("wechat_pay_external_effect_job_failed", extra={"out_trade_no": out_trade_no})
 
 
-def create_jsapi_order_response(request: Request, payload: dict[str, Any]) -> JSONResponse:
+def create_jsapi_order_response(
+    request: Request,
+    payload: dict[str, Any],
+    *,
+    product_override: dict[str, Any] | None = None,
+    checkout_return_path: str = "",
+    allow_paid_reuse: bool = True,
+    order_source: str = "h5_checkout",
+    request_meta_extra: dict[str, Any] | None = None,
+) -> JSONResponse:
     if not _is_wechat_browser(request):
         return JSONResponse({"ok": False, "error": "please_open_in_wechat"}, status_code=403, headers=route_headers())
     product_code = _normalized_text(payload.get("product_code"))
-    try:
-        product = get_public_product(product_code)
-    except Exception:
-        return JSONResponse(product_not_found_payload(product_code), status_code=404, headers=route_headers())
+    if product_override is None:
+        try:
+            product = get_public_product(product_code)
+        except Exception:
+            return JSONResponse(product_not_found_payload(product_code), status_code=404, headers=route_headers())
+    else:
+        product = dict(product_override)
+        product_code = _normalized_text(product.get("product_code") or product_code)
     identity = _identity_from_request(request)
     if not identity.get("openid"):
         return JSONResponse(
-            {"ok": False, "error": "openid_required", "oauth_start_url": payment_oauth_start_url(f"/pay/{product_code}")},
+            {"ok": False, "error": "openid_required", "oauth_start_url": payment_oauth_start_url(checkout_return_path or f"/pay/{product_code}")},
             status_code=401,
             headers=route_headers(),
         )
@@ -941,6 +968,8 @@ def create_jsapi_order_response(request: Request, payload: dict[str, Any]) -> JS
             "mobile_source": resolved_context.get("mobile_source"),
         }
     }
+    if request_meta_extra:
+        request_meta.update(request_meta_extra)
     out_trade_no = _out_trade_no()
     notify_url = _env("WECHAT_PAY_NOTIFY_URL") or f"{_external_base_url(request)}/api/h5/wechat-pay/notify"
     transaction_payload = {
@@ -955,8 +984,8 @@ def create_jsapi_order_response(request: Request, payload: dict[str, Any]) -> JS
     }
     try:
         with _connect() as conn:
-            existing_paid_order = _paid_order_payload_for_product_identity(conn, product=product, identity=order_identity)
-            if existing_paid_order:
+            existing_paid_order = _paid_order_payload_for_product_identity(conn, product=product, identity=order_identity) if allow_paid_reuse else None
+            if existing_paid_order is not None:
                 return JSONResponse({"ok": True, "already_paid": True, "order": existing_paid_order}, headers=route_headers())
             client = WeChatPayClient(config)
             _insert_order(
@@ -966,6 +995,7 @@ def create_jsapi_order_response(request: Request, payload: dict[str, Any]) -> JS
                 mobile=_normalized_text(resolved_context.get("mobile")),
                 out_trade_no=out_trade_no,
                 request_meta=request_meta,
+                order_source=order_source,
             )
             response_payload = client.create_jsapi_transaction(transaction_payload)
             prepay_id = _normalized_text(response_payload.get("prepay_id"))

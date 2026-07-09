@@ -902,15 +902,15 @@
 
   async function initEditor() {
     if (!$("productForm")) return;
-    const channels = await api("/api/admin/wechat-pay/products/lead-channels");
+    const [channels, pushConfig] = await Promise.all([
+      api("/api/admin/wechat-pay/products/lead-channels").catch(() => ({ items: leadChannels })),
+      mode === "edit" && product.id
+        ? api(`/api/admin/wechat-pay/products/${encodeURIComponent(product.id)}/external-push`).catch(() => ({ config: externalPush }))
+        : Promise.resolve({ config: externalPush })
+    ]);
     leadChannels = channels.items || leadChannels;
     renderLeadChannels();
-    if (mode === "edit" && product.id) {
-      const detail = await api(`/api/admin/wechat-pay/products/${encodeURIComponent(product.id)}`);
-      product = detail.product || product;
-      externalPush = (await api(`/api/admin/wechat-pay/products/${encodeURIComponent(product.id)}/external-push`)).config || externalPush;
-      await loadShareInfo();
-    }
+    externalPush = pushConfig.config || externalPush;
     fillForm();
     fillExternalPush();
   }
@@ -1026,7 +1026,6 @@
   $("productForm")?.addEventListener("input", updateProductSummary);
   $("productForm")?.addEventListener("change", updateProductSummary);
 
-  refreshList().catch(() => {});
   switchProductPanel(activeProductPanel);
   initEditor().catch(error => showToast(error.message || "加载失败"));
 })();

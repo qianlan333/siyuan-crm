@@ -48,6 +48,17 @@ def test_h5_wechat_pay_mobile_projection_test_selects_commerce_scope() -> None:
     assert result["needs_full_ci"] is False
 
 
+def test_public_pay_landing_test_selects_commerce_scope() -> None:
+    result = _select("tests/test_public_pay_landing.py")
+
+    assert result["matched_scopes"][:1] == ["commerce"]
+    assert "next_native_full_sync" in result["matched_scopes"]
+    assert "tests/test_public_pay_landing.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+    assert result["needs_full_ci"] is False
+
+
 def test_commerce_admin_order_tests_select_commerce_scope() -> None:
     result = _select(
         "aicrm_next/commerce/templates/admin_orders.html",
@@ -58,6 +69,25 @@ def test_commerce_admin_order_tests_select_commerce_scope() -> None:
     assert result["matched_scopes"][:1] == ["commerce"]
     assert "tests/test_admin_p0_commerce_api.py" in result["python_tests"]
     assert "tests/test_commerce_admin_transaction_detail.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+    assert result["needs_full_ci"] is False
+
+
+def test_service_period_change_selects_service_period_slice() -> None:
+    result = _select(
+        "aicrm_next/service_period/api.py",
+        "aicrm_next/service_period/templates/service_period_products.html",
+        "tests/test_service_period_frontend_contract.py",
+    )
+
+    assert result["matched_scopes"][:1] == ["service_period"]
+    assert "next_native_full_sync" in result["matched_scopes"]
+    assert "tests/test_service_period_application.py" in result["python_tests"]
+    assert "tests/test_service_period_h5_payment.py" in result["python_tests"]
+    assert "tests/test_service_period_frontend_contract.py" in result["python_tests"]
+    assert "tests/test_service_period_schema.py" in result["python_tests"]
+    assert "tests/test_router_registry_contract.py" in result["python_tests"]
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "fast"
     assert result["needs_full_ci"] is False

@@ -45,6 +45,13 @@ _audit_ledger = InMemoryAuditLedger()
 _side_effect_plans = InMemorySideEffectPlanRepository()
 
 
+_PRODUCTION_READY_COMMANDS = (
+    BindMobileCommand,
+    UpdateSidebarProfileCommand,
+    PlanMaterialSendCommand,
+)
+
+
 def _audit_hook(command: Command, result: CommandResult) -> None:
     _audit_ledger.record_event(
         event_type=f"{command.command_name}.{result.status}",
@@ -90,7 +97,7 @@ def get_sidebar_write_projection_events() -> list[dict[str, Any]]:
 def execute_sidebar_write(command: SidebarWriteCommand) -> dict[str, Any]:
     _validate_command(command)
     _validate_owner_scope(command)
-    if production_data_ready() and not isinstance(command, BindMobileCommand):
+    if production_data_ready() and not isinstance(command, _PRODUCTION_READY_COMMANDS):
         raise SidebarWriteProductionUnavailableError("sidebar write model is not production-ready for command execution")
     platform_command = Command(
         command_name=command.command_name,
@@ -107,8 +114,8 @@ def execute_sidebar_write(command: SidebarWriteCommand) -> dict[str, Any]:
     )
     result = _command_bus.execute(platform_command)
     if result.status == "failed":
-        if "customer not found" in result.error:
-            raise SidebarWriteNotFoundError("customer not found")
+        if "not found" in result.error:
+            raise SidebarWriteNotFoundError(result.error.strip("'") or "not found")
         if "already bound" in result.error:
             raise SidebarWriteConflictError(result.error)
         if "is required" in result.error or "must be" in result.error:
@@ -340,14 +347,24 @@ def _handle_update_profile(command: Command) -> dict[str, Any]:
     remark = str(payload.get("remark") or "").strip()
     description = str(payload.get("description") or "").strip()
     display_name = str(payload.get("display_name") or payload.get("customer_name") or "").strip()
-    if not any([remark, description, display_name]):
-        raise SidebarWriteInputError("remark, description, or display_name is required")
-    write = _repo.update_profile(
+    profile_field_keys = {"source", "industry", "industry_description", "needs_blockers_followup"}
+    has_profile_fields = any(key in payload for key in profile_field_keys)
+    if not has_profile_fields and not any([remark, description, display_name]):
+        raise SidebarWriteInputError("profile field, remark, description, or display_name is required")
+    repository = PostgresSidebarWriteRepository() if production_data_ready() else _repo
+    write = repository.update_profile(
         command_id=command.command_id,
         external_userid=str(command.payload["external_userid"]),
         remark=remark,
         description=description,
         display_name=display_name,
+        source=str(payload.get("source") or ""),
+        industry=str(payload.get("industry") or ""),
+        industry_description=str(payload.get("industry_description") or ""),
+        needs_blockers_followup=str(payload.get("needs_blockers_followup") or ""),
+        updated_by=str(payload.get("updated_by") or payload.get("operator") or command.context.actor_id or ""),
+        owner_userid=str(payload.get("owner_userid") or ""),
+        profile_fields_present=has_profile_fields,
     )
     plan = _create_side_effect_plan(
         command=command,
@@ -355,20 +372,38 @@ def _handle_update_profile(command: Command) -> dict[str, Any]:
         adapter_name="wecom",
         target_type="external_user",
         target_id=str(command.payload["external_userid"]),
-        payload_summary={key: value for key, value in {"remark": remark, "description": description, "display_name": display_name}.items() if value},
+        payload_summary={
+            key: value
+            for key, value in {
+                "remark": remark,
+                "description": description,
+                "display_name": display_name,
+                "source": str(payload.get("source") or ""),
+                "industry": str(payload.get("industry") or ""),
+                "industry_description": str(payload.get("industry_description") or ""),
+                "needs_blockers_followup": str(payload.get("needs_blockers_followup") or ""),
+            }.items()
+            if value
+        },
         risk_level="medium",
     )
     return {"write_model_status": "updated", "write": write, "side_effect_plan": _plan_response(plan)}
 
 
 def _handle_plan_material_send(command: Command) -> dict[str, Any]:
-    material_id = str(command.payload.get("payload", {}).get("material_id") or "").strip()
+    payload = dict(command.payload.get("payload") or {})
+    material_id = str(payload.get("material_id") or "").strip()
     if not material_id:
         raise SidebarWriteInputError("material_id is required")
-    write = _repo.record_material_send_plan(
+    repository = PostgresSidebarWriteRepository() if production_data_ready() else _repo
+    write = repository.record_material_send_plan(
         command_id=command.command_id,
         external_userid=str(command.payload["external_userid"]),
         material_id=material_id,
+        material_type=str(payload.get("type") or payload.get("material_type") or ""),
+        operator=str(payload.get("operator") or command.context.actor_id or ""),
+        delivery_mode=str(payload.get("delivery_mode") or ""),
+        owner_userid=str(payload.get("owner_userid") or ""),
     )
     plan = _create_side_effect_plan(
         command=command,
@@ -376,10 +411,17 @@ def _handle_plan_material_send(command: Command) -> dict[str, Any]:
         adapter_name="wecom",
         target_type="external_user",
         target_id=str(command.payload["external_userid"]),
-        payload_summary={"material_id": material_id},
+        payload_summary={
+            "material_id": material_id,
+            "type": str(payload.get("type") or payload.get("material_type") or ""),
+            "delivery_mode": str(payload.get("delivery_mode") or ""),
+        },
         risk_level="high",
     )
-    return {"write_model_status": "planned", "write": write, "side_effect_plan": _plan_response(plan)}
+    response = {"write_model_status": "planned", "write": write, "side_effect_plan": _plan_response(plan)}
+    if write.get("media_id"):
+        response["media_id"] = write.get("media_id")
+    return response
 
 
 def _create_side_effect_plan(

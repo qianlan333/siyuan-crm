@@ -246,7 +246,7 @@ def test_empty_material_checkout_oauth_round_trip_enters_pay_without_auth_loop(m
 
     before_auth = client.get(product.headers["location"], follow_redirects=False)
     assert before_auth.status_code == 200
-    assert ">微信授权</a>" in before_auth.text
+    assert ">授权登录</a>" in before_auth.text
 
     start = client.get("/api/h5/wechat-pay/oauth/start?return_url=/pay/test-product", follow_redirects=False)
     state = parse_qs(urlparse(start.headers["location"]).query)["state"][0]
@@ -260,7 +260,7 @@ def test_empty_material_checkout_oauth_round_trip_enters_pay_without_auth_loop(m
 
     after_auth = client.get(callback.headers["location"], follow_redirects=False)
     assert after_auth.status_code == 200
-    assert ">微信授权</a>" not in after_auth.text
+    assert ">授权登录</a>" not in after_auth.text
     assert '<button id="payButton"' in after_auth.text
 
 

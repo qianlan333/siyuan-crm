@@ -243,7 +243,6 @@ def test_wecom_callback_inbox_worker_processes_claimed_rows():
                 "baseline_effects": {
                     "welcome_message": {"external_effect_job_id": 101},
                     "entry_tag": {"external_effect_job_id": 102},
-                    "profile_description": {"reason": "no_profile"},
                 },
             },
         }

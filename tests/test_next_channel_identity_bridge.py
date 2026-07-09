@@ -17,6 +17,9 @@ def _app_context(app):
 
 
 class DetailAdapter:
+    def __init__(self):
+        self.profile_updates: list[dict] = []
+
     def get_external_contact_detail(self, external_userid: str):
         return {
             "errcode": 0,
@@ -38,6 +41,10 @@ class DetailAdapter:
                 }
             ],
         }
+
+    def update_external_contact_remark(self, payload: dict):
+        self.profile_updates.append(dict(payload))
+        return {"errcode": 0, "errmsg": "ok"}
 
 
 def _seed_identity_mobile_candidate(db, *, unionid: str, external_userid: str, mobile: str, owner_userid: str, openid: str = "") -> None:
@@ -87,7 +94,8 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
         lambda *args, **kwargs: None,
     )
     previous_adapter = get_wecom_adapter()
-    set_wecom_adapter(DetailAdapter())
+    adapter = DetailAdapter()
+    set_wecom_adapter(adapter)
     try:
         with _app_context(app):
             db = get_db()
@@ -134,8 +142,21 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
             ).fetchone()
         assert result["identity_sync"]["status"] == "success"
         assert result["identity_sync"]["unionid_present"] is True
+        assert result["identity_sync"]["profile_description"] == {
+            "status": "success",
+            "description_source": "external_userid",
+            "description": "wm_bridge_001",
+            "real_external_call_executed": True,
+        }
         assert result["identity_sync"]["mobile_binding"]["status"] == "bound"
         assert result["identity_sync"]["questionnaire_backfill"]["reason"] == "questionnaire_submissions_unionid_only"
+        assert adapter.profile_updates == [
+            {
+                "userid": "owner_bridge",
+                "external_userid": "wm_bridge_001",
+                "description": "wm_bridge_001",
+            }
+        ]
         assert dict(identity) == {
             "unionid": "union_bridge_001",
             "primary_external_userid": "wm_bridge_001",
@@ -392,7 +413,8 @@ def test_next_external_contact_callback_records_runtime_entry_when_identity_pend
 
 def test_sidebar_identity_refresh_binds_missing_identity_on_access(app, next_pg_schema):
     previous_adapter = get_wecom_adapter()
-    set_wecom_adapter(DetailAdapter())
+    adapter = DetailAdapter()
+    set_wecom_adapter(adapter)
     try:
         with _app_context(app):
             db = get_db()
@@ -428,6 +450,13 @@ def test_sidebar_identity_refresh_binds_missing_identity_on_access(app, next_pg_
         assert result["reason"] == "mobile_not_bound"
         assert result["sync_status"] == "success"
         assert result["mobile_binding_status"] == "bound"
+        assert adapter.profile_updates == [
+            {
+                "userid": "owner_bridge",
+                "external_userid": "wm_bridge_001",
+                "description": "wm_bridge_001",
+            }
+        ]
         assert dict(identity) == {
             "external_userid": "wm_bridge_001",
             "mobile": "18565883798",

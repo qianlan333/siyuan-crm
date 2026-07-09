@@ -21,6 +21,7 @@ class ProductUpsertRequest(BaseModel):
     completion_redirect_enabled: bool = False
     completion_redirect_url: str = ""
     completion_target: dict[str, Any] | None = None
+    metadata_json: dict[str, Any] = Field(default_factory=dict)
     require_mobile: bool = False
     lead_program_id: int | None = None
     lead_channel_id: int | None = None

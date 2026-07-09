@@ -69,6 +69,7 @@ from .questionnaire.api import router as questionnaire_router
 from .radar_links.admin_pages import router as radar_links_admin_pages_router
 from .radar_links.api import router as radar_links_router
 from .send_content.api import router as send_content_router
+from .service_period.api import router as service_period_router
 from .sidebar_write.api import router as sidebar_write_router
 
 
@@ -102,6 +103,7 @@ ROUTER_SPECS: tuple[RouterSpec, ...] = (
     RouterSpec("automation_agents", "automation_agents_api", automation_agents_router, "Automation agent audience webhook APIs"),
     RouterSpec("hxc_dashboard", "hxc_dashboard", hxc_dashboard_router),
     RouterSpec("public_product", "public_product", public_product_router),
+    RouterSpec("service_period", "service_period", service_period_router, "service period products and entitlements"),
     RouterSpec("sidebar_write", "sidebar_write", sidebar_write_router),
     RouterSpec("identity_contact", "sidebar_jssdk", sidebar_jssdk_router),
     RouterSpec("customer_tags", "customer_tags_read", customer_tags_read_router),

@@ -194,8 +194,11 @@ def ai_assist_notify_consumer(event: InternalEvent, run: InternalEventConsumerRu
 
 def register_payment_succeeded_consumers(registry: InternalEventConsumerRegistry | None = None) -> None:
     registry = registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
+    from aicrm_next.service_period.payment_consumer import service_period_entitlement_consumer
+
     for event_type in PAYMENT_SUCCEEDED_EVENT_TYPES:
         registry.register(event_type, "order_projection_consumer", order_projection_consumer, consumer_type="projection")
+        registry.register(event_type, "service_period_entitlement_consumer", service_period_entitlement_consumer, consumer_type="projection")
         registry.register(event_type, "webhook_order_paid_consumer", webhook_order_paid_consumer, consumer_type="external_effect_planner")
         registry.register(event_type, "customer_business_summary_consumer", customer_business_summary_consumer, consumer_type="projection")
         registry.register(event_type, "dnd_policy_consumer", dnd_policy_consumer, consumer_type="orchestration")

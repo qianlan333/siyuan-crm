@@ -59,6 +59,7 @@
         "tests/test_commerce_admin_transaction_detail.py",
         "tests/test_h5_wechat_pay_mobile_projection.py",
         "tests/test_wechat_pay_*.py",
+        "tests/test_public_pay_landing.py",
         "tests/test_public_product_*.py",
         "tests/test_next_h5_wechat_pay_external_push_outbox.py"
       ],
@@ -68,9 +69,31 @@
         "tests/test_wechat_products_admin_page_contract.py",
         "tests/test_product_external_push.py",
         "tests/test_h5_wechat_pay_mobile_projection.py",
+        "tests/test_public_pay_landing.py",
         "tests/test_public_product_no_real_payment.py",
         "tests/test_public_product_h5_pay_oauth_native.py",
         "tests/test_public_product_api_contract.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "service_period",
+      "paths": [
+        "aicrm_next/service_period/**",
+        "tests/test_service_period_*.py"
+      ],
+      "python_tests": [
+        "tests/test_service_period_application.py",
+        "tests/test_service_period_h5_payment.py",
+        "tests/test_service_period_frontend_contract.py",
+        "tests/test_service_period_schema.py",
+        "tests/test_public_product_frontend_contract.py",
+        "tests/test_wechat_products_admin_page_contract.py",
+        "tests/test_internal_events_payment_slice.py",
+        "tests/test_router_registry_contract.py",
+        "tests/test_fixture_reset_registry.py",
+        "tests/test_next_api_docs_page.py"
       ],
       "needs_postgres": false,
       "architecture_gate": "fast"
@@ -151,7 +174,10 @@
         "aicrm_next/auth_wecom/**",
         "tests/test_identity_*.py",
         "tests/test_channel_entry_*.py",
+        "tests/test_channel_identity_bridge_native_service.py",
         "tests/test_next_channel_*.py",
+        "tests/test_wecom_callback_external_effect_boundary.py",
+        "tests/test_wecom_callback_inbox.py",
         "tests/test_auth_wecom_*.py",
         "tests/test_identity_resolution_backfill_worker.py"
       ],
@@ -159,7 +185,11 @@
         "tests/test_identity_application_contract.py",
         "tests/test_channel_entry_identity_best_effort_contract.py",
         "tests/test_identity_resolution_backfill_worker.py",
-        "tests/test_next_channel_entry_orchestrator.py"
+        "tests/test_channel_identity_bridge_native_service.py",
+        "tests/test_next_channel_entry_orchestrator.py",
+        "tests/test_next_channel_identity_bridge.py",
+        "tests/test_wecom_callback_external_effect_boundary.py",
+        "tests/test_wecom_callback_inbox.py"
       ],
       "needs_postgres": true,
       "architecture_gate": "db"
@@ -345,7 +375,8 @@
         "tests/test_sql_static_guard.py"
       ],
       "python_tests": [
-        "tests/test_alembic_revision_chain.py"
+        "tests/test_alembic_revision_chain.py",
+        "tests/test_sql_static_guard.py"
       ],
       "needs_postgres": true,
       "architecture_gate": "db"
@@ -360,8 +391,18 @@
         "docs/ci/**",
         "docs/development/**",
         "docs/architecture/*manifest*",
+        "docs/architecture/repository_ownership.yml",
+        "aicrm_next/admin_config/api_docs_view_model.py",
+        "aicrm_next/admin_shell/navigation.py",
+        "aicrm_next/fixture_reset_registry.py",
+        "aicrm_next/router_registry.py",
+        "tests/conftest.py",
         "tests/test_ci_workflow_contract.py",
         "tests/test_select_test_scope.py",
+        "tests/test_fixture_reset_registry.py",
+        "tests/test_internal_events_payment_slice.py",
+        "tests/test_next_api_docs_page.py",
+        "tests/test_router_registry_contract.py",
         "requirements.txt",
         "app.py",
         "aicrm_next/platform_foundation/**"
@@ -369,7 +410,11 @@
       "python_tests": [
         "tests/test_ci_workflow_contract.py",
         "tests/test_select_test_scope.py",
-        "tests/test_architecture_boundaries.py"
+        "tests/test_architecture_boundaries.py",
+        "tests/test_fixture_reset_registry.py",
+        "tests/test_internal_events_payment_slice.py",
+        "tests/test_next_api_docs_page.py",
+        "tests/test_router_registry_contract.py"
       ],
       "needs_postgres": false,
       "architecture_gate": "full"

@@ -29,6 +29,22 @@ def normalize_mobile(value: str) -> str:
     return digits
 
 
+def _text(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _json_dump(value: dict[str, Any]) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True)
+
+
+def _usable_wecom_media_id(value: Any) -> str:
+    media_id = _text(value)
+    lowered = media_id.lower()
+    if lowered.startswith(("fake_", "staging_", "fake://")):
+        return ""
+    return media_id
+
+
 class SidebarWriteRepository:
     def __init__(self) -> None:
         fixture = FixtureCustomerReadRepository()
@@ -131,6 +147,13 @@ class SidebarWriteRepository:
         remark: str,
         description: str,
         display_name: str,
+        source: str = "",
+        industry: str = "",
+        industry_description: str = "",
+        needs_blockers_followup: str = "",
+        updated_by: str = "",
+        owner_userid: str = "",
+        profile_fields_present: bool = False,
     ) -> JsonDict:
         customer = self._require_customer(external_userid)
         changes: dict[str, Any] = {}
@@ -146,6 +169,18 @@ class SidebarWriteRepository:
             contact["name"] = display_name
         if contact:
             changes["contact"] = contact
+        profile_fields = {
+            "source": source,
+            "industry": industry,
+            "industry_description": industry_description,
+            "needs_blockers_followup": needs_blockers_followup,
+            "updated_by": updated_by,
+        }
+        if profile_fields_present:
+            sidebar_context = dict(customer.get("sidebar_context") or {})
+            sidebar_context.update(profile_fields)
+            changes["sidebar_context"] = sidebar_context
+            changes["profile_fields"] = profile_fields
         return self._update_customer(
             command_id=command_id,
             external_userid=external_userid,
@@ -153,12 +188,29 @@ class SidebarWriteRepository:
             changes=changes,
         )
 
-    def record_material_send_plan(self, *, command_id: str, external_userid: str, material_id: str) -> JsonDict:
+    def record_material_send_plan(
+        self,
+        *,
+        command_id: str,
+        external_userid: str,
+        material_id: str,
+        material_type: str = "",
+        operator: str = "",
+        delivery_mode: str = "",
+        owner_userid: str = "",
+    ) -> JsonDict:
         return self._update_customer(
             command_id=command_id,
             external_userid=external_userid,
             write_type="material_send_planned",
-            changes={"last_material_send_plan": {"material_id": material_id}},
+            changes={
+                "last_material_send_plan": {
+                    "material_id": material_id,
+                    "type": material_type,
+                    "operator": operator,
+                    "delivery_mode": delivery_mode,
+                }
+            },
         )
 
     def _require_customer(self, external_userid: str) -> JsonDict:
@@ -352,6 +404,184 @@ class PostgresSidebarWriteRepository:
                 "lead_pool_merge": {"ok": True, "merge_applied": False, "action_type": "customer_mobile_bound_event"},
             }
 
+    def update_profile(
+        self,
+        *,
+        command_id: str,
+        external_userid: str,
+        remark: str,
+        description: str,
+        display_name: str,
+        source: str = "",
+        industry: str = "",
+        industry_description: str = "",
+        needs_blockers_followup: str = "",
+        updated_by: str = "",
+        owner_userid: str = "",
+        profile_fields_present: bool = False,
+    ) -> JsonDict:
+        normalized_external_userid = _text(external_userid)
+        normalized_updated_by = _text(updated_by) or _text(owner_userid) or "sidebar_profile"
+        profile_fields = {
+            "source": _text(source),
+            "industry": _text(industry),
+            "industry_description": _text(industry_description),
+            "needs_blockers_followup": _text(needs_blockers_followup),
+            "updated_by": normalized_updated_by,
+        }
+        contact_changes = {
+            "remark": _text(remark),
+            "description": _text(description),
+            "display_name": _text(display_name),
+        }
+        with self._connect() as conn:
+            identity = self._require_identity_for_write(conn, normalized_external_userid, owner_userid=owner_userid)
+            unionid = _text(identity.get("unionid"))
+            changes: dict[str, Any] = {}
+            updated_at = ""
+            if profile_fields_present:
+                profile_row = conn.execute(
+                    """
+                    INSERT INTO sidebar_customer_profile_fields (
+                        unionid,
+                        source,
+                        industry,
+                        industry_description,
+                        needs_blockers_followup,
+                        updated_by,
+                        created_at,
+                        updated_at
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, NOW(), NOW())
+                    ON CONFLICT (unionid) DO UPDATE SET
+                        source = EXCLUDED.source,
+                        industry = EXCLUDED.industry,
+                        industry_description = EXCLUDED.industry_description,
+                        needs_blockers_followup = EXCLUDED.needs_blockers_followup,
+                        updated_by = EXCLUDED.updated_by,
+                        updated_at = NOW()
+                    RETURNING
+                        source,
+                        industry,
+                        industry_description,
+                        needs_blockers_followup,
+                        updated_by,
+                        updated_at
+                    """,
+                    (
+                        unionid,
+                        profile_fields["source"],
+                        profile_fields["industry"],
+                        profile_fields["industry_description"],
+                        profile_fields["needs_blockers_followup"],
+                        profile_fields["updated_by"],
+                    ),
+                ).fetchone()
+                if profile_row:
+                    changes["profile_fields"] = {
+                        "source": _text(profile_row.get("source")),
+                        "industry": _text(profile_row.get("industry")),
+                        "industry_description": _text(profile_row.get("industry_description")),
+                        "needs_blockers_followup": _text(profile_row.get("needs_blockers_followup")),
+                        "updated_by": _text(profile_row.get("updated_by")),
+                    }
+                    updated_at = _text(profile_row.get("updated_at"))
+            if any(contact_changes.values()):
+                identity_row = conn.execute(
+                    """
+                    UPDATE crm_user_identity
+                    SET customer_name = CASE WHEN %s <> '' THEN %s ELSE customer_name END,
+                        remark = CASE WHEN %s <> '' THEN %s ELSE remark END,
+                        profile_json = COALESCE(profile_json, '{}'::jsonb) || jsonb_strip_nulls(jsonb_build_object(
+                            'description', NULLIF(%s::text, ''),
+                            'sidebar_profile_updated_by', NULLIF(%s::text, '')
+                        )),
+                        updated_at = NOW()
+                    WHERE unionid = %s
+                    RETURNING customer_name, remark, profile_json, updated_at
+                    """,
+                    (
+                        contact_changes["display_name"],
+                        contact_changes["display_name"],
+                        contact_changes["remark"],
+                        contact_changes["remark"],
+                        contact_changes["description"],
+                        normalized_updated_by,
+                        unionid,
+                    ),
+                ).fetchone()
+                if identity_row:
+                    changes["contact"] = {
+                        "customer_name": _text(identity_row.get("customer_name")),
+                        "remark": _text(identity_row.get("remark")),
+                        "description": _text((identity_row.get("profile_json") or {}).get("description")),
+                    }
+                    updated_at = _text(identity_row.get("updated_at")) or updated_at
+            conn.commit()
+            return {
+                "external_userid": normalized_external_userid,
+                "unionid": unionid,
+                "write_type": "profile_update",
+                "write_model_status": "updated",
+                "updated_at": updated_at,
+                "changes": changes,
+            }
+
+    def record_material_send_plan(
+        self,
+        *,
+        command_id: str,
+        external_userid: str,
+        material_id: str,
+        material_type: str = "",
+        operator: str = "",
+        delivery_mode: str = "",
+        owner_userid: str = "",
+    ) -> JsonDict:
+        normalized_external_userid = _text(external_userid)
+        normalized_type = _text(material_type) or "image"
+        normalized_material_id = _text(material_id)
+        with self._connect() as conn:
+            identity = self._require_identity_for_write(conn, normalized_external_userid, owner_userid=owner_userid)
+            material = self._material_reference(conn, material_type=normalized_type, material_id=normalized_material_id)
+            if not material:
+                raise KeyError("material not found")
+            media_id = _usable_wecom_media_id(material.get("media_id"))
+            if normalized_type == "image" and not media_id:
+                raise ValueError("image material media_id is required before sending")
+            plan = {
+                "command_id": command_id,
+                "external_userid": normalized_external_userid,
+                "material_id": normalized_material_id,
+                "type": normalized_type,
+                "operator": _text(operator),
+                "delivery_mode": _text(delivery_mode),
+                "media_id": media_id,
+                "title": _text(material.get("title")),
+            }
+            updated = conn.execute(
+                """
+                UPDATE crm_user_identity
+                SET profile_json = COALESCE(profile_json, '{}'::jsonb) || jsonb_build_object(
+                        'last_material_send_plan', CAST(%s AS jsonb)
+                    ),
+                    updated_at = NOW()
+                WHERE unionid = %s
+                RETURNING updated_at
+                """,
+                (_json_dump(plan), identity["unionid"]),
+            ).fetchone()
+            conn.commit()
+            return {
+                "external_userid": normalized_external_userid,
+                "unionid": _text(identity.get("unionid")),
+                "write_type": "material_send_planned",
+                "write_model_status": "planned",
+                "updated_at": _text((updated or {}).get("updated_at")),
+                "media_id": media_id,
+                "changes": {"last_material_send_plan": plan},
+            }
+
     def _identity_row(self, conn, external_userid: str) -> JsonDict | None:
         row = conn.execute(
             """
@@ -375,6 +605,61 @@ class PostgresSidebarWriteRepository:
             """,
             (external_userid, external_userid, external_userid),
         ).fetchone()
+        return dict(row) if row else None
+
+    def _require_identity_for_write(self, conn, external_userid: str, *, owner_userid: str = "") -> JsonDict:
+        identity = self._identity_row(conn, external_userid)
+        if not identity:
+            raise KeyError("customer not found")
+        requested_owner_userid = _text(owner_userid)
+        identity_owner_userid = _text(identity.get("primary_owner_userid"))
+        owner_candidates = self._contact_owner_userids(
+            conn,
+            external_userid,
+            identity_owner_userid=identity_owner_userid,
+        )
+        if requested_owner_userid and owner_candidates and requested_owner_userid not in owner_candidates:
+            raise KeyError("customer not found")
+        return identity
+
+    def _material_reference(self, conn, *, material_type: str, material_id: str) -> JsonDict | None:
+        try:
+            item_id = int(material_id)
+        except (TypeError, ValueError):
+            raise ValueError("material_id must be numeric") from None
+        normalized_type = _text(material_type) or "image"
+        if normalized_type == "image":
+            row = conn.execute(
+                """
+                SELECT id, COALESCE(NULLIF(name, ''), NULLIF(file_name, '')) AS title, thumb_media_id AS media_id
+                FROM image_library
+                WHERE id = %s AND COALESCE(enabled, TRUE) IS TRUE
+                LIMIT 1
+                """,
+                (item_id,),
+            ).fetchone()
+        elif normalized_type == "mini":
+            row = conn.execute(
+                """
+                SELECT id, COALESCE(NULLIF(title, ''), NULLIF(name, '')) AS title, thumb_media_id AS media_id
+                FROM miniprogram_library
+                WHERE id = %s AND COALESCE(enabled, TRUE) IS TRUE
+                LIMIT 1
+                """,
+                (item_id,),
+            ).fetchone()
+        elif normalized_type in {"pdf", "attachment"}:
+            row = conn.execute(
+                """
+                SELECT id, COALESCE(NULLIF(name, ''), NULLIF(file_name, '')) AS title, media_id
+                FROM attachment_library
+                WHERE id = %s AND COALESCE(enabled, TRUE) IS TRUE
+                LIMIT 1
+                """,
+                (item_id,),
+            ).fetchone()
+        else:
+            raise ValueError("type must be image, mini, or pdf")
         return dict(row) if row else None
 
     def _contact_owner_userids(

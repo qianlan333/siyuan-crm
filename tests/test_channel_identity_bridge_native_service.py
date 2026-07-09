@@ -8,6 +8,7 @@ from aicrm_next.channel_entry.identity_bridge_service import IdentityBridgeServi
 
 class _DetailAdapter:
     def __init__(self, detail: dict[str, Any] | None = None) -> None:
+        self.profile_updates: list[dict[str, Any]] = []
         self.detail = detail or {
             "errcode": 0,
             "external_contact": {
@@ -21,6 +22,16 @@ class _DetailAdapter:
 
     def get_external_contact_detail(self, external_userid: str) -> dict[str, Any]:
         return self.detail
+
+    def update_external_contact_remark(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.profile_updates.append(dict(payload))
+        return {"errcode": 0, "errmsg": "ok"}
+
+
+class _RemarkFailingDetailAdapter(_DetailAdapter):
+    def update_external_contact_remark(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.profile_updates.append(dict(payload))
+        return {"errcode": 40003, "errmsg": "invalid userid"}
 
 
 class _AdapterWithoutDetail:
@@ -169,19 +180,20 @@ def test_sync_external_contact_identity_wecom_api_error() -> None:
 
 def test_sync_external_contact_identity_allows_missing_openid() -> None:
     repo = _FakeRepo()
+    adapter = _DetailAdapter(
+        {
+            "errcode": 0,
+            "external_contact": {
+                "external_userid": "wm_native_001",
+                "unionid": "union_native_001",
+                "name": "native customer",
+            },
+            "follow_user": [{"userid": "owner_native"}],
+        }
+    )
     result = _service(
         repo,
-        adapter=_DetailAdapter(
-            {
-                "errcode": 0,
-                "external_contact": {
-                    "external_userid": "wm_native_001",
-                    "unionid": "union_native_001",
-                    "name": "native customer",
-                },
-                "follow_user": [{"userid": "owner_native"}],
-            }
-        ),
+        adapter=adapter,
     ).sync_external_contact_identity_for_event(
         {
             "Event": "change_external_contact",
@@ -195,6 +207,19 @@ def test_sync_external_contact_identity_allows_missing_openid() -> None:
     assert result["status"] == "success"
     assert result["unionid_present"] is True
     assert result["openid_present"] is False
+    assert result["profile_description"] == {
+        "status": "success",
+        "description_source": "external_userid",
+        "description": "wm_native_001",
+        "real_external_call_executed": True,
+    }
+    assert adapter.profile_updates == [
+        {
+            "userid": "owner_native",
+            "external_userid": "wm_native_001",
+            "description": "wm_native_001",
+        }
+    ]
     assert repo.upserted_record["openid"] == ""
 
 
@@ -226,8 +251,26 @@ def test_sync_external_contact_identity_without_unionid_stays_pending() -> None:
     assert result["status"] == "pending_identity"
     assert result["reason"] == "missing_unionid"
     assert result["unionid_present"] is False
+    assert result["profile_description"]["status"] == "success"
     assert result["mobile_binding"] == {"status": "skipped", "reason": "identity_pending_unionid"}
     assert repo.binding_status == {"is_bound": False, "mobile": ""}
+
+
+def test_sync_external_contact_identity_keeps_identity_success_when_description_update_fails() -> None:
+    result = _service(_FakeRepo(), adapter=_RemarkFailingDetailAdapter()).sync_external_contact_identity_for_event(
+        {
+            "Event": "change_external_contact",
+            "ChangeType": "add_external_contact",
+            "ExternalUserID": "wm_native_001",
+            "UserID": "owner_native",
+        },
+        corp_id="ww-native",
+    )
+
+    assert result["status"] == "success"
+    assert result["profile_description"]["status"] == "failed"
+    assert result["profile_description"]["reason"] == "wecom_api_error"
+    assert result["profile_description"]["wecom_result"]["errcode"] == 40003
 
 
 def test_bind_mobile_from_identity_sources_no_candidate() -> None:

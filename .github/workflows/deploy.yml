@@ -28,6 +28,7 @@ jobs:
             git reset --hard refs/remotes/origin/main
             after_sha="$(git rev-parse HEAD)"
             printf '%s\n' "$after_sha" > .release-sha
+            python3 scripts/ops/ensure_ai_audience_external_api_env.py /home/ubuntu/.openclaw-wecom-pg.env
             set -a
             source /home/ubuntu/.openclaw-wecom-pg.env
             set +a

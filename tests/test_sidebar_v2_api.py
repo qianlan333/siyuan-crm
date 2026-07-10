@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -150,8 +151,9 @@ def test_sidebar_v2_workbench_and_read_panels_are_next_owned(monkeypatch):
     questionnaires = client.get(f"/api/sidebar/v2/questionnaires?{owner_query}")
     products = client.get(f"/api/sidebar/v2/products?{owner_query}")
     orders = client.get(f"/api/sidebar/v2/orders?{owner_query}")
+    periodic_orders = client.get(f"/api/sidebar/v2/periodic-orders?{owner_query}")
 
-    for response in (workbench, questionnaires, products, orders):
+    for response in (workbench, questionnaires, products, orders, periodic_orders):
         assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
         assert response.headers["Cache-Control"] == "no-store, max-age=0"
         payload = response.json()
@@ -244,6 +246,9 @@ def test_sidebar_v2_empty_readonly_fallback_returns_owner_pending_shell(monkeypa
         def list_customer_wechat_pay_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict]:
             return []
 
+        def list_customer_service_period_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict]:
+            return []
+
     class FakeCommerceRepo:
         def list_sidebar_active_products(self, *, limit: int = 100, offset: int = 0) -> dict:
             return {
@@ -267,9 +272,10 @@ def test_sidebar_v2_empty_readonly_fallback_returns_owner_pending_shell(monkeypa
     workbench = client.get("/api/sidebar/v2/workbench?external_userid=wx_ext_missing")
     questionnaires = client.get("/api/sidebar/v2/questionnaires?external_userid=wx_ext_missing")
     orders = client.get("/api/sidebar/v2/orders?external_userid=wx_ext_missing")
+    periodic_orders = client.get("/api/sidebar/v2/periodic-orders?external_userid=wx_ext_missing")
     products = client.get("/api/sidebar/v2/products?external_userid=wx_ext_missing")
 
-    for response in (workbench, questionnaires, orders, products):
+    for response in (workbench, questionnaires, orders, periodic_orders, products):
         assert response.status_code == 200
         payload = response.json()
         _assert_next(payload)
@@ -282,10 +288,85 @@ def test_sidebar_v2_empty_readonly_fallback_returns_owner_pending_shell(monkeypa
     assert workbench.json()["customer"]["external_userid"] == "wx_ext_missing"
     assert questionnaires.json()["questionnaires"] == []
     assert orders.json()["orders"] == []
+    assert periodic_orders.json()["periodic_orders"] == []
     product = products.json()["products"][0]
     assert product["context_status"] == "owner_pending"
     assert "?ctx=" not in product["product_url"]
     assert "?ctx=" not in product["checkout_url"]
+
+
+def test_sidebar_products_include_service_period_products_with_signed_links(monkeypatch) -> None:
+    class FakeCommerceRepo:
+        def list_sidebar_active_products(self, *, limit: int = 100, offset: int = 0) -> dict:
+            return {
+                "items": [
+                    {
+                        "id": "trade_regular",
+                        "product_code": "regular_001",
+                        "title": "普通商品",
+                        "price_cents": 19900,
+                        "enabled": True,
+                        "status": "active",
+                    }
+                ]
+            }
+
+    class FakeListServicePeriodProductsQuery:
+        def __call__(self, *, limit: int = 100, offset: int = 0) -> dict:
+            return {
+                "items": [
+                    {
+                        "id": "sp_active",
+                        "trade_product_id": "trade_periodic",
+                        "title": "季度周期商品",
+                        "price_cents": 99900,
+                        "duration_days": 90,
+                        "link_slug": "periodic-quarter",
+                        "enabled": True,
+                        "status": "active",
+                    },
+                    {
+                        "id": "sp_disabled",
+                        "trade_product_id": "trade_disabled",
+                        "title": "禁用周期商品",
+                        "duration_days": 30,
+                        "link_slug": "periodic-disabled",
+                        "enabled": False,
+                        "status": "active",
+                    },
+                    {
+                        "id": "sp_draft",
+                        "trade_product_id": "trade_draft",
+                        "title": "草稿周期商品",
+                        "duration_days": 30,
+                        "link_slug": "periodic-draft",
+                        "enabled": True,
+                        "status": "draft",
+                    },
+                ]
+            }
+
+    monkeypatch.setattr(sidebar_v2, "build_commerce_repository", lambda: FakeCommerceRepo())
+    monkeypatch.setattr(sidebar_v2, "ListServicePeriodProductsQuery", lambda: FakeListServicePeriodProductsQuery())
+
+    payload = SidebarCommerceReadModel().products(
+        external_userid="wx_periodic_product",
+        owner_userid="HuangYouCan",
+        bind_by_userid="HuangYouCan",
+    )
+
+    assert [item["id"] for item in payload["products"]] == ["regular_001"]
+    assert len(payload["service_period_products"]) == 1
+    periodic = payload["service_period_products"][0]
+    assert periodic["id"] == "sp_active"
+    assert periodic["service_product_id"] == "sp_active"
+    assert periodic["trade_product_id"] == "trade_periodic"
+    assert periodic["title"] == "季度周期商品"
+    assert periodic["price_label"] == "¥999"
+    assert periodic["duration_days"] == 90
+    assert periodic["link_slug"] == "periodic-quarter"
+    assert periodic["product_url"].startswith("/s/periodic-quarter?ctx=")
+    assert periodic["context_status"] == "signed"
 
 
 def test_sidebar_v2_profile_context_and_binding_status_use_next_read_models(monkeypatch):
@@ -420,6 +501,254 @@ def test_sidebar_orders_expose_wechat_shop_channel_fields() -> None:
     assert item["channel_label"] == "微信小店"
     assert item["detail_url"] == "/admin/wechat-shop/transactions/3737077448554214400"
     assert item["status_label"] == "已支付"
+
+
+def test_sidebar_periodic_orders_include_active_and_expired_with_member_remark() -> None:
+    future = datetime.now(timezone.utc) + timedelta(days=8, hours=2)
+    past = datetime.now(timezone.utc) - timedelta(days=2)
+
+    class FakeContextQuery:
+        def __init__(self) -> None:
+            self.requests = []
+
+        def __call__(self, request: CustomerContextRequest) -> dict:
+            self.requests.append(request)
+            return {
+                "ok": True,
+                "source_status": "fixture",
+                "customer": {
+                    "external_userid": request.external_userid,
+                    "customer_name": "周期客户",
+                    "owner_userid": "HuangYouCan",
+                    "mobile": "13900001111",
+                    "is_bound": True,
+                    "binding": {},
+                },
+            }
+
+    class FakeRepo:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get_contact_snapshot(self, external_userid: str) -> dict:
+            return {"external_userid": external_userid, "customer_name": "周期客户", "owner_userid": "HuangYouCan"}
+
+        def get_external_identity_snapshot(self, external_userid: str) -> dict:
+            return {"external_userid": external_userid, "follow_user_userid": "HuangYouCan"}
+
+        def get_profile_fields(self, external_userid: str) -> dict:
+            return {}
+
+        def get_contact_binding_status(self, external_userid: str) -> dict:
+            return {"is_bound": True, "external_userid": external_userid, "mobile": "13900001111", "owner_userid": "HuangYouCan"}
+
+        def get_workflow_title_for_customer(self, external_userid: str) -> str:
+            return ""
+
+        def list_customer_service_period_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict]:
+            self.calls.append({"external_userid": external_userid, "mobile": mobile, "limit": limit})
+            return [
+                {
+                    "entitlement_id": "ent_active",
+                    "service_product_id": "sp_active",
+                    "trade_product_id": "trade_active",
+                    "product_code": "sp_every_quarter",
+                    "product_name": "老黄的 AI+ 进化同行圈/每季度",
+                    "status": "active",
+                    "end_at": future,
+                    "duration_days": 90,
+                    "product_amount_total": 99900,
+                    "last_order_id": "order_active",
+                    "last_out_trade_no": "WXP260708234704E31147891A00",
+                    "last_order_paid_at": "2026-07-09 07:47:00+08:00",
+                    "remark": "高意向，提醒续费",
+                    "unionid": "union_periodic",
+                },
+                {
+                    "entitlement_id": "ent_expired",
+                    "service_product_id": "sp_expired",
+                    "trade_product_id": "trade_expired",
+                    "product_code": "sp_private_trial",
+                    "product_name": "老黄的 AI+进化同行圈体验-私域",
+                    "status": "active",
+                    "end_at": past,
+                    "duration_days": 14,
+                    "product_amount_total": 990,
+                    "last_order_id": "order_expired",
+                    "last_out_trade_no": "WXP2607081103375882F3604D6C",
+                    "remark": "已过期，待跟进",
+                    "unionid": "union_periodic",
+                },
+                {
+                    "entitlement_id": "ent_disabled",
+                    "service_product_id": "sp_disabled",
+                    "product_name": "已禁用服务期",
+                    "status": "disabled",
+                    "end_at": future,
+                    "unionid": "union_periodic",
+                },
+            ]
+
+    repo = FakeRepo()
+    payload = SidebarCommerceReadModel(repo=repo, context_query=FakeContextQuery()).periodic_orders(
+        external_userid="wmbNXyCwAAdv14187FTFLDTKp9UUGrbw",
+        owner_userid="HuangYouCan",
+    )
+
+    assert payload["ok"] is True
+    assert payload["diagnostics"]["periodic_orders_context"] == "workbench_customer_overlay"
+    assert repo.calls == [
+        {
+            "external_userid": "wmbNXyCwAAdv14187FTFLDTKp9UUGrbw",
+            "mobile": "13900001111",
+            "limit": 20,
+        }
+    ]
+    assert [item["id"] for item in payload["periodic_orders"]] == ["ent_active", "ent_expired"]
+    active, expired = payload["periodic_orders"]
+    assert active["status_label"] == "使用中"
+    assert active["remaining_days"] > 0
+    assert active["remark"] == "高意向，提醒续费"
+    assert active["detail_url"] == "/admin/wechat-pay/transactions/order_active"
+    assert expired["status_label"] == "已过期"
+    assert expired["remaining_days"] == 0
+    assert expired["remark"] == "已过期，待跟进"
+
+
+def test_sidebar_periodic_order_remark_target_keeps_customer_scope() -> None:
+    class FakeContextQuery:
+        def __call__(self, request: CustomerContextRequest) -> dict:
+            return {
+                "ok": True,
+                "source_status": "fixture",
+                "customer": {
+                    "external_userid": request.external_userid,
+                    "owner_userid": "HuangYouCan",
+                    "mobile": "13900001111",
+                    "is_bound": True,
+                    "binding": {},
+                },
+            }
+
+    class FakeRepo:
+        def get_contact_snapshot(self, external_userid: str) -> dict:
+            return {"external_userid": external_userid, "owner_userid": "HuangYouCan"}
+
+        def get_external_identity_snapshot(self, external_userid: str) -> dict:
+            return {"external_userid": external_userid, "follow_user_userid": "HuangYouCan"}
+
+        def get_profile_fields(self, external_userid: str) -> dict:
+            return {}
+
+        def get_contact_binding_status(self, external_userid: str) -> dict:
+            return {"is_bound": True, "external_userid": external_userid, "mobile": "13900001111", "owner_userid": "HuangYouCan"}
+
+        def get_workflow_title_for_customer(self, external_userid: str) -> str:
+            return ""
+
+        def get_customer_service_period_order(self, *, external_userid: str, entitlement_id: str, mobile: str = "") -> dict | None:
+            if entitlement_id == "ent_foreign":
+                return None
+            if entitlement_id == "ent_disabled":
+                return {
+                    "entitlement_id": "ent_disabled",
+                    "service_product_id": "sp_disabled",
+                    "status": "disabled",
+                    "end_at": datetime.now(timezone.utc) + timedelta(days=7),
+                    "unionid": "union_periodic",
+                }
+            return {
+                "entitlement_id": "ent_active",
+                "service_product_id": "sp_active",
+                "product_name": "周期商品",
+                "status": "active",
+                "end_at": datetime.now(timezone.utc) + timedelta(days=7),
+                "unionid": "union_periodic",
+                "remark": "可编辑",
+            }
+
+    read_model = SidebarCommerceReadModel(repo=FakeRepo(), context_query=FakeContextQuery())
+    target = read_model.periodic_order_remark_target(
+        external_userid="wx_periodic",
+        owner_userid="HuangYouCan",
+        entitlement_id="ent_active",
+    )
+    assert target["service_product_id"] == "sp_active"
+    assert target["unionid"] == "union_periodic"
+    assert target["periodic_order"]["remark"] == "可编辑"
+
+    with pytest.raises(NotFoundError):
+        read_model.periodic_order_remark_target(
+            external_userid="wx_periodic",
+            owner_userid="HuangYouCan",
+            entitlement_id="ent_foreign",
+        )
+    with pytest.raises(NotFoundError):
+        read_model.periodic_order_remark_target(
+            external_userid="wx_periodic",
+            owner_userid="HuangYouCan",
+            entitlement_id="ent_disabled",
+        )
+
+
+def test_sidebar_periodic_order_sql_reuses_service_period_member_remark_contract() -> None:
+    source = inspect.getsource(SidebarV2SqlRepository.list_customer_service_period_orders)
+    target_source = inspect.getsource(SidebarV2SqlRepository.get_customer_service_period_order)
+
+    assert "service_period_entitlements e" in source
+    assert "service_period_products sp" in source
+    assert "wechat_pay_products p" in source
+    assert "e.status IN ('active', 'expired')" in source
+    assert "metadata_json->>'admin_remark'" in source
+    assert "metadata_json->>'remark'" in source
+    assert "metadata_json->>'admin_remark'" in target_source
+
+
+def test_sidebar_periodic_order_remark_route_writes_service_period_member_remark(monkeypatch) -> None:
+    calls = []
+
+    class FakeCommerceReadModel:
+        def __init__(self, *args, **kwargs) -> None:
+            calls.append(("read_model_init", bool(kwargs.get("context_query"))))
+
+        def periodic_order_remark_target(self, *, external_userid: str, owner_userid: str, owner_verified: bool, entitlement_id: str) -> dict:
+            calls.append(("target", external_userid, owner_userid, owner_verified, entitlement_id))
+            return {
+                "service_product_id": "sp_active",
+                "unionid": "union_periodic",
+                "periodic_order": {
+                    "id": entitlement_id,
+                    "service_product_id": "sp_active",
+                    "title": "周期商品",
+                    "status": "active",
+                    "status_label": "使用中",
+                    "remark": "旧备注",
+                },
+            }
+
+    class FakeRemarkCommand:
+        def __call__(self, service_product_id: str, unionid: str, *, remark: str) -> dict:
+            calls.append(("remark", service_product_id, unionid, remark))
+            return {"ok": True, "member": {"remark": remark}}
+
+    monkeypatch.setattr("aicrm_next.customer_read_model.api.SidebarCommerceReadModel", FakeCommerceReadModel)
+    monkeypatch.setattr("aicrm_next.customer_read_model.api.UpdateServicePeriodMemberRemarkCommand", lambda: FakeRemarkCommand())
+    monkeypatch.setattr("aicrm_next.customer_read_model.api._verify_sidebar_owner_scope", lambda *args, **kwargs: None)
+    monkeypatch.setattr("aicrm_next.customer_read_model.api._request_scoped_customer_context_query", lambda _db: (object(), None))
+    client = _client(monkeypatch)
+
+    response = client.put(
+        "/api/sidebar/v2/periodic-orders/ent_active/remark?owner_userid=HuangYouCan",
+        json={"external_userid": "wx_periodic", "remark": "新备注"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    _assert_next(payload)
+    assert payload["source_status"] == "next_command"
+    assert payload["periodic_order"]["remark"] == "新备注"
+    assert ("target", "wx_periodic", "HuangYouCan", False, "ent_active") in calls
+    assert ("remark", "sp_active", "union_periodic", "新备注") in calls
 
 
 def test_sidebar_orders_fall_back_to_identity_snapshot_when_context_flaps() -> None:
@@ -726,7 +1055,10 @@ def test_sidebar_commerce_and_material_paths_avoid_heavy_list_queries() -> None:
     material_source = inspect.getsource(PostgresMediaLibraryRepository._select_list)
 
     assert "SELECT p.*" not in commerce_source
-    assert "WHERE p.enabled = TRUE AND p.status = 'active'" in commerce_source
+    assert "WHERE p.enabled = TRUE" in commerce_source
+    assert "p.status = 'active'" in commerce_source
+    assert "metadata_json->>'aicrm_product_owner'" in commerce_source
+    assert "service_period_products sp" in commerce_source
     assert "SELECT * FROM {table}" not in material_source
     assert "self._table_columns(cur, table)" in material_source
     assert "self._list_columns(kind, available_columns)" in material_source

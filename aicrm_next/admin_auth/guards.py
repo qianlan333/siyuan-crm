@@ -6,7 +6,7 @@ from urllib.parse import quote
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
-from aicrm_next.shared.runtime import production_environment
+from aicrm_next.shared.runtime import production_data_ready, production_environment
 
 from .service import CSRF_COOKIE, SESSION_COOKIE, csrf_token_from_session, normalize_text, route_headers, safe_next_path, verify_session
 
@@ -49,9 +49,23 @@ def current_admin_session(request: Request) -> dict | None:
 
 def admin_auth_enforcement_enabled() -> bool:
     value = normalize_text(os.getenv("AICRM_ADMIN_AUTH_ENFORCED")).lower()
-    if value:
-        return value in {"1", "true", "yes", "on"}
-    return production_environment()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return not _admin_auth_disable_override_allowed()
+    return _production_admin_auth_required()
+
+
+def _production_admin_auth_required() -> bool:
+    return production_environment() or production_data_ready()
+
+
+def _admin_auth_disable_override_allowed() -> bool:
+    if normalize_text(os.getenv("PYTEST_CURRENT_TEST")):
+        return True
+    if normalize_text(os.getenv("AICRM_NEXT_ENV")).lower() == "test":
+        return True
+    return not _production_admin_auth_required()
 
 
 def is_protected_admin_path(path: str) -> bool:
@@ -87,6 +101,8 @@ def require_admin(request: Request) -> dict:
 
 
 def admin_api_auth_error(request: Request) -> JSONResponse | None:
+    if not admin_auth_enforcement_enabled():
+        return None
     if current_admin_session(request):
         return None
     return JSONResponse(
@@ -127,6 +143,8 @@ def hmac_compare(left: str, right: str) -> bool:
 
 
 def admin_page_auth_redirect(request: Request) -> RedirectResponse | None:
+    if not admin_auth_enforcement_enabled():
+        return None
     if current_admin_session(request):
         return None
     next_path = safe_next_path(str(request.url.path or "/admin"))

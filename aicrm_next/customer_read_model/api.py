@@ -13,6 +13,7 @@ from aicrm_next.shared.db_session import get_db
 from aicrm_next.shared.errors import NotFoundError
 from aicrm_next.shared.runtime import database_mode, production_data_ready
 from aicrm_next.shared.signed_context import load_sidebar_owner_context_token
+from aicrm_next.service_period.application import UpdateServicePeriodMemberRemarkCommand
 
 from . import application as customer_application
 from .application import (
@@ -409,6 +410,18 @@ def _readonly_fallback_repo(owner_context: dict[str, Any]) -> SidebarV2SqlReposi
         return SidebarV2SqlRepository()
     except Exception:
         return None
+
+
+async def _sidebar_json_body(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if payload is None:
+        return {}
+    if not isinstance(payload, dict):
+        raise ValueError("json object body is required")
+    return payload
 
 
 def _class_term_payload(class_user_status: dict, sidebar_context: dict) -> tuple[int | None, str]:
@@ -1020,6 +1033,103 @@ def get_sidebar_v2_orders(
         return _sidebar_read_unavailable(exc)
     payload = _apply_readonly_owner_pending(payload, owner_context)
     return {"ok": True, **payload, "route_owner": "ai_crm_next"}
+
+
+@router.get("/api/sidebar/v2/periodic-orders")
+def get_sidebar_v2_periodic_orders(
+    request: Request,
+    external_userid: str | None = None,
+    owner_userid: str | None = None,
+    db: Session = Depends(get_db),
+):
+    if not str(external_userid or "").strip():
+        return _sidebar_input_error("external_userid is required")
+    normalized_external_userid = str(external_userid or "").strip()
+    owner_context = _sidebar_owner_context_from_request(
+        request,
+        external_userid=normalized_external_userid,
+        owner_userid=owner_userid,
+        allow_readonly_fallback=True,
+    )
+    scoped_owner_userid = str(owner_context.get("owner_userid") or "").strip()
+    context_query, live_source_repo = _request_scoped_customer_context_query(db)
+    try:
+        payload = SidebarCommerceReadModel(
+            repo=_readonly_fallback_repo(owner_context),
+            context_query=context_query,
+            live_source_repo=live_source_repo,
+        ).periodic_orders(
+            external_userid=normalized_external_userid,
+            owner_userid=scoped_owner_userid,
+            owner_verified=bool(owner_context.get("owner_verified")),
+        )
+    except NotFoundError as exc:
+        return _sidebar_lookup_error(str(exc) or "customer not found")
+    except ValueError as exc:
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    payload = _apply_readonly_owner_pending(payload, owner_context)
+    return {"ok": True, **payload, "route_owner": "ai_crm_next"}
+
+
+@router.put("/api/sidebar/v2/periodic-orders/{entitlement_id}/remark")
+async def update_sidebar_v2_periodic_order_remark(
+    request: Request,
+    entitlement_id: str,
+    owner_userid: str | None = None,
+    current_userid: str | None = None,
+    db: Session = Depends(get_db),
+):
+    try:
+        payload = await _sidebar_json_body(request)
+        external_userid = str(payload.get("external_userid") or request.query_params.get("external_userid") or "").strip()
+        if not external_userid:
+            return _sidebar_input_error("external_userid is required")
+        owner_context = _sidebar_owner_context_from_request(
+            request,
+            external_userid=external_userid,
+            owner_userid=str(payload.get("owner_userid") or owner_userid or "").strip() or None,
+            current_userid=current_userid,
+        )
+        scoped_owner_userid = str(owner_context.get("owner_userid") or "").strip()
+        context_query, live_source_repo = _request_scoped_customer_context_query(db)
+        _verify_sidebar_owner_scope(
+            context_query,
+            external_userid=external_userid,
+            owner_userid=scoped_owner_userid,
+            owner_verified=bool(owner_context.get("owner_verified")),
+        )
+        target = SidebarCommerceReadModel(context_query=context_query, live_source_repo=live_source_repo).periodic_order_remark_target(
+            external_userid=external_userid,
+            owner_userid=scoped_owner_userid,
+            owner_verified=bool(owner_context.get("owner_verified")),
+            entitlement_id=entitlement_id,
+        )
+        result = UpdateServicePeriodMemberRemarkCommand()(
+            target["service_product_id"],
+            target["unionid"],
+            remark=str(payload.get("remark") or ""),
+        )
+        member = dict(result.get("member") or {})
+    except NotFoundError as exc:
+        return _sidebar_lookup_error(str(exc) or "periodic order not found")
+    except ValueError as exc:
+        return _sidebar_input_error(str(exc))
+    except Exception as exc:
+        return _sidebar_read_unavailable(exc)
+    periodic_order = dict(target.get("periodic_order") or {})
+    periodic_order["remark"] = str(member.get("remark") or "")
+    return {
+        "ok": True,
+        "periodic_order": periodic_order,
+        "source_status": "next_command",
+        "write_model_status": "updated",
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "real_external_call_executed": False,
+        "degraded": False,
+    }
 
 
 @router.get("/api/admin/customers/profile")

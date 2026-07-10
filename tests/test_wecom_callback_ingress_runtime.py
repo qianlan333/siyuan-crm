@@ -19,7 +19,10 @@ SIYUAN_DEPLOY_OVERLAY_REASON = (
 
 def _is_siyuan_deploy_overlay() -> bool:
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return "scripts/ensure_channel_multi_staff_schema.py" in workflow and "workflow_run:" not in workflow
+    return (
+        "scripts/ensure_channel_multi_staff_schema.py" in workflow
+        and not (ROOT / "deploy" / "aicrm-web.service").exists()
+    )
 
 
 def _event() -> dict:
@@ -49,6 +52,7 @@ def test_wecom_callback_ingress_runtime_only_exposes_callback_and_health_routes(
     assert "/admin/webhook-inbox" not in paths
     assert health.status_code == 200
     assert health.json()["runtime"] == "ai_crm_wecom_ingress"
+    assert health.json()["time_sensitive_inline_enabled"] is True
     assert health.headers["X-AICRM-App"] == "ai_crm_wecom_ingress"
     assert admin.status_code == 404
 

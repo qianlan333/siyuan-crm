@@ -216,7 +216,7 @@ def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> s
     identity_ready = bool(page_state.get("identity_ready"))
     paid_order = page_state.get("paid_order")
     show_mobile_input = bool(identity_ready and page_state.get("require_mobile") and not paid_order)
-    cta_text = escape(str(product.get("buy_button_text") or "立即报名"))
+    cta_text = escape(str(page_state.get("cta_text") or product.get("buy_button_text") or "立即报名"))
     require_mobile_html = (
         """
       <div class="pay-mobile" id="mobileBlock">
@@ -634,6 +634,11 @@ def _pay_page_script(state_json: str) -> str:
         return /^https:\\/\\//.test(url) || /^\\/(?!\\/)[^\\s\\\\]*$/.test(url);
       }}
 
+      function postPaidRedirectUrl() {{
+        const url = String(state.post_paid_redirect_url || "");
+        return url && isSafeRedirectUrl(url) ? url : "";
+      }}
+
       function escapeAttr(value) {{
         return String(value || "")
           .replace(/&/g, "&amp;")
@@ -798,6 +803,12 @@ def _pay_page_script(state_json: str) -> str:
         if (completionAction.type === "redirect" && completionAction.redirect_url) {{
           setState("报名成功，正在跳转...", "success");
           window.location.href = completionAction.redirect_url;
+          return;
+        }}
+        const servicePeriodRedirect = postPaidRedirectUrl();
+        if (servicePeriodRedirect && !leadQrFromOrder(paidOrder).qr_url) {{
+          setState("支付成功，正在刷新服务期...", "success");
+          window.location.href = servicePeriodRedirect;
           return;
         }}
         if (checkoutCard) checkoutCard.style.display = "none";

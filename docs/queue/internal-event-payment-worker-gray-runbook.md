@@ -26,10 +26,10 @@ The worker execute path requires all of these gates:
 ```bash
 export AICRM_INTERNAL_EVENTS_AUTO_EXECUTE=1
 export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES=payment.succeeded
-export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer
-export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer
-export AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE=1
-export AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE=1
+export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:service_period_entitlement_consumer,payment.succeeded:webhook_order_paid_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,service_period_entitlement_consumer,webhook_order_paid_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer,ai_audience_source_poke_consumer
+export AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE=50
+export AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE=50
 ```
 
 `AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE` is still accepted as a legacy fallback, but the plural `AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE` should be used for this rollout.
@@ -43,13 +43,14 @@ When `AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS` is non-empty, it has priori
 Stage 1 only allows no-op/projection consumers:
 
 ```bash
-export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer
-export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,service_period_entitlement_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:service_period_entitlement_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer
 ```
 
 Expected results:
 
 - `order_projection_consumer`: `succeeded`
+- `service_period_entitlement_consumer`: `succeeded` for service-period products, `skipped` with `not_service_period_product` for ordinary products
 - `customer_business_summary_consumer`: `skipped`, reason `summary_refresh_not_configured`
 - `dnd_policy_consumer`: `skipped`, reason `dnd_policy_not_configured`
 - `ai_assist_notify_consumer`: `skipped`, reason `ai_assist_notify_not_configured`
@@ -59,8 +60,8 @@ Expected results:
 Stage 2 adds AI Audience source-poke after Stage 1 is stable:
 
 ```bash
-export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer,ai_audience_source_poke_consumer
-export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,service_period_entitlement_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer,ai_audience_source_poke_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:service_period_entitlement_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer
 ```
 
 Expected result:
@@ -72,8 +73,8 @@ Expected result:
 Stage 3 may add the webhook planner only after Stage 2 is stable:
 
 ```bash
-export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer,ai_audience_source_poke_consumer,webhook_order_paid_consumer
-export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer,payment.succeeded:webhook_order_paid_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_CONSUMERS=order_projection_consumer,service_period_entitlement_consumer,customer_business_summary_consumer,dnd_policy_consumer,ai_assist_notify_consumer,ai_audience_source_poke_consumer,webhook_order_paid_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:service_period_entitlement_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer,payment.succeeded:webhook_order_paid_consumer
 ```
 
 The webhook consumer may create or reuse a `webhook.order_paid.push` `external_effect_job`, but it must not dispatch `external_effect_attempt`. The job must remain `execution_mode=shadow` and `status=planned` or another safe non-executing state.
@@ -214,7 +215,7 @@ Example: keep payment automation enabled while also allowing `questionnaire.subm
 
 ```bash
 export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES=payment.succeeded,questionnaire.submitted,customer.tagged,customer.untagged
-export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer
+export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS=payment.succeeded:order_projection_consumer,payment.succeeded:service_period_entitlement_consumer,payment.succeeded:customer_business_summary_consumer,payment.succeeded:dnd_policy_consumer,payment.succeeded:ai_assist_notify_consumer,payment.succeeded:ai_audience_source_poke_consumer
 ```
 
 With that configuration, `customer.tagged:ai_assist_notify_consumer` remains blocked even though `ai_assist_notify_consumer` is allowed for `payment.succeeded`.

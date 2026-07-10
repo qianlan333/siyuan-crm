@@ -14,6 +14,7 @@
     ["questionnaires", "问卷"],
     ["products", "商品"],
     ["orders", "订单"],
+    ["periodic_orders", "周期订单"],
     ["materials", "素材"],
     ["other_staff_messages", "其他客服聊天"],
   ];
@@ -21,6 +22,10 @@
     ["image", "图片素材"],
     ["mini", "小程序素材"],
     ["pdf", "PDF 素材"],
+  ];
+  const productTabs = [
+    ["regular", "普通商品"],
+    ["service_period", "周期性商品"],
   ];
   const WORKBENCH_STATES = {
     identifying_customer: "identifying_customer",
@@ -38,6 +43,7 @@
     questionnaires: 9000,
     products: 9000,
     orders: 12000,
+    periodic_orders: 12000,
     materials: 10000,
     other_staff_messages: 9000,
   };
@@ -55,16 +61,20 @@
     sidebar_oauth_started: false,
     activeTab: "profile",
     materialType: "image",
+    productType: "regular",
     workbench: null,
     loaded: {},
     data: {
       questionnaires: null,
       products: null,
+      service_period_products: null,
       orders: null,
+      periodic_orders: null,
       materials: {},
       other_staff_messages: null,
     },
     profileSaveTimer: null,
+    periodicRemarkTimers: {},
     toastTimer: null,
     lastError: null,
     panelCache: {},
@@ -386,6 +396,12 @@
     };
   }
 
+  function clearPanelCache(tab) {
+    Object.keys(state.panelCache || {}).forEach((key) => {
+      if (key.indexOf("::" + tab + "::") >= 0) delete state.panelCache[key];
+    });
+  }
+
   async function requestPanelJson(tab, url, options) {
     const cached = readPanelCache(tab, url);
     if (cached) return cached;
@@ -548,6 +564,39 @@
     }
   }
 
+  function updatePeriodicOrderRemark(id, value) {
+    const rows = state.data.periodic_orders || [];
+    const item = rows.find((entry) => String(entry.id || "") === String(id || ""));
+    if (item) item.remark = value;
+  }
+
+  function savePeriodicOrderRemarkSoon(id) {
+    window.clearTimeout(state.periodicRemarkTimers[id]);
+    state.periodicRemarkTimers[id] = window.setTimeout(() => savePeriodicOrderRemark(id), 520);
+  }
+
+  async function savePeriodicOrderRemark(id) {
+    const rows = state.data.periodic_orders || [];
+    const item = rows.find((entry) => String(entry.id || "") === String(id || ""));
+    if (!item || !state.external_userid) return;
+    try {
+      const remarkUrl = queryUrl(endpoint("periodicOrderRemarkUrl") + "/" + encodeURIComponent(id) + "/remark", customerContextQuery());
+      const payload = await requestJson(remarkUrl, {
+        method: "PUT",
+        body: JSON.stringify({
+          external_userid: state.external_userid,
+          remark: item.remark || "",
+        }),
+      });
+      const updated = payload.periodic_order || {};
+      if (Object.prototype.hasOwnProperty.call(updated, "remark")) item.remark = updated.remark || "";
+      clearPanelCache("periodic_orders");
+      showToast("备注已保存");
+    } catch (error) {
+      showToast(error.message || "备注保存失败", "error");
+    }
+  }
+
   function textAreaField(key, label, value) {
     return (
       '<div class="field">' +
@@ -597,19 +646,23 @@
   }
 
   function renderProducts() {
-    const rows = state.data.products || [];
+    const isServicePeriod = state.productType === "service_period";
+    const rows = isServicePeriod ? state.data.service_period_products || [] : state.data.products || [];
+    const controls = '<div class="seg product-seg">' + productTabs.map(([key, label]) => '<button type="button" class="' + (key === state.productType ? "active" : "") + '" data-product-type="' + key + '">' + escapeHtml(label) + "</button>").join("") + "</div>";
     if (!rows.length) {
-      content.innerHTML = panel("商品", empty("暂无商品记录"));
+      content.innerHTML = panel("商品", controls + empty(isServicePeriod ? "暂无周期性商品" : "暂无普通商品"));
       return;
     }
     content.innerHTML = panel(
       "商品",
-      rows
+      controls +
+        rows
         .map((item, index) => {
+          const meta = isServicePeriod && item.duration_days ? '<div class="mini">有效期 ' + escapeHtml(String(item.duration_days)) + " 天</div>" : "";
           return (
             '<article class="card"><div class="card-title"><h3>' + escapeHtml(item.title || "未命名商品") + "</h3>" +
-            '<div class="price">' + escapeHtml(item.price_label || "") + "</div></div>" +
-            '<div class="row-actions"><button class="btn primary" type="button" data-product-send="' + escapeHtml(index) + '">发送商品</button></div></article>'
+            '<div class="price">' + escapeHtml(item.price_label || "") + "</div></div>" + meta +
+            '<div class="row-actions"><button class="btn primary" type="button" data-product-send="' + escapeHtml(index) + '" data-product-kind="' + escapeHtml(state.productType) + '">发送商品</button></div></article>'
           );
         })
         .join("")
@@ -632,6 +685,36 @@
           '<span>时间</span><strong>' + escapeHtml(item.paid_at || "") + "</strong></div>" +
           '<div class="row-actions"><button class="btn primary" type="button" data-order-detail-url="' + escapeHtml(item.detail_url || "") + '">查看详情</button></div></article>'
         ))
+        .join("")
+    );
+  }
+
+  function renderPeriodicOrders() {
+    const rows = state.data.periodic_orders || [];
+    if (!rows.length) {
+      content.innerHTML = panel("周期性产品订单", empty("暂无周期性产品订单"));
+      return;
+    }
+    content.innerHTML = panel(
+      "周期性产品订单",
+      rows
+        .map((item) => {
+          const lastOrder = [item.last_out_trade_no || "", item.last_order_paid_at || ""].filter(Boolean).join(" · ");
+          const detailAction = item.detail_url
+            ? '<div class="row-actions"><button class="btn primary" type="button" data-order-detail-url="' + escapeHtml(item.detail_url || "") + '">查看详情</button></div>'
+            : "";
+          return (
+            '<article class="card periodic-order-card"><div class="card-title"><div><h3>' + escapeHtml(item.title || "未命名周期商品") + "</h3>" +
+            '<div class="mini">' + escapeHtml(lastOrder || item.product_code || "") + '</div></div><div class="price">' + escapeHtml(item.amount_label || "") + "</div></div>" +
+            '<div class="kv"><span>状态</span><strong>' + escapeHtml(item.status_label || "") + "</strong>" +
+            '<span>剩余天数</span><strong>' + escapeHtml(String(item.remaining_days || 0)) + " 天</strong>" +
+            '<span>到期时间</span><strong>' + escapeHtml(item.end_at || "") + "</strong>" +
+            '<span>周期</span><strong>' + escapeHtml(String(item.duration_days || 0)) + " 天</strong></div>" +
+            '<div class="field periodic-remark"><div class="field-title">备注</div>' +
+            '<textarea class="textarea periodic-remark-textarea" data-periodic-order-remark="' + escapeHtml(item.id || "") + '">' + escapeHtml(item.remark || "") + "</textarea></div>" +
+            detailAction + "</article>"
+          );
+        })
         .join("")
     );
   }
@@ -744,7 +827,7 @@
     renderTabs();
     renderActiveTab();
     setWorkbenchState(payload.diagnostics && payload.diagnostics.context_source_status === "error" ? WORKBENCH_STATES.degraded_ready : WORKBENCH_STATES.ready, payload.diagnostics || {});
-    prefetchTabs(["questionnaires", "orders"]);
+    prefetchTabs(["questionnaires", "orders", "periodic_orders"]);
   }
 
   function prefetchTabs(tabNames) {
@@ -767,6 +850,7 @@
       const payload = await requestPanelJson("products", queryUrl(endpoint("productsUrl"), customerContextQuery()));
       writeDebug("products response", productContextDiagnostics(payload));
       state.data.products = payload.products || [];
+      state.data.service_period_products = payload.service_period_products || [];
     } else if (tab === "orders") {
       const payload = await requestPanelJson("orders", queryUrl(endpoint("ordersUrl"), customerContextQuery()));
       if (payload.customer) {
@@ -775,6 +859,14 @@
       }
       writeDebug("orders response", payload.diagnostics || {});
       state.data.orders = payload.orders || [];
+    } else if (tab === "periodic_orders") {
+      const payload = await requestPanelJson("periodic_orders", queryUrl(endpoint("periodicOrdersUrl"), customerContextQuery()));
+      if (payload.customer) {
+        state.workbench.customer = Object.assign({}, state.workbench.customer || {}, payload.customer);
+        renderTop();
+      }
+      writeDebug("periodic orders response", payload.diagnostics || {});
+      state.data.periodic_orders = payload.periodic_orders || [];
     } else if (tab === "materials") {
       await loadMaterials(state.materialType);
     } else if (tab === "other_staff_messages") {
@@ -809,6 +901,7 @@
     if (state.activeTab === "questionnaires") renderQuestionnaires();
     if (state.activeTab === "products") renderProducts();
     if (state.activeTab === "orders") renderOrders();
+    if (state.activeTab === "periodic_orders") renderPeriodicOrders();
     if (state.activeTab === "materials") renderMaterials();
     if (state.activeTab === "other_staff_messages") renderOtherStaffMessages();
   }
@@ -850,9 +943,11 @@
     }
   }
 
-  async function sendProduct(productIndex) {
-    const item = (state.data.products || [])[Number(productIndex)] || {};
-    const link = absoluteUrl(item.product_url || (item.id ? "/p/" + item.id : ""));
+  async function sendProduct(productIndex, kind) {
+    const rows = kind === "service_period" ? state.data.service_period_products || [] : state.data.products || [];
+    const item = rows[Number(productIndex)] || {};
+    const fallbackPath = kind === "service_period" ? "" : item.id ? "/p/" + item.id : "";
+    const link = absoluteUrl(item.product_url || fallbackPath);
     if (!link) {
       showToast("暂无商品链接", "error");
       return;
@@ -1138,6 +1233,12 @@
   });
 
   content.addEventListener("input", (event) => {
+    const periodicOrderId = event.target.dataset.periodicOrderRemark;
+    if (periodicOrderId && event.target.tagName === "TEXTAREA") {
+      updatePeriodicOrderRemark(periodicOrderId, event.target.value);
+      savePeriodicOrderRemarkSoon(periodicOrderId);
+      return;
+    }
     const field = event.target.dataset.profileField;
     if (!field || event.target.tagName !== "TEXTAREA") return;
     updateProfileField(field, event.target.value);
@@ -1145,6 +1246,12 @@
   });
 
   content.addEventListener("blur", (event) => {
+    const periodicOrderId = event.target.dataset.periodicOrderRemark;
+    if (periodicOrderId && event.target.tagName === "TEXTAREA") {
+      updatePeriodicOrderRemark(periodicOrderId, event.target.value);
+      savePeriodicOrderRemark(periodicOrderId);
+      return;
+    }
     const field = event.target.dataset.profileField;
     if (!field || event.target.tagName !== "TEXTAREA") return;
     updateProfileField(field, event.target.value);
@@ -1186,11 +1293,17 @@
       }
       return;
     }
+    const productTypeButton = event.target.closest("[data-product-type]");
+    if (productTypeButton) {
+      state.productType = productTypeButton.dataset.productType || "regular";
+      renderProducts();
+      return;
+    }
     const productSendButton = event.target.closest("[data-product-send]");
     if (productSendButton) {
       productSendButton.disabled = true;
       try {
-        await sendProduct(productSendButton.dataset.productSend);
+        await sendProduct(productSendButton.dataset.productSend, productSendButton.dataset.productKind || state.productType);
       } finally {
         productSendButton.disabled = false;
       }

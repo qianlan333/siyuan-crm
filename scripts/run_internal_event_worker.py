@@ -12,7 +12,9 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 ensure_repo_root_on_path()
 
 from aicrm_next.platform_foundation.internal_events.config import DEFAULT_WORKER_BATCH_SIZE
+from aicrm_next.platform_foundation.internal_events import register_payment_succeeded_consumers, register_shadow_event_consumers
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
+from aicrm_next.ai_audience_ops import register_ai_audience_event_consumers
 
 
 def _csv(value: str) -> list[str]:
@@ -38,7 +40,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return args
 
 
+def _register_default_consumers() -> None:
+    register_payment_succeeded_consumers()
+    register_shadow_event_consumers()
+    register_ai_audience_event_consumers()
+
+
 def run(*, limit: int | None = None, dry_run: bool = True, event_types: list[str] | None = None, consumer_names: list[str] | None = None) -> dict:
+    _register_default_consumers()
     return InternalEventWorker().run_due(
         batch_size=int(limit or _default_limit()),
         dry_run=bool(dry_run),

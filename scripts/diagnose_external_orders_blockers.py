@@ -18,6 +18,7 @@ DEFAULT_ORDER_ID = "156"
 
 EXPECTED_PAYMENT_CONSUMERS = (
     "order_projection_consumer",
+    "service_period_entitlement_consumer",
     "webhook_order_paid_consumer",
     "customer_business_summary_consumer",
     "dnd_policy_consumer",

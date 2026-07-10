@@ -140,7 +140,7 @@ def login_error_message(error_code: Any) -> str:
         "wecom_" + "access_" + "token_missing": "企业微信接口凭证返回为空，请检查应用配置。",
         "wecom_userinfo_failed": "企业微信用户身份获取失败，请重新扫码。",
         "wecom_userid_missing": "企业微信没有返回成员 UserId，当前账号无法进入后台。",
-        "admin_user_not_authorized": "当前企微成员尚未被授权进入后台，请先在“登录与权限”中添加该成员。",
+        "admin_user_not_authorized": "当前企微成员尚未被授权进入后台，请先在“后台访问”中添加该成员。",
         "admin_user_disabled": "当前后台成员已停用，无法登录。",
         "wecom_admin_auth_http_error": "企业微信登录请求失败，请稍后重试。",
         "wecom_admin_auth_response_invalid": "企业微信登录响应异常，请稍后重试。",

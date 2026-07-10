@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Request
+from fastapi.responses import JSONResponse
 
+from aicrm_next.integration_gateway.wecom_operation_members_client import WeComOperationMembersClientError
+from aicrm_next.operation_members.application import SyncOperationMembersFromWeComCommand
 from aicrm_next.shared.operation_members import (
     bool_from_query,
     clamp_page,
@@ -15,6 +18,14 @@ from aicrm_next.shared.operation_members import (
 from aicrm_next.platform_foundation.repository import connect_operation_members_db as _connect
 
 router = APIRouter()
+
+
+def _operator_from_request(request: Request) -> str:
+    return (
+        clean_text(request.headers.get("X-Admin-User"))
+        or clean_text(request.headers.get("X-Forwarded-User"))
+        or "admin_console"
+    )
 
 
 def _fetch_rows(conn: Any, sql: str, *, source: str, priority: int) -> list[dict[str, Any]]:
@@ -162,3 +173,31 @@ def api_operation_members(
         page_size=page_size,
         include_inactive=bool_from_query(include_inactive),
     )
+
+
+@router.post("/api/admin/common/operation-members/sync", name="api_operation_members_sync")
+def api_operation_members_sync(request: Request):
+    try:
+        return SyncOperationMembersFromWeComCommand().execute(operator=_operator_from_request(request))
+    except WeComOperationMembersClientError as exc:
+        status_code = 400 if exc.error_code == "wecom_operation_members_config_missing" else 502
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": exc.error_code,
+                "message": str(exc),
+                "stage": exc.stage,
+                "real_external_call_executed": exc.stage != "config",
+            },
+            status_code=status_code,
+        )
+    except Exception as exc:
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "operation_member_sync_failed",
+                "message": str(exc),
+                "real_external_call_executed": True,
+            },
+            status_code=502,
+        )

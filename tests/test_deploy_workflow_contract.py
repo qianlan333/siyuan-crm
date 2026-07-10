@@ -27,6 +27,13 @@ def _is_siyuan_deploy_overlay() -> bool:
     )
 
 
+RUNTIME_UNITS_HELPER = "python3 scripts/ops/manage_production_runtime_units.py"
+
+
+def _runtime_units_phase(phase: str) -> str:
+    return f"{RUNTIME_UNITS_HELPER} --phase {phase} --execute"
+
+
 def test_production_deploy_loads_postgres_env_before_alembic_upgrade():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
@@ -119,8 +126,7 @@ def test_production_deploy_runs_alembic_upgrade_before_service_restart():
     env_source_index = workflow.index("source /home/ubuntu/.openclaw-wecom-pg.env")
     database_url_guard_index = workflow.index('test -n "${DATABASE_URL:-}"')
     pip_install_index = workflow.index("pip install -r requirements.txt")
-    stop_broadcast_timer_index = workflow.index("sudo systemctl stop openclaw-broadcast-queue-worker.timer || true")
-    stop_broadcast_service_index = workflow.index("sudo systemctl stop openclaw-broadcast-queue-worker.service || true")
+    stop_runtime_units_index = workflow.index(_runtime_units_phase("stop-for-migration"))
     alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
     stop_canonical_web_index = workflow.index("sudo systemctl stop aicrm-web.service || true")
     stop_compatible_web_index = workflow.index("sudo systemctl stop openclaw-wecom-postgres.service || true")
@@ -135,8 +141,7 @@ def test_production_deploy_runs_alembic_upgrade_before_service_restart():
     assert env_source_index < database_url_guard_index < alembic_upgrade_index
     assert (
         pip_install_index
-        < stop_broadcast_timer_index
-        < stop_broadcast_service_index
+        < stop_runtime_units_index
         < alembic_upgrade_index
         < stop_canonical_web_index
         < stop_compatible_web_index
@@ -176,35 +181,24 @@ def test_production_deploy_installs_and_runs_external_push_worker_timer():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     health_index = workflow.index("curl -sSf -D /tmp/aicrm_health_headers.txt http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 60); do"))
-    copy_service_index = workflow.index("sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/")
-    copy_timer_index = workflow.index("sudo cp deploy/openclaw-external-push-worker.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_index = workflow.index("sudo systemctl enable openclaw-external-push-worker.timer")
-    restart_timer_index = workflow.index("sudo systemctl restart openclaw-external-push-worker.timer")
-    start_service_index = workflow.index("sudo systemctl start openclaw-external-push-worker.service")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert health_index < copy_service_index < copy_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_index < restart_timer_index < start_service_index
+    assert health_index < install_index < verify_index
 
 
 @pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_production_deploy_installs_external_effect_queue_worker_timer_without_manual_execute():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
-    stop_timer_index = workflow.index("sudo systemctl stop openclaw-external-effect-worker.timer || true")
-    stop_service_index = workflow.index("sudo systemctl stop openclaw-external-effect-worker.service || true")
+    stop_runtime_units_index = workflow.index(_runtime_units_phase("stop-for-migration"))
     alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
     health_index = workflow.index("curl -sSf -D /tmp/aicrm_health_headers.txt http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 60); do"))
-    copy_service_index = workflow.index("sudo cp deploy/openclaw-external-effect-worker.service /etc/systemd/system/")
-    copy_timer_index = workflow.index("sudo cp deploy/openclaw-external-effect-worker.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_index = workflow.index("sudo systemctl enable openclaw-external-effect-worker.timer")
-    restart_timer_index = workflow.index("sudo systemctl restart openclaw-external-effect-worker.timer")
-    timer_status_index = workflow.index("sudo systemctl status openclaw-external-effect-worker.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert stop_timer_index < stop_service_index < alembic_upgrade_index
-    assert health_index < copy_service_index < copy_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_index < restart_timer_index < timer_status_index
+    assert stop_runtime_units_index < alembic_upgrade_index
+    assert health_index < install_index < verify_index
     assert "sudo systemctl start openclaw-external-effect-worker.service" not in workflow
 
 
@@ -213,19 +207,10 @@ def test_production_deploy_installs_and_runs_broadcast_queue_worker_timer():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     health_index = workflow.index("curl -sSf -D /tmp/aicrm_health_headers.txt http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 60); do"))
-    copy_service_index = workflow.index("sudo cp deploy/openclaw-broadcast-queue-worker.service /etc/systemd/system/")
-    copy_timer_index = workflow.index("sudo cp deploy/openclaw-broadcast-queue-worker.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_index = workflow.index("sudo systemctl enable openclaw-broadcast-queue-worker.timer")
-    restart_timer_index = workflow.index("sudo systemctl restart openclaw-broadcast-queue-worker.timer")
-    start_service_index = workflow.index("if ! sudo systemctl start openclaw-broadcast-queue-worker.service; then")
-    service_status_index = workflow.index("sudo systemctl status openclaw-broadcast-queue-worker.service --no-pager || true")
-    journal_index = workflow.index("sudo journalctl -u openclaw-broadcast-queue-worker.service -n 80 --no-pager || true")
-    timer_status_index = workflow.index("sudo systemctl status openclaw-broadcast-queue-worker.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert health_index < copy_service_index < copy_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_index < restart_timer_index < start_service_index
-    assert start_service_index < service_status_index < journal_index < timer_status_index
+    assert health_index < install_index < verify_index
 
 
 @pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
@@ -233,19 +218,10 @@ def test_production_deploy_installs_and_runs_internal_event_worker_timer():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
     health_index = workflow.index("curl -sSf -D /tmp/aicrm_health_headers.txt http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 60); do"))
-    copy_service_index = workflow.index("sudo cp deploy/openclaw-internal-event-worker.service /etc/systemd/system/")
-    copy_timer_index = workflow.index("sudo cp deploy/openclaw-internal-event-worker.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_index = workflow.index("sudo systemctl enable openclaw-internal-event-worker.timer")
-    restart_timer_index = workflow.index("sudo systemctl restart openclaw-internal-event-worker.timer")
-    start_service_index = workflow.index("if ! sudo systemctl start openclaw-internal-event-worker.service; then")
-    service_status_index = workflow.index("sudo systemctl status openclaw-internal-event-worker.service --no-pager || true")
-    journal_index = workflow.index("sudo journalctl -u openclaw-internal-event-worker.service -n 80 --no-pager || true")
-    timer_status_index = workflow.index("sudo systemctl status openclaw-internal-event-worker.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert health_index < copy_service_index < copy_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_index < restart_timer_index < start_service_index
-    assert start_service_index < service_status_index < journal_index < timer_status_index
+    assert health_index < install_index < verify_index
 
 
 def test_external_push_worker_systemd_units_are_deployable():
@@ -281,41 +257,12 @@ def test_external_effect_queue_worker_systemd_units_are_deployable():
 def test_production_deploy_installs_payment_reconciliation_and_identity_workers():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
-    effect_stop_index = workflow.index("sudo systemctl stop openclaw-external-effect-worker.service || true")
-    pay_stop_timer_index = workflow.index("sudo systemctl stop openclaw-wechat-pay-order-reconciliation-worker.timer || true")
-    pay_stop_service_index = workflow.index("sudo systemctl stop openclaw-wechat-pay-order-reconciliation-worker.service || true")
-    identity_stop_timer_index = workflow.index("sudo systemctl stop openclaw-identity-resolution-worker.timer || true")
-    identity_stop_service_index = workflow.index("sudo systemctl stop openclaw-identity-resolution-worker.service || true")
+    stop_runtime_units_index = workflow.index(_runtime_units_phase("stop-for-migration"))
     alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
-    copy_pay_service_index = workflow.index("sudo cp deploy/openclaw-wechat-pay-order-reconciliation-worker.service /etc/systemd/system/")
-    copy_pay_timer_index = workflow.index("sudo cp deploy/openclaw-wechat-pay-order-reconciliation-worker.timer /etc/systemd/system/")
-    copy_identity_service_index = workflow.index("sudo cp deploy/openclaw-identity-resolution-worker.service /etc/systemd/system/")
-    copy_identity_timer_index = workflow.index("sudo cp deploy/openclaw-identity-resolution-worker.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_pay_index = workflow.index("sudo systemctl enable openclaw-wechat-pay-order-reconciliation-worker.timer")
-    restart_pay_index = workflow.index("sudo systemctl restart openclaw-wechat-pay-order-reconciliation-worker.timer")
-    pay_status_index = workflow.index("sudo systemctl status openclaw-wechat-pay-order-reconciliation-worker.timer --no-pager")
-    enable_identity_index = workflow.index("sudo systemctl enable openclaw-identity-resolution-worker.timer")
-    restart_identity_index = workflow.index("sudo systemctl restart openclaw-identity-resolution-worker.timer")
-    identity_status_index = workflow.index("sudo systemctl status openclaw-identity-resolution-worker.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert (
-        effect_stop_index
-        < pay_stop_timer_index
-        < pay_stop_service_index
-        < identity_stop_timer_index
-        < identity_stop_service_index
-        < alembic_upgrade_index
-    )
-    assert (
-        copy_pay_service_index
-        < copy_pay_timer_index
-        < copy_identity_service_index
-        < copy_identity_timer_index
-        < daemon_reload_index
-    )
-    assert daemon_reload_index < enable_pay_index < restart_pay_index < pay_status_index
-    assert pay_status_index < enable_identity_index < restart_identity_index < identity_status_index
+    assert stop_runtime_units_index < alembic_upgrade_index < install_index < verify_index
 
 
 @pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
@@ -357,11 +304,16 @@ def test_internal_event_worker_systemd_units_are_deployable():
     assert "After=network.target openclaw-wecom-postgres.service" in service
     assert "Requires=openclaw-wecom-postgres.service" in service
     assert "EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env" in service
-    assert "Environment=AICRM_INTERNAL_EVENTS_ENABLED=0" in service
+    assert "Environment=AICRM_INTERNAL_EVENTS_ENABLED=1" in service
+    assert "Environment=AICRM_INTERNAL_EVENTS_PAYMENT_ENABLED=1" in service
     assert "Environment=AICRM_INTERNAL_EVENTS_SHADOW_ONLY=1" in service
+    assert "Environment=AICRM_INTERNAL_EVENTS_AUTO_EXECUTE=1" in service
     assert "Environment=AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE=50" in service
+    assert "Environment=AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE=50" in service
+    assert "Environment=AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE=50" in service
+    assert "payment.succeeded:service_period_entitlement_consumer" in service
     assert "WorkingDirectory=/home/ubuntu/极简 crm" in service
-    assert "python scripts/run_internal_event_worker.py" in service
+    assert "python scripts/run_internal_event_worker.py --execute --limit ${AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE:-50}" in service
     assert "wecom_ability_service" not in service
     assert "legacy_flask_app" not in service
     assert "run-legacy" not in service
@@ -374,29 +326,16 @@ def test_internal_event_worker_systemd_units_are_deployable():
 def test_production_deploy_installs_callback_ingress_and_worker_isolated_runtime():
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
 
-    stop_worker_timer_index = workflow.index("sudo systemctl stop openclaw-wecom-callback-inbox-worker.timer || true")
-    stop_worker_service_index = workflow.index("sudo systemctl stop openclaw-wecom-callback-inbox-worker.service || true")
+    stop_runtime_units_index = workflow.index(_runtime_units_phase("stop-for-migration"))
     alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
     health_index = workflow.index("curl -sSf -D /tmp/aicrm_health_headers.txt http://127.0.0.1:5001/health", workflow.index("for _ in $(seq 1 60); do"))
-    copy_ingress_index = workflow.index("sudo cp deploy/openclaw-wecom-callback-ingress.service /etc/systemd/system/")
-    copy_worker_service_index = workflow.index("sudo cp deploy/openclaw-wecom-callback-inbox-worker.service /etc/systemd/system/")
-    copy_worker_timer_index = workflow.index("sudo cp deploy/openclaw-wecom-callback-inbox-worker.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_ingress_index = workflow.index("sudo systemctl enable openclaw-wecom-callback-ingress.service")
-    restart_ingress_index = workflow.index("sudo systemctl restart openclaw-wecom-callback-ingress.service")
-    ingress_poll_index = workflow.index("for _ in $(seq 1 20); do", restart_ingress_index)
-    ingress_health_index = workflow.index("curl -sSf http://127.0.0.1:5002/health", ingress_poll_index)
-    enable_worker_index = workflow.index("sudo systemctl enable openclaw-wecom-callback-inbox-worker.timer")
-    restart_worker_index = workflow.index("sudo systemctl restart openclaw-wecom-callback-inbox-worker.timer")
-    ingress_status_index = workflow.index("sudo systemctl status openclaw-wecom-callback-ingress.service --no-pager")
-    worker_status_index = workflow.index("sudo systemctl status openclaw-wecom-callback-inbox-worker.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
     smoke_index = workflow.index("python scripts/ops/check_wecom_callback_deploy_smoke.py")
     smoke_evidence_index = workflow.index("tee /tmp/wecom-callback-deploy-smoke.json")
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert stop_worker_timer_index < stop_worker_service_index < alembic_upgrade_index
-    assert health_index < copy_ingress_index < copy_worker_service_index < copy_worker_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_ingress_index < restart_ingress_index < ingress_poll_index < ingress_health_index
-    assert ingress_health_index < enable_worker_index < restart_worker_index < ingress_status_index < worker_status_index < smoke_index < smoke_evidence_index
+    assert stop_runtime_units_index < alembic_upgrade_index
+    assert health_index < install_index < smoke_index < smoke_evidence_index < verify_index
     assert "python scripts/ops/check_wecom_callback_deploy_smoke.py | tee /tmp/wecom-callback-deploy-smoke.json" in workflow
     assert "nginx-wecom-callback-ingress.conf.example /etc" not in workflow
 
@@ -474,16 +413,10 @@ def test_wechat_shop_order_sync_systemd_units_are_deployable():
     service = (ROOT / "deploy" / "aicrm-wechat-shop-order-sync.service").read_text(encoding="utf-8")
     timer = (ROOT / "deploy" / "aicrm-wechat-shop-order-sync.timer").read_text(encoding="utf-8")
 
-    copy_service_index = workflow.index("sudo cp deploy/aicrm-wechat-shop-order-sync.service /etc/systemd/system/")
-    copy_timer_index = workflow.index("sudo cp deploy/aicrm-wechat-shop-order-sync.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_index = workflow.index("sudo systemctl enable aicrm-wechat-shop-order-sync.timer")
-    restart_index = workflow.index("sudo systemctl restart aicrm-wechat-shop-order-sync.timer")
-    start_index = workflow.index("if ! sudo systemctl start aicrm-wechat-shop-order-sync.service; then")
-    status_index = workflow.index("sudo systemctl status aicrm-wechat-shop-order-sync.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert copy_service_index < copy_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_index < restart_index < start_index < status_index
+    assert install_index < verify_index
     assert "After=network.target openclaw-wecom-postgres.service" in service
     assert "Requires=openclaw-wecom-postgres.service" in service
     assert "EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env" in service
@@ -589,6 +522,9 @@ def test_due_runner_scripts_share_int_env_reader():
     assert not (ROOT / "scripts" / "run_automation_sop.py").exists()
     assert 'read_int_env("EXTERNAL_PUSH_WORKER_BATCH_SIZE", DEFAULT_BATCH_SIZE)' in external_push_worker
     assert 'read_int_env("AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE", DEFAULT_WORKER_BATCH_SIZE)' in internal_event_worker
+    assert "register_payment_succeeded_consumers()" in internal_event_worker
+    assert "register_shadow_event_consumers()" in internal_event_worker
+    assert "register_ai_audience_event_consumers()" in internal_event_worker
     assert 'read_int_env("AICRM_AI_AUDIENCE_SCHEDULER_BATCH_SIZE", 20)' in ai_audience_scheduler
     assert "--execute" in internal_event_worker
     assert "InternalEventWorker().run_due" in internal_event_worker
@@ -603,20 +539,12 @@ def test_ai_audience_scheduler_runs_through_internal_event_queue_only():
     scheduler = (ROOT / "scripts" / "run_ai_audience_scheduler.py").read_text(encoding="utf-8")
     service = (ROOT / "deploy" / "openclaw-ai-audience-scheduler.service").read_text(encoding="utf-8")
     timer = (ROOT / "deploy" / "openclaw-ai-audience-scheduler.timer").read_text(encoding="utf-8")
-    stop_timer_index = workflow.index("sudo systemctl stop openclaw-ai-audience-scheduler.timer || true")
-    stop_service_index = workflow.index("sudo systemctl stop openclaw-ai-audience-scheduler.service || true")
+    stop_runtime_units_index = workflow.index(_runtime_units_phase("stop-for-migration"))
     alembic_upgrade_index = workflow.index("python3 -m alembic upgrade head")
-    copy_service_index = workflow.index("sudo cp deploy/openclaw-ai-audience-scheduler.service /etc/systemd/system/")
-    copy_timer_index = workflow.index("sudo cp deploy/openclaw-ai-audience-scheduler.timer /etc/systemd/system/")
-    daemon_reload_index = workflow.index("sudo systemctl daemon-reload")
-    enable_index = workflow.index("sudo systemctl enable openclaw-ai-audience-scheduler.timer")
-    restart_index = workflow.index("sudo systemctl restart openclaw-ai-audience-scheduler.timer")
-    start_index = workflow.index("if ! sudo systemctl start openclaw-ai-audience-scheduler.service; then")
-    status_index = workflow.index("sudo systemctl status openclaw-ai-audience-scheduler.timer --no-pager")
+    install_index = workflow.index(_runtime_units_phase("install-enable-after-web-health"))
+    verify_index = workflow.index(_runtime_units_phase("verify"))
 
-    assert stop_timer_index < stop_service_index < alembic_upgrade_index
-    assert copy_service_index < copy_timer_index < daemon_reload_index
-    assert daemon_reload_index < enable_index < restart_index < start_index < status_index
+    assert stop_runtime_units_index < alembic_upgrade_index < install_index < verify_index
     assert "register_ai_audience_event_consumers()" in scheduler
     assert 'read_int_env("AICRM_AI_AUDIENCE_SCHEDULER_BATCH_SIZE", 20)' in scheduler
     assert "run_due_ai_audience_consumers" in scheduler

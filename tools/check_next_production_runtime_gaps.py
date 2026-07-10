@@ -63,6 +63,7 @@ PRODUCTION_CONFIG_PATTERNS = (
 
 QUESTIONNAIRE_FIXTURE_SLUGS = {"hxc-activation-v1", "disabled-demo"}
 FIXTURE_STATUS_VALUES = {"fixture", "fake", "partial", "fixture_boundary"}
+RUNTIME_UNITS_MANIFEST = ROOT / "deploy" / "production_runtime_units.json"
 
 
 @contextmanager
@@ -254,6 +255,12 @@ def _oauth_blockers(routes: dict[str, Any]) -> list[str]:
     return blockers
 
 
+def _runtime_unit_manifest() -> dict[str, Any]:
+    if not RUNTIME_UNITS_MANIFEST.exists():
+        return {"active_autostart": [], "approval_required": [], "retired_forbidden": []}
+    return json.loads(RUNTIME_UNITS_MANIFEST.read_text(encoding="utf-8"))
+
+
 def run_check() -> dict[str, Any]:
     with production_probe_env():
         database_url = os.environ.get("DATABASE_URL", "")
@@ -269,15 +276,10 @@ def run_check() -> dict[str, Any]:
     oauth_blockers = _oauth_blockers(routes)
     content_blockers = questionnaire_blockers + automation_blockers
     warnings = questionnaire_warnings + automation_warnings
-    forbidden_retired_timer_units = [
-        "aicrm-reply-monitor-run-due.timer",
-        "aicrm-reply-monitor-capture.timer",
-        "aicrm-automation-jobs-run-due.timer",
-    ]
-    active_timer_units = [
-        "openclaw-ai-audience-scheduler.timer",
-        "aicrm-campaign-run-due.timer",
-    ]
+    runtime_units = _runtime_unit_manifest()
+    forbidden_retired_timer_units = [str(unit) for unit in runtime_units.get("retired_forbidden") or []]
+    active_timer_units = [str(unit.get("timer")) for unit in runtime_units.get("active_autostart") or []]
+    approval_required_timer_units = [str(unit) for unit in runtime_units.get("approval_required") or []]
     result = {
         "ok": not route_404_blockers and not content_blockers and not oauth_blockers and not production_config_modified(),
         "health": health,
@@ -294,6 +296,7 @@ def run_check() -> dict[str, Any]:
         "retired_timers_currently_disabled": [],
         "forbidden_retired_timer_units": forbidden_retired_timer_units,
         "active_timer_units": active_timer_units,
+        "approval_required_timer_units": approval_required_timer_units,
         "callback_currently_has_5013_fallback": True,
         "fixture_only_modules_present": _static_fixture_modules(),
         "fake_or_disabled_adapter_warning": "D7 fake/staging-disabled adapters remain contract-only unless production env enables real adapters.",

@@ -240,6 +240,17 @@ def test_next_postgres_refund_result_updates_order_once(monkeypatch):
             "refund_amount_total": 6900,
         },
     )
+    service_refund_calls: list[dict] = []
+
+    class FakeApplyServicePeriodRefundCommand:
+        def __call__(self, **kwargs):
+            service_refund_calls.append(dict(kwargs))
+            return {"ok": True, "event_type": "refunded"}
+
+    monkeypatch.setattr(
+        "aicrm_next.service_period.application.ApplyServicePeriodRefundCommand",
+        lambda: FakeApplyServicePeriodRefundCommand(),
+    )
 
     result = admin_transactions.apply_wechat_refund_result(
         {
@@ -255,7 +266,20 @@ def test_next_postgres_refund_result_updates_order_once(monkeypatch):
 
     assert result["refund"]["status"] == "SUCCESS"
     assert result["order_refund_status"] == "full_refunded"
+    assert result["service_period_refund"]["event_type"] == "refunded"
     assert result["updated_order_amount"] is True
+    assert service_refund_calls == [
+        {
+            "out_trade_no": "WXP_REAL_REFUND",
+            "refund": {
+                "out_refund_no": "WXRTEST0001",
+                "refund_id": "503000000020260615",
+                "status": "SUCCESS",
+                "amount_total": 6900,
+                "order_refund_status": "full_refunded",
+            },
+        }
+    ]
     sql_text = "\n".join(sql for sql, _params in executed)
     assert "UPDATE wechat_pay_refunds" in sql_text
     assert "UPDATE wechat_pay_orders" in sql_text

@@ -62,6 +62,8 @@ def test_wechat_product_admin_pages_keep_existing_routes_and_sections(next_clien
     assert "已售卖数量" in list_page.text
     assert "<th>贴图</th>" not in list_page.text
     assert 'data-mode="edit"' in edit_page.text
+    assert "product-editor-topbar" not in edit_page.text
+    assert "product-editor-crumb" not in edit_page.text
     for text in ("商品管理", "售卖信息", "页面素材", "购买后动作", "外部推送"):
         assert text in edit_page.text
     assert 'id="panel-sale" data-product-panel-content="sale"' in edit_page.text

@@ -18,12 +18,14 @@ from aicrm_next.platform_foundation.internal_events.worker import InternalEventW
 OTHER_EVENT_TYPE = "questionnaire.submitted"
 STAGE_1_CONSUMERS = [
     "order_projection_consumer",
+    "service_period_entitlement_consumer",
     "customer_business_summary_consumer",
     "dnd_policy_consumer",
     "ai_assist_notify_consumer",
 ]
 PAYMENT_CONSUMERS = [
     "order_projection_consumer",
+    "service_period_entitlement_consumer",
     "customer_business_summary_consumer",
     "dnd_policy_consumer",
     "ai_assist_notify_consumer",
@@ -244,13 +246,35 @@ def test_stage_1_payment_consumers_auto_execute_under_allowlist(monkeypatch) -> 
     runs, _ = service.list_consumer_runs({"event_id": emitted["event"]["event_id"]})
     statuses = {run.consumer_name: run.status for run in runs}
 
-    assert len(items) == 4
+    assert len(items) == 5
     assert statuses["order_projection_consumer"] == "succeeded"
+    assert statuses["service_period_entitlement_consumer"] == "skipped"
     assert statuses["customer_business_summary_consumer"] == "skipped"
     assert statuses["dnd_policy_consumer"] == "skipped"
     assert statuses["ai_assist_notify_consumer"] == "skipped"
     assert statuses["webhook_order_paid_consumer"] == "pending"
     assert "automation_payment_consumer" not in statuses
+
+
+def test_payment_service_period_consumer_executes_when_pair_allowlisted(monkeypatch) -> None:
+    reset_internal_event_fixture_state()
+    reset_external_effect_fixture_state()
+    _enable_auto_execute(monkeypatch, consumers=["service_period_entitlement_consumer"])
+    monkeypatch.setenv(
+        "AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS",
+        f"{PAYMENT_SUCCEEDED_EVENT_TYPE}:service_period_entitlement_consumer",
+    )
+    service, repo, registry = _payment_service()
+    emitted = _emit_payment(service)
+
+    result = InternalEventWorker(repo, registry).run_due(batch_size=1, dry_run=False)
+    runs, _ = service.list_consumer_runs({"event_id": emitted["event"]["event_id"]})
+    statuses = {run.consumer_name: run.status for run in runs}
+
+    assert result["counts"]["processed_count"] == 1
+    assert result["processed"][0]["consumer_name"] == "service_period_entitlement_consumer"
+    assert statuses["service_period_entitlement_consumer"] == "skipped"
+    assert statuses["order_projection_consumer"] == "pending"
 
 
 def test_retired_automation_payment_consumer_is_not_registered(monkeypatch) -> None:

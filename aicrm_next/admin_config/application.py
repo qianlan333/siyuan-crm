@@ -887,7 +887,7 @@ class AdminConfigReadService:
         items = [
             {"key": "overview", "label": "概览", "href": "/admin/config"},
             {"key": "app_settings", "label": "系统设置", "href": "/admin/config/app-settings"},
-            {"key": "login_access", "label": "登录与权限", "href": "/admin/config/login-access"},
+            {"key": "login_access", "label": "后台访问", "href": "/admin/config/detail/admin_access"},
             {"key": "checklist", "label": "配置检查清单", "href": "/admin/config/checklist"},
         ]
         return [{**item, "active": item["key"] == active_key} for item in items]

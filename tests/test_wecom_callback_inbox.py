@@ -104,6 +104,29 @@ def test_callback_ingress_decrypts_and_ingests_webhook_inbox(monkeypatch):
     assert "cookie" not in repo.rows[0]["raw_headers_json"]
 
 
+def test_callback_ingress_enables_time_sensitive_inline_processing(monkeypatch):
+    calls: list[dict] = []
+
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.callback_ingress.decrypt_callback_body",
+        lambda *, query, body: (_event(), "<xml>plain</xml>"),
+    )
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.callback_ingress.ingest_wecom_callback",
+        lambda **kwargs: calls.append(kwargs) or {"ok": True, "id": 1, "time_sensitive_inline": True},
+    )
+
+    result = ingest_wecom_external_contact_callback(
+        query={"timestamp": "1", "nonce": "n", "msg_signature": "s"},
+        headers={},
+        body=b"<xml>encrypted</xml>",
+        route="/wecom/external-contact/callback",
+    )
+
+    assert result["ok"] is True
+    assert calls[0]["process_time_sensitive"] is True
+
+
 def test_callback_ingress_validation_error_is_returned_as_400(monkeypatch):
     client = TestClient(create_app(), raise_server_exceptions=False)
 

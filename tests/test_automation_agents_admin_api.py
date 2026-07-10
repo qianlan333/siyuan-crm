@@ -35,7 +35,8 @@ def _create_payload(**overrides):
     return payload
 
 
-def test_admin_automation_agents_requires_admin_session(next_client) -> None:
+def test_admin_automation_agents_requires_admin_session(next_client, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     response = next_client.get("/api/admin/automation-agents")
 
     assert response.status_code == 401

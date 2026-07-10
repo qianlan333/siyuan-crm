@@ -50,7 +50,7 @@
 
 ## 授权管理
 
-入口：`/admin/config/login-access`
+入口：`/admin/config/detail/admin_access`
 
 支持：
 
@@ -74,7 +74,7 @@
 
 1. 临时开启 break-glass
 2. 使用 break-glass 登录后台
-3. 到 `/admin/config/login-access` 绑定或修复企微管理员权限
+3. 到 `/admin/config/detail/admin_access` 绑定或修复企微管理员权限
 4. 验证企微 SSO 正常
 5. 关闭 break-glass
 

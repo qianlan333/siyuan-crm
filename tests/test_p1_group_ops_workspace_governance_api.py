@@ -262,7 +262,8 @@ def _assert_bridge_pending_not_execution(payload: dict) -> None:
     assert payload.get("review_status") not in {"sent", "completed"}
 
 
-def test_group_ops_workspace_governance_apis_fail_closed_without_admin_cookie(next_client: TestClient) -> None:
+def test_group_ops_workspace_governance_apis_fail_closed_without_admin_cookie(next_client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     request = next_client.post(
         "/api/admin/p1/group-ops-workspace/drafts/gowd_missing/governance/request",
         json=_governance_payload(snapshot_hash="safe-snapshot"),
@@ -529,7 +530,8 @@ def test_get_governance_returns_sanitized_summary_only(
         assert forbidden not in rendered
 
 
-def test_governance_step_apis_fail_closed_without_admin_cookie(next_client: TestClient) -> None:
+def test_governance_step_apis_fail_closed_without_admin_cookie(next_client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     approve = next_client.post(
         "/api/admin/p1/group-ops-workspace/governance/gowg_missing/steps/gowgs_missing/approve",
         json=_step_payload(idempotency_key="unauth-approve"),
@@ -739,7 +741,8 @@ def test_governance_api_does_not_break_legacy_group_ops_read_routes(
     assert response.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
 
 
-def test_push_center_bridge_apis_fail_closed_without_admin_cookie(next_client: TestClient) -> None:
+def test_push_center_bridge_apis_fail_closed_without_admin_cookie(next_client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     bridged = next_client.post(
         "/api/admin/p1/group-ops-workspace/governance/gowg_missing/bridge-push-center",
         json={

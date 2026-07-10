@@ -7,8 +7,7 @@
 <style>
   .service-period-admin { display: grid; gap: 14px; }
   .service-period-toolbar,
-  .service-period-actions,
-  .service-period-inline-actions {
+  .service-period-actions {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -364,6 +363,10 @@
     gap: 16px;
     align-items: center;
   }
+  .service-period-data-actions {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+  }
   .service-period-product-main {
     display: flex;
     align-items: center;
@@ -567,6 +570,13 @@
                   <option value="disabled">已下架</option>
                 </select>
               </div>
+              <div class="service-period-field">
+                <label for="requireMobile">手机号要求</label>
+                <select id="requireMobile">
+                  <option value="false">不要求</option>
+                  <option value="true">要求填写</option>
+                </select>
+              </div>
               <div class="service-period-field full">
                 <label for="productDescription">商品描述</label>
                 <textarea id="productDescription" placeholder="可选。不填写则用户端不展示。"></textarea>
@@ -710,10 +720,6 @@
   </div>
   {% elif page_mode == "data" %}
   {% set product = initial_product %}
-  <div class="service-period-inline-actions" style="justify-content:flex-end;">
-    <a class="admin-button admin-button--ghost" href="/admin/service-period-products">返回列表</a>
-    <button class="admin-button admin-button--primary" id="exportMembersBtn" type="button">导出数据</button>
-  </div>
   <section class="admin-card service-period-product-card">
     <div class="service-period-product-main">
       <div class="service-period-cover">{{ (product.title or product.name or "周期商品")[:12] }}</div>
@@ -721,6 +727,10 @@
         <h2 style="margin:0;font-size:18px;">{{ product.title or product.name }} <span class="service-period-pill {{ product.status }}">{{ {"active":"已上架","draft":"草稿","disabled":"已下架"}.get(product.status, product.status) }}</span></h2>
         <p class="service-period-muted">绑定：{{ product.membership_config_name or "默认会员设置" }} · 价格：¥{{ "%.2f"|format((product.price_cents or product.amount_total or 0) / 100) }} / {{ product.duration_days or 0 }} 天</p>
       </div>
+    </div>
+    <div class="service-period-actions service-period-data-actions">
+      <a class="admin-button admin-button--ghost" href="/admin/service-period-products">返回列表</a>
+      <button class="admin-button admin-button--primary" id="exportMembersBtn" type="button">导出数据</button>
     </div>
   </section>
   <div class="service-period-stats-grid">
@@ -739,19 +749,20 @@
     </div>
     <div class="admin-table-wrap" style="margin-top:14px;">
       <table class="admin-table service-period-data-table">
-        <thead><tr><th>会员</th><th>状态</th><th>剩余有效期</th><th>到期日</th><th>最近订单</th><th>操作</th></tr></thead>
+        <thead><tr><th>会员</th><th>外部联系人id</th><th>状态</th><th>剩余有效期</th><th>到期日</th><th>备注</th><th>操作</th></tr></thead>
         <tbody id="memberRows">
           {% for member in members %}
           <tr>
             <td>{{ member.display_name or member.unionid }}<div class="service-period-sub">{{ member.mobile or member.unionid }}</div></td>
+            <td class="service-period-mono">{{ member.external_userid or "-" }}</td>
             <td><span class="service-period-pill {{ 'ok' if member.status == 'active' else 'off' }}">{{ {"active":"使用中","expired":"已过期","disabled":"已停用","refunded":"已退款"}.get(member.status, member.status) }}</span></td>
             <td>{{ member.remaining_days or 0 }} 天</td>
-            <td>{{ member.end_at }}</td>
-            <td>¥{{ "%.2f"|format((member.last_order_amount or 0) / 100) }} / {{ member.last_order_duration_days or 0 }} 天</td>
-            <td><button class="admin-button admin-button--ghost" type="button">查看</button></td>
+            <td>{{ (member.end_at or "")[:10] }}</td>
+            <td>{{ member.remark or "-" }}</td>
+            <td><button class="admin-button admin-button--ghost" data-member-remark data-unionid="{{ member.unionid|forceescape }}" data-remark="{{ (member.remark or '')|forceescape }}" type="button">备注</button></td>
           </tr>
           {% else %}
-          <tr><td colspan="6" class="service-period-muted">暂无会员数据</td></tr>
+          <tr><td colspan="7" class="service-period-muted">暂无会员数据</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -1131,6 +1142,7 @@
     $("productPrice").value = money(product.price_cents || product.amount_total || product.trade_product?.price_cents || product.trade_product?.amount_total);
     $("durationDays").value = Number(product.duration_days || 30);
     $("productStatus").value = product.status || (product.enabled ? "active" : "draft");
+    $("requireMobile").value = (product.trade_product?.require_mobile || product.require_mobile) ? "true" : "false";
     $("productDescription").value = product.description || product.trade_product?.description || "";
     renderMembershipOptions();
     renderLeadChannels();
@@ -1154,7 +1166,7 @@
       duration_days: Number($("durationDays").value || 0),
       membership_config_id: $("membershipConfig").value,
       membership_config_name: selected?.dataset.name || selected?.textContent || "",
-      require_mobile: false,
+      require_mobile: $("requireMobile").value === "true",
       lead_channel_id: afterActionEnabled && afterActionMode === "lead" ? (Number($("leadChannel").value || 0) || null) : null,
       ...completionRedirectPayload(),
       slices: (product.slices || []).map((slice, index) => ({image_library_id: Number(slice.image_library_id), sort_order: index + 1}))
@@ -1413,22 +1425,36 @@
   const esc = (value) => String(value == null ? "" : value).replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c]));
   const money = (value) => (Number(value || 0) / 100).toFixed(2);
   const statusLabel = (value) => ({active: "使用中", expired: "已过期", disabled: "已停用", refunded: "已退款"}[value] || value || "-");
-  const api = async (url) => {
-    const response = await fetch(url, {credentials: "same-origin"});
+  const dateOnly = (value) => String(value || "").slice(0, 10);
+  function formatApiError(value) {
+    if (!value) return "";
+    if (typeof value === "string") return value;
+    if (Array.isArray(value)) return value.map(formatApiError).filter(Boolean).join("；");
+    if (typeof value === "object") {
+      if (value.detail) return formatApiError(value.detail);
+      if (value.error) return formatApiError(value.error);
+      if (value.msg) return String(value.msg);
+      try { return JSON.stringify(value); } catch (_error) { return String(value); }
+    }
+    return String(value);
+  }
+  const api = async (url, options) => {
+    const response = await fetch(url, Object.assign({credentials: "same-origin"}, options || {}));
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) throw new Error(payload.detail || payload.error || "请求失败");
+    if (!response.ok || payload.ok === false) throw new Error(formatApiError(payload.detail || payload.error) || "请求失败");
     return payload;
   };
   function renderMembers(items) {
     currentMembers = items || [];
     rows.innerHTML = currentMembers.map(member => `<tr>
       <td>${esc(member.display_name || member.unionid)}<div class="service-period-sub">${esc(member.mobile || member.unionid)}</div></td>
+      <td class="service-period-mono">${esc(member.external_userid || "-")}</td>
       <td><span class="service-period-pill ${member.status === "active" ? "ok" : "off"}">${esc(statusLabel(member.status))}</span></td>
       <td>${Number(member.remaining_days || 0)} 天</td>
-      <td>${esc(member.end_at || "")}</td>
-      <td>¥${money(member.last_order_amount)} / ${Number(member.last_order_duration_days || 0)} 天</td>
-      <td><button class="admin-button admin-button--ghost" type="button">查看</button></td>
-    </tr>`).join("") || '<tr><td colspan="6" class="service-period-muted">暂无会员数据</td></tr>';
+      <td>${esc(dateOnly(member.end_at))}</td>
+      <td>${esc(member.remark || "-")}</td>
+      <td><button class="admin-button admin-button--ghost" data-member-remark data-unionid="${esc(member.unionid)}" data-remark="${esc(member.remark || "")}" type="button">备注</button></td>
+    </tr>`).join("") || '<tr><td colspan="7" class="service-period-muted">暂无会员数据</td></tr>';
   }
   async function refreshData() {
     if (!serviceProductId) return;
@@ -1443,7 +1469,7 @@
     renderMembers(members.items || []);
   }
   function downloadCsv() {
-    const header = ["unionid", "display_name", "mobile", "status", "remaining_days", "end_at", "last_order_amount", "last_order_duration_days"];
+    const header = ["unionid", "display_name", "external_userid", "mobile", "status", "remaining_days", "end_at", "remark"];
     const lines = [header.join(",")].concat(currentMembers.map(member => header.map(key => `"${String(member[key] ?? "").replace(/"/g, '""')}"`).join(",")));
     const blob = new Blob([lines.join("\n")], {type: "text/csv;charset=utf-8"});
     const url = URL.createObjectURL(blob);
@@ -1454,8 +1480,27 @@
     URL.revokeObjectURL(url);
     if (notice) notice.textContent = "导出文件已生成。";
   }
+  async function editRemark(button) {
+    const unionid = String(button.dataset.unionid || "");
+    if (!unionid) return;
+    const current = String(button.dataset.remark || "");
+    const next = window.prompt("填写会员备注", current);
+    if (next === null) return;
+    await api(`/api/admin/service-period-products/${encodeURIComponent(serviceProductId)}/members/${encodeURIComponent(unionid)}/remark`, {
+      method: "PUT",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({remark: next})
+    });
+    if (notice) notice.textContent = "备注已保存。";
+    await refreshData();
+  }
   document.getElementById("exportMembersBtn").addEventListener("click", downloadCsv);
   document.getElementById("memberFilterBtn").addEventListener("click", () => { if (notice) notice.textContent = "当前仅展示全部会员。"; });
+  rows.addEventListener("click", event => {
+    const button = event.target.closest("[data-member-remark]");
+    if (!button) return;
+    editRemark(button).catch(error => { if (notice) notice.textContent = error.message || "备注保存失败"; });
+  });
   refreshData().catch(error => { if (notice) notice.textContent = error.message || "加载失败"; });
 })();
 </script>

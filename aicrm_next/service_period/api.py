@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from aicrm_next.admin_shell import shell_context
@@ -28,10 +28,11 @@ from .application import (
     ListServicePeriodMembersQuery,
     ListServicePeriodProductsQuery,
     SetServicePeriodProductEnabledCommand,
+    UpdateServicePeriodMemberRemarkCommand,
     UpdateServicePeriodProductCommand,
 )
 from .dto import ServicePeriodProductCreateRequest, ServicePeriodProductUpdateRequest
-from .public import render_service_period_public_page
+from .public import render_service_period_pay_page, render_service_period_public_page
 
 
 router = APIRouter()
@@ -79,7 +80,55 @@ def _inactive_public_state(product: dict) -> dict:
         "service_product": product,
         "entitlement": {"status": "unavailable", "remaining_days": 0, "end_at": ""},
         "cta_text": "暂未开放",
+        "checkout_url": "",
         "create_order_url": "",
+    }
+
+
+def _service_period_checkout_product(product: dict, public_state: dict | None = None) -> dict:
+    trade_product = dict(product.get("trade_product") or {})
+    price = int(product.get("price_cents") or product.get("amount_total") or trade_product.get("price_cents") or trade_product.get("amount_total") or 0)
+    title = str(product.get("title") or product.get("name") or trade_product.get("title") or trade_product.get("name") or "周期商品")
+    return {
+        **trade_product,
+        "product_code": str(trade_product.get("product_code") or product.get("product_code") or ""),
+        "title": title,
+        "name": title,
+        "price_cents": price,
+        "amount_total": price,
+        "currency": str(product.get("currency") or trade_product.get("currency") or "CNY"),
+        "buy_button_text": str((public_state or {}).get("cta_text") or "确认支付"),
+        "require_mobile": bool(trade_product.get("require_mobile") or product.get("require_mobile")),
+    }
+
+
+def _service_period_checkout_state(product: dict, request: Request, public_state: dict) -> dict:
+    identity = h5_wechat_pay.h5_payment_identity_from_request(request)
+    link_slug = str(product.get("link_slug") or "").strip()
+    checkout_path = f"/s/{link_slug}/pay"
+    public_path = f"/s/{quote(link_slug, safe='')}"
+    checkout_product = _service_period_checkout_product(product, public_state)
+    return {
+        "product": {
+            "product_code": str(checkout_product.get("product_code") or ""),
+            "name": str(checkout_product.get("title") or checkout_product.get("name") or ""),
+            "amount_total": int(checkout_product.get("price_cents") or checkout_product.get("amount_total") or 0),
+            "currency": str(checkout_product.get("currency") or "CNY"),
+        },
+        "identity_ready": bool(identity.get("openid")),
+        "oauth_start_url": h5_wechat_pay.payment_oauth_start_url(checkout_path),
+        "create_order_url": f"/api/h5/service-period-products/{link_slug}/wechat-pay/jsapi/orders",
+        "status_url_template": "/api/h5/wechat-pay/orders/{out_trade_no}",
+        "post_paid_redirect_url": public_path,
+        "enabled": h5_wechat_pay._env_bool("WECHAT_PAY_ENABLED", False),
+        "require_mobile": bool(checkout_product.get("require_mobile")),
+        "cta_text": str(public_state.get("cta_text") or "确认支付"),
+        "completion_target": checkout_product.get("completion_target") or checkout_product.get("completion_target_json") or {},
+        "completion_action": checkout_product.get("completion_action") or {"type": "default", "redirect_url": ""},
+        "paid_order": None,
+        "price_display": f"{str(checkout_product.get('currency') or 'CNY')} {int(checkout_product.get('price_cents') or 0) / 100:.2f}",
+        "context_token": "",
+        "context_status": "missing",
     }
 
 
@@ -324,6 +373,16 @@ def service_period_product_members(
         _raise_http(exc)
 
 
+@router.put("/api/admin/service-period-products/{service_product_id}/members/{unionid}/remark")
+def update_service_period_member_remark(service_product_id: str, unionid: str, request: Request) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        return _payload(UpdateServicePeriodMemberRemarkCommand()(service_product_id, unionid, remark=str(payload.get("remark") or "")))
+    except Exception as exc:
+        _raise_http(exc)
+
+
 @router.get("/s/{link_slug}", response_class=HTMLResponse, name="api.public_service_period_product_page")
 def public_service_period_product_page(request: Request, link_slug: str):
     try:
@@ -351,6 +410,12 @@ def public_service_period_product_page(request: Request, link_slug: str):
         _raise_http(exc)
     try:
         identity = h5_wechat_pay.h5_payment_identity_from_request(request)
+        if not identity.get("openid") and h5_wechat_pay._is_wechat_browser(request):
+            return RedirectResponse(
+                h5_wechat_pay.payment_oauth_start_url(f"/s/{quote(str(link_slug or '').strip(), safe='')}"),
+                status_code=302,
+                headers=route_headers(),
+            )
         state = GetServicePeriodPublicStateQuery()(link_slug, unionid=str(identity.get("unionid") or ""))
     except NotFoundError:
         state = _inactive_public_state(product)
@@ -358,6 +423,25 @@ def public_service_period_product_page(request: Request, link_slug: str):
         _raise_http(exc)
     html = render_service_period_public_page(product, state)
     return templates.TemplateResponse(request, "service_period_public.html", {"request": request, "html": html}, headers=route_headers())
+
+
+@router.get("/s/{link_slug}/pay", response_class=HTMLResponse, name="api.public_service_period_pay_page")
+def public_service_period_pay_page(request: Request, link_slug: str):
+    try:
+        product = GetPublicServicePeriodProductQuery()(link_slug)["product"]
+        identity = h5_wechat_pay.h5_payment_identity_from_request(request)
+        public_state = GetServicePeriodPublicStateQuery()(link_slug, unionid=str(identity.get("unionid") or ""))
+    except Exception as exc:
+        if isinstance(exc, NotFoundError):
+            return HTMLResponse(
+                "<!doctype html><meta charset='utf-8'><main data-route-owner='ai_crm_next'>周期商品不存在</main>",
+                status_code=404,
+                headers=route_headers(),
+            )
+        _raise_http(exc)
+    checkout_product = _service_period_checkout_product(product, public_state)
+    checkout_state = _service_period_checkout_state(product, request, public_state)
+    return HTMLResponse(render_service_period_pay_page(checkout_product, checkout_state), headers=route_headers())
 
 
 @router.get("/api/h5/service-period-products/{link_slug}")
@@ -383,7 +467,7 @@ def create_service_period_jsapi_order(request: Request, link_slug: str):
             request,
             payload,
             product_override=trade_product,
-            checkout_return_path=f"/s/{product.get('link_slug')}",
+            checkout_return_path=f"/s/{product.get('link_slug')}/pay",
             allow_paid_reuse=False,
             order_source="service_period_checkout",
             request_meta_extra={

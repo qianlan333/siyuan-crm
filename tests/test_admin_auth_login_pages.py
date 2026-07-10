@@ -25,6 +25,8 @@ def test_get_login_renders_next_page_with_wecom_links_and_form_target(monkeypatc
     assert "/auth/wecom/start?mode=oauth" in response.text
     assert 'method="post" action="/login"' in response.text
     assert "应急入口未启用" in response.text
+    assert "配置 &gt; 后台访问" in response.text
+    assert "配置 &gt; 登录与权限" not in response.text
     assert "disabled" in response.text
     assert "api.admin_login" not in response.text
     assert "本地应急入口状态" in response.text

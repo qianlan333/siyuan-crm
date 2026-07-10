@@ -93,6 +93,27 @@ tables:
       - tests/test_data_table_lifecycle_guard.py
     notes: Internal staff userid/display mapping used for customer read projections.
 
+  admin_wecom_directory_members:
+    domain: admin_identity
+    lifecycle: read_model
+    write_owner: aicrm_next.operation_members.SyncOperationMembersFromWeComCommand
+    read_owners:
+      - common operation members
+      - admin member selectors
+    replacement: none; local cache of WeCom customer-contact capable staff
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation member picker
+      - channel code staff assignment
+      - group ops owner selection
+    migration_source: 0096_admin_wecom_directory_members
+    pii_level: internal_contact
+    guard_tests:
+      - tests/test_wecom_operation_members_sync.py
+      - tests/test_data_table_lifecycle_guard.py
+    notes: Populated by explicit admin POST sync from WeCom externalcontact follow-user list; not a login authorization table.
+
   automation_member:
     domain: automation
     lifecycle: retired
@@ -3114,6 +3135,7 @@ tables:
     read_owners:
       - aicrm_next.service_period
       - aicrm_next.commerce
+      - aicrm_next.customer_read_model.sidebar_v2
     replacement: none; service period semantic binding over wechat_pay_products
     drop_candidate: false
     drop_after: ""
@@ -3121,6 +3143,7 @@ tables:
       - aicrm_next.service_period.api
       - aicrm_next.service_period.application
       - aicrm_next.service_period.payment_consumer
+      - aicrm_next.customer_read_model.sidebar_v2
     migration_source: 0095_service_period_products
     pii_level: internal_contact
     guard_tests:
@@ -3134,6 +3157,7 @@ tables:
     write_owner: aicrm_next.service_period
     read_owners:
       - aicrm_next.service_period
+      - aicrm_next.customer_read_model.sidebar_v2
     replacement: none; current entitlement state for service period products
     drop_candidate: false
     drop_after: ""
@@ -3141,6 +3165,7 @@ tables:
       - aicrm_next.service_period.api
       - aicrm_next.service_period.application
       - aicrm_next.service_period.payment_consumer
+      - aicrm_next.customer_read_model.sidebar_v2
     migration_source: 0095_service_period_products
     pii_level: direct_contact
     guard_tests:
@@ -3215,11 +3240,13 @@ tables:
     read_owners:
       - aicrm_next.external_push
       - aicrm_next.service_period
+      - aicrm_next.customer_read_model.sidebar_v2
     replacement: none; active production schema table registered during schema drift closeout
     drop_candidate: false
     drop_after: ""
     runtime_entrypoints:
       - existing production runtime
+      - aicrm_next.customer_read_model.sidebar_v2
     migration_source: pre-Alembic baseline, registered by 0083 schema drift closeout
     pii_level: internal_contact
     guard_tests:

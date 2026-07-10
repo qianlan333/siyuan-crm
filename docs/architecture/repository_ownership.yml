@@ -357,6 +357,12 @@ repositories:
       - owner_migration_results
       - wecom_external_contact_follow_users
       - wecom_external_contact_identity_map
+  aicrm_next/operation_members/repository.py:
+    capability_owner: aicrm_next.operation_members
+    table_reads:
+      - admin_wecom_directory_members
+    table_writes:
+      - admin_wecom_directory_members
   aicrm_next/platform_foundation/external_effects/repo.py:
     capability_owner: aicrm_next.platform_foundation.external_effects
     table_reads:

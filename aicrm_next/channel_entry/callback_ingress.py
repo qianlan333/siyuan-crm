@@ -8,6 +8,9 @@ from .application import decrypt_callback_body
 from .inbox import ingest_wecom_callback
 
 
+CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED = True
+
+
 class WeComCallbackIngressValidationError(ValueError):
     pass
 
@@ -32,5 +35,5 @@ def ingest_wecom_external_contact_callback(
         plain_xml=plain_xml,
         route=route,
         repository=repository,
-        process_time_sensitive=True,
+        process_time_sensitive=CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED,
     )

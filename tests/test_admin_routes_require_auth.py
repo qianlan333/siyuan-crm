@@ -40,6 +40,36 @@ def test_admin_pages_redirect_to_login_when_enforced(monkeypatch) -> None:
     assert response.headers["location"] == "/login?next=/admin/api-docs"
 
 
+def test_production_data_mode_enforces_all_admin_pages_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("AICRM_ADMIN_AUTH_ENFORCED", raising=False)
+    monkeypatch.setattr("aicrm_next.admin_auth.guards.production_data_ready", lambda: True)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    admin_pages = [
+        "/admin/automation-conversion",
+        "/admin/automation-agents",
+        "/admin/customers",
+        "/admin/questionnaires",
+        "/admin/wechat-pay/products",
+        "/admin/api-docs",
+    ]
+    for path in admin_pages:
+        response = client.get(path, follow_redirects=False)
+        assert response.status_code == 302
+        assert response.headers["location"] == f"/login?next={path}"
+
+
+def test_production_data_mode_enforces_all_admin_apis_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("AICRM_ADMIN_AUTH_ENFORCED", raising=False)
+    monkeypatch.setattr("aicrm_next.admin_auth.guards.production_data_ready", lambda: True)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+
+    for path in ["/api/admin/ai-audience/packages", "/api/admin/automation-agents", "/api/admin/channels"]:
+        response = client.get(path)
+        assert response.status_code == 401
+        assert response.json()["error"] == "admin_auth_required"
+
+
 def test_setup_wizard_redirects_to_login_when_enforced(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     client = TestClient(create_app(), raise_server_exceptions=False)
@@ -76,9 +106,14 @@ def test_public_routes_remain_public_when_admin_auth_is_enforced(monkeypatch) ->
     client = TestClient(create_app(), raise_server_exceptions=False)
 
     assert client.get("/health").status_code == 200
+    assert client.get("/api/system/health").status_code == 200
     assert client.get("/login").status_code == 200
+    assert client.get("/static/admin_console/admin_console.css").status_code == 200
     assert client.get("/api/sidebar/jssdk-config").status_code == 400
     assert client.get("/sidebar/bind-mobile").status_code == 200
+    assert client.get("/api/h5/questionnaires/slug").status_code != 401
+    assert client.get("/api/wecom/events").status_code != 401
+    assert client.get("/wecom/external-contact/callback").status_code != 401
 
 
 def test_admin_write_routes_require_session_bound_csrf_when_enforced(monkeypatch) -> None:

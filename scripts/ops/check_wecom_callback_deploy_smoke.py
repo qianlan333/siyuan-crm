@@ -81,16 +81,21 @@ def _payload_path(payload: dict[str, Any], path: str) -> Any:
     return value
 
 
+def _json_payload(probe: dict[str, Any]) -> dict[str, Any]:
+    try:
+        payload = json.loads(str(probe.get("body") or "{}"))
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _json_ok_or_auth(probe: dict[str, Any], *, required_list_paths: tuple[str, ...] = ()) -> bool:
     status = _status(probe)
     if status in {401, 403}:
         return True
     if status is None or not (200 <= status < 300):
         return False
-    try:
-        payload = json.loads(str(probe.get("body") or "{}"))
-    except json.JSONDecodeError:
-        return False
+    payload = _json_payload(probe)
     if payload.get("ok") is not True:
         return False
     return all(isinstance(_payload_path(payload, path), list) for path in required_list_paths)
@@ -176,6 +181,12 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
 
     web_health_ok = _is_2xx(probes["web_health"])
     ingress_health_ok = _is_2xx(probes["ingress_health"])
+    ingress_health_payload = _json_payload(probes["ingress_health"])
+    ingress_time_sensitive_inline_ready = bool(
+        ingress_health_ok
+        and ingress_health_payload.get("runtime") == "ai_crm_wecom_ingress"
+        and ingress_health_payload.get("time_sensitive_inline_enabled") is True
+    )
     admin_page_deployed = _is_route_deployed(probes["admin_webhook_inbox"])
     admin_api_deployed = bool(
         _json_ok_or_auth(
@@ -216,6 +227,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         base_urls_distinct
         and web_health_ok
         and ingress_health_ok
+        and ingress_time_sensitive_inline_ready
         and admin_page_deployed
         and admin_api_deployed
         and ingress_callback_routes_ready
@@ -228,6 +240,8 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         warnings.append("5001 web health is not 2xx")
     if not ingress_health_ok:
         warnings.append("5002 callback ingress health is not 2xx")
+    if not ingress_time_sensitive_inline_ready:
+        warnings.append("5002 callback ingress health does not prove time-sensitive inline welcome handling")
     if not admin_page_deployed:
         warnings.append("/admin/webhook-inbox route is not deployed or is returning 5xx")
     if not admin_api_deployed:
@@ -246,6 +260,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         "base_urls_distinct": base_urls_distinct,
         "web_health_ok": web_health_ok,
         "ingress_health_ok": ingress_health_ok,
+        "ingress_time_sensitive_inline_ready": ingress_time_sensitive_inline_ready,
         "admin_page_deployed": admin_page_deployed,
         "admin_api_deployed": admin_api_deployed,
         "admin_detail_route_deployed": _detail_route_deployed(probes["admin_webhook_inbox_detail"]),

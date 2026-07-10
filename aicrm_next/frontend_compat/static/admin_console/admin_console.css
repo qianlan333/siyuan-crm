@@ -513,7 +513,7 @@ code {
 .operation-member-picker__search {
   padding: 14px 24px;
   display: grid;
-  grid-template-columns: 1fr 110px;
+  grid-template-columns: 1fr 100px 110px;
   gap: 10px;
   border-bottom: 1px solid var(--line, #e5e7eb);
   background: #fbfdff;

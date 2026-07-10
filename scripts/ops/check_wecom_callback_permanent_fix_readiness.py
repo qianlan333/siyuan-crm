@@ -803,6 +803,7 @@ def read_deploy_smoke_evidence(path: str) -> dict[str, Any]:
         "base_urls_distinct": payload.get("base_urls_distinct") is True,
         "web_health_ok": payload.get("web_health_ok") is True,
         "ingress_health_ok": payload.get("ingress_health_ok") is True,
+        "ingress_time_sensitive_inline_ready": payload.get("ingress_time_sensitive_inline_ready") is True,
         "admin_page_deployed": payload.get("admin_page_deployed") is True,
         "admin_api_deployed": payload.get("admin_api_deployed") is True,
         "admin_detail_route_deployed": payload.get("admin_detail_route_deployed") is True,
@@ -818,7 +819,7 @@ def read_deploy_smoke_evidence(path: str) -> dict[str, Any]:
         "ingress_base_url": payload.get("ingress_base_url"),
         "ingress_callback_route_checks": ingress_callback_route_checks,
         "warnings": payload.get("warnings") if isinstance(payload.get("warnings"), list) else [],
-        "error": "" if ok else "deploy smoke evidence does not prove distinct web/ingress runtimes, admin API, detail routes, and ingress callback routes are deployed",
+        "error": "" if ok else "deploy smoke evidence does not prove distinct web/ingress runtimes, inline welcome handling, admin API, detail routes, and ingress callback routes are deployed",
     }
 
 

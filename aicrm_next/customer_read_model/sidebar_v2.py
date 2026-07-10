@@ -13,12 +13,18 @@ from aicrm_next.customer_read_model.application import GetCustomerContextQuery, 
 from aicrm_next.customer_read_model.dto import CustomerContextRequest
 from aicrm_next.customer_read_model.repo import CustomerReadRepository, build_customer_live_source_repository
 from aicrm_next.media_library.application import GetImageThumbnailQuery, ListMediaItemsQuery
+from aicrm_next.service_period.application import ListServicePeriodProductsQuery
+from aicrm_next.service_period.domain import (
+    entitlement_status as service_period_entitlement_status,
+    isoformat as service_period_isoformat,
+    remaining_days as service_period_remaining_days,
+)
 from aicrm_next.shared.db_session import get_engine
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.runtime import raw_database_url
 from aicrm_next.shared.signed_context import append_ctx_query, build_sidebar_product_context_token
 
-MODULES = ["profile", "questionnaires", "products", "orders", "materials", "other_staff_messages"]
+MODULES = ["profile", "questionnaires", "products", "orders", "periodic_orders", "materials", "other_staff_messages"]
 READONLY_OWNER_PENDING_USERID = "__aicrm_readonly_owner_pending__"
 ORDER_STATUS_LABELS = {
     "pending": "待支付",
@@ -28,6 +34,10 @@ ORDER_STATUS_LABELS = {
     "full_refunded": "全额退款",
     "closed": "已关闭",
     "failed": "支付失败",
+}
+SERVICE_PERIOD_STATUS_LABELS = {
+    "active": "使用中",
+    "expired": "已过期",
 }
 _CUSTOMER_PLACEHOLDER_TEXTS = {
     "customer_name",
@@ -440,6 +450,125 @@ class SidebarV2SqlRepository:
             """,
             {"external_userid": external_userid, "mobile": mobile, "limit": safe_limit, "candidate_limit": candidate_limit},
         )
+
+    def list_customer_service_period_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict[str, Any]]:
+        safe_limit = _limit(limit, default=20, maximum=50)
+        normalized_mobile = _normalize_mobile(mobile)
+        return self._all(
+            """
+            WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
+            identity_scope AS (
+                SELECT identity.unionid, identity.primary_external_userid, identity.mobile, identity.mobile_normalized
+                FROM crm_user_identity identity
+                JOIN target t ON (
+                    identity.primary_external_userid = t.external_userid
+                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
+                    OR (t.mobile <> '' AND identity.mobile = t.mobile)
+                    OR (t.mobile <> '' AND identity.mobile_normalized = t.mobile)
+                )
+                WHERE COALESCE(identity.unionid, '') <> ''
+            )
+            SELECT
+                e.id::text AS entitlement_id,
+                e.service_product_id::text AS service_product_id,
+                e.trade_product_id::text AS trade_product_id,
+                e.unionid,
+                e.external_userid_snapshot,
+                e.mobile_snapshot,
+                e.status,
+                e.start_at,
+                e.end_at,
+                e.last_order_id::text AS last_order_id,
+                e.last_out_trade_no,
+                COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark,
+                sp.duration_days,
+                sp.link_slug,
+                p.product_code,
+                COALESCE(NULLIF(p.name, ''), p.product_code) AS product_name,
+                p.amount_total AS product_amount_total,
+                p.currency,
+                o.id::text AS order_id,
+                o.amount_total AS last_order_amount,
+                o.paid_at AS last_order_paid_at,
+                o.created_at AS last_order_created_at
+            FROM service_period_entitlements e
+            JOIN service_period_products sp ON sp.id = e.service_product_id
+            JOIN wechat_pay_products p ON p.id = e.trade_product_id
+            LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
+            LEFT JOIN identity_scope identity ON identity.unionid = e.unionid
+            WHERE e.tenant_id = 'aicrm'
+              AND e.status IN ('active', 'expired')
+              AND (
+                  identity.unionid IS NOT NULL
+                  OR e.external_userid_snapshot = :external_userid
+                  OR (:mobile <> '' AND regexp_replace(COALESCE(e.mobile_snapshot, ''), '[^0-9]', '', 'g') = :mobile)
+              )
+            ORDER BY
+                CASE WHEN e.status = 'active' AND e.end_at > CURRENT_TIMESTAMP THEN 0 ELSE 1 END,
+                e.end_at DESC NULLS LAST,
+                e.id DESC
+            LIMIT :limit
+            """,
+            {"external_userid": external_userid, "mobile": normalized_mobile, "limit": safe_limit},
+        )
+
+    def get_customer_service_period_order(self, *, external_userid: str, entitlement_id: str, mobile: str = "") -> dict[str, Any] | None:
+        normalized_mobile = _normalize_mobile(mobile)
+        rows = self._all(
+            """
+            WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
+            identity_scope AS (
+                SELECT identity.unionid, identity.primary_external_userid, identity.mobile, identity.mobile_normalized
+                FROM crm_user_identity identity
+                JOIN target t ON (
+                    identity.primary_external_userid = t.external_userid
+                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
+                    OR (t.mobile <> '' AND identity.mobile = t.mobile)
+                    OR (t.mobile <> '' AND identity.mobile_normalized = t.mobile)
+                )
+                WHERE COALESCE(identity.unionid, '') <> ''
+            )
+            SELECT
+                e.id::text AS entitlement_id,
+                e.service_product_id::text AS service_product_id,
+                e.trade_product_id::text AS trade_product_id,
+                e.unionid,
+                e.external_userid_snapshot,
+                e.mobile_snapshot,
+                e.status,
+                e.start_at,
+                e.end_at,
+                e.last_order_id::text AS last_order_id,
+                e.last_out_trade_no,
+                COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark,
+                sp.duration_days,
+                sp.link_slug,
+                p.product_code,
+                COALESCE(NULLIF(p.name, ''), p.product_code) AS product_name,
+                p.amount_total AS product_amount_total,
+                p.currency,
+                o.id::text AS order_id,
+                o.amount_total AS last_order_amount,
+                o.paid_at AS last_order_paid_at,
+                o.created_at AS last_order_created_at
+            FROM service_period_entitlements e
+            JOIN service_period_products sp ON sp.id = e.service_product_id
+            JOIN wechat_pay_products p ON p.id = e.trade_product_id
+            LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
+            LEFT JOIN identity_scope identity ON identity.unionid = e.unionid
+            WHERE e.tenant_id = 'aicrm'
+              AND e.id::text = :entitlement_id
+              AND e.status IN ('active', 'expired')
+              AND (
+                  identity.unionid IS NOT NULL
+                  OR e.external_userid_snapshot = :external_userid
+                  OR (:mobile <> '' AND regexp_replace(COALESCE(e.mobile_snapshot, ''), '[^0-9]', '', 'g') = :mobile)
+              )
+            LIMIT 1
+            """,
+            {"external_userid": external_userid, "mobile": normalized_mobile, "entitlement_id": entitlement_id},
+        )
+        return rows[0] if rows else None
 
     def list_questionnaire_answers(self, *, external_userid: str, mobile: str = "") -> list[dict[str, Any]]:
         normalized_mobile = _normalize_mobile(mobile)
@@ -1109,13 +1238,61 @@ class SidebarCommerceReadModel:
         diagnostics["context_status"] = context_status
         rows = self._list_sidebar_products(limit=100)
         active = [dict(item) for item in rows if bool(item.get("enabled")) and _text(item.get("status")) == "active"]
+        service_period_rows = self._list_sidebar_service_period_products(limit=100)
+        active_service_period = [
+            dict(item)
+            for item in service_period_rows
+            if bool(item.get("enabled")) and _text(item.get("status")) == "active" and _text(item.get("link_slug"))
+        ]
         return _with_route_owner(
             {
                 "ok": True,
                 "products": [self._product_item(item, context_token=context_token, context_status=context_status) for item in active],
+                "service_period_products": [
+                    self._service_period_product_item(item, context_token=context_token, context_status=context_status)
+                    for item in active_service_period
+                ],
                 "diagnostics": diagnostics,
             }
         )
+
+    def _customer_for_order_context(
+        self,
+        *,
+        external_userid: str,
+        owner_userid: str,
+        owner_verified: bool = False,
+        diagnostics_key: str = "orders_context",
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        try:
+            customer, diagnostics = SidebarWorkbenchReadModel(
+                self._repo,
+                context_query=self._context_query,
+                live_source_repo=self._live_source_repo,
+            ).customer_with_overlay(
+                external_userid=external_userid,
+                owner_userid=owner_userid,
+                owner_verified=owner_verified,
+            )
+            context_status = (
+                "identity_snapshot_fallback"
+                if diagnostics.get("context_source_status") == "identity_snapshot_fallback"
+                else "workbench_customer_overlay"
+            )
+            return customer, {**diagnostics, diagnostics_key: context_status}
+        except NotFoundError as primary_not_found:
+            try:
+                customer, diagnostics = _customer_from_identity_snapshot(
+                    repo=self._sql_repo(),
+                    external_userid=external_userid,
+                    owner_userid=owner_userid,
+                    owner_verified=owner_verified,
+                )
+                return customer, {**diagnostics, diagnostics_key: "identity_snapshot_fallback"}
+            except NotFoundError:
+                raise
+            except Exception:
+                raise primary_not_found
 
     def orders(self, *, external_userid: str, owner_userid: str = "", owner_verified: bool = False) -> dict[str, Any]:
         normalized_external = _text(external_userid)
@@ -1124,35 +1301,12 @@ class SidebarCommerceReadModel:
             raise ValueError("external_userid is required")
         if not normalized_owner:
             raise ValueError("owner_userid is required")
-        try:
-            customer, diagnostics = SidebarWorkbenchReadModel(
-                self._repo,
-                context_query=self._context_query,
-                live_source_repo=self._live_source_repo,
-            ).customer_with_overlay(
-                external_userid=normalized_external,
-                owner_userid=normalized_owner,
-                owner_verified=owner_verified,
-            )
-            orders_context = (
-                "identity_snapshot_fallback"
-                if diagnostics.get("context_source_status") == "identity_snapshot_fallback"
-                else "workbench_customer_overlay"
-            )
-            diagnostics = {**diagnostics, "orders_context": orders_context}
-        except NotFoundError as primary_not_found:
-            try:
-                customer, diagnostics = _customer_from_identity_snapshot(
-                    repo=self._sql_repo(),
-                    external_userid=normalized_external,
-                    owner_userid=normalized_owner,
-                    owner_verified=owner_verified,
-                )
-                diagnostics = {**diagnostics, "orders_context": "identity_snapshot_fallback"}
-            except NotFoundError:
-                raise
-            except Exception:
-                raise primary_not_found
+        customer, diagnostics = self._customer_for_order_context(
+            external_userid=normalized_external,
+            owner_userid=normalized_owner,
+            owner_verified=owner_verified,
+            diagnostics_key="orders_context",
+        )
         rows = self._sql_repo().list_customer_wechat_pay_orders(
             external_userid=normalized_external,
             mobile=_text(customer.get("mobile")),
@@ -1167,11 +1321,87 @@ class SidebarCommerceReadModel:
             }
         )
 
+    def periodic_orders(self, *, external_userid: str, owner_userid: str = "", owner_verified: bool = False) -> dict[str, Any]:
+        normalized_external = _text(external_userid)
+        normalized_owner = _text(owner_userid)
+        if not normalized_external:
+            raise ValueError("external_userid is required")
+        if not normalized_owner:
+            raise ValueError("owner_userid is required")
+        customer, diagnostics = self._customer_for_order_context(
+            external_userid=normalized_external,
+            owner_userid=normalized_owner,
+            owner_verified=owner_verified,
+            diagnostics_key="periodic_orders_context",
+        )
+        rows = self._sql_repo().list_customer_service_period_orders(
+            external_userid=normalized_external,
+            mobile=_text(customer.get("mobile")),
+            limit=20,
+        )
+        items = [item for item in (self._periodic_order_item(dict(row)) for row in rows) if item]
+        return _with_route_owner(
+            {
+                "ok": True,
+                "periodic_orders": items,
+                "customer": customer,
+                "diagnostics": diagnostics,
+            }
+        )
+
+    def periodic_order_remark_target(
+        self,
+        *,
+        external_userid: str,
+        owner_userid: str = "",
+        owner_verified: bool = False,
+        entitlement_id: str,
+    ) -> dict[str, Any]:
+        normalized_external = _text(external_userid)
+        normalized_owner = _text(owner_userid)
+        normalized_entitlement = _text(entitlement_id)
+        if not normalized_external:
+            raise ValueError("external_userid is required")
+        if not normalized_owner:
+            raise ValueError("owner_userid is required")
+        if not normalized_entitlement:
+            raise ValueError("entitlement_id is required")
+        customer, diagnostics = self._customer_for_order_context(
+            external_userid=normalized_external,
+            owner_userid=normalized_owner,
+            owner_verified=owner_verified,
+            diagnostics_key="periodic_orders_context",
+        )
+        row = self._sql_repo().get_customer_service_period_order(
+            external_userid=normalized_external,
+            entitlement_id=normalized_entitlement,
+            mobile=_text(customer.get("mobile")),
+        )
+        if not row:
+            raise NotFoundError("periodic order not found")
+        item = self._periodic_order_item(dict(row))
+        if not item or item["status"] not in {"active", "expired"}:
+            raise NotFoundError("periodic order not found")
+        unionid = _text(row.get("unionid"))
+        if not unionid:
+            raise NotFoundError("periodic order member not found")
+        return {
+            "entitlement_id": normalized_entitlement,
+            "service_product_id": _text(row.get("service_product_id")),
+            "unionid": unionid,
+            "periodic_order": item,
+            "customer": customer,
+            "diagnostics": diagnostics,
+        }
+
     def _list_sidebar_products(self, *, limit: int) -> list[dict[str, Any]]:
         repo = build_commerce_repository()
         if hasattr(repo, "list_sidebar_active_products"):
             return list(repo.list_sidebar_active_products(limit=limit, offset=0).get("items") or [])
         return list(ListProductsQuery(repo=repo)(limit=limit, offset=0).get("items") or [])
+
+    def _list_sidebar_service_period_products(self, *, limit: int) -> list[dict[str, Any]]:
+        return list(ListServicePeriodProductsQuery()(limit=limit, offset=0).get("items") or [])
 
     def _product_item(self, item: dict[str, Any], *, context_token: str = "", context_status: str = "") -> dict[str, Any]:
         product_code = _text(item.get("product_code"))
@@ -1186,6 +1416,30 @@ class SidebarCommerceReadModel:
             "price_label": _money_label(item.get("price_cents") or item.get("amount_total")),
             "product_url": product_url,
             "checkout_url": checkout_url,
+            "context_source": "sidebar_product_link" if context_token else "",
+            "context_status": context_status,
+        }
+
+    def _service_period_product_item(
+        self,
+        item: dict[str, Any],
+        *,
+        context_token: str = "",
+        context_status: str = "",
+    ) -> dict[str, Any]:
+        service_product_id = _text(item.get("id") or item.get("service_product_id"))
+        link_slug = _text(item.get("link_slug"))
+        public_path = f"/s/{link_slug}" if link_slug else ""
+        product_url = append_ctx_query(public_path, context_token) if context_token else public_path
+        return {
+            "id": service_product_id,
+            "service_product_id": service_product_id,
+            "trade_product_id": _text(item.get("trade_product_id")),
+            "title": _text(item.get("title") or item.get("name")) or _text(item.get("product_code")) or "未命名周期商品",
+            "price_label": _money_label(item.get("price_cents") or item.get("amount_total")),
+            "duration_days": _int(item.get("duration_days")),
+            "link_slug": link_slug,
+            "product_url": product_url,
             "context_source": "sidebar_product_link" if context_token else "",
             "context_status": context_status,
         }
@@ -1210,6 +1464,33 @@ class SidebarCommerceReadModel:
             "status_label": ORDER_STATUS_LABELS.get(status, status),
             "paid_at": _format_time(order.get("paid_at") or order.get("created_at")),
             "detail_url": f"{detail_base}/{order_id}" if order_id else "",
+        }
+
+    def _periodic_order_item(self, row: dict[str, Any]) -> dict[str, Any] | None:
+        status = service_period_entitlement_status(row.get("end_at"), row.get("status"))
+        if status not in {"active", "expired"}:
+            return None
+        order_id = _text(row.get("order_id") or row.get("last_order_id"))
+        amount_total = row.get("last_order_amount")
+        if amount_total in (None, ""):
+            amount_total = row.get("product_amount_total")
+        product_code = _text(row.get("product_code"))
+        return {
+            "id": _text(row.get("entitlement_id") or row.get("id")),
+            "service_product_id": _text(row.get("service_product_id")),
+            "trade_product_id": _text(row.get("trade_product_id")),
+            "title": _text(row.get("product_name")) or product_code or "未命名周期商品",
+            "product_code": product_code,
+            "status": status,
+            "status_label": SERVICE_PERIOD_STATUS_LABELS.get(status, status),
+            "remaining_days": service_period_remaining_days(row.get("end_at")),
+            "end_at": service_period_isoformat(row.get("end_at")),
+            "duration_days": _int(row.get("duration_days")),
+            "amount_label": _money_label(amount_total),
+            "last_out_trade_no": _text(row.get("last_out_trade_no")),
+            "last_order_paid_at": _format_time(row.get("last_order_paid_at") or row.get("last_order_created_at")),
+            "remark": _text(row.get("remark")),
+            "detail_url": f"/admin/wechat-pay/transactions/{order_id}" if order_id else "",
         }
 
     def _order_status(self, order: dict[str, Any]) -> str:

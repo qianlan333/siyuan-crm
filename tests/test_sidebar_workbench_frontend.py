@@ -20,7 +20,11 @@ def test_sidebar_workbench_v2_page_is_next_owned(client):
     assert "客户侧边栏 V2 工作台" in html
     assert 'data-workbench-url="/api/sidebar/v2/workbench"' in html
     assert 'data-material-send-url="/api/sidebar/v2/materials/send"' in html
+    assert 'data-periodic-orders-url="/api/sidebar/v2/periodic-orders"' in html
+    assert 'data-periodic-order-remark-url="/api/sidebar/v2/periodic-orders"' in html
     assert "sidebar_workbench/sidebar_workbench.js" in html
+    assert "sidebar_workbench/sidebar_workbench.js?v=20260709-periodic-product-tabs" in html
+    assert "sidebar_workbench/sidebar_workbench.css?v=20260709-periodic-product-tabs" in html
     assert "自动化转化操作区" not in html
 
 
@@ -34,6 +38,9 @@ def test_sidebar_workbench_static_contract_has_next_surface_only():
     assert '["questionnaires", "问卷"]' in script
     assert '["products", "商品"]' in script
     assert '["orders", "订单"]' in script
+    assert '["periodic_orders", "周期订单"]' in script
+    assert '["regular", "普通商品"]' in script
+    assert '["service_period", "周期性商品"]' in script
     assert 'invokeWeCom("getCurExternalContact"' in script
     assert "sendChatMessage" in script
     assert "PRODUCT_CARD_IMAGE_PATH" in script
@@ -46,7 +53,21 @@ def test_sidebar_workbench_static_contract_has_next_surface_only():
     assert 'cache: "no-store"' in script
     assert "sidebar_owner_token" in script
     assert "data-material-thumb-img" in script
+    assert "service_period_products" in script
+    assert "data-product-type" in script
+    assert "data-product-kind" in script
+    assert "product-seg" in css
+    assert 'payload.service_period_products || []' in script
+    assert 'await sendProduct(productSendButton.dataset.productSend, productSendButton.dataset.productKind || state.productType)' in script
     assert "data-order-detail-url" in script
+    assert "renderPeriodicOrders" in script
+    assert "data-periodic-order-remark" in script
+    assert "savePeriodicOrderRemarkSoon" in script
+    assert 'queryUrl(endpoint("periodicOrdersUrl"), customerContextQuery())' in script
+    assert 'queryUrl(endpoint("periodicOrderRemarkUrl") + "/" + encodeURIComponent(id) + "/remark", customerContextQuery())' in script
+    assert 'data-periodic-orders-url="/api/sidebar/v2/periodic-orders"' in template
+    assert 'data-periodic-order-remark-url="/api/sidebar/v2/periodic-orders"' in template
+    assert "periodic-remark-textarea" in css
     assert "grid-template-columns: minmax(0, 1fr) auto" in css
     assert "@keyframes sidebar-skeleton" in css
     assert WORKBENCH_PRODUCT_CARD_COVER.exists()

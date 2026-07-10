@@ -645,6 +645,7 @@ def apply_wechat_refund_result(refund_payload: dict[str, Any], *, raw_event: dic
     response_payload = dict(refund_payload)
     if raw_event:
         response_payload["_notify_event"] = dict(raw_event)
+    service_period_refund: dict[str, Any] = {}
     with connect_commerce_db(_database_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -724,6 +725,19 @@ def apply_wechat_refund_result(refund_payload: dict[str, Any], *, raw_event: dic
                 ),
             )
         conn.commit()
+    if status == "SUCCESS" and order_refund_status == "full_refunded":
+        from aicrm_next.service_period.application import ApplyServicePeriodRefundCommand
+
+        service_period_refund = ApplyServicePeriodRefundCommand()(
+            out_trade_no=str(refund.get("out_trade_no") or refund_payload.get("out_trade_no") or ""),
+            refund={
+                "out_refund_no": resolved_out_refund_no,
+                "refund_id": resolved_refund_id,
+                "status": status,
+                "amount_total": refund_amount,
+                "order_refund_status": order_refund_status,
+            },
+        )
     return {
         "ok": True,
         "refund": {
@@ -734,6 +748,7 @@ def apply_wechat_refund_result(refund_payload: dict[str, Any], *, raw_event: dic
             "previous_status": previous_status,
         },
         "order_refund_status": order_refund_status,
+        "service_period_refund": service_period_refund,
         "updated_order_amount": status == "SUCCESS" and previous_status != "SUCCESS",
     }
 

@@ -744,7 +744,14 @@ class PostgresCommerceRepository:
                     FROM wechat_pay_products p
                     LEFT JOIN wechat_pay_product_page_slices s
                       ON s.product_id = p.id AND s.enabled = TRUE
-                    WHERE p.enabled = TRUE AND p.status = 'active'
+                    WHERE p.enabled = TRUE
+                      AND p.status = 'active'
+                      AND COALESCE(p.metadata_json->>'aicrm_product_owner', '') <> 'service_period'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM service_period_products sp
+                          WHERE sp.trade_product_id = p.id
+                      )
                     GROUP BY p.id
                     ORDER BY p.updated_at DESC, p.id DESC
                     LIMIT %s OFFSET %s
@@ -752,7 +759,18 @@ class PostgresCommerceRepository:
                     (limit, offset),
                 ).fetchall()
                 total_row = cur.execute(
-                    "SELECT count(*) AS total FROM wechat_pay_products WHERE enabled = TRUE AND status = 'active'"
+                    """
+                    SELECT count(*) AS total
+                    FROM wechat_pay_products p
+                    WHERE p.enabled = TRUE
+                      AND p.status = 'active'
+                      AND COALESCE(p.metadata_json->>'aicrm_product_owner', '') <> 'service_period'
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM service_period_products sp
+                          WHERE sp.trade_product_id = p.id
+                      )
+                    """
                 ).fetchone() or {}
         return {
             "items": [self._serialize_product(row) for row in rows],

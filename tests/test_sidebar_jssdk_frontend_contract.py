@@ -16,7 +16,7 @@ def test_frontend_declares_and_consumes_jssdk_config_contract() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
 
     assert 'data-jssdk-config-url="/api/sidebar/jssdk-config"' in template
-    assert "sidebar_workbench.js?v=20260706-sidebar-viewer-oauth" in template
+    assert "sidebar_workbench.js?v=20260709-periodic-product-tabs" in template
     assert "jssdkConfigUrl()" in script
     assert 'url.searchParams.set("external_userid", state.external_userid)' in script
     assert "applySidebarOwnerToken(configPayload)" in script

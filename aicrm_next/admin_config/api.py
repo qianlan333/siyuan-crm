@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -28,6 +28,7 @@ from .application import (
 router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "frontend_compat" / "templates"
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+ADMIN_ACCESS_DETAIL_PATH = "/admin/config/detail/admin_access"
 
 
 def _operator_from_request(request: Request, payload: dict[str, Any] | None = None, form: Any | None = None) -> str:
@@ -95,6 +96,54 @@ def _redirect(url: str, **query: Any) -> RedirectResponse:
     return RedirectResponse(url=url, status_code=302)
 
 
+def _admin_access_detail_url(request: Request | None = None, **query: Any) -> str:
+    merged: dict[str, Any] = {}
+    if request is not None:
+        merged.update(dict(parse_qsl(str(request.url.query), keep_blank_values=False)))
+    merged.update({key: value for key, value in query.items() if _text(value)})
+    if not merged:
+        return ADMIN_ACCESS_DETAIL_PATH
+    return f"{ADMIN_ACCESS_DETAIL_PATH}?{urlencode(merged)}"
+
+
+def _build_admin_access_context(request: Request, detail: dict[str, Any]) -> dict[str, Any]:
+    payload = AdminConfigReadService().build_login_access_payload()
+    edit_id = _text(request.query_params.get("edit_id"))
+    candidate_userid = _text(request.query_params.get("wecom_userid"))
+    directory_candidate = next((row for row in payload["directory_members"] if row["wecom_userid"] == candidate_userid), None)
+    default_form_row = {
+        "is_active": True,
+        "login_enabled": True,
+        "admin_level": "admin",
+        "roles": ["viewer"],
+        "wecom_corpid": payload.get("corp_id", ""),
+    }
+    if directory_candidate:
+        default_form_row.update(
+            {
+                "wecom_userid": directory_candidate["wecom_userid"],
+                "display_name": directory_candidate["display_name"],
+                "wecom_corpid": directory_candidate["wecom_corpid"] or payload.get("corp_id", ""),
+                "auth_source": "wecom_sso",
+            }
+        )
+    form_row = next((row for row in payload["rows"] if str(row["id"]) == edit_id), default_form_row)
+    return _config_context(
+        request,
+        active_tab="login_access",
+        page_title="后台访问",
+        page_summary="配置后台认证参数，并维护允许访问 CRM 后台的企微成员。",
+        page_notice="保存成功" if _bool(request.query_params.get("saved")) else _text(request.query_params.get("notice")),
+        page_error=_text(request.query_params.get("error")),
+        config_category_detail=detail,
+        form_row=form_row,
+        can_manage_accounts=True,
+        can_manage_super_admin=True,
+        can_manage_form=True,
+        **payload,
+    )
+
+
 async def _form_dict(request: Request) -> dict[str, Any]:
     form = await request.form()
     payload: dict[str, Any] = {}
@@ -157,6 +206,12 @@ def admin_config_category_detail(request: Request, category_key: str):
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="config category not found") from exc
     category = detail["category"]
+    if _text(category.get("key")) == "admin_access":
+        return templates.TemplateResponse(
+            request,
+            "admin_console/config_admin_access_detail.html",
+            _build_admin_access_context(request, detail),
+        )
     if _text(category.get("special_view")) == "push_capabilities":
         return templates.TemplateResponse(
             request,
@@ -577,64 +632,27 @@ async def api_admin_config_save_app_settings(request: Request):
 
 @router.get("/admin/config/login-access", name="api.admin_config_login_access", response_class=HTMLResponse)
 def admin_config_login_access(request: Request):
-    payload = AdminConfigReadService().build_login_access_payload()
-    edit_id = _text(request.query_params.get("edit_id"))
-    candidate_userid = _text(request.query_params.get("wecom_userid"))
-    directory_candidate = next((row for row in payload["directory_members"] if row["wecom_userid"] == candidate_userid), None)
-    default_form_row = {
-        "is_active": True,
-        "login_enabled": True,
-        "admin_level": "admin",
-        "roles": ["viewer"],
-        "wecom_corpid": payload.get("corp_id", ""),
-    }
-    if directory_candidate:
-        default_form_row.update(
-            {
-                "wecom_userid": directory_candidate["wecom_userid"],
-                "display_name": directory_candidate["display_name"],
-                "wecom_corpid": directory_candidate["wecom_corpid"] or payload.get("corp_id", ""),
-                "auth_source": "wecom_sso",
-            }
-        )
-    form_row = next((row for row in payload["rows"] if str(row["id"]) == edit_id), default_form_row)
-    return templates.TemplateResponse(
-        request,
-        "admin_console/config_login_access.html",
-        _config_context(
-            request,
-            active_tab="login_access",
-            page_title="登录与权限",
-            page_summary="在这里维护后台企微成员授权、角色分配、启停状态与最近登录审计。",
-            page_notice="保存成功" if _bool(request.query_params.get("saved")) else _text(request.query_params.get("notice")),
-            page_error=_text(request.query_params.get("error")),
-            form_row=form_row,
-            can_manage_accounts=True,
-            can_manage_super_admin=True,
-            can_manage_form=True,
-            **payload,
-        ),
-    )
+    return _redirect(_admin_access_detail_url(request))
 
 
 @router.post("/admin/config/login-access/directory/refresh", name="api.admin_config_refresh_login_access_directory")
 async def admin_config_refresh_login_access_directory(request: Request):
     token_error, _form = await _token_error_from_form(request)
     if token_error:
-        return _redirect("/admin/config/login-access", error=token_error)
-    return _redirect("/admin/config/login-access", notice="通讯录刷新已跳过：Next 配置模块不会触发真实企微外呼")
+        return _redirect(ADMIN_ACCESS_DETAIL_PATH, error=token_error)
+    return _redirect(ADMIN_ACCESS_DETAIL_PATH, notice="通讯录刷新已跳过：Next 配置模块不会触发真实企微外呼")
 
 
 @router.post("/admin/config/login-access/save", name="api.admin_config_save_login_access")
 async def admin_config_save_login_access(request: Request):
     token_error, form = await _token_error_from_form(request)
     if token_error:
-        return _redirect("/admin/config/login-access", error=token_error)
+        return _redirect(ADMIN_ACCESS_DETAIL_PATH, error=token_error)
     try:
         saved = LoginAccessSaveCommand().execute(form, operator=_operator_from_request(request, form=form))
     except ValueError as exc:
-        return _redirect("/admin/config/login-access", error=str(exc))
-    return _redirect("/admin/config/login-access", saved=1, edit_id=saved.get("id", ""))
+        return _redirect(ADMIN_ACCESS_DETAIL_PATH, error=str(exc))
+    return _redirect(ADMIN_ACCESS_DETAIL_PATH, saved=1, edit_id=saved.get("id", ""))
 
 
 @router.get("/admin/config/checklist", name="api.admin_config_checklist", response_class=HTMLResponse)

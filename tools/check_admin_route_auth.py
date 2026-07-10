@@ -34,6 +34,8 @@ def check_admin_route_auth_gate() -> list[str]:
         errors.append("aicrm_next/main.py must install admin_auth_required_response middleware gate")
     if "def require_admin" not in guards_source:
         errors.append("aicrm_next/admin_auth/guards.py must expose require_admin dependency")
+    if "production_data_ready" not in guards_source:
+        errors.append("admin auth enforcement must default on in production data / PostgreSQL mode")
 
     from aicrm_next.admin_auth.guards import is_protected_admin_path
 

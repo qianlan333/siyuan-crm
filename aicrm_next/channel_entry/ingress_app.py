@@ -1,55 +1,27 @@
 from __future__ import annotations
 
 from fastapi import FastAPI
-from fastapi.routing import APIRoute, _iter_routes_with_context
+from fastapi.routing import APIRoute
 from fastapi.responses import JSONResponse
 
 from aicrm_next.shared.release import current_release_sha
 
 from .api import callback_router
+from .callback_ingress import CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED
 
 
-def _materialize_included_router_routes(app: FastAPI) -> None:
-    routes = list(app.router.routes)
-    app.router.routes = [
-        route
-        for route in routes
-        if not (getattr(route, "original_router", None) is not None or getattr(route, "include_context", None) is not None)
-    ]
-    for route, context in _iter_routes_with_context(routes):
-        if context is None:
+def _include_callback_routes(app: FastAPI) -> None:
+    for route in callback_router.routes:
+        if not isinstance(route, APIRoute):
+            app.router.routes.append(route)
             continue
-        if isinstance(route, APIRoute):
-            app.router.add_api_route(
-                context.path,
-                route.endpoint,
-                response_model=context.response_model,
-                status_code=context.status_code,
-                tags=context.tags,
-                dependencies=context.dependencies,
-                summary=context.summary,
-                description=context.description,
-                response_description=context.response_description,
-                responses=context.responses,
-                deprecated=context.deprecated,
-                methods=context.methods,
-                operation_id=context.operation_id,
-                response_model_include=context.response_model_include,
-                response_model_exclude=context.response_model_exclude,
-                response_model_by_alias=context.response_model_by_alias,
-                response_model_exclude_unset=context.response_model_exclude_unset,
-                response_model_exclude_defaults=context.response_model_exclude_defaults,
-                response_model_exclude_none=context.response_model_exclude_none,
-                include_in_schema=context.include_in_schema,
-                response_class=context.response_class,
-                name=context.name,
-                callbacks=context.callbacks,
-                openapi_extra=context.openapi_extra,
-                generate_unique_id_function=context.generate_unique_id_function,
-                strict_content_type=context.strict_content_type,
-            )
-            continue
-        app.router.routes.append(route)
+        app.add_api_route(
+            route.path,
+            route.endpoint,
+            methods=route.methods,
+            name=route.name,
+            include_in_schema=route.include_in_schema,
+        )
 
 
 def create_wecom_callback_ingress_app() -> FastAPI:
@@ -72,11 +44,12 @@ def create_wecom_callback_ingress_app() -> FastAPI:
                 "runtime": "ai_crm_wecom_ingress",
                 "route_owner": "ai_crm_next",
                 "release_sha": current_release_sha(),
+                "time_sensitive_inline_enabled": CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED,
+                "time_sensitive_inline_reason": "State and WelcomeCode callbacks bypass the minute timer for welcome-code freshness.",
             }
         )
 
-    app.include_router(callback_router)
-    _materialize_included_router_routes(app)
+    _include_callback_routes(app)
     return app
 
 

@@ -12,6 +12,7 @@ from aicrm_next.public_product.h5_wechat_pay import _apply_transaction
 
 PAYMENT_CONSUMERS = {
     "order_projection_consumer",
+    "service_period_entitlement_consumer",
     "webhook_order_paid_consumer",
     "ai_audience_source_poke_consumer",
     "customer_business_summary_consumer",
@@ -163,7 +164,7 @@ def _emit_payment(monkeypatch, *, out_trade_no: str = "WXP_SINGLE_CONSUMER"):
     _apply_transaction(_PaymentConn(out_trade_no=out_trade_no), _transaction(out_trade_no))
     event = InternalEventService().list_events({"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE})[0][0]
     runs, total = InternalEventService().list_consumer_runs({"event_id": event.event_id})
-    assert total == 6
+    assert total == 7
     assert {run.consumer_name for run in runs} == PAYMENT_CONSUMERS
     return event
 
@@ -239,6 +240,7 @@ def test_single_consumer_execute_only_updates_specified_consumer(monkeypatch) ->
     assert result["counts"]["succeeded_count"] == 1
     assert statuses["order_projection_consumer"] == "succeeded"
     assert {name: status for name, status in statuses.items() if name != "order_projection_consumer"} == {
+        "service_period_entitlement_consumer": "pending",
         "webhook_order_paid_consumer": "pending",
         "ai_audience_source_poke_consumer": "pending",
         "customer_business_summary_consumer": "pending",

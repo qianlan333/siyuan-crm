@@ -133,14 +133,16 @@ def _insert_run(session, *, package_id: int, refresh_finished_at: str, run_statu
     )
 
 
-def test_admin_ai_audience_packages_requires_admin_session(next_client) -> None:
+def test_admin_ai_audience_packages_requires_admin_session(next_client, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     response = next_client.get("/api/admin/ai-audience/packages")
 
     assert response.status_code == 401
     assert response.json()["error"] == "admin_auth_required"
 
 
-def test_admin_ai_audience_package_create_requires_admin_session(next_client) -> None:
+def test_admin_ai_audience_package_create_requires_admin_session(next_client, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     response = next_client.post(
         "/api/admin/ai-audience/packages",
         json={"package_key": "no_cookie", "name": "No Cookie", "refresh_mode": "manual"},
@@ -582,6 +584,7 @@ def test_user_ops_batch_send_modal_static_component_uses_standard_endpoints(next
 
 def test_admin_ai_audience_package_detail_requires_admin_and_redacts_sensitive_fields(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     monkeypatch.setenv("SECRET_KEY", "ai-audience-detail-test")
     session_factory = get_session_factory()
     with session_factory() as session:

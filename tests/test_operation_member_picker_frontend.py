@@ -16,6 +16,8 @@ OPERATIONS_TEMPLATE = ROOT / "aicrm_next/frontend_compat/templates/admin_console
 JOBS_TEMPLATE = ROOT / "aicrm_next/frontend_compat/templates/admin_console/jobs.html"
 ADMIN_JOBS_TEMPLATE = ROOT / "aicrm_next/admin_jobs/templates/admin_console/jobs.html"
 ADMIN_JOBS_BASE = ROOT / "aicrm_next/admin_jobs/templates/admin_console/base.html"
+CONFIG_CENTER_JS = ROOT / "aicrm_next/frontend_compat/static/admin_console/config_center.js"
+ADMIN_ACCESS_TEMPLATE = ROOT / "aicrm_next/frontend_compat/templates/admin_console/config_admin_access_detail.html"
 AI_ASSISTANT_SOURCES = [
     ROOT / "aicrm_next/frontend_compat/static/admin_console/automation_agent_config.js",
     ROOT / "aicrm_next/frontend_compat/static/admin_console/automation_agent_config_channel_model.js",
@@ -46,11 +48,14 @@ def test_operation_member_picker_modal_is_simplified_and_searches_common_api():
     assert "member-modal__actions" in source
     assert "data-operation-member-search" in source
     assert "data-operation-member-clear" in source
+    assert "data-operation-member-refresh" in source
     assert "data-operation-member-list" in source
     assert "data-operation-member-cancel" in source
     assert "data-operation-member-confirm" in source
     assert "operation-member-picker__close" in source
     assert ">关闭<" in source
+    assert "刷新客服" in source
+    assert 'const syncApiUrl = "/api/admin/common/operation-members/sync"' in source
     assert "data-operation-member-search-button" not in source
     assert "全部来源" not in source
     assert "当前选择" not in source
@@ -87,10 +92,10 @@ def test_operation_member_picker_rows_only_show_identity_avatar_and_select_butto
     assert ".role" not in source
     assert "operation-member-picker__select" in css
     assert "width: min(860px, 100%)" in source
-    assert "grid-template-columns: 1fr 100px" in source
+    assert "grid-template-columns: 1fr 100px 110px" in source
     assert "border-radius: 18px" in source
     assert "width: min(820px, 100%)" in css
-    assert "grid-template-columns: 1fr 110px" in css
+    assert "grid-template-columns: 1fr 100px 110px" in css
     assert "background: var(--panel-strong, #fff)" in css
     assert "box-shadow: var(--shadow-lg, 0 18px 54px rgba(15, 23, 42, 0.18))" in css
     assert "display: none !important" in css
@@ -100,11 +105,17 @@ def test_operation_member_picker_error_empty_debounce_clear_cancel_confirm_contr
     source = _read(PICKER_JS)
 
     assert "人员加载失败，请稍后重试" in source
+    assert "企微客服刷新失败，请检查企微配置后重试" in source
     assert "没有找到匹配人员" in source
     assert "setTimeout(() => load(), 260)" in source
     assert 'searchInput?.addEventListener("input"' in source
     assert "clearTimeout(state.debounceTimer)" in source
     assert "if (input) input.value = \"\";" in source
+    assert "data-operation-member-refresh" in source
+    assert "refreshFromWeCom().then" in source
+    assert 'fetch(syncApiUrl, { method: "POST"' in source
+    assert 'cache: "no-store"' in source
+    assert 'refreshButton.textContent = state.loading ? "刷新中" : "刷新客服"' in source
     assert "state.selected = state.confirmed" in source
     assert "if (!state.selected) return;" in source
     assert "state.onSelect(state.selected)" in source
@@ -131,14 +142,17 @@ def test_business_pages_use_operation_member_picker_instead_of_visible_userid_in
     admin_jobs = _read(ADMIN_JOBS_TEMPLATE)
     admin_jobs_base = _read(ADMIN_JOBS_BASE)
     base_template = _read(BASE_TEMPLATE)
+    config_center = _read(CONFIG_CENTER_JS)
+    admin_access = _read(ADMIN_ACCESS_TEMPLATE)
 
     assert "OperationMemberPicker.open" in group_ops
     assert "OperationMemberPicker.open" in channel_js
     assert "OperationMemberPicker.open" in operations
     assert "OperationMemberPicker.open" in jobs
     assert "OperationMemberPicker.open" in admin_jobs
-    assert "operation_member_picker.js') }}?v=operation-member-picker-fix-20260527" in base_template
-    assert "operation_member_picker.js') }}?v=operation-member-picker-fix-20260527" in admin_jobs_base
+    assert "OperationMemberPicker.open" in config_center
+    assert "operation_member_picker.js') }}?v=operation-member-picker-wecom-sync-20260709" in base_template
+    assert "operation_member_picker.js') }}?v=operation-member-picker-wecom-sync-20260709" in admin_jobs_base
     assert "admin_console.css') }}?v=operation-member-picker-fix-20260527" in base_template
     for source in [group_ops, channel_js, operations, jobs, admin_jobs]:
         assert "value:" in source
@@ -167,6 +181,20 @@ def test_business_pages_use_operation_member_picker_instead_of_visible_userid_in
         assert "请输入 userID" not in source
         assert "请输入 userid" not in source.lower()
 
+    assert 'type="hidden" name="wecom_userid"' in admin_access
+    assert 'type="text" name="wecom_userid"' not in admin_access
+    assert '<select name="wecom_userid"' not in admin_access
+    assert "data-admin-access-member-picker" in admin_access
+    assert "data-admin-access-member-feedback" in admin_access
+    assert "data-admin-access-super-admin" in admin_access
+    assert 'name="role_codes" value="viewer"' in admin_access
+    assert "角色分配" not in admin_access
+    assert "手动输入客服 ID" not in admin_access
+    assert "访问概览" not in admin_access
+    assert "最近登录审计" not in admin_access
+    assert "OperationMemberPicker.open" in config_center
+    assert "已选择 ${nextLabel}" in config_center
+    assert "data-admin-access-level" in admin_access
     assert 'type="hidden" name="owner_staff_id"' in channel_form
     assert 'type="text" name="owner_staff_id"' not in channel_form
     assert 'placeholder="sales_01"' not in channel_form

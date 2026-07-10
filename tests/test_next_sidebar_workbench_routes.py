@@ -29,6 +29,8 @@ def test_next_sidebar_bind_mobile_page_renders_v2_workbench(monkeypatch):
     assert "客户侧边栏 V2 工作台" in html
     assert 'data-workbench-url="/api/sidebar/v2/workbench"' in html
     assert 'data-material-send-url="/api/sidebar/v2/materials/send"' in html
+    assert 'data-periodic-orders-url="/api/sidebar/v2/periodic-orders"' in html
+    assert 'data-periodic-order-remark-url="/api/sidebar/v2/periodic-orders"' in html
     assert "/api/sidebar/bind-mobile" in html
     assert "sidebar_workbench/sidebar_workbench.css" in html
     assert "sidebar_workbench/sidebar_workbench.js" in html
@@ -50,13 +52,18 @@ def test_next_sidebar_workbench_static_assets_are_served(monkeypatch):
     assert ".profile-card" in css_response.text
     assert js_response.status_code == 200
     assert "other_staff_messages" in js_response.text
+    assert "periodic_orders" in js_response.text
+    assert "service_period_products" in js_response.text
+    assert "data-product-type" in js_response.text
+    assert "savePeriodicOrderRemark" in js_response.text
 
 
 def test_next_sidebar_workbench_css_keeps_dense_three_column_tabs():
     css = NEXT_SIDEBAR_WORKBENCH_CSS.read_text(encoding="utf-8")
 
     assert css.count("grid-template-columns: repeat(3, minmax(0, 1fr));") >= 2
-    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" not in css
+    assert ".product-seg" in css
+    assert "grid-template-columns: repeat(2, minmax(0, 1fr));" in css
     assert "font-size: 22px" not in css
     assert "min-height: 50px" not in css
     assert "font-size: 19px" not in css

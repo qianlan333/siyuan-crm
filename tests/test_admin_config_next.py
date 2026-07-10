@@ -254,7 +254,7 @@ def test_admin_config_pages_are_next_owned_and_nonblank(monkeypatch, tmp_path) -
     for path, marker in [
         ("/admin/config", "系统配置"),
         ("/admin/config/app-settings", "系统设置"),
-        ("/admin/config/login-access", "登录与权限"),
+        ("/admin/config/detail/admin_access", "后台访问"),
         ("/admin/config/checklist", "配置检查清单"),
         ("/setup/wizard", "系统配置向导"),
     ]:
@@ -269,6 +269,17 @@ def test_admin_config_pages_are_next_owned_and_nonblank(monkeypatch, tmp_path) -
     assert "config-editor-layout" not in config_home.text
     for marker in ["类目", "是否生效", "生效开关", "配置"]:
         assert marker in config_home.text
+
+
+def test_legacy_login_access_page_redirects_to_admin_access_detail(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+
+    response = client.get("/admin/config/login-access?edit_id=7&error=needs-member", follow_redirects=False)
+
+    assert response.status_code == 302
+    assert response.headers["location"].startswith("/admin/config/detail/admin_access?")
+    assert "edit_id=7" in response.headers["location"]
+    assert "error=needs-member" in response.headers["location"]
 
     wecom_tags_alias = client.get("/admin/config/wecom-tags", follow_redirects=False)
     assert wecom_tags_alias.status_code == 302
@@ -363,6 +374,53 @@ def test_config_category_detail_returns_blocks_and_masks_sensitive_fields(monkey
     assert secret["display_value"] == "sup***ue"
     assert secret["configured"] is True
     assert any(field["key"] == "WECOM_CALLBACK_TOKEN" for field in fields)
+
+
+def test_admin_access_detail_combines_settings_and_member_picker_authorization(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+    database_url = _db_url(monkeypatch)
+    engine = create_engine(database_url, future=True)
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO admin_users (wecom_userid, wecom_corpid, display_name, is_active, login_enabled, admin_level)
+                VALUES ('owner.admin', 'ww-next-corp', 'Owner Admin', TRUE, TRUE, 'super_admin')
+                """
+            )
+        )
+        conn.execute(text("INSERT INTO admin_user_roles (admin_user_id, role_code) VALUES (1, 'super_admin')"))
+
+    response = client.get("/admin/config/detail/admin_access?edit_id=1")
+
+    assert response.status_code == 200
+    assert "后台访问" in response.text
+    assert "后台管理员" in response.text
+    assert "超级管理员" in response.text
+    assert "编辑管理员" in response.text
+    assert 'data-admin-access-detail' in response.text
+    assert 'data-admin-access-member-picker' in response.text
+    assert 'data-admin-access-member-feedback' in response.text
+    assert 'data-admin-access-super-admin' in response.text
+    assert 'type="hidden" name="wecom_userid"' in response.text
+    assert 'type="text" name="wecom_userid"' not in response.text
+    assert '<select name="wecom_userid"' not in response.text
+    assert 'type="text" name="display_name"' not in response.text
+    assert 'type="text" name="wecom_corpid"' not in response.text
+    assert 'name="role_codes" value="viewer"' in response.text
+    assert "访问概览" not in response.text
+    assert "当前企业 ID" not in response.text
+    assert "后台授权成员" not in response.text
+    assert "最近登录审计" not in response.text
+    assert "角色分配" not in response.text
+    assert "授权来源" not in response.text
+    assert "操作人" not in response.text
+    assert "未缓存通讯录时保留手工输入兜底" not in response.text
+    assert "手动输入客服 ID" not in response.text
+
+    add_response = client.get("/admin/config/detail/admin_access")
+    assert add_response.status_code == 200
+    assert "加入管理员" in add_response.text
 
 
 def test_retired_reply_monitor_chat_settings_are_not_exposed(monkeypatch, tmp_path) -> None:
@@ -616,7 +674,7 @@ def test_setup_wizard_saves_and_repeated_submit_is_noop(monkeypatch, tmp_path) -
 
 def test_login_access_save_and_directory_refresh_do_not_call_wecom(monkeypatch, tmp_path) -> None:
     client = _prepare_client(monkeypatch, tmp_path)
-    token = _token(client.get("/admin/config/login-access").text)
+    token = _token(client.get("/admin/config/detail/admin_access").text)
 
     refresh = client.post("/admin/config/login-access/directory/refresh", data={"admin_action_token": token}, follow_redirects=False)
     save = client.post(
@@ -630,18 +688,20 @@ def test_login_access_save_and_directory_refresh_do_not_call_wecom(monkeypatch, 
             "is_active": "1",
             "login_enabled": "1",
             "admin_level": "admin",
-            "role_codes": ["config_admin", "viewer"],
+            "role_codes": "viewer",
             "operator": "access-test",
         },
         follow_redirects=False,
     )
 
     assert refresh.status_code == 302
+    assert refresh.headers["location"].startswith("/admin/config/detail/admin_access")
     assert "real_external" not in refresh.headers.get("location", "")
     assert save.status_code == 302
+    assert save.headers["location"].startswith("/admin/config/detail/admin_access")
     database_url = _db_url(monkeypatch)
     assert _scalar(database_url, "SELECT COUNT(*) FROM admin_users WHERE wecom_userid = 'root.admin'") == 1
-    assert _scalar(database_url, "SELECT COUNT(*) FROM admin_user_roles WHERE role_code = 'config_admin'") == 1
+    assert _scalar(database_url, "SELECT COUNT(*) FROM admin_user_roles WHERE role_code = 'viewer'") == 1
     assert _scalar(database_url, "SELECT COUNT(*) FROM admin_operation_logs WHERE target_type = 'admin_user'") == 1
 
 

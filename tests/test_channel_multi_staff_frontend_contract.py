@@ -137,7 +137,7 @@ def test_channel_form_hides_shell_header_and_busts_static_cache() -> None:
     assert '"show_page_header": False' in pages
     assert "channel_admission_pages.css?v=channel-detail-clean-demo-v2-20260626" in html
     assert "channel_admission_pages.js?v=channel-detail-clean-demo-v2-20260626" in html
-    assert "operation_member_picker.js') }}?v=channel-multi-staff-picker-20260612" in base
+    assert "operation_member_picker.js') }}?v=operation-member-picker-wecom-sync-20260709" in base
 
 
 def test_channel_detail_clean_demo_v2_panel_and_type_contract() -> None:

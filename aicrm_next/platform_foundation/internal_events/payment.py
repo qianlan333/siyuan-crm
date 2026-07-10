@@ -16,6 +16,17 @@ PAYMENT_SUCCEEDED_EVENT_TYPES = (
     TRANSACTION_PAID_EVENT_ALIAS,
     PAYMENT_SUCCEEDED_EVENT_ALIAS,
 )
+PAYMENT_SUCCEEDED_CORE_CONSUMERS = (
+    "order_projection_consumer",
+    "service_period_entitlement_consumer",
+    "webhook_order_paid_consumer",
+    "customer_business_summary_consumer",
+    "dnd_policy_consumer",
+    "ai_assist_notify_consumer",
+)
+PAYMENT_SUCCEEDED_PRODUCTION_EVENT_CONSUMERS = tuple(
+    f"{PAYMENT_SUCCEEDED_EVENT_TYPE}:{consumer_name}" for consumer_name in PAYMENT_SUCCEEDED_CORE_CONSUMERS
+)
 
 
 def _text(value: Any) -> str:

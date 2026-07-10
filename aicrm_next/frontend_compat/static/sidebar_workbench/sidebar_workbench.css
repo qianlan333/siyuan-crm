@@ -251,6 +251,14 @@ button[disabled] {
   line-height: 1.42;
 }
 
+.periodic-remark {
+  margin-top: 8px;
+}
+
+.periodic-remark-textarea {
+  min-height: 66px;
+}
+
 .card {
   margin-top: 7px;
   padding: 9px;
@@ -355,6 +363,10 @@ button[disabled] {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 6px;
   margin-bottom: 8px;
+}
+
+.product-seg {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .seg button {

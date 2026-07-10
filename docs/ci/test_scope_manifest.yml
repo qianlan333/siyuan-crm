@@ -35,6 +35,29 @@
     },
     {
       "paths": [
+        "aicrm_next/integration_gateway/wecom_operation_members_client.py"
+      ],
+      "scopes": [
+        "admin_config"
+      ]
+    },
+    {
+      "paths": [
+        "aicrm_next/admin_jobs/templates/admin_console/base.html",
+        "aicrm_next/customer_tags/templates/admin_console/base.html",
+        "aicrm_next/automation_engine/templates/admin_console/base.html",
+        "aicrm_next/automation_engine/group_ops/templates/admin_console/base.html",
+        "aicrm_next/frontend_compat/templates/admin_console/base.html",
+        "aicrm_next/admin_shell/templates/admin_shell/base.html",
+        "aicrm_next/radar_links/templates/admin_console/base.html",
+        "tests/test_channel_multi_staff_frontend_contract.py"
+      ],
+      "scopes": [
+        "admin_config"
+      ]
+    },
+    {
+      "paths": [
         "aicrm_next/ai_audience_ops/admin_api.py",
         "aicrm_next/automation_engine/group_ops/api.py",
         "aicrm_next/automation_engine/group_ops/application.py",
@@ -44,6 +67,15 @@
       ],
       "scopes": [
         "admin_read_pages"
+      ]
+    },
+    {
+      "paths": [
+        "docs/ci/test_scope_manifest.yml",
+        "tests/test_select_test_scope.py"
+      ],
+      "scopes": [
+        "ci_scope_selector"
       ]
     }
   ],
@@ -58,6 +90,7 @@
         "tests/test_admin_p0_commerce_api.py",
         "tests/test_commerce_admin_transaction_detail.py",
         "tests/test_h5_wechat_pay_mobile_projection.py",
+        "tests/test_next_wechat_pay_refunds.py",
         "tests/test_wechat_pay_*.py",
         "tests/test_public_pay_landing.py",
         "tests/test_public_product_*.py",
@@ -69,6 +102,7 @@
         "tests/test_wechat_products_admin_page_contract.py",
         "tests/test_product_external_push.py",
         "tests/test_h5_wechat_pay_mobile_projection.py",
+        "tests/test_next_wechat_pay_refunds.py",
         "tests/test_public_pay_landing.py",
         "tests/test_public_product_no_real_payment.py",
         "tests/test_public_product_h5_pay_oauth_native.py",
@@ -172,10 +206,13 @@
         "aicrm_next/identity_contact/**",
         "aicrm_next/channel_entry/**",
         "aicrm_next/auth_wecom/**",
+        "scripts/ops/check_wecom_callback_*.py",
+        "scripts/ops/prepare_wecom_callback_ingress_cutover.py",
         "tests/test_identity_*.py",
         "tests/test_channel_entry_*.py",
         "tests/test_channel_identity_bridge_native_service.py",
         "tests/test_next_channel_*.py",
+        "tests/test_wecom_callback_*.py",
         "tests/test_wecom_callback_external_effect_boundary.py",
         "tests/test_wecom_callback_inbox.py",
         "tests/test_auth_wecom_*.py",
@@ -189,7 +226,11 @@
         "tests/test_next_channel_entry_orchestrator.py",
         "tests/test_next_channel_identity_bridge.py",
         "tests/test_wecom_callback_external_effect_boundary.py",
-        "tests/test_wecom_callback_inbox.py"
+        "tests/test_wecom_callback_inbox.py",
+        "tests/test_wecom_callback_cutover_plan.py",
+        "tests/test_wecom_callback_deploy_smoke.py",
+        "tests/test_wecom_callback_ingress_runtime.py",
+        "tests/test_wecom_callback_permanent_fix_readiness.py"
       ],
       "needs_postgres": true,
       "architecture_gate": "db"
@@ -276,16 +317,54 @@
       "name": "admin_auth_security",
       "paths": [
         "aicrm_next/admin_auth/**",
+        "aicrm_next/frontend_compat/templates/admin_console/login.html",
         "tests/test_admin_auth_*.py",
         "tests/test_admin_routes_require_auth.py"
       ],
       "python_tests": [
         "tests/test_admin_routes_require_auth.py",
+        "tests/test_admin_auth_login_pages.py",
         "tests/test_admin_auth_login_submit.py",
         "tests/test_admin_auth_logout.py"
       ],
       "needs_postgres": true,
       "architecture_gate": "db"
+    },
+    {
+      "name": "admin_config",
+      "paths": [
+        "aicrm_next/admin_config/**",
+        "aicrm_next/common_operation_members.py",
+        "aicrm_next/operation_members/**",
+        "aicrm_next/integration_gateway/wecom_operation_members_client.py",
+        "aicrm_next/admin_jobs/templates/admin_console/base.html",
+        "aicrm_next/customer_tags/templates/admin_console/base.html",
+        "aicrm_next/automation_engine/templates/admin_console/base.html",
+        "aicrm_next/automation_engine/group_ops/templates/admin_console/base.html",
+        "aicrm_next/frontend_compat/templates/admin_console/base.html",
+        "aicrm_next/admin_shell/templates/admin_shell/base.html",
+        "aicrm_next/radar_links/templates/admin_console/base.html",
+        "aicrm_next/frontend_compat/static/admin_console/admin_console.css",
+        "aicrm_next/frontend_compat/static/admin_console/config_center.css",
+        "aicrm_next/frontend_compat/static/admin_console/config_center.js",
+        "aicrm_next/frontend_compat/static/admin_console/operation_member_picker.js",
+        "aicrm_next/frontend_compat/templates/admin_console/config_*.html",
+        "tests/test_admin_config_next.py",
+        "tests/test_operation_member_picker_frontend.py",
+        "tests/test_channel_multi_staff_frontend_contract.py",
+        "tests/test_wecom_operation_members_sync.py",
+        "tests/test_admin_pages_real_data_binding.py"
+      ],
+      "python_tests": [
+        "tests/test_admin_config_next.py",
+        "tests/test_operation_member_picker_frontend.py",
+        "tests/test_channel_multi_staff_frontend_contract.py",
+        "tests/test_wecom_operation_members_sync.py",
+        "tests/test_admin_auth_login_pages.py",
+        "tests/test_admin_pages_real_data_binding.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
     },
     {
       "name": "wecom_tag_catalog_write",
@@ -341,7 +420,10 @@
         "aicrm_next/platform_foundation/push_center/view_model.py",
         "aicrm_next/shared/admin_read_fallback.py",
         "scripts/ops/check_admin_read_pages_smoke.py",
-        "tests/test_admin_read_pages_smoke.py"
+        "tests/test_admin_read_pages_smoke.py",
+        "tests/test_automation_agents_admin_api.py",
+        "tests/test_p1_group_ops_workspace_draft_api.py",
+        "tests/test_p1_group_ops_workspace_governance_api.py"
       ],
       "python_tests": [
         "tests/test_push_center.py",
@@ -352,6 +434,8 @@
         "tests/test_admin_wecom_tags_management.py",
         "tests/test_automation_agents_admin_api.py",
         "tests/test_ai_audience_admin_pages.py",
+        "tests/test_p1_group_ops_workspace_draft_api.py",
+        "tests/test_p1_group_ops_workspace_governance_api.py",
         "tests/test_user_ops_admin_pages_native.py",
         "tests/test_user_ops_api.py",
         "tests/test_data_health_checks.py",
@@ -382,10 +466,26 @@
       "architecture_gate": "db"
     },
     {
+      "name": "ci_scope_selector",
+      "paths": [
+        "docs/ci/test_scope_manifest.yml",
+        "tests/test_select_test_scope.py"
+      ],
+      "python_tests": [
+        "tests/test_select_test_scope.py",
+        "tests/test_ci_workflow_contract.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "full"
+    },
+    {
       "name": "ci_deploy",
       "paths": [
         ".github/**",
         "scripts/ci/**",
+        "scripts/ops/manage_production_runtime_units.py",
+        "scripts/diagnose_external_orders_blockers.py",
+        "scripts/run_internal_event_worker.py",
         "deploy/**",
         "tools/**",
         "docs/ci/**",
@@ -398,9 +498,14 @@
         "aicrm_next/router_registry.py",
         "tests/conftest.py",
         "tests/test_ci_workflow_contract.py",
+        "tests/test_deploy_workflow_contract.py",
+        "tests/test_retired_runtime_gap_timer_report.py",
+        "tests/test_runtime_units_autostart.py",
         "tests/test_select_test_scope.py",
         "tests/test_fixture_reset_registry.py",
         "tests/test_internal_events_payment_slice.py",
+        "tests/test_internal_events_single_consumer_run.py",
+        "tests/test_internal_events_worker_allowlist.py",
         "tests/test_next_api_docs_page.py",
         "tests/test_router_registry_contract.py",
         "requirements.txt",
@@ -409,10 +514,15 @@
       ],
       "python_tests": [
         "tests/test_ci_workflow_contract.py",
+        "tests/test_deploy_workflow_contract.py",
+        "tests/test_retired_runtime_gap_timer_report.py",
+        "tests/test_runtime_units_autostart.py",
         "tests/test_select_test_scope.py",
         "tests/test_architecture_boundaries.py",
         "tests/test_fixture_reset_registry.py",
         "tests/test_internal_events_payment_slice.py",
+        "tests/test_internal_events_single_consumer_run.py",
+        "tests/test_internal_events_worker_allowlist.py",
         "tests/test_next_api_docs_page.py",
         "tests/test_router_registry_contract.py"
       ],

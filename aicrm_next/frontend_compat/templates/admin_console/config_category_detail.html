@@ -3,7 +3,7 @@
 {% set category = config_category_detail.category %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/config_center.css') }}?v=config-center-shell-20260611">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/config_center.css') }}?v=config-center-admin-access-20260709">
 {% endblock %}
 
 {% block content %}
@@ -127,5 +127,5 @@
 {% endblock %}
 
 {% block scripts_extra %}
-<script defer src="{{ url_for('static', filename='admin_console/config_center.js') }}?v=config-center-shell-20260611"></script>
+<script defer src="{{ url_for('static', filename='admin_console/config_center.js') }}?v=config-center-admin-access-20260709"></script>
 {% endblock %}

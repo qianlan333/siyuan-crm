@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _is_siyuan_deploy_overlay() -> bool:
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return "scripts/ensure_channel_multi_staff_schema.py" in workflow and "workflow_run:" not in workflow
+    return (
+        "scripts/ensure_channel_multi_staff_schema.py" in workflow
+        and not (ROOT / "deploy" / "aicrm-web.service").exists()
+    )
 
 
 pytestmark = pytest.mark.skipif(
@@ -35,6 +38,7 @@ def test_wecom_callback_cutover_plan_requires_all_local_assets() -> None:
     assert payload["backup_path_file"] == "/tmp/wecom-callback-cutover-backup-path"
     assert any(item["path"] == "aicrm_next/platform_foundation/webhook_inbox/models.py" for item in payload["assets"])
     assert any(item["path"] == "aicrm_next/platform_foundation/webhook_inbox/service.py" for item in payload["assets"])
+    assert any(item["path"] == "aicrm_next/channel_entry/callback_ingress.py" for item in payload["assets"])
     assert any(item["path"] == "scripts/ops/check_wecom_callback_deploy_smoke.py" for item in payload["assets"])
 
 

@@ -2,6 +2,7 @@
   "use strict";
 
   const apiUrl = "/api/admin/common/operation-members";
+  const syncApiUrl = "/api/admin/common/operation-members/sync";
   const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
     "&": "&amp;",
     "<": "&lt;",
@@ -104,7 +105,7 @@
       .member-modal__search {
         padding: 16px 18px;
         display: grid;
-        grid-template-columns: 1fr 100px;
+        grid-template-columns: 1fr 100px 110px;
         gap: 10px;
         border-bottom: 1px solid var(--line, #e5e7eb);
         background: #fafafa;
@@ -240,6 +241,7 @@
         <div class="operation-member-picker__search member-modal__search">
           <input type="search" data-operation-member-search placeholder="搜索姓名或 userID" autocomplete="off">
           <button class="admin-button admin-button--secondary" type="button" data-operation-member-clear>清空</button>
+          <button class="admin-button admin-button--secondary" type="button" data-operation-member-refresh>刷新客服</button>
         </div>
         <div class="operation-member-picker__list member-modal__list" data-operation-member-list></div>
         <div class="operation-member-picker__actions member-modal__actions">
@@ -265,6 +267,13 @@
         if (input) input.value = "";
         clearTimeout(state.debounceTimer);
         load().then(() => {
+          if (input) input.focus();
+        });
+      }
+      if (event.target.closest("[data-operation-member-refresh]")) {
+        const input = modal.querySelector("[data-operation-member-search]");
+        clearTimeout(state.debounceTimer);
+        refreshFromWeCom().then(() => {
           if (input) input.focus();
         });
       }
@@ -314,6 +323,11 @@
     const modal = ensureModal();
     const list = modal.querySelector("[data-operation-member-list]");
     const confirmButton = modal.querySelector("[data-operation-member-confirm]");
+    const refreshButton = modal.querySelector("[data-operation-member-refresh]");
+    if (refreshButton) {
+      refreshButton.disabled = state.loading;
+      refreshButton.textContent = state.loading ? "刷新中" : "刷新客服";
+    }
     if (confirmButton) {
       if (state.multiple) {
         confirmButton.disabled = !state.selectedMembers.length;
@@ -362,26 +376,48 @@
     }).join("");
   }
 
+  async function fetchMembers() {
+    const q = currentQuery();
+    const url = scopedUrl(q);
+    const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !Array.isArray(data.items)) throw new Error("load_failed");
+    state.items = data.items;
+    const selectedUserId = String((state.selected || {}).user_id || (state.confirmed || {}).user_id || "");
+    const matchedSelected = state.items.find((item) => item.user_id === selectedUserId);
+    if (matchedSelected) state.selected = matchedSelected;
+    if (state.multiple && state.selectedMembers.length) {
+      state.selectedMembers = state.selectedMembers.map((selected) => state.items.find((item) => item.user_id === selected.user_id) || selected);
+    }
+  }
+
   async function load() {
     state.loading = true;
     state.errorMessage = "";
     render();
-    const q = currentQuery();
-    const url = scopedUrl(q);
     try {
-      const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin" });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok || !Array.isArray(data.items)) throw new Error("load_failed");
-      state.items = data.items;
-      const selectedUserId = String((state.selected || {}).user_id || (state.confirmed || {}).user_id || "");
-      const matchedSelected = state.items.find((item) => item.user_id === selectedUserId);
-      if (matchedSelected) state.selected = matchedSelected;
-      if (state.multiple && state.selectedMembers.length) {
-        state.selectedMembers = state.selectedMembers.map((selected) => state.items.find((item) => item.user_id === selected.user_id) || selected);
-      }
+      await fetchMembers();
     } catch (error) {
       state.items = [];
       state.errorMessage = "人员加载失败，请稍后重试";
+    } finally {
+      state.loading = false;
+      render();
+    }
+  }
+
+  async function refreshFromWeCom() {
+    state.loading = true;
+    state.errorMessage = "";
+    render();
+    try {
+      const response = await fetch(syncApiUrl, { method: "POST", headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.ok === false) throw new Error(data.message || data.error || "sync_failed");
+      await fetchMembers();
+    } catch (error) {
+      state.items = [];
+      state.errorMessage = "企微客服刷新失败，请检查企微配置后重试";
     } finally {
       state.loading = false;
       render();
@@ -474,7 +510,7 @@
     state.scope = previousScope;
     state.pageSize = previousPageSize;
     state.includeInactive = previousIncludeInactive;
-    const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin" });
+    const response = await fetch(url.toString(), { headers: { Accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
     const data = await response.json().catch(() => ({}));
     return (data.items || []).find((item) => item.user_id === normalized) || (data.items || [])[0] || null;
   }

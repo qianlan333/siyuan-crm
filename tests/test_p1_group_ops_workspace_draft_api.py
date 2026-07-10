@@ -113,7 +113,9 @@ def _assert_non_execution_response(payload: dict) -> None:
 
 def test_group_ops_workspace_draft_write_apis_fail_closed_without_admin_cookie(
     next_client: TestClient,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     create = next_client.post("/api/admin/p1/group-ops-workspace/drafts", json=_payload())
     update = next_client.patch("/api/admin/p1/group-ops-workspace/drafts/gowd_missing", json={**_payload(), "version": 1})
     archive = next_client.post("/api/admin/p1/group-ops-workspace/drafts/gowd_missing/archive", json={"version": 1})
@@ -131,7 +133,9 @@ def test_group_ops_workspace_draft_write_apis_fail_closed_without_admin_cookie(
 
 def test_group_ops_workspace_draft_request_review_route_requires_admin_cookie(
     next_client: TestClient,
+    monkeypatch,
 ) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     response = next_client.post(
         "/api/admin/p1/group-ops-workspace/drafts/gowd_safe/request-review",
         json=_request_review_payload(version=1),

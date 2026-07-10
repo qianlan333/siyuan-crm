@@ -87,7 +87,7 @@ def test_service_period_edit_page_keeps_four_existing_dimensions_only(next_clien
         assert f'data-service-period-panel-content="{panel}"' in text
     for label in ("售卖信息", "页面素材", "购买后动作", "外部推送"):
         assert label in text
-    for field in ("商品名称", "商品编码", "价格", "有效期", "绑定会员设置", "商品状态", "商品描述"):
+    for field in ("商品名称", "商品编码", "价格", "有效期", "绑定会员设置", "商品状态", "手机号要求", "商品描述"):
         assert field in text
     assert "保存售卖信息" in text
     assert "保存页面素材" in text
@@ -99,6 +99,7 @@ def test_service_period_edit_page_keeps_four_existing_dimensions_only(next_clien
     assert "prepareImageForUpload(file)" in text
     assert 'if (mode === "new") body.product_code = productCodeValue;' in text
     assert "formatApiError(payload.detail || payload.error)" in text
+    assert 'require_mobile: $("requireMobile").value === "true"' in text
     assert "product_code: productCodeValue" not in text
     for forbidden in (
         "购买按钮文案",
@@ -167,11 +168,26 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
     assert "前端周期服务数据" in text
     assert "查看有效用户、到期用户和续费订单。" in text
     assert "导出数据" in text
+    product_card = text[
+        text.index('class="admin-card service-period-product-card"') : text.index('class="service-period-stats-grid"')
+    ]
+    assert 'href="/admin/service-period-products">返回列表</a>' in product_card
+    assert 'id="exportMembersBtn"' in product_card
+    assert "service-period-inline-actions" not in text
     for label in ("有效用户", "7 天内到期", "续费订单", "累计金额", "会员列表"):
         assert label in text
-    for header in ("会员", "状态", "剩余有效期", "到期日", "最近订单", "操作"):
+    for header in ("会员", "外部联系人id", "状态", "剩余有效期", "到期日", "备注", "操作"):
         assert f"<th>{header}</th>" in text
-    assert ">查看<" in text
+    assert "<th>最近订单</th>" not in text
+    assert ">备注<" in text
+    assert ">查看<" not in text
+    assert "/members/${encodeURIComponent(unionid)}/remark" in text
+    assert 'const dateOnly = (value) => String(value || "").slice(0, 10);' in text
+    assert "dateOnly(member.end_at)" in text
+    assert '"external_userid"' in text
+    assert '"remark"' in text
+    assert '"last_order_amount"' not in text
+    assert '"last_order_duration_days"' not in text
     for forbidden in ("报名链接", "续费规则", "交易商品卡片", "交易商品信息", ">编辑<", "用户报名页", "用户续费页", "管理配置页", "管理详情页"):
         assert forbidden not in text
 
@@ -183,7 +199,11 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     none_page = next_client.get("/s/sp_public_none")
     assert none_page.status_code == 200
     assert "立即报名" in none_page.text
-    assert "开通后获得" in none_page.text
+    assert "开通后获得" not in none_page.text
+    assert "测试会员设置" not in none_page.text
+    assert "90 天有效期" not in none_page.text
+    assert 'window.location.href = state.checkout_url' in none_page.text
+    assert 'WeixinJSBridge.invoke("getBrandWCPayRequest"' not in none_page.text
     assert "商品编码" not in none_page.text
     assert "webhook" not in none_page.text.lower()
 
@@ -195,7 +215,9 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     active_page = next_client.get("/s/sp_public_active")
     assert active_page.status_code == 200
     assert "立即续费" in active_page.text
-    assert "续费后有效期将继续顺延" in active_page.text
+    assert "使用中" not in active_page.text
+    assert "当前服务仍在有效期内" not in active_page.text
+    assert "续费后有效期将继续顺延" not in active_page.text
 
     _create(next_client, product_code="sp_public_expired")
     GrantOrRenewEntitlementCommand()(
@@ -206,6 +228,45 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     assert expired_page.status_code == 200
     assert "重新开通" in expired_page.text
     assert "上次到期日" in expired_page.text
+
+
+def test_service_period_public_page_starts_oauth_before_state_in_wechat(next_client) -> None:
+    _reset()
+    _create(next_client, product_code="sp_public_auth_gate")
+
+    response = next_client.get(
+        "/s/sp_public_auth_gate",
+        headers={"User-Agent": "Mozilla/5.0 MicroMessenger"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "/api/h5/wechat-pay/oauth/start?return_url=%2Fs%2Fsp_public_auth_gate"
+
+
+def test_service_period_pay_page_reuses_public_pay_confirmation_contract(next_client, monkeypatch) -> None:
+    _reset()
+    _create(next_client, product_code="sp_public_pay_mobile", require_mobile=True)
+    monkeypatch.setenv("WECHAT_PAY_ENABLED", "1")
+
+    before_auth = next_client.get("/s/sp_public_pay_mobile/pay")
+    assert before_auth.status_code == 200
+    assert "确认报名信息" in before_auth.text
+    assert "授权登录" in before_auth.text
+    assert "需要先完成微信授权。" in before_auth.text
+    assert 'id="mobileInput"' not in before_auth.text
+
+    next_client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_sp_pay", "unionid": "union_sp_pay"}))
+    after_auth = next_client.get("/s/sp_public_pay_mobile/pay")
+    assert after_auth.status_code == 200
+    assert "授权登录" not in after_auth.text
+    assert 'id="mobileInput"' in after_auth.text
+    assert "/api/h5/service-period-products/sp_public_pay_mobile/wechat-pay/jsapi/orders" in after_auth.text
+    assert '"post_paid_redirect_url": "/s/sp_public_pay_mobile"' in after_auth.text
+    assert "支付成功，正在刷新服务期..." in after_auth.text
+    assert "servicePeriodRedirect && !leadQrFromOrder(paidOrder).qr_url" in after_auth.text
+    assert 'WeixinJSBridge.invoke("getBrandWCPayRequest"' in after_auth.text
+    assert "请填写 11 位手机号后再继续。" in after_auth.text
 
 
 def test_service_period_public_page_keeps_draft_slug_in_service_period_context(next_client) -> None:

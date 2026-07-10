@@ -102,6 +102,27 @@ def test_identity_contact_change_selects_pg_and_db_architecture_gate() -> None:
     assert result["architecture_gate"] == "db"
 
 
+def test_wecom_callback_ops_change_selects_identity_contact_slice() -> None:
+    result = _select(
+        "scripts/ops/check_wecom_callback_deploy_smoke.py",
+        "scripts/ops/check_wecom_callback_permanent_fix_readiness.py",
+        "scripts/ops/prepare_wecom_callback_ingress_cutover.py",
+        "tests/test_wecom_callback_deploy_smoke.py",
+        "tests/test_wecom_callback_ingress_runtime.py",
+        "tests/test_wecom_callback_permanent_fix_readiness.py",
+    )
+
+    assert "identity_contact" in result["matched_scopes"]
+    assert set(result["matched_scopes"]) <= {"identity_contact", "next_native_full_sync"}
+    assert "tests/test_wecom_callback_inbox.py" in result["python_tests"]
+    assert "tests/test_wecom_callback_deploy_smoke.py" in result["python_tests"]
+    assert "tests/test_wecom_callback_ingress_runtime.py" in result["python_tests"]
+    assert "tests/test_wecom_callback_permanent_fix_readiness.py" in result["python_tests"]
+    assert result["unmatched_files"] == []
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "db"
+
+
 def test_sidebar_write_change_selects_write_command_regression() -> None:
     result = _select("aicrm_next/sidebar_write/repo.py")
 
@@ -168,6 +189,65 @@ def test_admin_read_smoke_test_file_selects_admin_read_scope() -> None:
     assert result["architecture_gate"] == "fast"
 
 
+def test_admin_config_page_change_selects_config_scope() -> None:
+    result = _select(
+        "aicrm_next/admin_config/api.py",
+        "aicrm_next/frontend_compat/static/admin_console/config_center.js",
+        "aicrm_next/frontend_compat/templates/admin_console/config_admin_access_detail.html",
+        "tests/test_admin_config_next.py",
+    )
+
+    assert "admin_config" in result["matched_scopes"]
+    assert set(result["matched_scopes"]) <= {"admin_config", "next_native_full_sync"}
+    assert "tests/test_admin_config_next.py" in result["python_tests"]
+    assert "tests/test_operation_member_picker_frontend.py" in result["python_tests"]
+    assert "tests/test_admin_auth_login_pages.py" in result["python_tests"]
+    assert "tests/test_admin_pages_real_data_binding.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+
+
+def test_operation_member_picker_static_assets_select_admin_config_scope() -> None:
+    result = _select(
+        "aicrm_next/frontend_compat/static/admin_console/admin_console.css",
+        "aicrm_next/frontend_compat/static/admin_console/operation_member_picker.js",
+        "tests/test_operation_member_picker_frontend.py",
+    )
+
+    assert "admin_config" in result["matched_scopes"]
+    assert set(result["matched_scopes"]) <= {"admin_config", "next_native_full_sync"}
+    assert "tests/test_operation_member_picker_frontend.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+    assert result["needs_full_ci"] is False
+
+
+def test_operation_member_wecom_sync_change_selects_admin_config_and_db_scope() -> None:
+    result = _select(
+        "aicrm_next/common_operation_members.py",
+        "aicrm_next/operation_members/application.py",
+        "aicrm_next/operation_members/repository.py",
+        "aicrm_next/integration_gateway/wecom_operation_members_client.py",
+        "aicrm_next/frontend_compat/static/admin_console/operation_member_picker.js",
+        "aicrm_next/frontend_compat/templates/admin_console/base.html",
+        "migrations/versions/0096_admin_wecom_directory_members.py",
+        "docs/architecture/route_ownership_manifest.yml",
+        "docs/ci/test_scope_manifest.yml",
+        "tests/test_wecom_operation_members_sync.py",
+        "tests/test_operation_member_picker_frontend.py",
+    )
+
+    assert "admin_config" in result["matched_scopes"]
+    assert "migration_db" in result["matched_scopes"]
+    assert "ci_scope_selector" in result["matched_scopes"]
+    assert "tests/test_wecom_operation_members_sync.py" in result["python_tests"]
+    assert "tests/test_operation_member_picker_frontend.py" in result["python_tests"]
+    assert result["unmatched_files"] == []
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
 def test_wecom_tag_catalog_write_change_selects_real_tag_crud_slice() -> None:
     result = _select(
         "aicrm_next/customer_tags/admin_write.py",
@@ -201,6 +281,34 @@ def test_ci_change_selects_contract_tests_and_full_gate() -> None:
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "full"
     assert result["needs_full_ci"] is True
+
+
+def test_runtime_units_change_selects_deploy_contract_tests() -> None:
+    result = _select(
+        "deploy/production_runtime_units.json",
+        "scripts/ops/manage_production_runtime_units.py",
+        "tests/test_runtime_units_autostart.py",
+        "tests/test_retired_runtime_gap_timer_report.py",
+    )
+
+    assert "ci_deploy" in result["matched_scopes"]
+    assert "tests/test_deploy_workflow_contract.py" in result["python_tests"]
+    assert "tests/test_runtime_units_autostart.py" in result["python_tests"]
+    assert "tests/test_retired_runtime_gap_timer_report.py" in result["python_tests"]
+    assert result["unmatched_files"] == []
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_ci_manifest_change_selects_lightweight_selector_scope() -> None:
+    result = _select("docs/ci/test_scope_manifest.yml", "tests/test_select_test_scope.py")
+
+    assert result["matched_scopes"] == ["ci_scope_selector"]
+    assert result["python_tests"] == ["tests/test_select_test_scope.py", "tests/test_ci_workflow_contract.py"]
+    assert result["unmatched_files"] == []
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "full"
 
 
 def test_frontend_typescript_change_runs_frontend_tests_and_build() -> None:

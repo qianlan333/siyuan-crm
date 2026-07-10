@@ -32,7 +32,7 @@ def test_ci_fast_uses_selector_and_single_required_result() -> None:
     assert "Prepare PostgreSQL compatibility database" in source
     assert "CREATE ROLE aicrm_next LOGIN PASSWORD" in source
     assert "bash scripts/ci/run_architecture_gates.sh --mode" in source
-    assert "timeout-minutes: 12" in source
+    assert "timeout-minutes: 18" in source
     assert "force_full != 'true'" not in source
     assert not LEGACY_CI_WORKFLOW.exists()
 

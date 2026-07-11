@@ -1565,3 +1565,33 @@ class ReceiveGroupOpsWebhookCommand:
         if not recipients:
             raise ContractError("no matched recipients for group ops webhook")
         return recipients
+
+
+class ReceiveTrustedGroupOpsBroadcastCommand:
+    """Queue a legacy group bundle after the caller has passed machine auth."""
+
+    def __init__(self, repo: GroupOpsRepository | None = None) -> None:
+        self._repo = repo
+
+    def __call__(
+        self,
+        plan_id: int,
+        request: GroupOpsWebhookReceiveRequest,
+        *,
+        idempotency_key: str,
+    ) -> dict[str, Any]:
+        repo = _repo_or_block(self._repo)
+        if repo is None:
+            return _production_unavailable()
+        plan = _plan_or_404(repo, int(plan_id))
+        if plan.get("plan_type") != "webhook":
+            raise ContractError("broadcast plan must be a webhook plan")
+        if plan.get("status") != "active":
+            raise ConflictError("group ops webhook plan is not active")
+        _assert_webhook_rate_limit(clean_text(plan.get("webhook_key")) or f"plan:{int(plan_id)}")
+        return ReceiveGroupOpsWebhookCommand(repo)._receive_legacy_group_bundle(
+            repo,
+            plan,
+            request,
+            idempotency_key=idempotency_key,
+        )

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from aicrm_next.shared.mobile import normalize_mainland_mobile
+
 from .signed_context import (
     SIDEBAR_PRODUCT_CONTEXT_RESOLVED_SOURCE,
     load_sidebar_product_context_token,
@@ -12,8 +14,8 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
-def _normalize_mobile(value: Any) -> str:
-    return "".join(ch for ch in str(value or "") if ch.isdigit())
+def _normalize_mobile(value: Any, *, allow_country_code: bool = False) -> str:
+    return normalize_mainland_mobile(value, allow_country_code=allow_country_code)
 
 
 def resolve_sidebar_order_context(
@@ -31,7 +33,7 @@ def resolve_sidebar_order_context(
     mobile = _normalize_mobile(payload_mobile)
     mobile_source = "payload" if mobile else "none"
     if not mobile:
-        mobile = _normalize_mobile(binding.get("mobile"))
+        mobile = _normalize_mobile(binding.get("mobile"), allow_country_code=True)
         mobile_source = "existing_binding" if mobile else "none"
     external_userid = _text(signed_context.get("external_userid"))
     owner_userid = _text(signed_context.get("owner_userid"))

@@ -93,6 +93,30 @@ def test_service_period_change_selects_service_period_slice() -> None:
     assert result["needs_full_ci"] is False
 
 
+def test_questionnaire_mobile_change_selects_questionnaire_and_commerce_slices() -> None:
+    result = _select(
+        "aicrm_next/questionnaire/domain.py",
+        "aicrm_next/questionnaire/h5_write.py",
+        "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html",
+        "aicrm_next/shared/mobile.py",
+        "aicrm_next/commerce/application.py",
+        "tests/test_questionnaire_h5_submit_validation.py",
+        "tests/test_questionnaire_mobile_normalization.py",
+        "tests/test_checkout_api_contract.py",
+    )
+
+    assert "questionnaire" in result["matched_scopes"]
+    assert "commerce" in result["matched_scopes"]
+    assert "mobile_validation" in result["matched_scopes"]
+    assert "tests/test_questionnaire_h5_submit_validation.py" in result["python_tests"]
+    assert "tests/test_questionnaire_mobile_normalization.py" in result["python_tests"]
+    assert "tests/test_checkout_api_contract.py" in result["python_tests"]
+    assert result["unmatched_files"] == []
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+    assert result["needs_full_ci"] is False
+
+
 def test_identity_contact_change_selects_pg_and_db_architecture_gate() -> None:
     result = _select("aicrm_next/identity_contact/application.py")
 

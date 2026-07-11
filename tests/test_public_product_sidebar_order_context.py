@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from aicrm_next.public_product.signed_context import build_sidebar_product_context_token
 from aicrm_next.public_product.sidebar_order_context import resolve_sidebar_order_context
 
@@ -46,9 +48,24 @@ def test_sidebar_order_context_uses_existing_binding_mobile(monkeypatch) -> None
         existing_binding={"mobile": "+86 139-0000-0000"},
     )
 
-    assert result["mobile"] == "8613900000000"
+    assert result["mobile"] == "13900000000"
     assert result["mobile_source"] == "existing_binding"
     assert result["require_mobile_effective"] is False
+
+
+@pytest.mark.parametrize("mobile", ["1856588379", "185658837988", "12565883798"])
+def test_sidebar_order_context_rejects_invalid_required_mobile(monkeypatch, mobile: str) -> None:
+    result = resolve_sidebar_order_context(
+        context_token=_token(monkeypatch),
+        payment_identity={},
+        product={"require_mobile": True},
+        payload_mobile=mobile,
+        existing_binding={},
+    )
+
+    assert result["mobile"] == ""
+    assert result["mobile_source"] == "none"
+    assert result["require_mobile_effective"] is True
 
 
 def test_sidebar_order_context_missing_or_invalid_ctx(monkeypatch) -> None:

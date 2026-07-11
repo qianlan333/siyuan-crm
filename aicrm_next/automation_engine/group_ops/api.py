@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from aicrm_next.shared.errors import ApplicationError, ContractError, NotFoundError
 from aicrm_next.common_operation_members import search_operation_members
@@ -45,6 +47,15 @@ from .application import (
     UpdateGroupOpsNodeCommand,
     UpdateGroupOpsPlanCommand,
 )
+from .broadcast import (
+    BroadcastImage,
+    ExecuteGroupOpsTokenBroadcastCommand,
+    GroupOpsBroadcastError,
+    MAX_IMAGE_BYTES,
+    MAX_IMAGES,
+    MAX_TOTAL_IMAGE_BYTES,
+    internal_broadcast_token_error,
+)
 from .dto import (
     AudienceRuleCreateRequest,
     AudienceRuleRunRequest,
@@ -61,6 +72,7 @@ from .dto import (
     GroupOpsRunDueRequest,
     GroupOpsPlanUpdateRequest,
     GroupOpsSegmentationRequest,
+    GroupOpsTokenBroadcastRequest,
     GroupOpsWebhookReceiveRequest,
 )
 
@@ -127,6 +139,72 @@ def _raise_http(exc: Exception) -> None:
     if isinstance(exc, ContractError):
         raise HTTPException(status_code=400, detail=detail) from exc
     raise HTTPException(status_code=400, detail=detail) from exc
+
+
+def _broadcast_json(payload: dict, *, status_code: int = 200) -> JSONResponse:
+    headers = {
+        "X-AICRM-Route-Owner": "ai_crm_next",
+        "X-AICRM-Real-External-Call-Executed": "true" if payload.get("real_external_call_executed") else "false",
+    }
+    return JSONResponse(jsonable_encoder(payload), status_code=status_code, headers=headers)
+
+
+async def _parse_token_broadcast_request(request: Request) -> tuple[GroupOpsTokenBroadcastRequest, list[BroadcastImage]]:
+    content_type = str(request.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+    try:
+        content_length = int(str(request.headers.get("Content-Length") or "0"))
+    except ValueError as exc:
+        raise GroupOpsBroadcastError("invalid_content_length", "Content-Length must be an integer") from exc
+    if content_type == "application/json":
+        if content_length > 64 * 1024:
+            raise GroupOpsBroadcastError("request_too_large", "JSON request is too large", status_code=413)
+        try:
+            raw = await request.json()
+        except Exception as exc:
+            raise GroupOpsBroadcastError("invalid_request", "request body must be valid JSON") from exc
+        if not isinstance(raw, dict):
+            raise GroupOpsBroadcastError("invalid_request", "request body must be a JSON object")
+        try:
+            return GroupOpsTokenBroadcastRequest.model_validate(raw), []
+        except ValidationError as exc:
+            raise GroupOpsBroadcastError("invalid_request", "request body contains unsupported fields") from exc
+    if content_type == "multipart/form-data":
+        if content_length > MAX_TOTAL_IMAGE_BYTES + 1024 * 1024:
+            raise GroupOpsBroadcastError("request_too_large", "multipart request is too large", status_code=413)
+        try:
+            form = await request.form()
+        except Exception as exc:
+            raise GroupOpsBroadcastError("invalid_request", "multipart request could not be parsed") from exc
+        raw = {
+            "text": str(form.get("text") or form.get("recommendation_text") or ""),
+            "card_path": str(form.get("card_path") or ""),
+            "card_title": str(form.get("card_title") or ""),
+            "idempotency_key": str(form.get("idempotency_key") or ""),
+            "image_media_ids": [str(item or "") for item in form.getlist("image_media_ids")],
+        }
+        images: list[BroadcastImage] = []
+        image_items = form.getlist("images")
+        if len(image_items) > MAX_IMAGES:
+            raise GroupOpsBroadcastError("too_many_images", f"at most {MAX_IMAGES} images are allowed")
+        for item in image_items:
+            if not isinstance(item, StarletteUploadFile):
+                raise GroupOpsBroadcastError("invalid_image", "images must be uploaded files")
+            try:
+                file_bytes = await item.read(MAX_IMAGE_BYTES + 1)
+            except Exception as exc:
+                raise GroupOpsBroadcastError("invalid_image", "uploaded image could not be read") from exc
+            images.append(
+                BroadcastImage(
+                    file_name=str(item.filename or "broadcast-image"),
+                    content_type=str(item.content_type or ""),
+                    file_bytes=file_bytes,
+                )
+            )
+        try:
+            return GroupOpsTokenBroadcastRequest.model_validate(raw), images
+        except ValidationError as exc:
+            raise GroupOpsBroadcastError("invalid_request", "multipart fields are invalid") from exc
+    raise GroupOpsBroadcastError("unsupported_content_type", "Content-Type must be application/json or multipart/form-data", status_code=415)
 
 
 @router.get("/api/admin/automation-conversion/group-ops/plans")
@@ -558,3 +636,40 @@ def receive_group_ops_webhook(
         )
     except Exception as exc:
         _raise_http(exc)
+
+
+@router.post("/api/automation/group-ops/broadcast")
+async def execute_group_ops_token_broadcast(request: Request) -> JSONResponse:
+    auth_error = internal_broadcast_token_error(request.headers)
+    if auth_error:
+        error, status_code = auth_error
+        return _broadcast_json(
+            {
+                "ok": False,
+                "error": error,
+                "route_owner": "ai_crm_next",
+                "real_external_call_executed": False,
+            },
+            status_code=status_code,
+        )
+    try:
+        payload, images = await _parse_token_broadcast_request(request)
+        result = ExecuteGroupOpsTokenBroadcastCommand()(
+            payload,
+            idempotency_key=str(request.headers.get("Idempotency-Key") or payload.idempotency_key or ""),
+            images=images,
+            actor_id=str(request.headers.get("X-AICRM-Actor") or "external_group_ops_api"),
+        )
+    except GroupOpsBroadcastError as exc:
+        return _broadcast_json(
+            {
+                "ok": False,
+                "error": exc.error_code,
+                "message": str(exc),
+                "route_owner": "ai_crm_next",
+                "real_external_call_executed": False,
+            },
+            status_code=exc.status_code,
+        )
+    status_code = 200 if result.get("ok") else 502
+    return _broadcast_json(result, status_code=status_code)

@@ -62,6 +62,7 @@ def test_api_docs_view_model_scans_current_fastapi_routes() -> None:
         ("GET", "/api/admin/automation-conversion/agent-outputs"),
         ("GET", "/api/admin/ai-audience/packages"),
         ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/run-due"),
+        ("POST", "/api/automation/group-ops/broadcast"),
         ("POST", "/api/automation/group-ops/webhooks/{webhook_key}"),
         ("POST", "/api/admin/wecom/tags/live/mark"),
         ("POST", "/api/admin/image-library/upload"),

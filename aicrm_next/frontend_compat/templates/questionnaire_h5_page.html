@@ -399,7 +399,7 @@
             inputmode="numeric"
             autocomplete="tel"
             placeholder="{{ question.placeholder_text or '请输入手机号' }}"
-            maxlength="20"
+            maxlength="11"
             value="{{ page_state.prefill_fields.get(field_name, '') }}"
           >
           {% else %}
@@ -821,6 +821,10 @@
           setState(`请完成必填题：“${question.title}”。`, true);
           return false;
         }
+        if (question.type === 'mobile' && String(value || '').trim() && !/^1[3-9]\d{9}$/.test(String(value).replace(/\D+/g, ''))) {
+          setState('请输入11位有效手机号。', true);
+          return false;
+        }
         setState('');
         return true;
       }
@@ -985,10 +989,12 @@
           input.inputMode = 'numeric';
           input.autocomplete = 'tel';
           input.placeholder = question.placeholder_text || '请输入手机号';
-          input.maxLength = 20;
+          input.maxLength = 11;
           input.value = String(answersState[question.id] || '');
           input.addEventListener('input', (event) => {
-            answersState[question.id] = event.target.value;
+            const mobile = String(event.target.value || '').replace(/\D+/g, '').slice(0, 11);
+            event.target.value = mobile;
+            answersState[question.id] = mobile;
             setState('');
           });
           wrapper.appendChild(input);

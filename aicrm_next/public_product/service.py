@@ -554,7 +554,7 @@ def _pay_page_script(state_json: str) -> str:
       function validateMobile() {{
         if (!state.require_mobile) return "";
         const value = normalizedMobile();
-        if (!/^1\\d{{10}}$/.test(value)) {{
+        if (!/^1[3-9]\\d{{9}}$/.test(value)) {{
           setMobileError("请填写 11 位手机号后再继续。");
           return "";
         }}

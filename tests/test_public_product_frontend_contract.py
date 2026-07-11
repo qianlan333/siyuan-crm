@@ -92,6 +92,7 @@ def test_public_pay_landing_shows_mobile_after_oauth_for_mobile_required_product
 
     assert response.status_code == 200
     assert 'id="mobileInput"' in response.text
+    assert "!/^1[3-9]\\d{9}$/.test(value)" in response.text
     assert "立即报名" in response.text
     assert "已就绪。" in response.text
     assert "授权登录" not in response.text

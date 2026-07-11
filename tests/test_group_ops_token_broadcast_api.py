@@ -1,0 +1,210 @@
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+pytest_plugins = ("tests.group_ops_test_helpers",)
+
+
+PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"synthetic-png-payload"
+AUTH_HEADERS = {
+    "Authorization": "Bearer pytest-internal-token",
+    "Idempotency-Key": "pytest-group-broadcast-001",
+}
+
+
+@pytest.fixture(autouse=True)
+def _broadcast_runtime(monkeypatch):
+    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "pytest-internal-token")
+    monkeypatch.setenv("AICRM_GROUP_OPS_BROADCAST_PLAN_ID", "2")
+    monkeypatch.setenv("AICRM_GROUP_OPS_MINIPROGRAM_APPID", "wx-fixture-miniprogram")
+    monkeypatch.setenv("AICRM_GROUP_OPS_OUTBOUND_MODE", "external_effect")
+    monkeypatch.setenv("AICRM_WECOM_GROUP_ADAPTER_MODE", "fake")
+
+
+def _post_json(client, payload: dict[str, Any], *, idempotency_key: str = "pytest-group-broadcast-001"):
+    return client.post(
+        "/api/automation/group-ops/broadcast",
+        headers={**AUTH_HEADERS, "Idempotency-Key": idempotency_key},
+        json=payload,
+    )
+
+
+def test_group_ops_broadcast_requires_internal_bearer_token(group_ops_api_client, monkeypatch):
+    missing = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers={"Idempotency-Key": "missing-token"},
+        json={"text": "hello"},
+    )
+    invalid = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers={"Authorization": "Bearer wrong", "Idempotency-Key": "wrong-token"},
+        json={"text": "hello"},
+    )
+
+    assert missing.status_code == 401
+    assert invalid.status_code == 401
+    assert missing.json()["error"] == "internal_token_required"
+    assert invalid.json()["error"] == "internal_token_required"
+    assert "pytest-internal-token" not in missing.text + invalid.text
+
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
+    machine_authorized = _post_json(
+        group_ops_api_client,
+        {"text": "machine auth without admin session"},
+        idempotency_key="machine-auth-no-admin-session",
+    )
+    assert machine_authorized.status_code == 200
+    assert machine_authorized.json()["status"] == "succeeded"
+
+
+def test_group_ops_broadcast_requires_idempotency_and_content(group_ops_api_client):
+    no_idempotency = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers={"Authorization": "Bearer pytest-internal-token"},
+        json={"text": "hello"},
+    )
+    empty = _post_json(group_ops_api_client, {}, idempotency_key="empty-content")
+
+    assert no_idempotency.status_code == 400
+    assert no_idempotency.json()["error"] == "idempotency_key_required"
+    assert empty.status_code == 400
+    assert empty.json()["error"] == "broadcast_content_required"
+
+
+def test_group_ops_broadcast_sends_text_only(group_ops_api_client):
+    response = _post_json(group_ops_api_client, {"recommendation_text": "text-only group broadcast"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["status"] == "succeeded"
+    assert body["external_effect_job_id"] > 0
+    assert body["requested_chat_count"] == 1
+    assert body["exact_target_verified"] is True
+    assert body["content"]["text_present"] is True
+    assert body["content"]["uploaded_image_count"] == 0
+    assert body["content"]["card_attached"] is False
+    assert body["route_owner"] == "ai_crm_next"
+
+
+def test_group_ops_broadcast_accepts_multipart_images(group_ops_api_client):
+    response = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers=AUTH_HEADERS,
+        files=[("images", ("cover.png", PNG_BYTES, "image/png"))],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["status"] == "succeeded"
+    assert body["content"]["text_present"] is False
+    assert body["content"]["uploaded_image_count"] == 1
+    assert body["content"]["image_count"] == 1
+    assert body["content"]["card_attached"] is False
+    assert "fake_media" not in response.text
+
+
+def test_group_ops_broadcast_accepts_card_and_combined_content(group_ops_api_client, monkeypatch):
+    from aicrm_next.automation_engine.group_ops import broadcast
+    from aicrm_next.integration_gateway.lesson_card_cover_client import LessonCardCover
+
+    calls: list[str] = []
+
+    class FakeCoverClient:
+        def download(self, lesson_id: str) -> LessonCardCover:
+            calls.append(lesson_id)
+            return LessonCardCover(
+                file_name=f"lesson-{lesson_id}.png",
+                content_type="image/png",
+                file_bytes=PNG_BYTES,
+            )
+
+    monkeypatch.setattr(broadcast, "build_lesson_card_cover_client", lambda: FakeCoverClient())
+    response = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers={**AUTH_HEADERS, "Idempotency-Key": "combined-card-image"},
+        data={
+            "text": "今日日课——《测试卡片标题》",
+            "card_path": "pages/article/article?lesson_id=2fe19357-3b07-4547-9a3f-c14696cc81f5&from=learn",
+        },
+        files=[("images", ("detail.png", PNG_BYTES, "image/png"))],
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["content"]["card_attached"] is True
+    assert body["content"]["card_title"] == "测试卡片标题"
+    assert body["content"]["uploaded_image_count"] == 1
+    card_only = _post_json(
+        group_ops_api_client,
+        {
+            "card_path": "pages/article/article?lesson_id=2fe19357-3b07-4547-9a3f-c14696cc81f5&from=learn"
+        },
+        idempotency_key="card-only",
+    )
+    assert card_only.status_code == 200
+    assert card_only.json()["content"]["text_present"] is False
+    assert card_only.json()["content"]["card_attached"] is True
+    assert card_only.json()["content"]["card_title"] == "黄小璨 AI 日课"
+    assert calls == [
+        "2fe19357-3b07-4547-9a3f-c14696cc81f5",
+        "2fe19357-3b07-4547-9a3f-c14696cc81f5",
+    ]
+
+
+def test_group_ops_broadcast_rejects_invalid_card_path_and_image(group_ops_api_client):
+    invalid_card = _post_json(
+        group_ops_api_client,
+        {"card_path": "https://attacker.example/cover.png"},
+        idempotency_key="invalid-card",
+    )
+    invalid_image = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers={**AUTH_HEADERS, "Idempotency-Key": "invalid-image"},
+        files=[("images", ("fake.png", b"not-an-image", "image/png"))],
+    )
+
+    assert invalid_card.status_code == 400
+    assert invalid_card.json()["error"] == "invalid_card_path"
+    assert invalid_image.status_code == 400
+    assert invalid_image.json()["error"] == "invalid_image_content"
+
+
+def test_group_ops_broadcast_rejects_invalid_existing_media_id(group_ops_api_client):
+    response = _post_json(
+        group_ops_api_client,
+        {"image_media_ids": ["invalid media id"]},
+        idempotency_key="invalid-media-id",
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_image_media_id"
+
+
+def test_group_ops_broadcast_rejects_more_than_three_images(group_ops_api_client):
+    response = group_ops_api_client.post(
+        "/api/automation/group-ops/broadcast",
+        headers=AUTH_HEADERS,
+        files=[
+            ("images", (f"image-{index}.png", PNG_BYTES, "image/png"))
+            for index in range(4)
+        ],
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "too_many_images"
+
+
+def test_group_ops_broadcast_idempotency_does_not_send_twice(group_ops_api_client):
+    first = _post_json(group_ops_api_client, {"text": "idempotent broadcast"}, idempotency_key="same-request")
+    duplicate = _post_json(group_ops_api_client, {"text": "changed text"}, idempotency_key="same-request")
+
+    assert first.status_code == 200
+    assert duplicate.status_code == 200
+    assert first.json()["external_effect_job_id"] == duplicate.json()["external_effect_job_id"]
+    assert duplicate.json()["duplicate"] is True
+    assert duplicate.json()["status"] == "succeeded"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.commerce.repo import reset_commerce_fixture_state
+from aicrm_next.commerce.repo import build_commerce_repository, reset_commerce_fixture_state
 from aicrm_next.main import create_app
 
 
@@ -76,3 +76,62 @@ def test_checkout_options_are_next_diagnostics(monkeypatch) -> None:
         assert payload["route_owner"] == "ai_crm_next"
         assert payload["fallback_used"] is False
         assert payload["side_effect_safety"]["payment_request_executed"] is False
+
+
+def test_required_mobile_checkout_rejects_invalid_mobile_before_order_creation(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    repo = build_commerce_repository()
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "checkout-required-mobile",
+            "title": "需手机号商品",
+            "price_cents": 990,
+            "enabled": True,
+            "status": "active",
+            "require_mobile": True,
+        },
+    )
+    assert created.status_code == 200
+    payload = {
+        "product_code": "checkout-required-mobile",
+        "quantity": 1,
+        "buyer_identity": {"mobile": "186109474111", "external_userid": "wx_invalid_mobile"},
+    }
+
+    for path in ["/api/checkout/wechat", "/api/checkout/alipay"]:
+        provider = path.rsplit("/", 1)[-1]
+        before = repo.list_transactions(provider, {}, limit=100, offset=0)["total"]
+        response = client.post(path, json=payload)
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "手机号必须为11位有效的中国大陆手机号"
+        assert repo.list_transactions(provider, {}, limit=100, offset=0)["total"] == before
+
+
+def test_required_mobile_checkout_accepts_valid_11_digit_mobile(monkeypatch) -> None:
+    client = _client(monkeypatch)
+    created = client.post(
+        "/api/admin/wechat-pay/products",
+        json={
+            "product_code": "checkout-valid-mobile",
+            "title": "需手机号商品",
+            "price_cents": 990,
+            "enabled": True,
+            "status": "active",
+            "require_mobile": True,
+        },
+    )
+    assert created.status_code == 200
+
+    response = client.post(
+        "/api/checkout/wechat",
+        json={
+            "product_code": "checkout-valid-mobile",
+            "quantity": 1,
+            "buyer_identity": {"mobile": "18610947411", "external_userid": "wx_valid_mobile"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True

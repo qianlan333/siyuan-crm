@@ -15,6 +15,7 @@ from aicrm_next.integration_gateway.payment_adapters import (
     build_wechat_pay_adapter,
 )
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.mobile import MOBILE_VALIDATION_MESSAGE, normalize_mainland_mobile
 
 from .domain import completion_redirect_projection, normalize_product_completion_target, preview_product, validate_quantity
 from .dto import CheckoutRequest, PaymentNotifyRequest, ProductUpsertRequest
@@ -205,6 +206,11 @@ class CheckoutCommand:
             raise ContractError("disabled product cannot checkout")
         amount = int(product["price_cents"]) * quantity
         identity = payload.buyer_identity.model_dump()
+        if product.get("require_mobile"):
+            mobile = normalize_mainland_mobile(identity.get("mobile"))
+            if not mobile:
+                raise ContractError(MOBILE_VALIDATION_MESSAGE)
+            identity["mobile"] = mobile
         order = self._repo.create_order(
             {
                 "payment_provider": self._provider,

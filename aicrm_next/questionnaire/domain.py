@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from aicrm_next.navigation_target import completion_target_projection
 from aicrm_next.shared.errors import ContractError
+from aicrm_next.shared.mobile import MOBILE_VALIDATION_MESSAGE, normalize_mainland_mobile
 
 CHOICE_QUESTION_TYPES = {"single_choice", "multi_choice"}
 
@@ -256,6 +256,8 @@ def validate_required_answers(questionnaire: dict[str, Any], answers: dict[str, 
         if question_type not in CHOICE_QUESTION_TYPES:
             if question["required"] and value in (None, "", []):
                 raise ContractError(f"missing required answer: {question['id']}")
+            if question_type == "mobile" and value not in (None, "", []) and not normalize_mainland_mobile(value):
+                raise ContractError(f"question {_question_label(question)}: {MOBILE_VALIDATION_MESSAGE}")
             continue
         selected_ids, _other_text = choice_answer_parts(value)
         if question["required"] and not selected_ids:
@@ -276,14 +278,7 @@ def validate_required_answers(questionnaire: dict[str, Any], answers: dict[str, 
 
 
 def normalize_mobile_answer(value: Any) -> str:
-    if isinstance(value, list):
-        value = value[0] if value else ""
-    digits = re.sub(r"\D+", "", str(value or ""))
-    if len(digits) == 13 and digits.startswith("86"):
-        digits = digits[2:]
-    if re.fullmatch(r"1\d{10}", digits):
-        return digits
-    return ""
+    return normalize_mainland_mobile(value)
 
 
 def extract_submission_mobile(questionnaire: dict[str, Any], answers: dict[str, Any], respondent_identity: dict[str, Any]) -> str:

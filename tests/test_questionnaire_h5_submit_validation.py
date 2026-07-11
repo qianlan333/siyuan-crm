@@ -109,3 +109,64 @@ def test_h5_submit_accepts_legal_minimal_answers_and_writes_submission(client: T
     assert body["real_external_call_executed"] is False
     assert body["submission_id"]
     assert _submission_count() == before + 1
+
+
+@pytest.mark.parametrize("mobile", ["1861094741", "186109474111", "12610947411"])
+def test_h5_submit_rejects_invalid_mobile_answer_without_writing(client: TestClient, mobile: str) -> None:
+    repo = build_questionnaire_repository()
+    questionnaire = repo.save_questionnaire(
+        {
+            "slug": "required-mobile-validation",
+            "title": "手机号校验问卷",
+            "enabled": True,
+            "questions": [
+                {
+                    "id": "q_mobile",
+                    "type": "mobile",
+                    "title": "请输入手机号",
+                    "required": True,
+                    "options": [],
+                }
+            ],
+        }
+    )
+    before = repo.list_submissions(questionnaire["id"], limit=100, offset=0)
+    assert before is not None
+
+    response = client.post(
+        "/api/h5/questionnaires/required-mobile-validation/submit",
+        json={"answers": {"q_mobile": mobile}},
+    )
+
+    _assert_invalid_submission_response(response)
+    assert "11位" in response.json()["error"]
+    after = repo.list_submissions(questionnaire["id"], limit=100, offset=0)
+    assert after is not None
+    assert after[1] == before[1]
+    assert get_questionnaire_h5_side_effect_plans() == []
+
+
+def test_questionnaire_mobile_field_frontend_enforces_11_digits(client: TestClient) -> None:
+    build_questionnaire_repository().save_questionnaire(
+        {
+            "slug": "required-mobile-frontend",
+            "title": "手机号校验问卷",
+            "enabled": True,
+            "questions": [
+                {
+                    "id": "q_mobile",
+                    "type": "mobile",
+                    "title": "请输入手机号",
+                    "required": True,
+                    "options": [],
+                }
+            ],
+        }
+    )
+
+    response = client.get("/s/required-mobile-frontend")
+
+    assert response.status_code == 200
+    assert 'maxlength="11"' in response.text
+    assert "input.maxLength = 11" in response.text
+    assert "请输入11位有效手机号。" in response.text

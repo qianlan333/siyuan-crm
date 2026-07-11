@@ -953,7 +953,8 @@ def create_jsapi_order_response(
         payload_mobile=mobile,
     )
     if product.get("require_mobile") and not _normalized_text(resolved_context.get("mobile")):
-        return JSONResponse({"ok": False, "error": "mobile_required"}, status_code=400, headers=route_headers())
+        error_code = "mobile_invalid" if mobile else "mobile_required"
+        return JSONResponse({"ok": False, "error": error_code}, status_code=400, headers=route_headers())
     order_identity = {
         **identity,
         "external_userid": _normalized_text(resolved_context.get("external_userid")),

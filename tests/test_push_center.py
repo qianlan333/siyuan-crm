@@ -430,7 +430,7 @@ def test_questionnaire_default_external_push_is_queue_first(client: TestClient, 
 
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {phone_question_id: "test_phone_default_queue"}},
+        json={"answers": {phone_question_id: "13800000001"}},
         headers={"Idempotency-Key": "push-center-questionnaire-default-queue"},
     )
     body = response.json()

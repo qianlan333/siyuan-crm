@@ -89,7 +89,7 @@ def test_questionnaire_submit_extracts_mobile_answer_and_runs_binding_boundary()
     ).execute(
         "hxc-activation-v1",
         QuestionnaireSubmitRequest(
-            answers={"q_activation": "activated", "q_mobile": "+86 138-3560-4611"},
+                answers={"q_activation": "activated", "q_mobile": "138-3560-4611"},
             respondent_identity={"external_userid": "wmbNXyCwAAmPAoMr3Yz015qYew8ADdMA"},
         ),
     )

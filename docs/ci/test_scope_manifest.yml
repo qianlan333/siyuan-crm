@@ -94,6 +94,7 @@
         "tests/test_wechat_pay_*.py",
         "tests/test_public_pay_landing.py",
         "tests/test_public_product_*.py",
+        "tests/test_checkout_*.py",
         "tests/test_next_h5_wechat_pay_external_push_outbox.py"
       ],
       "python_tests": [
@@ -107,6 +108,40 @@
         "tests/test_public_product_no_real_payment.py",
         "tests/test_public_product_h5_pay_oauth_native.py",
         "tests/test_public_product_api_contract.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "questionnaire",
+      "paths": [
+        "aicrm_next/questionnaire/**",
+        "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html",
+        "tests/test_questionnaire_*.py"
+      ],
+      "python_tests": [
+        "tests/test_questionnaire_h5_submit_validation.py",
+        "tests/test_questionnaire_mobile_normalization.py",
+        "tests/test_questionnaire_h5_submit_commands.py",
+        "tests/test_questionnaire_application_contract.py",
+        "tests/test_questionnaire_h5_submit_no_real_side_effects.py",
+        "tests/test_questionnaire_h5_submit_no_fixture_production.py"
+      ],
+      "needs_postgres": false,
+      "architecture_gate": "fast"
+    },
+    {
+      "name": "mobile_validation",
+      "paths": [
+        "aicrm_next/shared/mobile.py"
+      ],
+      "python_tests": [
+        "tests/test_questionnaire_h5_submit_validation.py",
+        "tests/test_questionnaire_mobile_normalization.py",
+        "tests/test_questionnaire_application_contract.py",
+        "tests/test_checkout_api_contract.py",
+        "tests/test_public_product_sidebar_order_context.py",
+        "tests/test_service_period_h5_payment.py"
       ],
       "needs_postgres": false,
       "architecture_gate": "fast"

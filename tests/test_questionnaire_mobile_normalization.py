@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from aicrm_next.questionnaire.h5_write import QuestionnaireH5SubmitCommand, execute_questionnaire_h5_submit
+from aicrm_next.questionnaire.domain import normalize_mobile_answer
 from aicrm_next.questionnaire.repo import reset_questionnaire_fixture_state
 
 
@@ -23,3 +24,10 @@ def test_questionnaire_h5_submit_normalizes_mobile_identity():
     assert result["binding_status"] == "unresolved"
     assert result["fallback_used"] is False
     assert result["real_external_call_executed"] is False
+
+
+def test_questionnaire_mobile_normalization_requires_11_digit_mainland_mobile():
+    assert normalize_mobile_answer(" 138 0013 8000 ") == "13800138000"
+    assert normalize_mobile_answer("1380013800") == ""
+    assert normalize_mobile_answer("138001380001") == ""
+    assert normalize_mobile_answer("12800138000") == ""

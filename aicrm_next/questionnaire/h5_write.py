@@ -25,7 +25,7 @@ from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.runtime import production_data_ready
 
-from .domain import normalize_questionnaire, score_and_tags, validate_required_answers
+from .domain import normalize_mobile_answer, normalize_questionnaire, score_and_tags, validate_required_answers
 from .external_push import (
     QUESTIONNAIRE_EXTERNAL_PUSH_MODE,
     plan_questionnaire_external_push_effect,
@@ -261,10 +261,9 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         if not bool(item.get("enabled", True)):
             raise NotFoundError("questionnaire disabled")
         validate_required_answers(item, answers)
-        if not identity_payload.get("mobile"):
-            mobile_answer = _mobile_answer_from_questions(item, answers)
-            if mobile_answer:
-                identity_payload["mobile"] = mobile_answer
+        mobile_answer = _mobile_answer_from_questions(item, answers)
+        if mobile_answer:
+            identity_payload["mobile"] = mobile_answer
         identity_resolution_error = ""
         try:
             identity = ResolvePersonIdentityQuery()(
@@ -506,7 +505,7 @@ def _mobile_answer_from_questions(questionnaire: dict[str, Any], answers: dict[s
         value = answers.get(str(question.get("id")))
         if isinstance(value, list):
             value = "、".join(str(item) for item in value if item not in (None, ""))
-        mobile = str(value or "").strip()
+        mobile = normalize_mobile_answer(value)
         if mobile:
             return mobile
     return ""

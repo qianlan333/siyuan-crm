@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 class GroupOpsPlanListRequest(BaseModel):
@@ -124,6 +124,16 @@ class GroupOpsWebhookReceiveRequest(BaseModel):
     external_effect_test_loopback: bool = False
     test_receiver_response_status: int = 200
     test_receiver_base_url: str = ""
+
+
+class GroupOpsTokenBroadcastRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    text: str = Field(default="", validation_alias=AliasChoices("text", "recommendation_text"))
+    card_path: str = ""
+    card_title: str = ""
+    image_media_ids: list[str] = Field(default_factory=list)
+    idempotency_key: str = ""
 
 
 class GroupOpsMembersRequest(BaseModel):

@@ -8,6 +8,8 @@ import json
 import os
 from typing import Any
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 from .payment_commerce_live_gateway import PaymentCommerceLiveGateway, build_payment_commerce_live_gateway
 
 
@@ -32,7 +34,7 @@ def _enabled(name: str) -> bool:
 
 
 def _present(name: str) -> bool:
-    return bool(str(os.getenv(name, "") or "").strip())
+    return bool(runtime_setting(name, ""))
 
 
 def _timestamp() -> str:

@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 from datetime import datetime, timezone
 import json
-import os
 from typing import Any
 from urllib.parse import quote
 
@@ -16,6 +15,7 @@ from aicrm_next.customer_read_model.dto import CustomerDetailRequest
 from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
 from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
 from aicrm_next.shared.errors import NotFoundError
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .admin_unified_orders import get_order, list_orders
 
@@ -56,7 +56,7 @@ def _error(*, error_code: str, message: str, status_code: int, source_status: st
 
 
 def _auth_failure(request: Request, *, source_status: str) -> JSONResponse | None:
-    expected = _text(os.getenv(TOKEN_ENV_KEY))
+    expected = _text(runtime_setting(TOKEN_ENV_KEY))
     if not expected:
         return _error(
             error_code="internal_token_not_configured",

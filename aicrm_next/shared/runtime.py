@@ -17,7 +17,9 @@ def raw_database_url() -> str:
 
 
 def runtime_setting(name: str, default: str = "") -> str:
-    return str(os.getenv(name, default) or "").strip()
+    from aicrm_next.shared.runtime_settings import runtime_setting as resolve_runtime_setting
+
+    return resolve_runtime_setting(name, default)
 
 
 def database_mode() -> str:

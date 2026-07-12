@@ -9,13 +9,17 @@ JSON for human review.
 from __future__ import annotations
 
 import ast
-import json
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+try:
+    from scripts.script_runtime import print_json
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from script_runtime import print_json
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -445,7 +449,7 @@ def main() -> None:
             "tests and docs are scanned for evidence but excluded from gap heuristics",
         ],
     }
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    print_json(payload, indent=2, sort_keys=True)
 
 
 if __name__ == "__main__":

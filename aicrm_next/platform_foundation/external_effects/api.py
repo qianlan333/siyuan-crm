@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hmac
-import os
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -9,6 +8,7 @@ from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
 from aicrm_next.admin_jobs.routes import validate_admin_action_token
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .adapters import wecom_execution_settings
 from .repo import build_external_effect_repository
@@ -73,7 +73,7 @@ def _internal_token_error(request: Request) -> str:
     header = _text(request.headers.get("Authorization"))
     if not header.lower().startswith("bearer "):
         return "internal_token_required"
-    expected = _text(os.getenv("AUTOMATION_INTERNAL_API_TOKEN"))
+    expected = _text(runtime_setting("AUTOMATION_INTERNAL_API_TOKEN"))
     if not expected:
         return "automation_internal_token_not_configured"
     actual = header.split(" ", 1)[1].strip()
@@ -87,7 +87,7 @@ def _action_or_internal_token_error(request: Request, payload: dict[str, Any]) -
     if not internal_error:
         return ""
     token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
-    return validate_admin_action_token(token)
+    return validate_admin_action_token(token, request=request)
 
 
 def _service() -> ExternalEffectService:

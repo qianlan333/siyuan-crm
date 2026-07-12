@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .repo import connect_media_library_db, normalize_tags
 from .variants import (
@@ -327,8 +328,14 @@ class PostgresMediaLibraryRepository:
                 (table,),
             )
             columns = {str(row.get("column_name") or "").strip() for row in cur.fetchall() or []}
-        except Exception:
-            logger.debug("media library table column probe failed table=%s", table, exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                logger,
+                "media library table column probe failed",
+                exc,
+                level=logging.DEBUG,
+                table=table,
+            )
             return None
         columns.discard("")
         if not columns:
@@ -401,8 +408,13 @@ class PostgresMediaLibraryRepository:
         try:
             cur.execute("SELECT to_regclass('public.image_library_variants') AS table_name")
             self._variants_table_available = bool((cur.fetchone() or {}).get("table_name"))
-        except Exception:
-            logger.debug("image_library_variants table availability check failed", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                logger,
+                "image_library_variants table availability check failed",
+                exc,
+                level=logging.DEBUG,
+            )
             self._variants_table_available = False
         return self._variants_table_available
 
@@ -422,8 +434,8 @@ class PostgresMediaLibraryRepository:
                 (image_ids,),
             )
             by_id = {int(row["image_id"]): row for row in cur.fetchall() or []}
-        except Exception:
-            logger.debug("image variant dimensions unavailable", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(logger, "image variant dimensions unavailable", exc, level=logging.DEBUG)
             return
         for item in rows:
             variant = by_id.get(int(item.get("id") or 0)) or {}
@@ -611,7 +623,13 @@ class PostgresMediaLibraryRepository:
         except (ContractError, NotFoundError):
             raise
         except Exception as exc:
-            logger.exception("miniprogram library save failed item_id=%s payload_keys=%s", item_id, sorted(payload.keys()))
+            safe_log_exception(
+                logger,
+                "miniprogram library save failed",
+                exc,
+                item_id=item_id,
+                payload_keys=sorted(payload.keys()),
+            )
             raise ContractError("小程序素材保存失败：数据库写入异常，请稍后重试") from exc
         if not row:
             raise NotFoundError("miniprogram item not found")

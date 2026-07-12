@@ -34,6 +34,7 @@ def _read(path: Path) -> str:
 
 def test_automation_agent_admin_pages_require_admin_session(next_client, monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "automation-agent-page-auth-test")
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
 
     list_response = next_client.get("/admin/automation-agents", follow_redirects=False)
     edit_response = next_client.get("/admin/automation-agents/1/edit", follow_redirects=False)

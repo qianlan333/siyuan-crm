@@ -32,7 +32,7 @@ REQUIRED_ASSETS = {
     "callback_ingress_systemd_unit": "deploy/openclaw-wecom-callback-ingress.service",
     "callback_worker_systemd_unit": "deploy/openclaw-wecom-callback-inbox-worker.service",
     "callback_worker_systemd_timer": "deploy/openclaw-wecom-callback-inbox-worker.timer",
-    "canonical_web_systemd_unit": "deploy/aicrm-web.service",
+    "canonical_web_systemd_unit": "deploy/openclaw-wecom-postgres.service",
     "canonical_wecom_ingress_systemd_unit": "deploy/aicrm-wecom-ingress.service",
     "canonical_callback_worker_systemd_unit": "deploy/aicrm-wecom-callback-worker.service",
     "canonical_internal_event_worker_systemd_unit": "deploy/aicrm-internal-event-worker.service",
@@ -170,7 +170,7 @@ REQUIRED_TEST_PROOFS = {
     "external_effect_boundary": ("tests/test_wecom_callback_external_effect_boundary.py", "test_channel_entry_real_wecom_actions_are_planned_as_external_effect_jobs"),
     "channel_entry_effect_realtime_wakeup": (
         "tests/test_next_channel_entry_orchestrator.py",
-        "channel_entry_profile_update",
+        "test_active_channel_baseline_emits_only_channel_entry_without_program_admission",
     ),
     "external_effect_realtime_retryable_failure": (
         "tests/test_external_effects_realtime.py",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
@@ -320,6 +321,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
                 "matched_by": resolved_identity.get("matched_by") or "",
                 "score": score,
                 "final_tags": final_tags,
+                "result_token": secrets.token_urlsafe(32),
                 "status": "submitted",
                 "updated_at": utcnow_iso(),
             }
@@ -396,6 +398,8 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         "ok": True,
         "success": True,
         "submission_id": submission["submission_id"],
+        "result_access_token": submission["result_token"],
+        "result_url": f"/api/h5/questionnaires/{item['slug']}/result/{submission['result_token']}",
         "questionnaire_id": int(item["id"]),
         "slug": item["slug"],
         "identity": _public_identity(submission),

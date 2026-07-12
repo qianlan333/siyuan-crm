@@ -29,11 +29,21 @@ def test_ci_fast_uses_selector_and_single_required_result() -> None:
     assert "needs.select.outputs.needs_postgres != 'true'" in source
     assert "needs.select.outputs.frontend_tests != ''" in source
     assert "needs.select.outputs.needs_frontend_build == 'true'" in source
-    assert "Prepare PostgreSQL compatibility database" in source
-    assert "CREATE ROLE aicrm_next LOGIN PASSWORD" in source
     assert "bash scripts/ci/run_architecture_gates.sh --mode" in source
-    assert "timeout-minutes: 18" in source
+    assert "dependency-audit:" in source
+    assert "python -m pip_audit -r requirements.lock --require-hashes --progress-spinner=off" in source
+    assert "npm audit --audit-level=high" in source
+    assert source.count("python -m pip install --require-hashes -r requirements.lock") == 4
+    assert source.count("cache-dependency-path: requirements.lock") == 4
+    assert "timeout-minutes: 8" in source
     assert "force_full != 'true'" not in source
+    assert "full-regression:" in source
+    assert "uses: ./.github/workflows/full-regression.yml" in source
+    assert "needs.select.outputs.needs_full_ci == 'true'" in source
+    assert source.count("needs.select.outputs.needs_full_ci != 'true'") == 2
+    assert "- full-regression" in source
+    assert "- dependency-audit" in source
+    assert "full-regression={needs.get('full-regression', {}).get('result', 'missing')}_but_required" in source
     assert not LEGACY_CI_WORKFLOW.exists()
 
 
@@ -42,12 +52,52 @@ def test_full_regression_owns_full_pytest_and_full_frontend() -> None:
 
     assert "name: Full Regression" in source
     assert "workflow_dispatch:" in source
+    assert "workflow_call:" in source
     assert 'cron: "0 18 * * *"' in source
-    assert "python -m pytest tests/ -n auto --dist=loadfile" in source
+    assert "full-python-shard:" in source
+    assert "fail-fast: false" in source
+    assert "max-parallel: 4" in source
+    assert source.count("shard_index:") == 4
+    assert "shard_index: 0" in source
+    assert "shard_index: 1" in source
+    assert "shard_index: 2" in source
+    assert "shard_index: 3" in source
+    assert "python scripts/ci/select_pytest_shard.py" in source
+    assert "--shard-total 4" in source
+    assert "--duration-baseline docs/ci/pytest_duration_baseline.json" in source
+    assert "set -o pipefail" in source
+    assert "pytest_files=()" in source
+    assert "while IFS= read -r test_file; do" in source
+    assert 'pytest_files+=("$test_file")' in source
+    assert 'done < "$RUNNER_TEMP/pytest-shard-files.txt"' in source
+    assert "mapfile" not in source
+    assert 'python -m pytest "${pytest_files[@]}" -n auto --dist=loadfile -q' in source
+    assert "--junitxml=" in source
+    assert "actions/upload-artifact@v4" in source
+    assert "timeout-minutes: 25" in source
     assert "bash scripts/ci/run_architecture_gates.sh --mode full" in source
+    assert "python scripts/ci/check_dependency_security.py" in source
+    assert "python -m pip_audit -r requirements.lock --require-hashes --progress-spinner=off" in source
+    assert "python -m pip install --require-hashes -r requirements.lock" in source
+    assert "npm audit --audit-level=high" in source
     assert "npm run typecheck" in source
     assert "npm run build:frontend" in source
     assert "npm run test:frontend:all" in source
+
+
+def test_full_regression_runs_governance_once_and_ci_fast_does_not_duplicate_it() -> None:
+    full_source = _source(FULL_REGRESSION_WORKFLOW)
+    ci_fast_source = _source(CI_FAST_WORKFLOW)
+
+    assert full_source.count("run_governance:") == 2
+    assert "type: boolean" in full_source
+    assert "default: true" in full_source
+    assert "full-governance:" in full_source
+    assert "github.event_name == 'schedule' || inputs.run_governance == true" in full_source
+    assert "github.event_name != 'workflow_call'" not in full_source
+    assert full_source.count("python scripts/ci/check_dependency_security.py") == 1
+    assert full_source.count("bash scripts/ci/run_architecture_gates.sh --mode full") == 1
+    assert "uses: ./.github/workflows/full-regression.yml\n    with:\n      run_governance: false" in ci_fast_source
 
 
 def test_deploy_waits_for_successful_ci_fast_on_main() -> None:
@@ -74,12 +124,14 @@ def test_architecture_gate_script_has_fast_db_and_full_modes() -> None:
     assert "run_db()" in script
     assert "run_full_only()" in script
     assert "tools/check_route_ownership_manifest.py" in script
+    assert "scripts/ci/update_route_policy_manifest.py --check" in script
     assert "tools/check_repository_ownership.py" in script
     assert "tools/check_admin_route_auth.py" in script
     assert "tools/check_db_access_boundary.py" in script
     assert "tools/check_sql_static_guard.py" in script
     assert "tests/test_alembic_revision_chain.py" in script
     assert "tools/check_background_job_contract.py" in script
+    assert "scripts/ci/check_dependency_security.py" in script
     assert "Unknown architecture gate mode" in script
 
 

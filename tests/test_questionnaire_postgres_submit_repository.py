@@ -75,11 +75,13 @@ def test_postgres_questionnaire_submit_writes_submission_and_answer_snapshots(mo
             "follow_user_userid": "LinKaiYan",
             "matched_by": "unionid",
             "final_tags": ["activated"],
+            "result_token": "result_grant_postgres_contract_001",
             "status": "submitted",
         }
     )
 
     assert submission["submission_id"] == "901"
+    assert submission["result_token"] == "result_grant_postgres_contract_001"
     assert submission["external_userid"] == "wm_submit_001"
     assert submission["follow_user_userid"] == "LinKaiYan"
     assert submission["matched_by"] == "unionid"
@@ -94,6 +96,7 @@ def test_postgres_questionnaire_submit_writes_submission_and_answer_snapshots(mo
     assert submission_params[3] == "unionid"
     assert submission_params[4] == "h5"
     assert submission_params[8] == ["activated"]
+    assert submission_params[10] == "result_grant_postgres_contract_001"
 
     mobile_answer_params = connection.calls[1][1]
     assert mobile_answer_params[1] == 11

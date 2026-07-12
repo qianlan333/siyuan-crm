@@ -32,7 +32,7 @@ def test_questionnaire_h5_submit_resolves_identity_into_result_contract():
     assert payload["external_userid"] == "wx_ext_001"
     assert payload["mobile"] == "13800138000"
 
-    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{payload['submission_id']}")
+    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{payload['result_access_token']}")
     assert result.status_code == 200
     assert result.json()["result"]["submission_id"] == payload["submission_id"]
 

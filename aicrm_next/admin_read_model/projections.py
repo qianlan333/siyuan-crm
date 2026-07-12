@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from aicrm_next.shared.release import current_release_sha
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .repo import AdminReadRepository
 
@@ -272,7 +273,7 @@ def config_payload(repo: AdminReadRepository) -> dict[str, Any]:
         ["production_data_ready", health.get("production_data_ready")],
         ["release_sha", current_release_sha()],
         ["callback_fallback", "5013 retained until observation completes"],
-        ["wechat_callback_token", "configured" if os.getenv("WECOM_CALLBACK_TOKEN") else "missing"],
+        ["wechat_callback_token", "configured" if runtime_setting("WECOM_CALLBACK_TOKEN") else "missing"],
         ["wechat_pay_config", "configured" if os.getenv("WECHAT_PAY_MCH_ID") else "missing"],
         ["oauth_config", "configured" if os.getenv("WECHAT_OAUTH_APPID") or os.getenv("WECHAT_MP_APPID") else "missing"],
     ]

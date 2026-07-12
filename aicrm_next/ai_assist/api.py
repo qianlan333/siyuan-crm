@@ -42,7 +42,12 @@ async def create_internal_direct_wecom_private_send(request: Request):
             {"ok": False, "error": "invalid_json", "route_owner": "ai_crm_next"},
             status_code=400,
         )
-    return create_direct_wecom_private_send_response(payload, request.headers, allow_admin_action_token=False)
+    return create_direct_wecom_private_send_response(
+        payload,
+        request.headers,
+        allow_admin_action_token=False,
+        request=request,
+    )
 
 
 @router.post("/api/admin/direct-send/wecom-private")
@@ -54,4 +59,9 @@ async def create_admin_direct_wecom_private_send(request: Request):
             {"ok": False, "error": "invalid_json", "route_owner": "ai_crm_next"},
             status_code=400,
         )
-    return create_direct_wecom_private_send_response(payload, request.headers, allow_admin_action_token=True)
+    return create_direct_wecom_private_send_response(
+        payload,
+        request.headers,
+        allow_admin_action_token=True,
+        request=request,
+    )

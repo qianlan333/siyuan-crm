@@ -1,28 +1,9 @@
 from __future__ import annotations
 
-SENSITIVE_KEYS = {
-    "AUTOMATION_INTERNAL_API_TOKEN",
-    "AUTOMATION_ACTIVATION_WEBHOOK_TOKEN",
-    "DEEPSEEK_API_KEY",
-    "MCP_BEARER_TOKEN",
-    "LAOHUANG_CHAT_WEBHOOK_TOKEN",
-    "OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TOKEN",
-    "QUESTIONNAIRE_SUBMIT_WEBHOOK_TOKEN",
-    "AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET",
-    "AICRM_SIDEBAR_JSSDK_SECRET",
-    "SIDEBAR_THIRD_PARTY_API_TOKEN",
-    "WECOM_CONTACT_SECRET",
-    "WECOM_SECRET",
-    "WECOM_ARCHIVE_SECRET",
-    "WECOM_CALLBACK_TOKEN",
-    "WECOM_CALLBACK_AES_KEY",
-    "WECHAT_MP_APP_SECRET",
-    "WECHAT_PAY_API_V3_KEY",
-    "WECHAT_PAY_CERT_SERIAL_NO",
-    "WECHAT_SHOP_APPSECRET",
-    "WECHAT_SHOP_CALLBACK_TOKEN",
-    "ADMIN_BREAK_GLASS_PASSWORD_HASH",
-}
+from aicrm_next.shared.secret_store import SENSITIVE_SETTING_KEYS
+from aicrm_next.shared.sensitive_data import SECRET_MASK
+
+SENSITIVE_KEYS = SENSITIVE_SETTING_KEYS
 
 
 def mask_value(key: str, value: str) -> str:
@@ -30,6 +11,4 @@ def mask_value(key: str, value: str) -> str:
         return value
     if not value:
         return ""
-    if len(value) <= 6:
-        return "*" * len(value)
-    return f"{value[:3]}***{value[-2:]}"
+    return SECRET_MASK

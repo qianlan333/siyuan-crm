@@ -477,7 +477,7 @@ def test_external_effect_agent_webhook_continuation_enqueues_broadcast_job(next_
         target_type="automation_agent_audience_webhook",
         target_id="activation_agent",
         payload={
-            "webhook_url": "http://testserver/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+            "webhook_url": "https://testserver/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
             "body": {"external_userids": ["wm_001"]},
             "headers": {
                 "X-AICRM-Event-Type": "audience.incremental.entered",

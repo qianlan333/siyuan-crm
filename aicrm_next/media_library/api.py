@@ -9,6 +9,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from fastapi.responses import JSONResponse, Response
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .application import (
     DeleteMediaItemCommand,
@@ -319,7 +320,7 @@ def create_miniprogram(payload: MiniprogramUpsertRequest):
         result = _with_contract(UpsertMediaItemCommand("miniprogram")(payload), source_status="local_repository_write")
         return JSONResponse(content=result, headers=duration_headers())
     except Exception as exc:
-        logger.exception("miniprogram library create failed")
+        safe_log_exception(logger, "miniprogram library create failed", exc)
         return _error_response(exc, headers=duration_headers())
 
 

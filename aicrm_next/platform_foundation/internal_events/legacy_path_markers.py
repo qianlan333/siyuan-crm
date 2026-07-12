@@ -7,6 +7,8 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Any
 
+from aicrm_next.shared.safe_logging import safe_log_exception
+
 from .config import legacy_path_markers_enabled, legacy_path_retire_after_days
 
 LOGGER = logging.getLogger(__name__)
@@ -142,8 +144,8 @@ def mark_legacy_path_invoked(
             }
         LOGGER.info("legacy_internal_event_path_invoked", extra=marker)
         return {"recorded": True, **marker}
-    except Exception:
-        LOGGER.exception("legacy_internal_event_path_marker_failed")
+    except Exception as exc:
+        safe_log_exception(LOGGER, "legacy_internal_event_path_marker_failed", exc)
         return {"recorded": False, "reason": "legacy_path_marker_failed", "real_external_call_executed": False}
 
 

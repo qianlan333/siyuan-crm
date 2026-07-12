@@ -30,8 +30,8 @@ def check_admin_route_auth_gate() -> list[str]:
     errors: list[str] = []
     main_source = (ROOT / "aicrm_next" / "main.py").read_text(encoding="utf-8")
     guards_source = (ROOT / "aicrm_next" / "admin_auth" / "guards.py").read_text(encoding="utf-8")
-    if "admin_auth_required_response" not in main_source:
-        errors.append("aicrm_next/main.py must install admin_auth_required_response middleware gate")
+    if "route_policy_required_response" not in main_source:
+        errors.append("aicrm_next/main.py must install route_policy_required_response middleware gate")
     if "def require_admin" not in guards_source:
         errors.append("aicrm_next/admin_auth/guards.py must expose require_admin dependency")
     if "production_data_ready" not in guards_source:

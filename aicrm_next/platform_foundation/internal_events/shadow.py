@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from aicrm_next.platform_foundation.command_bus import Command, CommandContext
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .config import (
     ai_campaign_internal_events_enabled,
@@ -1310,6 +1311,6 @@ def emit_owner_migration_executed_shadow_event(
 def safe_emit(label: str, func, **kwargs: Any) -> dict[str, Any]:
     try:
         return func(**kwargs)
-    except Exception:
-        LOGGER.exception("internal_event_shadow_emit_failed", extra={"label": label})
+    except Exception as exc:
+        safe_log_exception(LOGGER, "internal_event_shadow_emit_failed", exc, label=label)
         return {"status": "failed", "error": "internal_event_shadow_emit_failed"}

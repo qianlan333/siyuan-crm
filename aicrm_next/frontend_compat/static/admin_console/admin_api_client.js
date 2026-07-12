@@ -10,6 +10,123 @@
     }
   }
 
+  const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS", "TRACE"]);
+
+  function cookieValue(name) {
+    const prefix = `${encodeURIComponent(name)}=`;
+    return document.cookie
+      .split(";")
+      .map((item) => item.trim())
+      .filter((item) => item.startsWith(prefix))
+      .map((item) => decodeURIComponent(item.slice(prefix.length)))[0] || "";
+  }
+
+  function adminActionTokens() {
+    const node = document.getElementById("aicrmAdminActionGrants");
+    const payload = safeJsonParse((node && node.textContent) || "{}");
+    return payload && typeof payload === "object" ? payload : {};
+  }
+
+  function routeTemplateMatches(template, pathname) {
+    const expected = String(template || "").split("/").filter(Boolean);
+    const actual = String(pathname || "").split("/").filter(Boolean);
+    if (expected.length !== actual.length) return false;
+    return expected.every((segment, index) => {
+      if (segment.startsWith("{") && segment.endsWith("}")) return Boolean(actual[index]);
+      return segment === actual[index];
+    });
+  }
+
+  function actionToken(method, url) {
+    const normalizedMethod = String(method || "GET").toUpperCase();
+    let parsed;
+    try {
+      parsed = new URL(String(url || window.location.href), window.location.href);
+    } catch (_error) {
+      return "";
+    }
+    if (parsed.origin !== window.location.origin) return "";
+    const tokens = adminActionTokens();
+    const exactKey = `${normalizedMethod} ${parsed.pathname}`;
+    if (tokens[exactKey]) return String(tokens[exactKey]);
+    const prefix = `${normalizedMethod} `;
+    const matched = Object.keys(tokens).find((key) =>
+      key.startsWith(prefix) && routeTemplateMatches(key.slice(prefix.length), parsed.pathname),
+    );
+    return matched ? String(tokens[matched]) : "";
+  }
+
+  function sameOrigin(url) {
+    try {
+      return new URL(String(url || window.location.href), window.location.href).origin === window.location.origin;
+    } catch (_error) {
+      return false;
+    }
+  }
+
+  function prepareUnsafeHeaders(headers, method, url) {
+    const normalizedMethod = String(method || "GET").toUpperCase();
+    if (SAFE_METHODS.has(normalizedMethod) || !sameOrigin(url)) return headers;
+    const csrfToken = cookieValue("aicrm_next_csrf");
+    if (csrfToken && !hasHeader(headers, "X-CSRF-Token")) {
+      headers["X-CSRF-Token"] = csrfToken;
+    }
+    const token = actionToken(normalizedMethod, url);
+    if (token) {
+      headers["X-Admin-Action-Token"] = token;
+    }
+    return headers;
+  }
+
+  function prepareUnsafeForm(form) {
+    if (!form) return;
+    const method = String(form.method || "GET").toUpperCase();
+    if (SAFE_METHODS.has(method) || !sameOrigin(form.action || window.location.href)) return;
+    const csrfToken = cookieValue("aicrm_next_csrf");
+    if (csrfToken) {
+      let csrfInput = form.querySelector('input[name="csrf_token"]');
+      if (!csrfInput) {
+        csrfInput = document.createElement("input");
+        csrfInput.type = "hidden";
+        csrfInput.name = "csrf_token";
+        form.appendChild(csrfInput);
+      }
+      csrfInput.value = csrfToken;
+    }
+    const token = actionToken(method, form.action || window.location.href);
+    if (token) {
+      let tokenInput = form.querySelector('input[name="admin_action_token"]');
+      if (!tokenInput) {
+        tokenInput = document.createElement("input");
+        tokenInput.type = "hidden";
+        tokenInput.name = "admin_action_token";
+        form.appendChild(tokenInput);
+      }
+      tokenInput.value = token;
+    }
+  }
+
+  function installRequestSecurity() {
+    if (window.__aicrmRequestSecurityInstalled) return;
+    window.__aicrmRequestSecurityInstalled = true;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = function securedFetch(input, options = {}) {
+      const url = typeof input === "string" || input instanceof URL ? String(input) : String(input && input.url || "");
+      const method = String(options.method || (input && input.method) || "GET").toUpperCase();
+      const finalOptions = { ...options };
+      finalOptions.headers = prepareUnsafeHeaders(headersToObject(options.headers || (input && input.headers)), method, url);
+      return nativeFetch(input, finalOptions);
+    };
+    document.addEventListener("submit", (event) => prepareUnsafeForm(event.target), true);
+    if (typeof HTMLFormElement !== "undefined") {
+      const nativeSubmit = HTMLFormElement.prototype.submit;
+      HTMLFormElement.prototype.submit = function securedSubmit() {
+        prepareUnsafeForm(this);
+        return nativeSubmit.call(this);
+      };
+    }
+  }
+
   function escapeHtml(value) {
     return String(value || "")
       .replace(/&/g, "&amp;")
@@ -161,5 +278,10 @@
     requestJson,
     isPermissionError,
     normalizeRequestError,
+    actionToken,
+    csrfToken: () => cookieValue("aicrm_next_csrf"),
+    prepareUnsafeForm,
   };
+
+  installRequestSecurity();
 })(window);

@@ -60,9 +60,13 @@ def test_h5_submit_executes_next_commandbus_and_writes_submission_projection(cli
     assert body["mobile_binding"]["ok"] is True
     assert body["mobile_binding"]["real_external_call_executed"] is False
 
-    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{body['submission_id']}")
+    sequential = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{body['submission_id']}")
+    assert sequential.status_code == 404
+
+    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{body['result_access_token']}")
     assert result.status_code == 200
     assert result.json()["result"]["answers"]["q_activation"] == "activated"
+    assert "result_token" not in result.json()["result"]
 
     audit_events = get_questionnaire_h5_write_audit_events()
     assert body["command_id"] in {event["command_id"] for event in audit_events}

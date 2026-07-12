@@ -112,9 +112,9 @@ def test_external_push_payload_masks_stored_body_but_sends_full_payload():
     assert payload["buyer"]["unionid"] == "unionid_product_push"
     assert payload["submitted_at"] == "2026-06-01T15:30:10+08:00"
     redacted = external_push_admin._redact_sensitive_fields(payload)
-    assert redacted["phone_number"] == "138****0000"
-    assert redacted["buyer"]["phone"] == "138****0000"
-    assert redacted["buyer"]["unionid"] == "unio***push"
+    assert redacted["phone_number"] == "[pii]"
+    assert redacted["buyer"]["phone"] == "[pii]"
+    assert redacted["buyer"]["unionid"] == "[pii]"
     assert "config" not in redacted
     assert "tenant" not in redacted
 
@@ -190,7 +190,7 @@ def test_external_push_attempt_queues_external_effect_and_updates_delivery(monke
     assert result["external_effect_job_id"]
     assert result["real_external_call_executed"] is False
     assert updates[0]["request_headers"]["X-AICRM-Signature"].startswith("sha256=")
-    assert updates[0]["request_body"]["phone_number"] == "138****0000"
+    assert updates[0]["request_body"]["phone_number"] == "[pii]"
     assert updates[0]["response_status"] is None
     items, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH, "target_id": "deliv_attempt"})
     assert total == 1

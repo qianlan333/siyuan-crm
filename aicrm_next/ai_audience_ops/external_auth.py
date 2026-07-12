@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import hmac
-import os
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 
 def external_spec_auth_error(request: Request) -> JSONResponse | None:
-    expected = str(os.getenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN") or "").strip()
+    expected = runtime_setting("AICRM_AI_AUDIENCE_SPEC_API_TOKEN")
     if not expected:
         return _json({"ok": False, "error": "external_token_not_configured"}, status_code=503)
     auth = str(request.headers.get("Authorization") or "").strip()

@@ -16,16 +16,22 @@ def ensure_repo_root_on_path() -> Path:
     return REPO_ROOT
 
 
-def print_json(payload: Any, *, indent: int | None = None) -> None:
-    print(dump_json(payload, indent=indent))
+def print_json(payload: Any, *, indent: int | None = None, sort_keys: bool = False) -> None:
+    ensure_repo_root_on_path()
+    from aicrm_next.shared.sensitive_data import redact_sensitive_data
+
+    print(dump_json(redact_sensitive_data(payload), indent=indent, sort_keys=sort_keys))
 
 
-def dump_json(payload: Any, *, indent: int | None = None) -> str:
-    return json.dumps(payload, ensure_ascii=False, default=str, indent=indent)
+def dump_json(payload: Any, *, indent: int | None = None, sort_keys: bool = False) -> str:
+    return json.dumps(payload, ensure_ascii=False, default=str, indent=indent, sort_keys=sort_keys)
 
 
-def emit_json(payload: Any, *, indent: int | None = None) -> str:
-    body = dump_json(payload, indent=indent)
+def emit_json(payload: Any, *, indent: int | None = None, sort_keys: bool = False) -> str:
+    ensure_repo_root_on_path()
+    from aicrm_next.shared.sensitive_data import redact_sensitive_data
+
+    body = dump_json(redact_sensitive_data(payload), indent=indent, sort_keys=sort_keys)
     print(body)
     return body
 
@@ -42,5 +48,8 @@ def read_app_port() -> str:
     return os.getenv("APP_PORT", "5000").strip() or "5000"
 
 
-def read_internal_api_token() -> str:
-    return os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()
+def read_internal_api_token(*, purpose: str = "automation_worker") -> str:
+    ensure_repo_root_on_path()
+    from aicrm_next.shared.internal_service_tokens import internal_service_token_for_purpose
+
+    return internal_service_token_for_purpose(purpose)

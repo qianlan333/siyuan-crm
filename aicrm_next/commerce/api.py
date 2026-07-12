@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
 import logging
 import os
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import APIRouter, Body, HTTPException, Path as PathParam, Query, Request
+from fastapi import APIRouter, Body, Path as PathParam, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from aicrm_next.admin_shell import shell_context
-from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.errors import NotFoundError
+from aicrm_next.shared.pii_audit import infer_pii_result_count, set_pii_audit_result_count
+from aicrm_next.shared.safe_logging import safe_log_exception
 from aicrm_next.shared.share_qr import svg_qr_data_url
 from aicrm_next.shared.sync_request import read_request_body, read_request_json
 
@@ -31,6 +35,8 @@ from .admin_transaction_detail import (
     provider_config,
 )
 from .admin_exports import create_export_job, get_export_job
+from .api_contract import checkout_order_headers as _checkout_order_headers
+from .api_contract import raise_http as _raise_http
 from .admin_refunds import list_refunds as list_unified_refunds
 from .admin_refunds import request_refund as request_unified_refund
 from .admin_unified_orders import (
@@ -82,18 +88,6 @@ _EXTERNAL_PUSH_CALL_EXECUTED = bool(1)
 logger = logging.getLogger(__name__)
 
 
-def _raise_http(exc: Exception) -> None:
-    if isinstance(exc, NotFoundError):
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, ContractError):
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    logger.exception("commerce api unexpected error")
-    raise HTTPException(
-        status_code=500,
-        detail={"error_code": "commerce_internal_error", "message": "internal commerce error"},
-    ) from exc
-
-
 def _admin_api_error(*, error_code: str, message: str, source_status: str, status_code: int) -> JSONResponse:
     return JSONResponse(
         {
@@ -107,16 +101,6 @@ def _admin_api_error(*, error_code: str, message: str, source_status: str, statu
         status_code=status_code,
         headers=_payment_final_headers(),
     )
-
-
-def _checkout_order_headers(*, order_create_executed: str = "false") -> dict[str, str]:
-    return {
-        "X-AICRM-Route-Owner": "ai_crm_next",
-        "X-AICRM-Fallback-Used": "false",
-        "X-AICRM-Real-External-Call-Executed": "false",
-        "X-AICRM-Payment-Request-Executed": "false",
-        "X-AICRM-Order-Create-Executed": order_create_executed,
-    }
 
 
 def _checkout_order_side_effects(*, order_create_executed: str | bool = False) -> dict:
@@ -608,6 +592,7 @@ def export_wechat_admin_orders(request: Request) -> Response:
     except Exception:
         payload = {}
     csv_text = export_orders_csv(payload.get("filters") if isinstance(payload, dict) else {})
+    set_pii_audit_result_count(request, max(0, sum(1 for _row in csv.reader(io.StringIO(csv_text))) - 1))
     return Response(
         csv_text,
         media_type="text/csv; charset=utf-8",
@@ -976,8 +961,8 @@ def wechat_shop_notify(request: Request) -> Response:
     except ValueError as exc:
         status_code = 403 if "signature" in str(exc).lower() or "callback token" in str(exc).lower() else 400
         return Response(str(exc), media_type="text/plain", status_code=status_code)
-    except Exception:
-        logger.exception("wechat shop notify failed before durable event handling")
+    except Exception as exc:
+        safe_log_exception(logger, "wechat shop notify failed before durable event handling", exc)
         return Response("wechat shop notify failed", media_type="text/plain", status_code=500)
 
 
@@ -1373,9 +1358,14 @@ def list_admin_wechat_shop_sync_runs(
     summary="创建后台导出任务",
     description="创建轻量同步导出任务。本阶段不接外部对象存储；没有持久化 export job 存储时使用模块级内存 store，并标注 next_export_in_memory。",
 )
-def create_admin_export(payload: dict = Body(..., description="导出任务 JSON，resource 支持 orders/payments/refunds/customer_business_profile，format 支持 csv")) -> JSONResponse:
+def create_admin_export(
+    request: Request,
+    payload: dict = Body(..., description="导出任务 JSON，resource 支持 orders/payments/refunds/customer_business_profile，format 支持 csv"),
+) -> JSONResponse:
     try:
-        return JSONResponse(jsonable_encoder(_payment_final_payload(create_export_job(payload), source_status="next_admin_exports")), headers=_payment_final_headers())
+        result = _payment_final_payload(create_export_job(payload), source_status="next_admin_exports")
+        set_pii_audit_result_count(request, infer_pii_result_count(result))
+        return JSONResponse(jsonable_encoder(result), headers=_payment_final_headers())
     except ValueError as exc:
         return _admin_api_error(error_code="invalid_export_request", message=str(exc), source_status="next_admin_exports", status_code=400)
 
@@ -1386,10 +1376,15 @@ def create_admin_export(payload: dict = Body(..., description="导出任务 JSON
     description="返回导出任务 JSON 结果，包含 content_text 或 content_base64。本阶段不新增单独 download endpoint。",
 )
 def get_admin_export(
+    request: Request,
     job_id: str = PathParam(..., description="导出任务 job_id"),
 ) -> JSONResponse:
     try:
-        return JSONResponse(jsonable_encoder(_payment_final_payload(get_export_job(job_id), source_status="next_admin_export_result")), headers=_payment_final_headers())
+        result = _payment_final_payload(get_export_job(job_id), source_status="next_admin_export_result")
+        content = str(result.get("content_text") or "")
+        result_count = max(0, sum(1 for _row in csv.reader(io.StringIO(content))) - 1) if content else 0
+        set_pii_audit_result_count(request, result_count)
+        return JSONResponse(jsonable_encoder(result), headers=_payment_final_headers())
     except LookupError:
         return _admin_api_error(error_code="not_found", message="export job not found", source_status="next_admin_export_result", status_code=404)
 

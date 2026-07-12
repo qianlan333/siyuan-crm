@@ -6,12 +6,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from aicrm_next.shared.sensitive_data import redact_sensitive_data
+
 from .sql_linter import extract_params, lint_sql
 
 
 REFRESH_MODES = {"manual", "incremental_3m", "daily_0200", "incremental_3m_plus_daily_0200"}
 SYSTEM_SQL_PARAMS = {"last_watermark_at", "refresh_started_at", "lookback_seconds", "package_id"}
-SECRET_RE = re.compile(r'("(?:[^"]*(?:secret|token|dsn|database_url|cookie)[^"]*)"\s*:\s*)"[^"]*"', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -112,7 +113,7 @@ def package_payload_from_spec(spec: PackageSpec, *, package_key: str) -> dict[st
 
 
 def redact_report(value: Any) -> str:
-    return SECRET_RE.sub(r'\1"***"', json.dumps(value, ensure_ascii=False, indent=2, default=str))
+    return json.dumps(redact_sensitive_data(value), ensure_ascii=False, indent=2, default=str)
 
 
 def _split_frontmatter(text: str) -> tuple[str, str]:

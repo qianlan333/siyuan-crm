@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 import os
 import re
 from dataclasses import dataclass
@@ -25,6 +24,7 @@ from aicrm_next.platform_foundation.external_effects.repo import (
 )
 from aicrm_next.platform_foundation.external_effects.service import ExternalEffectService
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
+from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
 
 from .application import ReceiveTrustedGroupOpsBroadcastCommand
 from .domain import clean_text
@@ -65,12 +65,12 @@ class ParsedCardPath:
 
 
 def internal_broadcast_token_error(headers: Mapping[str, Any]) -> tuple[str, int] | None:
-    expected = clean_text(os.getenv("AUTOMATION_INTERNAL_API_TOKEN"))
-    if not expected:
-        return ("broadcast_token_not_configured", 503)
     authorization = clean_text(headers.get("authorization") or headers.get("Authorization"))
     provided = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
-    if not provided or not hmac.compare_digest(provided, expected):
+    result = validate_internal_service_token("group_broadcast", provided)
+    if result.error == "internal_token_not_configured":
+        return ("broadcast_token_not_configured", 503)
+    if not result.ok:
         return ("internal_token_required", 401)
     return None
 

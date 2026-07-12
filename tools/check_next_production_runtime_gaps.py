@@ -200,11 +200,7 @@ def _questionnaire_content_blockers(routes: dict[str, Any], *, local_probe_datab
             blockers.append(item)
         return blockers, warnings
     items = payload.get("questionnaires") or payload.get("items") or []
-    slugs = {
-        str(item.get("slug") or "").strip()
-        for item in items
-        if isinstance(item, dict) and str(item.get("slug") or "").strip()
-    }
+    slugs = {str(item.get("slug") or "").strip() for item in items if isinstance(item, dict) and str(item.get("slug") or "").strip()}
     if status == 200 and slugs and slugs.issubset(QUESTIONNAIRE_FIXTURE_SLUGS):
         blockers.append("questionnaire_fixture_demo_only")
     source_status = str(payload.get("source_status") or "").strip().lower()
@@ -269,9 +265,7 @@ def run_check() -> dict[str, Any]:
         health = client.get("/health").json()
         routes = _route_probe(client)
     route_404_blockers = [name for name, result in routes.items() if not result["not_404"]]
-    questionnaire_blockers, questionnaire_warnings = _questionnaire_content_blockers(
-        routes, local_probe_database=local_probe_database
-    )
+    questionnaire_blockers, questionnaire_warnings = _questionnaire_content_blockers(routes, local_probe_database=local_probe_database)
     automation_blockers, automation_warnings = _automation_content_blockers(routes, local_probe_database=local_probe_database)
     oauth_blockers = _oauth_blockers(routes)
     content_blockers = questionnaire_blockers + automation_blockers
@@ -279,7 +273,9 @@ def run_check() -> dict[str, Any]:
     runtime_units = _runtime_unit_manifest()
     forbidden_retired_timer_units = [str(unit) for unit in runtime_units.get("retired_forbidden") or []]
     active_timer_units = [str(unit.get("timer")) for unit in runtime_units.get("active_autostart") or []]
-    approval_required_timer_units = [str(unit) for unit in runtime_units.get("approval_required") or []]
+    approval_required_timer_units = [
+        str(item.get("timer") or "") if isinstance(item, dict) else str(item) for item in runtime_units.get("approval_required") or []
+    ]
     result = {
         "ok": not route_404_blockers and not content_blockers and not oauth_blockers and not production_config_modified(),
         "health": health,

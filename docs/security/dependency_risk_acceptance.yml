@@ -1,0 +1,69 @@
+schema_version: 1
+owner: platform_security
+reviewed_at: 2026-07-10
+python_version: "3.10"
+lock_platforms:
+  - macos-arm64
+  - linux-x86_64
+
+policy:
+  python_gate: all_known_vulnerabilities
+  node_gate: high_and_critical
+  lock_install: pip --require-hashes
+  exception_required_fields:
+    - advisory_id
+    - ecosystem
+    - package
+    - severity
+    - owner
+    - reason
+    - compensating_control
+    - expires_at
+  expired_exception_behavior: fail
+
+baseline:
+  python:
+    command: pip-audit -r requirements.txt --format=json --progress-spinner=off
+    vulnerability_records: 14
+    affected_direct_packages: 4
+    remediated:
+      requests:
+        from: 2.32.3
+        to: 2.33.0
+        advisories:
+          - PYSEC-2026-1872
+          - CVE-2026-25645
+      pytest:
+        from: 8.3.5
+        to: 9.0.3
+        advisories:
+          - PYSEC-2026-1845
+      cryptography:
+        from: 44.0.2
+        to: 48.0.1
+        advisories:
+          - PYSEC-2026-35
+          - CVE-2026-26007
+          - GHSA-537c-gmf6-5ccf
+      pillow:
+        from: 11.3.0
+        to: 12.2.0+
+        advisories:
+          - PYSEC-2026-165
+          - CVE-2026-25990
+          - CVE-2026-40192
+          - CVE-2026-42309
+          - CVE-2026-42310
+          - CVE-2026-42311
+    current_vulnerability_records: 0
+  node:
+    command: npm audit --audit-level=high --json
+    current_high: 0
+    current_critical: 0
+
+sources:
+  python_advisories: https://github.com/pypa/advisory-database
+  pip_audit: https://github.com/pypa/pip-audit
+  npm_audit: https://docs.npmjs.com/cli/commands/npm-audit
+
+exceptions: []

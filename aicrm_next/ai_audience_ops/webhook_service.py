@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 from typing import Any
 
 from aicrm_next.platform_foundation.command_bus.models import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WECOM_MESSAGE_PRIVATE_SEND
 from aicrm_next.send_content.application import normalize_send_content_package
-from aicrm_next.shared.runtime_settings import runtime_bool
+from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
 
 from .repository import AudienceRepository, build_audience_repository, _json_dumps, _text
 
@@ -49,7 +48,7 @@ class AudienceInboundWebhookService:
         }
 
     def _verify(self, package: dict[str, Any], *, raw_body: bytes, signature: str) -> bool:
-        secret = _text(package.get("inbound_webhook_secret") or os.getenv("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
+        secret = _text(package.get("inbound_webhook_secret") or runtime_setting("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
         if not secret:
             return False
         provided = _text(signature)

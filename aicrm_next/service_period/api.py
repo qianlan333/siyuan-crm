@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from aicrm_next.admin_shell import shell_context
 from aicrm_next.public_product import h5_wechat_pay
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.safe_logging import safe_log_exception
 from aicrm_next.shared.share_qr import svg_qr_data_url
 from aicrm_next.shared.sync_request import read_request_json
 
@@ -137,7 +138,7 @@ def _raise_http(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, ContractError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    LOGGER.exception("service period api unexpected error")
+    safe_log_exception(LOGGER, "service period api unexpected error", exc)
     raise HTTPException(status_code=500, detail={"error_code": "service_period_internal_error", "message": "internal service period error"}) from exc
 
 

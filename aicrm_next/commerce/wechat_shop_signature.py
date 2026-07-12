@@ -7,6 +7,7 @@ import os
 from typing import Any
 
 from aicrm_next.shared.runtime import production_environment
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ def verify_signature(token: str, timestamp: str, nonce: str, signature: str) -> 
 
 
 def callback_token() -> str:
-    return _text(os.getenv("WECHAT_SHOP_CALLBACK_TOKEN"))
+    return _text(runtime_setting("WECHAT_SHOP_CALLBACK_TOKEN"))
 
 
 def should_skip_signature_without_token() -> bool:

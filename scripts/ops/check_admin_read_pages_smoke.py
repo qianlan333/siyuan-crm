@@ -15,6 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from scripts.script_runtime import print_json  # noqa: E402
+
 REQUIRED_OPENAPI_PATHS = (
     "/api/admin/push-center/stats",
     "/api/admin/push-center/jobs",
@@ -47,6 +49,7 @@ SMOKE_PATHS = (
     "/api/admin/automation-agents",
     "/api/admin/user-ops/send-records?limit=1",
 )
+DEFAULT_TIMEOUT_SECONDS = 20.0
 
 
 @dataclass(frozen=True)
@@ -191,7 +194,7 @@ def run(base_url: str, *, timeout: float, require_admin_cookie: bool = False) ->
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Smoke test production admin read pages and APIs.")
     parser.add_argument("--base-url", default="http://127.0.0.1:5001")
-    parser.add_argument("--timeout", type=float, default=8.0)
+    parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_SECONDS)
     parser.add_argument(
         "--require-admin-cookie",
         action="store_true",
@@ -199,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
     payload = run(args.base_url, timeout=max(1.0, float(args.timeout)), require_admin_cookie=args.require_admin_cookie)
-    print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+    print_json(payload, indent=2, sort_keys=True)
     return 0 if payload["ok"] else 1
 
 

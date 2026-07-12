@@ -20,7 +20,7 @@ def test_wecom_tag_read_returns_degraded_empty_payload_without_production_projec
         assert response.status_code == 200
         assert payload["ok"] is True
         assert payload["degraded"] is True
-        assert payload["error_code"] == "production_unavailable"
+        assert payload["error_code"] == "production_read_unavailable"
         assert payload["source_status"] == "production_unavailable"
         assert payload["read_model_status"] == "unavailable"
         assert payload["route_owner"] == "ai_crm_next"

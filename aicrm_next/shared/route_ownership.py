@@ -19,12 +19,43 @@ REQUIRED_MANIFEST_FIELDS = (
     "data_source",
     "requires_auth",
     "rollback",
+    "audience",
+    "auth_scheme",
+    "capability",
+    "access_scope",
+    "pii_level",
+    "csrf",
+    "rate_limit",
 )
 
 ALLOWED_RUNTIME_OWNERS = {"ai_crm_next", "blocked", "retired"}
 ALLOWED_EXTERNAL_EFFECTS = {"none", "fake_only", "staging_disabled", "real_requires_approval"}
 ALLOWED_LAYERS = {"api", "admin_page", "h5", "webhook", "static", "integration"}
 ALLOWED_DATA_SOURCES = {"read_model", "command", "external_adapter", "static"}
+ALLOWED_AUDIENCES = {"admin", "sidebar", "public_h5", "callback", "internal_worker", "external_integration"}
+ALLOWED_AUTH_SCHEMES = {
+    "admin_session",
+    "internal_bearer",
+    "oauth_state",
+    "path_token",
+    "provider_signature",
+    "public",
+    "scoped_bearer",
+    "sidebar_signed_context",
+    "webhook_bearer",
+}
+ALLOWED_ACCESS_SCOPES = {"global", "owner", "public", "self", "service", "single_resource"}
+ALLOWED_PII_LEVELS = {"none", "internal", "customer", "sensitive", "financial"}
+ALLOWED_RATE_LIMITS = {
+    "auth_strict",
+    "authenticated",
+    "callback_burst",
+    "health",
+    "integration",
+    "internal",
+    "public_standard",
+    "public_strict",
+}
 FASTAPI_BUILTIN_ROUTE_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}
 
 
@@ -250,7 +281,22 @@ def _validate_manifest_entry(entry: dict[str, Any], index: int) -> list[str]:
     if not isinstance(methods, list) or not all(isinstance(method, str) and method for method in methods):
         errors.append(_format_error(index, key, "invalid_methods", "`methods` must be a list of method strings."))
 
-    for field in ("path", "route_name", "capability_owner", "runtime_owner", "layer", "external_effects", "data_source", "rollback"):
+    for field in (
+        "path",
+        "route_name",
+        "capability_owner",
+        "runtime_owner",
+        "layer",
+        "external_effects",
+        "data_source",
+        "rollback",
+        "audience",
+        "auth_scheme",
+        "capability",
+        "access_scope",
+        "pii_level",
+        "rate_limit",
+    ):
         value = entry.get(field)
         if not isinstance(value, str) or not value.strip():
             errors.append(_format_error(index, key, "invalid_field", f"`{field}` must be a non-empty string."))
@@ -269,8 +315,36 @@ def _validate_manifest_entry(entry: dict[str, Any], index: int) -> list[str]:
         errors.append(_format_error(index, key, "invalid_layer", f"`layer` must be one of {sorted(ALLOWED_LAYERS)}."))
     if entry.get("data_source") not in ALLOWED_DATA_SOURCES:
         errors.append(_format_error(index, key, "invalid_data_source", f"`data_source` must be one of {sorted(ALLOWED_DATA_SOURCES)}."))
+    if entry.get("audience") not in ALLOWED_AUDIENCES:
+        errors.append(_format_error(index, key, "invalid_audience", f"`audience` must be one of {sorted(ALLOWED_AUDIENCES)}."))
+    if entry.get("auth_scheme") not in ALLOWED_AUTH_SCHEMES:
+        errors.append(
+            _format_error(index, key, "invalid_auth_scheme", f"`auth_scheme` must be one of {sorted(ALLOWED_AUTH_SCHEMES)}.")
+        )
+    if entry.get("access_scope") not in ALLOWED_ACCESS_SCOPES:
+        errors.append(_format_error(index, key, "invalid_access_scope", f"`access_scope` must be one of {sorted(ALLOWED_ACCESS_SCOPES)}."))
+    if entry.get("pii_level") not in ALLOWED_PII_LEVELS:
+        errors.append(_format_error(index, key, "invalid_pii_level", f"`pii_level` must be one of {sorted(ALLOWED_PII_LEVELS)}."))
+    if entry.get("rate_limit") not in ALLOWED_RATE_LIMITS:
+        errors.append(_format_error(index, key, "invalid_rate_limit", f"`rate_limit` must be one of {sorted(ALLOWED_RATE_LIMITS)}."))
     if not isinstance(entry.get("requires_auth"), bool):
         errors.append(_format_error(index, key, "invalid_requires_auth", "`requires_auth` must be true or false."))
+    if not isinstance(entry.get("csrf"), bool):
+        errors.append(_format_error(index, key, "invalid_csrf", "`csrf` must be true or false."))
+    if entry.get("csrf") is True and entry.get("auth_scheme") != "admin_session":
+        errors.append(_format_error(index, key, "invalid_csrf_auth_scheme", "CSRF can only be required for admin_session routes."))
+    if entry.get("csrf") is True and not (set(normalize_methods(entry.get("methods") or ())) - {"GET", "HEAD", "OPTIONS", "TRACE"}):
+        errors.append(_format_error(index, key, "csrf_on_safe_method", "CSRF must only be required for unsafe HTTP methods."))
+    expected_requires_auth = entry.get("auth_scheme") not in {"public", "oauth_state", "path_token", "provider_signature"}
+    if isinstance(entry.get("requires_auth"), bool) and entry.get("requires_auth") != expected_requires_auth:
+        errors.append(
+            _format_error(
+                index,
+                key,
+                "requires_auth_policy_mismatch",
+                f"Set `requires_auth` to {str(expected_requires_auth).lower()} for auth_scheme={entry.get('auth_scheme')}.",
+            )
+        )
     return errors
 
 

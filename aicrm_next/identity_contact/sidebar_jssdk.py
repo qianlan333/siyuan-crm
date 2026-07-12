@@ -21,6 +21,7 @@ from aicrm_next.integration_gateway.wecom_admin_auth_client import (
     build_wecom_admin_auth_client,
 )
 from aicrm_next.shared.runtime import production_environment
+from aicrm_next.shared.runtime_settings import runtime_setting
 from aicrm_next.shared.signed_context import build_sidebar_owner_context_token, sidebar_owner_context_ttl_seconds
 from aicrm_next.shared.signed_session import (
     ADMIN_SESSION_COOKIE,
@@ -402,7 +403,7 @@ def _sidebar_oauth_config(request: Request) -> dict[str, Any]:
     return {
         "enabled": _truthy(os.getenv(SIDEBAR_OAUTH_ENABLE_ENV)) or _truthy(os.getenv(ADMIN_AUTH_ENABLE_ENV)),
         "corp_id": str(os.getenv("WECOM_CORP_ID") or "").strip(),
-        "corp_secret": str(os.getenv("WECOM_SECRET") or "").strip(),
+        "corp_secret": runtime_setting("WECOM_SECRET"),
         "redirect_uri": str(os.getenv(SIDEBAR_OAUTH_REDIRECT_URI_ENV) or "").strip()
         or f"{request_base.rstrip('/')}/api/sidebar/oauth/callback",
     }

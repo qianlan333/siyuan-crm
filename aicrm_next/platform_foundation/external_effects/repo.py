@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from aicrm_next.platform_foundation.external_calls import scrub_summary
 from aicrm_next.shared.db_session import get_session_factory
 from aicrm_next.shared.runtime import fixture_mode
+from aicrm_next.shared.sensitive_data import redact_sensitive_text
 
 from .models import (
     DEFAULT_TENANT_ID,
@@ -23,12 +24,15 @@ from .models import (
     utcnow,
 )
 
-_SENSITIVE_PAYLOAD_KEYS = {"token", "secret", "password", "authorization", "access_token", "refresh_token"}
 _MODEL_FIELD_NAMES: dict[type[Any], set[str]] = {}
 
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _safe_error_message(value: Any) -> str:
+    return redact_sensitive_text(_text(value))[:1000]
 
 
 def _json_dumps(value: Any) -> str:
@@ -106,15 +110,7 @@ def _public_receipt(row: dict[str, Any] | None) -> ExternalEffectTestReceipt | N
 
 
 def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
-    summary: dict[str, Any] = {}
-    for key, value in dict(payload or {}).items():
-        if key.lower() in _SENSITIVE_PAYLOAD_KEYS:
-            summary[key] = "[redacted]"
-        elif isinstance(value, (str, int, float, bool)) or value is None:
-            summary[key] = value
-        else:
-            summary[key] = type(value).__name__
-    return summary
+    return scrub_summary(dict(payload or {}))
 
 
 def _idempotency_key(request: ExternalEffectCreateRequest) -> str:
@@ -550,7 +546,7 @@ class SQLAlchemyExternalEffectRepository(ExternalEffectRepository):
             {
                 "attempt_id": _text(attempt_id),
                 "error_code": _text(error_code),
-                "error_message": _text(error_message),
+                "error_message": _safe_error_message(error_message),
                 "next_retry_at": public_datetime(next_retry_at),
             },
         )
@@ -559,14 +555,14 @@ class SQLAlchemyExternalEffectRepository(ExternalEffectRepository):
         return self._update(
             job_id,
             "status = 'failed_terminal', attempt_count = attempt_count + 1, last_attempt_id = :attempt_id, last_error_code = :error_code, last_error_message = :error_message, locked_by = '', locked_at = NULL",
-            {"attempt_id": _text(attempt_id), "error_code": _text(error_code), "error_message": _text(error_message)},
+            {"attempt_id": _text(attempt_id), "error_code": _text(error_code), "error_message": _safe_error_message(error_message)},
         )
 
     def mark_blocked(self, job_id: int, *, attempt_id: str, error_code: str, error_message: str) -> ExternalEffectJob | None:
         return self._update(
             job_id,
             "status = 'blocked', attempt_count = attempt_count + 1, last_attempt_id = :attempt_id, last_error_code = :error_code, last_error_message = :error_message, locked_by = '', locked_at = NULL",
-            {"attempt_id": _text(attempt_id), "error_code": _text(error_code), "error_message": _text(error_message)},
+            {"attempt_id": _text(attempt_id), "error_code": _text(error_code), "error_message": _safe_error_message(error_message)},
         )
 
     def cancel_job(self, job_id: int) -> ExternalEffectJob | None:
@@ -606,7 +602,7 @@ class SQLAlchemyExternalEffectRepository(ExternalEffectRepository):
                 "request_summary": _json_dumps(scrub_summary(request_summary or {})),
                 "response_summary": _json_dumps(scrub_summary(response_summary or {})),
                 "error_code": _text(error_code),
-                "error_message": _text(error_message),
+                "error_message": _safe_error_message(error_message),
             },
         )
         attempt = _public_attempt(row)
@@ -967,19 +963,19 @@ class InMemoryExternalEffectRepository(ExternalEffectRepository):
         row = self._find(job_id)
         if row:
             row["attempt_count"] = int(row.get("attempt_count") or 0) + 1
-        return self._mutate(job_id, status="failed_retryable", next_retry_at=public_datetime(next_retry_at), last_attempt_id=_text(attempt_id), last_error_code=_text(error_code), last_error_message=_text(error_message), locked_by="", locked_at="")
+        return self._mutate(job_id, status="failed_retryable", next_retry_at=public_datetime(next_retry_at), last_attempt_id=_text(attempt_id), last_error_code=_text(error_code), last_error_message=_safe_error_message(error_message), locked_by="", locked_at="")
 
     def mark_failed_terminal(self, job_id: int, *, attempt_id: str, error_code: str, error_message: str) -> ExternalEffectJob | None:
         row = self._find(job_id)
         if row:
             row["attempt_count"] = int(row.get("attempt_count") or 0) + 1
-        return self._mutate(job_id, status="failed_terminal", last_attempt_id=_text(attempt_id), last_error_code=_text(error_code), last_error_message=_text(error_message), locked_by="", locked_at="")
+        return self._mutate(job_id, status="failed_terminal", last_attempt_id=_text(attempt_id), last_error_code=_text(error_code), last_error_message=_safe_error_message(error_message), locked_by="", locked_at="")
 
     def mark_blocked(self, job_id: int, *, attempt_id: str, error_code: str, error_message: str) -> ExternalEffectJob | None:
         row = self._find(job_id)
         if row:
             row["attempt_count"] = int(row.get("attempt_count") or 0) + 1
-        return self._mutate(job_id, status="blocked", last_attempt_id=_text(attempt_id), last_error_code=_text(error_code), last_error_message=_text(error_message), locked_by="", locked_at="")
+        return self._mutate(job_id, status="blocked", last_attempt_id=_text(attempt_id), last_error_code=_text(error_code), last_error_message=_safe_error_message(error_message), locked_by="", locked_at="")
 
     def cancel_job(self, job_id: int) -> ExternalEffectJob | None:
         return self._mutate(job_id, status="cancelled", locked_by="", locked_at="", cancelled_at=public_datetime(utcnow()))
@@ -1012,7 +1008,7 @@ class InMemoryExternalEffectRepository(ExternalEffectRepository):
             "request_summary_json": scrub_summary(request_summary or {}),
             "response_summary_json": scrub_summary(response_summary or {}),
             "error_code": _text(error_code),
-            "error_message": _text(error_message),
+            "error_message": _safe_error_message(error_message),
             "started_at": now,
             "completed_at": now,
         }

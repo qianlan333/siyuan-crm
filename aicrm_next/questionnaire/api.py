@@ -5,7 +5,6 @@ import csv
 from datetime import datetime, timezone
 import json
 import logging
-import os
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -19,7 +18,10 @@ from fastapi.templating import Jinja2Templates
 
 from aicrm_next.navigation_target import safe_completion_url
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.pii_audit import infer_pii_result_count, set_pii_audit_result_count
 from aicrm_next.shared.runtime import production_data_ready
+from aicrm_next.shared.runtime_settings import runtime_setting
+from aicrm_next.shared.safe_logging import safe_log_fields
 
 from .admin_write import (
     QuestionnaireAdminWriteCommand,
@@ -139,7 +141,7 @@ def _external_error(*, error_code: str, message: str, status_code: int) -> JSONR
 
 
 def _external_auth_failure(request: Request) -> JSONResponse | None:
-    expected = _external_text(os.getenv(_EXTERNAL_TOKEN_ENV_KEY))
+    expected = _external_text(runtime_setting(_EXTERNAL_TOKEN_ENV_KEY))
     if not expected:
         return _external_error(
             error_code="internal_token_not_configured",
@@ -196,10 +198,11 @@ def _csv_value(value: Any) -> Any:
     return value
 
 
-def _csv_download_response(payload: dict[str, Any]) -> Response:
+def _csv_download_response(payload: dict[str, Any], *, request: Request) -> Response:
     export_payload = dict(payload.get("export_download") or {})
     fields = [str(field) for field in export_payload.get("fields") or []]
     rows = export_payload.get("rows") if isinstance(export_payload.get("rows"), list) else []
+    set_pii_audit_result_count(request, len(rows))
     buffer = StringIO()
     writer = csv.DictWriter(buffer, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
@@ -246,6 +249,8 @@ async def _execute_admin_write(
             trace_id=str(payload.get("trace_id") or request.headers.get("X-Request-Id") or uuid4().hex),
         )
         response = execute_questionnaire_admin_write(command)
+        if command_name in {"questionnaire.admin.export_download", "questionnaire.admin.export_preview"}:
+            set_pii_audit_result_count(request, infer_pii_result_count(response))
         return JSONResponse(jsonable_encoder(response), status_code=200)
     except QuestionnaireAdminWriteInputError as exc:
         return _write_error(str(exc), status_code=400, source_status="input_error", write_model_status="input_error")
@@ -894,7 +899,7 @@ async def export_questionnaire(questionnaire_id: int, request: Request) -> Respo
             trace_id=str(request.headers.get("X-Request-Id") or uuid4().hex),
         )
         response = execute_questionnaire_admin_write(command)
-        return _csv_download_response(response)
+        return _csv_download_response(response, request=request)
     except QuestionnaireAdminWriteInputError as exc:
         return _write_error(str(exc), status_code=400, source_status="input_error", write_model_status="input_error")
     except QuestionnaireAdminWriteNotFoundError as exc:
@@ -1010,12 +1015,12 @@ def wechat_oauth_start(
         return RedirectResponse(str(payload["redirect_url"]), status_code=302)
     logger.warning(
         "questionnaire oauth start browser redirect unavailable",
-        extra={
-            "slug": slug,
-            "adapter_mode": payload.get("adapter_mode"),
-            "error": payload.get("error"),
-            "source_status": payload.get("source_status"),
-        },
+        extra=safe_log_fields(
+            slug=slug,
+            adapter_mode=payload.get("adapter_mode"),
+            error=payload.get("error"),
+            source_status=payload.get("source_status"),
+        ),
     )
     return _oauth_html_error(
         title="当前微信授权配置未完成",
@@ -1080,12 +1085,12 @@ def wechat_oauth_callback(
             return redirect_response
         logger.warning(
             "questionnaire oauth callback browser redirect failed",
-            extra={
-                "slug": payload.get("slug") or state_context.get("slug"),
-                "adapter_mode": payload.get("adapter_mode"),
-                "error": payload.get("error"),
-                "source_status": payload.get("source_status"),
-            },
+            extra=safe_log_fields(
+                slug=payload.get("slug") or state_context.get("slug"),
+                adapter_mode=payload.get("adapter_mode"),
+                error=payload.get("error"),
+                source_status=payload.get("source_status"),
+            ),
         )
         return _oauth_html_error(
             title="授权未完成",

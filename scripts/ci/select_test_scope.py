@@ -132,7 +132,8 @@ def _full_ci_requested() -> bool:
 
     payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
     if os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        value = payload.get("inputs", {}).get("full", "")
+        inputs = payload.get("inputs") or {}
+        value = inputs.get("full", "") if isinstance(inputs, dict) else ""
         return str(value).lower() in {"1", "true", "yes"}
 
     pull_request = payload.get("pull_request") or {}
@@ -201,6 +202,7 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
         for test in scope.get("frontend_tests", [])
     )
     needs_postgres = any(bool(scope.get("needs_postgres")) for scope in matched_scopes)
+    scope_forces_full = any(bool(scope.get("needs_full_ci")) for scope in matched_scopes)
 
     gate = "none"
     for scope in matched_scopes:
@@ -221,7 +223,7 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
         "frontend_tests": frontend_tests,
         "needs_postgres": needs_postgres,
         "needs_frontend_build": needs_frontend_build,
-        "needs_full_ci": high_risk or force_full,
+        "needs_full_ci": high_risk or scope_forces_full or force_full,
         "force_full": force_full,
         "architecture_gate": gate,
     }

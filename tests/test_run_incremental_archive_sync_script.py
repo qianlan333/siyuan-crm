@@ -45,7 +45,7 @@ def test_run_incremental_archive_sync_uses_internal_http_helper(monkeypatch, cap
     monkeypatch.setenv("APP_HOST", "archive.local")
     monkeypatch.setenv("APP_PORT", "5002")
     monkeypatch.setenv("WECOM_DEFAULT_OWNER_USERID", "zhangsan")
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "archive-token")
+    monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", "archive-token")
     monkeypatch.setenv("WECOM_ARCHIVE_SYNC_CURSOR", "30651")
     monkeypatch.setenv("WECOM_ARCHIVE_SYNC_LIMIT", "200")
     monkeypatch.setenv("WECOM_ARCHIVE_SYNC_MAX_PAGES", "20")

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import secrets
-import socket
+import socket  # noqa: F401 -- compatibility export for legacy monkeypatch callers
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from aicrm_next.external_push.security import WebhookUrlValidationError, resolve_and_validate_public_https_url
+from aicrm_next.external_push.security import WebhookUrlValidationError, resolve_and_validate_public_https_url  # noqa: F401
 from aicrm_next.external_push.service import (
     build_external_push_payload as _build_external_push_payload,
     redact_sensitive_fields as _redact_sensitive_fields,
@@ -17,6 +17,7 @@ from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_GENERIC_PUSH, WEBHOOK_ORDER_PAID_PUSH
 from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from aicrm_next.shared.runtime import production_data_ready
+from aicrm_next.shared.sensitive_data import redact_sensitive_text
 
 from .external_push_outbox import DEFAULT_TENANT_ID, EVENT_TRANSACTION_PAID, resolve_product_for_order as _resolve_product_for_order
 from .repo import connect_commerce_db
@@ -514,10 +515,10 @@ def _attempt_delivery(
             request_body=_redact_sensitive_fields(payload),
             response_status=None,
             response_body="",
-            error_message=_truncate_body(str(exc), 1000),
+            error_message=_truncate_body(redact_sensitive_text(exc), 1000),
             next_retry_at="",
         )
-        return {"ok": False, "delivery": _public_delivery(updated), "reason": str(exc)}
+        return {"ok": False, "delivery": _public_delivery(updated), "reason": redact_sensitive_text(exc)}
 
 
 def list_order_external_push_state(order_id: int) -> dict[str, Any]:

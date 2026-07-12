@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from aicrm_next.shared.sensitive_data import SECRET_MASK, redact_sensitive_data
+
 from .adapters import webhook_execution_settings, wecom_execution_settings
 from .jobs import external_effect_scheduler_state
 from .models import ExternalEffectAttempt, ExternalEffectJob, ExternalEffectTestReceipt
@@ -37,7 +39,7 @@ EXPECTED_INDEXES = [
     "idx_external_effect_attempt_trace",
 ]
 PROBLEM_STATUSES = {"failed_retryable", "failed_terminal", "blocked", "dispatching"}
-REDACTED = "[redacted]"
+REDACTED = SECRET_MASK
 SENSITIVE_KEY_FRAGMENTS = (
     "authorization",
     "access_token",
@@ -94,6 +96,9 @@ def redact_external_effect_payload(value: Any, *, key: str = "") -> Any:
         return [redact_external_effect_payload(item) for item in value]
     if isinstance(value, tuple):
         return [redact_external_effect_payload(item) for item in value]
+    shared_redacted = redact_sensitive_data(value, key=key)
+    if shared_redacted != value:
+        return shared_redacted
     if _sensitive_scalar(value):
         return REDACTED
     return value

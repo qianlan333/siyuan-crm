@@ -141,6 +141,10 @@ def _client_with_request_scope(monkeypatch):
 
     monkeypatch.setattr(application, "build_customer_read_model_repository", build_read_repo)
     monkeypatch.setattr(application, "build_customer_live_source_repository", build_live_repo)
+    monkeypatch.setattr(
+        "aicrm_next.main.AdminConfigPiiAuditRepository.record_pii_access",
+        lambda _repository, _event: None,
+    )
     app = create_app()
     app.dependency_overrides[get_db] = override_get_db
     return TestClient(app), session, read_repos, live_repos

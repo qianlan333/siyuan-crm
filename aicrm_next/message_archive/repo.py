@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from aicrm_next.shared.repository_provider import assert_repository_allowed
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
+from aicrm_next.shared.runtime_settings import runtime_setting
 from aicrm_next.shared.typing import JsonDict
 
 
@@ -457,19 +458,7 @@ def build_archive_sync_repository() -> ArchiveSyncRepository:
 
 
 def read_archive_app_setting(key: str) -> str:
-    database_url = raw_database_url()
-    if not database_url:
-        return ""
-    try:
-        import psycopg
-        from psycopg.rows import dict_row
-
-        url = _psycopg_url(database_url)
-        with psycopg.connect(url, row_factory=dict_row) as conn:
-            row = conn.execute("SELECT value FROM app_settings WHERE key = %s", (key,)).fetchone()
-        return str((row or {}).get("value") or "").strip()
-    except Exception:
-        return ""
+    return runtime_setting(key, "")
 
 
 def _page(rows: list[JsonDict], *, limit: int | None, offset: int) -> list[JsonDict]:

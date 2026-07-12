@@ -3,6 +3,10 @@ from __future__ import annotations
 from scripts.ops import check_admin_read_pages_smoke as smoke
 
 
+def test_production_smoke_timeout_covers_observed_cold_admin_reads() -> None:
+    assert smoke.DEFAULT_TIMEOUT_SECONDS == 20.0
+
+
 def test_run_fails_when_required_admin_cookie_is_missing(monkeypatch) -> None:
     monkeypatch.setattr(smoke, "_admin_cookie_header", lambda: ("", "admin_cookie_sign_failed:RuntimeError"))
     monkeypatch.setattr(smoke, "_openapi_paths", lambda *args, **kwargs: set(smoke.REQUIRED_OPENAPI_PATHS))

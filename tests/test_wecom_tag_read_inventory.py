@@ -30,7 +30,7 @@ def test_wecom_tag_read_inventory_covers_read_write_selector_and_sync_scope() ->
     assert "deletion_locked" in text
     assert "legacy_fallback_allowed=false" in text
     assert "may execute real WeCom sync" in text
-    assert "does not create/update/delete tags or groups" in text
+    assert "Production CRUD routes may create/update/delete WeCom corp tags/groups" in text
     assert "does not mutate customer or questionnaire tags" in text
     assert "production_unavailable" in text
     assert "local_contract_probe" in text

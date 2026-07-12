@@ -45,7 +45,7 @@ def test_shape_checker_accepts_items_and_questionnaires_datetime_strings():
         "GET /api/h5/questionnaires/hxc-activation-v1": {
             "json": {"ok": True, "questionnaire": {"slug": "prod-questionnaire"}, "questions": []}
         },
-        "GET /api/h5/questionnaires/hxc-activation-v1/result/sub_fixture_001": {
+        "GET /api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61": {
             "json": {"ok": True, "result": {}, "result_message": "ok"}
         },
     }

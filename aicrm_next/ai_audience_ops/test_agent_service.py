@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 from typing import Any
 
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_csv, runtime_setting
@@ -69,7 +68,7 @@ class AudienceTestAgentService:
                 "sender_userid": sender,
             },
         }
-        inbound_secret = _text(package.get("inbound_webhook_secret") or os.getenv("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
+        inbound_secret = _text(package.get("inbound_webhook_secret") or runtime_setting("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
         if not inbound_secret:
             return {"ok": False, "error": "inbound_webhook_secret_missing", "status_code": 400, "real_external_call_executed": False}
         raw_body = _json_dumps(callback_payload).encode("utf-8")
@@ -130,7 +129,7 @@ class AudienceTestAgentService:
                 "sender_userid": sender,
             },
         }
-        inbound_secret = _text(package.get("inbound_webhook_secret") or os.getenv("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
+        inbound_secret = _text(package.get("inbound_webhook_secret") or runtime_setting("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
         if not inbound_secret:
             return {"ok": False, "error": "inbound_webhook_secret_missing", "status_code": 400, "real_external_call_executed": False}
         raw_body = _json_dumps(callback_payload).encode("utf-8")

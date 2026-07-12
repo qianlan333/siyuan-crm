@@ -13,7 +13,8 @@
     "test:frontend:interaction-shell": "node tests/frontend/p1_interaction_shell.test.mjs",
     "test:frontend:preview": "node tests/frontend/p1_preview_board.test.mjs",
     "test:frontend:business-pages": "node tests/frontend/p1_business_pages_interaction_shell.test.mjs",
-    "test:frontend:all": "npm run test:frontend:push-center && npm run test:frontend:group-ops && npm run test:frontend:ops-plan && npm run test:frontend:wecom && npm run test:frontend:interaction-shell && npm run test:frontend:preview && npm run test:frontend:business-pages"
+    "test:frontend:security": "node tests/frontend/admin_request_security.test.mjs",
+    "test:frontend:all": "npm run test:frontend:security && npm run test:frontend:push-center && npm run test:frontend:group-ops && npm run test:frontend:ops-plan && npm run test:frontend:wecom && npm run test:frontend:interaction-shell && npm run test:frontend:preview && npm run test:frontend:business-pages"
   },
   "devDependencies": {
     "typescript": "5.9.3"

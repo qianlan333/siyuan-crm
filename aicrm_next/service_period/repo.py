@@ -11,10 +11,10 @@ from aicrm_next.shared.db_session import connect_pooled_postgres
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.repository_provider import assert_repository_allowed
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
+from aicrm_next.shared.safe_logging import safe_log_fields
 
 from .domain import (
     TENANT_ID,
-    cta_text_for_status,
     entitlement_status,
     event_id_for,
     isoformat,
@@ -317,7 +317,10 @@ class InMemoryServicePeriodRepository:
                 after=None,
                 payload={"reason": "missing_unionid", "order": order, "transaction": transaction or {}},
             )
-            LOGGER.warning("service_period_grant_failed_missing_unionid", extra={"out_trade_no": out_trade_no, "service_product_id": product.get("id")})
+            LOGGER.warning(
+                "service_period_grant_failed_missing_unionid",
+                extra=safe_log_fields(out_trade_no=out_trade_no, service_product_id=product.get("id")),
+            )
             return {"ok": False, "skipped": True, "reason": "missing_unionid", "event": event}
         now = utcnow()
         paid_at = _order_paid_at(order, transaction)
@@ -889,7 +892,7 @@ class PostgresServicePeriodRepository:
                         NULLIF(c.primary_external_userid, ''),
                         NULLIF(wim.external_userid, '')
                     ) AS external_userid,
-                    COALESCE(NULLIF(e.mobile_snapshot, ''), NULLIF(c.mobile, '')) AS mobile,
+                    COALESCE(NULLIF(c.mobile, ''), NULLIF(c.mobile_normalized, '')) AS mobile,
                     COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark
                 FROM service_period_entitlements e
                 JOIN service_period_products p ON p.id = e.service_product_id
@@ -974,7 +977,7 @@ class PostgresServicePeriodRepository:
                         NULLIF(c.primary_external_userid, ''),
                         NULLIF(wim.external_userid, '')
                     ) AS external_userid,
-                    COALESCE(NULLIF(e.mobile_snapshot, ''), NULLIF(c.mobile, '')) AS mobile,
+                    COALESCE(NULLIF(c.mobile, ''), NULLIF(c.mobile_normalized, '')) AS mobile,
                     COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark
                 FROM service_period_entitlements e
                 JOIN service_period_products p ON p.id = e.service_product_id
@@ -1065,7 +1068,10 @@ class PostgresServicePeriodRepository:
                     payload={"reason": "missing_unionid", "order": order, "transaction": transaction or {}},
                 )
                 conn.commit()
-                LOGGER.warning("service_period_grant_failed_missing_unionid", extra={"out_trade_no": out_trade_no, "service_product_id": product.get("id")})
+                LOGGER.warning(
+                    "service_period_grant_failed_missing_unionid",
+                    extra=safe_log_fields(out_trade_no=out_trade_no, service_product_id=product.get("id")),
+                )
                 return {"ok": False, "skipped": True, "reason": "missing_unionid", "event": event}
             result = self._grant_or_renew_with_unionid(conn, product=product, order=order, transaction=transaction or {}, unionid=unionid, out_trade_no=out_trade_no)
             conn.commit()
@@ -1359,7 +1365,6 @@ class PostgresServicePeriodRepository:
                 UPDATE service_period_entitlements
                 SET trade_product_id = %s,
                     external_userid_snapshot = %s,
-                    mobile_snapshot = %s,
                     membership_config_id = %s,
                     status = 'active',
                     start_at = %s,
@@ -1375,7 +1380,6 @@ class PostgresServicePeriodRepository:
                 (
                     int(product["trade_product_id"]),
                     identity["external_userid"],
-                    identity["mobile"],
                     text(product.get("membership_config_id")),
                     start_at,
                     end_at,
@@ -1391,12 +1395,12 @@ class PostgresServicePeriodRepository:
                 """
                 INSERT INTO service_period_entitlements (
                     tenant_id, service_product_id, trade_product_id, unionid,
-                    external_userid_snapshot, mobile_snapshot, membership_config_id,
+                    external_userid_snapshot, membership_config_id,
                     status, start_at, end_at, last_order_id, last_out_trade_no,
                     renewal_count, metadata_json, created_at, updated_at
                 )
                 VALUES (
-                    'aicrm', %s, %s, %s, %s, %s, %s,
+                    'aicrm', %s, %s, %s, %s, %s,
                     'active', %s, %s, %s, %s, %s, %s::jsonb,
                     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
                 )
@@ -1407,7 +1411,6 @@ class PostgresServicePeriodRepository:
                     int(product["trade_product_id"]),
                     unionid,
                     identity["external_userid"],
-                    identity["mobile"],
                     text(product.get("membership_config_id")),
                     start_at,
                     end_at,

@@ -167,8 +167,8 @@ def test_signature_is_stable_and_sensitive_payload_is_redacted() -> None:
     assert sig == service.sign_webhook_payload("secret", "1778888888", '{"a":1}')
     assert sig != service.sign_webhook_payload("secret", "1778888888", '{"a":2}')
     assert service.redact_sensitive_fields({"phone": "13800000000", "buyer": {"unionid": "unionid_product_push"}}) == {
-        "phone": "138****0000",
-        "buyer": {"unionid": "unio***push"},
+        "phone": "[pii]",
+        "buyer": {"unionid": "[pii]"},
     }
 
 
@@ -187,8 +187,8 @@ def test_run_due_events_success_updates_delivery_and_outbox(monkeypatch) -> None
     assert repository.delivery["status"] == "retrying"
     assert repository.delivery["attempt_count"] == 0
     assert repository.delivery["request_headers"]["X-AICRM-Signature"].startswith("sha256=")
-    assert repository.delivery["request_body"]["phone_number"] == "138****0000"
-    assert repository.delivery["request_body"]["buyer"]["phone"] == "138****0000"
+    assert repository.delivery["request_body"]["phone_number"] == "[pii]"
+    assert repository.delivery["request_body"]["buyer"]["phone"] == "[pii]"
     assert total == 1
     assert jobs[0].status == "queued"
     assert jobs[0].execution_mode == "execute"

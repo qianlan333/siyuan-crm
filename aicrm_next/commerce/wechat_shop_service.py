@@ -13,6 +13,7 @@ from aicrm_next.integration_gateway.wechat_shop_client import (
     WeChatShopClientError,
 )
 from aicrm_next.shared.runtime import database_mode
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .product_code_aliases import canonical_product_code, canonical_product_name
 from .repo import connect_commerce_db
@@ -91,7 +92,7 @@ def _jsonb(value: Any):
 def _sanitize_error(value: Any) -> str:
     text = _text(value)
     text = re.sub(r"(access_token=)[^&\s]+", r"\1***", text, flags=re.IGNORECASE)
-    for secret in (os.getenv("WECHAT_SHOP_APPSECRET"), os.getenv("WECHAT_SHOP_CALLBACK_TOKEN")):
+    for secret in (runtime_setting("WECHAT_SHOP_APPSECRET"), runtime_setting("WECHAT_SHOP_CALLBACK_TOKEN")):
         if secret:
             text = text.replace(secret, "***")
     return text[:1000]
@@ -106,7 +107,7 @@ def _client() -> WeChatShopClient:
     return WeChatShopClient(
         WeChatShopClientConfig(
             appid=_text(os.getenv("WECHAT_SHOP_APPID")),
-            appsecret=_text(os.getenv("WECHAT_SHOP_APPSECRET")),
+            appsecret=_text(runtime_setting("WECHAT_SHOP_APPSECRET")),
             api_base=_text(os.getenv("WECHAT_SHOP_API_BASE")) or "https://api.weixin.qq.com",
             timeout_seconds=timeout,
         )

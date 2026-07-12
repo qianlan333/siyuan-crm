@@ -4,13 +4,13 @@ import base64
 import binascii
 from io import BytesIO
 import hashlib
-import os
 import secrets
 from typing import Any
 
 from aicrm_next.integration_gateway.questionnaire_adapters import WeChatOAuthAdapter, build_wechat_oauth_adapter
 from aicrm_next.media_library.application import GetImageVariantQuery, GetMediaItemQuery, UploadAttachmentCommand
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.runtime_settings import runtime_setting
 from aicrm_next.shared.share_qr import safe_qr_download_filename, svg_qr_data_url
 
 from .domain import (
@@ -36,7 +36,7 @@ _PDF_UPLOADS: dict[str, dict[str, Any]] = {}
 
 
 def _secret_key() -> str:
-    return os.getenv("SECRET_KEY", "").strip()
+    return runtime_setting("SECRET_KEY")
 
 
 class ListRadarLinksQuery:

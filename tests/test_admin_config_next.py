@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+from time import time
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from aicrm_next.main import create_app
+from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE, sign_session
 from aicrm_next.platform_foundation.external_effects.adapters import webhook_execution_settings, wecom_execution_settings
 from aicrm_next.platform_foundation.external_effects.realtime import realtime_wakeup_state
 from aicrm_next.shared.db_session import reset_engine_cache_for_tests
+from aicrm_next.shared.secret_store import FileSecretStore, is_secret_reference
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -21,6 +25,7 @@ def _prepare_client(monkeypatch, tmp_path) -> TestClient:
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
+    monkeypatch.setenv("AICRM_SECRET_STORE_DIR", str(tmp_path / "secret-store"))
     monkeypatch.setenv("SECRET_KEY", "admin-config-next-test")
     monkeypatch.setenv("WECOM_CORP_ID", "ww-env-corp")
     reset_engine_cache_for_tests()
@@ -68,7 +73,8 @@ def _prepare_client(monkeypatch, tmp_path) -> TestClient:
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_by TEXT NOT NULL DEFAULT '',
                     login_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-                    admin_level TEXT NOT NULL DEFAULT 'admin'
+                    admin_level TEXT NOT NULL DEFAULT 'admin',
+                    session_version INTEGER NOT NULL DEFAULT 1
                 )
                 """
             )
@@ -229,13 +235,38 @@ def _prepare_client(monkeypatch, tmp_path) -> TestClient:
                 """
             )
         )
-    return TestClient(create_app(), raise_server_exceptions=False)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    csrf_token = "admin-config-next-csrf"
+    client.cookies.set(
+        SESSION_COOKIE,
+        sign_session(
+            {
+                "username": "admin-config-test",
+                "roles": ["super_admin"],
+                "login_type": "pytest",
+                "iat": int(time()),
+                "csrf_token": csrf_token,
+            }
+        ),
+    )
+    client.cookies.set(CSRF_COOKIE, csrf_token)
+    client.headers["X-CSRF-Token"] = csrf_token
+    return client
 
 
-def _token(html: str) -> str:
-    match = re.search(r'name="admin_action_token" value="([^"]+)"', html)
+def _token(
+    html: str,
+    *,
+    method: str = "PUT",
+    path: str = "/api/admin/config/app-settings",
+) -> str:
+    match = re.search(
+        r'<script id="aicrmAdminActionGrants" type="application/json">(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
     assert match
-    return match.group(1)
+    return json.loads(match.group(1))[f"{method} {path}"]
 
 
 def _db_url(monkeypatch) -> str:
@@ -295,7 +326,7 @@ def test_app_settings_api_masks_secrets_and_save_is_idempotent(monkeypatch, tmp_
     assert masked_response.status_code == 200
     text_payload = masked_response.text
     assert "super-secret-value" not in text_payload
-    assert "sup***ue" in text_payload
+    assert "[redacted]" in text_payload
 
     save_payload = {
         "admin_action_token": token,
@@ -317,6 +348,39 @@ def test_app_settings_api_masks_secrets_and_save_is_idempotent(monkeypatch, tmp_
     assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECOM_CORP_ID'") == "ww-next-corp"
     assert _scalar(database_url, "SELECT value FROM app_settings WHERE key = 'WECOM_SECRET'") == "super-secret-value"
     assert _scalar(database_url, "SELECT COUNT(*) FROM admin_operation_logs WHERE target_type = 'app_setting' AND target_id = 'WECOM_CORP_ID'") == 1
+
+
+def test_app_settings_api_secret_write_returns_metadata_without_raw_value_or_reference(monkeypatch, tmp_path) -> None:
+    client = _prepare_client(monkeypatch, tmp_path)
+    token = _token(client.get("/admin/config/app-settings").text)
+    raw_secret = "complete-contact-secret"
+
+    response = client.put(
+        "/api/admin/config/app-settings",
+        json={
+            "admin_action_token": token,
+            "confirm": True,
+            "operator": "next-test",
+            "settings": {"WECOM_CONTACT_SECRET": raw_secret},
+        },
+    )
+
+    assert response.status_code == 200
+    assert raw_secret not in response.text
+    assert "secretref:file:" not in response.text
+    changed = response.json()["changed"]
+    assert changed == [
+        {
+            "key": "WECOM_CONTACT_SECRET",
+            "configured": True,
+            "display_value": "[redacted]",
+            "version": changed[0]["version"],
+            "updated_at": changed[0]["updated_at"],
+        }
+    ]
+    stored = _scalar(_db_url(monkeypatch), "SELECT value FROM app_settings WHERE key = 'WECOM_CONTACT_SECRET'")
+    assert is_secret_reference(stored)
+    assert FileSecretStore(tmp_path / "secret-store").read(stored) == raw_secret
 
 
 def test_app_settings_save_requires_clear_token_and_confirm_errors(monkeypatch, tmp_path) -> None:
@@ -371,7 +435,7 @@ def test_config_category_detail_returns_blocks_and_masks_sensitive_fields(monkey
     secret = next(field for field in fields if field["key"] == "WECOM_SECRET")
     assert secret["sensitive"] is True
     assert secret["value"] == ""
-    assert secret["display_value"] == "sup***ue"
+    assert secret["display_value"] == "[redacted]"
     assert secret["configured"] is True
     assert any(field["key"] == "WECOM_CALLBACK_TOKEN" for field in fields)
 
@@ -458,7 +522,10 @@ def test_config_category_enabled_update_uses_app_settings_and_preserves_auth_tab
                 """
             )
         )
-    token = _token(client.get("/admin/config/app-settings").text)
+    token = _token(
+        client.get("/admin/config/app-settings").text,
+        path="/api/admin/config/categories/{category_key}/enabled",
+    )
 
     response = client.put(
         "/api/admin/config/categories/wechat_pay/enabled",
@@ -488,12 +555,15 @@ def test_config_category_settings_save_skips_empty_sensitive_and_rejects_cross_c
     engine = create_engine(database_url, future=True)
     with engine.begin() as conn:
         conn.execute(text("INSERT INTO app_settings (key, value) VALUES ('WECHAT_PAY_API_V3_KEY', 'original-v3-secret')"))
-    token = _token(client.get("/admin/config/app-settings").text)
-
+    token_page = client.get("/admin/config/app-settings").text
+    category_settings_token = _token(
+        token_page,
+        path="/api/admin/config/categories/{category_key}/settings",
+    )
     saved = client.put(
         "/api/admin/config/categories/wechat_pay/settings",
         json={
-            "admin_action_token": token,
+            "admin_action_token": category_settings_token,
             "operator": "category-settings-test",
             "settings": {
                 "WECHAT_PAY_NOTIFY_URL": "https://pay.example.test/notify",
@@ -505,7 +575,7 @@ def test_config_category_settings_save_skips_empty_sensitive_and_rejects_cross_c
     cross_category = client.put(
         "/api/admin/config/categories/wechat_pay/settings",
         json={
-            "admin_action_token": token,
+            "admin_action_token": category_settings_token,
             "operator": "category-settings-test",
             "settings": {"ALIPAY_APP_ID": "alipay-app"},
         },
@@ -523,7 +593,16 @@ def test_config_category_settings_save_skips_empty_sensitive_and_rejects_cross_c
 def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tmp_path) -> None:
     client = _prepare_client(monkeypatch, tmp_path)
     database_url = _db_url(monkeypatch)
-    token = _token(client.get("/admin/config/app-settings").text)
+    token_page = client.get("/admin/config/app-settings").text
+    category_settings_token = _token(
+        token_page,
+        path="/api/admin/config/categories/{category_key}/settings",
+    )
+    push_capability_token = _token(
+        token_page,
+        method="PATCH",
+        path="/api/admin/config/push-capabilities/{capability_key}",
+    )
 
     detail_page = client.get("/admin/config/detail/webhooks_push")
     assert detail_page.status_code == 200
@@ -537,7 +616,7 @@ def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tm
     rejected_legacy_save = client.put(
         "/api/admin/config/categories/webhooks_push/settings",
         json={
-            "admin_action_token": token,
+            "admin_action_token": category_settings_token,
             "operator": "webhook-runtime-test",
             "settings": {
                 "AICRM_QUESTIONNAIRE_EXTERNAL_PUSH_MODE": "queue",
@@ -565,7 +644,7 @@ def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tm
 
     saved = client.patch(
         "/api/admin/config/push-capabilities/questionnaire_external_push",
-        headers={"X-Admin-Action-Token": token},
+        headers={"X-Admin-Action-Token": push_capability_token},
         json={"enabled": True, "operator": "webhook-runtime-test"},
     )
 
@@ -585,7 +664,7 @@ def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tm
 
     welcome_saved = client.patch(
         "/api/admin/config/push-capabilities/welcome_message",
-        headers={"X-Admin-Action-Token": token},
+        headers={"X-Admin-Action-Token": push_capability_token},
         json={"enabled": True, "operator": "webhook-runtime-test"},
     )
 
@@ -602,7 +681,7 @@ def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tm
     rejected = client.put(
         "/api/admin/config/categories/webhooks_push/settings",
         json={
-            "admin_action_token": token,
+            "admin_action_token": category_settings_token,
             "operator": "webhook-runtime-test",
             "settings": {"AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES": "*"},
         },
@@ -614,7 +693,7 @@ def test_webhooks_push_category_controls_external_effect_runtime(monkeypatch, tm
     rejected_host = client.put(
         "/api/admin/config/categories/webhooks_push/settings",
         json={
-            "admin_action_token": token,
+            "admin_action_token": category_settings_token,
             "operator": "webhook-runtime-test",
             "settings": {"AICRM_EXTERNAL_EFFECT_ALLOWED_BASE_HOSTS": "localhost"},
         },
@@ -631,7 +710,13 @@ def test_config_category_check_and_invalid_category_are_controlled(monkeypatch, 
     missing = client.get("/api/admin/config/categories/not-a-category")
     save_missing = client.put(
         "/api/admin/config/categories/not-a-category/settings",
-        json={"admin_action_token": _token(client.get("/admin/config/app-settings").text), "settings": {"WECOM_CORP_ID": "ww"}},
+        json={
+            "admin_action_token": _token(
+                client.get("/admin/config/app-settings").text,
+                path="/api/admin/config/categories/{category_key}/settings",
+            ),
+            "settings": {"WECOM_CORP_ID": "ww"},
+        },
     )
 
     assert check.status_code == 200
@@ -647,7 +732,11 @@ def test_config_category_check_and_invalid_category_are_controlled(monkeypatch, 
 
 def test_setup_wizard_saves_and_repeated_submit_is_noop(monkeypatch, tmp_path) -> None:
     client = _prepare_client(monkeypatch, tmp_path)
-    token = _token(client.get("/setup/wizard").text)
+    token = _token(
+        client.get("/setup/wizard").text,
+        method="POST",
+        path="/setup/wizard/save",
+    )
     payload = {
         "admin_action_token": token,
         "operator": "wizard-test",
@@ -674,13 +763,27 @@ def test_setup_wizard_saves_and_repeated_submit_is_noop(monkeypatch, tmp_path) -
 
 def test_login_access_save_and_directory_refresh_do_not_call_wecom(monkeypatch, tmp_path) -> None:
     client = _prepare_client(monkeypatch, tmp_path)
-    token = _token(client.get("/admin/config/detail/admin_access").text)
+    token_page = client.get("/admin/config/detail/admin_access").text
+    refresh_token = _token(
+        token_page,
+        method="POST",
+        path="/admin/config/login-access/directory/refresh",
+    )
+    save_token = _token(
+        token_page,
+        method="POST",
+        path="/admin/config/login-access/save",
+    )
 
-    refresh = client.post("/admin/config/login-access/directory/refresh", data={"admin_action_token": token}, follow_redirects=False)
+    refresh = client.post(
+        "/admin/config/login-access/directory/refresh",
+        data={"admin_action_token": refresh_token},
+        follow_redirects=False,
+    )
     save = client.post(
         "/admin/config/login-access/save",
         data={
-            "admin_action_token": token,
+            "admin_action_token": save_token,
             "wecom_userid": "root.admin",
             "wecom_corpid": "ww-next-corp",
             "display_name": "Root Admin",
@@ -701,6 +804,7 @@ def test_login_access_save_and_directory_refresh_do_not_call_wecom(monkeypatch, 
     assert save.headers["location"].startswith("/admin/config/detail/admin_access")
     database_url = _db_url(monkeypatch)
     assert _scalar(database_url, "SELECT COUNT(*) FROM admin_users WHERE wecom_userid = 'root.admin'") == 1
+    assert _scalar(database_url, "SELECT session_version FROM admin_users WHERE wecom_userid = 'root.admin'") == 2
     assert _scalar(database_url, "SELECT COUNT(*) FROM admin_user_roles WHERE role_code = 'viewer'") == 1
     assert _scalar(database_url, "SELECT COUNT(*) FROM admin_operation_logs WHERE target_type = 'admin_user'") == 1
 

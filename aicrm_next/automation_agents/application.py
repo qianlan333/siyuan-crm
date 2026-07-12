@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 from typing import Any
 from urllib.parse import quote, urlparse
 from uuid import uuid4
@@ -14,6 +13,7 @@ from aicrm_next.send_content.dto import SendContentPackage, SendContentPreviewRe
 from aicrm_next.send_content.repo import build_send_content_repository
 from aicrm_next.shared.errors import ContractError
 from aicrm_next.shared.runtime import production_environment
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .dto import AutomationAgentCreateRequest, AutomationAgentUpdateRequest
 from .repository import AutomationAgentRepository, build_automation_agent_repository, _text
@@ -360,7 +360,7 @@ class AutomationAgentWebhookService:
                 return {"ok": False, "error": "missing_token"}, 401
             if not hmac.compare_digest(configured_token, provided_token):
                 return {"ok": False, "error": "invalid_token"}, 401
-        secret = _text(agent.get("inbound_webhook_secret") or os.getenv("AICRM_AUTOMATION_AGENT_WEBHOOK_SECRET"))
+        secret = _text(agent.get("inbound_webhook_secret") or runtime_setting("AICRM_AUTOMATION_AGENT_WEBHOOK_SECRET"))
         signature = _text(headers.get("X-AICRM-Signature") or headers.get("x-aicrm-signature"))
         if signature:
             if not secret and production_environment():

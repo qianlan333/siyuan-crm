@@ -602,9 +602,13 @@ def test_customer_context_closes_internally_created_repositories(monkeypatch):
 def test_customer_api_and_admin_page_smoke_next_primary(monkeypatch):
     from aicrm_next.main import create_app
 
+    class NoopPiiAuditRepository:
+        def record_pii_access(self, _event) -> None:
+            pass
+
     _production_env(monkeypatch)
     _patch_next_repo(monkeypatch, FakeNextCustomerReadRepository())
-    client = TestClient(create_app())
+    client = TestClient(create_app(pii_audit_repository=NoopPiiAuditRepository()))
 
     list_response = client.get("/api/customers?limit=10")
     detail_response = client.get("/api/customers/wx_ext_001")

@@ -56,7 +56,7 @@ from .external_effects import (
     plan_group_ops_action_effect,
     plan_group_ops_external_effect,
 )
-from .projections import group_asset_item, plan_list_item
+from .projections import group_asset_item, plan_list_item, plan_public_payload
 from .repo import GroupOpsRepository, build_group_ops_repository, plan_binding_summary
 
 
@@ -168,97 +168,6 @@ def _coerce_plan_id(value: Any) -> int:
     return int(text or 0)
 
 
-def _plan_public_payload(repo: GroupOpsRepository, plan: dict[str, Any]) -> dict[str, Any]:
-    plan_id = int(plan["id"])
-    scopes = _optional_group_ops_detail([], lambda: repo.list_plan_scopes(plan_id)) if hasattr(repo, "list_plan_scopes") else []
-    groups = repo.list_bound_groups(plan_id)
-    segmentation = _optional_group_ops_detail(None, lambda: repo.get_segmentation(plan_id)) if hasattr(repo, "get_segmentation") else None
-    rule_stats = {"total": 0, "layers": []}
-    if segmentation and segmentation.get("rule_key") and segmentation.get("rule_version"):
-        rows, total = ([], 0)
-        if hasattr(repo, "list_audience_rule_results"):
-            rows, total = _optional_group_ops_detail(
-                ([], 0),
-                lambda: repo.list_audience_rule_results(
-                    clean_text(segmentation["rule_key"]),
-                    int(segmentation["rule_version"]),
-                    plan_id,
-                    {"limit": 10000, "offset": 0},
-                ),
-            )
-        counts: dict[str, int] = {}
-        for row in rows:
-            layer = clean_text(row.get("layer_key"))
-            counts[layer] = counts.get(layer, 0) + 1
-        rule_stats = {"total": total, "layers": [{"layerKey": key, "count": value} for key, value in sorted(counts.items())]}
-    execution_rows, execution_total = (
-        _optional_group_ops_detail(([], 0), lambda: repo.list_execution_logs(plan_id, {"limit": 1, "offset": 0}))
-        if hasattr(repo, "list_execution_logs")
-        else ([], 0)
-    )
-    result_rows = []
-    if segmentation and hasattr(repo, "list_audience_rule_results"):
-        result_rows = _optional_group_ops_detail(
-            ([], 0),
-            lambda: repo.list_audience_rule_results(
-                clean_text(segmentation.get("rule_key")),
-                int(segmentation.get("rule_version") or 0),
-                plan_id,
-                {"limit": 10000},
-            ),
-        )[0]
-    webhook_key = clean_text(plan.get("webhook_key"))
-    payload = {
-        "planId": f"plan_{plan_id}",
-        "id": plan_id,
-        "name": clean_text(plan.get("plan_name")),
-        "plan_name": clean_text(plan.get("plan_name")),
-        "type": "webhook_receiver" if plan.get("plan_type") == "webhook" else "standard",
-        "plan_type": clean_text(plan.get("plan_type")),
-        "status": clean_text(plan.get("status")),
-        "operatorMemberId": clean_text(plan.get("owner_userid")),
-        "owner_userid": clean_text(plan.get("owner_userid")),
-        "operator_member": {"userid": clean_text(plan.get("owner_userid")), "name": clean_text(plan.get("owner_name"))},
-        "defaultActionType": clean_text(plan.get("default_action_type") or "record_only"),
-        "allowNoSop": bool(plan.get("allow_no_sop", True)),
-        "allowExternalRecipients": bool(plan.get("allow_external_recipients", True)),
-        "description": clean_text(plan.get("description")),
-        "boundGroups": groups,
-        "boundGroupIds": [clean_text(item.get("chat_id") or item.get("scope_ref_id")) for item in groups]
-        + [clean_text(item.get("scope_ref_id")) for item in scopes if item.get("scope_type") == "group"],
-        "boundAudienceIds": [clean_text(item.get("scope_ref_id")) for item in scopes if item.get("scope_type") == "audience"],
-        "webhook": {
-            "endpointKey": webhook_key,
-            "url": _webhook_path(webhook_key) if webhook_key else "",
-            "method": "POST",
-            "tokenStatus": "generated" if plan.get("webhook_token_hash") else "missing",
-            "signatureEnabled": bool(plan.get("signature_secret_hash")),
-            "lastRotatedAt": clean_text(plan.get("last_rotated_at") or plan.get("updated_at")),
-        },
-        "segmentation": segmentation or {},
-        "lastRefreshAt": max([clean_text(item.get("computed_at")) for item in result_rows] or [""]),
-        "segmentationStats": rule_stats,
-        "executionStats": {
-            "total": execution_total,
-            "lastStatus": clean_text(execution_rows[0].get("status")) if execution_rows else "",
-        },
-        "created_at": clean_text(plan.get("created_at")),
-        "updated_at": clean_text(plan.get("updated_at")),
-        "archived_at": clean_text(plan.get("archived_at")),
-    }
-    if plan.get("plaintext_token"):
-        payload["webhook"]["token"] = clean_text(plan.get("plaintext_token"))
-        payload["webhook"]["tokenStatus"] = "generated"
-    return payload
-
-
-def _optional_group_ops_detail(default: Any, getter: Any) -> Any:
-    try:
-        return getter()
-    except RepositoryProviderError:
-        return default
-
-
 def _queue_count() -> int:
     try:
         from aicrm_next.integration_gateway.wecom_group_adapter import build_group_ops_queue_stats_gateway
@@ -333,7 +242,7 @@ class CreateGroupOpsPlanCommand:
             return _production_unavailable()
         plan = repo.create_plan(request.model_dump(exclude_none=True))
         return _response(
-            {"item": plan, **_plan_public_payload(repo, plan)},
+            {"item": plan, **plan_public_payload(repo, plan)},
             status_code=201,
             repo=repo,
         )
@@ -351,7 +260,7 @@ class GetGroupOpsPlanQuery:
         return _response(
             {
                 "item": plan,
-                "plan": _plan_public_payload(repo, plan),
+                "plan": plan_public_payload(repo, plan),
                 "groups_summary": plan_binding_summary(repo, int(plan_id)),
                 "nodes": repo.list_nodes(int(plan_id)),
             },
@@ -369,7 +278,7 @@ class UpdateGroupOpsPlanCommand:
             return _production_unavailable()
         _plan_or_404(repo, plan_id)
         plan = repo.update_plan(int(plan_id), request.model_dump(exclude_none=True))
-        return _response({"item": plan, **_plan_public_payload(repo, plan)}, repo=repo)
+        return _response({"item": plan, **plan_public_payload(repo, plan)}, repo=repo)
 
 
 class EnableGroupOpsPlanCommand:
@@ -382,7 +291,7 @@ class EnableGroupOpsPlanCommand:
             return _production_unavailable()
         _plan_or_404(repo, plan_id)
         plan = repo.update_plan(int(plan_id), {"status": "active", "operator": operator})
-        return _response({"item": plan, **_plan_public_payload(repo, plan)}, repo=repo)
+        return _response({"item": plan, **plan_public_payload(repo, plan)}, repo=repo)
 
 
 class DisableGroupOpsPlanCommand:
@@ -395,7 +304,7 @@ class DisableGroupOpsPlanCommand:
             return _production_unavailable()
         _plan_or_404(repo, plan_id)
         plan = repo.update_plan(int(plan_id), {"status": "disabled", "operator": operator})
-        return _response({"item": plan, **_plan_public_payload(repo, plan)}, repo=repo)
+        return _response({"item": plan, **plan_public_payload(repo, plan)}, repo=repo)
 
 
 class ArchiveGroupOpsPlanCommand:
@@ -407,7 +316,7 @@ class ArchiveGroupOpsPlanCommand:
         if repo is None:
             return _production_unavailable()
         plan = repo.archive_plan(int(plan_id), operator=operator)
-        return _response({"archived": True, "item": plan, **_plan_public_payload(repo, plan)}, repo=repo)
+        return _response({"archived": True, "item": plan, **plan_public_payload(repo, plan)}, repo=repo)
 
 
 class ListGroupOpsPlanGroupsQuery:

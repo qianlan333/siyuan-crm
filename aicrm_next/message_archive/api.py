@@ -9,6 +9,8 @@ from fastapi import APIRouter, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
+from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
+
 from .application import (
     ListExternalChatRecordsQuery,
     ListArchivedMessagesQuery,
@@ -20,7 +22,6 @@ from .sync_service import archive_health_payload, execute_archive_sync
 
 router = APIRouter()
 _EXTERNAL_CHAT_SOURCE_STATUS = "external_chat_records"
-_EXTERNAL_TOKEN_ENV_KEY = "AUTOMATION_INTERNAL_API_TOKEN"
 _EXTERNAL_CHAT_PAGE_SIZE = 20
 
 
@@ -48,31 +49,35 @@ def _external_error(*, error_code: str, message: str, status_code: int) -> JSONR
 
 
 def _external_auth_failure(request: Request) -> JSONResponse | None:
-    expected = _text(os.getenv(_EXTERNAL_TOKEN_ENV_KEY))
-    if not expected:
+    auth_header = _text(request.headers.get("Authorization"))
+    provided = _text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
+    result = validate_internal_service_token("archive", provided)
+    if result.error == "internal_token_not_configured":
         return _external_error(
             error_code="internal_token_not_configured",
             message="internal token not configured",
             status_code=503,
         )
-    auth_header = _text(request.headers.get("Authorization"))
-    provided = _text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
     if not provided:
         return _external_error(error_code="missing_internal_token", message="missing internal token", status_code=401)
-    if provided != expected:
+    if not result.ok:
         return _external_error(error_code="invalid_internal_token", message="invalid internal token", status_code=401)
     return None
 
 
 def _internal_auth_failure(request: Request) -> JSONResponse | None:
-    expected = _text(os.getenv(_EXTERNAL_TOKEN_ENV_KEY))
-    if not expected:
-        return None
     auth_header = _text(request.headers.get("Authorization"))
     provided = _text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
+    result = validate_internal_service_token("archive", provided)
+    if result.error == "internal_token_not_configured":
+        return _external_error(
+            error_code="internal_token_not_configured",
+            message="internal token not configured",
+            status_code=503,
+        )
     if not provided:
         return _external_error(error_code="missing_internal_token", message="missing internal token", status_code=401)
-    if provided != expected:
+    if not result.ok:
         return _external_error(error_code="invalid_internal_token", message="invalid internal token", status_code=401)
     return None
 

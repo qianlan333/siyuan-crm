@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS business_contacts (
     assert "external_userid" in violations[0].detail
 
 
-def test_sql_static_guard_allows_service_period_mobile_snapshot(tmp_path: Path) -> None:
+def test_sql_static_guard_blocks_service_period_mobile_snapshot(tmp_path: Path) -> None:
     manifest = _write_manifest(
         tmp_path,
         baseline_prefix="0073",
@@ -128,7 +128,10 @@ CREATE TABLE IF NOT EXISTS service_period_entitlements (
 ''',
     )
 
-    assert check_sql_static_guard(root=tmp_path, manifest_path=manifest) == []
+    violations = check_sql_static_guard(root=tmp_path, manifest_path=manifest)
+
+    assert [violation.rule for violation in violations] == ["legacy_identity_column_in_business_sql"]
+    assert "service_period_entitlements declares legacy identity column mobile_snapshot" in violations[0].detail
 
 
 def test_runtime_public_retired_table_reference_fails(tmp_path: Path) -> None:

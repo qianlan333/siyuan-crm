@@ -1,0 +1,347 @@
+schema_version: 1
+owner: shared_security
+parent_issue: 72
+
+product_boundary:
+  user_visible_capability_delta: none
+  new_product_routes_pages_menus: none
+  new_business_models_tables: none
+
+secret_defaults: &secret_defaults
+  current_sources:
+    - environment
+    - app_settings
+  target_provider: versioned_file_secret_store
+  rotation_owner: platform_ops
+  rollback: previous_secret_version
+
+secret_keys:
+  AUTOMATION_INTERNAL_API_TOKEN:
+    <<: *secret_defaults
+    purpose: automation_worker
+    runtime_consumers:
+      - aicrm_next.shared.internal_service_tokens
+      - aicrm_next.platform_foundation.internal_events.api
+      - aicrm_next.platform_foundation.external_effects.api
+  IDENTITY_INTERNAL_API_TOKEN:
+    <<: *secret_defaults
+    purpose: identity
+    runtime_consumers:
+      - aicrm_next.shared.internal_service_tokens
+      - aicrm_next.admin_auth.route_policy
+  ARCHIVE_INTERNAL_API_TOKEN:
+    <<: *secret_defaults
+    purpose: archive
+    runtime_consumers:
+      - aicrm_next.shared.internal_service_tokens
+      - aicrm_next.message_archive.api
+      - scripts.run_incremental_archive_sync
+  GROUP_BROADCAST_INTERNAL_API_TOKEN:
+    <<: *secret_defaults
+    purpose: group_broadcast
+    runtime_consumers:
+      - aicrm_next.shared.internal_service_tokens
+      - aicrm_next.automation_engine.group_ops.broadcast
+  CALLBACK_INTERNAL_API_TOKEN:
+    <<: *secret_defaults
+    purpose: callback
+    runtime_consumers:
+      - aicrm_next.shared.internal_service_tokens
+      - aicrm_next.platform_foundation.webhook_inbox.api
+  AUTOMATION_ACTIVATION_WEBHOOK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_config
+  SECRET_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.shared.runtime
+      - aicrm_next.admin_auth.service
+      - aicrm_next.shared.signed_session
+      - aicrm_next.questionnaire.oauth
+      - aicrm_next.radar_links
+  CRON_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_jobs.routes
+  AICRM_NEXT_ACTION_TOKEN_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_auth.action_token
+      - aicrm_next.admin_jobs.routes
+  AICRM_QUESTIONNAIRE_OAUTH_STATE_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.questionnaire.oauth
+  AICRM_AI_AUDIENCE_API_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_audience_ops.api
+  AICRM_AI_AUDIENCE_SPEC_API_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_audience_ops.external_auth
+  AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_audience_ops.test_agent_service
+      - aicrm_next.ai_audience_ops.webhook_service
+  AICRM_AI_AUDIENCE_AGENT_API_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_audience_ops.agent_gateway
+  AICRM_RUNTIME_V2_AGENT_API_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_audience_ops.agent_gateway
+  AICRM_AUTOMATION_AGENT_WEBHOOK_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.automation_agents.application
+  AICRM_EXTERNAL_CAMPAIGN_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_assist.external_campaigns
+  AICRM_MEDIA_UPLOAD_PROVIDER_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.media_live_adapter
+  AICRM_OAUTH_IDENTITY_APP_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.oauth_identity_live_adapter
+  AICRM_PAYMENT_COMMERCE_PROVIDER_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.payment_commerce_live_adapter
+  AICRM_WECOM_CONTACT_CALLBACK_AES_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_contact_callback_live_adapter
+  AICRM_WECOM_CONTACT_CALLBACK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_contact_callback_live_adapter
+  AICRM_WECOM_GROUP_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_customer_group_client
+      - aicrm_next.integration_gateway.wecom_media_upload_client
+  AICRM_WECOM_MEDIA_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_media_upload_client
+  AICRM_WECOM_OPERATION_MEMBERS_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_operation_members_client
+  AICRM_WECOM_TAG_AGENT_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_tag_live_gateway
+  DEEPSEEK_API_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.ai_audience_ops.agent_gateway
+  MCP_BEARER_TOKEN:
+    <<: *secret_defaults
+    purpose: mcp
+    runtime_consumers:
+      - aicrm_next.shared.internal_service_tokens
+      - aicrm_next.admin_jobs.application
+  LAOHUANG_CHAT_WEBHOOK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_config
+  OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_config.application
+  QUESTIONNAIRE_SUBMIT_WEBHOOK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_config.application
+      - aicrm_next.questionnaire.external_push
+  AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.platform_foundation.external_effects.adapters
+      - aicrm_next.platform_foundation.external_effects.test_receiver
+      - aicrm_next.questionnaire.external_push
+  AICRM_SIDEBAR_JSSDK_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_jssdk_adapter
+  SIDEBAR_THIRD_PARTY_API_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_config
+  WECOM_CONTACT_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wecom_tag_live_gateway
+      - aicrm_next.integration_gateway.wecom_operation_members_client
+      - aicrm_next.integration_gateway.wecom_channel_entry_client
+      - aicrm_next.platform_foundation.external_effects.adapters
+  WECOM_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.auth_wecom.service
+      - aicrm_next.identity_contact.sidebar_jssdk
+      - aicrm_next.integration_gateway.wecom_jssdk_adapter
+      - aicrm_next.integration_gateway.wecom_channel_entry_client
+  WECOM_ARCHIVE_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.message_archive.sync_service
+  WECOM_CALLBACK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.channel_entry.application
+      - aicrm_next.admin_read_model.projections
+  WECOM_CALLBACK_AES_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.channel_entry.application
+      - aicrm_next.channel_entry.wecom_crypto
+  WECHAT_MP_APP_SECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.questionnaire_adapters
+      - aicrm_next.questionnaire.application
+      - aicrm_next.public_product.h5_wechat_pay
+  WECHAT_PAY_API_V3_KEY:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wechat_pay_client
+      - aicrm_next.public_product.h5_wechat_pay
+  WECHAT_PAY_CERT_SERIAL_NO:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wechat_pay_client
+      - aicrm_next.public_product.h5_wechat_pay
+  WECHAT_SHOP_APPSECRET:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.integration_gateway.wechat_shop_client
+      - aicrm_next.commerce.wechat_shop_service
+  WECHAT_SHOP_CALLBACK_TOKEN:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.shared.runtime
+      - aicrm_next.commerce.wechat_shop_signature
+      - aicrm_next.commerce.wechat_shop_service
+  ADMIN_BREAK_GLASS_PASSWORD_HASH:
+    <<: *secret_defaults
+    runtime_consumers:
+      - aicrm_next.admin_auth.service
+
+internal_token_purpose_policy:
+  exact_match_required: true
+  cross_purpose_replay: deny
+  route_policy_field: token_purpose
+  purposes:
+    mcp: MCP_BEARER_TOKEN
+    identity: IDENTITY_INTERNAL_API_TOKEN
+    archive: ARCHIVE_INTERNAL_API_TOKEN
+    group_broadcast: GROUP_BROADCAST_INTERNAL_API_TOKEN
+    callback: CALLBACK_INTERNAL_API_TOKEN
+    automation_worker: AUTOMATION_INTERNAL_API_TOKEN
+  legacy_fallback:
+    flag: AICRM_LEGACY_INTERNAL_TOKEN_FALLBACK_ENABLED
+    default: false
+    source_key: AUTOMATION_INTERNAL_API_TOKEN
+    owner: platform_ops
+    delete_after: 2026-08-10
+    production_cutover_required_state: false
+
+pii_audit_defaults:
+  customer:
+    purpose: customer_record_access
+    audit_mode: required
+    scope_source: route_policy
+    raw_payload_allowed: false
+  sensitive:
+    purpose: sensitive_record_access
+    audit_mode: required
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  financial:
+    purpose: financial_record_access
+    audit_mode: required
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+
+pii_route_overrides:
+  - path_prefix: /api/identity
+    purpose: identity_resolution
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - path_prefix: /api/messages
+    purpose: message_content_access
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - path_prefix: /api/archive
+    purpose: message_archive_access
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - path_prefix: /api/admin/questionnaires
+    purpose: questionnaire_response_access
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - path_prefix: /api/h5/questionnaires
+    purpose: questionnaire_self_service_access
+    audit_mode: required
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - path_prefix: /api/admin/radar-links
+    purpose: radar_event_access
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - route_names:
+      - class_user_management_export
+      - export_questionnaire
+      - export_radar_link_events
+      - export_wechat_admin_orders
+      - create_admin_export
+      - get_admin_export
+      - user_ops_export_preview
+      - user_ops_export_stub
+    purpose: pii_export
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+  - route_names:
+      - api_admin_jobs_order_identity_repair_run
+      - repair_entry
+    purpose: identity_forced_repair
+    audit_mode: required_fail_closed
+    scope_source: resource_fingerprint
+    raw_payload_allowed: false
+
+outbound_webhook_callers:
+  - source: aicrm_next.platform_foundation.external_effects.adapters.WebhookAdapter
+    dispatch_owner: aicrm_next.external_push.https_transport
+    redirect_policy: deny
+    dns_policy: resolve_validate_pin
+    real_execution_change: none
+  - source: aicrm_next.external_push.service
+    dispatch_owner: aicrm_next.external_push.https_transport
+    redirect_policy: deny
+    dns_policy: resolve_validate_pin
+    real_execution_change: none
+  - source: aicrm_next.commerce.external_push_admin
+    dispatch_owner: aicrm_next.external_push.https_transport
+    redirect_policy: deny
+    dns_policy: resolve_validate_pin
+    real_execution_change: none
+  - source: aicrm_next.questionnaire.external_push
+    dispatch_owner: aicrm_next.external_push.https_transport
+    redirect_policy: deny
+    dns_policy: resolve_validate_pin
+    real_execution_change: none

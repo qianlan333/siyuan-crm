@@ -22,7 +22,7 @@ from aicrm_next.platform_foundation.push_center.view_model import (
     build_jobs_payload,
     build_stats_payload,
 )
-from tests.group_ops_test_helpers import group_ops_api_client
+from tests.group_ops_test_helpers import group_ops_api_client  # noqa: F401
 
 
 class _FakeBroadcastJobAdapter(BroadcastJobAdapter):
@@ -263,7 +263,9 @@ def test_push_center_group_ops_shadow_failed_without_primary_is_not_business_fai
 
 def test_push_center_detail_includes_attempts_without_full_payload(next_client: TestClient) -> None:
     reset_external_effect_fixture_state()
-    job = _plan_job(effect_type=AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK, business_type="ai_assist_campaign", business_id="camp_loop", status="blocked", execution_mode="shadow")
+    job = _plan_job(
+        effect_type=AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK, business_type="ai_assist_campaign", business_id="camp_loop", status="blocked", execution_mode="shadow"
+    )
     repo = build_external_effect_repository()
     job_obj = repo.get_job(job["id"])
     assert job_obj is not None
@@ -348,7 +350,13 @@ def test_push_center_sections_stats_retry_cancel_auth(next_client: TestClient, m
 
 def test_push_center_page_smoke(next_client: TestClient) -> None:
     reset_external_effect_fixture_state()
-    _plan_job(effect_type=WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH, business_type="questionnaire", business_id="q_page", target_type="questionnaire_submission", target_id="sub_page")
+    _plan_job(
+        effect_type=WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH,
+        business_type="questionnaire",
+        business_id="q_page",
+        target_type="questionnaire_submission",
+        target_id="sub_page",
+    )
 
     response = next_client.get("/admin/push-center")
 
@@ -360,7 +368,7 @@ def test_push_center_page_smoke(next_client: TestClient) -> None:
     assert 'id="pushCenterTable"' in response.text
     assert 'id="detailModal"' in response.text
     assert 'id="detailPanel"' in response.text
-    assert 'data-close-detail' in response.text
+    assert "data-close-detail" in response.text
     assert 'role="dialog"' in response.text
     assert 'aria-modal="true"' in response.text
     assert 'aria-hidden="true"' in response.text
@@ -430,7 +438,7 @@ def test_questionnaire_default_external_push_is_queue_first(client: TestClient, 
 
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {phone_question_id: "13800000001"}},
+        json={"answers": {phone_question_id: "13800001006"}},
         headers={"Idempotency-Key": "push-center-questionnaire-default-queue"},
     )
     body = response.json()
@@ -443,7 +451,10 @@ def test_questionnaire_default_external_push_is_queue_first(client: TestClient, 
     assert body["external_effect_job_status"] == "queued"
 
 
-def test_group_ops_default_webhook_uses_external_effect_not_legacy_gateway(group_ops_api_client, monkeypatch) -> None:
+def test_group_ops_default_webhook_uses_external_effect_not_legacy_gateway(
+    group_ops_api_client,  # noqa: F811
+    monkeypatch,
+) -> None:
     monkeypatch.delenv("AICRM_GROUP_OPS_OUTBOUND_MODE", raising=False)
     monkeypatch.delenv("AICRM_GROUP_OPS_EXTERNAL_EFFECT_SEND_MODE", raising=False)
     response = group_ops_api_client.post(

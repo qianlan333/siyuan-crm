@@ -53,7 +53,7 @@ def test_webhook_inbox_admin_metrics_and_items(monkeypatch):
 
 def test_webhook_inbox_admin_filters_incident_window_pending_failed_rows(monkeypatch):
     repo = InMemoryWebhookInboxRepository()
-    pending = _seed(repo, "pending")
+    _seed(repo, "pending")
     failed = _seed(repo, "failed")
     succeeded = _seed(repo, "succeeded")
     outside = _seed(repo, "outside")
@@ -140,7 +140,7 @@ def test_webhook_inbox_admin_retry_and_skip_require_token(monkeypatch):
     row = _seed(repo)
     repo.mark_dead_letter(row["id"], error_code="RuntimeError", error_message="boom")
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "test-token")
+    monkeypatch.setenv("CALLBACK_INTERNAL_API_TOKEN", "test-token")
     client = TestClient(create_app(), raise_server_exceptions=False)
 
     rejected = client.post(f"/api/admin/webhook-inbox/{row['id']}/retry", json={"reason": "manual replay"})
@@ -177,7 +177,7 @@ def test_webhook_inbox_admin_dispatch_one_requires_token_and_supports_execute(mo
 
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api.WeComCallbackInboxWorker", FakeWorker)
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "test-token")
+    monkeypatch.setenv("CALLBACK_INTERNAL_API_TOKEN", "test-token")
     client = TestClient(create_app(), raise_server_exceptions=False)
 
     rejected = client.post(f"/api/admin/webhook-inbox/{row['id']}/dispatch", json={"dry_run": False})
@@ -206,7 +206,7 @@ def test_webhook_inbox_admin_run_due_defaults_to_dry_run(monkeypatch):
     repo = InMemoryWebhookInboxRepository()
     _seed(repo)
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "test-token")
+    monkeypatch.setenv("CALLBACK_INTERNAL_API_TOKEN", "test-token")
     client = TestClient(create_app(), raise_server_exceptions=False)
 
     response = client.post(

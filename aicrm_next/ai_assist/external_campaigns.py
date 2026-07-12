@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from datetime import datetime, time, timedelta
 from typing import Any, Mapping
@@ -11,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from aicrm_next.send_targets.dto import SendTargetRequest
 from aicrm_next.send_targets.resolver import SendTargetError, SendTargetResolver
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .external_campaigns_repo import ExternalCampaignRepository
 from .external_campaigns_repo import build_external_campaign_repository
@@ -138,7 +138,7 @@ def _configured_tokens() -> list[str]:
     tokens: list[str] = []
     seen: set[str] = set()
     for key in _TOKEN_KEYS:
-        token = _text(os.getenv(key))
+        token = _text(runtime_setting(key))
         if token and token not in seen:
             seen.add(token)
             tokens.append(token)
@@ -337,7 +337,13 @@ def _external_campaign_review_details(
     return details
 
 
-def _direct_auth_failure(headers: Mapping[str, Any], payload: JsonDict, *, allow_admin_action_token: bool) -> tuple[str, int] | None:
+def _direct_auth_failure(
+    headers: Mapping[str, Any],
+    payload: JsonDict,
+    *,
+    allow_admin_action_token: bool,
+    request: Any | None = None,
+) -> tuple[str, int] | None:
     failure = _auth_failure(headers)
     if failure is None:
         return None
@@ -345,7 +351,7 @@ def _direct_auth_failure(headers: Mapping[str, Any], payload: JsonDict, *, allow
         from aicrm_next.admin_jobs.routes import validate_admin_action_token
 
         token = _text(headers.get("X-Admin-Action-Token") or headers.get("x-admin-action-token") or payload.get("admin_action_token"))
-        token_error = validate_admin_action_token(token)
+        token_error = validate_admin_action_token(token, request=request)
         if not token_error:
             return None
         return ("admin_action_token_invalid", 401)
@@ -871,8 +877,19 @@ def create_external_campaigns_response(payload: JsonDict, headers: Mapping[str, 
         )
 
 
-def create_direct_wecom_private_send_response(payload: JsonDict, headers: Mapping[str, Any], *, allow_admin_action_token: bool = False) -> JsonDict | JSONResponse:
-    failure = _direct_auth_failure(headers, payload if isinstance(payload, dict) else {}, allow_admin_action_token=allow_admin_action_token)
+def create_direct_wecom_private_send_response(
+    payload: JsonDict,
+    headers: Mapping[str, Any],
+    *,
+    allow_admin_action_token: bool = False,
+    request: Any | None = None,
+) -> JsonDict | JSONResponse:
+    failure = _direct_auth_failure(
+        headers,
+        payload if isinstance(payload, dict) else {},
+        allow_admin_action_token=allow_admin_action_token,
+        request=request,
+    )
     if failure is not None:
         error, status_code = failure
         return JSONResponse({"ok": False, "error": error, "route_owner": "ai_crm_next"}, status_code=status_code)

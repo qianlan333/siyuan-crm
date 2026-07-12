@@ -170,11 +170,33 @@ def _production_success_marker_blockers() -> list[str]:
         for capability, response in probes.items():
             if response.status_code != 200:
                 continue
-            text = response.text.lower()
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = response.text
+            if isinstance(payload, dict) and (not payload.get("ok", True) or payload.get("degraded") is True):
+                continue
+            text = "\n".join(_string_values(payload)).lower()
             for marker in FIXTURE_MARKERS:
                 if marker in text:
                     blockers.append(f"{capability}:production_success_contains_{marker}")
     return blockers
+
+
+def _string_values(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        result: list[str] = []
+        for item in value.values():
+            result.extend(_string_values(item))
+        return result
+    if isinstance(value, (list, tuple)):
+        result = []
+        for item in value:
+            result.extend(_string_values(item))
+        return result
+    return []
 
 
 def run_check() -> dict[str, Any]:

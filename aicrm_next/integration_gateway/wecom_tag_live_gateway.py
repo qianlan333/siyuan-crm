@@ -6,6 +6,8 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 
 Json = dict[str, Any]
 
@@ -23,7 +25,11 @@ class WeComTagLiveGateway:
 
     def _access_token(self) -> str:
         corp_id = os.getenv("AICRM_WECOM_TAG_CORP_ID") or os.getenv("WECOM_CORP_ID") or ""
-        secret = os.getenv("AICRM_WECOM_TAG_AGENT_SECRET") or os.getenv("WECOM_CONTACT_SECRET") or os.getenv("WECOM_SECRET") or ""
+        secret = (
+            runtime_setting("AICRM_WECOM_TAG_AGENT_SECRET")
+            or runtime_setting("WECOM_CONTACT_SECRET")
+            or runtime_setting("WECOM_SECRET")
+        )
         if not corp_id.strip() or not secret.strip():
             raise RuntimeError("WECOM_CORP_ID and WECOM_CONTACT_SECRET are required for WeCom tag sync")
         query = urlencode(

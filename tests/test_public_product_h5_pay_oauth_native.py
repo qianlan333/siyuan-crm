@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
@@ -97,6 +98,60 @@ def test_h5_pay_oauth_callback_uses_native_client_and_sets_cookie(monkeypatch) -
         "code": "oauth-code-001",
     }
     assert calls["userinfo"] == {"access_token": "token_should_not_be_cookie", "openid": "op_pay_001"}
+
+
+def test_h5_pay_oauth_callback_resolves_secret_reference_before_exchange(monkeypatch) -> None:
+    calls: dict[str, str] = {}
+
+    class FakeOAuthClient:
+        def exchange_code(self, *, app_id: str, app_secret: str, code: str):
+            calls.update(app_id=app_id, app_secret=app_secret, code=code)
+            return {"openid": "op_secretref", "unionid": "un_secretref", "access_token": "token_secretref"}
+
+        def fetch_userinfo(self, *, access_token: str, openid: str):
+            return {"openid": openid, "unionid": "un_secretref", "nickname": "引用密钥用户"}
+
+    client = _client(monkeypatch)
+    monkeypatch.setenv("WECHAT_MP_APP_SECRET", "secretref:file:WECHAT_MP_APP_SECRET:v1_reference")
+
+    def resolve_setting(name: str, default: str = "") -> str:
+        if name == "WECHAT_MP_APP_SECRET":
+            return "resolved-wechat-mp-secret"
+        return os.getenv(name, default)
+
+    monkeypatch.setattr(h5_wechat_pay, "runtime_setting", resolve_setting)
+    h5_wechat_pay.set_h5_wechat_pay_oauth_client_factory(lambda: FakeOAuthClient())
+
+    response = client.get(
+        f"/api/h5/wechat-pay/oauth/callback?state={_state()}&code=oauth-code-secretref",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert calls == {
+        "app_id": "wx-pay-oauth-app",
+        "app_secret": "resolved-wechat-mp-secret",
+        "code": "oauth-code-secretref",
+    }
+
+
+def test_h5_pay_client_config_resolves_sensitive_secret_references(monkeypatch) -> None:
+    monkeypatch.setenv("WECHAT_PAY_API_V3_KEY", "secretref:file:WECHAT_PAY_API_V3_KEY:v1_reference")
+    monkeypatch.setenv("WECHAT_PAY_CERT_SERIAL_NO", "secretref:file:WECHAT_PAY_CERT_SERIAL_NO:v1_reference")
+
+    def resolve_setting(name: str, default: str = "") -> str:
+        resolved = {
+            "WECHAT_PAY_API_V3_KEY": "resolved-api-v3-key",
+            "WECHAT_PAY_CERT_SERIAL_NO": "resolved-merchant-serial",
+        }
+        return resolved.get(name, os.getenv(name, default))
+
+    monkeypatch.setattr(h5_wechat_pay, "runtime_setting", resolve_setting)
+
+    config = h5_wechat_pay._client_config()
+
+    assert config.api_v3_key == "resolved-api-v3-key"
+    assert config.merchant_serial_no == "resolved-merchant-serial"
 
 
 def test_h5_pay_oauth_start_skips_wechat_when_identity_cookie_exists(monkeypatch) -> None:

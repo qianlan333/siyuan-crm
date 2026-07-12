@@ -30,7 +30,10 @@ SERVICE_COMMANDS = {
 
 def _is_siyuan_deploy_overlay() -> bool:
     workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return "scripts/ensure_channel_multi_staff_schema.py" in workflow and "workflow_run:" not in workflow
+    return (
+        "scripts/ensure_channel_multi_staff_schema.py" in workflow
+        and not (ROOT / "deploy" / "production_runtime_units.json").exists()
+    )
 
 
 def _run_cli(args: list[str]) -> dict:

@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "description": "Issue #67 R00 golden contracts. Every domain keeps success, failure, and replay/concurrency evidence in its scoped CI job without real provider calls.",
+  "pii_logging_allowlist": [],
+  "domains": [
+    {
+      "domain": "auth",
+      "owner": "admin_auth/auth_wecom",
+      "ci_scope": "admin_auth_security",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_admin_auth_login_submit.py::test_break_glass_success_sets_next_cookie_and_redirects_safe_next",
+        "failure": "tests/test_admin_auth_login_submit.py::test_invalid_or_disabled_break_glass_login_is_controlled",
+        "replay_or_concurrency": "tests/test_questionnaire_oauth_state_security.py::test_oauth_state_replay_is_rejected"
+      }
+    },
+    {
+      "domain": "callback",
+      "owner": "channel_entry",
+      "ci_scope": "identity_contact",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_wecom_callback_inbox.py::test_callback_post_enqueues_and_acks_without_processing",
+        "failure": "tests/test_wecom_callback_inbox.py::test_callback_post_returns_503_when_inbox_write_fails",
+        "replay_or_concurrency": "tests/test_wecom_callback_inbox.py::test_ingest_wecom_callback_deduplicates_by_event_key"
+      }
+    },
+    {
+      "domain": "payment",
+      "owner": "commerce/platform_foundation",
+      "ci_scope": "ci_deploy",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_internal_events_payment_slice.py::test_payment_success_emits_payment_succeeded_and_duplicate_notify_is_idempotent",
+        "failure": "tests/test_internal_events_payment_slice.py::test_webhook_order_paid_consumer_skips_when_no_configured_job_or_production_config",
+        "replay_or_concurrency": "tests/test_internal_events_single_consumer_run.py::test_repeated_webhook_single_consumer_does_not_duplicate_external_effect_job"
+      }
+    },
+    {
+      "domain": "refund_entitlement",
+      "owner": "commerce/service_period",
+      "ci_scope": "commerce",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_next_wechat_pay_refunds.py::test_next_postgres_refund_result_updates_order_once",
+        "failure": "tests/test_next_wechat_pay_refunds.py::test_next_postgres_refund_does_not_call_wechat_pay_when_client_would_reject",
+        "replay_or_concurrency": "tests/test_next_wechat_pay_refunds.py::test_next_postgres_refund_result_is_idempotent_when_already_success"
+      }
+    },
+    {
+      "domain": "questionnaire",
+      "owner": "questionnaire/platform_foundation",
+      "ci_scope": "questionnaire",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_internal_events_questionnaire_slice.py::test_questionnaire_submit_emits_single_event_and_expected_consumer_runs",
+        "failure": "tests/test_questionnaire_h5_submit_validation.py::test_h5_submit_validation_failure_does_not_trigger_external_push",
+        "replay_or_concurrency": "tests/test_questionnaire_h5_submit_idempotency.py::test_h5_submit_idempotency_reuses_first_command_result"
+      }
+    },
+    {
+      "domain": "group_ops",
+      "owner": "automation_engine",
+      "ci_scope": "broadcast_group_ops",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_group_ops_token_broadcast_api.py::test_group_ops_broadcast_sends_text_only",
+        "failure": "tests/test_group_ops_token_broadcast_api.py::test_group_ops_broadcast_requires_internal_bearer_token",
+        "replay_or_concurrency": "tests/test_group_ops_token_broadcast_api.py::test_group_ops_broadcast_idempotency_does_not_send_twice"
+      }
+    },
+    {
+      "domain": "delivery",
+      "owner": "platform_foundation",
+      "ci_scope": "broadcast_group_ops",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_external_effects_mvp.py::test_webhook_adapter_enabled_allowlisted_2xx_succeeds_and_records_attempt",
+        "failure": "tests/test_external_effects_mvp.py::test_webhook_adapter_terminal_statuses_and_max_attempts",
+        "replay_or_concurrency": "tests/test_external_effects_mvp.py::test_external_effect_service_idempotency_filters_retry_and_cancel"
+      }
+    }
+  ]
+}

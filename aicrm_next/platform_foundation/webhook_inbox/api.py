@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hmac
-import os
 from datetime import date, datetime, time
 from decimal import Decimal
 from pathlib import Path
@@ -18,6 +16,7 @@ from aicrm_next.admin_shell import admin_path_for, shell_context
 from aicrm_next.channel_entry.inbox import WeComCallbackInboxWorker
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService
 from aicrm_next.platform_foundation.internal_events import InternalEventService
+from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
 
 from .repository import build_webhook_inbox_repository
 from .service import WebhookInboxService
@@ -83,15 +82,11 @@ def _json(payload: dict[str, Any], *, status_code: int = 200) -> JSONResponse:
 
 def _internal_token_error(request: Request) -> str:
     header = _text(request.headers.get("Authorization"))
-    if not header.lower().startswith("bearer "):
-        return "internal_token_required"
-    expected = _text(os.getenv("AUTOMATION_INTERNAL_API_TOKEN"))
-    if not expected:
-        return "automation_internal_token_not_configured"
-    actual = header.split(" ", 1)[1].strip()
-    if not hmac.compare_digest(actual, expected):
-        return "internal_token_required"
-    return ""
+    actual = header.split(" ", 1)[1].strip() if header.lower().startswith("bearer ") else ""
+    result = validate_internal_service_token("callback", actual)
+    if result.error == "internal_token_not_configured":
+        return "callback_internal_token_not_configured"
+    return result.error
 
 
 def _action_or_internal_token_error(request: Request, payload: dict[str, Any]) -> str:
@@ -99,7 +94,7 @@ def _action_or_internal_token_error(request: Request, payload: dict[str, Any]) -
     if not internal_error:
         return ""
     token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
-    return validate_admin_action_token(token)
+    return validate_admin_action_token(token, request=request)
 
 
 def _repo():

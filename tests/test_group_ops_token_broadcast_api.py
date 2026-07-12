@@ -16,7 +16,7 @@ AUTH_HEADERS = {
 
 @pytest.fixture(autouse=True)
 def _broadcast_runtime(monkeypatch):
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "pytest-internal-token")
+    monkeypatch.setenv("GROUP_BROADCAST_INTERNAL_API_TOKEN", "pytest-internal-token")
     monkeypatch.setenv("AICRM_GROUP_OPS_BROADCAST_PLAN_ID", "2")
     monkeypatch.setenv("AICRM_GROUP_OPS_MINIPROGRAM_APPID", "wx-fixture-miniprogram")
     monkeypatch.setenv("AICRM_GROUP_OPS_OUTBOUND_MODE", "external_effect")

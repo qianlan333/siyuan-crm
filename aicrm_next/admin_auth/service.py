@@ -15,11 +15,13 @@ from werkzeug.security import check_password_hash
 
 from aicrm_next.admin_shell import admin_path_for
 from aicrm_next.shared.runtime import require_signing_secret
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 
 SESSION_COOKIE = "aicrm_next_admin_session"
 CSRF_COOKIE = "aicrm_next_csrf"
 CSRF_SESSION_KEY = "csrf_token"
+SESSION_ID_KEY = "sid"
 SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
 DEFAULT_NEXT_PATH = "/admin"
 
@@ -160,7 +162,7 @@ def authenticate_break_glass(*, username: str, password: str) -> AuthResult:
     if not break_glass_enabled():
         return AuthResult(ok=False, error="break_glass_disabled")
     expected_username = normalize_text(os.getenv("ADMIN_BREAK_GLASS_USERNAME"))
-    password_hash = normalize_text(os.getenv("ADMIN_BREAK_GLASS_PASSWORD_HASH"))
+    password_hash = normalize_text(runtime_setting("ADMIN_BREAK_GLASS_PASSWORD_HASH"))
     if not expected_username or not password_hash:
         return AuthResult(ok=False, error="break_glass_not_configured")
     if normalize_text(username) != expected_username:
@@ -181,6 +183,7 @@ def authenticate_break_glass(*, username: str, password: str) -> AuthResult:
 def session_payload_with_csrf(payload: dict[str, Any]) -> dict[str, Any]:
     session_payload = dict(payload or {})
     session_payload[CSRF_SESSION_KEY] = normalize_text(session_payload.get(CSRF_SESSION_KEY)) or secrets.token_urlsafe(32)
+    session_payload[SESSION_ID_KEY] = normalize_text(session_payload.get(SESSION_ID_KEY)) or secrets.token_urlsafe(24)
     return session_payload
 
 

@@ -3166,12 +3166,12 @@ tables:
       - aicrm_next.service_period.application
       - aicrm_next.service_period.payment_consumer
       - aicrm_next.customer_read_model.sidebar_v2
-    migration_source: 0095_service_period_products
+    migration_source: 0097_service_period_unionid_cleanup
     pii_level: direct_contact
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_service_period_schema.py
-    notes: Unionid-first current service period credential. Repeated purchases extend end_at and preserve event history.
+    notes: Unionid-first current service period credential. Repeated purchases extend end_at and preserve event history; contact mobile is read from crm_user_identity instead of duplicated in this table.
 
   service_period_events:
     domain: service_period

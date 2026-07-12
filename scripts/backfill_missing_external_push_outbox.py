@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import argparse
-import json
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.script_runtime import ensure_repo_root_on_path
+    from scripts.script_runtime import ensure_repo_root_on_path, print_json
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from script_runtime import ensure_repo_root_on_path
+    from script_runtime import ensure_repo_root_on_path, print_json
 
 ensure_repo_root_on_path()
 
@@ -163,7 +162,7 @@ def main() -> int:
             "stderr": completed.stderr.strip(),
         }
         payload["ok"] = bool(payload["ok"] and completed.returncode == 0)
-    print(json.dumps(payload, ensure_ascii=False, default=str))
+    print_json(payload)
     return 0 if payload.get("ok") else 1
 
 

@@ -72,6 +72,7 @@ def test_retired_automation_project_pages_return_gone(monkeypatch) -> None:
 
 
 def test_retired_automation_project_pages_require_admin_session(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     client = _client(monkeypatch)
 
     response = client.get("/admin/automation-conversion/programs/1/setup", follow_redirects=False)
@@ -81,6 +82,7 @@ def test_retired_automation_project_pages_require_admin_session(monkeypatch) -> 
 
 
 def test_ai_audience_admin_pages_require_admin_session(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     client = _client(monkeypatch)
 
     page_response = client.get("/admin/automation-conversion", follow_redirects=False)
@@ -88,7 +90,8 @@ def test_ai_audience_admin_pages_require_admin_session(monkeypatch) -> None:
 
     assert page_response.status_code == 302
     assert page_response.headers["location"] == "/login?next=/admin/automation-conversion"
-    assert legacy_response.status_code == 404
+    assert legacy_response.status_code == 302
+    assert legacy_response.headers["location"] == "/login?next=/admin/automation-conversion/legacy"
 
 
 def test_automation_project_routes_are_removed_from_frontend_compat_inventory() -> None:

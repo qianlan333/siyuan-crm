@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 
 from .ai_audience_ops import register_ai_audience_event_consumers
 from . import fixture_reset_registry
-from .admin_auth.guards import admin_auth_required_response
+from .admin_auth.route_policy import route_policy_required_response
+from .admin_config.pii_audit_repository import AdminConfigPiiAuditRepository
 from .automation_engine.repo import reset_automation_fixture_state
 from .commerce.repo import reset_commerce_fixture_state
 from .media_library.repo import reset_media_library_fixture_state
@@ -21,7 +22,10 @@ from .router_registry import register_routers
 from .shared.errors import ApplicationError
 from .shared.repository_provider import RepositoryProviderError
 from .shared.release import current_release_sha
-from .shared.runtime import assert_required_runtime_secrets, fixture_mode
+from .shared.pii_audit import PiiAuditRepository, apply_pii_audit, pii_audit_enabled
+from .shared.route_policy import RoutePolicyIndex
+from .shared.runtime import assert_required_runtime_secrets, fixture_mode, require_signing_secret
+from .shared.safe_logging import safe_log_exception
 
 __all__ = [
     "app",
@@ -41,7 +45,7 @@ _CUSTOMER_TAGS_DIR = Path(__file__).resolve().parent / "customer_tags"
 logger = logging.getLogger(__name__)
 
 
-def create_app() -> FastAPI:
+def create_app(*, pii_audit_repository: PiiAuditRepository | None = None) -> FastAPI:
     assert_required_runtime_secrets()
     app = FastAPI(title="AI-CRM Next", version="0.1.0")
     register_payment_succeeded_consumers()
@@ -50,6 +54,9 @@ def create_app() -> FastAPI:
 
     if fixture_mode():
         fixture_reset_registry.reset_fixture_state()
+    route_policy_index = RoutePolicyIndex.from_manifest()
+    audit_repository = pii_audit_repository or AdminConfigPiiAuditRepository()
+    pii_fingerprint_secret = require_signing_secret("SECRET_KEY", local_fallback="aicrm-next-local-secret")
 
     @app.exception_handler(RepositoryProviderError)
     async def repository_provider_error_handler(request, exc):
@@ -77,7 +84,7 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(Exception)
     async def unhandled_error_handler(request, exc):
-        logger.exception("unhandled ai-crm next exception")
+        safe_log_exception(logger, "unhandled ai-crm next exception", exc)
         return JSONResponse(
             status_code=500,
             content={
@@ -89,11 +96,18 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def write_route_owner_headers(request, call_next):
-        auth_response = admin_auth_required_response(request)
+        auth_response = await route_policy_required_response(request, app=app, index=route_policy_index)
         if auth_response is not None:
             response = auth_response
         else:
             response = await call_next(request)
+        if pii_audit_enabled():
+            response = apply_pii_audit(
+                request=request,
+                response=response,
+                repository=audit_repository,
+                fingerprint_secret=pii_fingerprint_secret,
+            )
         response.headers.setdefault("X-AICRM-Route-Owner", "ai_crm_next")
         response.headers.setdefault("X-AICRM-Fallback-Used", "false")
         response.headers.setdefault("X-AICRM-App", "ai_crm_next")

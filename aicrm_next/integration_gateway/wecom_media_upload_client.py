@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-import os
 import time
 from typing import Any, Callable
+
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 JsonDict = dict[str, Any]
 HttpCallable = Callable[..., Any]
@@ -14,7 +15,7 @@ def _text(value: Any) -> str:
 
 def _first_env(*names: str) -> str:
     for name in names:
-        value = _text(os.getenv(name))
+        value = _text(runtime_setting(name, ""))
         if value:
             return value
     return ""

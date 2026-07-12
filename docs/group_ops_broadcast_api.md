@@ -18,7 +18,7 @@ POST https://www.youcangogogo.com/api/automation/group-ops/broadcast
 ## 鉴权与幂等
 
 ```http
-Authorization: Bearer <AUTOMATION_INTERNAL_API_TOKEN>
+Authorization: Bearer <GROUP_BROADCAST_INTERNAL_API_TOKEN>
 Idempotency-Key: <本次业务唯一值>
 ```
 

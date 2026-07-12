@@ -90,7 +90,7 @@ def test_execute_archive_sync_fetches_from_last_seq_and_only_persists_archive(mo
 
 
 def test_archive_sync_route_requires_internal_token_when_configured(monkeypatch) -> None:
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "archive-token")
+    monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", "archive-token")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     from aicrm_next.main import create_app
 
@@ -102,7 +102,7 @@ def test_archive_sync_route_requires_internal_token_when_configured(monkeypatch)
 
 
 def test_archive_sync_route_passes_archive_request_without_reply_queue(monkeypatch) -> None:
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "archive-token")
+    monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", "archive-token")
     monkeypatch.setenv("AICRM_ENABLE_IN_PROCESS_ARCHIVE_SYNC", "1")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     captured: dict = {}
@@ -140,7 +140,7 @@ def test_archive_sync_route_passes_archive_request_without_reply_queue(monkeypat
 
 
 def test_archive_sync_route_defaults_to_runner_only(monkeypatch) -> None:
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "archive-token")
+    monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", "archive-token")
     monkeypatch.delenv("AICRM_ENABLE_IN_PROCESS_ARCHIVE_SYNC", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     from aicrm_next.main import create_app

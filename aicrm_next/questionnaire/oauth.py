@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 from aicrm_next.integration_gateway.questionnaire_adapters import WeChatOAuthAdapter, build_wechat_oauth_adapter
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.shared.runtime import production_data_ready, production_environment
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .dto import OAuthCallbackRequest, OAuthStartRequest
 
@@ -49,9 +50,9 @@ def _json_dumps(payload: Json) -> str:
 
 def _secret() -> str:
     return (
-        os.getenv("AICRM_QUESTIONNAIRE_OAUTH_STATE_SECRET")
-        or os.getenv("AICRM_NEXT_ACTION_TOKEN_SECRET")
-        or os.getenv("SECRET_KEY")
+        runtime_setting("AICRM_QUESTIONNAIRE_OAUTH_STATE_SECRET")
+        or runtime_setting("AICRM_NEXT_ACTION_TOKEN_SECRET")
+        or runtime_setting("SECRET_KEY")
         or "aicrm-next-questionnaire-oauth-dev-secret"
     )
 

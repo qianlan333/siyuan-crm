@@ -22,6 +22,7 @@ from .models import (
     customer_recent_message_next,
     customer_timeline_event_next,
 )
+from .sql_dialect import is_sqlite_session, json_text_expression
 
 _DEFAULT_LIVE_SOURCE_LIST_LIMIT = 200
 
@@ -1024,6 +1025,7 @@ class LiveSourceCustomerReadRepository:
         return [dict(row) for row in self._session.execute(text(sql), params).mappings()]
 
     def _customer_decorated_sql(self, where_sql: str, select_sql: str) -> str:
+        sqlite = is_sqlite_session(self._session)
         return f"""
             WITH scope AS (
                 SELECT unionid FROM crm_user_identity WHERE COALESCE(identity_status, 'active') <> 'deleted'
@@ -1058,18 +1060,18 @@ class LiveSourceCustomerReadRepository:
                     ) AS owner_userid,
                     COALESCE(
                         NULLIF(class_status.customer_name_snapshot, ''),
-                        NULLIF(CAST(channel_contact.source_payload_json ->> 'customer_name' AS TEXT), ''),
-                        NULLIF(CAST(channel_contact.source_payload_json ->> 'name' AS TEXT), ''),
+                        NULLIF(CAST({json_text_expression("channel_contact.source_payload_json", "customer_name", sqlite=sqlite)} AS TEXT), ''),
+                        NULLIF(CAST({json_text_expression("channel_contact.source_payload_json", "name", sqlite=sqlite)} AS TEXT), ''),
                         NULLIF(identity.customer_name, ''),
-                        NULLIF(CAST(identity.profile_json ->> 'name' AS TEXT), ''),
-                        NULLIF(CAST(identity.profile_json ->> 'customer_name' AS TEXT), ''),
+                        NULLIF(CAST({json_text_expression("identity.profile_json", "name", sqlite=sqlite)} AS TEXT), ''),
+                        NULLIF(CAST({json_text_expression("identity.profile_json", "customer_name", sqlite=sqlite)} AS TEXT), ''),
                         NULLIF(identity.remark, ''),
                         NULLIF(identity.primary_external_userid, ''),
                         scope.unionid
                     ) AS customer_name,
                     COALESCE(NULLIF(identity.mobile, ''), '') AS mobile,
-                    COALESCE(NULLIF(identity.remark, ''), NULLIF(CAST(channel_contact.source_payload_json ->> 'remark' AS TEXT), ''), '') AS remark,
-                    COALESCE(NULLIF(identity.description, ''), NULLIF(CAST(channel_contact.source_payload_json ->> 'description' AS TEXT), ''), '') AS description,
+                    COALESCE(NULLIF(identity.remark, ''), NULLIF(CAST({json_text_expression("channel_contact.source_payload_json", "remark", sqlite=sqlite)} AS TEXT), ''), '') AS remark,
+                    COALESCE(NULLIF(identity.description, ''), NULLIF(CAST({json_text_expression("channel_contact.source_payload_json", "description", sqlite=sqlite)} AS TEXT), ''), '') AS description,
                     COALESCE(class_status.signup_status, '') AS signup_status,
                     COALESCE(class_status.signup_label_name, '') AS signup_label_name,
                     COALESCE(CAST(class_status.status_flags_json AS TEXT), '{{}}') AS status_flags_json,
@@ -1323,7 +1325,7 @@ class LiveSourceCustomerReadRepository:
         normalized = str(external_userid or "").strip()
         if not normalized:
             return {}
-        if self._is_sqlite_session():
+        if is_sqlite_session(self._session):
             return self._identity_by_external_userid_sqlite(normalized)
         row = self._session.execute(
             text(
@@ -1346,11 +1348,6 @@ class LiveSourceCustomerReadRepository:
             {"external_userid": normalized},
         ).mappings().first()
         return dict(row or {})
-
-    def _is_sqlite_session(self) -> bool:
-        bind = self._session.get_bind()
-        dialect = getattr(bind, "dialect", None)
-        return str(getattr(dialect, "name", "") or "").lower() == "sqlite"
 
     def _identity_by_external_userid_sqlite(self, external_userid: str) -> JsonDict:
         row = self._session.execute(

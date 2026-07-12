@@ -8,6 +8,8 @@ import secrets
 from typing import Any
 
 from aicrm_next.shared.release import current_release_sha
+from aicrm_next.shared.runtime_settings import runtime_setting
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from . import repo
 from .domain import (
@@ -48,8 +50,8 @@ LOGGER = logging.getLogger(__name__)
 def callback_config() -> dict[str, str]:
     return {
         "corp_id": text(os.getenv("WECOM_CORP_ID")),
-        "token": text(os.getenv("WECOM_CALLBACK_TOKEN")),
-        "aes_key": text(os.getenv("WECOM_CALLBACK_AES_KEY")),
+        "token": text(runtime_setting("WECOM_CALLBACK_TOKEN")),
+        "aes_key": text(runtime_setting("WECOM_CALLBACK_AES_KEY")),
     }
 
 
@@ -308,7 +310,7 @@ def _emit_channel_entry_internal_event(
         )
         return {"ok": True, "event_id": text((result.get("event") or {}).get("event_id")), "consumer_run_count": len(result.get("consumer_runs") or [])}
     except Exception as exc:
-        LOGGER.warning("channel entry internal event emit failed: %s", exc)
+        safe_log_exception(LOGGER, "channel entry internal event emit failed", exc, level=logging.WARNING)
         return {"ok": False, "error": str(exc)}
 
 
@@ -389,7 +391,7 @@ def process_channel_entry_runtime(
             reason="identity_pending_unionid",
         )
     except Exception as exc:
-        LOGGER.warning("channel entry identity resolution enqueue failed: %s", exc)
+        safe_log_exception(LOGGER, "channel entry identity resolution enqueue failed", exc, level=logging.WARNING)
         identity_queue = {"ok": False, "reason": "identity_resolution_enqueue_failed", "message": str(exc)}
     runtime_entry["identity_resolution_queue"] = identity_queue
     _log_effect(
@@ -449,7 +451,7 @@ def _record_identity_sync_result(event_log_id: int | None, identity_sync: dict[s
             response_json=repo.json_safe(identity_sync),
         )
     except Exception as exc:
-        LOGGER.warning("identity sync diagnostic persistence failed: %s", exc)
+        safe_log_exception(LOGGER, "identity sync diagnostic persistence failed", exc, level=logging.WARNING)
         return {"ok": False, "reason": "diagnostic_persist_failed", "message": str(exc)}
     return {"ok": True}
 
@@ -473,7 +475,7 @@ def _mark_runtime_identity_from_sync(
             identity_sync=identity_sync,
         )
     except Exception as exc:
-        LOGGER.warning("channel entry runtime identity update failed: %s", exc)
+        safe_log_exception(LOGGER, "channel entry runtime identity update failed", exc, level=logging.WARNING)
         return {"status": "failed", "reason": str(exc)}
 
 
@@ -545,7 +547,7 @@ def _sync_identity_best_effort(event: dict[str, Any], *, corp_id: str, event_log
             )
             identity_sync["channel_entry_canonical"] = canonical
         except Exception as exc:
-            LOGGER.warning("channel entry canonicalization after identity failed: %s", exc)
+            safe_log_exception(LOGGER, "channel entry canonicalization after identity failed", exc, level=logging.WARNING)
             identity_sync["channel_entry_canonical"] = {"status": "failed", "reason": str(exc)}
     else:
         identity_sync["runtime_identity"] = _mark_runtime_identity_from_sync(

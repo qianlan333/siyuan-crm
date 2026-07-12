@@ -16,6 +16,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 
 HttpRequest = Callable[..., Any]
 
@@ -52,9 +54,9 @@ def wechat_pay_client_config_from_env() -> WeChatPayClientConfig:
     return WeChatPayClientConfig(
         app_id=app_id,
         mch_id=_normalized_text(os.getenv("WECHAT_PAY_MCH_ID")),
-        api_v3_key=_normalized_text(os.getenv("WECHAT_PAY_API_V3_KEY")),
+        api_v3_key=_normalized_text(runtime_setting("WECHAT_PAY_API_V3_KEY")),
         private_key_path=_normalized_text(os.getenv("WECHAT_PAY_PRIVATE_KEY_PATH")),
-        merchant_serial_no=_normalized_text(os.getenv("WECHAT_PAY_CERT_SERIAL_NO")),
+        merchant_serial_no=_normalized_text(runtime_setting("WECHAT_PAY_CERT_SERIAL_NO")),
         platform_public_key_path=_normalized_text(os.getenv("WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH")),
         platform_serial_no=_normalized_text(os.getenv("WECHAT_PAY_PLATFORM_CERT_SERIAL_NO")),
         api_base=_normalized_text(os.getenv("WECHAT_PAY_API_BASE")) or "https://api.mch.weixin.qq.com",

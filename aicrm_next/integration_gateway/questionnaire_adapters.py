@@ -5,6 +5,8 @@ import os
 from typing import Any, Callable
 from urllib.parse import quote, urlencode, urlparse
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 from .audit import record_audit_event
 from .idempotency import get_or_create, make_idempotency_key
 from .questionnaire_contracts import AdapterMode, Json
@@ -415,7 +417,7 @@ class WeChatOAuthAdapter(_GuardedQuestionnaireAdapter):
 
     @staticmethod
     def _wechat_app_secret() -> str:
-        return str(os.getenv("WECHAT_MP_APP_SECRET", "") or "").strip()
+        return runtime_setting("WECHAT_MP_APP_SECRET")
 
     @staticmethod
     def _oauth_scope() -> str:

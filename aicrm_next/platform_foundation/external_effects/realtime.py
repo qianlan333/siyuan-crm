@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_csv, runtime_setting
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .adapters import ExternalEffectAdapterRegistry
 from .execution_gates import explicit_wecom_execution_disabled, is_wecom_effect_type
@@ -149,9 +150,13 @@ def dispatch_external_effect_job_realtime(
             locked_by=f"external-effect-realtime:{_text(reason) or 'unspecified'}",
         ).dispatch_one(int(job_id))
     except Exception as exc:
-        LOGGER.exception(
+        safe_log_exception(
+            LOGGER,
             "external effect realtime dispatch failed",
-            extra={"external_effect_job_id": int(job_id or 0), "effect_type": _text(effect_type), "reason": _text(reason)},
+            exc,
+            external_effect_job_id=int(job_id or 0),
+            effect_type=_text(effect_type),
+            reason=_text(reason),
         )
         return {
             "ok": False,
@@ -221,11 +226,15 @@ def wake_external_effect_job(
             repository=repository,
             adapter_registry=adapter_registry,
         )
-    except Exception:
+    except Exception as exc:
         _release_slot()
-        LOGGER.exception(
+        safe_log_exception(
+            LOGGER,
             "external effect realtime wakeup scheduling failed",
-            extra={"external_effect_job_id": normalized_job_id, "effect_type": normalized_effect_type, "reason": _text(reason)},
+            exc,
+            external_effect_job_id=normalized_job_id,
+            effect_type=normalized_effect_type,
+            reason=_text(reason),
         )
         return False
     return True

@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 from datetime import datetime, timedelta
 from typing import Any
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH
 from aicrm_next.platform_foundation.external_effects.models import public_datetime, utcnow
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 QUESTIONNAIRE_EXTERNAL_PUSH_MODE = "queue"
 
@@ -98,7 +98,7 @@ def build_questionnaire_external_effect_payload(
         "webhook_url": target_url,
         "body": request_body,
         "signature": {
-            "enabled": bool(os.getenv("AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET")),
+            "enabled": bool(runtime_setting("AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET")),
             "alg": "hmac-sha256",
             "header": "X-AICRM-External-Effect-Signature",
         },

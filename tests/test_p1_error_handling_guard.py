@@ -68,7 +68,9 @@ def test_commerce_unknown_exception_maps_to_safe_500() -> None:
 
 def test_wechat_shop_notify_does_not_return_success_from_generic_exception_handler() -> None:
     source = (ROOT / "aicrm_next" / "commerce" / "api.py").read_text(encoding="utf-8")
-    handler = source.split('logger.exception("wechat shop notify failed before durable event handling")', 1)[1]
+    marker = 'safe_log_exception(logger, "wechat shop notify failed before durable event handling", exc)'
+    assert marker in source
+    handler = source.split(marker, 1)[1]
     handler = handler.split("\n\n", 1)[0]
 
     assert 'return Response("success"' not in handler

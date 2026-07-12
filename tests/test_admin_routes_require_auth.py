@@ -127,7 +127,15 @@ def test_admin_write_routes_require_session_bound_csrf_when_enforced(monkeypatch
     assert missing.json()["error"] == "admin_csrf_required"
 
     client.cookies.set(CSRF_COOKIE, csrf_token)
-    passed_csrf = client.post("/api/admin/jobs/order-identity-repair/run", json={})
+    cookie_only = client.post("/api/admin/jobs/order-identity-repair/run", json={})
+    assert cookie_only.status_code == 403
+    assert cookie_only.json()["error"] == "admin_csrf_required"
+
+    passed_csrf = client.post(
+        "/api/admin/jobs/order-identity-repair/run",
+        json={},
+        headers={"X-CSRF-Token": csrf_token},
+    )
     assert passed_csrf.status_code == 401
     assert passed_csrf.json()["error"] != "admin_csrf_required"
 

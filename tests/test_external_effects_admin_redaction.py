@@ -179,8 +179,8 @@ def test_external_effect_admin_jobs_list_detail_attempts_receipts_and_diagnostic
     assert detail_body["job"]["payload_json"]["webhook_url"] == "[redacted]"
     assert detail_body["job"]["payload_json"]["body"]["buyer"]["openid"] == "[redacted]"
     assert detail_body["job"]["payload_json"]["provider_transaction_id"] == "[redacted]"
-    assert detail_body["job"]["target_id"] == "[redacted]"
-    assert detail_body["job"]["business_id"] == "[redacted]"
+    assert detail_body["job"]["target_id"] == "[pii]"
+    assert detail_body["job"]["business_id"] == "[pii]"
     assert detail_body["attempts"][0]["error_message"] == "[redacted]"
 
     troubleshooting_body = troubleshooting.json()
@@ -189,7 +189,7 @@ def test_external_effect_admin_jobs_list_detail_attempts_receipts_and_diagnostic
     assert receipts.json()["items"][0]["receiver_token"] == "[redacted]"
     assert receipts.json()["items"][0]["body_json"]["external_userid"] == "[redacted]"
     assert receipt_detail.json()["receipt"]["body_json"]["transaction_id"] == "[redacted]"
-    assert diagnostics.json()["filters"]["target_id"] == "[redacted]"
+    assert diagnostics.json()["filters"]["target_id"] == "[pii]"
 
 
 def test_external_effect_retry_and_cancel_responses_are_redacted(next_client: TestClient) -> None:
@@ -230,4 +230,4 @@ def test_external_effect_run_due_preview_and_dry_run_responses_are_redacted(next
         assert body["real_external_call_executed"] is False
         assert body["items"][0]["payload_json"]["mobile"] == "[redacted]"
         assert body["items"][0]["payload_json"]["webhook_url"] == "[redacted]"
-        assert body["items"][0]["target_id"] == "[redacted]"
+        assert body["items"][0]["target_id"] == "[pii]"

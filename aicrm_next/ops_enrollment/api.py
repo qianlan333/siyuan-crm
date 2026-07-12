@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 
 from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.pii_audit import infer_pii_result_count, set_pii_audit_result_count
 
 from .application import (
     ExecuteUserOpsBatchSendCommand,
@@ -203,9 +204,15 @@ def user_ops_broadcast_preview(request: BroadcastPreviewRequest, idempotency_key
 
 
 @router.post("/api/admin/user-ops/export/preview")
-def user_ops_export_preview(request: ExportPreviewRequest, idempotency_key: str = Header(default="", alias="Idempotency-Key")) -> dict:
+def user_ops_export_preview(
+    web_request: Request,
+    request: ExportPreviewRequest,
+    idempotency_key: str = Header(default="", alias="Idempotency-Key"),
+) -> dict:
     try:
-        return PreviewUserOpsExportCommand()(request, idempotency_key=idempotency_key)
+        result = PreviewUserOpsExportCommand()(request, idempotency_key=idempotency_key)
+        set_pii_audit_result_count(web_request, infer_pii_result_count(result))
+        return result
     except ContractError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -260,5 +267,6 @@ def user_ops_send_record_refresh(record_id: str) -> dict:
 
 
 @router.get("/api/admin/user-ops/export")
-def user_ops_export_stub() -> dict:
+def user_ops_export_stub(request: Request) -> dict:
+    set_pii_audit_result_count(request, 0)
     return {"ok": True, "status": "stubbed", "items": [], "filename": "user_ops_export_stub.csv"}

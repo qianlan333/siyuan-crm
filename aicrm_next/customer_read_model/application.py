@@ -4,6 +4,7 @@ import logging
 import os
 
 from aicrm_next.shared.errors import NotFoundError
+from aicrm_next.shared.safe_logging import safe_log_exception
 from aicrm_next.shared.typing import JsonDict
 from aicrm_next.integration_gateway.customer_sync_adapters import (
     build_archive_sync_adapter,
@@ -60,8 +61,8 @@ def _close_repository(repo: CustomerReadRepository | None) -> None:
     if callable(close):
         try:
             close()
-        except Exception:
-            LOGGER.warning("failed to close customer read repository", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(LOGGER, "failed to close customer read repository", exc, level=logging.WARNING)
         return
 
     session = getattr(repo, "session", None) or getattr(repo, "_session", None)
@@ -71,19 +72,24 @@ def _close_repository(repo: CustomerReadRepository | None) -> None:
     if callable(rollback):
         try:
             rollback()
-        except Exception:
-            LOGGER.warning("failed to rollback customer read repository session", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(LOGGER, "failed to rollback customer read repository session", exc, level=logging.WARNING)
     session_close = getattr(session, "close", None)
     if callable(session_close):
         try:
             session_close()
-        except Exception:
-            LOGGER.warning("failed to close customer read repository session", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(LOGGER, "failed to close customer read repository session", exc, level=logging.WARNING)
 
 
 def _read_model_primary_failed(exc: Exception, repo: CustomerReadRepository | None) -> None:
     _close_repository(repo)
-    LOGGER.warning("customer read model primary failed; switching to live source fallback: %s", exc)
+    safe_log_exception(
+        LOGGER,
+        "customer read model primary failed; switching to live source fallback",
+        exc,
+        level=logging.WARNING,
+    )
 
 
 def _diagnostics(
@@ -325,7 +331,7 @@ def _primary_customer_list_stale_reason(
     try:
         live_total = _live_source_matching_customer_count(query, repo=live_source_repo)
     except Exception as exc:
-        LOGGER.warning("customer read model live source freshness check failed: %s", exc)
+        safe_log_exception(LOGGER, "customer read model live source freshness check failed", exc, level=logging.WARNING)
         return ""
     if live_total > primary_total:
         return (

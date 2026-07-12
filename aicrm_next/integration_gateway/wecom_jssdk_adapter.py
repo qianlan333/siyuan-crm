@@ -13,6 +13,7 @@ from urllib.request import urlopen
 
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.shared.runtime import production_environment
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 
 DEFAULT_JS_API_LIST = ("getContext", "getCurExternalContact", "sendChatMessage")
@@ -202,7 +203,7 @@ def _build_real_jssdk_config(
     debug: bool,
     http_get_json: Any | None,
 ) -> dict[str, Any]:
-    secret = str(os.getenv("WECOM_SECRET") or os.getenv("AICRM_SIDEBAR_JSSDK_SECRET") or "").strip()
+    secret = runtime_setting("WECOM_SECRET") or runtime_setting("AICRM_SIDEBAR_JSSDK_SECRET")
     if not corp_id:
         raise SidebarJSSDKConfigError("WECOM_CORP_ID is required")
     if not agent_id:

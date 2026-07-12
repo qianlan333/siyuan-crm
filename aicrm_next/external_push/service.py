@@ -10,6 +10,7 @@ from typing import Any
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_GENERIC_PUSH, WEBHOOK_ORDER_PAID_PUSH
 from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
+from aicrm_next.shared.sensitive_data import redact_sensitive_data, redact_sensitive_text
 
 from . import repo
 from .security import WebhookUrlValidationError, resolve_and_validate_public_https_url, validate_webhook_url
@@ -119,7 +120,7 @@ def normalize_config_payload(payload: dict[str, Any], *, validate_dns: bool = Tr
         try:
             webhook_url = resolve_and_validate_public_https_url(webhook_url) if validate_dns else validate_webhook_url(webhook_url)
         except WebhookUrlValidationError as exc:
-            raise ExternalPushError(str(exc)) from exc
+            raise ExternalPushError(redact_sensitive_text(exc)) from exc
     return {
         "enabled": enabled,
         "webhook_url": webhook_url,
@@ -157,30 +158,8 @@ def _mask_openid(value: Any) -> str:
     return f"{text[:4]}***{text[-4:]}"
 
 
-def _mask_phone(value: Any) -> str:
-    digits = _normalized_text(value)
-    if len(digits) < 7:
-        return "***" if digits else ""
-    return f"{digits[:3]}****{digits[-4:]}"
-
-
 def redact_sensitive_fields(payload: Any) -> Any:
-    if isinstance(payload, list):
-        return [redact_sensitive_fields(item) for item in payload]
-    if not isinstance(payload, dict):
-        return payload
-    redacted: dict[str, Any] = {}
-    for key, value in payload.items():
-        lowered = str(key).lower()
-        if lowered in {"secret", "webhook_secret", "pay_sign", "paysign", "api_v3_key", "private_key"}:
-            redacted[key] = "[REDACTED]"
-        elif lowered in {"phone", "mobile", "mobile_snapshot", "phone_number"}:
-            redacted[key] = _mask_phone(value)
-        elif lowered in {"openid", "payer_openid", "unionid"}:
-            redacted[key] = _mask_openid(value)
-        else:
-            redacted[key] = redact_sensitive_fields(value)
-    return redacted
+    return redact_sensitive_data(payload)
 
 
 def _product_for_order(repository: Any, order: dict[str, Any]) -> dict[str, Any]:
@@ -426,10 +405,10 @@ def _attempt_delivery(
             request_body=redact_sensitive_fields(request_payload),
             response_status=None,
             response_body="",
-            error_message=truncate_body(str(exc), 1000),
+            error_message=truncate_body(redact_sensitive_text(exc), 1000),
             next_retry_at="",
         )
-        return {"ok": False, "delivery": updated, "reason": str(exc)}
+        return {"ok": False, "delivery": updated, "reason": redact_sensitive_text(exc)}
 
 
 def enqueue_transaction_paid_event(order: dict[str, Any], *, repository: Any | None = None) -> dict[str, Any] | None:
@@ -567,7 +546,7 @@ def send_product_external_push_test(product_id: int, *, repository: Any | None =
     try:
         resolve_and_validate_public_https_url(webhook_url)
     except WebhookUrlValidationError as exc:
-        raise ExternalPushError(str(exc)) from exc
+        raise ExternalPushError(redact_sensitive_text(exc)) from exc
     delivery = repository.create_test_delivery(
         {
             "tenant_id": DEFAULT_TENANT_ID,

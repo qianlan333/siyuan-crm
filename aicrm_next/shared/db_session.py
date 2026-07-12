@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from aicrm_next.shared.config import Settings, get_settings
 from aicrm_next.shared.runtime import raw_database_url
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 LOGGER = logging.getLogger(__name__)
 
@@ -164,19 +165,34 @@ def session_scope(
         else:
             try:
                 session.rollback()
-            except Exception:
-                LOGGER.warning("failed to rollback SQLAlchemy session after session_scope success", exc_info=True)
+            except Exception as exc:
+                safe_log_exception(
+                    LOGGER,
+                    "failed to rollback SQLAlchemy session after session_scope success",
+                    exc,
+                    level=logging.WARNING,
+                )
     except Exception:
         try:
             session.rollback()
-        except Exception:
-            LOGGER.warning("failed to rollback SQLAlchemy session after session_scope exception", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                LOGGER,
+                "failed to rollback SQLAlchemy session after session_scope exception",
+                exc,
+                level=logging.WARNING,
+            )
         raise
     finally:
         try:
             session.close()
-        except Exception:
-            LOGGER.warning("failed to close SQLAlchemy session in session_scope", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                LOGGER,
+                "failed to close SQLAlchemy session in session_scope",
+                exc,
+                level=logging.WARNING,
+            )
 
 
 def get_db() -> Iterator[Session]:
@@ -188,19 +204,34 @@ def get_db() -> Iterator[Session]:
         try:
             session.rollback()
             rolled_back = True
-        except Exception:
-            LOGGER.warning("failed to rollback SQLAlchemy session after get_db exception", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                LOGGER,
+                "failed to rollback SQLAlchemy session after get_db exception",
+                exc,
+                level=logging.WARNING,
+            )
         raise
     finally:
         if not rolled_back:
             try:
                 session.rollback()
-            except Exception:
-                LOGGER.warning("failed to rollback SQLAlchemy session in get_db cleanup", exc_info=True)
+            except Exception as exc:
+                safe_log_exception(
+                    LOGGER,
+                    "failed to rollback SQLAlchemy session in get_db cleanup",
+                    exc,
+                    level=logging.WARNING,
+                )
         try:
             session.close()
-        except Exception:
-            LOGGER.warning("failed to close SQLAlchemy session in get_db cleanup", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                LOGGER,
+                "failed to close SQLAlchemy session in get_db cleanup",
+                exc,
+                level=logging.WARNING,
+            )
 
 
 def connect_raw_postgres(database_url: str, *, autocommit: bool = False):
@@ -241,8 +272,8 @@ class PooledPsycopgConnection:
             from psycopg.rows import dict_row
 
             return self._conn.cursor(row_factory=dict_row)
-        except Exception:
-            LOGGER.debug("failed to open pooled psycopg dict cursor", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(LOGGER, "failed to open pooled psycopg dict cursor", exc, level=logging.DEBUG)
             return self._conn.cursor()
 
     def execute(self, query: str, params: object | None = None):

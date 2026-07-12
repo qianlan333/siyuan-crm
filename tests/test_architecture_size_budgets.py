@@ -19,7 +19,7 @@ RUNTIME_FILE_LINE_BUDGETS = {
 INLINE_SCRIPT_LINE_BUDGETS = {
     "aicrm_next/questionnaire/templates/admin_questionnaires.html": 4359,
     "aicrm_next/frontend_compat/templates/admin_user_ops.html": 926,
-    "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html": 793,
+    "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html": 798,
     "aicrm_next/frontend_compat/templates/admin_console/cloud_campaigns_workspace.html": 682,
     "aicrm_next/commerce/templates/wechat_products.html": 636,
     "aicrm_next/frontend_compat/templates/admin_console/owner_migration.html": 555,

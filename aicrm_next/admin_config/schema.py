@@ -339,6 +339,26 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
                 "required": False,
                 "label": "自动化内部API Token",
             },
+            "IDENTITY_INTERNAL_API_TOKEN": {
+                "type": "secret",
+                "required": False,
+                "label": "身份解析内部API Token",
+            },
+            "ARCHIVE_INTERNAL_API_TOKEN": {
+                "type": "secret",
+                "required": False,
+                "label": "消息归档内部API Token",
+            },
+            "GROUP_BROADCAST_INTERNAL_API_TOKEN": {
+                "type": "secret",
+                "required": False,
+                "label": "群发内部API Token",
+            },
+            "CALLBACK_INTERNAL_API_TOKEN": {
+                "type": "secret",
+                "required": False,
+                "label": "回调任务内部API Token",
+            },
             "AUTOMATION_ACTIVATION_WEBHOOK_TOKEN": {
                 "type": "secret",
                 "required": False,

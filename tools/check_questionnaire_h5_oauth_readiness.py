@@ -54,7 +54,7 @@ LOCAL_FIXTURE_ROUTES = [
     "/s/hxc-activation-v1",
     "/api/h5/wechat/oauth/start?slug=hxc-activation-v1",
     "/api/h5/wechat/oauth/callback?state=hxc-activation-v1",
-    "/api/h5/questionnaires/hxc-activation-v1/result/sub_fixture_001",
+    "/api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
 ]
 
 PRODUCTION_PROBE_ROUTES = [
@@ -64,7 +64,7 @@ PRODUCTION_PROBE_ROUTES = [
     "/s/hxc-activation-v1",
     "/api/h5/wechat/oauth/start?slug=hxc-activation-v1",
     "/api/h5/wechat/oauth/callback?state=hxc-activation-v1",
-    "/api/h5/questionnaires/hxc-activation-v1/result/sub_fixture_001",
+    "/api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
 ]
 
 SERVER_READONLY_ROUTES = [
@@ -74,7 +74,7 @@ SERVER_READONLY_ROUTES = [
     "/s/hxc-activation-v1",
     "/api/h5/wechat/oauth/start?slug=hxc-activation-v1",
     "/api/h5/wechat/oauth/callback?state=hxc-activation-v1",
-    "/api/h5/questionnaires/hxc-activation-v1/result/sub_fixture_001",
+    "/api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
 ]
 
 
@@ -228,7 +228,10 @@ def _add_shape_blockers(probes: dict[str, Any]) -> tuple[list[str], list[str]]:
     else:
         blockers.append("public_questionnaire_not_json")
 
-    result_payload = probes.get("GET /api/h5/questionnaires/hxc-activation-v1/result/sub_fixture_001", {}).get("json")
+    result_payload = probes.get(
+        "GET /api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
+        {},
+    ).get("json")
     if isinstance(result_payload, dict):
         if "result" not in result_payload:
             blockers.append("submission_result_missing_result")
@@ -315,7 +318,7 @@ def _production_fixture_blockers(probes: dict[str, Any], *, local_probe_database
         if hits:
             blocker = f"production_fixture_or_demo_marker:{key}:{','.join(hits)}"
             if local_probe_database and key in {
-                "GET /api/h5/questionnaires/hxc-activation-v1/result/sub_fixture_001",
+                "GET /api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
                 "GET /s/hxc-activation-v1",
             }:
                 warnings.append(blocker)

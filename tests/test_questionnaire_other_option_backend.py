@@ -171,7 +171,7 @@ def test_h5_submit_single_choice_other_object_saves_text_value(client: TestClien
     _create_questionnaire(client, _choice_questionnaire_payload(slug=slug))
 
     body = _submit(client, slug, {"q_single": {"selected_option_ids": ["other"], "other_text": "线下沙龙"}})
-    result = _result(client, slug, body["submission_id"])
+    result = _result(client, slug, body["result_access_token"])
 
     assert body["score"] == 5
     assert body["final_tags"] == ["tag_other"]
@@ -188,7 +188,7 @@ def test_h5_submit_multi_choice_regular_plus_other_saves_text_value(client: Test
         slug,
         {"q_multi": {"selected_option_ids": ["regular", "other"], "other_text": "线下社群承接"}},
     )
-    result = _result(client, slug, body["submission_id"])
+    result = _result(client, slug, body["result_access_token"])
 
     assert body["score"] == 8
     assert body["final_tags"] == ["tag_regular", "tag_other"]
@@ -230,7 +230,7 @@ def test_h5_submit_ignores_other_text_when_other_not_selected(client: TestClient
     _create_questionnaire(client, _choice_questionnaire_payload(slug=slug))
 
     body = _submit(client, slug, {"q_single": {"selected_option_ids": ["regular"], "other_text": "不要保存"}})
-    result = _result(client, slug, body["submission_id"])
+    result = _result(client, slug, body["result_access_token"])
 
     assert result["answers"]["q_single"] == "regular"
     assert result["answer_snapshots"][0]["text_value"] == ""

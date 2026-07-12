@@ -29,6 +29,7 @@ from .category_registry import CONFIG_CATEGORIES, ConfigCategory, ConfigCategory
 from .definitions import APP_SETTING_DEFINITIONS
 from .repository import AdminConfigRepository
 from .schema import CONFIG_SCHEMA, build_config_checklist, validate_config
+from .secret_settings import current_setting_values, public_changed_row, setting_details, stored_value_matches
 from .settings import SENSITIVE_KEYS, mask_value
 
 
@@ -893,20 +894,11 @@ class AdminConfigReadService:
         return [{**item, "active": item["key"] == active_key} for item in items]
 
     def _setting_value_source(self, key: str) -> tuple[str, str]:
-        row = self.repo.get_app_setting(key)
-        if row is not None:
-            return _text(row.get("value")), "app_settings"
-        env_value = _text(os.getenv(key))
-        return env_value, "config"
+        value, source, _version, _updated_at = setting_details(self.repo, key)
+        return value, source
 
     def _current_setting_values(self) -> dict[str, str]:
-        values: dict[str, str] = {}
-        for group in CONFIG_SCHEMA.values():
-            for field_key in group["fields"]:
-                value, _source = self._setting_value_source(field_key)
-                if value:
-                    values[field_key] = value
-        return values
+        return current_setting_values(self, CONFIG_SCHEMA)
 
     def _audit_meta_map(self, target_ids: list[str]) -> dict[str, dict[str, Any]]:
         result: dict[str, dict[str, Any]] = {}
@@ -971,7 +963,7 @@ class AdminConfigReadService:
         audit_map = self._audit_meta_map(list(metadata.keys()))
         rows: list[dict[str, Any]] = []
         for item in definitions:
-            value, source = self._setting_value_source(item["key"])
+            value, source, version, updated_at = setting_details(self.repo, item["key"])
             display_value = mask_value(item["key"], value) if item["mode"] == "masked" else value
             row = {
                 **item,
@@ -979,6 +971,8 @@ class AdminConfigReadService:
                 "display_value": display_value,
                 "configured": bool(value),
                 "source": source,
+                "version": version,
+                "updated_at": updated_at,
             }
             row.update(audit_map.get(item["key"], {"last_modified_at": "", "last_modified_by": "", "last_action_type": ""}))
             if scope and row["mode"] != scope:
@@ -1025,7 +1019,7 @@ class AdminConfigReadService:
 
     def _serialize_category_field(self, ref: ConfigCategoryField) -> dict[str, Any]:
         metadata = _metadata_for_setting(ref.key)
-        value, source = self._setting_value_source(ref.key)
+        value, source, version, updated_at = setting_details(self.repo, ref.key)
         sensitive = ref.key in SENSITIVE_KEYS or metadata.get("mode") == "masked" or metadata.get("type") == "secret"
         display_value = mask_value(ref.key, value) if sensitive else value
         return {
@@ -1035,6 +1029,8 @@ class AdminConfigReadService:
             "display_value": display_value,
             "configured": bool(value),
             "source": source,
+            "version": version,
+            "updated_at": updated_at,
             "sensitive": sensitive,
             "readonly": bool(ref.readonly),
             "block_title": ref.block_title,
@@ -1147,7 +1143,7 @@ class AdminConfigReadService:
         items: list[dict[str, Any]] = []
         for public_key, setting_key, label in PUSH_CAPABILITY_ADVANCED_KEYS:
             metadata = _metadata_for_setting(setting_key)
-            value, _source = self._setting_value_source(setting_key)
+            value, _source, version, updated_at = setting_details(self.repo, setting_key)
             sensitive = setting_key in SENSITIVE_KEYS or metadata.get("mode") == "masked" or metadata.get("type") == "secret"
             items.append(
                 {
@@ -1156,6 +1152,8 @@ class AdminConfigReadService:
                     "configured": bool(value),
                     "sensitive": sensitive,
                     "display_value": mask_value(setting_key, value) if sensitive else value,
+                    "version": version,
+                    "updated_at": updated_at,
                 }
             )
         return items
@@ -1482,7 +1480,7 @@ class AdminConfigWriteCommand:
             else:
                 validated = _text(raw_value)
             before = self.repo.get_app_setting(normalized_key)
-            if _text((before or {}).get("value")) == validated:
+            if stored_value_matches(normalized_key, (before or {}).get("value"), validated):
                 continue
             after = self.repo.upsert_app_setting(key=normalized_key, value=validated)
             self.repo.insert_audit_log(
@@ -1493,7 +1491,7 @@ class AdminConfigWriteCommand:
                 before=before or {},
                 after=after,
             )
-            changed.append(after)
+            changed.append(public_changed_row(normalized_key, after))
         return changed
 
     def _category_or_error(self, category_key: str) -> ConfigCategory:
@@ -1551,7 +1549,7 @@ class AdminConfigWriteCommand:
                 continue
             validated = _validate_category_setting(key, raw_value, metadata)
             before = self.repo.get_app_setting(key)
-            if _text((before or {}).get("value")) == validated:
+            if stored_value_matches(key, (before or {}).get("value"), validated):
                 continue
             after = self.repo.upsert_app_setting(key=key, value=validated)
             self.repo.insert_audit_log(
@@ -1562,7 +1560,7 @@ class AdminConfigWriteCommand:
                 before=before or {},
                 after=after,
             )
-            changed.append(after)
+            changed.append(public_changed_row(key, after))
         return changed
 
     def _upsert_setting_with_audit(self, *, key: str, value: str, operator: str, target_type: str = TARGET_APP_SETTING) -> dict[str, Any]:

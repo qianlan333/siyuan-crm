@@ -26,8 +26,8 @@ def _wechat_checkout_payload(product_code: str = "test-product") -> dict:
 
 
 def test_wechat_pay_sensitive_settings_are_masked_by_next_settings():
-    assert mask_value("WECHAT_PAY_API_V3_KEY", "12345678901234567890123456789012") == "123***12"
-    assert mask_value("WECHAT_PAY_CERT_SERIAL_NO", "serial123456") == "ser***56"
+    assert mask_value("WECHAT_PAY_API_V3_KEY", "12345678901234567890123456789012") == "[redacted]"
+    assert mask_value("WECHAT_PAY_CERT_SERIAL_NO", "serial123456") == "[redacted]"
 
 
 def test_next_wechat_pay_client_sends_platform_public_key_id_header():

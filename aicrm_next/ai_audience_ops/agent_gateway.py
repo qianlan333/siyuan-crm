@@ -74,7 +74,7 @@ def _timeout() -> float:
 
 
 def _setting(key: str) -> str:
-    return _text(runtime_setting(key, os.getenv(key, "")))
+    return _text(runtime_setting(key, ""))
 
 
 def generate_agent_reply(

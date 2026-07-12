@@ -21,6 +21,7 @@ from aicrm_next.platform_foundation.side_effects import InMemorySideEffectPlanRe
 from aicrm_next.shared.config import get_settings
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.runtime import fixture_mode
+from aicrm_next.shared.safe_logging import safe_log_exception
 from aicrm_next.shared.typing import JsonDict
 
 from .dto import BatchSendRequest, BroadcastPreviewRequest, DoNotDisturbRequest, ExportPreviewRequest, UserOpsListRequest
@@ -91,8 +92,8 @@ def _close_repository(repo: UserOpsRepository | None) -> None:
         return
     try:
         close()
-    except Exception:
-        LOGGER.warning("failed to close user ops repository", exc_info=True)
+    except Exception as exc:
+        safe_log_exception(LOGGER, "failed to close user ops repository", exc, level=logging.WARNING)
 
 
 def _should_close_repo(repo_owner: UserOpsRepository | None) -> bool:

@@ -8,6 +8,7 @@ from typing import Protocol
 from uuid import uuid4
 
 from aicrm_next.shared.typing import JsonDict
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .repo import CustomerReadRepository, FixtureCustomerReadRepository, build_customer_read_model_repository
 from .reconciliation import CustomerReadModelReconciliationRun, reconcile_customer_read_model
@@ -135,8 +136,13 @@ class CustomerReadModelBackfillService:
             return
         try:
             close()
-        except Exception:
-            LOGGER.warning("failed to close customer read model backfill target repository", exc_info=True)
+        except Exception as exc:
+            safe_log_exception(
+                LOGGER,
+                "failed to close customer read model backfill target repository",
+                exc,
+                level=logging.WARNING,
+            )
 
     def run(
         self,

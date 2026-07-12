@@ -7,6 +7,8 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 CLOUD_CAMPAIGN_RUN_DUE_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due"
 CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due/preview"
 
@@ -64,7 +66,7 @@ def is_production_runtime() -> bool:
 
 
 def validate_internal_timer_token(request: Request) -> InternalRunDueGuardResult:
-    expected = str(os.getenv("AUTOMATION_INTERNAL_API_TOKEN") or "").strip()
+    expected = runtime_setting("AUTOMATION_INTERNAL_API_TOKEN")
     if not expected:
         return InternalRunDueGuardResult(
             response=build_timer_token_error_response("automation_internal_token_not_configured", status_code=503),

@@ -14,9 +14,9 @@ def _client(monkeypatch, *, token_configured: bool = True) -> TestClient:
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("SECRET_KEY", "external-chat-api")
     if token_configured:
-        monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", TOKEN)
+        monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", TOKEN)
     else:
-        monkeypatch.delenv("AUTOMATION_INTERNAL_API_TOKEN", raising=False)
+        monkeypatch.delenv("ARCHIVE_INTERNAL_API_TOKEN", raising=False)
     return TestClient(create_app(), raise_server_exceptions=False)
 
 

@@ -74,9 +74,17 @@ async def _execute(request: Request, command_type: Type[SidebarWriteCommand]) ->
         return Response(status_code=204)
     try:
         body = await _json_body(request)
+        trusted_owner_userid = str(getattr(request.state, "sidebar_owner_userid", "") or "").strip()
+        if trusted_owner_userid:
+            body["owner_userid"] = trusted_owner_userid
         command = command_type(
             idempotency_key=_idempotency_key(request, body),
-            actor_id=str(body.get("actor_id") or request.headers.get("X-AICRM-Actor-Id") or "sidebar_operator"),
+            actor_id=str(
+                trusted_owner_userid
+                or body.get("actor_id")
+                or request.headers.get("X-AICRM-Actor-Id")
+                or "sidebar_operator"
+            ),
             actor_type=str(body.get("actor_type") or request.headers.get("X-AICRM-Actor-Type") or "user"),
             external_userid=str(body.get("external_userid") or "").strip(),
             payload={key: value for key, value in body.items() if key not in {"actor_id", "actor_type", "external_userid", "idempotency_key", "dry_run", "trace_id"}},

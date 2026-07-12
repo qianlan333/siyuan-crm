@@ -47,7 +47,7 @@ def run_direct() -> str:
 def run_http() -> str:
     host = read_app_host()
     port = read_app_port()
-    token = read_internal_api_token()
+    token = read_internal_api_token(purpose="archive")
     response_payload = internal_http.post_json(
         host=host,
         port=port,

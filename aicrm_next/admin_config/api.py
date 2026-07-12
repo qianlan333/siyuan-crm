@@ -161,12 +161,12 @@ async def _form_dict(request: Request) -> dict[str, Any]:
 
 async def _token_error_from_form(request: Request) -> tuple[str, dict[str, Any]]:
     form = await _form_dict(request)
-    return validate_admin_action_token(_text(form.get("admin_action_token"))), form
+    return validate_admin_action_token(_text(form.get("admin_action_token")), request=request), form
 
 
 def _token_error_from_payload(request: Request, payload: dict[str, Any]) -> str:
     token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
-    return validate_admin_action_token(token)
+    return validate_admin_action_token(token, request=request)
 
 
 def _category_error(exc: Exception) -> JSONResponse:
@@ -612,7 +612,7 @@ async def api_admin_config_save_app_settings(request: Request):
     if not _bool(payload.get("confirm")):
         return JSONResponse({"ok": False, "error": "confirm is required before saving app settings"}, status_code=400)
     token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
-    token_error = validate_admin_action_token(token)
+    token_error = validate_admin_action_token(token, request=request)
     if token_error:
         return JSONResponse({"ok": False, "error": token_error}, status_code=400)
     try:

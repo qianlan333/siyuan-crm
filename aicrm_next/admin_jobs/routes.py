@@ -13,6 +13,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
+from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 from .application import (
     approve_broadcast_job,
     build_broadcast_jobs_payload,
@@ -28,7 +31,7 @@ from .application import (
     cancel_broadcast_job,
     execute_jobs_action,
 )
-from .domain import normalized_bool, normalized_int, normalized_text
+from .domain import normalized_bool, normalized_text
 from .notification_settings import (
     FEISHU_WEBHOOK_ERROR,
     FeishuWebhookValidationError,
@@ -38,6 +41,7 @@ from .notification_settings import (
     validate_feishu_webhook,
 )
 from aicrm_next.admin_shell import admin_path_for, shell_context
+from aicrm_next.admin_auth.action_token import bound_action_tokens_required, validate_action_token_for_request
 from aicrm_next.shared.runtime import require_signing_secret
 
 router = APIRouter()
@@ -64,10 +68,16 @@ def ensure_admin_action_token() -> str:
     return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
 
 
-def validate_admin_action_token(token: str) -> str:
+def validate_admin_action_token(token: str, *, request: Request | None = None) -> str:
     token = normalized_text(token)
     if not token:
         return "缺少 admin_action_token"
+    if request is not None:
+        result = validate_action_token_for_request(request, token)
+        if result.ok:
+            return ""
+        if bound_action_tokens_required():
+            return "admin_action_token 已过期" if result.error == "expired" else "admin_action_token 无效或与当前动作不匹配"
     try:
         raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
         ts_text, nonce, signature = raw.split(":", 2)
@@ -92,14 +102,12 @@ def _operator_from_request(request: Request, payload: dict[str, Any] | None = No
 
 def _internal_token_error(request: Request) -> str:
     header = normalized_text(request.headers.get("Authorization"))
-    if not header.lower().startswith("bearer "):
-        return "missing bearer token"
-    actual = header.split(" ", 1)[1].strip()
-    expected = normalized_text(os.getenv("AUTOMATION_INTERNAL_API_TOKEN")) or normalized_text(os.getenv("MCP_BEARER_TOKEN"))
-    if not expected:
+    actual = header.split(" ", 1)[1].strip() if header.lower().startswith("bearer ") else ""
+    result = validate_internal_service_token("automation_worker", actual)
+    if result.error == "internal_token_not_configured":
         return "internal token is not configured"
-    if not hmac.compare_digest(actual, expected):
-        return "invalid bearer token"
+    if not result.ok:
+        return "invalid bearer token" if actual else "missing bearer token"
     return ""
 
 
@@ -125,12 +133,12 @@ async def _action_token_error(request: Request, payload: dict[str, Any] | None =
             token = normalized_text(form.get("admin_action_token"))
         except Exception:
             token = ""
-    return validate_admin_action_token(token)
+    return validate_admin_action_token(token, request=request)
 
 
 async def _cron_or_action_token_error(request: Request, payload: dict[str, Any] | None = None) -> str:
     header = normalized_text(request.headers.get("Authorization"))
-    secret = normalized_text(os.getenv("CRON_SECRET"))
+    secret = normalized_text(runtime_setting("CRON_SECRET"))
     if secret and header.lower().startswith("bearer "):
         actual = header.split(" ", 1)[1].strip()
         if hmac.compare_digest(actual, secret):
@@ -177,7 +185,7 @@ async def admin_jobs_action(request: Request):
         "webhook_status": normalized_text(form.get("webhook_status")),
         "webhook_limit": normalized_text(form.get("webhook_limit")),
     }
-    token_error = validate_admin_action_token(normalized_text(form.get("admin_action_token")))
+    token_error = validate_admin_action_token(normalized_text(form.get("admin_action_token")), request=request)
     if token_error:
         return templates.TemplateResponse(request, "admin_console/jobs.html", _jobs_context(request, page_error=token_error, args=query_overrides))
     try:
@@ -406,9 +414,6 @@ async def api_admin_jobs_order_identity_repair_run(request: Request):
         },
         status_code=410,
     )
-    return _jsonable(result)
-
-
 @router.post("/api/admin/broadcast-jobs/{job_id}/approve")
 async def api_admin_broadcast_jobs_approve(job_id: int, request: Request):
     payload = await _request_payload(request)

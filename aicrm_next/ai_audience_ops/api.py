@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from fastapi import APIRouter, Request
@@ -9,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
 from aicrm_next.shared.sync_request import read_request_body
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .refresh_service import AudienceRefreshService
 from .schemas import (
@@ -49,8 +49,8 @@ def _expected_tokens() -> set[str]:
     return {
         token
         for token in (
-            _text(os.getenv("AICRM_AI_AUDIENCE_API_TOKEN")),
-            _text(os.getenv("AUTOMATION_INTERNAL_API_TOKEN")),
+            _text(runtime_setting("AICRM_AI_AUDIENCE_API_TOKEN")),
+            _text(runtime_setting("AUTOMATION_INTERNAL_API_TOKEN")),
         )
         if token
     }

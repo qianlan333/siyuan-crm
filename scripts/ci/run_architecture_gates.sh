@@ -21,6 +21,7 @@ fi
 
 run_fast() {
 "$PYTHON" tools/check_route_ownership_manifest.py
+"$PYTHON" scripts/ci/update_route_policy_manifest.py --check
 "$PYTHON" tools/check_admin_route_auth.py
 "$PYTHON" tools/check_repository_ownership.py
 }
@@ -37,6 +38,10 @@ run_full_only() {
   "$PYTHON" tools/check_external_effects_boundary.py
   "$PYTHON" tools/check_background_job_contract.py
   "$PYTHON" tools/check_schema_change_templates.py
+  "$PYTHON" scripts/ci/runtime_contract_inventory.py --check docs/architecture/runtime_contract_inventory.json
+  "$PYTHON" scripts/ci/check_high_risk_contract_inventory.py
+  "$PYTHON" scripts/ci/check_pii_logging.py
+  "$PYTHON" scripts/ci/check_dependency_security.py
 }
 
 case "$MODE" in

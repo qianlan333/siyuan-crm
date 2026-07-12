@@ -43,7 +43,7 @@ jobs:
     needs: select
     if: needs.select.outputs.architecture_gate != 'none'
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -53,21 +53,19 @@ jobs:
         with:
           python-version: "3.10.5"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements.lock
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: python -m pip install --require-hashes -r requirements.lock
 
       - name: Run selected architecture gates
         run: bash scripts/ci/run_architecture_gates.sh --mode "${{ needs.select.outputs.architecture_gate }}"
 
   fast-python-no-pg:
     needs: select
-    if: needs.select.outputs.python_tests != '' && needs.select.outputs.needs_postgres != 'true'
+    if: needs.select.outputs.needs_full_ci != 'true' && needs.select.outputs.python_tests != '' && needs.select.outputs.needs_postgres != 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 4
+    timeout-minutes: 8
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -77,12 +75,10 @@ jobs:
         with:
           python-version: "3.10.5"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements.lock
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+        run: python -m pip install --require-hashes -r requirements.lock
 
       - name: Run scoped Python tests
         env:
@@ -91,7 +87,7 @@ jobs:
 
   fast-python-pg:
     needs: select
-    if: needs.select.outputs.python_tests != '' && needs.select.outputs.needs_postgres == 'true'
+    if: needs.select.outputs.needs_full_ci != 'true' && needs.select.outputs.python_tests != '' && needs.select.outputs.needs_postgres == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 18
     services:
@@ -117,44 +113,10 @@ jobs:
         with:
           python-version: "3.10.5"
           cache: pip
-          cache-dependency-path: requirements.txt
+          cache-dependency-path: requirements.lock
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      - name: Prepare PostgreSQL compatibility database
-        run: |
-          python - <<'PY'
-          import psycopg
-
-          admin_url = "postgresql://test:test@localhost:5432/test"
-          default_url = "postgresql://test:test@localhost:5432/aicrm_next"
-
-          with psycopg.connect(admin_url, autocommit=True) as conn:
-              role_exists = conn.execute(
-                  "SELECT 1 FROM pg_roles WHERE rolname = %s",
-                  ("aicrm_next",),
-              ).fetchone()
-              if role_exists:
-                  conn.execute("ALTER ROLE aicrm_next WITH LOGIN PASSWORD 'aicrm_next'")
-              else:
-                  conn.execute("CREATE ROLE aicrm_next LOGIN PASSWORD 'aicrm_next'")
-
-              db_exists = conn.execute(
-                  "SELECT 1 FROM pg_database WHERE datname = %s",
-                  ("aicrm_next",),
-              ).fetchone()
-              if not db_exists:
-                  conn.execute("CREATE DATABASE aicrm_next OWNER aicrm_next")
-
-              conn.execute("GRANT ALL PRIVILEGES ON DATABASE test TO aicrm_next")
-              conn.execute("GRANT ALL ON SCHEMA public TO aicrm_next")
-
-          with psycopg.connect(default_url, autocommit=True) as conn:
-              conn.execute("GRANT ALL ON SCHEMA public TO aicrm_next")
-          PY
+        run: python -m pip install --require-hashes -r requirements.lock
 
       - name: Run scoped PostgreSQL Python tests
         env:
@@ -177,6 +139,7 @@ jobs:
         with:
           node-version: "24"
           cache: npm
+          cache-dependency-path: package-lock.json
 
       - name: Install frontend dependencies
         run: npm ci
@@ -197,6 +160,49 @@ jobs:
             node "$test_file"
           done
 
+  dependency-audit:
+    needs: select
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10.5"
+          cache: pip
+          cache-dependency-path: requirements.lock
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install hashed Python lock
+        run: python -m pip install --require-hashes -r requirements.lock
+
+      - name: Validate dependency governance
+        run: python scripts/ci/check_dependency_security.py
+
+      - name: Audit Python dependencies
+        run: python -m pip_audit -r requirements.lock --require-hashes --progress-spinner=off
+
+      - name: Audit Node dependencies
+        run: |
+          npm ci
+          npm audit --audit-level=high
+
+  full-regression:
+    needs: select
+    if: needs.select.outputs.needs_full_ci == 'true'
+    uses: ./.github/workflows/full-regression.yml
+    with:
+      run_governance: false
+
   ci-fast-result:
     needs:
       - select
@@ -204,6 +210,8 @@ jobs:
       - fast-python-no-pg
       - fast-python-pg
       - fast-frontend
+      - dependency-audit
+      - full-regression
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -225,6 +233,12 @@ jobs:
               for name, job in needs.items()
               if job["result"] not in {"success", "skipped"}
           ]
+          if (
+              os.environ.get("NEEDS_FULL_CI") == "true"
+              and needs.get("full-regression", {}).get("result") != "success"
+              and not any(item.startswith("full-regression=") for item in failed)
+          ):
+              failed.append(f"full-regression={needs.get('full-regression', {}).get('result', 'missing')}_but_required")
           print(f"selected_scopes={os.environ.get('SCOPES') or 'none'}")
           print(f"architecture_gate={os.environ.get('ARCHITECTURE_GATE') or 'none'}")
           print(f"needs_full_ci={os.environ.get('NEEDS_FULL_CI') or 'false'}")

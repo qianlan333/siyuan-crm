@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, Response
 
+from aicrm_next.shared.pii_audit import set_pii_audit_result_count
 from aicrm_next.shared.runtime import production_data_ready
 
 router = APIRouter()
@@ -82,6 +83,7 @@ async def class_user_management_export(request: Request) -> Response:
             "updated_at": _now(),
         }
     ]
+    set_pii_audit_result_count(request, len(rows))
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)

@@ -4,19 +4,19 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 from uuid import uuid4
 
+from aicrm_next.shared.sensitive_data import redact_sensitive_data, redact_sensitive_text
+
 from .command_bus.models import utcnow_iso
 
 ExternalCallAttemptStatus = Literal["success", "failed", "blocked"]
-_SENSITIVE_KEYS = {"token", "secret", "password", "authorization", "access_token", "refresh_token"}
-
-
 def scrub_summary(payload: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     for key, value in payload.items():
-        if key.lower() in _SENSITIVE_KEYS:
-            summary[key] = "[redacted]"
+        redacted = redact_sensitive_data(value, key=str(key))
+        if redacted != value:
+            summary[key] = redacted
         elif isinstance(value, (str, int, float, bool)) or value is None:
-            summary[key] = value
+            summary[key] = redact_sensitive_text(value) if isinstance(value, str) else value
         else:
             summary[key] = type(value).__name__
     return summary

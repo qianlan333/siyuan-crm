@@ -1397,7 +1397,7 @@ def test_questionnaire_external_push_is_queue_only(client: TestClient, monkeypat
     )
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {phone_question_id: "13800000002"}},
+        json={"answers": {phone_question_id: "13800001001"}},
         headers={"Idempotency-Key": "queue-only-questionnaire-effect"},
     )
     body = response.json()
@@ -1428,7 +1428,7 @@ def test_questionnaire_queue_mode_preview_dry_run_and_loopback_execute_2xx(next_
         next_client,
         monkeypatch,
         idempotency_key="questionnaire-queue-loopback-2xx",
-        phone="13800000003",
+        phone="13800001002",
         receiver_token="eert_questionnaire_queue_2xx",
         response_status=200,
     )
@@ -1471,7 +1471,7 @@ def test_questionnaire_queue_mode_loopback_500_retryable_and_400_terminal(next_c
         next_client,
         monkeypatch,
         idempotency_key="questionnaire-queue-loopback-500",
-        phone="13800000004",
+        phone="13800001003",
         receiver_token="eert_questionnaire_queue_500",
         response_status=500,
     )
@@ -1479,7 +1479,7 @@ def test_questionnaire_queue_mode_loopback_500_retryable_and_400_terminal(next_c
         next_client,
         monkeypatch,
         idempotency_key="questionnaire-queue-loopback-400",
-        phone="13800000005",
+        phone="13800001004",
         receiver_token="eert_questionnaire_queue_400",
         response_status=400,
     )
@@ -1522,7 +1522,7 @@ def test_questionnaire_queue_mode_job_creation_failure_does_not_fail_submission(
 
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {phone_question_id: "13800000006"}},
+        json={"answers": {phone_question_id: "13800001005"}},
         headers={"Idempotency-Key": "questionnaire-queue-plan-failure"},
     )
     body = response.json()

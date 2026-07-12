@@ -3,14 +3,15 @@ from __future__ import annotations
 import csv
 import html
 import io
-import os
 from typing import Any
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.pii_audit import set_pii_audit_result_count
 from aicrm_next.shared.repository_provider import RepositoryProviderError
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .application import (
     CompleteRadarOAuthCallbackCommand,
@@ -107,7 +108,7 @@ def _redirect_with_viewer_cookie(url: str, token: str = "") -> RedirectResponse:
 
 def _radar_oauth_return_url(state: str | None) -> str:
     try:
-        context = verify_radar_state(state, secret_key=os.getenv("SECRET_KEY", "").strip())
+        context = verify_radar_state(state, secret_key=runtime_setting("SECRET_KEY"))
     except Exception:
         return "/"
     code = str(context.get("code") or "").strip()
@@ -252,6 +253,7 @@ def list_radar_link_events(
 @router.get("/api/admin/radar-links/{link_id}/events/export")
 def export_radar_link_events(
     link_id: int,
+    request: Request,
     start_at: str = "",
     end_at: str = "",
 ) -> Response:
@@ -259,6 +261,7 @@ def export_radar_link_events(
         payload = ExportRadarLinkEventsQuery()(link_id, start_at=start_at, end_at=end_at)
     except Exception as exc:
         _raise_http(exc)
+    set_pii_audit_result_count(request, len(payload["items"]))
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=["unionid", "external_userid", "created_at"])
     writer.writeheader()

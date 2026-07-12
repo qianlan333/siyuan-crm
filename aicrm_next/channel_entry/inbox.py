@@ -5,6 +5,7 @@ import logging
 from typing import Any, Callable
 
 from aicrm_next.platform_foundation.webhook_inbox import WebhookInboxRepository, WebhookInboxService, build_webhook_inbox_repository
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .application import process_wecom_external_contact_event
 from .domain import ENTRY_CHANGE_TYPES, text
@@ -291,7 +292,12 @@ class WeComCallbackInboxWorker:
                 retryable=True,
                 next_retry_at=_next_retry_at(attempt_count),
             ) or {"status": "failed_retryable"}
-            LOGGER.exception("wecom callback inbox dispatch failed", extra={"webhook_inbox_id": inbox_id})
+            safe_log_exception(
+                LOGGER,
+                "wecom callback inbox dispatch failed",
+                exc,
+                webhook_inbox_id=inbox_id,
+            )
             return {
                 "id": inbox_id,
                 "status": text(updated.get("status")),

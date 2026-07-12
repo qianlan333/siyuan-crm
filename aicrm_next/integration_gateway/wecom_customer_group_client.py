@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
+
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 
 HttpGet = Callable[..., Any]
@@ -27,7 +28,7 @@ class WeComCustomerGroupClientError(RuntimeError):
 
 def _env_first(*names: str) -> str:
     for name in names:
-        value = str(os.getenv(name, "") or "").strip()
+        value = runtime_setting(name, "")
         if value:
             return value
     return ""

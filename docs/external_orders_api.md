@@ -1,37 +1,40 @@
-# 外部订单查询 API
+# 外部只读 API
 
 ## 概述
 
-这组接口给外部系统只读拉取订单数据，覆盖 `wechat`、`alipay`、`wechat_shop` 三类渠道。
+这组接口给外部系统只读拉取订单、用户基础信息和问卷提交数据。
 
-接口只查询本地订单读模型，不会创建订单、发起支付、发起退款，也不会主动同步微信小店订单。
+接口只查询本地读模型，不会创建订单、发起支付、发起退款、主动同步微信小店订单，也不会触发企微、webhook 或自动化发送。
 
 ## 生产访问地址
 
 生产环境 Base URL：
 
 ```text
-https://<SIYUAN_PRODUCTION_DOMAIN>
+https://www.youcangogogo.com
 ```
 
 当前文档涉及的完整接口地址：
 
 | 能力 | Method | 完整 URL |
 |---|---|---|
-| 查询用户基础信息 | `GET` | `https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/users/resolve` |
-| 批量查询订单 | `GET` | `https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders` |
-| 查询订单详情 | `GET` | `https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders/{order_no}` |
+| 查询用户基础信息 | `GET` | `https://www.youcangogogo.com/api/external/users/resolve` |
+| 查询问卷提交 | `GET` | `https://www.youcangogogo.com/api/external/questionnaire-submissions` |
+| 查询聊天记录 | `GET` | `https://www.youcangogogo.com/api/external/chat-records` |
+| 批量查询订单 | `GET` | `https://www.youcangogogo.com/api/external/orders` |
+| 查询订单详情 | `GET` | `https://www.youcangogogo.com/api/external/orders/{order_no}` |
 
 可选 shell 变量写法：
 
 ```bash
-BASE_URL="https://<SIYUAN_PRODUCTION_DOMAIN>"
+BASE_URL="https://www.youcangogogo.com"
 TOKEN="<AUTOMATION_INTERNAL_API_TOKEN>"
+ARCHIVE_TOKEN="<ARCHIVE_INTERNAL_API_TOKEN>"
 ```
 
 ## 鉴权
 
-所有请求都必须带 Bearer Token：
+所有请求都必须带 Bearer Token。用户、问卷与订单接口使用：
 
 ```http
 Authorization: Bearer <AUTOMATION_INTERNAL_API_TOKEN>
@@ -41,6 +44,12 @@ Authorization: Bearer <AUTOMATION_INTERNAL_API_TOKEN>
 
 ```bash
 AUTOMATION_INTERNAL_API_TOKEN
+```
+
+聊天记录接口单独使用 `ARCHIVE_INTERNAL_API_TOKEN`，不得用订单/自动化令牌替代：
+
+```http
+Authorization: Bearer <ARCHIVE_INTERNAL_API_TOKEN>
 ```
 
 错误语义：
@@ -74,7 +83,7 @@ GET /api/external/users/resolve
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/users/resolve?unionid=<UNIONID>"
+"https://www.youcangogogo.com/api/external/users/resolve?unionid=orSqJ5iT9UoeYQRVxvAoo_8avkmA"
 ```
 
 ### 响应字段
@@ -115,21 +124,21 @@ curl -H "Authorization: Bearer $TOKEN" \
   "ok": true,
   "user": {
     "person_id": "123",
-    "external_userid": "<EXTERNAL_USERID>",
-    "mobile": "<MOBILE>",
-    "customer_name": "<CUSTOMER_NAME>",
-    "unionid": "<UNIONID>",
-    "openid": "<OPENID>",
-    "owner_userid": "<OWNER_USERID>",
-    "owner_display_name": "<OWNER_DISPLAY_NAME>",
-    "remark": "<CUSTOMER_REMARK>",
-    "follow_user_userid": "<OWNER_USERID>",
-    "follow_user_userids": ["<OWNER_USERID>"],
+    "external_userid": "wm_xxx",
+    "mobile": "13800138000",
+    "customer_name": "张三",
+    "unionid": "orSqJ5iT9UoeYQRVxvAoo_8avkmA",
+    "openid": "o_xxx",
+    "owner_userid": "zhangsan",
+    "owner_display_name": "张三",
+    "remark": "张三妈妈",
+    "follow_user_userid": "zhangsan",
+    "follow_user_userids": ["zhangsan"],
     "binding_status": "bound",
     "is_bound": true,
     "matched_by": "unionid",
     "identity_map_id": 123,
-    "detail_url": "/api/customers/<EXTERNAL_USERID>"
+    "detail_url": "/api/customers/wm_xxx"
   },
   "route_owner": "ai_crm_next",
   "source_status": "external_user_basic",
@@ -137,21 +146,309 @@ curl -H "Authorization: Bearer $TOKEN" \
 }
 ```
 
+## 查询聊天记录
+
+```http
+GET /api/external/chat-records
+```
+
+按用户身份键查询本地归档聊天记录。该接口仅接受 `ARCHIVE_INTERNAL_API_TOKEN`，只读本地 `archived_messages`/消息读模型，不会实时调用企微，也不会发送消息或触发自动化。
+
+### Query 参数
+
+`mobile`、`unionid`、`external_userid` 至少传一个。`start_time` 和 `chat_scene` 必传。
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---:|---|---|
+| `mobile` | string | 条件必填 | - | 手机号 |
+| `unionid` | string | 条件必填 | - | 微信 unionid |
+| `external_userid` | string | 条件必填 | - | 企业微信外部联系人 ID |
+| `start_time` | integer | 是 | - | 聊天记录起始时间，秒级 Unix 时间戳 |
+| `chat_scene` | string | 是 | - | 聊天场景：`private`/`私信` 或 `group`/`群聊` |
+| `with_userid` | string | 否 | `HuangYouCan` | 私信场景下查询和哪个员工的聊天记录；空值默认 `HuangYouCan` |
+| `cursor` | string | 否 | - | 下一页游标，使用上一页返回的 `next_cursor` |
+
+分页固定每页 `20` 条。首次请求不传 `cursor`；如果 `has_more=true`，下一页保持原筛选条件不变并追加 `cursor`。
+
+### 请求示例
+
+按手机号查询与 `HuangYouCan` 的私信记录：
+
+```bash
+curl -H "Authorization: Bearer $ARCHIVE_TOKEN" \
+"https://www.youcangogogo.com/api/external/chat-records?mobile=13800138000&start_time=1780272000&chat_scene=private"
+```
+
+按 unionid 查询与指定员工的私信记录：
+
+```bash
+curl -H "Authorization: Bearer $ARCHIVE_TOKEN" \
+"https://www.youcangogogo.com/api/external/chat-records?unionid=orSqJ5iT9UoeYQRVxvAoo_8avkmA&start_time=1780272000&chat_scene=private&with_userid=ZhaoYanFang"
+```
+
+按 external_userid 查询群聊记录：
+
+```bash
+curl -H "Authorization: Bearer $ARCHIVE_TOKEN" \
+"https://www.youcangogogo.com/api/external/chat-records?external_userid=wm_xxx&start_time=1780272000&chat_scene=group"
+```
+
+拉取下一页：
+
+```bash
+curl -H "Authorization: Bearer $ARCHIVE_TOKEN" \
+"https://www.youcangogogo.com/api/external/chat-records?mobile=13800138000&start_time=1780272000&chat_scene=private&cursor=xxxx"
+```
+
+### 响应字段
+
+| 字段 | 说明 |
+|---|---|
+| `ok` | 是否成功 |
+| `items` / `messages` | 聊天记录数组 |
+| `total` | 当前筛选条件下的总数 |
+| `count` | 当前页返回条数 |
+| `limit` | 固定为 `20` |
+| `next_cursor` | 下一页游标；为空表示没有下一页 |
+| `has_more` | 是否还有下一页 |
+| `external_userid` | 最终解析出的企业微信外部联系人 ID |
+| `matched_by` | 本次匹配使用的键：`external_userid`、`unionid` 或 `mobile` |
+| `filters` | 服务端实际使用的筛选条件 |
+| `route_owner` | 路由归属，固定为 `ai_crm_next` |
+| `source_status` | 固定为 `external_chat_records` |
+| `read_model_status` | 读模型状态 |
+| `fallback_used` | 固定为 `false` |
+
+`items[]` 字段：
+
+| 字段 | 说明 |
+|---|---|
+| `msgid` | 消息 ID |
+| `chat_scene` | 标准化聊天场景：`private` 或 `group` |
+| `chat_type` | 原始聊天类型 |
+| `external_userid` | 企业微信外部联系人 ID |
+| `with_userid` | 员工 userid；私信场景通常是本次对话员工 |
+| `sender` | 发送方 |
+| `receiver` | 接收方 |
+| `chat_id` | 群聊 ID；私信为空 |
+| `roomid` | 群聊 roomid；私信为空 |
+| `group_name` | 群名；私信为空 |
+| `msgtype` | 消息类型 |
+| `content` | 消息内容 |
+| `send_time` | 发送时间 |
+| `source_id` | 本地归档行 ID |
+
+响应示例：
+
+```json
+{
+  "ok": true,
+  "items": [
+    {
+      "msgid": "msg_001",
+      "chat_scene": "private",
+      "chat_type": "single",
+      "external_userid": "wm_xxx",
+      "with_userid": "HuangYouCan",
+      "sender": "wm_xxx",
+      "receiver": "HuangYouCan",
+      "chat_id": "",
+      "roomid": "",
+      "group_name": "",
+      "msgtype": "text",
+      "content": "我刚买了 9.9，想知道第一步怎么做",
+      "send_time": "2026-06-14T09:20:30+00:00",
+      "source_id": "123"
+    }
+  ],
+  "messages": [
+    {
+      "msgid": "msg_001",
+      "chat_scene": "private",
+      "chat_type": "single",
+      "external_userid": "wm_xxx",
+      "with_userid": "HuangYouCan",
+      "sender": "wm_xxx",
+      "receiver": "HuangYouCan",
+      "chat_id": "",
+      "roomid": "",
+      "group_name": "",
+      "msgtype": "text",
+      "content": "我刚买了 9.9，想知道第一步怎么做",
+      "send_time": "2026-06-14T09:20:30+00:00",
+      "source_id": "123"
+    }
+  ],
+  "total": 1,
+  "count": 1,
+  "limit": 20,
+  "next_cursor": "",
+  "has_more": false,
+  "external_userid": "wm_xxx",
+  "matched_by": "mobile",
+  "filters": {
+    "chat_scene": "private",
+    "start_time": "2026-06-01 00:00:00",
+    "with_userid": "HuangYouCan"
+  },
+  "route_owner": "ai_crm_next",
+  "source_status": "external_chat_records",
+  "read_model_status": "primary",
+  "fallback_used": false
+}
+```
+
+## 查询问卷提交
+
+```http
+GET /api/external/questionnaire-submissions
+```
+
+按用户身份键查询问卷提交和答案快照。该接口与订单 API 使用同一个 `AUTOMATION_INTERNAL_API_TOKEN`，只读本地问卷提交读模型，不会触发外部推送、企微打标、支付或自动化动作。
+
+### Query 参数
+
+`mobile`、`unionid`、`external_userid` 至少传一个。其余参数可选。
+
+| 参数 | 类型 | 必填 | 默认 | 说明 |
+|---|---|---:|---|---|
+| `mobile` | string | 条件必填 | - | 手机号 |
+| `unionid` | string | 条件必填 | - | 微信 unionid |
+| `external_userid` | string | 条件必填 | - | 企业微信外部联系人 ID |
+| `questionnaire_id` | integer | 否 | - | 指定某份问卷 |
+| `submitted_from` | integer | 否 | - | 提交开始时间，秒级 Unix 时间戳 |
+| `submitted_to` | integer | 否 | - | 提交结束时间，秒级 Unix 时间戳 |
+| `limit` | integer | 否 | `100` | 每页条数，最大 `500` |
+| `cursor` | string | 否 | - | 下一页游标，使用上一页返回的 `next_cursor` |
+
+### 请求示例
+
+按真实付费用户手机号查询最近 5 条问卷提交：
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+"https://www.youcangogogo.com/api/external/questionnaire-submissions?mobile=13800138000&limit=5"
+```
+
+按 unionid + 指定问卷查询：
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+"https://www.youcangogogo.com/api/external/questionnaire-submissions?unionid=orSqJ5iT9UoeYQRVxvAoo_8avkmA&questionnaire_id=21&limit=5"
+```
+
+按时间窗口查询：
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+"https://www.youcangogogo.com/api/external/questionnaire-submissions?mobile=13800138000&submitted_from=1780272000&submitted_to=1781222399&limit=20"
+```
+
+### 响应字段
+
+| 字段 | 说明 |
+|---|---|
+| `ok` | 是否成功 |
+| `items` | 问卷提交数组 |
+| `total` | 当前筛选条件下的总数 |
+| `limit` | 当前页大小 |
+| `next_cursor` | 下一页游标；为空表示没有下一页 |
+| `has_more` | 是否还有下一页 |
+| `filters` | 服务端实际使用的筛选条件 |
+| `route_owner` | 路由归属，固定为 `ai_crm_next` |
+| `source_status` | 固定为 `external_questionnaire_submissions` |
+| `read_model_status` | 读模型状态 |
+| `fallback_used` | 固定为 `false` |
+
+`items[]` 提交级字段：
+
+| 字段 | 说明 |
+|---|---|
+| `mobile` | 手机号 |
+| `unionid` | 微信 unionid |
+| `external_userid` | 企业微信外部联系人 ID |
+| `submitted_at` | 提交时间 |
+| `questionnaire_id` | 问卷 ID |
+| `questionnaire_title` | 问卷标题快照 |
+| `final_tags` | 本次问卷计算出的最终标签数组 |
+| `assessment_result_snapshot` | 测评结果快照对象 |
+| `answers` | 答案数组 |
+
+`answers[]` 答案级字段：
+
+| 字段 | 说明 |
+|---|---|
+| `question_title_snapshot` | 问题标题快照 |
+| `selected_option_texts_snapshot` | 选项文本快照数组 |
+| `text_value` | 文本答案；选择题的其他填写内容也在这里 |
+| `score_contribution` | 本题分数贡献 |
+
+响应示例：
+
+```json
+{
+  "ok": true,
+  "items": [
+    {
+      "mobile": "13800138000",
+      "unionid": "orSqJ5iT9UoeYQRVxvAoo_8avkmA",
+      "external_userid": "wm_xxx",
+      "submitted_at": "2026-06-14T09:20:30+00:00",
+      "questionnaire_id": 21,
+      "questionnaire_title": "首月体验问卷",
+      "final_tags": ["tag_interest_ai_tools"],
+      "assessment_result_snapshot": {
+        "level": "starter"
+      },
+      "answers": [
+        {
+          "question_title_snapshot": "你现在卡在哪里？",
+          "selected_option_texts_snapshot": ["不知道怎么开始"],
+          "text_value": "",
+          "score_contribution": 3.0
+        },
+        {
+          "question_title_snapshot": "你最想要什么帮助？",
+          "selected_option_texts_snapshot": [],
+          "text_value": "希望有人帮我拆第一步",
+          "score_contribution": 0.0
+        }
+      ]
+    }
+  ],
+  "total": 1,
+  "limit": 5,
+  "next_cursor": "",
+  "has_more": false,
+  "filters": {
+    "mobile": "13800138000"
+  },
+  "route_owner": "ai_crm_next",
+  "source_status": "external_questionnaire_submissions",
+  "read_model_status": "primary",
+  "fallback_used": false
+}
+```
+
 ## 当前产品编码对照
 
-以下对照应来自 siyuan 当前生产商品列表 `GET /api/admin/wechat-pay/products?limit=100`，用于 `product_code` 参数。PR-11 不提交真实生产商品、订单或用户示例。
+以下对照来自当前生产商品列表 `GET /api/admin/wechat-pay/products?limit=100`，用于 `product_code` 参数。
 
 | product_code | 产品名称 | 金额 | 状态 | 备注 |
 |---|---|---:|---|---|
-| `<PRODUCT_CODE>` | `<PRODUCT_NAME>` | `<AMOUNT_YUAN>` | active | 由部署环境数据决定 |
+| `premium_monthly_trial` | 黄小璨月度会员私教版 | 69.00 | active | 当前可用 |
+| `subscription_monthly` | 黄小璨订阅版-月付 | 19.90 | active | 当前可用 |
+| `subscription_trial_month` | 黄小璨首月体验 | 9.90 | active | 当前可用 |
+| `prd_20260528102810_0fe9ac` | 黄小璨私教版年度会员 | 999.00 | active | 当前可用 |
 
 历史订单编码兼容：
 
 | 历史 product_code | 归并到当前 product_code |
 |---|---|
-| `<LEGACY_PRODUCT_CODE>` | `<PRODUCT_CODE>` |
+| `prd_20260518095708_9f77db` | `subscription_trial_month` |
+| `prd_20260601055439_3c4f56` | `premium_monthly_trial` |
 
-调用时传当前编码即可命中兼容的历史编码。例如传 `<PRODUCT_CODE>`，会同时匹配 `<PRODUCT_CODE>` 和 `<LEGACY_PRODUCT_CODE>`。
+调用时传当前编码即可命中兼容的历史编码。例如传 `subscription_trial_month`，会同时匹配 `subscription_trial_month` 和 `prd_20260518095708_9f77db`。
 
 ## 批量查询订单
 
@@ -188,21 +485,21 @@ GET /api/external/orders
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders?provider=all&paid_from=<PAID_FROM_TS>&paid_to=<PAID_TO_TS>&is_paid=true&limit=100"
+"https://www.youcangogogo.com/api/external/orders?provider=all&paid_from=1780272000&paid_to=1781222399&is_paid=true&limit=100"
 ```
 
-按产品编码拉取：
+只拉取订阅版月付：
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders?provider=all&product_code=<PRODUCT_CODE>&is_paid=true&limit=100"
+"https://www.youcangogogo.com/api/external/orders?provider=all&product_code=subscription_monthly&is_paid=true&limit=100"
 ```
 
 只拉取微信小店订单：
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders?provider=wechat_shop&is_paid=true&limit=100"
+"https://www.youcangogogo.com/api/external/orders?provider=wechat_shop&is_paid=true&limit=100"
 ```
 
 ### 响应字段
@@ -248,11 +545,11 @@ curl -H "Authorization: Bearer $TOKEN" \
   "items": [
     {
       "provider": "wechat",
-      "order_no": "<ORDER_NO>",
-      "transaction_id": "<TRANSACTION_ID>",
+      "order_no": "WXP202606110001",
+      "transaction_id": "4200000000000000000",
       "paid_at": "2026-06-11 10:30:22",
       "created_at": "2026-06-11 10:29:58",
-      "product_code": "<PRODUCT_CODE>",
+      "product_code": "subscription_monthly",
       "payment_status": "paid",
       "status_label": "已支付",
       "amount_total": 1990,
@@ -262,10 +559,10 @@ curl -H "Authorization: Bearer $TOKEN" \
       "is_refunded": false,
       "refund_status": "",
       "refunded_amount_total": 0,
-      "mobile": "<MOBILE>",
-      "unionid": "<UNIONID>",
-      "external_userid": "<EXTERNAL_USERID>",
-      "detail_url": "/api/external/orders/<ORDER_NO>?provider=wechat"
+      "mobile": "138****0000",
+      "unionid": "xxx",
+      "external_userid": "wm_xxx",
+      "detail_url": "/api/external/orders/WXP202606110001?provider=wechat"
     }
   ],
   "next_cursor": "",
@@ -289,14 +586,14 @@ GET /api/external/orders/{order_no}
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders/<ORDER_NO>?provider=wechat"
+"https://www.youcangogogo.com/api/external/orders/WXP202606110001?provider=wechat"
 ```
 
 微信小店详情：
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders/<WECHAT_SHOP_ORDER_ID>?provider=wechat_shop"
+"https://www.youcangogogo.com/api/external/orders/3705115058471208928?provider=wechat_shop"
 ```
 
 详情响应复用统一订单详情投影，包含客户、商品编码、金额、可退款金额、已退款/退款中金额、回调摘要和时间线。外部对接统一按 `product_code` 识别产品。
@@ -316,7 +613,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" \
-"https://<SIYUAN_PRODUCTION_DOMAIN>/api/external/orders?provider=all&is_paid=true&limit=100&cursor=<NEXT_CURSOR>"
+"https://www.youcangogogo.com/api/external/orders?provider=all&is_paid=true&limit=100&cursor=xxxx"
 ```
 
 不要自行拼 `offset`。
@@ -340,8 +637,13 @@ POST /api/admin/wechat-shop/orders/{order_id}/sync
 
 ## 时间戳说明
 
-`paid_from`、`paid_to`、`created_from`、`created_to` 都必须传秒级 Unix 时间戳。
+`paid_from`、`paid_to`、`created_from`、`created_to`、`submitted_from`、`submitted_to`、`start_time` 都必须传秒级 Unix 时间戳。
 
-示例值请由调用方按查询窗口生成，例如 `<PAID_FROM_TS>`、`<PAID_TO_TS>`。
+示例：
 
-不要传毫秒级时间戳，例如 `<MILLISECONDS_TS>` 会被拒绝。
+| 时间 | 秒级时间戳 |
+|---|---:|
+| 2026-06-01 00:00:00 UTC | `1780272000` |
+| 2026-06-11 23:59:59 UTC | `1781222399` |
+
+不要传毫秒级时间戳，例如 `1780272000000` 会被拒绝。

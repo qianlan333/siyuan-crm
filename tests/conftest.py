@@ -367,7 +367,8 @@ def _run_next_alembic_upgrade(url: str) -> None:
     from alembic import command
     from alembic.config import Config
 
-    _bootstrap_next_test_baseline_schema(url)
+    if not _database_has_alembic_state(url):
+        _bootstrap_next_test_baseline_schema(url)
     previous_url = os.environ.get("DATABASE_URL")
     os.environ["DATABASE_URL"] = url
     try:
@@ -379,6 +380,16 @@ def _run_next_alembic_upgrade(url: str) -> None:
             os.environ.pop("DATABASE_URL", None)
         else:
             os.environ["DATABASE_URL"] = previous_url
+
+
+def _database_has_alembic_state(url: str) -> bool:
+    import psycopg
+
+    with psycopg.connect(url) as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+            row = cur.fetchone()
+    return bool(row and row[0])
 
 
 def _bootstrap_next_test_baseline_schema(url: str) -> None:
@@ -845,7 +856,6 @@ def _bootstrap_next_test_baseline_schema(url: str) -> None:
             trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
             unionid TEXT NOT NULL,
             external_userid_snapshot TEXT NOT NULL DEFAULT '',
-            mobile_snapshot TEXT NOT NULL DEFAULT '',
             membership_config_id TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','expired','disabled','refunded')),
             start_at TIMESTAMPTZ NOT NULL,

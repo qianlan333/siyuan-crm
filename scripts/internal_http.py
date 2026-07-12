@@ -7,6 +7,14 @@ import urllib.request
 from collections.abc import Callable
 from typing import Any
 
+try:
+    from aicrm_next.shared.sensitive_data import redact_sensitive_text
+except ModuleNotFoundError:  # pragma: no cover - direct script execution
+    from script_runtime import ensure_repo_root_on_path
+
+    ensure_repo_root_on_path()
+    from aicrm_next.shared.sensitive_data import redact_sensitive_text
+
 
 UrlOpen = Callable[[urllib.request.Request, int], Any]
 
@@ -50,7 +58,7 @@ def post_json(
             with urlopen(request, timeout=timeout_seconds) as response:
                 return json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as exc:
-            print(exc.read().decode("utf-8", errors="replace"))
+            print(redact_sensitive_text(exc.read().decode("utf-8", errors="replace")))
             raise
         except urllib.error.URLError as exc:
             last_error = exc

@@ -9,6 +9,7 @@ from uuid import uuid4
 from aicrm_next.platform_foundation.push_center.capability_registry import capability_for_section
 from aicrm_next.platform_foundation.push_center.section_mapper import section_for_job
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
+from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .adapters import DEFAULT_ADAPTER_REGISTRY, ExternalEffectAdapterRegistry
 from .execution_gates import (
@@ -200,13 +201,13 @@ class ExternalEffectWorker:
         try:
             dispatch_result = self._adapters.get(job.adapter_name).dispatch(job)
         except Exception as exc:
-            LOGGER.exception(
+            safe_log_exception(
+                LOGGER,
                 "external effect adapter dispatch raised",
-                extra={
-                    "external_effect_job_id": int(job.id or 0),
-                    "effect_type": job.effect_type,
-                    "adapter_name": job.adapter_name,
-                },
+                exc,
+                external_effect_job_id=int(job.id or 0),
+                effect_type=job.effect_type,
+                adapter_name=job.adapter_name,
             )
             error_code = "adapter_exception"
             error_message = str(exc)[:500]
@@ -358,9 +359,12 @@ class ExternalEffectWorker:
                 operator="external_effect_agent_continuation",
             )
         except Exception as exc:
-            LOGGER.exception(
+            safe_log_exception(
+                LOGGER,
                 "automation agent post-success continuation failed",
-                extra={"external_effect_job_id": int(job.id or 0), "batch_id": batch_id},
+                exc,
+                external_effect_job_id=int(job.id or 0),
+                batch_id=batch_id,
             )
             return {"applicable": True, "ok": False, "batch_id": batch_id, "error": str(exc)[:500]}
         return {"applicable": True, **result}

@@ -4,6 +4,8 @@ import os
 import time
 from typing import Any, Callable
 
+from aicrm_next.shared.runtime_settings import runtime_setting
+
 
 HttpRequest = Callable[..., Any]
 
@@ -102,7 +104,7 @@ class ProductionWeComAdapter:
         http_request: HttpRequest | None = None,
     ) -> None:
         self.corp_id = _text(corp_id or os.getenv("WECOM_CORP_ID"))
-        self.secret = _text(secret or os.getenv("WECOM_CONTACT_SECRET") or os.getenv("WECOM_SECRET"))
+        self.secret = _text(secret or runtime_setting("WECOM_CONTACT_SECRET") or runtime_setting("WECOM_SECRET"))
         self.api_base = _text(api_base or os.getenv("WECOM_API_BASE") or "https://qyapi.weixin.qq.com").rstrip("/")
         self.timeout = float(timeout or os.getenv("WECOM_TIMEOUT_SECONDS") or 15)
         self.http_request = http_request or _default_http_request
@@ -222,7 +224,7 @@ def missing_wecom_config() -> list[str]:
     missing: list[str] = []
     if not _text(os.getenv("WECOM_CORP_ID")):
         missing.append("WECOM_CORP_ID")
-    if not (_text(os.getenv("WECOM_CONTACT_SECRET")) or _text(os.getenv("WECOM_SECRET"))):
+    if not (_text(runtime_setting("WECOM_CONTACT_SECRET")) or _text(runtime_setting("WECOM_SECRET"))):
         missing.append("WECOM_CONTACT_SECRET")
     return missing
 

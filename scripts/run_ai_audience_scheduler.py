@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import argparse
-import json
 import sys
 
 try:
-    from scripts.script_runtime import ensure_repo_root_on_path, read_int_env
+    from scripts.script_runtime import ensure_repo_root_on_path, print_json, read_int_env
 except ModuleNotFoundError:  # pragma: no cover - direct script execution
-    from script_runtime import ensure_repo_root_on_path, read_int_env
+    from script_runtime import ensure_repo_root_on_path, print_json, read_int_env
 
 ensure_repo_root_on_path()
 
@@ -66,7 +65,7 @@ def main() -> int:
                 include_incremental_refresh=include_incremental,
                 include_daily_refresh=run_daily_consumers,
             )
-    print(json.dumps(payload, ensure_ascii=False, indent=2, default=str))
+    print_json(payload, indent=2)
     return 0 if payload["ticks"].get("ok") else 1
 
 

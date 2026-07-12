@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
-import os
 from pathlib import Path
 from typing import Any, Protocol
+
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .archive_sdk import (
     WeComArchiveError,
@@ -13,7 +14,7 @@ from .archive_sdk import (
     extract_text_record,
     fetch_chatdata_page,
 )
-from .repo import ArchiveSyncRepository, build_archive_sync_repository, read_archive_app_setting
+from .repo import ArchiveSyncRepository, build_archive_sync_repository
 
 
 DEFAULT_START_TIME = "2000-01-01 00:00:00"
@@ -273,10 +274,7 @@ def _summary_for_storage(result: dict[str, Any]) -> dict[str, Any]:
 
 
 def _setting(key: str) -> str:
-    env_value = str(os.getenv(key) or "").strip()
-    if env_value:
-        return env_value
-    return _db_setting(key)
+    return runtime_setting(key, "")
 
 
 def _int_setting(key: str, default: int) -> int:
@@ -287,7 +285,7 @@ def _int_setting(key: str, default: int) -> int:
 
 
 def _db_setting(key: str) -> str:
-    return read_archive_app_setting(key)
+    return runtime_setting(key, "")
 
 
 def dump_archive_sync_payload(payload: dict[str, Any]) -> str:

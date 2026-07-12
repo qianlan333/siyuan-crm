@@ -60,9 +60,9 @@ IDENTITY_BOUNDARY_TABLE_PREFIXES = (
 IDENTITY_BOUNDARY_TABLE_NAMES = {
     "automation_channel_entry_runtime",
 }
-ALLOWED_BUSINESS_LEGACY_IDENTITY_COLUMNS = {
-    # Service period entitlements keep a denormalized contact snapshot for member lists.
-    "service_period_entitlements": {"mobile_snapshot"},
+APPROVED_LEGACY_IDENTITY_MIGRATION_BOUNDARIES = {
+    ("0095_service_period_products.py", "upgrade", "service_period_entitlements", "mobile_snapshot"),
+    ("0097_service_period_unionid_cleanup.py", "downgrade", "service_period_entitlements", "mobile_snapshot"),
 }
 _UNQUOTED_SQL_IDENTIFIER = r"[a-zA-Z_][a-zA-Z0-9_]*"
 _QUOTED_SQL_IDENTIFIER = r'"[^"]+"'
@@ -275,8 +275,17 @@ def _legacy_identity_column_violations(literal: SqlLiteral, normalized: str) -> 
         )
         for table in sorted(business_tables)
         for column in sorted(columns)
-        if column not in ALLOWED_BUSINESS_LEGACY_IDENTITY_COLUMNS.get(table, set())
+        if not _approved_legacy_identity_migration_boundary(literal, table, column)
     ]
+
+
+def _approved_legacy_identity_migration_boundary(literal: SqlLiteral, table: str, column: str) -> bool:
+    return (
+        literal.path.name,
+        literal.function_name,
+        table,
+        column,
+    ) in APPROVED_LEGACY_IDENTITY_MIGRATION_BOUNDARIES
 
 
 def _references_table(sql_text: str, table: str) -> bool:

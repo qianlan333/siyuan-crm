@@ -8,6 +8,7 @@ from typing import Any
 
 from aicrm_next.message_archive.sync_service import execute_archive_sync
 from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
+from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .domain import (
     BROADCAST_SOURCE_TYPES,
@@ -237,7 +238,7 @@ def build_jobs_payload(args: Any, repo: AdminJobsRepository | None = None) -> di
         "archive_runtime": {"last_sync_run": last_sync_run, "sync_counts": sync_counts, "health": {"runner": "aicrm_next_admin_jobs"}, "health_error": "", "sync_form": _archive_sync_form_defaults()},
         "callback_runtime": {"enabled": True, "async_enabled": True, "counts": callback_counts},
         "batches_runtime": {"counts": batch_counts},
-        "deferred_runtime": {"counts": deferred_counts, "mcp_auth_configured": bool(os.getenv("MCP_BEARER_TOKEN"))},
+        "deferred_runtime": {"counts": deferred_counts, "mcp_auth_configured": bool(runtime_setting("MCP_BEARER_TOKEN"))},
         "webhook_runtime": {"counts": webhook_counts},
         "archive_filters": archive_filters,
         "callback_filters": callback_filters,

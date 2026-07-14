@@ -47,6 +47,12 @@ jobs:
             else
               echo "scripts/ensure_channel_multi_staff_schema.py not present; skipping"
             fi
+            # Identity preflight must fail before any runtime unit is stopped.
+            python3 scripts/ops/check_unionid_identity_cutover.py \
+              --phase preflight \
+              --register-existing-conflicts \
+              --expected-release-sha "$after_sha" \
+              | tee /tmp/aicrm-identity-preflight.json
             sudo systemctl restart openclaw-wecom-postgres.service
             for _ in $(seq 1 20); do
               if curl -sSf http://127.0.0.1:5001/health; then
@@ -55,6 +61,10 @@ jobs:
               sleep 0.5
             done
             curl -sSf http://127.0.0.1:5001/health
+            python3 scripts/ops/check_unionid_identity_cutover.py \
+              --phase post-deploy \
+              --expected-release-sha "$after_sha" \
+              | tee /tmp/aicrm-identity-reconciliation.json
             admin_channels_status="$(curl -sS -o /tmp/aicrm_channels_smoke.json -w "%{http_code}" http://127.0.0.1:5001/api/admin/channels?limit=1)"
             if [ "$admin_channels_status" != "200" ] && [ "$admin_channels_status" != "401" ] && [ "$admin_channels_status" != "403" ]; then
               cat /tmp/aicrm_channels_smoke.json

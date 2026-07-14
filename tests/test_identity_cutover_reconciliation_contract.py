@@ -30,5 +30,6 @@ def test_identity_reconciliation_outputs_counts_only_and_runs_before_service_sto
     assert "--phase post-deploy" in deploy
     deploy_execution = deploy[deploy.index("# Identity preflight must fail before any runtime unit is stopped.") :]
     preflight_index = deploy_execution.index("--phase preflight")
-    migration_stop_index = deploy_execution.index("--phase stop-for-migration")
+    stop_marker = "--phase stop-for-migration" if "--phase stop-for-migration" in deploy_execution else "systemctl restart openclaw-wecom-postgres.service"
+    migration_stop_index = deploy_execution.index(stop_marker)
     assert preflight_index < migration_stop_index

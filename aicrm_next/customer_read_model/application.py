@@ -1162,18 +1162,28 @@ class GetCustomerContextQuery:
                 self._assert_owner_scope(customer, query)
                 unionid = unionid or str(customer.get("unionid") or "").strip()
                 external_userid = external_userid or str(customer.get("external_userid") or customer.get("user_id") or "").strip()
-                timeline_payload = GetCustomerTimelineQuery(repo, live_source_repo=self._live_source_repo)(
-                    CustomerTimelineRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.timeline_limit)
-                )
-                if not timeline_payload.get("ok"):
-                    raise RuntimeError(str(timeline_payload.get("page_error") or timeline_payload.get("error_code") or "customer timeline unavailable"))
-                messages_payload = ListRecentMessagesQuery(repo, live_source_repo=self._live_source_repo)(
-                    RecentMessagesRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.recent_message_limit)
-                )
-                if not messages_payload.get("ok"):
-                    raise RuntimeError(str(messages_payload.get("page_error") or messages_payload.get("error_code") or "recent messages unavailable"))
-                timeline = dict(timeline_payload.get("timeline") or {})
-                recent_messages = list(messages_payload.get("messages") or messages_payload.get("items") or [])
+                if query.include_activity:
+                    timeline_payload = GetCustomerTimelineQuery(repo, live_source_repo=self._live_source_repo)(
+                        CustomerTimelineRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.timeline_limit)
+                    )
+                    if not timeline_payload.get("ok"):
+                        raise RuntimeError(
+                            str(timeline_payload.get("page_error") or timeline_payload.get("error_code") or "customer timeline unavailable")
+                        )
+                    messages_payload = ListRecentMessagesQuery(repo, live_source_repo=self._live_source_repo)(
+                        RecentMessagesRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.recent_message_limit)
+                    )
+                    if not messages_payload.get("ok"):
+                        raise RuntimeError(
+                            str(messages_payload.get("page_error") or messages_payload.get("error_code") or "recent messages unavailable")
+                        )
+                    timeline = dict(timeline_payload.get("timeline") or {})
+                    recent_messages = list(messages_payload.get("messages") or messages_payload.get("items") or [])
+                else:
+                    timeline_payload = {"source_status": "skipped", "fallback_used": False, "fallback_reason": ""}
+                    messages_payload = {"source_status": "skipped", "fallback_used": False, "fallback_reason": ""}
+                    timeline = {"external_userid": external_userid, "items": [], "count": 0, "total": 0}
+                    recent_messages = []
                 return _customer_context_payload(
                     unionid=unionid,
                     external_userid=external_userid,
@@ -1210,12 +1220,22 @@ class GetCustomerContextQuery:
             self._assert_owner_scope(customer, query)
             unionid = unionid or str(customer.get("unionid") or "").strip()
             external_userid = external_userid or str(customer.get("external_userid") or customer.get("user_id") or "").strip()
-            timeline = GetCustomerTimelineQuery(repo, live_source_repo=self._live_source_repo)(
-                CustomerTimelineRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.timeline_limit)
-            )
-            messages = ListRecentMessagesQuery(repo, live_source_repo=self._live_source_repo)(
-                RecentMessagesRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.recent_message_limit)
-            )
+            if query.include_activity:
+                timeline = GetCustomerTimelineQuery(repo, live_source_repo=self._live_source_repo)(
+                    CustomerTimelineRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.timeline_limit)
+                )
+                messages = ListRecentMessagesQuery(repo, live_source_repo=self._live_source_repo)(
+                    RecentMessagesRequest(unionid=unionid or None, external_userid=external_userid or None, limit=query.recent_message_limit)
+                )
+            else:
+                timeline = {
+                    "timeline": {"external_userid": external_userid, "items": [], "count": 0, "total": 0},
+                    "adapter_contract": {"source_status": "skipped", "fallback_used": False},
+                }
+                messages = {
+                    "messages": [],
+                    "adapter_contract": {"source_status": "skipped", "fallback_used": False},
+                }
             return _customer_context_payload(
                 unionid=unionid,
                 external_userid=external_userid,

@@ -19,6 +19,7 @@ from aicrm_next.navigation_target import completion_action_for_target, completio
 from aicrm_next.commerce.order_expiration import close_expired_wechat_pay_orders, pending_order_expires_at_text
 from aicrm_next.shared.product_code_aliases import product_code_filter_values
 from aicrm_next.identity_contact.dto import IdentityResolveResult, ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.payment_projection import project_payment_order_mobile
 from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.integration_gateway.wechat_pay_client import WeChatPayClient, WeChatPayClientConfig, WeChatPayClientError
 from aicrm_next.integration_gateway.wechat_oauth_client import WeChatOAuthClientError, build_wechat_oauth_client
@@ -721,103 +722,8 @@ def _mark_order_failed(conn: Any, out_trade_no: str, error_message: str) -> None
     )
 
 
-def _json_object(value: Any) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return value
-    if isinstance(value, str) and value.strip():
-        try:
-            parsed = json.loads(value)
-        except Exception:
-            return {}
-        return parsed if isinstance(parsed, dict) else {}
-    return {}
-
-
-def _order_metadata_identity(order: dict[str, Any]) -> dict[str, Any]:
-    metadata = _json_object(order.get("metadata_json"))
-    for key in ("payer_identity", "buyer_identity"):
-        identity = metadata.get(key)
-        if isinstance(identity, dict):
-            return identity
-    return {}
-
-
 def _project_order_mobile_to_identity(conn: Any, order: dict[str, Any], *, source_route: str) -> dict[str, Any]:
-    identity = _order_metadata_identity(order)
-    mobile = "".join(ch for ch in _normalized_text(identity.get("mobile")) if ch.isdigit())
-    if not mobile:
-        return {"ok": True, "projected": False, "reason": "missing_mobile"}
-    if not (len(mobile) == 11 and mobile.startswith("1")):
-        return {"ok": True, "projected": False, "reason": "invalid_mobile"}
-
-    external_userid = _normalized_text(identity.get("external_userid"))
-    base_resolution = resolve_identity_with_dbapi(
-        conn,
-        ResolvePersonIdentityRequest(
-            unionid=_normalized_text(order.get("unionid") or identity.get("unionid")) or None,
-            external_userid=external_userid or None,
-            openid=_normalized_text(identity.get("openid")) or None,
-        ),
-    )
-    unionid = resolved_unionid(base_resolution)
-    if not unionid:
-        return {
-            "ok": False if base_resolution.status == "conflict" else True,
-            "projected": False,
-            "reason": "identity_conflict" if base_resolution.status == "conflict" else "missing_unionid",
-        }
-    mobile_resolution = resolve_identity_with_dbapi(
-        conn,
-        ResolvePersonIdentityRequest(mobile=mobile),
-    )
-    mobile_unionid = resolved_unionid(mobile_resolution)
-    if mobile_resolution.status in {"pending", "conflict"} or (mobile_unionid and mobile_unionid != unionid):
-        return {"ok": False, "projected": False, "reason": "mobile_alias_conflict"}
-
-    owner_userid = _normalized_text(identity.get("owner_userid"))
-    customer_name = _normalized_text(order.get("payer_name_snapshot") or identity.get("payer_name"))
-    row = conn.execute(
-        """
-        UPDATE crm_user_identity
-        SET mobile = %s,
-            mobile_normalized = %s,
-            mobile_verified = TRUE,
-            mobile_source = CASE
-                WHEN COALESCE(NULLIF(mobile_source, ''), '') = '' THEN 'wechat_pay_order'
-                ELSE mobile_source
-            END,
-            primary_external_userid = COALESCE(NULLIF(primary_external_userid, ''), NULLIF(%s, ''), primary_external_userid),
-            primary_owner_userid = COALESCE(NULLIF(primary_owner_userid, ''), NULLIF(%s, ''), primary_owner_userid),
-            customer_name = COALESCE(NULLIF(customer_name, ''), NULLIF(%s, ''), customer_name),
-            profile_json = COALESCE(profile_json, '{}'::jsonb) || %s::jsonb,
-            last_seen_at = NOW(),
-            updated_at = NOW()
-        WHERE unionid = %s
-          AND (COALESCE(mobile, '') = '' OR mobile = %s OR mobile_normalized = %s)
-        RETURNING unionid, mobile, primary_external_userid, primary_owner_userid
-        """,
-        (
-            mobile,
-            mobile,
-            external_userid,
-            owner_userid,
-            customer_name,
-            _jsonb(
-                {
-                    "wechat_pay_mobile_projection": {
-                        "out_trade_no": _normalized_text(order.get("out_trade_no")),
-                        "source_route": source_route,
-                    }
-                }
-            ),
-            unionid,
-            mobile,
-            mobile,
-        ),
-    ).fetchone()
-    if not row:
-        return {"ok": True, "projected": False, "reason": "identity_missing_or_mobile_conflict", "unionid": unionid}
-    return {"ok": True, "projected": True, "unionid": unionid, "mobile": mobile}
+    return project_payment_order_mobile(conn, order, source_route=source_route)
 
 
 def _safe_project_order_mobile_to_identity(conn: Any, order: dict[str, Any], *, source_route: str) -> dict[str, Any]:

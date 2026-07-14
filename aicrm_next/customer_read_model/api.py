@@ -855,7 +855,7 @@ def get_sidebar_v2_workbench(
     request: Request,
     external_userid: str | None = None,
     owner_userid: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     if not str(external_userid or "").strip():
         return _sidebar_input_error("external_userid is required")
@@ -892,7 +892,7 @@ def get_sidebar_v2_questionnaires(
     request: Request,
     external_userid: str | None = None,
     owner_userid: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     if not str(external_userid or "").strip():
         return _sidebar_input_error("external_userid is required")
@@ -966,7 +966,7 @@ def get_sidebar_v2_other_staff_messages(
     current_userid: str | None = None,
     owner_userid: str | None = None,
     limit: int = 20,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     if not str(external_userid or "").strip():
         return _sidebar_input_error("external_userid is required")
@@ -1007,7 +1007,7 @@ def get_sidebar_v2_products(
     external_userid: str | None = None,
     owner_userid: str | None = None,
     bind_by_userid: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     if not str(external_userid or "").strip():
         return _sidebar_input_error("external_userid is required")
@@ -1047,7 +1047,7 @@ def get_sidebar_v2_orders(
     request: Request,
     external_userid: str | None = None,
     owner_userid: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     if not str(external_userid or "").strip():
         return _sidebar_input_error("external_userid is required")
@@ -1084,7 +1084,7 @@ def get_sidebar_v2_periodic_orders(
     request: Request,
     external_userid: str | None = None,
     owner_userid: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     if not str(external_userid or "").strip():
         return _sidebar_input_error("external_userid is required")
@@ -1122,7 +1122,7 @@ async def update_sidebar_v2_periodic_order_remark(
     entitlement_id: str,
     owner_userid: str | None = None,
     current_userid: str | None = None,
-    db: Session = Depends(get_db),
+    db: Session = Depends(get_db, scope="function"),
 ):
     try:
         payload = await _sidebar_json_body(request)

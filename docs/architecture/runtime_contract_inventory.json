@@ -1577,37 +1577,37 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/commerce/wechat_shop_service.py",
       "key": "WECHAT_SHOP_API_BASE",
-      "line": 111
+      "line": 112
     },
     {
       "accessor": "os.getenv",
       "file": "aicrm_next/commerce/wechat_shop_service.py",
       "key": "WECHAT_SHOP_APPID",
-      "line": 109
-    },
-    {
-      "accessor": "os.getenv",
-      "file": "aicrm_next/commerce/wechat_shop_service.py",
-      "key": "WECHAT_SHOP_APPID",
-      "line": 699
-    },
-    {
-      "accessor": "runtime_setting",
-      "file": "aicrm_next/commerce/wechat_shop_service.py",
-      "key": "WECHAT_SHOP_APPSECRET",
-      "line": 95
-    },
-    {
-      "accessor": "runtime_setting",
-      "file": "aicrm_next/commerce/wechat_shop_service.py",
-      "key": "WECHAT_SHOP_APPSECRET",
       "line": 110
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "aicrm_next/commerce/wechat_shop_service.py",
+      "key": "WECHAT_SHOP_APPID",
+      "line": 700
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/wechat_shop_service.py",
+      "key": "WECHAT_SHOP_APPSECRET",
+      "line": 96
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/wechat_shop_service.py",
+      "key": "WECHAT_SHOP_APPSECRET",
+      "line": 111
     },
     {
       "accessor": "runtime_setting",
       "file": "aicrm_next/commerce/wechat_shop_service.py",
       "key": "WECHAT_SHOP_CALLBACK_TOKEN",
-      "line": 95
+      "line": 96
     },
     {
       "accessor": "runtime_setting",
@@ -1625,7 +1625,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/commerce/wechat_shop_service.py",
       "key": "WECHAT_SHOP_HTTP_TIMEOUT_SECONDS",
-      "line": 106
+      "line": 107
     },
     {
       "accessor": "os.getenv",
@@ -2773,7 +2773,7 @@
     }
   ],
   "migration_heads": [
-    "0109_questionnaire_auto_execute"
+    "0111_wechat_shop_mobile_projection"
   ],
   "openapi_components": {
     "schemas": {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from aicrm_next.platform_foundation.external_effects import ExternalEffectJob, ExternalEffectService, WEBHOOK_ORDER_PAID_PUSH
@@ -33,6 +34,7 @@ PAYMENT_SUCCEEDED_CORE_CONSUMERS = (
 PAYMENT_SUCCEEDED_PRODUCTION_EVENT_CONSUMERS = tuple(
     f"{PAYMENT_SUCCEEDED_EVENT_TYPE}:{consumer_name}" for consumer_name in PAYMENT_SUCCEEDED_CORE_CONSUMERS
 )
+PaymentIdentityProjector = Callable[..., dict[str, Any]]
 
 
 def _text(value: Any) -> str:
@@ -158,7 +160,12 @@ def _plan_order_paid_external_push_from_db(
     )
 
 
-def order_projection_consumer(event: InternalEvent, run: InternalEventConsumerRun) -> InternalEventConsumerResult:
+def order_projection_consumer(
+    event: InternalEvent,
+    run: InternalEventConsumerRun,
+    *,
+    identity_projector: PaymentIdentityProjector | None = None,
+) -> InternalEventConsumerResult:
     order = _read_order_from_db(event) or _order_from_event(event)
     out_trade_no = _text(order.get("out_trade_no") or event.aggregate_id)
     if not order:
@@ -177,11 +184,51 @@ def order_projection_consumer(event: InternalEvent, run: InternalEventConsumerRu
             error_code="order_not_paid",
             error_message="order is not paid yet",
         )
+    mobile_projection = {"ok": True, "projected": False, "reason": "identity_projector_not_configured"}
+    if identity_projector is not None:
+        try:
+            mobile_projection = dict(
+                identity_projector(
+                    order=order,
+                    source_route="/internal-events/payment.succeeded/order_projection_consumer",
+                )
+                or {}
+            )
+        except Exception:
+            return InternalEventConsumerResult(
+                status="failed_retryable",
+                request_summary={"event_id": event.event_id, "out_trade_no": out_trade_no},
+                response_summary={"order_found": True, "paid": True, "mobile_projected": False},
+                error_code="payment_identity_projection_failed",
+                error_message="canonical payment identity projection failed",
+                retry_after_seconds=60,
+            )
+    projection_reason = _text(mobile_projection.get("reason"))
+    if not mobile_projection.get("ok", True) and projection_reason == "projection_error":
+        return InternalEventConsumerResult(
+            status="failed_retryable",
+            request_summary={"event_id": event.event_id, "out_trade_no": out_trade_no},
+            response_summary={"order_found": True, "paid": True, "mobile_projected": False},
+            error_code="payment_identity_projection_failed",
+            error_message="canonical payment identity projection failed",
+            retry_after_seconds=60,
+        )
     return InternalEventConsumerResult(
         status="succeeded",
         request_summary={"event_id": event.event_id, "out_trade_no": out_trade_no},
-        response_summary={"order_found": True, "paid": True},
-        result_summary={"order_projection": "paid_confirmed", "out_trade_no": out_trade_no},
+        response_summary={
+            "order_found": True,
+            "paid": True,
+            "mobile_projection_attempted": identity_projector is not None,
+            "mobile_projected": bool(mobile_projection.get("projected")),
+            "mobile_projection_reason": projection_reason,
+        },
+        result_summary={
+            "order_projection": "paid_confirmed",
+            "out_trade_no": out_trade_no,
+            "mobile_projected": bool(mobile_projection.get("projected")),
+            "mobile_projection_reason": projection_reason,
+        },
     )
 
 
@@ -307,13 +354,23 @@ def ai_assist_notify_consumer(event: InternalEvent, run: InternalEventConsumerRu
 def register_payment_succeeded_consumers(
     registry: InternalEventConsumerRegistry | None = None,
     *,
+    payment_identity_projector: PaymentIdentityProjector | None = None,
     service_period_consumer: InternalEventConsumerHandler | None = None,
     webhook_order_paid_handler: InternalEventConsumerHandler | None = None,
 ) -> None:
     registry = registry or current_internal_event_consumer_registry()
 
     for event_type in PAYMENT_SUCCEEDED_EVENT_TYPES:
-        registry.register(event_type, "order_projection_consumer", order_projection_consumer, consumer_type="projection")
+        registry.register(
+            event_type,
+            "order_projection_consumer",
+            (
+                partial(order_projection_consumer, identity_projector=payment_identity_projector)
+                if payment_identity_projector is not None
+                else order_projection_consumer
+            ),
+            consumer_type="projection",
+        )
         if service_period_consumer is not None:
             registry.register(
                 event_type,

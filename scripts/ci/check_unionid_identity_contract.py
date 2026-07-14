@@ -38,6 +38,7 @@ HIGH_RISK_ALIAS_CONSUMERS = (
 
 CANONICAL_WRITE_OWNERS = {
     Path("aicrm_next/channel_entry/identity_bridge_repo.py"),
+    Path("aicrm_next/identity_contact/payment_projection.py"),
     Path("aicrm_next/identity_contact/repo.py"),
     Path("aicrm_next/public_product/h5_wechat_pay.py"),
     Path("aicrm_next/sidebar_write/repo.py"),

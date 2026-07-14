@@ -10,6 +10,7 @@ from sqlalchemy import create_engine, text
 
 from aicrm_next.commerce.repo import PostgresCommerceRepository
 from aicrm_next.customer_read_model import sidebar_v2
+from aicrm_next.customer_read_model.application import GetCustomerContextQuery
 from aicrm_next.customer_read_model.dto import CustomerContextRequest
 from aicrm_next.customer_read_model.sidebar_v2 import (
     SidebarCommerceReadModel,
@@ -433,6 +434,7 @@ def test_sidebar_orders_expose_wechat_shop_channel_fields() -> None:
     class FakeRepo:
         def __init__(self) -> None:
             self.order_calls = []
+            self.unexpected_workbench_calls = []
 
         def get_contact_snapshot(self, external_userid: str) -> dict:
             return {"external_userid": external_userid, "customer_name": "微信小店客户"}
@@ -441,6 +443,7 @@ def test_sidebar_orders_expose_wechat_shop_channel_fields() -> None:
             return {"external_userid": external_userid, "follow_user_userid": "HuangYouCan"}
 
         def get_profile_fields(self, external_userid: str) -> dict:
+            self.unexpected_workbench_calls.append(("profile", external_userid))
             return {}
 
         def get_contact_binding_status(self, external_userid: str) -> dict:
@@ -450,6 +453,7 @@ def test_sidebar_orders_expose_wechat_shop_channel_fields() -> None:
             return {"mobile_snapshot": "18028720840", "order_count": 1}
 
         def get_workflow_title_for_customer(self, external_userid: str) -> str:
+            self.unexpected_workbench_calls.append(("workflow", external_userid))
             return ""
 
         def list_customer_wechat_pay_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict]:
@@ -485,7 +489,10 @@ def test_sidebar_orders_expose_wechat_shop_channel_fields() -> None:
 
     assert payload["ok"] is True
     assert payload["diagnostics"]["orders_context"] == "workbench_customer_overlay"
-    assert [(request.recent_message_limit, request.timeline_limit) for request in context_query.requests] == [(20, 20)]
+    assert [(request.include_activity, request.recent_message_limit, request.timeline_limit) for request in context_query.requests] == [
+        (False, 20, 20)
+    ]
+    assert repo.unexpected_workbench_calls == []
     assert repo.order_calls == [
         {
             "external_userid": "wmbNXyCwAAdv14187FTFLDTKp9UUGrbw",
@@ -499,6 +506,93 @@ def test_sidebar_orders_expose_wechat_shop_channel_fields() -> None:
     assert item["channel_label"] == "微信小店"
     assert item["detail_url"] == "/admin/wechat-shop/transactions/3737077448554214400"
     assert item["status_label"] == "已支付"
+
+
+def test_sidebar_context_query_can_skip_unused_activity_reads(monkeypatch) -> None:
+    monkeypatch.setattr("aicrm_next.shared.runtime.production_data_ready", lambda: False)
+
+    class ActivityTrackingRepo:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get_customer(self, external_userid: str) -> dict:
+            self.calls.append("get_customer")
+            return {
+                "external_userid": external_userid,
+                "unionid": "union_lightweight_sidebar",
+                "owner_userid": "HuangYouCan",
+                "follow_users": [{"userid": "HuangYouCan", "is_primary": True}],
+            }
+
+        def list_timeline(self, *args, **kwargs):
+            self.calls.append("list_timeline")
+            raise AssertionError("sidebar lightweight context must not load timeline")
+
+        def list_recent_messages(self, *args, **kwargs):
+            self.calls.append("list_recent_messages")
+            raise AssertionError("sidebar lightweight context must not load recent messages")
+
+    repo = ActivityTrackingRepo()
+
+    payload = GetCustomerContextQuery(repo=repo, live_source_repo=repo)(
+        CustomerContextRequest(
+            external_userid="wx_lightweight_sidebar",
+            owner_userid="HuangYouCan",
+            require_owner_scope=True,
+            include_activity=False,
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["timeline"]["items"] == []
+    assert payload["recent_messages"] == []
+    assert repo.calls == ["get_customer"]
+    assert payload["adapter_contract"]["timeline"]["source_status"] == "skipped"
+    assert payload["adapter_contract"]["recent_messages"]["source_status"] == "skipped"
+
+
+def test_sidebar_context_query_skips_unused_activity_reads_in_production(monkeypatch) -> None:
+    monkeypatch.setattr("aicrm_next.shared.runtime.production_data_ready", lambda: True)
+
+    class ProductionActivityTrackingRepo:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get_customer(self, external_userid: str) -> dict:
+            self.calls.append("get_customer")
+            return {
+                "external_userid": external_userid,
+                "unionid": "union_lightweight_sidebar_prod",
+                "owner_userid": "HuangYouCan",
+                "follow_users": [{"userid": "HuangYouCan", "is_primary": True}],
+            }
+
+        def list_timeline(self, *args, **kwargs):
+            self.calls.append("list_timeline")
+            raise AssertionError("production sidebar lightweight context must not load timeline")
+
+        def list_recent_messages(self, *args, **kwargs):
+            self.calls.append("list_recent_messages")
+            raise AssertionError("production sidebar lightweight context must not load recent messages")
+
+    repo = ProductionActivityTrackingRepo()
+
+    payload = GetCustomerContextQuery(repo=repo, live_source_repo=repo)(
+        CustomerContextRequest(
+            external_userid="wx_lightweight_sidebar_prod",
+            owner_userid="HuangYouCan",
+            require_owner_scope=True,
+            include_activity=False,
+        )
+    )
+
+    assert payload["ok"] is True
+    assert payload["source_status"] == "next_read_model"
+    assert payload["timeline"]["items"] == []
+    assert payload["recent_messages"] == []
+    assert repo.calls == ["get_customer"]
+    assert payload["adapter_contract"]["timeline"]["source_status"] == "skipped"
+    assert payload["adapter_contract"]["recent_messages"]["source_status"] == "skipped"
 
 
 def test_sidebar_periodic_orders_include_active_and_expired_with_member_remark() -> None:
@@ -904,6 +998,51 @@ def test_sidebar_workbench_snapshot_values_win_over_placeholder_live_source() ->
     assert payload["customer"]["display_name"] == "Wayne"
     assert payload["customer"]["mobile"] == "18086851909"
     assert payload["customer"]["is_bound"] is True
+
+
+def test_sidebar_workbench_preserves_profile_only_fallback_without_duplicate_profile_read() -> None:
+    class FailingContextQuery:
+        def __call__(self, request: CustomerContextRequest) -> dict:
+            raise NotFoundError("customer not found")
+
+    class ProfileOnlyRepo:
+        def __init__(self) -> None:
+            self.profile_calls = 0
+
+        def get_contact_snapshot(self, external_userid: str) -> dict:
+            return {}
+
+        def get_external_identity_snapshot(self, external_userid: str) -> dict:
+            return {}
+
+        def get_contact_binding_status(self, external_userid: str) -> dict:
+            return {"is_bound": False, "external_userid": external_userid}
+
+        def get_contact_owner_userids(self, external_userid: str) -> set[str]:
+            return {"HuangYouCan"}
+
+        def get_profile_fields(self, external_userid: str) -> dict:
+            self.profile_calls += 1
+            return {"source": "profile-only", "industry": "教育"}
+
+        def get_workflow_title_for_customer(self, external_userid: str) -> str:
+            return ""
+
+        def get_bindable_wechat_pay_order_mobile(self, external_userid: str) -> dict | None:
+            return None
+
+    repo = ProfileOnlyRepo()
+
+    payload = SidebarWorkbenchReadModel(repo=repo, context_query=FailingContextQuery())(
+        external_userid="wx_profile_only",
+        owner_userid="HuangYouCan",
+        owner_verified=True,
+    )
+
+    assert payload["ok"] is True
+    assert payload["profile"]["source"] == "profile-only"
+    assert payload["profile"]["industry"] == "教育"
+    assert repo.profile_calls == 1
 
 
 def test_sidebar_questionnaires_fall_back_to_identity_snapshot_when_context_flaps() -> None:

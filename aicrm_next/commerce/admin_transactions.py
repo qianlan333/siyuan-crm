@@ -331,7 +331,7 @@ def _postgres_order_select() -> str:
     return f"""
         id, out_trade_no, transaction_id, payer_name_snapshot,
         COALESCE(
-            (SELECT identity.mobile FROM crm_user_identity identity WHERE identity.unionid = wechat_pay_orders.unionid LIMIT 1),
+            NULLIF((SELECT identity.mobile FROM crm_user_identity identity WHERE identity.unionid = wechat_pay_orders.unionid LIMIT 1), ''),
             NULLIF(metadata_json #>> '{{payer_identity,mobile}}', ''),
             NULLIF(metadata_json #>> '{{buyer_identity,mobile}}', ''),
             ''

@@ -136,6 +136,22 @@ def test_h5_wechat_pay_mobile_projection_test_selects_commerce_scope() -> None:
     assert result["needs_full_ci"] is False
 
 
+def test_wechat_shop_mobile_projection_tests_select_commerce_scope() -> None:
+    result = _select(
+        "tests/test_wechat_shop_mobile_projection.py",
+        "tests/test_wechat_shop_mobile_projection_migration.py",
+    )
+
+    assert {"commerce", "migration_db"} <= set(result["matched_scopes"])
+    assert set(result["matched_scopes"]) <= {"commerce", "migration_db", "next_native_full_sync"}
+    assert "tests/test_wechat_shop_mobile_projection.py" in result["python_tests"]
+    assert "tests/test_wechat_shop_mobile_projection_migration.py" in result["python_tests"]
+    assert result["unmatched_files"] == []
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "db"
+    assert result["needs_full_ci"] is False
+
+
 def test_public_pay_landing_test_selects_commerce_scope() -> None:
     result = _select("tests/test_public_pay_landing.py")
 
@@ -891,6 +907,20 @@ def test_frontend_typescript_change_runs_frontend_tests_and_build() -> None:
     assert "tests/frontend/p1_push_center_status.test.mjs" in result["frontend_tests"]
     assert result["needs_frontend_build"] is True
     assert result["python_tests"] == []
+
+
+def test_sidebar_workbench_change_selects_progressive_loading_behavior_test() -> None:
+    for changed_file, expected_gate, expected_full_ci in (
+        ("aicrm_next/frontend_compat/static/sidebar_workbench/sidebar_workbench.js", "full", True),
+        ("tests/frontend/sidebar_progressive_loading.test.mjs", "fast", False),
+    ):
+        result = _select(changed_file)
+
+        assert "customer_read_model_sidebar" in result["matched_scopes"]
+        assert "tests/frontend/sidebar_progressive_loading.test.mjs" in result["frontend_tests"]
+        assert result["unmatched_files"] == []
+        assert result["architecture_gate"] == expected_gate
+        assert result["needs_full_ci"] is expected_full_ci
 
 
 def test_questionnaire_change_selects_postgres_contracts_and_full_regression() -> None:

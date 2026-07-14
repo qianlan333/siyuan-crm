@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import time
 from concurrent.futures import ThreadPoolExecutor
+from importlib import import_module
 from threading import Event
 
 import psycopg
@@ -13,6 +14,7 @@ from psycopg.rows import dict_row
 
 from aicrm_next.commerce import admin_transactions, external_push_admin
 from aicrm_next.commerce.fulfillment_reconciliation import CommerceFulfillmentReconciliationService
+from aicrm_next.identity_contact.payment_projection import project_payment_order_mobile, project_wechat_shop_order_mobile
 from aicrm_next.platform_foundation.internal_events.models import InternalEvent, InternalEventConsumerRun
 from aicrm_next.public_product import h5_wechat_pay
 from aicrm_next.service_period import payment_consumer, refund_consumer
@@ -97,6 +99,216 @@ def _transaction(out_trade_no: str, *, amount_total: int = 1000) -> dict:
         "amount": {"payer_total": amount_total},
         "payer": {"openid": "openid_not_persisted_in_reconciliation"},
     }
+
+
+def test_paid_order_mobile_creates_queryable_canonical_identity_and_is_idempotent(next_pg_schema) -> None:
+    del next_pg_schema
+    order = {
+        "out_trade_no": "WXP_R08_MOBILE_IDENTITY",
+        "unionid": "union_r08_mobile_identity",
+        "payer_name_snapshot": "R08 付款人",
+        "metadata_json": {
+            "payer_identity": {
+                "openid": "openid_r08_mobile_identity",
+                "external_userid": "wm_r08_mobile_identity",
+                "owner_userid": "owner_r08_mobile_identity",
+                "mobile": "15812345678",
+            }
+        },
+    }
+
+    for source_route in (
+        "/api/h5/wechat-pay/notify",
+        "/internal-events/payment.succeeded/order_projection_consumer",
+    ):
+        with _connect() as conn:
+            result = project_payment_order_mobile(conn, order, source_route=source_route)
+            conn.commit()
+        assert result == {
+            "ok": True,
+            "projected": True,
+            "unionid": "union_r08_mobile_identity",
+            "mobile": "15812345678",
+        }
+
+    with _connect() as conn:
+        identity = conn.execute(
+            """
+            SELECT unionid, mobile, mobile_normalized, mobile_verified, mobile_source,
+                   primary_external_userid, primary_openid, primary_owner_userid
+            FROM crm_user_identity
+            WHERE mobile_normalized = %s
+            """,
+            ("15812345678",),
+        ).fetchone()
+
+    assert dict(identity) == {
+        "unionid": "union_r08_mobile_identity",
+        "mobile": "15812345678",
+        "mobile_normalized": "15812345678",
+        "mobile_verified": True,
+        "mobile_source": "wechat_pay_order",
+        "primary_external_userid": "wm_r08_mobile_identity",
+        "primary_openid": "openid_r08_mobile_identity",
+        "primary_owner_userid": "owner_r08_mobile_identity",
+    }
+
+
+def test_mobile_projection_migration_backfills_existing_paid_order_into_canonical_identity(next_pg_schema) -> None:
+    del next_pg_schema
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO wechat_pay_orders (
+                out_trade_no, transaction_id, product_code, product_name,
+                amount_total, currency, status, trade_state, unionid,
+                payer_name_snapshot, metadata_json, paid_at
+            ) VALUES (
+                'WXP_R08_MOBILE_BACKFILL', 'wx_tx_mobile_backfill', 'r08_mobile_backfill',
+                'R08 Mobile Backfill', 9900, 'CNY', 'paid', 'SUCCESS',
+                'union_r08_mobile_backfill', 'R08 历史付款人',
+                %s::jsonb, CURRENT_TIMESTAMP
+            )
+            """,
+            (
+                json.dumps(
+                    {
+                        "payer_identity": {
+                            "mobile": "15912345678",
+                            "openid": "openid_r08_mobile_backfill",
+                            "external_userid": "wm_r08_mobile_backfill",
+                        }
+                    }
+                ),
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO crm_user_identity (unionid, mobile, mobile_normalized)
+            VALUES ('union_r08_mobile_backfill', '', '')
+            """
+        )
+        migration = import_module("migrations.versions.0110_wechat_pay_mobile_projection")
+        conn.execute(migration._BACKFILL_SQL)
+        conn.commit()
+
+    with _connect() as conn:
+        identity = conn.execute(
+            """
+            SELECT unionid, mobile, mobile_normalized, mobile_verified, mobile_source
+            FROM crm_user_identity
+            WHERE mobile_normalized = '15912345678'
+            """
+        ).fetchone()
+
+    assert dict(identity) == {
+        "unionid": "union_r08_mobile_backfill",
+        "mobile": "15912345678",
+        "mobile_normalized": "15912345678",
+        "mobile_verified": True,
+        "mobile_source": "wechat_pay_order",
+    }
+
+
+def test_wechat_shop_mobile_projection_and_backfill_are_queryable_from_canonical_identity(next_pg_schema) -> None:
+    del next_pg_schema
+    order = {
+        "order_id": "3737749464399107840",
+        "paid_at": "2026-07-14T01:34:29Z",
+        "unionid": "union_r08_wechat_shop",
+        "openid": "openid_r08_wechat_shop",
+        "buyer_mobile": "15912345678",
+    }
+    with _connect() as conn:
+        result = project_wechat_shop_order_mobile(conn, order, source_route="wechat_shop_order_sync")
+        conn.commit()
+
+    assert result == {
+        "ok": True,
+        "projected": True,
+        "unionid": "union_r08_wechat_shop",
+        "mobile": "15912345678",
+    }
+
+    with _connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO wechat_shop_orders (order_id, unionid, paid_at, raw_order_json)
+            VALUES ('shop-r08-backfill', 'union_r08_shop_backfill', CURRENT_TIMESTAMP, %s::jsonb)
+            """,
+            (
+                json.dumps(
+                    {
+                        "order": {
+                            "openid": "openid_r08_shop_backfill",
+                            "order_detail": {
+                                "delivery_info": {
+                                    "address_info": {"virtual_order_tel_number": "13712345678"}
+                                }
+                            },
+                        }
+                    }
+                ),
+            ),
+        )
+        for suffix in ("a", "b"):
+            conn.execute(
+                """
+                INSERT INTO wechat_shop_orders (order_id, unionid, paid_at, raw_order_json)
+                VALUES (%s, %s, CURRENT_TIMESTAMP, %s::jsonb)
+                """,
+                (
+                    f"shop-r08-shared-{suffix}",
+                    f"union_r08_shop_shared_{suffix}",
+                    json.dumps(
+                        {
+                            "order": {
+                                "order_detail": {
+                                    "delivery_info": {
+                                        "address_info": {"virtual_order_tel_number": "13612345678"}
+                                    }
+                                }
+                            }
+                        }
+                    ),
+                ),
+            )
+        migration = import_module("migrations.versions.0111_wechat_shop_mobile_projection")
+        conn.execute(migration._BACKFILL_SQL)
+        conn.commit()
+
+    with _connect() as conn:
+        identities = conn.execute(
+            """
+            SELECT unionid, mobile, mobile_normalized, mobile_verified, mobile_source, primary_openid
+            FROM crm_user_identity
+            WHERE mobile_normalized IN ('15912345678', '13712345678')
+            ORDER BY mobile_normalized
+            """
+        ).fetchall()
+        shared_mobile_count = conn.execute(
+            "SELECT COUNT(*) AS total FROM crm_user_identity WHERE mobile_normalized = '13612345678'"
+        ).fetchone()["total"]
+
+    assert [dict(row) for row in identities] == [
+        {
+            "unionid": "union_r08_shop_backfill",
+            "mobile": "13712345678",
+            "mobile_normalized": "13712345678",
+            "mobile_verified": True,
+            "mobile_source": "wechat_shop_order",
+            "primary_openid": "openid_r08_shop_backfill",
+        },
+        {
+            "unionid": "union_r08_wechat_shop",
+            "mobile": "15912345678",
+            "mobile_normalized": "15912345678",
+            "mobile_verified": True,
+            "mobile_source": "wechat_shop_order",
+            "primary_openid": "openid_r08_wechat_shop",
+        },
+    ]
+    assert shared_mobile_count == 0
 
 
 def test_payment_state_and_unique_outbox_share_one_postgres_transaction(next_pg_schema, monkeypatch) -> None:

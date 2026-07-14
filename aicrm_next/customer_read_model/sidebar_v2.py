@@ -15,6 +15,10 @@ from aicrm_next.customer_read_model.application import GetCustomerContextQuery, 
 from aicrm_next.customer_read_model.dto import CustomerContextRequest
 from aicrm_next.customer_read_model.errors import CustomerScopeForbiddenError
 from aicrm_next.customer_read_model.repo import CustomerReadRepository, build_customer_live_source_repository
+from aicrm_next.customer_read_model.sidebar_customer_resolution import (
+    customer_text as _customer_text,
+    resolve_customer_payload as _resolve_customer_payload,
+)
 from aicrm_next.media_library.application import GetImageThumbnailQuery, ListMediaItemsQuery
 from aicrm_next.service_period.application import ListServicePeriodProductsQuery
 from aicrm_next.service_period.domain import (
@@ -45,17 +49,6 @@ ORDER_STATUS_LABELS = {
 SERVICE_PERIOD_STATUS_LABELS = {
     "active": "使用中",
     "expired": "已过期",
-}
-_CUSTOMER_PLACEHOLDER_TEXTS = {
-    "customer_name",
-    "display_name",
-    "name",
-    "remark",
-    "description",
-    "mobile",
-    "phone",
-    "title",
-    "external_userid",
 }
 _QUESTIONNAIRE_TITLE_PLACEHOLDER_TEXTS = {"questionnaire_title", "title", "name", "submitted_at"}
 _QUESTION_PLACEHOLDER_TEXTS = {"question", "question_title", "question_title_snapshot"}
@@ -131,14 +124,6 @@ def _clean_placeholder_text(value: Any, placeholders: set[str]) -> str:
     if value_text.lower() in placeholders:
         return ""
     return value_text
-
-
-def _customer_text(value: Any) -> str:
-    return _clean_placeholder_text(value, _CUSTOMER_PLACEHOLDER_TEXTS)
-
-
-def _customer_mobile(value: Any) -> str:
-    return _normalize_mobile(value)
 
 
 def _questionnaire_title_text(value: Any) -> str:
@@ -666,73 +651,6 @@ class SidebarV2SqlRepository:
             return [dict(row) for row in conn.execute(text(sql), params).mappings()]
 
 
-def _first_named_value(*candidates: tuple[str, Any]) -> tuple[str, str]:
-    for source, value in candidates:
-        value_text = _customer_text(value)
-        if value_text:
-            return value_text, source
-    return "未命名客户", "default"
-
-
-def _resolve_customer_payload(
-    *,
-    context: dict[str, Any],
-    binding: dict[str, Any],
-    contacts: dict[str, Any] | None,
-    identity_map: dict[str, Any] | None,
-    external_userid: str,
-    owner_userid: str,
-) -> tuple[dict[str, Any], dict[str, str]]:
-    customer = dict(context.get("customer") or {})
-    customer_binding = dict(customer.get("binding") or {})
-    contact = dict(customer.get("contact") or {})
-    contacts_row = dict(contacts or {})
-    identity_row = dict(identity_map or {})
-    display_name, display_name_source = _first_named_value(
-        ("contacts.remark", contacts_row.get("remark")),
-        ("contacts.customer_name", contacts_row.get("customer_name")),
-        ("wecom_external_contact_identity_map.name", identity_row.get("name")),
-        ("customer.display_name", customer.get("display_name")),
-        ("customer.customer_name", customer.get("customer_name")),
-        ("customer.remark", customer.get("remark")),
-        ("customer.contact.name", contact.get("name")),
-        ("binding.display_name", binding.get("display_name")),
-        ("binding.customer_name", binding.get("customer_name")),
-        ("binding.remark", binding.get("remark")),
-    )
-    resolved_owner = (
-        _text(owner_userid)
-        or _text(customer.get("owner_userid"))
-        or _text(identity_row.get("follow_user_userid"))
-    )
-    mobile = (
-        _customer_mobile(binding.get("mobile"))
-        or _customer_mobile(customer.get("mobile"))
-        or _customer_mobile(customer_binding.get("mobile"))
-    )
-    is_bound = bool(mobile)
-    payload = {
-        "display_name": display_name,
-        "avatar_text": display_name[:1] if display_name else "",
-        "mobile": mobile,
-        "is_bound": is_bound,
-        "external_userid": _text(external_userid),
-        "owner_userid": resolved_owner,
-    }
-    context_binding = dict(context.get("binding") or {})
-    if not binding:
-        binding_source = "none"
-    elif context_binding and binding == context_binding:
-        binding_source = "context.binding"
-    else:
-        binding_source = "fresh_binding_status"
-    diagnostics = {
-        "display_name_source": display_name_source,
-        "binding_source": binding_source,
-    }
-    return payload, diagnostics
-
-
 def _snapshot_owner_candidates(
     *,
     repo: SidebarV2SqlRepository,
@@ -851,6 +769,37 @@ class SidebarWorkbenchReadModel:
         return self._repo
 
     def __call__(self, *, external_userid: str, owner_userid: str = "", owner_verified: bool = False) -> dict[str, Any]:
+        customer, context, diagnostics, fallback_profile = self._customer_snapshot(
+            external_userid=external_userid,
+            owner_userid=owner_userid,
+            owner_verified=owner_verified,
+        )
+        normalized_external = _text(external_userid)
+        repo = self._sql_repo()
+        profile = fallback_profile if fallback_profile is not None else (repo.get_profile_fields(normalized_external) or {})
+        sidebar_context = dict((context.get("customer") or {}).get("sidebar_context") or {})
+        workflow_title = (
+            _text(sidebar_context.get("workflow_title"))
+            or _text(sidebar_context.get("sop_title"))
+            or repo.get_workflow_title_for_customer(normalized_external)
+        )
+        payload = {
+            "ok": True,
+            "customer": customer,
+            "workflow": {"title": workflow_title},
+            "profile": self._profile_payload(normalized_external, context, persisted=profile),
+            "modules": list(MODULES),
+            "diagnostics": diagnostics,
+        }
+        return _with_route_owner(payload)
+
+    def _customer_snapshot(
+        self,
+        *,
+        external_userid: str,
+        owner_userid: str = "",
+        owner_verified: bool = False,
+    ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any] | None]:
         normalized_external = _text(external_userid)
         if not normalized_external:
             raise ValueError("external_userid is required")
@@ -873,10 +822,14 @@ class SidebarWorkbenchReadModel:
         repo = self._sql_repo()
         contact = repo.get_contact_snapshot(normalized_external) or {}
         identity = repo.get_external_identity_snapshot(normalized_external) or {}
-        profile = repo.get_profile_fields(normalized_external) or {}
         binding = repo.get_contact_binding_status(normalized_external)
-        if not context.get("customer") and not contact and not identity and not profile and not binding.get("is_bound"):
-            raise NotFoundError("customer not found")
+        fallback_profile: dict[str, Any] | None = None
+        if not context.get("customer") and not contact and not identity and not binding.get("is_bound"):
+            # Preserve the historical profile-only fallback without making every
+            # panel request pay for a full profile read.
+            fallback_profile = repo.get_profile_fields(normalized_external) or {}
+            if not fallback_profile:
+                raise NotFoundError("customer not found")
         if not context.get("customer") or context_diagnostics.get("context_source_status") in {"missing", "error", "live_source", "not_found"}:
             _assert_snapshot_owner_scope(
                 repo=repo,
@@ -898,21 +851,7 @@ class SidebarWorkbenchReadModel:
             owner_userid=normalized_owner,
         )
         self._overlay_paid_order_mobile(customer, diagnostics := {**context_diagnostics, **resolution})
-        sidebar_context = dict((context.get("customer") or {}).get("sidebar_context") or {})
-        workflow_title = (
-            _text(sidebar_context.get("workflow_title"))
-            or _text(sidebar_context.get("sop_title"))
-            or repo.get_workflow_title_for_customer(normalized_external)
-        )
-        payload = {
-            "ok": True,
-            "customer": customer,
-            "workflow": {"title": workflow_title},
-            "profile": self._profile_payload(normalized_external, context, persisted=profile),
-            "modules": list(MODULES),
-            "diagnostics": diagnostics,
-        }
-        return _with_route_owner(payload)
+        return customer, context, diagnostics, fallback_profile
 
     def customer_with_overlay(
         self,
@@ -921,8 +860,12 @@ class SidebarWorkbenchReadModel:
         owner_userid: str = "",
         owner_verified: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        payload = self(external_userid=external_userid, owner_userid=owner_userid, owner_verified=owner_verified)
-        return dict(payload.get("customer") or {}), dict(payload.get("diagnostics") or {})
+        customer, _context, diagnostics, _fallback_profile = self._customer_snapshot(
+            external_userid=external_userid,
+            owner_userid=owner_userid,
+            owner_verified=owner_verified,
+        )
+        return customer, diagnostics
 
     def _context(
         self,
@@ -938,6 +881,7 @@ class SidebarWorkbenchReadModel:
                     owner_userid=_text(owner_userid) or None,
                     require_owner_scope=True,
                     owner_verified=owner_verified,
+                    include_activity=False,
                     recent_message_limit=20,
                     timeline_limit=20,
                 )
@@ -955,15 +899,13 @@ class SidebarWorkbenchReadModel:
             customer = repo.get_customer(external_userid)
             if not customer:
                 return {}, {"context_source_status": "missing"}
-            messages = repo.list_recent_messages(external_userid, limit=20)
-            timeline = repo.list_timeline(external_userid, limit=20)
             return (
                 {
                     "ok": True,
                     "customer": customer,
                     "binding": dict(customer.get("binding") or {}),
-                    "messages": messages,
-                    "timeline": {"items": timeline},
+                    "messages": [],
+                    "timeline": {"items": []},
                 },
                 {"context_source_status": "live_source"},
             )

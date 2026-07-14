@@ -16,8 +16,25 @@ def test_frontend_declares_and_consumes_jssdk_config_contract() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
 
     assert 'data-jssdk-config-url="/api/sidebar/jssdk-config"' in template
-    assert "sidebar_workbench.js?v=20260713-huangyoucan-usage" in template
+    assert "sidebar_workbench.js?v=20260714-progressive-loading" in template
     assert "jssdkConfigUrl()" in script
+    assert "jssdkConfigRequests: new Map()" in script
+    assert "jssdkConfigCache: new Map()" in script
+    assert "JSSDK_CONFIG_CACHE_SAFETY_MS" in script
+    assert "JSSDK_CONFIG_CACHE_MAX_TTL_MS" in script
+    config_request = script[script.index("function jssdkConfigCacheTtlMs") : script.index("async function refreshSidebarOwnerToken")]
+    assert "sidebar_owner_context" in config_request
+    assert "expires_in" in config_request
+    assert "Math.min(JSSDK_CONFIG_CACHE_MAX_TTL_MS" in config_request
+    assert "expiresInMs - JSSDK_CONFIG_CACHE_SAFETY_MS" in config_request
+    assert "cached.expiresAt <= Date.now()" in config_request
+    assert "const url = jssdkConfigUrl();" in config_request
+    assert "state.jssdkConfigRequests.get(url)" in config_request
+    assert "state.jssdkConfigRequests.set(url, request)" in config_request
+    assert "state.jssdkConfigRequests.delete(url)" in config_request
+    assert "if (ttlMs <= 0) return;" in config_request
+    assert "expiresAt: Date.now() + ttlMs" in config_request
+    assert "requestJson(jssdkConfigUrl()" not in script
     assert 'url.searchParams.set("external_userid", state.external_userid)' in script
     assert "applySidebarOwnerToken(configPayload)" in script
     assert "extractWeComViewerUserid" in script

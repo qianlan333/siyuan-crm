@@ -12,6 +12,7 @@ from aicrm_next.integration_gateway.wechat_shop_client import (
     WeChatShopClientConfig,
     WeChatShopClientError,
 )
+from aicrm_next.identity_contact.payment_projection import project_wechat_shop_order_mobile
 from aicrm_next.shared.runtime import database_mode
 from aicrm_next.shared.runtime_settings import runtime_setting
 
@@ -923,7 +924,13 @@ def _upsert_order(order: dict[str, Any], *, source_event_id: int | None = None) 
                 "last_event_at": _now() if source_event_id else None,
             },
         ).fetchone()
-    return dict(row or {})
+        saved = dict(row or {})
+        project_wechat_shop_order_mobile(
+            conn,
+            order,
+            source_route="wechat_shop_order_sync",
+        )
+    return saved
 
 
 def _latest_event_type(source_event_id: int | None) -> str:

@@ -19,6 +19,17 @@ class FakeSession:
         self.closed = True
 
 
+class SessionLifecycleAuditRepository:
+    def __init__(self) -> None:
+        self.session: FakeSession | None = None
+        self.closed_states: list[bool] = []
+
+    def record_pii_access(self, _event) -> None:
+        assert self.session is not None
+        self.closed_states.append(self.session.closed)
+        assert self.session.closed is True
+
+
 class RequestScopedCustomerRepo:
     def __init__(self, session: FakeSession, *, name: str = "read") -> None:
         self.session = session
@@ -118,7 +129,7 @@ def _production_env(monkeypatch) -> None:
     monkeypatch.delenv("CUSTOMER_READ_MODEL_REPO_BACKEND", raising=False)
 
 
-def _client_with_request_scope(monkeypatch):
+def _client_with_request_scope(monkeypatch, *, pii_audit_repository=None):
     from aicrm_next.customer_read_model import application
 
     _production_env(monkeypatch)
@@ -148,7 +159,7 @@ def _client_with_request_scope(monkeypatch):
         "aicrm_next.main.AdminConfigPiiAuditRepository.record_pii_access",
         lambda _repository, _event: None,
     )
-    app = create_app()
+    app = create_app(pii_audit_repository=pii_audit_repository)
     app.dependency_overrides[get_db] = override_get_db
     return TestClient(app), session, read_repos, live_repos
 
@@ -200,6 +211,32 @@ def test_sidebar_customer_context_reuses_one_request_scoped_repo(monkeypatch) ->
     assert live_repos[0].session is session
     assert read_repos[0].closed is False
     assert set(read_repos[0].calls) >= {"get_customer", "customer_exists", "list_timeline", "list_recent_messages"}
+
+
+def test_sidebar_v2_releases_request_scoped_session_before_pii_audit(monkeypatch) -> None:
+    audit_repository = SessionLifecycleAuditRepository()
+    client, session, _read_repos, _live_repos = _client_with_request_scope(
+        monkeypatch,
+        pii_audit_repository=audit_repository,
+    )
+    audit_repository.session = session
+    monkeypatch.setattr(
+        "aicrm_next.customer_read_model.api.SidebarCommerceReadModel.orders",
+        lambda _read_model, **_kwargs: {"orders": []},
+    )
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="owner-a",
+        external_userid="wx_ext_001",
+    )
+
+    response = client.get(
+        "/api/sidebar/v2/orders?external_userid=wx_ext_001&owner_userid=owner-a",
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert audit_repository.closed_states == [True]
 
 
 def test_sidebar_customer_context_rejects_resolved_customer_outside_staff_scope_without_pii(monkeypatch) -> None:

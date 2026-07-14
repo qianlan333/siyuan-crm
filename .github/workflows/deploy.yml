@@ -47,6 +47,30 @@ jobs:
             else
               echo "scripts/ensure_channel_multi_staff_schema.py not present; skipping"
             fi
+            auth_issuer="${AICRM_AUTH_ISSUER:-${AICRM_PUBLIC_BASE_URL:-https://www.youcangogogo.com}}"
+            export AICRM_SECRET_STORE_DIR="${AICRM_SECRET_STORE_DIR:-/home/ubuntu/.aicrm-secrets}"
+            python3 scripts/ops/migrate_app_setting_secrets.py --execute \
+              --secret-store-dir "$AICRM_SECRET_STORE_DIR" \
+              --environment-file /home/ubuntu/.openclaw-wecom-pg.env \
+              | tee /tmp/aicrm-secret-migration.json
+            python3 scripts/ops/bootstrap_auth_clients.py \
+              --apply \
+              --issuer "$auth_issuer" \
+              --secret-store-dir "$AICRM_SECRET_STORE_DIR" \
+              --environment-file /home/ubuntu/.openclaw-wecom-pg.env \
+              | tee /tmp/aicrm-auth-client-bootstrap.json
+            set -a
+            source /home/ubuntu/.openclaw-wecom-pg.env
+            set +a
+            python3 scripts/ops/check_auth_readiness.py \
+              --issuer "$auth_issuer" \
+              --secret-store-dir "$AICRM_SECRET_STORE_DIR" \
+              --environment-file /home/ubuntu/.openclaw-wecom-pg.env \
+              | tee /tmp/aicrm-auth-readiness.json
+            python3 scripts/ops/check_secret_reference_cutover.py \
+              --secret-store-dir "$AICRM_SECRET_STORE_DIR" \
+              --environment-file /home/ubuntu/.openclaw-wecom-pg.env \
+              | tee /tmp/aicrm-secret-reconciliation.json
             # Identity preflight must fail before any runtime unit is stopped.
             python3 scripts/ops/check_unionid_identity_cutover.py \
               --phase preflight \

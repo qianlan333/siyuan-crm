@@ -8,9 +8,9 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from scripts.script_runtime import dump_json, ensure_repo_root_on_path, print_json
+    from scripts.script_runtime import ensure_repo_root_on_path, print_json
 except ModuleNotFoundError:  # pragma: no cover - direct script execution fallback
-    from script_runtime import dump_json, ensure_repo_root_on_path, print_json
+    from script_runtime import ensure_repo_root_on_path, print_json
 
 
 ROOT = ensure_repo_root_on_path()
@@ -130,9 +130,7 @@ def classify_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
     runtime_fix_required = bool(internal_event_repair["next_pr_required"])
     data_backfill_required = bool(customer_linkage_repair["approved_backfill_runbook_required"])
     operator_action_required = (
-        blocker_1 != "expected_not_applicable"
-        or blocker_2 != "expected_not_applicable"
-        or external_effect["classification"] != "expected_not_applicable"
+        blocker_1 != "expected_not_applicable" or blocker_2 != "expected_not_applicable" or external_effect["classification"] != "expected_not_applicable"
     )
     can_recollect = not operator_action_required
 
@@ -187,12 +185,8 @@ def _classify_payment_succeeded_consumer_run_due(
     event_type = str(internal_event.get("event_type") or "")
     actual_runs = _consumer_run_records(evidence)
     pending_runs = [row for row in actual_runs if str(row.get("status") or "").lower() == "pending"]
-    failed_retryable_runs = [
-        row for row in actual_runs if str(row.get("status") or "").lower() in {"failed_retryable", "failed", "error"}
-    ]
-    failed_terminal_runs = [
-        row for row in actual_runs if str(row.get("status") or "").lower() in {"failed_terminal", "blocked"}
-    ]
+    failed_retryable_runs = [row for row in actual_runs if str(row.get("status") or "").lower() in {"failed_retryable", "failed", "error"}]
+    failed_terminal_runs = [row for row in actual_runs if str(row.get("status") or "").lower() in {"failed_terminal", "blocked"}]
     finished_runs = [row for row in actual_runs if str(row.get("status") or "").lower() in {"succeeded", "skipped"}]
     attempt_counts = [int(row.get("attempt_count") or 0) for row in actual_runs]
     missing = list(internal_event.get("missing_consumers") or [])
@@ -276,15 +270,14 @@ def _classify_payment_succeeded_consumer_run_due(
         "single_consumer_run_route_available": True,
         "single_consumer_run_route": PAYMENT_SINGLE_CONSUMER_RUN_ROUTE,
         "auto_execute_enabled": config["auto_execute_enabled"],
-        "required_token_or_gate": "AUTOMATION_INTERNAL_API_TOKEN for run-due preview/run; internal token or admin action token for single-consumer run/retry/skip",
+        "required_token_or_gate": "OAuth automation-worker access token for run-due preview/run; OAuth context or admin action confirmation for single-consumer actions",
         "token_configured": config["token_configured"],
         "token_gate_status": config["token_gate_status"],
         "allowlist_required": config["allowlist_required"],
         "allowlist_required_for_execute": config["allowlist_required_for_execute"],
         "allowlist_status": config["allowlist_status"],
         "allowlist_missing": config["allowlist_missing"],
-        "operator_action_required": classification
-        not in {"consumer_already_succeeded", "consumer_non_applicable"},
+        "operator_action_required": classification not in {"consumer_already_succeeded", "consumer_non_applicable"},
         "can_execute_in_operator_window": classification
         in {"run_due_ready_for_operator_preview", "consumer_failed_retryable", "consumer_explicitly_skippable"},
         "real_external_call_risk": real_external_call_risk,
@@ -417,7 +410,9 @@ def _last_consumer_error(runs: list[dict[str, Any]]) -> dict[str, str]:
 
 
 def _next_run_at_summary(runs: list[dict[str, Any]]) -> str:
-    values = sorted(str(row.get("next_retry_at") or row.get("next_run_at") or "") for row in runs if str(row.get("next_retry_at") or row.get("next_run_at") or ""))
+    values = sorted(
+        str(row.get("next_retry_at") or row.get("next_run_at") or "") for row in runs if str(row.get("next_retry_at") or row.get("next_run_at") or "")
+    )
     return values[0] if values else ""
 
 
@@ -544,10 +539,7 @@ def _decide_customer_linkage_repair(linkage: dict[str, Any], evidence: dict[str,
         decision = "backfill_required"
         projection_status = "backfill_required"
         next_pr_required = True
-        reason = (
-            "The order customer identity is now part of the customer read-model projection source, "
-            "but the target read-model rows are still missing."
-        )
+        reason = "The order customer identity is now part of the customer read-model projection source, but the target read-model rows are still missing."
     elif channel_present:
         decision = "runtime_projection_repair_required"
         projection_status = "projection_still_missing"
@@ -655,11 +647,7 @@ def _classify_external_effect_linkage(evidence: dict[str, Any]) -> dict[str, Any
     jobs = effect.get("jobs") or effect.get("external_effect_jobs") or []
     attempts = effect.get("attempts") or effect.get("external_effect_attempts") or []
     push_center_status = effect.get("push_center_status") or effect.get("effective_status") or ""
-    failed_attempts = [
-        row
-        for row in attempts
-        if str(row.get("status") or row.get("raw_status") or "").lower() not in {"succeeded", "sent"}
-    ]
+    failed_attempts = [row for row in attempts if str(row.get("status") or row.get("raw_status") or "").lower() not in {"succeeded", "sent"}]
 
     if not jobs:
         classification = "projection_missing"
@@ -695,9 +683,7 @@ def _classify_order_customer_channel_linkage(evidence: dict[str, Any]) -> dict[s
     detail_rows = int(linkage.get("customer_detail_snapshot_rows") or 0)
     channel_rows = int(linkage.get("channel_contact_rows") or 0)
     channel_ids_present = int(linkage.get("channel_ids_present") or 0)
-    projection_source_found = bool(
-        linkage.get("projection_source_found", external_userid_present or channel_rows > 0 or channel_ids_present > 0)
-    )
+    projection_source_found = bool(linkage.get("projection_source_found", external_userid_present or channel_rows > 0 or channel_ids_present > 0))
     projection_target_found = customer_rows > 0 or detail_rows > 0
 
     if projection_target_found:
@@ -836,19 +822,23 @@ def _load_readonly_db_evidence(*, order_id: str, database_url: str | None) -> di
 
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
         conn.execute("BEGIN READ ONLY")
-        order_row = conn.execute(
-            """
+        order_row = (
+            conn.execute(
+                """
             select id, 'wechat_pay' as provider, order_source as source,
                    coalesce(external_userid, '') as redacted_external_userid_source,
                    coalesce(external_userid, '') <> '' as external_userid_present
               from wechat_pay_orders
              where id = %s
             """,
-            (order_id,),
-        ).fetchone() or {}
+                (order_id,),
+            ).fetchone()
+            or {}
+        )
         order_external_userid = str(order_row.get("redacted_external_userid_source") or "").strip()
-        event_row = conn.execute(
-            """
+        event_row = (
+            conn.execute(
+                """
             select id, event_id, event_type, aggregate_type, aggregate_id, source_module, source_route
               from internal_event
              where event_type = 'payment.succeeded'
@@ -856,8 +846,10 @@ def _load_readonly_db_evidence(*, order_id: str, database_url: str | None) -> di
              order by created_at desc
              limit 1
             """,
-            (str(order_id),),
-        ).fetchone() or {}
+                (str(order_id),),
+            ).fetchone()
+            or {}
+        )
         consumer_runs = []
         if event_row:
             consumer_runs = conn.execute(
@@ -983,7 +975,7 @@ def _collect_payment_run_due_gate_config() -> dict[str, Any]:
         )
     except Exception:
         return {
-            "token_configured": bool(os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()),
+            "token_configured": bool(os.getenv("AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "").strip()),
             "auto_execute_enabled": "not_collected",
             "allowed_event_types": [],
             "allowed_consumers": [],
@@ -991,7 +983,7 @@ def _collect_payment_run_due_gate_config() -> dict[str, Any]:
             "allowlist_required": True,
         }
     return {
-        "token_configured": bool(os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()),
+        "token_configured": bool(os.getenv("AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "").strip()),
         "auto_execute_enabled": auto_execute_enabled(),
         "allowed_event_types": allowed_event_types(),
         "allowed_consumers": allowed_consumers(),
@@ -1033,9 +1025,7 @@ def _redact_id(value: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Readonly triage for External Orders 90%+ evidence blockers."
-    )
+    parser = argparse.ArgumentParser(description="Readonly triage for External Orders 90%+ evidence blockers.")
     parser.add_argument("--order-id", default=DEFAULT_ORDER_ID, help="Internal order id to inspect. Default: 156")
     parser.add_argument("--input-json", type=Path, help="Classify a redacted evidence JSON fixture instead of DB.")
     parser.add_argument(

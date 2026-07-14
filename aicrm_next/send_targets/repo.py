@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi
 from aicrm_next.shared.postgres_connection import get_db
 
 JsonDict = dict[str, Any]
@@ -20,40 +22,23 @@ class PostgresSendTargetRepository:
         self.db = db or get_db()
 
     def fetch_send_target_by_unionid(self, unionid: str) -> JsonDict | None:
-        row = self.db.execute(
-            """
-            SELECT
-                unionid,
-                primary_external_userid,
-                primary_owner_userid,
-                primary_owner_userid AS owner_userid,
-                customer_name
-            FROM crm_user_identity
-            WHERE unionid = ?
-            LIMIT 1
-            """,
-            (_text(unionid),),
-        ).fetchone()
-        return _row(row)
+        return self._target(ResolvePersonIdentityRequest(unionid=_text(unionid) or None))
 
     def fetch_send_target_by_external_userid(self, external_userid: str) -> JsonDict | None:
-        row = self.db.execute(
-            """
-            SELECT
-                unionid,
-                primary_external_userid,
-                primary_owner_userid,
-                primary_owner_userid AS owner_userid,
-                customer_name
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY updated_at DESC, unionid DESC
-            LIMIT 1
-            """,
-            (_text(external_userid), _text(external_userid)),
-        ).fetchone()
-        return _row(row)
+        return self._target(ResolvePersonIdentityRequest(external_userid=_text(external_userid) or None))
+
+    def _target(self, query: ResolvePersonIdentityRequest) -> JsonDict | None:
+        resolution = resolve_identity_with_dbapi(self.db, query, placeholder="?")
+        identity = resolution.identity if resolution.status == "resolved" else None
+        if identity is None:
+            return None
+        return {
+            "unionid": _text(identity.unionid),
+            "primary_external_userid": _text(identity.external_userid),
+            "primary_owner_userid": _text(identity.owner_userid),
+            "owner_userid": _text(identity.owner_userid),
+            "customer_name": _text(identity.customer_name),
+        }
 
     def fetch_do_not_disturb_reasons(self, unionid: str) -> list[JsonDict]:
         try:

@@ -6,12 +6,18 @@ from aicrm_next.customer_tags.live_mutation import execute_wecom_tag_mutation, r
 from aicrm_next.customer_tags.local_projection import get_customer_tag_local_projection_fixture_rows
 from aicrm_next.customer_tags.mutation_commands import PlanCustomerTagAssignmentCommand
 from aicrm_next.identity_contact.dto import IdentityResolution
+from aicrm_next.integration_gateway import wecom_channel_entry_client
 from aicrm_next.main import create_app
+from aicrm_next.platform_foundation.external_effects import ExternalEffectService, reset_external_effect_fixture_state
+from aicrm_next.platform_foundation.internal_events import reset_internal_event_fixture_state
 from aicrm_next.questionnaire import h5_write
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
 def _client(monkeypatch) -> TestClient:
     h5_write.reset_questionnaire_h5_write_fixture_state()
+    reset_internal_event_fixture_state()
+    reset_external_effect_fixture_state()
     monkeypatch.setenv("SECRET_KEY", "wecom-live-mutation-callers")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
@@ -21,11 +27,17 @@ def _client(monkeypatch) -> TestClient:
 
 def test_sidebar_signup_tag_mutation_remains_plan_only(monkeypatch) -> None:
     client = _client(monkeypatch)
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="ZhaoYanFang",
+        external_userid="wx_ext_001",
+    )
+    headers["Idempotency-Key"] = "sidebar-tag-plan-only"
 
     response = client.post(
         "/api/sidebar/signup-tags/mark",
         json={"external_userid": "wx_ext_001", "tag_id": "tag_fixture_active", "marked": True},
-        headers={"Idempotency-Key": "sidebar-tag-plan-only"},
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -38,17 +50,17 @@ def test_sidebar_signup_tag_mutation_remains_plan_only(monkeypatch) -> None:
     assert payload["side_effect_plan"]["real_external_call_executed"] is False
 
 
-def test_questionnaire_submit_tag_side_effect_executes_real_wecom_and_updates_mirror(monkeypatch) -> None:
+def test_questionnaire_submit_tag_side_effect_is_durable_and_does_not_call_wecom(monkeypatch) -> None:
     calls: list[dict] = []
 
     class FakeProductionWeComAdapter:
-        def mark_external_contact_tags(self, **payload):
-            calls.append(payload)
-            return {"errcode": 0, "errmsg": "ok"}
+        def __init__(self, *args, **kwargs):
+            calls.append({"args": args, "kwargs": kwargs})
+            raise AssertionError("H5 must not construct a provider adapter")
 
     monkeypatch.setenv("WECOM_CORP_ID", "corp-questionnaire")
     monkeypatch.setenv("WECOM_CONTACT_SECRET", "secret-questionnaire")
-    monkeypatch.setattr(h5_write, "ProductionWeComAdapter", FakeProductionWeComAdapter)
+    monkeypatch.setattr(wecom_channel_entry_client, "ProductionWeComAdapter", FakeProductionWeComAdapter)
     client = _client(monkeypatch)
 
     response = client.post(
@@ -67,30 +79,27 @@ def test_questionnaire_submit_tag_side_effect_executes_real_wecom_and_updates_mi
 
     assert response.status_code == 200
     tag_plan = response.json()["side_effects"]["wecom_tag"]
-    assert tag_plan["source_status"] == "tag_apply"
+    assert tag_plan["source_status"] == "durable_internal_event"
     assert tag_plan["effect_type"] == "questionnaire.tag.apply"
     assert tag_plan["fallback_used"] is False
-    assert tag_plan["status"] == "succeeded"
-    assert tag_plan["real_external_call_executed"] is True
-    assert tag_plan["wecom_api_called"] is True
-    assert tag_plan["mark_tag_executed"] is True
-    assert tag_plan["adapter_mode"] == "real_mark_tag"
-    assert tag_plan["execution_mode"] == "execute"
+    assert tag_plan["status"] == "queued"
+    assert tag_plan["real_external_call_executed"] is False
+    assert tag_plan["wecom_api_called"] is False
+    assert tag_plan["mark_tag_executed"] is False
+    assert tag_plan["adapter_mode"] == "durable_internal_event"
+    assert tag_plan["execution_mode"] == "worker"
     assert tag_plan["requires_approval"] is False
-    assert tag_plan["local_projection_updated"] is True
-    assert tag_plan["local_projection_status"] == "updated"
+    assert tag_plan["local_projection_updated"] is False
+    assert tag_plan["local_projection_status"] == "skipped"
     assert tag_plan["external_effect_job"] is None
-    assert calls == [
-        {
-            "external_userid": "wx_ext_001",
-            "follow_user_userid": "owner-questionnaire",
-            "add_tags": ["tag_hxc_activated", "tag_interest_ai_tools"],
-            "remove_tags": [],
-        }
-    ]
+    assert response.json()["durable_continuation_queued"] is True
+    assert response.json()["external_effect_job_status"] == "not_planned"
+    assert ExternalEffectService().list_jobs({})[1] == 0
+    assert get_customer_tag_local_projection_fixture_rows() == []
+    assert calls == []
 
 
-def test_questionnaire_submit_with_unionid_only_fails_without_local_projection(monkeypatch) -> None:
+def test_questionnaire_submit_with_unionid_only_queues_identity_recovery_without_local_projection(monkeypatch) -> None:
     client = _client(monkeypatch)
 
     response = client.post(
@@ -104,11 +113,14 @@ def test_questionnaire_submit_with_unionid_only_fails_without_local_projection(m
 
     assert response.status_code == 200
     tag_plan = response.json()["side_effects"]["wecom_tag"]
-    assert tag_plan["adapter_mode"] == "real_mark_tag"
-    assert tag_plan["status"] == "failed"
-    assert tag_plan["error_code"] == "missing_external_userid"
+    assert tag_plan["adapter_mode"] == "durable_internal_event"
+    assert tag_plan["status"] == "queued"
+    assert tag_plan["error_code"] == "identity_pending_unionid"
+    assert tag_plan["retryable"] is True
     assert tag_plan["local_projection_updated"] is False
     assert tag_plan["wecom_api_called"] is False
+    assert response.json()["durable_continuation_queued"] is True
+    assert ExternalEffectService().list_jobs({})[1] == 0
     rows = [row for row in get_customer_tag_local_projection_fixture_rows() if row["unionid"] == "unionid_union_only_001"]
     assert rows == []
 

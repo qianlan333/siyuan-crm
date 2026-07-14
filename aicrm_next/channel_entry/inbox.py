@@ -8,7 +8,7 @@ from aicrm_next.platform_foundation.webhook_inbox import WebhookInboxRepository,
 from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .application import process_wecom_external_contact_event
-from .domain import ENTRY_CHANGE_TYPES, text
+from .domain import text
 from .schemas import ProcessWeComExternalContactEventCommand
 
 
@@ -56,15 +56,6 @@ def _payload_summary(event_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def should_process_callback_inline(event_data: dict[str, Any]) -> bool:
-    return (
-        text(event_data.get("Event")) == "change_external_contact"
-        and text(event_data.get("ChangeType")) in ENTRY_CHANGE_TYPES
-        and bool(text(event_data.get("WelcomeCode")))
-        and bool(text(event_data.get("State")))
-    )
-
-
 def ingest_wecom_callback(
     *,
     query: dict[str, str],
@@ -74,7 +65,6 @@ def ingest_wecom_callback(
     plain_xml: str,
     route: str,
     repository: WebhookInboxRepository | None = None,
-    process_time_sensitive: bool = False,
 ) -> dict[str, Any]:
     corp_id = text(event_data.get("ToUserName"))
     idempotency_key = wecom_callback_idempotency_key(corp_id, event_data)
@@ -98,25 +88,14 @@ def ingest_wecom_callback(
         payload_summary_json=_payload_summary(event_data),
         max_attempts=8,
     )
-    inline_processing: dict[str, Any] = {}
-    if process_time_sensitive and should_process_callback_inline(event_data):
-        inline_processing = WeComCallbackInboxWorker(
-            repository,
-            locked_by="wecom-callback-ingress-inline",
-        ).dispatch_one(
-            int(row.get("id") or 0),
-            reason="time_sensitive_welcome_inline",
-        )
-    current_status = text(inline_processing.get("status")) or text(row.get("status")) or "received"
     return {
         "ok": True,
         "id": int(row.get("id") or 0),
         "duplicate": int(row.get("duplicate_count") or 0) > 0,
         "duplicate_count": int(row.get("duplicate_count") or 0),
-        "status": current_status,
+        "status": text(row.get("status")) or "received",
         "idempotency_key": idempotency_key,
-        "time_sensitive_inline": bool(inline_processing),
-        "inline_processing": inline_processing,
+        "ack_boundary": "durable_inbox_only",
     }
 
 
@@ -285,12 +264,31 @@ class WeComCallbackInboxWorker:
             }
         except Exception as exc:
             attempt_count = int(row.get("attempt_count") or 0)
+            provider_classification = text(getattr(exc, "classification", ""))
+            if provider_classification in {"retryable", "terminal", "blocked"}:
+                error_code = text(getattr(exc, "error_code", "")) or exc.__class__.__name__
+                retryable = provider_classification == "retryable"
+                retry_after_seconds = getattr(exc, "retry_after_seconds", None)
+            elif isinstance(exc, (TypeError, ValueError)):
+                error_code = "callback_payload_invalid"
+                retryable = False
+                retry_after_seconds = None
+            else:
+                error_code = exc.__class__.__name__
+                retryable = True
+                retry_after_seconds = None
+            next_retry = _next_retry_at(attempt_count)
+            if retry_after_seconds is not None:
+                next_retry = max(
+                    next_retry,
+                    datetime.now(timezone.utc) + timedelta(seconds=max(0.0, min(float(retry_after_seconds), 86400.0))),
+                )
             updated = self._repo.mark_failed(
                 inbox_id,
-                error_code=exc.__class__.__name__,
+                error_code=error_code,
                 error_message=str(exc),
-                retryable=True,
-                next_retry_at=_next_retry_at(attempt_count),
+                retryable=retryable,
+                next_retry_at=next_retry if retryable else None,
             ) or {"status": "failed_retryable"}
             safe_log_exception(
                 LOGGER,
@@ -301,7 +299,7 @@ class WeComCallbackInboxWorker:
             return {
                 "id": inbox_id,
                 "status": text(updated.get("status")),
-                "error_code": exc.__class__.__name__,
+                "error_code": error_code,
                 "error_message": str(exc),
                 "attempt_count": int(updated.get("attempt_count") or attempt_count + 1),
             }

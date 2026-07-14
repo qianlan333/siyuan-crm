@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 
 from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
 from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import IdentityConflictError
 from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.runtime import production_data_ready
 from aicrm_next.shared.typing import JsonDict
@@ -218,6 +219,8 @@ class ListExternalChatRecordsQuery:
             )
         except RepositoryProviderError as exc:
             return _production_unavailable(exc)
+        except IdentityConflictError as exc:
+            return _identity_conflict(str(exc))
         except ValueError as exc:
             return _input_error(str(exc))
         except Exception as exc:
@@ -249,22 +252,22 @@ class ListExternalChatRecordsQuery:
 
     def _resolve_identity(self, *, external_userid: str = "", unionid: str = "", mobile: str = "") -> JsonDict:
         external = str(external_userid or "").strip()
-        if external:
-            return {"external_userid": external, "matched_by": "external_userid"}
-        if not str(unionid or "").strip() and not str(mobile or "").strip():
+        normalized_unionid = str(unionid or "").strip()
+        normalized_mobile = str(mobile or "").strip()
+        if not external and not normalized_unionid and not normalized_mobile:
             raise ValueError("one of mobile, unionid, or external_userid is required")
         resolved = self._identity_query(
             ResolvePersonIdentityRequest(
                 external_userid=external or None,
-                unionid=str(unionid or "").strip() or None,
-                mobile=str(mobile or "").strip() or None,
+                unionid=normalized_unionid or None,
+                mobile=normalized_mobile or None,
             )
         )
         if not resolved:
             return {}
         return {
             "external_userid": resolved.external_userid or "",
-            "matched_by": resolved.matched_by or ("unionid" if str(unionid or "").strip() else "mobile"),
+            "matched_by": resolved.matched_by or ("external_userid" if external else "unionid" if normalized_unionid else "mobile"),
         }
 
     __call__ = execute
@@ -322,4 +325,16 @@ def _not_found(message: str) -> JsonDict:
         "route_owner": "ai_crm_next",
         "fallback_used": False,
         "status_code": 404,
+    }
+
+
+def _identity_conflict(message: str) -> JsonDict:
+    return {
+        "ok": False,
+        "error": message,
+        "error_code": "identity_conflict",
+        "source_status": "identity_conflict",
+        "route_owner": "ai_crm_next",
+        "fallback_used": False,
+        "status_code": 409,
     }

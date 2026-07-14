@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
 from typing import Any
 
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_csv, runtime_setting
@@ -23,11 +20,11 @@ class AudienceTestAgentService:
         self._repo = repository or build_audience_repository()
         self._inbound = inbound_service or AudienceInboundWebhookService(repository=self._repo)
 
-    def handle(self, payload: Any, *, signature: str = "", headers: dict[str, Any] | None = None) -> dict[str, Any]:
+    def handle(self, payload: Any, *, headers: dict[str, Any] | None = None) -> dict[str, Any]:
         if not runtime_bool("AICRM_AI_AUDIENCE_TEST_AGENT_ENABLED"):
             return {"ok": False, "error": "test_agent_disabled", "status_code": 404, "real_external_call_executed": False}
         if isinstance(payload, list):
-            return self._handle_run_payload(payload, signature=signature, headers=headers or {})
+            return self._handle_run_payload(payload, headers=headers or {})
         if not isinstance(payload, dict):
             return {"ok": False, "error": "invalid_test_agent_payload", "status_code": 400, "real_external_call_executed": False}
 
@@ -50,11 +47,9 @@ class AudienceTestAgentService:
         subscription = self._matching_subscription(
             int(package["id"]),
             event_type=event_type,
-            payload=payload,
-            signature=signature,
         )
         if not subscription:
-            return {"ok": False, "error": "invalid_signature", "status_code": 401, "real_external_call_executed": False}
+            return {"ok": False, "error": "subscription_not_found", "status_code": 404, "real_external_call_executed": False}
 
         sender = _text(runtime_setting("AICRM_AI_AUDIENCE_TEST_AGENT_SENDER_USERID", "HuangYouCan")) or "HuangYouCan"
         callback_payload = {
@@ -68,12 +63,8 @@ class AudienceTestAgentService:
                 "sender_userid": sender,
             },
         }
-        inbound_secret = _text(package.get("inbound_webhook_secret") or runtime_setting("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
-        if not inbound_secret:
-            return {"ok": False, "error": "inbound_webhook_secret_missing", "status_code": 400, "real_external_call_executed": False}
         raw_body = _json_dumps(callback_payload).encode("utf-8")
-        inbound_signature = hmac.new(inbound_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-        result = self._inbound.handle(package_key, callback_payload, raw_body=raw_body, signature=inbound_signature)
+        result = self._inbound.handle(package_key, callback_payload, raw_body=raw_body)
         status_code = 200 if result.get("ok") else 400
         return {
             "ok": bool(result.get("ok")),
@@ -89,7 +80,7 @@ class AudienceTestAgentService:
             "real_external_call_executed": False,
         }
 
-    def _handle_run_payload(self, payload: list[Any], *, signature: str, headers: dict[str, Any]) -> dict[str, Any]:
+    def _handle_run_payload(self, payload: list[Any], *, headers: dict[str, Any]) -> dict[str, Any]:
         package_key = _header(headers, "X-AICRM-Package-Key")
         refresh_run_id = _header(headers, "X-AICRM-Refresh-Run-Id")
         event_type = _header(headers, "X-AICRM-Event-Type")
@@ -110,11 +101,9 @@ class AudienceTestAgentService:
         subscription = self._matching_subscription(
             int(package["id"]),
             event_type="entered",
-            payload=payload,
-            signature=signature,
         )
         if not subscription:
-            return {"ok": False, "error": "invalid_signature", "status_code": 401, "real_external_call_executed": False}
+            return {"ok": False, "error": "subscription_not_found", "status_code": 404, "real_external_call_executed": False}
 
         sender = _text(runtime_setting("AICRM_AI_AUDIENCE_TEST_AGENT_SENDER_USERID", "HuangYouCan")) or "HuangYouCan"
         message_text = _message_text(package_key, refresh_run_id)
@@ -129,12 +118,8 @@ class AudienceTestAgentService:
                 "sender_userid": sender,
             },
         }
-        inbound_secret = _text(package.get("inbound_webhook_secret") or runtime_setting("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
-        if not inbound_secret:
-            return {"ok": False, "error": "inbound_webhook_secret_missing", "status_code": 400, "real_external_call_executed": False}
         raw_body = _json_dumps(callback_payload).encode("utf-8")
-        inbound_signature = hmac.new(inbound_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-        result = self._inbound.handle(package_key, callback_payload, raw_body=raw_body, signature=inbound_signature)
+        result = self._inbound.handle(package_key, callback_payload, raw_body=raw_body)
         status_code = 200 if result.get("ok") else 400
         return {
             "ok": bool(result.get("ok")),
@@ -151,11 +136,9 @@ class AudienceTestAgentService:
             "real_external_call_executed": False,
         }
 
-    def _matching_subscription(self, package_id: int, *, event_type: str, payload: Any, signature: str) -> dict[str, Any] | None:
+    def _matching_subscription(self, package_id: int, *, event_type: str) -> dict[str, Any] | None:
         for subscription in self._repo.list_subscriptions(package_id, active_only=True, trigger_event_type=event_type):
-            secret = _text(subscription.get("signing_secret"))
-            if secret and _external_effect_signature_valid(secret=secret, payload=payload, signature=signature):
-                return subscription
+            return subscription
         return None
 
 
@@ -175,17 +158,6 @@ def _package_key_allowed(package_key: str) -> bool:
     if _allowed("AICRM_AI_AUDIENCE_TEST_AGENT_PACKAGE_KEYS", package_key):
         return True
     return runtime_bool("AICRM_AI_AUDIENCE_E2E_RUNNER_ENABLED") and package_key.startswith("prod_e2e_")
-
-
-def _external_effect_signature_valid(*, secret: str, payload: Any, signature: str) -> bool:
-    provided = _text(signature)
-    if provided.startswith("sha256="):
-        provided = provided[len("sha256=") :]
-    if not secret or not provided:
-        return False
-    canonical = json.dumps(payload if payload is not None else {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    expected = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(provided, expected)
 
 
 def _header(headers: dict[str, Any], name: str) -> str:

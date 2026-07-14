@@ -12,6 +12,8 @@ from zoneinfo import ZoneInfo
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, PAYMENT_WECHAT_REFUND_REQUEST
+from aicrm_next.platform_foundation.internal_events.outbox import enqueue_transactional_internal_event_outbox
+from aicrm_next.platform_foundation.internal_events.refund import build_refund_succeeded_event_request
 from aicrm_next.shared.runtime import database_mode
 from aicrm_next.shared.text_encoding import repair_utf8_mojibake
 
@@ -502,71 +504,131 @@ def _validate_refund_request(order: dict[str, Any], payload: dict[str, Any]) -> 
     return amount_total
 
 
-def create_wechat_refund_request(order_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-    order = get_wechat_admin_order(order_id)
-    amount_total = _validate_refund_request(order or {}, payload)
-    reason = str(payload.get("reason") or "").strip()
-    out_refund_no = _out_refund_no()
+def _refund_request_payload(
+    order: dict[str, Any],
+    *,
+    out_refund_no: str,
+    amount_total: int,
+    reason: str,
+    notify_url: str,
+) -> dict[str, Any]:
     currency = str(order.get("currency") or "CNY").strip() or "CNY"
-    request_payload = {
-        "transaction_id": order["transaction_id"],
+    request_payload: dict[str, Any] = {
+        "transaction_id": str(order.get("transaction_id") or "").strip(),
         "out_refund_no": out_refund_no,
         "reason": reason[:80],
         "amount": {
-            "refund": amount_total,
-            "total": order["amount_total"],
+            "refund": int(amount_total),
+            "total": int(order.get("amount_total") or 0),
             "currency": currency,
         },
     }
-    refund_notify_url = str(payload.get("refund_notify_url") or payload.get("notify_url") or os.getenv("WECHAT_PAY_REFUND_NOTIFY_URL") or "").strip()
-    if refund_notify_url:
-        request_payload["notify_url"] = refund_notify_url
+    if notify_url:
+        request_payload["notify_url"] = notify_url
+    return request_payload
+
+
+def _locked_refundable_wechat_order(conn: Any, order_db_id: int) -> dict[str, Any]:
+    # Acquire the order lock in its own statement. Under READ COMMITTED, a
+    # concurrent waiter then gets a fresh snapshot for the aggregate query
+    # below and sees refund rows committed by the previous lock owner. Keeping
+    # the aggregate inside the locking statement would retain the pre-wait
+    # statement snapshot and can permit concurrent over-refund.
+    locked = conn.execute(
+        "SELECT id FROM wechat_pay_orders WHERE id = %s FOR UPDATE",
+        (int(order_db_id),),
+    ).fetchone()
+    if not locked:
+        return {}
+    row = conn.execute(
+        f"""
+        SELECT o.*,
+               COALESCE((
+                   SELECT SUM(r.refund_amount_total)
+                   FROM wechat_pay_refunds r
+                   WHERE r.order_id = o.id
+                     AND {active_wechat_refund_sql("r")}
+               ), 0) AS active_refund_amount_total
+        FROM wechat_pay_orders o
+        WHERE o.id = %s
+        """,
+        (int(order_db_id),),
+    ).fetchone()
+    return _present_order(dict(row)) if row else {}
+
+
+def create_wechat_refund_request(order_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    order = get_wechat_admin_order(order_id) or {}
+    amount_total = _validate_refund_request(order, payload)
+    reason = str(payload.get("reason") or "").strip()
+    out_refund_no = _out_refund_no()
+    refund_notify_url = str(
+        payload.get("refund_notify_url")
+        or payload.get("notify_url")
+        or os.getenv("WECHAT_PAY_REFUND_NOTIFY_URL")
+        or ""
+    ).strip()
+    request_payload = _refund_request_payload(
+        order,
+        out_refund_no=out_refund_no,
+        amount_total=amount_total,
+        reason=reason,
+        notify_url=refund_notify_url,
+    )
     if database_mode() == "postgres":
         try:
             from psycopg.types.json import Jsonb
         except ModuleNotFoundError as exc:
             raise RuntimeError("psycopg is required for production transaction admin") from exc
         with connect_commerce_db(_database_url()) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO wechat_pay_refunds (
-                        order_id, out_trade_no, transaction_id, out_refund_no, reason,
-                        refund_amount_total, order_amount_total, currency, status,
-                        requested_by, request_payload_json, created_at, updated_at
-                    )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'requested', %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """,
-                    (
-                        int(order["id"]),
-                        order.get("out_trade_no") or "",
-                        order["transaction_id"],
-                        out_refund_no,
-                        reason,
-                        amount_total,
-                        order["amount_total"],
-                        currency,
-                        str(payload.get("operator") or "aicrm_next"),
-                        Jsonb(request_payload),
-                    ),
+            order = _locked_refundable_wechat_order(conn, int(order["id"]))
+            amount_total = _validate_refund_request(order, payload)
+            currency = str(order.get("currency") or "CNY").strip() or "CNY"
+            request_payload = _refund_request_payload(
+                order,
+                out_refund_no=out_refund_no,
+                amount_total=amount_total,
+                reason=reason,
+                notify_url=refund_notify_url,
+            )
+            conn.execute(
+                """
+                INSERT INTO wechat_pay_refunds (
+                    order_id, out_trade_no, transaction_id, out_refund_no, reason,
+                    refund_amount_total, order_amount_total, currency, status,
+                    requested_by, request_payload_json, created_at, updated_at
                 )
-                cur.execute(
-                    """
-                    INSERT INTO wechat_pay_order_events (
-                        out_trade_no, event_type, transaction_id, trade_state,
-                        payload_json, headers_json, created_at
-                    )
-                    VALUES (%s, 'refund_request_queued', %s, %s, %s, %s, CURRENT_TIMESTAMP)
-                    """,
-                    (
-                        order.get("out_trade_no") or "",
-                        order["transaction_id"],
-                        str(order.get("trade_state") or ""),
-                        Jsonb({"out_refund_no": out_refund_no, "amount_total": amount_total, "provider_refund_executed": False}),
-                        Jsonb({}),
-                    ),
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'requested', %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (
+                    int(order["id"]),
+                    order.get("out_trade_no") or "",
+                    order["transaction_id"],
+                    out_refund_no,
+                    reason,
+                    amount_total,
+                    order["amount_total"],
+                    currency,
+                    str(payload.get("operator") or "aicrm_next"),
+                    Jsonb(request_payload),
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO wechat_pay_order_events (
+                    out_trade_no, event_type, transaction_id, trade_state,
+                    payload_json, headers_json, created_at
                 )
-            conn.commit()
+                VALUES (%s, 'refund_request_queued', %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                """,
+                (
+                    order.get("out_trade_no") or "",
+                    order["transaction_id"],
+                    str(order.get("trade_state") or ""),
+                    Jsonb({"out_refund_no": out_refund_no, "amount_total": amount_total, "provider_refund_executed": False}),
+                    Jsonb({}),
+                ),
+            )
             effect_job = ExternalEffectService().plan_effect(
                 effect_type=PAYMENT_WECHAT_REFUND_REQUEST,
                 adapter_name="wechat_payment",
@@ -598,7 +660,9 @@ def create_wechat_refund_request(order_id: str, payload: dict[str, Any]) -> dict
                 ),
                 source_module="commerce.admin_transactions",
                 idempotency_key=f"wechat-refund-request:{out_refund_no}",
+                connection=conn,
             )
+            conn.commit()
             updated_order = get_wechat_admin_order(order_id) or order
             return {
                 "ok": True,
@@ -646,6 +710,7 @@ def apply_wechat_refund_result(refund_payload: dict[str, Any], *, raw_event: dic
     if raw_event:
         response_payload["_notify_event"] = dict(raw_event)
     service_period_refund: dict[str, Any] = {}
+    order: dict[str, Any] = {}
     with connect_commerce_db(_database_url()) as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -699,6 +764,12 @@ def apply_wechat_refund_result(refund_payload: dict[str, Any], *, raw_event: dic
                 )
                 order_refund_status = str((cur.fetchone() or {}).get("refund_status") or "")
             cur.execute(
+                "SELECT * FROM wechat_pay_orders WHERE id = %s LIMIT 1",
+                (int(refund["order_id"]),),
+            )
+            order = dict(cur.fetchone() or {})
+            order_refund_status = str(order.get("refund_status") or order_refund_status)
+            cur.execute(
                 """
                 INSERT INTO wechat_pay_order_events (
                     out_trade_no, event_type, transaction_id, trade_state,
@@ -724,20 +795,30 @@ def apply_wechat_refund_result(refund_payload: dict[str, Any], *, raw_event: dic
                     Jsonb({}),
                 ),
             )
-        conn.commit()
-    if status == "SUCCESS" and order_refund_status == "full_refunded":
-        from aicrm_next.service_period.application import ApplyServicePeriodRefundCommand
-
-        service_period_refund = ApplyServicePeriodRefundCommand()(
-            out_trade_no=str(refund.get("out_trade_no") or refund_payload.get("out_trade_no") or ""),
-            refund={
+        if status == "SUCCESS" and order_refund_status == "full_refunded":
+            refund_event_payload = {
                 "out_refund_no": resolved_out_refund_no,
                 "refund_id": resolved_refund_id,
                 "status": status,
                 "amount_total": refund_amount,
                 "order_refund_status": order_refund_status,
-            },
-        )
+                "out_trade_no": str(refund.get("out_trade_no") or refund_payload.get("out_trade_no") or ""),
+            }
+            request = build_refund_succeeded_event_request(
+                refund=refund_event_payload,
+                order=order,
+                source_route="/api/h5/wechat-pay/refund/notify",
+            )
+            if request is None:
+                raise RuntimeError("refund.succeeded event identity is incomplete")
+            outbox = enqueue_transactional_internal_event_outbox(conn, request)
+            service_period_refund = {
+                "queued": True,
+                "event_type": request.event_type,
+                "outbox_id": outbox.get("outbox_id"),
+                "real_external_call_executed": False,
+            }
+        conn.commit()
     return {
         "ok": True,
         "refund": {

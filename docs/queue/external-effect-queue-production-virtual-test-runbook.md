@@ -140,9 +140,11 @@ The response includes `receiver_url`, `job`, and `runbook_next_steps`.
 
 Preview must happen before any execution:
 
+Use an `automation_worker` short-lived JWT in `AICRM_ACCESS_TOKEN` (`audience=internal_worker`, `scope=write`); see [`../auth_client_credentials.md`](../auth_client_credentials.md).
+
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/external-effects/run-due/preview" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "batch_size": 1,
@@ -158,7 +160,7 @@ Expected: `dry_run=true`, `test_only=true`,
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/external-effects/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "batch_size": 1,
@@ -176,7 +178,7 @@ Only after preview and dry-run match the expected candidate:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/external-effects/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "batch_size": 1,

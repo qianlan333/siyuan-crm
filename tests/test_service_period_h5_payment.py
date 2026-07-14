@@ -3,10 +3,11 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from aicrm_next.commerce.wechat_pay_client import WeChatPayClientConfig
+from aicrm_next.internal_event_composition import register_payment_succeeded_consumers
 from aicrm_next.main import create_app
 from aicrm_next.platform_foundation.internal_events.consumer_registry import InternalEventConsumerRegistry
 from aicrm_next.platform_foundation.internal_events.models import InternalEvent, InternalEventConsumerRun
-from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE, register_payment_succeeded_consumers
+from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE
 from aicrm_next.public_product import h5_wechat_pay
 from aicrm_next.service_period.application import CreateServicePeriodProductCommand
 from aicrm_next.service_period.dto import ServicePeriodProductCreateRequest
@@ -57,6 +58,23 @@ def test_service_period_h5_order_allows_repeat_paid_order(monkeypatch) -> None:
 
         def execute(self, query, params=()):
             queries.append((query, tuple(params)))
+            if "FROM crm_user_identity identity" in query:
+                external_userid, unionid, openid, mobile = tuple(params)
+                canonical_unionid = unionid or ("union_h5_repeat" if openid == "op_h5" else "")
+                return Cursor(
+                    {
+                        "unionid": canonical_unionid,
+                        "external_userid": external_userid,
+                        "openid": openid,
+                        "mobile": mobile,
+                        "mobile_normalized": mobile,
+                        "status": "active",
+                        "matched_unionid": bool(unionid),
+                        "matched_external_userid": bool(external_userid),
+                        "matched_openid": bool(openid),
+                        "matched_mobile": bool(mobile),
+                    }
+                )
             if "INSERT INTO wechat_pay_orders" in query:
                 assert params[1] == "service_period_checkout"
                 return Cursor(

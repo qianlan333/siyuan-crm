@@ -9,6 +9,7 @@ from aicrm_next.commerce.domain import preview_product
 from aicrm_next.commerce.repo import build_commerce_repository
 from aicrm_next.media_library.application import GetImageVariantQuery
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.signed_context import product_context_fragment_bootstrap_script
 
 
 PUBLIC_PRODUCT_ROUTES = (
@@ -170,10 +171,10 @@ def public_product_image_variant(product_code: Any, image_id: Any, variant_key: 
     return variant
 
 
-def render_product_page(product: dict[str, Any], *, context_token: str = "", context_status: str = "") -> str:
+def render_product_page(product: dict[str, Any], *, context_status: str = "") -> str:
     title = escape(str(product.get("title") or "商品详情"))
     cta = escape(str(product.get("buy_button_text") or product.get("cta_text") or "立即报名"))
-    checkout_url = escape(_append_query(f"/pay/{product.get('product_code') or ''}", "ctx", context_token) if context_token else f"/pay/{product.get('product_code') or ''}", quote=True)
+    checkout_url = escape(f"/pay/{product.get('product_code') or ''}", quote=True)
     media = _render_detail_media(product)
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -189,25 +190,14 @@ def render_product_page(product: dict[str, Any], *, context_token: str = "", con
       <div class="sticky-title">{title}</div>
       <div class="sticky-price"><small>¥</small>{_price_amount(product)}</div>
     </div>
-    <a class="cta" href="{checkout_url}" data-context-status="{escape(str(context_status or ('valid' if context_token else 'missing')), quote=True)}">{cta}</a>
+    <a class="cta" href="{checkout_url}" data-context-status="{escape(str(context_status or 'missing'), quote=True)}">{cta}</a>
   </nav>
   <main class="product-page" data-route-owner="ai_crm_next" data-fallback-used="false">
     {media}
   </main>
+  {product_context_fragment_bootstrap_script()}
 </body>
 </html>"""
-
-
-def _append_query(path: str, key: str, value: str) -> str:
-    normalized_path = str(path or "").strip()
-    normalized_key = str(key or "").strip()
-    normalized_value = str(value or "").strip()
-    if not normalized_path or not normalized_key or not normalized_value:
-        return normalized_path
-    from urllib.parse import quote
-
-    separator = "&" if "?" in normalized_path else "?"
-    return f"{normalized_path}{separator}{quote(normalized_key, safe='')}={quote(normalized_value, safe='')}"
 
 
 def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> str:
@@ -295,6 +285,7 @@ def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> s
     </div>
   </div>
   {_pay_page_script(state_json)}
+  {product_context_fragment_bootstrap_script()}
 </body>
 </html>"""
 
@@ -605,9 +596,6 @@ def _pay_page_script(state_json: str) -> str:
           product_code: state.product.product_code,
           order_source: "product_checkout"
         }};
-        if (state.context_token) {{
-          body.ctx = state.context_token;
-        }}
         if (state.require_mobile) {{
           const mobile = validateMobile();
           if (!mobile) return null;
@@ -625,7 +613,11 @@ def _pay_page_script(state_json: str) -> str:
             window.location.href = payload.oauth_start_url;
             return null;
           }}
-          throw new Error(payload.error || "下单失败");
+          const friendlyErrors = {{
+            identity_resolution_required: "微信身份正在同步，请稍后重试。",
+            identity_conflict: "当前微信身份存在冲突，请联系客服处理。"
+          }};
+          throw new Error(friendlyErrors[payload.error] || payload.error || "下单失败");
         }}
         return payload;
       }}

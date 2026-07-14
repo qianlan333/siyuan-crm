@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import re
 from datetime import timedelta
@@ -11,7 +10,8 @@ from uuid import uuid4
 from fastapi import Request
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
-from aicrm_next.shared.runtime_settings import runtime_bool, runtime_csv, runtime_setting
+from aicrm_next.platform_foundation.auth_platform.context import AuthContext
+from aicrm_next.shared.runtime_settings import runtime_bool, runtime_csv
 
 from .models import (
     AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK,
@@ -164,14 +164,12 @@ def create_loopback_job(
         raise ValueError("unsupported_test_receiver_response_status")
 
     base_url = detect_current_base_url(request)
-    token = "eert_" + uuid4().hex
-    signature_secret = "eers_" + uuid4().hex
-    receiver_url = f"{base_url}{TEST_RECEIVER_PATH_PREFIX}/{token}"
+    receiver_url = f"{base_url}{TEST_RECEIVER_PATH_PREFIX}"
     suffix = uuid4().hex[:12]
     target_id = f"{scenario_config['target_id_prefix']}_{suffix}"
     business_id = f"{scenario_config['business_id_prefix']}_{suffix}"
     trace_id = f"trace_test_loopback_{suffix}"
-    idempotency_key = f"test-loopback:{scenario}:{token}"
+    idempotency_key = f"test-loopback:{scenario}:evt_{uuid4().hex}"
     body = {
         "synthetic": True,
         "scenario": scenario,
@@ -196,8 +194,6 @@ def create_loopback_job(
         payload={
             "webhook_url": receiver_url,
             "body": body,
-            "signature_secret": signature_secret,
-            "receiver_token": token,
             "receiver_response_status": status,
             "test_receiver_expires_at": public_datetime(utcnow() + timedelta(hours=12)),
             "execution_scope": "test_loopback",
@@ -206,7 +202,7 @@ def create_loopback_job(
         },
         payload_summary={
             "scenario": scenario,
-            "receiver_token": token,
+            "event_id": idempotency_key,
             "receiver_response_status": status,
             "execution_scope": "test_loopback",
             "expected_payload_hash": payload_hash,
@@ -238,16 +234,17 @@ def create_loopback_job(
     }
 
 
-async def record_test_receiver_request(*, request: Request, receiver_token: str, repository: ExternalEffectRepository) -> tuple[int, dict[str, Any]]:
+async def record_test_receiver_request(*, request: Request, repository: ExternalEffectRepository) -> tuple[int, dict[str, Any]]:
     if not test_receiver_enabled():
         return 404, {"ok": False, "error": "test_receiver_disabled"}
-    job = repository.get_job_by_receiver_token(receiver_token)
+    event_id = str(request.headers.get("X-AICRM-Event-Id") or "").strip()
+    job = repository.get_job_by_event_id(event_id)
     if not job:
-        return 404, {"ok": False, "error": "test_receiver_token_not_found"}
+        return 404, {"ok": False, "error": "test_receiver_event_not_found"}
     payload = dict(job.payload_json or {})
     expires_at = str(payload.get("test_receiver_expires_at") or "").strip()
     if expires_at and public_datetime(expires_at) < public_datetime(utcnow()):
-        return 403, {"ok": False, "error": "test_receiver_token_expired"}
+        return 403, {"ok": False, "error": "test_receiver_event_expired"}
 
     try:
         body = await request.json()
@@ -255,10 +252,10 @@ async def record_test_receiver_request(*, request: Request, receiver_token: str,
         body = {}
     body_json = dict(body or {}) if isinstance(body, dict) else {"_non_object": body}
     payload_hash = canonical_payload_hash(body_json)
-    signature_valid = _signature_valid(payload=payload, body=body_json, headers=request.headers)
+    signature_valid = isinstance(getattr(request.state, "auth_context", None), AuthContext)
     response_status = int(payload.get("receiver_response_status") or 200)
     receipt = repository.create_test_receipt(
-        receiver_token=receiver_token,
+        event_id=event_id,
         job=job,
         request_method=request.method,
         request_path=request.url.path,
@@ -270,23 +267,6 @@ async def record_test_receiver_request(*, request: Request, receiver_token: str,
         response_status=response_status,
     )
     return response_status, {"ok": True, "receipt_id": receipt.receipt_id, "received": True}
-
-
-def _signature_valid(*, payload: dict[str, Any], body: dict[str, Any], headers: Any) -> bool | None:
-    secret = str(
-        payload.get("signature_secret")
-        or payload.get("signing_secret")
-        or runtime_setting("AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET")
-        or ""
-    ).strip()
-    if not secret:
-        return None
-    provided = str(headers.get("X-AICRM-External-Effect-Signature") or "").strip()
-    if not provided:
-        return False
-    canonical = json.dumps(body or {}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    expected = hmac.new(secret.encode("utf-8"), canonical.encode("utf-8"), hashlib.sha256).hexdigest()
-    return hmac.compare_digest(provided, expected)
 
 
 def _headers_summary(headers: Any) -> dict[str, Any]:

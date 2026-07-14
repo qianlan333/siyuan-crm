@@ -11,49 +11,67 @@ from aicrm_next.ai_audience_ops.refresh_service import AudienceRefreshService
 from aicrm_next.ai_audience_ops.repository import build_audience_repository
 from aicrm_next.shared.db_session import get_session_factory
 from scripts import ai_audience_apply_package_spec as spec_script
+from tests.admin_auth_test_helpers import access_token_headers, install_access_token
 from tests.test_ai_audience_package_spec import VALID_SPEC
 
 
 TOKEN = "external-spec-test-token"
 
 
-def _headers(token: str = TOKEN) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
+def _headers() -> dict[str, str]:
+    return {"Content-Type": "application/json"}
 
 
-def _ready_env(monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN", TOKEN)
+def _ready_env(monkeypatch, client) -> None:
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_ALLOWED_PREFIXES", "prod_verify_,group_chat_members_,official_,audience_")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_ALLOW_NON_VERIFY_PREFIX", "false")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_ALLOW_PUBLISH", "false")
     if os.getenv("DATABASE_URL"):
         monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", os.environ["DATABASE_URL"])
+    token = install_access_token(
+        client,
+        audience="external_integration",
+        capabilities=("external_write",),
+        scopes=("write",),
+        client_id="pytest-external-audience-agent",
+        purpose="external_agent",
+    )
+    client.headers.update(access_token_headers(token))
 
 
 def _spec(package_key: str = "spec_q101") -> str:
     return VALID_SPEC.replace("package_key: spec_q101", f"package_key: {package_key}")
 
 
-def test_external_spec_auth_guards(next_client, monkeypatch) -> None:
-    monkeypatch.delenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN", raising=False)
-    missing_config = next_client.post("/api/external/ai-audience/spec/dry-run", json={"spec_markdown": _spec(), "package_key_prefix": "prod_verify_"})
-    assert missing_config.status_code == 503
-    assert missing_config.json()["error"] == "external_token_not_configured"
-
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN", TOKEN)
+def test_external_spec_auth_guards(next_client, next_pg_schema, monkeypatch) -> None:
+    del next_pg_schema
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     no_auth = next_client.post("/api/external/ai-audience/spec/dry-run", json={"spec_markdown": _spec(), "package_key_prefix": "prod_verify_"})
     assert no_auth.status_code == 401
-    assert no_auth.json()["error"] == "external_token_required"
+    assert no_auth.json()["error"] == "access_token_required"
 
-    wrong = next_client.post("/api/external/ai-audience/spec/dry-run", headers=_headers("bad"), json={"spec_markdown": _spec(), "package_key_prefix": "prod_verify_"})
+    install_access_token(
+        next_client,
+        audience="external_integration",
+        capabilities=("external_write",),
+        scopes=("write",),
+        client_id="pytest-external-audience-agent",
+        purpose="external_agent",
+    )
+    wrong = next_client.post(
+        "/api/external/ai-audience/spec/dry-run",
+        headers={"Authorization": "Bearer malformed"},
+        json={"spec_markdown": _spec(), "package_key_prefix": "prod_verify_"},
+    )
     assert wrong.status_code == 401
-    assert wrong.json()["error"] == "external_token_invalid"
-    assert TOKEN not in wrong.text
+    assert wrong.json()["error"] == "invalid_access_token"
+    assert "malformed" not in wrong.text
 
 
 def test_external_spec_dry_run_validates_without_creating_package(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
 
     response = next_client.post(
         "/api/external/ai-audience/spec/dry-run",
@@ -77,7 +95,7 @@ def test_external_spec_dry_run_validates_without_creating_package(next_client, n
 
 def test_external_spec_dry_run_blocks_invalid_sql_and_enforces_prefix_gate(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     invalid_refresh = _spec().replace("refresh_mode: incremental_3m", "refresh_mode: incremental_5m")
     select_star = _spec().replace(
         "SELECT\n  'external_userid' AS identity_type,",
@@ -120,7 +138,7 @@ def test_external_spec_dry_run_blocks_invalid_sql_and_enforces_prefix_gate(next_
 
 def test_external_spec_apply_creates_official_package_key_with_valid_token(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
 
     response = next_client.post(
         "/api/external/ai-audience/spec/apply",
@@ -144,7 +162,7 @@ def test_external_spec_apply_creates_official_package_key_with_valid_token(next_
 
 def test_external_spec_apply_previews_group_chat_snapshot_package(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     markdown = Path("docs/ai_audience/examples/group_chat_members_manual.md").read_text(encoding="utf-8")
 
     response = next_client.post(
@@ -164,7 +182,7 @@ def test_external_spec_apply_previews_group_chat_snapshot_package(next_client, n
 
 def test_external_spec_apply_creates_package_version_and_no_side_effects(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
 
     response = next_client.post(
         "/api/external/ai-audience/spec/apply",
@@ -197,7 +215,7 @@ def test_external_spec_apply_creates_package_version_and_no_side_effects(next_cl
 
 def test_external_spec_publish_gate_and_no_activate(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     applied = next_client.post(
         "/api/external/ai-audience/spec/apply",
         headers=_headers(),
@@ -228,7 +246,7 @@ def test_external_spec_publish_gate_and_no_activate(next_client, next_pg_schema,
 
 def test_external_spec_archive_allows_official_package_key_with_valid_token(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     applied = next_client.post(
         "/api/external/ai-audience/spec/apply",
         headers=_headers(),
@@ -247,7 +265,7 @@ def test_external_spec_archive_allows_official_package_key_with_valid_token(next
     assert status == "archived"
 
 
-def test_external_spec_script_mode_uses_bearer_token(monkeypatch, tmp_path) -> None:
+def test_external_spec_script_mode_uses_oauth_access_token(monkeypatch, tmp_path) -> None:
     spec_path = tmp_path / "spec.md"
     spec_path.write_text(_spec(), encoding="utf-8")
     calls: list[dict] = []
@@ -268,13 +286,13 @@ def test_external_spec_script_mode_uses_bearer_token(monkeypatch, tmp_path) -> N
         }
 
     monkeypatch.setattr(spec_script, "_http_json", fake_http_json)
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN", TOKEN)
+    monkeypatch.setenv("AICRM_AUTH_CLI_ACCESS_TOKEN", TOKEN)
     rc = spec_script.main(
         [
             str(spec_path),
             "--external-api-base",
             "https://example.test",
-            "--external-token-from-env",
+            "--oauth-access-token-from-env",
             "--apply",
             "--package-key-prefix",
             "prod_verify_",
@@ -338,7 +356,7 @@ def _insert_identities(session, *external_userids: str) -> None:
 
 def test_external_simple_preview_validates_sql_contract(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
 
     valid = next_client.post(
         "/api/external/ai-audience/simple/preview",
@@ -388,7 +406,7 @@ def test_external_simple_preview_validates_sql_contract(next_client, next_pg_sch
 
 def test_external_simple_apply_creates_paused_package_version_and_runtime_config(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
 
     response = next_client.post("/api/external/ai-audience/simple/apply", headers=_headers(), json=_simple_payload("audience_apply_simple"))
 
@@ -426,7 +444,7 @@ def test_external_simple_apply_creates_paused_package_version_and_runtime_config
 
 def test_external_simple_activate_and_archive(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     payload = _simple_payload("audience_activate_simple")
     payload["refresh_mode"] = "every_3m"
     applied = next_client.post("/api/external/ai-audience/simple/apply", headers=_headers(), json=payload).json()
@@ -464,7 +482,7 @@ def test_external_simple_activate_and_archive(next_client, next_pg_schema, monke
 
 def test_external_simple_sync_refresh_enters_idempotently_and_exits(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     with get_session_factory()() as session:
         _insert_identities(session, "wm_simple_001")
         session.execute(
@@ -495,7 +513,7 @@ def test_external_simple_sync_refresh_enters_idempotently_and_exits(next_client,
 
 def test_external_simple_outbound_plan_keeps_external_userids_array_body(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
     payload = _simple_payload("audience_outbound_simple")
     payload["outbound_webhook_url"] = "https://agent.example.test/audience"
     with get_session_factory()() as session:
@@ -524,7 +542,7 @@ def test_external_simple_outbound_plan_keeps_external_userids_array_body(next_cl
 
 def test_external_simple_prefix_gate_rejects_unsafe_keys(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    _ready_env(monkeypatch)
+    _ready_env(monkeypatch, next_client)
 
     response = next_client.post(
         "/api/external/ai-audience/simple/preview",

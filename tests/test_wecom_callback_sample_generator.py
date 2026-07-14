@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from urllib.parse import parse_qsl, urlsplit
 
 from aicrm_next.channel_entry import application as channel_application
@@ -21,6 +22,7 @@ def test_callback_sample_generator_outputs_valid_encrypted_callback(monkeypatch,
     body_file = tmp_path / "sample.xml"
     url_file = tmp_path / "sample.url"
     metadata_file = tmp_path / "sample.json"
+    timestamp = str(int(time.time()))
 
     payload = generator.run(
         [
@@ -33,7 +35,7 @@ def test_callback_sample_generator_outputs_valid_encrypted_callback(monkeypatch,
             "--metadata-file",
             str(metadata_file),
             "--timestamp",
-            "1782530000",
+            timestamp,
             "--nonce",
             "nonce-a",
             "--external-userid",
@@ -46,7 +48,7 @@ def test_callback_sample_generator_outputs_valid_encrypted_callback(monkeypatch,
     )
 
     assert payload["ok"] is True
-    assert payload["idempotency_key"] == "ww-test|change_external_contact|del_external_contact|wm-a|sales-a|1782530000||scene-a"
+    assert payload["idempotency_key"] == f"ww-test|change_external_contact|del_external_contact|wm-a|sales-a|{timestamp}||scene-a"
     assert body_file.exists()
     assert url_file.read_text(encoding="utf-8").startswith("http://127.0.0.1:5002/wecom/external-contact/callback?")
     assert "WECOM_CALLBACK_AES_KEY" not in metadata_file.read_text(encoding="utf-8")
@@ -62,7 +64,7 @@ def test_callback_sample_generator_outputs_valid_encrypted_callback(monkeypatch,
 def test_callback_sample_generator_escapes_xml_values(monkeypatch) -> None:
     _set_callback_env(monkeypatch)
 
-    payload = generator.run(["--state", "a&b", "--timestamp", "1782530000", "--nonce", "nonce-a", "--print-body"])
+    payload = generator.run(["--state", "a&b", "--timestamp", str(int(time.time())), "--nonce", "nonce-a", "--print-body"])
     validation = probe.validate_callback_sample(payload["callback_url"], str(payload["callback_body"]).encode("utf-8"))
 
     assert validation["ok"] is True
@@ -75,7 +77,7 @@ def test_generated_callback_sample_round_trips_through_inbox_worker(monkeypatch)
             "--callback-base-url",
             "http://127.0.0.1:5002/wecom/external-contact/callback",
             "--timestamp",
-            "1782530000",
+            str(int(time.time())),
             "--nonce",
             "nonce-a",
             "--external-userid",

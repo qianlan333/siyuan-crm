@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import hashlib
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("composed_internal_event_registry")
+
 from aicrm_next.cloud_orchestrator.application import ApproveCloudPlanCommand, ApproveCloudPlanRecipientCommand
 from aicrm_next.cloud_orchestrator.repository import reset_cloud_plan_fixture_state
 from aicrm_next.owner_migration.application import OwnerMigrationCommand, OwnerMigrationService

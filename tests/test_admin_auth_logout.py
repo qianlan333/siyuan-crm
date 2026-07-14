@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE, sign_session
+from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE
 from aicrm_next.main import create_app
+from tests.admin_auth_test_helpers import install_admin_session
 
 
 def _client(monkeypatch) -> TestClient:
@@ -15,7 +16,7 @@ def _client(monkeypatch) -> TestClient:
 
 def test_logout_redirects_to_login_and_clears_next_cookie(monkeypatch) -> None:
     client = _client(monkeypatch)
-    client.cookies.set(SESSION_COOKIE, sign_session({"username": "bg-admin", "login_type": "break_glass", "iat": 4_102_444_800}))
+    issued = install_admin_session(client, "super_admin", subject="admin:break-glass", principal_id="admin-break-glass")
 
     response = client.get("/logout", follow_redirects=False)
 
@@ -26,6 +27,7 @@ def test_logout_redirects_to_login_and_clears_next_cookie(monkeypatch) -> None:
     assert SESSION_COOKIE in response.headers["set-cookie"]
     assert CSRF_COOKIE in response.headers["set-cookie"]
     assert "Max-Age=0" in response.headers["set-cookie"] or "max-age=0" in response.headers["set-cookie"].lower()
+    assert not client.app.state.auth_session_service.introspect(issued.session_cookie).active
 
 
 def test_logout_options_is_next_diagnostics(monkeypatch) -> None:

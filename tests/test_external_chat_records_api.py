@@ -2,46 +2,49 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from aicrm_next.identity_contact.resolver import IdentityConflictError
 from aicrm_next.main import create_app
+from aicrm_next.message_archive.application import ListExternalChatRecordsQuery
+from aicrm_next.message_archive.repo import FixtureMessageArchiveRepository
+from tests.admin_auth_test_helpers import access_token_headers, install_access_token
 
 
-TOKEN = "external-chat-token"
-
-
-def _client(monkeypatch, *, token_configured: bool = True) -> TestClient:
+def _client(monkeypatch, *, authorized: bool = True) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("SECRET_KEY", "external-chat-api")
-    if token_configured:
-        monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", TOKEN)
-    else:
-        monkeypatch.delenv("ARCHIVE_INTERNAL_API_TOKEN", raising=False)
-    return TestClient(create_app(), raise_server_exceptions=False)
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    token = install_access_token(
+        client,
+        audience="external_integration",
+        capabilities=("external_read",),
+        scopes=("read",),
+        client_id="pytest-external-chat",
+        purpose="external_agent",
+    )
+    if authorized:
+        client.headers.update(access_token_headers(token))
+    return client
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"}
+    return {}
 
 
-def test_external_chat_records_requires_configured_bearer_token(monkeypatch) -> None:
-    unconfigured = _client(monkeypatch, token_configured=False).get(
-        "/api/external/chat-records?external_userid=wx_ext_001&start_time=1780358760&chat_scene=private"
-    )
-    assert unconfigured.status_code == 503
-    assert unconfigured.json()["error_code"] == "internal_token_not_configured"
-
-    client = _client(monkeypatch)
+def test_external_chat_records_requires_registered_client_access_token(monkeypatch) -> None:
+    client = _client(monkeypatch, authorized=False)
     missing = client.get("/api/external/chat-records?external_userid=wx_ext_001&start_time=1780358760&chat_scene=private")
     assert missing.status_code == 401
-    assert missing.json()["error_code"] == "missing_internal_token"
+    assert missing.json()["error"] == "access_token_required"
 
     invalid = client.get(
         "/api/external/chat-records?external_userid=wx_ext_001&start_time=1780358760&chat_scene=private",
         headers={"Authorization": "Bearer wrong-token"},
     )
     assert invalid.status_code == 401
-    assert invalid.json()["error_code"] == "invalid_internal_token"
+    assert invalid.json()["error"] == "invalid_access_token"
 
 
 def test_external_chat_records_resolves_by_mobile_and_defaults_private_peer(monkeypatch) -> None:
@@ -87,7 +90,7 @@ def test_external_chat_records_resolves_by_unionid_and_supports_group_scene(monk
 def test_external_chat_records_cursor_paginates_fixed_twenty_rows(monkeypatch) -> None:
     client = _client(monkeypatch)
     first = client.get(
-        "/api/external/chat-records?external_userid=wm_ext_001&start_time=1773567000&chat_scene=private&with_userid=sales_01&cursor=",
+        "/api/external/chat-records?external_userid=wx_ext_001&start_time=1773567000&chat_scene=private&with_userid=HuangYouCan&cursor=",
         headers=_headers(),
     ).json()
 
@@ -120,3 +123,22 @@ def test_external_chat_records_rejects_bad_inputs(monkeypatch) -> None:
     )
     assert bad_scene.status_code == 400
     assert bad_scene.json()["error_code"] == "invalid_request"
+
+
+def test_external_chat_records_identity_conflict_is_explicit_and_never_falls_back() -> None:
+    class ConflictIdentityQuery:
+        def __call__(self, _request):
+            raise IdentityConflictError("duplicate_alias")
+
+    payload = ListExternalChatRecordsQuery(
+        repo=FixtureMessageArchiveRepository(),
+        identity_query=ConflictIdentityQuery(),
+    ).execute(
+        external_userid="conflicting-external",
+        start_time=1780358760,
+        chat_scene="private",
+    )
+
+    assert payload["status_code"] == 409
+    assert payload["error_code"] == "identity_conflict"
+    assert payload["fallback_used"] is False

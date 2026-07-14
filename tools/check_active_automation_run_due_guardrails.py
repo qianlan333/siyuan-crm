@@ -24,6 +24,8 @@ except ModuleNotFoundError:
         os.execv(str(venv_python), [str(venv_python), *sys.argv])
     raise
 
+from tools.auth_probe import install_probe_access_token
+
 CAMPAIGN_ROUTE = "/api/admin/cloud-orchestrator/campaigns/run-due"
 CAMPAIGN_PREVIEW_ROUTE = "/api/admin/cloud-orchestrator/campaigns/run-due/preview"
 
@@ -40,15 +42,11 @@ PRODUCTION_CONFIG_PATTERNS = ("nginx", "systemd", ".service", ".timer", "deploy/
 def guardrail_probe_env():
     keys = {
         "AICRM_NEXT_ENV": os.environ.get("AICRM_NEXT_ENV"),
-        "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": os.environ.get("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE"),
         "DATABASE_URL": os.environ.get("DATABASE_URL"),
-        "AUTOMATION_INTERNAL_API_TOKEN": os.environ.get("AUTOMATION_INTERNAL_API_TOKEN"),
         "SECRET_KEY": os.environ.get("SECRET_KEY"),
     }
     os.environ.setdefault("AICRM_NEXT_ENV", "production")
-    os.environ.setdefault("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
     os.environ.setdefault("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    os.environ.setdefault("AUTOMATION_INTERNAL_API_TOKEN", "probe-token")
     os.environ.setdefault("SECRET_KEY", "active-automation-run-due-guardrails")
     try:
         yield
@@ -212,7 +210,12 @@ def _timer_enablement_status() -> dict[str, Any]:
 def run_check() -> dict[str, Any]:
     with guardrail_probe_env():
         client = _client()
-        token = os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "probe-token")
+        token = install_probe_access_token(
+            client,
+            purpose="automation_worker",
+            audience="internal_worker",
+            scopes=("write",),
+        )
         sentinel_before = _read_db_sentinel()
 
         campaign_dry_run = client.post(

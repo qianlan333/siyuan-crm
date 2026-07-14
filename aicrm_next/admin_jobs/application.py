@@ -6,8 +6,8 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Any
 
-from aicrm_next.message_archive.sync_service import execute_archive_sync
-from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
+from aicrm_next.admin_jobs_archive_sync_gateway import execute_archive_sync
+from aicrm_next.shared.retired_contracts import retired_external_effect_payload
 from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .domain import (
@@ -31,21 +31,8 @@ TARGET_JOBS_ACTION = "jobs_console_action"
 TARGET_BROADCAST_JOB = "broadcast_job"
 
 
-def _record_legacy_marker(legacy_key: str, *, marker: str = "legacy_path_invoked", metadata: dict[str, Any] | None = None) -> None:
-    try:
-        LegacyWebhookCleanupService().record_runtime_marker(
-            legacy_key,
-            marker=marker,
-            operator="admin_jobs.application",
-            metadata=metadata or {},
-            real_external_call_executed=False,
-        )
-    except Exception:
-        pass
-
-
 def build_legacy_disabled_payload(legacy_key: str, *, error: str, extra: dict[str, Any] | None = None) -> dict[str, Any]:
-    payload = LegacyWebhookCleanupService().disabled_payload(legacy_key, error=error)
+    payload = retired_external_effect_payload(legacy_key, error=error)
     payload.update(extra or {})
     return payload
 
@@ -196,11 +183,31 @@ def build_jobs_payload(args: Any, repo: AdminJobsRepository | None = None) -> di
     if active_tab not in {item["key"] for item in JOB_TABS}:
         active_tab = "overview"
 
-    archive_filters = {"status": normalized_text(raw_args.get("archive_status") or raw_args.get("status")), "limit": normalized_int(raw_args.get("archive_limit") or raw_args.get("limit"), default=20)}
-    callback_filters = {"process_status": normalized_text(raw_args.get("callback_status") or raw_args.get("status")), "query": normalized_text(raw_args.get("callback_query")), "limit": normalized_int(raw_args.get("callback_limit") or raw_args.get("limit"), default=20)}
-    batch_filters = {"status": normalized_text(raw_args.get("batch_status") or raw_args.get("status")), "limit": normalized_int(raw_args.get("batch_limit") or raw_args.get("limit"), default=20), "selected_batch_id": normalized_text(raw_args.get("batch_id"))}
-    deferred_filters = {"status": normalized_text(raw_args.get("job_status") or raw_args.get("status")), "owner_userid": normalized_text(raw_args.get("owner_userid")), "external_userid": normalized_text(raw_args.get("external_userid")), "limit": normalized_int(raw_args.get("job_limit") or raw_args.get("limit"), default=20)}
-    webhook_filters = {"event_type": normalized_text(raw_args.get("webhook_event_type") or raw_args.get("event_type")), "status": normalized_text(raw_args.get("webhook_status") or raw_args.get("status")), "limit": normalized_int(raw_args.get("webhook_limit") or raw_args.get("limit"), default=20)}
+    archive_filters = {
+        "status": normalized_text(raw_args.get("archive_status") or raw_args.get("status")),
+        "limit": normalized_int(raw_args.get("archive_limit") or raw_args.get("limit"), default=20),
+    }
+    callback_filters = {
+        "process_status": normalized_text(raw_args.get("callback_status") or raw_args.get("status")),
+        "query": normalized_text(raw_args.get("callback_query")),
+        "limit": normalized_int(raw_args.get("callback_limit") or raw_args.get("limit"), default=20),
+    }
+    batch_filters = {
+        "status": normalized_text(raw_args.get("batch_status") or raw_args.get("status")),
+        "limit": normalized_int(raw_args.get("batch_limit") or raw_args.get("limit"), default=20),
+        "selected_batch_id": normalized_text(raw_args.get("batch_id")),
+    }
+    deferred_filters = {
+        "status": normalized_text(raw_args.get("job_status") or raw_args.get("status")),
+        "owner_userid": normalized_text(raw_args.get("owner_userid")),
+        "external_userid": normalized_text(raw_args.get("external_userid")),
+        "limit": normalized_int(raw_args.get("job_limit") or raw_args.get("limit"), default=20),
+    }
+    webhook_filters = {
+        "event_type": normalized_text(raw_args.get("webhook_event_type") or raw_args.get("event_type")),
+        "status": normalized_text(raw_args.get("webhook_status") or raw_args.get("status")),
+        "limit": normalized_int(raw_args.get("webhook_limit") or raw_args.get("limit"), default=20),
+    }
 
     sync_runs = [_sync_row_view(item) for item in repo.list_sync_runs(**archive_filters)]
     callback_logs = [_callback_row_view(item) for item in repo.list_callback_logs(**callback_filters)]
@@ -224,21 +231,55 @@ def build_jobs_payload(args: Any, repo: AdminJobsRepository | None = None) -> di
     last_sync_run = sync_runs[0] if sync_runs else {}
 
     summary_cards = [
-        {"label": "聊天同步", "value": status_label(normalized_text(last_sync_run.get("status")) or "never"), "description": f"任务 #{last_sync_run.get('id') or '-'} · {last_sync_run.get('finished_or_created_at') or '暂无记录'}", "tone": status_tone(normalized_text(last_sync_run.get("status")) or "unknown")},
-        {"label": "回调状态", "value": "已开启", "description": f"失败 {callback_counts.get('failed_count', 0)} · 异步已开启", "tone": "danger" if callback_counts.get("failed_count") else "ok"},
-        {"label": "消息批次", "value": batch_counts.get("pending_count", 0), "description": f"待处理 · 已确认 {batch_counts.get('acked_count', 0)}", "tone": "warn" if batch_counts.get("pending_count") else "ok"},
-        {"label": "待处理作业", "value": deferred_counts.get("pending_count", 0), "description": f"待处理 · 失败 {deferred_counts.get('failed_count', 0)}", "tone": "danger" if deferred_counts.get("failed_count") else ("warn" if deferred_counts.get("pending_count") else "ok")},
-        {"label": "Webhook 投递", "value": webhook_counts.get("retry_scheduled_count", 0) + webhook_counts.get("exhausted_count", 0), "description": f"待重试 {webhook_counts.get('retry_scheduled_count', 0)} · 已耗尽 {webhook_counts.get('exhausted_count', 0)}", "tone": "danger" if webhook_counts.get("exhausted_count") else ("warn" if webhook_counts.get("retry_scheduled_count") else "ok")},
+        {
+            "label": "聊天同步",
+            "value": status_label(normalized_text(last_sync_run.get("status")) or "never"),
+            "description": f"任务 #{last_sync_run.get('id') or '-'} · {last_sync_run.get('finished_or_created_at') or '暂无记录'}",
+            "tone": status_tone(normalized_text(last_sync_run.get("status")) or "unknown"),
+        },
+        {
+            "label": "回调状态",
+            "value": "已开启",
+            "description": f"失败 {callback_counts.get('failed_count', 0)} · 异步已开启",
+            "tone": "danger" if callback_counts.get("failed_count") else "ok",
+        },
+        {
+            "label": "消息批次",
+            "value": batch_counts.get("pending_count", 0),
+            "description": f"待处理 · 已确认 {batch_counts.get('acked_count', 0)}",
+            "tone": "warn" if batch_counts.get("pending_count") else "ok",
+        },
+        {
+            "label": "待处理作业",
+            "value": deferred_counts.get("pending_count", 0),
+            "description": f"待处理 · 失败 {deferred_counts.get('failed_count', 0)}",
+            "tone": "danger" if deferred_counts.get("failed_count") else ("warn" if deferred_counts.get("pending_count") else "ok"),
+        },
+        {
+            "label": "Webhook 投递",
+            "value": webhook_counts.get("retry_scheduled_count", 0) + webhook_counts.get("exhausted_count", 0),
+            "description": f"待重试 {webhook_counts.get('retry_scheduled_count', 0)} · 已耗尽 {webhook_counts.get('exhausted_count', 0)}",
+            "tone": "danger" if webhook_counts.get("exhausted_count") else ("warn" if webhook_counts.get("retry_scheduled_count") else "ok"),
+        },
     ]
 
     return {
         "active_tab": active_tab,
         "tabs": jobs_tabs(active_tab),
         "summary_cards": summary_cards,
-        "archive_runtime": {"last_sync_run": last_sync_run, "sync_counts": sync_counts, "health": {"runner": "aicrm_next_admin_jobs"}, "health_error": "", "sync_form": _archive_sync_form_defaults()},
+        "archive_runtime": {
+            "last_sync_run": last_sync_run,
+            "sync_counts": sync_counts,
+            "health": {"runner": "aicrm_next_admin_jobs"},
+            "health_error": "",
+            "sync_form": _archive_sync_form_defaults(),
+        },
         "callback_runtime": {"enabled": True, "async_enabled": True, "counts": callback_counts},
         "batches_runtime": {"counts": batch_counts},
-        "deferred_runtime": {"counts": deferred_counts, "mcp_auth_configured": bool(runtime_setting("MCP_BEARER_TOKEN"))},
+        "deferred_runtime": {
+            "counts": deferred_counts,
+            "mcp_auth_configured": bool(runtime_setting("AICRM_AUTH_MCP_CLIENT_ID")),
+        },
         "webhook_runtime": {"counts": webhook_counts},
         "archive_filters": archive_filters,
         "callback_filters": callback_filters,
@@ -250,7 +291,11 @@ def build_jobs_payload(args: Any, repo: AdminJobsRepository | None = None) -> di
         "batch_status_options": ["", "pending", "acked"],
         "deferred_status_options": ["", "pending", "running", "success", "conflict", "skipped", "failed"],
         "webhook_status_options": ["", "pending", "success", "failed", "retry_scheduled", "exhausted"],
-        "webhook_event_type_options": [{"value": "", "label": "全部事件"}, {"value": "openclaw_focus_message", "label": "OpenClaw 焦点消息"}, {"value": "questionnaire_submit", "label": "问卷提交外发"}],
+        "webhook_event_type_options": [
+            {"value": "", "label": "全部事件"},
+            {"value": "openclaw_focus_message", "label": "OpenClaw 焦点消息"},
+            {"value": "questionnaire_submit", "label": "问卷提交外发"},
+        ],
         "sync_runs": sync_runs,
         "callback_logs": callback_logs,
         "batch_rows": batch_rows,
@@ -269,32 +314,63 @@ def build_jobs_summary_payload(args: Any) -> dict[str, Any]:
 
 def build_jobs_archive_sync_payload(args: Any) -> dict[str, Any]:
     payload = build_jobs_payload({**dict(args or {}), "tab": "archive"})
-    return {"runtime": payload["archive_runtime"], "filters": payload["archive_filters"], "items": payload["sync_runs"], "status_options": payload["archive_status_options"]}
+    return {
+        "runtime": payload["archive_runtime"],
+        "filters": payload["archive_filters"],
+        "items": payload["sync_runs"],
+        "status_options": payload["archive_status_options"],
+    }
 
 
 def build_jobs_callbacks_payload(args: Any) -> dict[str, Any]:
     payload = build_jobs_payload({**dict(args or {}), "tab": "callbacks"})
-    return {"runtime": payload["callback_runtime"], "filters": payload["callback_filters"], "items": payload["callback_logs"], "status_options": payload["callback_status_options"]}
+    return {
+        "runtime": payload["callback_runtime"],
+        "filters": payload["callback_filters"],
+        "items": payload["callback_logs"],
+        "status_options": payload["callback_status_options"],
+    }
 
 
 def build_jobs_message_batches_payload(args: Any) -> dict[str, Any]:
     payload = build_jobs_payload({**dict(args or {}), "tab": "batches"})
-    return {"runtime": payload["batches_runtime"], "filters": payload["batch_filters"], "items": payload["batch_rows"], "status_options": payload["batch_status_options"]}
+    return {
+        "runtime": payload["batches_runtime"],
+        "filters": payload["batch_filters"],
+        "items": payload["batch_rows"],
+        "status_options": payload["batch_status_options"],
+    }
 
 
 def build_jobs_message_batch_detail_payload(batch_id: int, args: Any) -> dict[str, Any]:
     payload = build_jobs_payload({**dict(args or {}), "tab": "batches", "batch_id": str(batch_id)})
-    return {"runtime": payload["batches_runtime"], "filters": payload["batch_filters"], "batch": payload["selected_batch"], "messages": payload["selected_batch_messages"]}
+    return {
+        "runtime": payload["batches_runtime"],
+        "filters": payload["batch_filters"],
+        "batch": payload["selected_batch"],
+        "messages": payload["selected_batch_messages"],
+    }
 
 
 def build_jobs_deferred_jobs_payload(args: Any) -> dict[str, Any]:
     payload = build_jobs_payload({**dict(args or {}), "tab": "deferred"})
-    return {"runtime": payload["deferred_runtime"], "filters": payload["deferred_filters"], "items": payload["deferred_jobs"], "status_options": payload["deferred_status_options"]}
+    return {
+        "runtime": payload["deferred_runtime"],
+        "filters": payload["deferred_filters"],
+        "items": payload["deferred_jobs"],
+        "status_options": payload["deferred_status_options"],
+    }
 
 
 def build_jobs_webhook_deliveries_payload(args: Any) -> dict[str, Any]:
     payload = build_jobs_payload({**dict(args or {}), "tab": "webhooks"})
-    return {"runtime": payload["webhook_runtime"], "filters": payload["webhook_filters"], "items": payload["webhook_deliveries"], "status_options": payload["webhook_status_options"], "event_type_options": payload["webhook_event_type_options"]}
+    return {
+        "runtime": payload["webhook_runtime"],
+        "filters": payload["webhook_filters"],
+        "items": payload["webhook_deliveries"],
+        "status_options": payload["webhook_status_options"],
+        "event_type_options": payload["webhook_event_type_options"],
+    }
 
 
 def execute_jobs_action(*, action: str, form: Any, operator: str, repo: AdminJobsRepository | None = None) -> dict[str, Any]:
@@ -307,7 +383,15 @@ def execute_jobs_action(*, action: str, form: Any, operator: str, repo: AdminJob
             raise ValueError("开始时间、结束时间和负责人账号不能为空")
         if not normalized_bool(form.get("confirm")):
             preview = {"ok": True, "preview_only": True, "confirm_required": True, "request": request_payload}
-            _audit(repo, operator=operator_value, action_type="preview_archive_sync", target_type=TARGET_JOBS_ACTION, target_id="archive_sync", before=request_payload, after=preview)
+            _audit(
+                repo,
+                operator=operator_value,
+                action_type="preview_archive_sync",
+                target_type=TARGET_JOBS_ACTION,
+                target_id="archive_sync",
+                before=request_payload,
+                after=preview,
+            )
             return preview
         if os.getenv("AICRM_ENABLE_IN_PROCESS_ARCHIVE_SYNC", "").strip().lower() not in {"1", "true", "yes", "on"}:
             return {
@@ -326,7 +410,15 @@ def execute_jobs_action(*, action: str, form: Any, operator: str, repo: AdminJob
             max_pages=normalized_int(form.get("max_pages"), default=1000, minimum=1, maximum=10000),
         )
         payload["runner"] = "aicrm_next_admin_jobs"
-        _audit(repo, operator=operator_value, action_type="run_archive_sync", target_type=TARGET_JOBS_ACTION, target_id="archive_sync", before=request_payload, after=payload)
+        _audit(
+            repo,
+            operator=operator_value,
+            action_type="run_archive_sync",
+            target_type=TARGET_JOBS_ACTION,
+            target_id="archive_sync",
+            before=request_payload,
+            after=payload,
+        )
         return payload
     if action == "ack-message-batch":
         if not normalized_bool(form.get("confirm")):
@@ -337,14 +429,16 @@ def execute_jobs_action(*, action: str, form: Any, operator: str, repo: AdminJob
         if not batch:
             raise ValueError("未找到对应消息批次")
         result = {"ok": True, "batch": _batch_row_view(batch)}
-        _audit(repo, operator=operator_value, action_type="ack_message_batch", target_type=TARGET_JOBS_ACTION, target_id=str(batch_id), before=before, after=result)
+        _audit(
+            repo, operator=operator_value, action_type="ack_message_batch", target_type=TARGET_JOBS_ACTION, target_id=str(batch_id), before=before, after=result
+        )
         return result
     if action == "run-deferred-jobs":
-        return LegacyWebhookCleanupService().disabled_payload("old_admin_jobs_deferred_run", error="legacy_deferred_jobs_runner_disabled")
+        return retired_external_effect_payload("old_admin_jobs_deferred_run", error="legacy_deferred_jobs_runner_disabled")
     if action == "retry-webhook-delivery":
-        return LegacyWebhookCleanupService().disabled_payload("old_customer_webhook_delivery_retry", error="legacy_webhook_retry_disabled")
+        return retired_external_effect_payload("old_customer_webhook_delivery_retry", error="legacy_webhook_retry_disabled")
     if action == "run-webhook-retries":
-        return LegacyWebhookCleanupService().disabled_payload("old_customer_webhook_delivery_retry", error="legacy_webhook_retry_disabled")
+        return retired_external_effect_payload("old_customer_webhook_delivery_retry", error="legacy_webhook_retry_disabled")
     raise ValueError("不支持的同步任务操作")
 
 
@@ -442,7 +536,6 @@ def _broadcast_job_view(row: dict[str, Any]) -> dict[str, Any]:
 def approve_broadcast_job(job_id: int, *, operator: str, repo: AdminJobsRepository | None = None) -> dict[str, Any]:
     repo = repo or build_admin_jobs_repository()
     before = repo.get_broadcast_job(job_id) or {}
-    _record_legacy_marker("old_broadcast_jobs_direct_approve_cancel", metadata={"operation": "approve_broadcast_job", "job_id_present": bool(job_id)})
     after = repo.approve_broadcast_job(job_id, approved_by=_operator(operator))
     if not after:
         raise ValueError("job not approvable (not waiting_approval)")
@@ -454,7 +547,6 @@ def approve_broadcast_job(job_id: int, *, operator: str, repo: AdminJobsReposito
 def cancel_broadcast_job(job_id: int, *, operator: str, reason: str = "", repo: AdminJobsRepository | None = None) -> dict[str, Any]:
     repo = repo or build_admin_jobs_repository()
     before = repo.get_broadcast_job(job_id) or {}
-    _record_legacy_marker("old_broadcast_jobs_direct_approve_cancel", metadata={"operation": "cancel_broadcast_job", "job_id_present": bool(job_id)})
     after = repo.cancel_broadcast_job(job_id, cancelled_by=_operator(operator), reason=normalized_text(reason))
     if not after:
         raise ValueError("job not cancelable (not queued or waiting_approval)")

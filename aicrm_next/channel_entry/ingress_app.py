@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 from aicrm_next.shared.release import current_release_sha
 
 from .api import callback_router
-from .callback_ingress import CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED
+from .callback_ingress import CALLBACK_ACK_BOUNDARY, CALLBACK_MAX_BODY_BYTES
 
 
 def _include_callback_routes(app: FastAPI) -> None:
@@ -44,8 +44,9 @@ def create_wecom_callback_ingress_app() -> FastAPI:
                 "runtime": "ai_crm_wecom_ingress",
                 "route_owner": "ai_crm_next",
                 "release_sha": current_release_sha(),
-                "time_sensitive_inline_enabled": CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED,
-                "time_sensitive_inline_reason": "State and WelcomeCode callbacks bypass the minute timer for welcome-code freshness.",
+                "ack_boundary": CALLBACK_ACK_BOUNDARY,
+                "durable_inbox_only": True,
+                "max_body_bytes": CALLBACK_MAX_BODY_BYTES,
             }
         )
 

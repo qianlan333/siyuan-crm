@@ -322,3 +322,41 @@ def test_questionnaire_backfill_updates_unbound_submission() -> None:
         "follow_user_userid": "owner_native",
         "matched_by": "mobile",
     }
+def test_identity_sync_rejects_request_corp_override_before_db_or_external_side_effect(monkeypatch) -> None:
+    from aicrm_next.channel_entry.identity_bridge_service import IdentityBridgeService
+
+    calls: list[str] = []
+
+    class Repository:
+        def identity_bridge_state(self, external_userid):
+            calls.append("db")
+            raise AssertionError("database must not be touched for corp mismatch")
+
+    def adapter_factory():
+        calls.append("external")
+        raise AssertionError("external adapter must not be touched for corp mismatch")
+
+    monkeypatch.setenv("WECOM_CORP_ID", "corp-configured")
+    service = IdentityBridgeService(repository=Repository(), adapter_factory=adapter_factory)
+
+    result = service.sync_external_contact_identity_for_event(
+        {
+            "Event": "change_external_contact",
+            "ChangeType": "edit_external_contact",
+            "ExternalUserID": "external-r03-corp",
+            "UserID": "owner-r03-corp",
+        },
+        corp_id="corp-request-override",
+    )
+    sidebar_result = service.ensure_external_contact_identity_for_sidebar(
+        external_userid="external-r03-corp",
+        corp_id="corp-request-override",
+    )
+
+    assert result == {
+        "status": "failed",
+        "reason": "corp_id_mismatch",
+        "real_external_call_executed": False,
+    }
+    assert sidebar_result == result
+    assert calls == []

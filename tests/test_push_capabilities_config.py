@@ -7,7 +7,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.admin_config.repository import AdminConfigRepository
-from aicrm_next.admin_jobs.routes import ensure_admin_action_token
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import (
     FEISHU_WEBHOOK_NOTIFY,
@@ -27,6 +26,7 @@ from aicrm_next.platform_foundation.external_effects.adapters import ExternalEff
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
 from aicrm_next.platform_foundation.push_center.capability_registry import PUSH_CAPABILITIES
 from aicrm_next.platform_foundation.push_center.section_mapper import all_sections, effect_types_for_section, label_for_section
+from tests.admin_auth_test_helpers import install_admin_action_tokens
 
 
 class _SucceedingAdapter:
@@ -39,8 +39,9 @@ class _SucceedingAdapter:
             status="succeeded",
             adapter_mode="execute",
             request_summary={"effect_type": job.effect_type},
-            response_summary={"ok": True, "real_external_call_executed": False},
-            real_external_call_executed=False,
+            response_summary={"ok": True, "status_code": 200, "real_external_call_executed": True},
+            real_external_call_executed=True,
+            provider_result_received=True,
         )
 
 
@@ -185,7 +186,10 @@ def test_push_capabilities_get_hides_raw_engineering_settings_and_sensitive_valu
 
 
 def test_push_capability_toggle_updates_business_setting_and_derived_gates(next_client: TestClient) -> None:
-    token = ensure_admin_action_token()
+    token = install_admin_action_tokens(
+        next_client,
+        ("PATCH", "/api/admin/config/push-capabilities/{capability_key}"),
+    )[("PATCH", "/api/admin/config/push-capabilities/{capability_key}")]
     disabled = next_client.patch(
         "/api/admin/config/push-capabilities/questionnaire_external_push",
         headers={"X-Admin-Action-Token": token},
@@ -219,7 +223,10 @@ def test_push_capability_toggle_updates_business_setting_and_derived_gates(next_
 
 
 def test_push_capability_toggle_derives_all_external_effect_execution_gates(next_client: TestClient) -> None:
-    token = ensure_admin_action_token()
+    token = install_admin_action_tokens(
+        next_client,
+        ("PATCH", "/api/admin/config/push-capabilities/{capability_key}"),
+    )[("PATCH", "/api/admin/config/push-capabilities/{capability_key}")]
 
     payment = next_client.patch(
         "/api/admin/config/push-capabilities/payment_query",
@@ -268,7 +275,10 @@ def test_push_capability_toggle_derives_all_external_effect_execution_gates(next
 
 
 def test_push_capability_scheduler_toggle_is_global_not_per_capability(next_client: TestClient) -> None:
-    token = ensure_admin_action_token()
+    token = install_admin_action_tokens(
+        next_client,
+        ("PATCH", "/api/admin/config/push-capabilities/scheduler"),
+    )[("PATCH", "/api/admin/config/push-capabilities/scheduler")]
     AdminConfigRepository().upsert_app_setting(key=SCHEDULER_ENABLED_KEY, value="false")
     initial = next_client.get("/api/admin/config/push-capabilities")
     assert initial.status_code == 200
@@ -315,7 +325,7 @@ def test_external_effect_worker_blocks_disabled_capability_before_adapter_and_al
         effect_types=[WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH],
     )
 
-    assert blocked["counts"]["failed_count"] == 1
+    assert blocked["counts"]["blocked_count"] == 1
     assert blocked["items"][0]["attempt"]["error_code"] == "push_capability_disabled"
     assert blocked["real_external_call_executed"] is False
     assert adapter.calls == 0
@@ -340,6 +350,8 @@ def test_external_effect_worker_blocks_disabled_capability_before_adapter_and_al
 
 def test_shared_wecom_effect_type_is_gated_by_business_section() -> None:
     reset_external_effect_fixture_state()
+    _set_setting("AICRM_WECOM_EXECUTION_MODE", "execute")
+    _set_setting("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_MESSAGE_PRIVATE_SEND)
     _set_setting("AICRM_PUSH_CAPABILITY_AI_ASSIST_PUSH_ENABLED", "true")
     _set_setting("AICRM_PUSH_CAPABILITY_PRIVATE_BROADCAST_ENABLED", "false")
     adapter = _SucceedingAdapter()
@@ -378,12 +390,14 @@ def test_shared_wecom_effect_type_is_gated_by_business_section() -> None:
     assert ai_result["counts"]["succeeded_count"] == 1
     assert private_result["items"][0]["job"]["business_type"] == "private_broadcast"
     assert private_result["items"][0]["attempt"]["error_code"] == "push_capability_disabled"
-    assert private_result["counts"]["failed_count"] == 1
+    assert private_result["counts"]["blocked_count"] == 1
     assert adapter.calls == 1
 
 
 def test_wecom_tag_effect_honors_tags_capability_unless_explicitly_bypassed() -> None:
     reset_external_effect_fixture_state()
+    _set_setting("AICRM_WECOM_EXECUTION_MODE", "execute")
+    _set_setting("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_CONTACT_TAG_MARK)
     _set_setting("AICRM_PUSH_CAPABILITY_TAGS_ENABLED", "false")
     adapter = _SucceedingAdapter()
 
@@ -403,7 +417,7 @@ def test_wecom_tag_effect_honors_tags_capability_unless_explicitly_bypassed() ->
     )
 
     assert blocked["items"][0]["attempt"]["error_code"] == "push_capability_disabled"
-    assert blocked["counts"]["failed_count"] == 1
+    assert blocked["counts"]["blocked_count"] == 1
     assert adapter.calls == 0
 
     ExternalEffectService().plan_effect(

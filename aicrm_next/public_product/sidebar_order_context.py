@@ -3,8 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from aicrm_next.shared.mobile import normalize_mainland_mobile
-
-from .signed_context import (
+from aicrm_next.shared.signed_context import (
     SIDEBAR_PRODUCT_CONTEXT_RESOLVED_SOURCE,
     load_sidebar_product_context_token,
 )

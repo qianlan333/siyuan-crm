@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -303,15 +301,11 @@ class AutomationAgentWorker:
                 owner_userid=owner_userid,
                 prompt_preview=prompt_preview[:1000],
             )
-        package = self._repo.get_package_by_key(callback_package_key) or {}
-        secret = _text(package.get("inbound_webhook_secret"))
         raw = json.dumps(callback_payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        signature = hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest() if secret else ""
         callback = AudienceInboundWebhookService().handle(
             callback_package_key,
             callback_payload,
             raw_body=raw,
-            signature=signature,
         )
         ok = bool(callback.get("ok"))
         self._repo.update_item(

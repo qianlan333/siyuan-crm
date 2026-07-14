@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Iterable
 from typing import Any
 
 from aicrm_next.shared.runtime import fixture_mode
@@ -9,11 +10,6 @@ from aicrm_next.shared.runtime import fixture_mode
 DEFAULT_WORKER_BATCH_SIZE = 50
 DEFAULT_AUTO_EXECUTE_MAX_BATCH_SIZE = 1
 CONSUMER_METADATA: dict[str, dict[str, str]] = {
-    "questionnaire_tag_consumer": {
-        "type": "placeholder",
-        "expected_status": "skipped",
-        "reason": "side_effect_already_planned_or_not_configured",
-    },
     "automation_questionnaire_consumer": {
         "type": "placeholder",
         "expected_status": "skipped",
@@ -141,11 +137,7 @@ def consumer_metadata(consumer_name: str) -> dict[str, str]:
 
 
 def placeholder_consumers() -> list[str]:
-    return sorted(
-        consumer_name
-        for consumer_name, metadata in CONSUMER_METADATA.items()
-        if _text(metadata.get("type")) == "placeholder"
-    )
+    return sorted(consumer_name for consumer_name, metadata in CONSUMER_METADATA.items() if _text(metadata.get("type")) == "placeholder")
 
 
 def config_warnings() -> list[str]:
@@ -158,6 +150,36 @@ def config_warnings() -> list[str]:
 def event_type_allowed(event_type: str, *, configured: list[str] | None = None) -> bool:
     allowed = configured if configured is not None else allowed_event_types()
     return not allowed or _text(event_type) in set(allowed)
+
+
+def worker_allows(
+    event_type: str,
+    consumer_name: str,
+    *,
+    configured_pairs: Iterable[tuple[str, str]] | None = None,
+    configured_event_types: Iterable[str] | None = None,
+    configured_consumers: Iterable[str] | None = None,
+) -> bool:
+    """Return whether the current worker rollout can execute one event/consumer pair.
+
+    A configured pair allowlist is authoritative.  The broader event/consumer
+    allowlists are only used when no pair allowlist exists, matching the worker
+    and diagnostics semantics.
+    """
+
+    normalized_pair = (_text(event_type), _text(consumer_name))
+    event_types = set(configured_event_types if configured_event_types is not None else allowed_event_types())
+    if event_types and normalized_pair[0] not in {_text(item) for item in event_types}:
+        return False
+
+    pairs = set(configured_pairs if configured_pairs is not None else allowed_event_consumer_pairs())
+    if pairs:
+        return normalized_pair in {(_text(item[0]), _text(item[1])) for item in pairs}
+
+    consumers = set(configured_consumers if configured_consumers is not None else allowed_consumers())
+    if consumers and normalized_pair[1] not in {_text(item) for item in consumers}:
+        return False
+    return True
 
 
 def worker_batch_size() -> int:

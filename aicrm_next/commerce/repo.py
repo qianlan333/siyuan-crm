@@ -3,7 +3,7 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timezone
 import secrets
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol, TypeVar
 
 from aicrm_next.navigation_target import completion_action_for_target
 from aicrm_next.shared.db_session import connect_pooled_postgres
@@ -18,6 +18,18 @@ from .refund_status import active_wechat_refund_sql
 
 def connect_commerce_db(database_url: str | None = None):
     return connect_pooled_postgres(database_url or raw_database_url())
+
+
+TransactionResult = TypeVar("TransactionResult")
+
+
+def execute_commerce_transaction(
+    operation: Callable[[Any], TransactionResult],
+) -> TransactionResult:
+    with connect_commerce_db() as conn:
+        result = operation(conn)
+        conn.commit()
+        return result
 
 
 class CommerceRepository(Protocol):

@@ -31,7 +31,6 @@ class PackageCreateRequest(BaseModel):
     ai_prompt: str = ""
     ai_rationale: str = ""
     natural_language_explanation: str = ""
-    inbound_webhook_secret: str = ""
 
 
 class PackageVersionCreateRequest(BaseModel):
@@ -81,7 +80,6 @@ class OutboundSubscriptionCreateRequest(BaseModel):
     dispatch_mode: str = "per_member"
     target_type: str = "webhook"
     webhook_url: str
-    signing_secret: str = ""
     headers: dict[str, Any] = Field(default_factory=dict)
     payload_template: dict[str, Any] = Field(default_factory=dict)
     execution_mode: str = "execute"
@@ -92,7 +90,6 @@ class OutboundSubscriptionCreateRequest(BaseModel):
 class OutboundSubscriptionUpdateRequest(BaseModel):
     status: str | None = None
     webhook_url: str | None = None
-    signing_secret: str | None = None
     headers: dict[str, Any] | None = None
     payload_template: dict[str, Any] | None = None
     execution_mode: str | None = None

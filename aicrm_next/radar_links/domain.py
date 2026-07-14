@@ -11,11 +11,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 from aicrm_next.shared.errors import ContractError
+from aicrm_next.shared.runtime import production_environment
 
 
 RADAR_LINK_OWNER = "radar_links"
 RADAR_STATE_TTL_SECONDS = 10 * 60
 RADAR_VIEWER_SESSION_TTL_SECONDS = 2 * 60 * 60
+RADAR_VIEWER_SESSION_PURPOSE = "radar_viewer_session"
 TARGET_TYPES = {"link", "image", "pdf"}
 IMAGE_MIME_TYPES = {"image/jpeg", "image/png", "image/webp"}
 PDF_MIME_TYPE = "application/pdf"
@@ -31,7 +33,10 @@ def _urlsafe_b64decode(payload: str) -> bytes:
 
 
 def _state_secret(secret_key: str | None) -> bytes:
-    secret = str(secret_key or "").strip() or "radar-links-local-contract-secret"
+    secret = str(secret_key or "").strip()
+    if not secret and production_environment():
+        raise ContractError("radar signing secret is required")
+    secret = secret or "radar-links-local-contract-secret"
     return secret.encode("utf-8")
 
 
@@ -88,10 +93,18 @@ def sign_viewer_session(
     now: int | None = None,
 ) -> str:
     issued_at = int(now if now is not None else time.time())
-    identity = str(unionid or openid or external_userid or "anonymous").strip()
+    canonical_identity = {
+        "openid": str(openid or "").strip(),
+        "unionid": str(unionid or "").strip(),
+        "external_userid": str(external_userid or "").strip(),
+    }
+    identity = str(canonical_identity["unionid"] or canonical_identity["openid"] or canonical_identity["external_userid"] or "anonymous").strip()
     payload = {
+        "purpose": RADAR_VIEWER_SESSION_PURPOSE,
         "code": str(code or "").strip(),
         "identity_hash": _digest(identity, secret_key=secret_key)[:24],
+        "identity": canonical_identity,
+        "iat": issued_at,
         "exp": issued_at + RADAR_VIEWER_SESSION_TTL_SECONDS,
     }
     if not payload["code"]:
@@ -113,12 +126,31 @@ def verify_viewer_session(token: str | None, *, code: str, secret_key: str | Non
         payload = json.loads(_urlsafe_b64decode(body).decode("utf-8"))
     except Exception as exc:
         raise ContractError("invalid radar viewer session") from exc
-    if set(payload) != {"code", "identity_hash", "exp"}:
+    if set(payload) != {"purpose", "code", "identity_hash", "identity", "iat", "exp"}:
+        raise ContractError("invalid radar viewer session")
+    if payload.get("purpose") != RADAR_VIEWER_SESSION_PURPOSE:
         raise ContractError("invalid radar viewer session")
     if str(payload.get("code") or "") != str(code or "").strip():
         raise ContractError("invalid radar viewer session")
-    if int(payload.get("exp") or 0) < int(now if now is not None else time.time()):
+    current_time = int(now if now is not None else time.time())
+    issued_at = int(payload.get("iat") or 0)
+    expires_at = int(payload.get("exp") or 0)
+    if issued_at <= 0 or issued_at > current_time:
+        raise ContractError("invalid radar viewer session")
+    if expires_at < current_time or expires_at - issued_at > RADAR_VIEWER_SESSION_TTL_SECONDS:
         raise ContractError("radar viewer session expired")
+    identity = payload.get("identity")
+    if not isinstance(identity, dict) or set(identity) != {"openid", "unionid", "external_userid"}:
+        raise ContractError("invalid radar viewer session")
+    normalized_identity = {
+        "openid": str(identity.get("openid") or "").strip(),
+        "unionid": str(identity.get("unionid") or "").strip(),
+        "external_userid": str(identity.get("external_userid") or "").strip(),
+    }
+    identity_value = str(normalized_identity["unionid"] or normalized_identity["openid"] or normalized_identity["external_userid"] or "anonymous")
+    if str(payload.get("identity_hash") or "") != _digest(identity_value, secret_key=secret_key)[:24]:
+        raise ContractError("invalid radar viewer session")
+    payload["identity"] = normalized_identity
     return payload
 
 
@@ -132,14 +164,7 @@ def _is_forbidden_host(hostname: str) -> bool:
         ip = ipaddress.ip_address(host.strip("[]"))
     except ValueError:
         return False
-    return bool(
-        ip.is_loopback
-        or ip.is_private
-        or ip.is_link_local
-        or ip.is_multicast
-        or ip.is_reserved
-        or ip.is_unspecified
-    )
+    return bool(ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified)
 
 
 def validate_original_url(original_url: str) -> str:

@@ -43,6 +43,24 @@ def production_environment() -> bool:
     return bool(values & {"prod", "production"})
 
 
+def public_https_environment() -> bool:
+    """Whether configured browser-facing origins are HTTPS.
+
+    Production can sit behind an HTTP loopback proxy, so cookie and HSTS
+    policy must not depend only on the ASGI request scheme or an optional env
+    label.
+    """
+
+    return any(
+        str(runtime_setting(name, "") or "").strip().lower().startswith("https://")
+        for name in ("AICRM_PUBLIC_BASE_URL", "AICRM_AUTH_ISSUER")
+    )
+
+
+def secure_cookie_environment() -> bool:
+    return production_environment() or public_https_environment()
+
+
 def require_signing_secret(
     env_key: str = "SECRET_KEY",
     *,

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from time import time
 
 import pytest
 from fastapi import Request
@@ -10,7 +9,6 @@ from fastapi.responses import Response
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.admin_config.pii_audit_repository import AdminConfigPiiAuditRepository
 from aicrm_next.main import create_app
 from aicrm_next.shared.pii_audit import (
@@ -21,6 +19,7 @@ from aicrm_next.shared.pii_audit import (
     set_pii_audit_result_count,
 )
 from aicrm_next.shared.route_policy import RoutePolicy
+from tests.admin_auth_test_helpers import install_admin_session
 
 
 class RecordingRepository:
@@ -39,7 +38,7 @@ def _policy(
     path: str = "/api/admin/customers",
     route_name: str = "list_customers",
     pii_level: str = "customer",
-    auth_scheme: str = "admin_session",
+    auth_scheme: str = "oauth_session",
 ) -> RoutePolicy:
     return RoutePolicy(
         path=path,
@@ -83,7 +82,7 @@ def _request(
 
 def test_five_principals_are_audited_with_fingerprints_and_no_raw_identifiers() -> None:
     actors = [
-        ("admin_session", "admin-user-42"),
+        ("user", "admin-user-42"),
         ("internal_service", "automation-internal"),
         ("scoped_service", "external-integration"),
         ("sidebar_owner", "ZhaoYanFang"),
@@ -144,7 +143,7 @@ def test_pii_request_id_is_fingerprinted_when_client_supplies_an_identifier() ->
     raw_request_id = "13800138000"
     request = _request(
         _policy(),
-        actor_type="admin_session",
+        actor_type="user",
         actor_id="admin-user-42",
         request_id=raw_request_id,
     )
@@ -174,7 +173,7 @@ def test_server_declared_export_purpose_fails_closed_when_durable_audit_fails() 
         pii_level="sensitive",
     )
     rule = pii_audit_rule(policy)
-    request = _request(policy, actor_type="admin_session", actor_id="admin-user-42")
+    request = _request(policy, actor_type="user", actor_id="admin-user-42")
     set_pii_audit_result_count(request, 8)
 
     response = apply_pii_audit(
@@ -193,7 +192,7 @@ def test_server_declared_export_purpose_fails_closed_when_durable_audit_fails() 
 
 def test_non_high_risk_customer_read_remains_available_when_audit_store_fails() -> None:
     policy = _policy()
-    request = _request(policy, actor_type="admin_session", actor_id="admin-user-42")
+    request = _request(policy, actor_type="user", actor_id="admin-user-42")
     original = Response(content=b"safe-response", status_code=200)
 
     response = apply_pii_audit(
@@ -227,7 +226,7 @@ def test_admin_config_pii_audit_repository_persists_only_safe_event_fields(tmp_p
             )
         )
     event = PiiAuditEvent(
-        actor_type="admin_session",
+        actor_type="user",
         actor_fingerprint="hmac-sha256:actor-safe",
         purpose="pii_export",
         policy_scope="global",
@@ -242,14 +241,18 @@ def test_admin_config_pii_audit_repository_persists_only_safe_event_fields(tmp_p
     AdminConfigPiiAuditRepository(engine=engine).record_pii_access(event)
 
     with engine.connect() as connection:
-        row = connection.execute(
-            text(
-                """
+        row = (
+            connection.execute(
+                text(
+                    """
                 SELECT operator, action_type, target_type, target_id, before_json, after_json
                 FROM admin_operation_logs
                 """
+                )
             )
-        ).mappings().one()
+            .mappings()
+            .one()
+        )
     assert row["operator"] == event.actor_fingerprint
     assert row["action_type"] == "pii_access"
     assert row["target_type"] == event.route_name
@@ -285,22 +288,11 @@ def test_denied_admin_export_is_audited_with_admin_or_anonymous_principal(monkey
     client = TestClient(create_app(pii_audit_repository=repository), raise_server_exceptions=False)
 
     anonymous = client.get("/api/admin/class-user-management/export")
-    client.cookies.set(
-        SESSION_COOKIE,
-        sign_session(
-            {
-                "username": "pii-viewer",
-                "roles": ["viewer"],
-                "login_type": "pytest",
-                "iat": int(time()),
-                "csrf_token": "pii-csrf",
-            }
-        ),
-    )
+    install_admin_session(client, "viewer", subject="admin:pii-viewer")
     viewer = client.post("/api/admin/class-user-management/export", json={})
 
     assert anonymous.status_code == 401
     assert viewer.status_code == 403
     statuses = [(event.actor_type, event.status_code) for event in repository.events]
     assert ("anonymous", 401) in statuses
-    assert ("admin_session", 403) in statuses
+    assert ("human", 403) in statuses

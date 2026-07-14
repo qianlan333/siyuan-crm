@@ -21,6 +21,7 @@ from aicrm_next.shared.sensitive_data import (
     redact_sensitive_text,
     stable_hmac_identifier,
 )
+from tests.webhook_hmac_test_helpers import outbound_webhook_hmac_signer
 
 
 class _CapturingConnection:
@@ -189,6 +190,8 @@ def test_webhook_exception_diagnostic_never_contains_secret_or_pii(monkeypatch) 
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE", "1")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES", WEBHOOK_GENERIC_PUSH)
     job = SimpleNamespace(
+        id=1,
+        idempotency_key="pytest-sensitive-webhook-event",
         effect_type=WEBHOOK_GENERIC_PUSH,
         execution_mode="execute",
         payload_json={"webhook_url": "https://hooks.example.test/redaction", "body": {"ok": True}},
@@ -197,7 +200,7 @@ def test_webhook_exception_diagnostic_never_contains_secret_or_pii(monkeypatch) 
         target_id="wmCompleteExternal001",
     )
 
-    result = WebhookAdapter(http_post=fail_post).dispatch(job)
+    result = WebhookAdapter(http_post=fail_post, signer=outbound_webhook_hmac_signer()).dispatch(job)
 
     assert result.error_code == "network_error"
     assert "complete-token" not in result.error_message

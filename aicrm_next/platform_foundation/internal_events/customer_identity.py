@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any
+from typing import Any, Protocol
 
-from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest
 from aicrm_next.platform_foundation.command_bus import CommandContext
 
 from .config import customer_identity_internal_events_enabled, event_type_allowed
-from .consumer_registry import DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY, InternalEventConsumerRegistry
+from .consumer_registry import InternalEventConsumerRegistry, current_internal_event_consumer_registry
 from .legacy_path_markers import mark_legacy_path_invoked
 from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerRun
 from .service import InternalEventService
 
 CUSTOMER_PHONE_BOUND_EVENT_TYPE = "customer.phone_bound"
+
+
+class BindMobileRequest(Protocol):
+    external_userid: str | None
+    mobile: str | None
+    owner_userid: str | None
+    bind_by_userid: str | None
 
 
 def _text(value: Any) -> str:
@@ -144,7 +150,7 @@ def customer_identity_ai_assist_notify_consumer(event: InternalEvent, run: Inter
 
 
 def register_customer_identity_event_consumers(registry: InternalEventConsumerRegistry | None = None) -> None:
-    registry = registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
+    registry = registry or current_internal_event_consumer_registry()
     registry.register(
         CUSTOMER_PHONE_BOUND_EVENT_TYPE,
         "customer_identity_projection_consumer",
@@ -173,7 +179,7 @@ def register_customer_identity_event_consumers(registry: InternalEventConsumerRe
 
 def emit_customer_phone_bound_event(
     *,
-    request: BindMobileToExternalContactRequest,
+    request: BindMobileRequest,
     binding_result: dict[str, Any],
     source_module: str = "identity_contact.application",
     source_route: str = "identity_contact.bind_mobile",

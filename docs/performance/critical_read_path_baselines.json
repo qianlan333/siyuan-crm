@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "regression_factor": 1.1,
+  "profiles": {
+    "customer_list": {
+      "route": "/api/customers",
+      "owner": "customer_read_model",
+      "dataset_rows": 10000,
+      "sample_count": 20,
+      "max_query_count": 2,
+      "page_limit": 50,
+      "baseline_p95_ms": 250.0,
+      "max_seq_scan_rows": 1000,
+      "allowed_large_seq_scan_relations": []
+    },
+    "sidebar_workbench": {
+      "route": "/api/sidebar/v2/workbench",
+      "owner": "customer_read_model",
+      "dataset_rows": 5000,
+      "sample_count": 20,
+      "max_query_count": 6,
+      "page_limit": 1,
+      "baseline_p95_ms": 250.0,
+      "max_seq_scan_rows": 1000,
+      "allowed_large_seq_scan_relations": []
+    },
+    "questionnaire_admin": {
+      "route": "/api/admin/questionnaires",
+      "owner": "questionnaire",
+      "dataset_rows": 32000,
+      "sample_count": 20,
+      "max_query_count": 2,
+      "page_limit": 50,
+      "baseline_p95_ms": 250.0,
+      "max_seq_scan_rows": 1000,
+      "allowed_large_seq_scan_relations": [
+        "questionnaires"
+      ]
+    },
+    "admin_jobs": {
+      "route": "/admin/jobs",
+      "owner": "admin_jobs",
+      "dataset_rows": 20000,
+      "sample_count": 20,
+      "max_query_count": 8,
+      "page_limit": 20,
+      "baseline_p95_ms": 250.0,
+      "max_seq_scan_rows": 1000,
+      "allowed_large_seq_scan_relations": [
+        "broadcast_jobs",
+        "outbound_webhook_deliveries",
+        "sync_runs",
+        "wecom_external_contact_event_logs"
+      ]
+    }
+  }
+}

@@ -26,7 +26,12 @@ def test_shared_signed_context_has_no_flask_config_imports(monkeypatch) -> None:
     result = signed_context.load_sidebar_product_context_token(token)
 
     assert result["ok"] is True
-    owner_token = signed_context.build_sidebar_owner_context_token(viewer_userid="viewer_001", corp_id="ww-test")
+    owner_token = signed_context.build_sidebar_owner_context_token(
+        viewer_userid="viewer_001",
+        external_userid="external_001",
+        session_id="session_001",
+        corp_id="ww-test",
+    )
     owner_result = signed_context.load_sidebar_owner_context_token(owner_token)
     assert owner_result["ok"] is True
     assert owner_result["context"]["viewer_userid"] == "viewer_001"

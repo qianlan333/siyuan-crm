@@ -155,9 +155,7 @@ def classify_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
             "classification": "legacy_event_non_applicable" if classification == "legacy_event_non_applicable" else "not_applicable",
             "is_legacy_event": _is_legacy_event(event),
             "can_judge_next_native_planner": classification != "legacy_event_non_applicable",
-            "reason": "legacy_campaign lacks Next-native recipient/message projection rows"
-            if classification == "legacy_event_non_applicable"
-            else "",
+            "reason": "legacy_campaign lacks Next-native recipient/message projection rows" if classification == "legacy_event_non_applicable" else "",
         },
         "next_native_evidence_target": target_selection["target"],
         "next_native_evidence_target_status": target_selection["status"],
@@ -175,11 +173,12 @@ def classify_evidence(evidence: dict[str, Any]) -> dict[str, Any]:
         "run_route": RUN_DUE_EXECUTE_ROUTE,
         "retry_route_available": classification in {"consumer_failed_retryable", "planner_failed_retryable"},
         "retry_route": SINGLE_CONSUMER_RETRY_ROUTE,
-        "skip_route_available": classification in {"run_due_ready_for_operator_preview", "run_due_blocked_by_auto_execute_config", "run_due_blocked_by_allowlist", "run_due_blocked_by_token"},
+        "skip_route_available": classification
+        in {"run_due_ready_for_operator_preview", "run_due_blocked_by_auto_execute_config", "run_due_blocked_by_allowlist", "run_due_blocked_by_token"},
         "skip_route": SINGLE_CONSUMER_SKIP_ROUTE,
         "single_consumer_run_route_available": True,
         "single_consumer_run_route": SINGLE_CONSUMER_RUN_ROUTE,
-        "required_token_or_gate": "AUTOMATION_INTERNAL_API_TOKEN for run-due preview/run; internal token or admin action token for single-consumer run/retry/skip",
+        "required_token_or_gate": "OAuth automation-worker access token for run-due preview/run; OAuth context or admin action confirmation for single-consumer actions",
         "token_configured": config["token_configured"],
         "token_gate_status": config["token_gate_status"],
         "auto_execute_enabled": config["auto_execute_enabled"],
@@ -320,12 +319,7 @@ def _next_native_target_selection(
     event: dict[str, Any],
     plan_context: dict[str, Any],
 ) -> dict[str, Any]:
-    target = dict(
-        evidence.get("next_native_evidence_target")
-        or evidence.get("next_native_target")
-        or evidence.get("next_native_target_candidate")
-        or {}
-    )
+    target = dict(evidence.get("next_native_evidence_target") or evidence.get("next_native_target") or evidence.get("next_native_target_candidate") or {})
     if not target and plan_context and _is_next_native_plan(plan_context):
         target = dict(plan_context)
     if not target and _is_legacy_event(event):
@@ -355,18 +349,8 @@ def _next_native_target_selection(
             required_operator_action="create_or_approve_next_native_test_plan",
         )
 
-    recipient_count = _int_value(
-        target.get("recipient_projection_count")
-        or target.get("recipient_count")
-        or target.get("recipients_count")
-        or 0
-    )
-    message_count = _int_value(
-        target.get("message_projection_count")
-        or target.get("message_count")
-        or target.get("messages_count")
-        or 0
-    )
+    recipient_count = _int_value(target.get("recipient_projection_count") or target.get("recipient_count") or target.get("recipients_count") or 0)
+    message_count = _int_value(target.get("message_projection_count") or target.get("message_count") or target.get("messages_count") or 0)
     target["recipient_projection_count"] = recipient_count
     target["message_projection_count"] = message_count
     target.setdefault("approval_event_exists", bool(target.get("approval_event_id") or target.get("internal_event_id")))
@@ -654,8 +638,9 @@ def _load_readonly_db_evidence(*, plan_id: str, database_url: str | None) -> dic
 
     with psycopg.connect(database_url, row_factory=dict_row) as conn:
         conn.execute("BEGIN READ ONLY")
-        event = conn.execute(
-            """
+        event = (
+            conn.execute(
+                """
             select id, event_id, event_type, aggregate_type, aggregate_id, subject_type, subject_id,
                    source_module, source_route, trace_id, payload_summary_json, payload_json
               from internal_event
@@ -664,8 +649,10 @@ def _load_readonly_db_evidence(*, plan_id: str, database_url: str | None) -> dic
              order by created_at desc
              limit 1
             """,
-            (OPS_PLAN_APPROVED_EVENT_TYPE, str(plan_id), str(plan_id), str(plan_id)),
-        ).fetchone() or {}
+                (OPS_PLAN_APPROVED_EVENT_TYPE, str(plan_id), str(plan_id), str(plan_id)),
+            ).fetchone()
+            or {}
+        )
         runs = []
         if event:
             runs = conn.execute(
@@ -871,11 +858,7 @@ def _safe_next_native_target(conn: Any) -> dict[str, Any]:
         }
         if not fallback:
             fallback = candidate
-        if (
-            candidate["approval_event_exists"]
-            and candidate["recipient_projection_count"] > 0
-            and candidate["message_projection_count"] > 0
-        ):
+        if candidate["approval_event_exists"] and candidate["recipient_projection_count"] > 0 and candidate["message_projection_count"] > 0:
             return candidate
     return fallback
 
@@ -890,7 +873,7 @@ def _collect_run_due_gate_config() -> dict[str, Any]:
         )
     except Exception:
         return {
-            "token_configured": bool(os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()),
+            "token_configured": bool(os.getenv("AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "").strip()),
             "auto_execute_enabled": "not_collected",
             "allowed_event_types": [],
             "allowed_consumers": [],
@@ -898,7 +881,7 @@ def _collect_run_due_gate_config() -> dict[str, Any]:
             "allowlist_required": True,
         }
     return {
-        "token_configured": bool(os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "").strip()),
+        "token_configured": bool(os.getenv("AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "").strip()),
         "auto_execute_enabled": auto_execute_enabled(),
         "allowed_event_types": allowed_event_types(),
         "allowed_consumers": allowed_consumers(),
@@ -940,9 +923,7 @@ def _redact_id(value: str) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Readonly triage for Ops Plan -> Broadcast E2E planner consumer blockers."
-    )
+    parser = argparse.ArgumentParser(description="Readonly triage for Ops Plan -> Broadcast E2E planner consumer blockers.")
     parser.add_argument("--plan-id", default=DEFAULT_PLAN_ID, help=f"Ops plan id to inspect. Default: {DEFAULT_PLAN_ID}")
     parser.add_argument("--input-json", type=Path, help="Classify a redacted evidence JSON fixture instead of DB.")
     parser.add_argument("--database-url", help="Optional read-only database URL. Defaults to DATABASE_URL.")

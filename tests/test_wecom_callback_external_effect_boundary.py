@@ -89,8 +89,9 @@ def test_external_effect_realtime_wakeup_stays_behind_runtime_gates() -> None:
     assert "REALTIME_ALLOWED_TYPES_KEY" in source
     assert "runtime_bool(REALTIME_ENABLED_KEY)" in source
     assert "runtime_csv(REALTIME_ALLOWED_TYPES_KEY)" in source
-    assert 'runtime_csv("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES")' in source
-    assert 'runtime_bool("AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE")' in source
+    assert "load_wecom_execution_config" in source
+    assert "ThreadPoolExecutor" not in source
+    assert "_EXECUTOR.submit" not in source
     assert "ExternalEffectWorker(" in source
     assert "_wake_welcome_external_effect_job" not in application_source
     assert "wake_external_effect_job" in application_source

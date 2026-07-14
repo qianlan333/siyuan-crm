@@ -6,6 +6,8 @@ from urllib.parse import quote, urlencode
 
 from fastapi import Request
 
+from aicrm_next.shared.admin_action_runtime import admin_action_token_bundle
+
 
 @dataclass(frozen=True)
 class AdminRoute:
@@ -15,10 +17,6 @@ class AdminRoute:
 
 ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
     "api.admin_console_dashboard": AdminRoute("api.admin_console_dashboard", "/admin"),
-    "api.admin_p1_group_ops_workspace": AdminRoute(
-        "api.admin_p1_group_ops_workspace",
-        "/admin/p1/group-ops-workspace",
-    ),
     "api.admin_console_customers": AdminRoute("api.admin_console_customers", "/admin/customers"),
     "api.admin_owner_migration_page": AdminRoute("api.admin_owner_migration_page", "/admin/owner-migration"),
     "api.admin_owner_migration_action": AdminRoute("api.admin_owner_migration_action", "/admin/owner-migration"),
@@ -213,8 +211,6 @@ def shell_context(
     page_summary: str,
     active_endpoint: str,
 ) -> dict[str, Any]:
-    from aicrm_next.admin_auth.action_token import build_admin_action_token_bundle
-
     return {
         "request": request,
         "page_title": page_title,
@@ -231,5 +227,5 @@ def shell_context(
         "page_error": "",
         "admin_path_for": admin_path_for,
         "url_for": admin_path_for,
-        "admin_action_tokens": build_admin_action_token_bundle(request),
+        "admin_action_tokens": admin_action_token_bundle(request),
     }

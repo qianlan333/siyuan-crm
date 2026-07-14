@@ -60,8 +60,13 @@ class QuestionnaireRespondentIdentityService:
         request_identity: Mapping[str, Any] | None = None,
         slug: str = "",
     ) -> dict[str, Any]:
-        cookie_identity = self._clean_identity(questionnaire_h5_identity_from_cookies(cookies or {}))
+        raw_cookie_identity = questionnaire_h5_identity_from_cookies(cookies or {})
+        cookie_identity = self._clean_identity(raw_cookie_identity)
         query_identity = self._clean_identity(request_identity or {})
+        cookie_is_anonymous = bool(raw_cookie_identity.get("anonymous"))
+        query_has_identity = any(query_identity.get(field) for field in IDENTITY_FIELDS)
+        if cookie_is_anonymous and query_has_identity:
+            cookie_identity = {}
         identity: dict[str, str] = {}
         for field in IDENTITY_FIELDS:
             if cookie_identity.get(field):
@@ -78,8 +83,13 @@ class QuestionnaireRespondentIdentityService:
             cookie_value = build_questionnaire_h5_identity_cookie(
                 {"respondent_key": identity["respondent_key"], "slug": slug, "anonymous": True}
             )
+        elif not cookie_identity and query_has_identity:
+            anonymous = _text(identity.get("respondent_key")).startswith("anon_")
+            cookie_value = build_questionnaire_h5_identity_cookie(
+                {**identity, "slug": slug, "anonymous": anonymous}
+            )
         elif (
-            bool(cookie_identity.get("anonymous"))
+            cookie_is_anonymous
             and identity.get("respondent_key") == cookie_identity.get("respondent_key")
         ) or _text(identity.get("respondent_key")).startswith("anon_"):
             anonymous = True

@@ -19,18 +19,46 @@ class FakeBroadcastRepo:
             }
         ]
         self.sent: list[dict[str, Any]] = []
+        self.simulated: list[dict[str, Any]] = []
         self.failed: list[dict[str, Any]] = []
+        self.unknown: list[dict[str, Any]] = []
         self.claims: list[dict[str, Any]] = []
 
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]:
         self.claims.append({"limit": limit, "now": now, "claim_token": claim_token, "lease_seconds": lease_seconds})
         return self.jobs[:limit]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
-        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count, "claim_token": claim_token})
+    def begin_dispatch(self, job_id: int, *, claim_token: str, now: datetime) -> dict[str, Any] | None:
+        return next(({**job, "status": "dispatching"} for job in self.jobs if int(job["id"]) == job_id), None)
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
-        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type, "claim_token": claim_token})
+    def finalize_dispatch(self, job_id: int, *, claim_token: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        record = {"job_id": job_id, "claim_token": claim_token, **outcome}
+        if outcome["status"] == "sent":
+            self.sent.append(record)
+        elif outcome["status"] == "simulated":
+            self.simulated.append(record)
+        else:
+            self.failed.append(record)
+        return record
+
+    def mark_unknown_after_dispatch(
+        self,
+        job_id: int,
+        *,
+        claim_token: str,
+        error: str,
+        side_effect_executed: bool,
+        provider_result_received: bool,
+    ) -> dict[str, Any]:
+        record = {
+            "job_id": job_id,
+            "claim_token": claim_token,
+            "error": error,
+            "side_effect_executed": side_effect_executed,
+            "provider_result_received": provider_result_received,
+        }
+        self.unknown.append(record)
+        return record
 
 
 class FakeDispatcher:
@@ -41,6 +69,11 @@ class FakeDispatcher:
 class SkippedDispatcher:
     def dispatch(self, job: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "status": "skipped", "reason": "adapter_disabled"}
+
+
+class SimulatedDispatcher:
+    def dispatch(self, job: dict[str, Any]) -> dict[str, Any]:
+        return {"ok": True, "status": "simulated", "outbound_task_id": 8803, "target_count": len(job["target_unionids_json"]), "side_effect_executed": False}
 
 
 class SometimesBrokenDispatcher:
@@ -59,7 +92,12 @@ def test_broadcast_worker_claims_due_jobs_and_marks_sent() -> None:
     assert result["claimed"] == 1
     assert result["sent_ok"] == 1
     assert result["sent_failed"] == 0
-    assert repo.sent == [{"job_id": 101, "outbound_task_id": 8801, "sent_count": 2, "failed_count": 0, "claim_token": repo.claims[0]["claim_token"]}]
+    assert {key: repo.sent[0][key] for key in ("job_id", "sent_count", "failed_count", "claim_token")} == {
+        "job_id": 101,
+        "sent_count": 2,
+        "failed_count": 0,
+        "claim_token": repo.claims[0]["claim_token"],
+    }
     assert repo.claims[0]["lease_seconds"] > 0
 
 
@@ -71,7 +109,23 @@ def test_broadcast_worker_records_structured_skip_without_external_send() -> Non
     assert result["ok"] is True
     assert result["skipped"] == 1
     assert result["sent_failed"] == 1
-    assert repo.failed == [{"job_id": 101, "error": "adapter_disabled", "failure_type": "next_native_dispatch_skipped", "claim_token": repo.claims[0]["claim_token"]}]
+    assert repo.failed[0]["job_id"] == 101
+    assert repo.failed[0]["error"] == "adapter_disabled"
+    assert repo.failed[0]["failure_type"] == "next_native_dispatch_skipped"
+
+
+def test_broadcast_worker_persists_simulation_without_marking_sent() -> None:
+    repo = FakeBroadcastRepo()
+
+    result = run_broadcast_queue_worker(limit=10, repo=repo, dispatcher=SimulatedDispatcher())
+
+    assert result["ok"] is True
+    assert result["simulated"] == 1
+    assert result["sent_ok"] == 0
+    assert repo.sent == []
+    assert repo.simulated[0]["job_id"] == 101
+    assert repo.simulated[0]["claim_token"] == repo.claims[0]["claim_token"]
+    assert result["results"] == [{"id": 101, "status": "simulated", "target_count": 2, "side_effect_executed": False}]
 
 
 def test_broadcast_worker_continues_after_per_job_dispatch_exception() -> None:
@@ -87,12 +141,15 @@ def test_broadcast_worker_continues_after_per_job_dispatch_exception() -> None:
 
     result = run_broadcast_queue_worker(limit=10, repo=repo, dispatcher=SometimesBrokenDispatcher())
 
-    assert result["ok"] is True
+    assert result["ok"] is False
     assert result["claimed"] == 2
     assert result["sent_failed"] == 1
     assert result["sent_ok"] == 1
-    assert repo.failed == [{"job_id": 101, "error": "temporary wecom failure", "failure_type": "handler_exception", "claim_token": repo.claims[0]["claim_token"]}]
-    assert repo.sent == [{"job_id": 102, "outbound_task_id": 8802, "sent_count": 1, "failed_count": 0, "claim_token": repo.claims[0]["claim_token"]}]
+    assert repo.unknown[0]["job_id"] == 101
+    assert repo.unknown[0]["error"] == "temporary wecom failure"
+    assert repo.unknown[0]["side_effect_executed"] is True
+    assert repo.sent[0]["job_id"] == 102
+    assert repo.sent[0]["sent_count"] == 1
 
 
 def test_postgres_broadcast_claim_reclaims_expired_and_retryable_jobs(monkeypatch) -> None:

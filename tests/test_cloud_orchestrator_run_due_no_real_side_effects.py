@@ -40,7 +40,6 @@ def test_run_due_module_has_no_legacy_scheduler_send_or_http_clients():
 
 def test_run_due_routes_do_not_forward_to_legacy_or_execute_runtime(monkeypatch):
     monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "test-token")
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
     reset_campaign_read_fixture_state()

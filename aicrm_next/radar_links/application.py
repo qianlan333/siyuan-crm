@@ -10,6 +10,7 @@ from typing import Any
 from aicrm_next.integration_gateway.questionnaire_adapters import WeChatOAuthAdapter, build_wechat_oauth_adapter
 from aicrm_next.media_library.application import GetImageVariantQuery, GetMediaItemQuery, UploadAttachmentCommand
 from aicrm_next.shared.errors import ContractError, NotFoundError
+from aicrm_next.shared.runtime import fixture_mode
 from aicrm_next.shared.runtime_settings import runtime_setting
 from aicrm_next.shared.share_qr import safe_qr_download_filename, svg_qr_data_url
 
@@ -37,6 +38,10 @@ _PDF_UPLOADS: dict[str, dict[str, Any]] = {}
 
 def _secret_key() -> str:
     return runtime_setting("SECRET_KEY")
+
+
+def _fixture_oauth_identity_inputs_allowed(adapter: WeChatOAuthAdapter) -> bool:
+    return fixture_mode() and str(getattr(adapter, "mode", "") or "").strip() != "production"
 
 
 class ListRadarLinksQuery:
@@ -551,19 +556,26 @@ class ResolveRadarLandingQuery:
     def __init__(self, repo: RadarLinksRepository | None = None) -> None:
         self._repo = repo or build_radar_links_repository()
 
-    def execute(self, code: str, *, identity: dict[str, str], request_meta: dict[str, Any], viewer_session: str | None = None) -> dict[str, Any]:
+    def execute(
+        self,
+        code: str,
+        *,
+        request_meta: dict[str, Any],
+        viewer_session: str | None = None,
+    ) -> dict[str, Any]:
         link = self._repo.get_link_by_code(code)
         if not link or not bool(link.get("enabled", True)):
             raise NotFoundError("radar link not found")
-        self._record_event(link, stage="landing", identity=identity, request_meta=request_meta)
-        has_identity = bool(identity.get("openid") or identity.get("unionid"))
+        identity = {"openid": "", "unionid": "", "external_userid": ""}
         has_session = False
         try:
-            verify_viewer_session(viewer_session, code=str(link["code"]), secret_key=_secret_key())
+            session = verify_viewer_session(viewer_session, code=str(link["code"]), secret_key=_secret_key())
+            identity = dict(session.get("identity") or identity)
             has_session = True
         except ContractError:
             has_session = False
-        if bool(link.get("auth_required")) and not has_identity and not has_session:
+        self._record_event(link, stage="landing", identity=identity, request_meta=request_meta)
+        if bool(link.get("auth_required")) and not has_session:
             state = sign_radar_state(code=str(link["code"]), secret_key=_secret_key())
             self._record_event(link, stage="oauth_start", identity=identity, request_meta=request_meta)
             return {"ok": True, "action": "oauth_start", "oauth_start_url": f"/api/h5/radar/oauth/start?state={state}"}
@@ -606,17 +618,20 @@ class StartRadarOAuthQuery:
     def __init__(self, adapter: WeChatOAuthAdapter | None = None) -> None:
         self._adapter = adapter or build_wechat_oauth_adapter()
 
-    def execute(self, *, state: str | None, code: str | None = None, openid: str | None = None, unionid: str | None = None, external_userid: str | None = None) -> dict[str, Any]:
+    def execute(
+        self, *, state: str | None, code: str | None = None, openid: str | None = None, unionid: str | None = None, external_userid: str | None = None
+    ) -> dict[str, Any]:
         signed_state = str(state or "").strip() or sign_radar_state(code=str(code or ""), secret_key=_secret_key())
         context = verify_radar_state(signed_state, secret_key=_secret_key())
         callback_url = f"/api/h5/radar/oauth/callback?state={signed_state}"
+        allow_fixture_identity = _fixture_oauth_identity_inputs_allowed(self._adapter)
         adapter_result = self._adapter.build_authorize_url(
             slug=str(context["code"]),
             state=signed_state,
             redirect=callback_url,
-            openid=openid,
-            unionid=unionid,
-            external_userid=external_userid,
+            openid=openid if allow_fixture_identity else None,
+            unionid=unionid if allow_fixture_identity else None,
+            external_userid=external_userid if allow_fixture_identity else None,
         )
         result = adapter_result.get("result") if isinstance(adapter_result.get("result"), dict) else {}
         if not adapter_result.get("ok"):
@@ -650,21 +665,24 @@ class CompleteRadarOAuthCallbackCommand:
         link = self._repo.get_link_by_code(str(context["code"]))
         if not link or not bool(link.get("enabled", True)):
             raise NotFoundError("radar link not found")
+        allow_fixture_identity = _fixture_oauth_identity_inputs_allowed(self._adapter)
         adapter_result = self._adapter.resolve_oauth_identity(
             state=state,
             code=code,
-            openid=openid,
-            unionid=unionid,
-            external_userid=external_userid,
+            openid=openid if allow_fixture_identity else None,
+            unionid=unionid if allow_fixture_identity else None,
+            external_userid=external_userid if allow_fixture_identity else None,
         )
         result = adapter_result.get("result") if isinstance(adapter_result.get("result"), dict) else {}
         if not adapter_result.get("ok"):
             raise ContractError(str(adapter_result.get("error_message") or "radar oauth adapter unavailable"))
         identity = {
-            "openid": str(result.get("openid") or openid or ""),
-            "unionid": str(result.get("unionid") or unionid or ""),
-            "external_userid": str(result.get("external_userid") or external_userid or ""),
+            "openid": str(result.get("openid") or "").strip(),
+            "unionid": str(result.get("unionid") or "").strip(),
+            "external_userid": str(result.get("external_userid") or "").strip(),
         }
+        if not (identity["openid"] or identity["unionid"]):
+            raise ContractError("radar oauth canonical identity is missing")
         meta = request_meta or {}
         for stage in ("oauth_callback", "authorized"):
             self._repo.record_click_event(
@@ -709,7 +727,13 @@ class CompleteRadarOAuthCallbackCommand:
                     "query_params_json": meta.get("query_params_json") if isinstance(meta.get("query_params_json"), dict) else {},
                 }
             )
-        return {"ok": True, "redirect_url": redirect_url, "identity": identity, "source_status": result.get("source_status", "fake"), "viewer_session_token": viewer_token}
+        return {
+            "ok": True,
+            "redirect_url": redirect_url,
+            "identity": identity,
+            "source_status": result.get("source_status", "fake"),
+            "viewer_session_token": viewer_token,
+        }
 
     __call__ = execute
 
@@ -1017,19 +1041,20 @@ def _require_viewable_content(repo: RadarLinksRepository, code: str, viewer_sess
     target_type = normalize_target_type(str(link.get("target_type") or "link"))
     if target_type not in {"image", "pdf"}:
         raise NotFoundError("radar content not found")
-    verify_viewer_session(viewer_session, code=str(link["code"]), secret_key=_secret_key())
-    return link
+    session = verify_viewer_session(viewer_session, code=str(link["code"]), secret_key=_secret_key())
+    return {**link, "_viewer_identity": dict(session.get("identity") or {})}
 
 
 def _view_event_payload(link: dict[str, Any], *, stage: str, request_meta: dict[str, Any]) -> dict[str, Any]:
+    identity = dict(link.get("_viewer_identity") or {})
     return {
         "link_id": int(link["id"]),
         "code": str(link.get("code") or ""),
         "target_type_snapshot": normalize_target_type(str(link.get("target_type") or "link")),
         "stage": stage,
-        "openid": "",
-        "unionid": "",
-        "external_userid": "",
+        "openid": str(identity.get("openid") or ""),
+        "unionid": str(identity.get("unionid") or ""),
+        "external_userid": str(identity.get("external_userid") or ""),
         "source_channel": str(link.get("source_channel") or ""),
         "campaign_id": str(link.get("campaign_id") or ""),
         "staff_id": str(link.get("staff_id") or ""),

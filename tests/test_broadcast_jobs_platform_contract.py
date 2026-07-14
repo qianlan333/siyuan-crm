@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from aicrm_next.background_jobs import broadcast_queue_worker
 from aicrm_next.background_jobs.broadcast_queue_worker import SafeSkippedBroadcastDispatcher
 
 
@@ -32,7 +31,6 @@ def test_default_broadcast_dispatcher_skips_unknown_source_type() -> None:
 
 def test_group_broadcast_payload_uses_safe_adapter_result_when_disabled(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_WECOM_GROUP_ADAPTER_MODE", "disabled")
-    monkeypatch.setattr(broadcast_queue_worker, "_record_outbound_task", lambda **kwargs: None)
 
     result = SafeSkippedBroadcastDispatcher().dispatch(
         {

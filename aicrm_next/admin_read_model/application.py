@@ -6,7 +6,6 @@ from typing import Any
 from .errors import AdminReadModelError
 from .projections import (
     ai_assistant_payload,
-    api_docs_payload,
     config_payload,
     funnel_payload,
     jobs_payload,
@@ -124,10 +123,3 @@ class GetAdminConfigPageQuery(_AdminPageQuery):
 
     def __call__(self) -> dict[str, Any]:
         return self._run(config_payload)
-
-
-class GetAdminApiDocsPageQuery(_AdminPageQuery):
-    page_name = "API 文档"
-
-    def __call__(self) -> dict[str, Any]:
-        return self._run(api_docs_payload)

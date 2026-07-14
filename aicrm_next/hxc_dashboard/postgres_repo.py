@@ -43,20 +43,16 @@ class PostgresHxcDashboardBroadcastRepository(HxcDashboardBroadcastRepository):
         projection = """
             WITH snapshot_identity AS (
                 SELECT
-                    COALESCE(NULLIF(s.unionid, ''), identity.unionid, '') AS unionid,
+                    identity.unionid,
                     COALESCE(identity.primary_external_userid, '') AS resolved_external_userid,
                     s.owner_userid,
                     s.funnel_state,
                     s.phone_match_key,
                     s.refreshed_at
                 FROM user_ops_hxc_dashboard_snapshot s
-                LEFT JOIN crm_user_identity identity
-                  ON identity.unionid = s.unionid
-                  OR (
-                      COALESCE(s.unionid, '') = ''
-                      AND COALESCE(s.mobile, '') <> ''
-                      AND identity.mobile_normalized = regexp_replace(s.mobile, '\\D', '', 'g')
-                  )
+                JOIN crm_user_identity identity ON identity.unionid = s.unionid
+                WHERE COALESCE(s.unionid, '') <> ''
+                  AND identity.identity_status = 'active'
             )
         """
         try:
@@ -76,18 +72,8 @@ class PostgresHxcDashboardBroadcastRepository(HxcDashboardBroadcastRepository):
                                    ) AS do_not_disturb
                             FROM snapshot_identity s
                             WHERE s.unionid = ANY(%s)
-                               OR s.resolved_external_userid = ANY(%s)
-                               OR s.phone_match_key = ANY(%s)
-                               OR EXISTS (
-                                   SELECT 1
-                                   FROM crm_user_identity selected_identity
-                                   JOIN unnest(%s::text[]) selected(value)
-                                     ON selected_identity.primary_external_userid = selected.value
-                                     OR jsonb_exists(selected_identity.external_userids_json, selected.value)
-                                   WHERE selected_identity.unionid = s.unionid
-                               )
                             """,
-                            (selected, selected, selected, selected),
+                            (selected,),
                         )
                     else:
                         cur.execute(

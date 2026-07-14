@@ -30,7 +30,6 @@
     bindingGroups: false,
     showNodeModal: false,
     editingNodeId: 0,
-    oneTimeToken: "",
     activeDetailPanel: "basic",
   };
 
@@ -49,8 +48,6 @@
     apiPlanNode: (id, nodeId) =>
       `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/nodes/${encodeURIComponent(nodeId)}`,
     apiWebhook: (id) => `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/webhook`,
-    apiWebhookRegenerate: (id) =>
-      `/api/admin/automation-conversion/group-ops/plans/${encodeURIComponent(id)}/webhook/regenerate`,
     apiGroups: "/api/admin/automation-conversion/group-ops/groups",
     apiGroupsSync: "/api/admin/automation-conversion/group-ops/groups/sync",
     apiMembers: "/api/admin/common/operation-members?scope=group_ops&page_size=100",
@@ -407,7 +404,6 @@
     if (action === "cancel-node") return closeNodeModal();
     if (action === "delete-node") return deleteNode(event.currentTarget.dataset.nodeId);
     if (action === "copy-webhook") return copyWebhook();
-    if (action === "reset-webhook") return resetWebhook();
     if (action === "pick-create-owner") return openMemberPicker({
       fieldName: "create_owner_userid",
       title: "选择运营人员",
@@ -696,14 +692,6 @@
       await navigator.clipboard.writeText(url);
     }
     state.notice = "已复制";
-    renderDetail();
-  }
-
-  async function resetWebhook() {
-    if (!state.plan || !state.plan.id) return;
-    state.webhook = await requestJson(routes.apiWebhookRegenerate(state.plan.id), { method: "POST" });
-    state.oneTimeToken = state.webhook.plaintext_token || "";
-    state.notice = "已重置";
     renderDetail();
   }
 
@@ -1092,9 +1080,8 @@
             ${actionButton("复制地址", "copy-webhook", "group-ops__button--primary")}
           </div>
           <div class="group-ops__webhook-line">
-            <strong>Token 状态</strong>
-            <span class="group-ops__chip group-ops__chip--ok">${escapeHtml(config.token_status === "generated" ? "已生成" : "未生成")}</span>
-            ${actionButton("重置 token", "reset-webhook")}
+            <strong>认证方式</strong>
+            <span class="group-ops__chip group-ops__chip--ok">HTTP Message Signatures</span>
           </div>
         </div>
       </section>

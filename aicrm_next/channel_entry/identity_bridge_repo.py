@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
 from typing import Any, Protocol
 
+from aicrm_next.identity_contact.dto import IdentityResolveResult, ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.shared.postgres_connection import get_db
 
 
@@ -97,23 +100,31 @@ def _now_sql() -> str:
 
 
 class PostgresIdentityBridgeRepository:
+    def _resolve_identity(
+        self,
+        *,
+        external_userid: str = "",
+        unionid: str = "",
+        openid: str = "",
+        mobile: str = "",
+        for_update: bool = False,
+    ) -> IdentityResolveResult:
+        return resolve_identity_with_dbapi(
+            get_db(),
+            ResolvePersonIdentityRequest(
+                external_userid=_text(external_userid) or None,
+                unionid=_text(unionid) or None,
+                openid=_text(openid) or None,
+                mobile=_text(mobile) or None,
+            ),
+            placeholder="?",
+            for_update=for_update,
+        )
+
     def identity_bridge_state(self, external_userid: str) -> dict[str, Any]:
-        row = get_db().execute(
-            """
-            SELECT primary_external_userid AS external_userid,
-                   unionid,
-                   primary_openid AS openid,
-                   updated_at,
-                   COALESCE(mobile, '') <> '' AS mobile_bound
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (_text(external_userid), _text(external_userid)),
-        ).fetchone()
-        if not row:
+        resolution = self._resolve_identity(external_userid=external_userid)
+        identity = resolution.identity if resolution.status == "resolved" else None
+        if identity is None:
             pending = get_db().execute(
                 """
                 SELECT external_userid, openid, reason, updated_at
@@ -134,13 +145,24 @@ class PostgresIdentityBridgeRepository:
                     "mobile_bound": False,
                     "reason": _text(payload.get("reason")) or "identity_pending_resolution",
                 }
-            return {"exists": False, "reason": "identity_missing"}
-        payload = _row_dict(row)
-        payload["exists"] = True
-        payload["unionid_present"] = bool(_text(payload.get("unionid")))
-        payload["openid_present"] = bool(_text(payload.get("openid")))
-        payload["mobile_bound"] = bool(payload.get("mobile_bound"))
-        return payload
+            return {
+                "exists": False,
+                "reason": "identity_conflict" if resolution.status == "conflict" else "identity_missing",
+            }
+        freshness = get_db().execute(
+            "SELECT updated_at FROM crm_user_identity WHERE unionid = ?",
+            (_text(identity.unionid),),
+        ).fetchone()
+        return {
+            "exists": True,
+            "external_userid": _text(identity.external_userid),
+            "unionid": _text(identity.unionid),
+            "openid": _text(identity.openid),
+            "updated_at": (freshness or {}).get("updated_at"),
+            "unionid_present": bool(_text(identity.unionid)),
+            "openid_present": bool(_text(identity.openid)),
+            "mobile_bound": bool(_text(identity.mobile)),
+        }
 
     def normalize_external_contact_identity(
         self,
@@ -184,6 +206,7 @@ class PostgresIdentityBridgeRepository:
         if not unionid:
             self.enqueue_identity_resolution(record, reason="missing_unionid")
             return 0
+        self._assert_aliases_assignable(record)
         row = get_db().execute(
             """
             INSERT INTO crm_user_identity (
@@ -286,6 +309,78 @@ class PostgresIdentityBridgeRepository:
         get_db().commit()
         return int((row or {}).get("id") or 0)
 
+    def _assert_aliases_assignable(self, record: dict[str, Any]) -> None:
+        db = get_db()
+        unionid = _text(record.get("unionid"))
+        external_userid = _text(record.get("external_userid"))
+        openid = _text(record.get("openid"))
+        lock_keys = sorted(
+            key
+            for key in {
+                f"unionid:{unionid}" if unionid else "",
+                f"external_userid:{external_userid}" if external_userid else "",
+                f"openid:{openid}" if openid else "",
+            }
+            if key
+        )
+        for lock_key in lock_keys:
+            db.execute("SELECT pg_advisory_xact_lock(hashtextextended(?, 0))", (lock_key,))
+
+        checks = [
+            self._resolve_identity(unionid=unionid, for_update=True),
+            self._resolve_identity(external_userid=external_userid, for_update=True),
+        ]
+        if openid:
+            checks.append(self._resolve_identity(openid=openid, for_update=True))
+        for resolution in checks:
+            candidate_unionid = resolved_unionid(resolution)
+            if resolution.status == "conflict" or (candidate_unionid and candidate_unionid != unionid):
+                self._record_identity_conflict(
+                    record,
+                    reason=resolution.reason or "identity_alias_conflict",
+                    candidate_unionid=candidate_unionid,
+                )
+                raise IdentityBridgeRepositoryError("identity alias conflict")
+
+    def _record_identity_conflict(
+        self,
+        record: dict[str, Any],
+        *,
+        reason: str,
+        candidate_unionid: str = "",
+    ) -> None:
+        unionid = _text(record.get("unionid"))
+        external_userid = _text(record.get("external_userid"))
+        openid = _text(record.get("openid"))
+        mobile = _text(record.get("mobile"))
+        source_key = hashlib.sha256(
+            f"{reason}|{unionid}|{candidate_unionid}|{external_userid}|{openid}|{mobile}".encode("utf-8")
+        ).hexdigest()
+        get_db().execute(
+            """
+            INSERT INTO crm_user_identity_conflicts (
+                conflict_type, unionid, candidate_unionid, external_userid, openid, mobile,
+                source_type, source_key, payload_json, source_payload_json,
+                status, resolution_status, created_at, updated_at
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?,
+                'wecom_external_contact', ?, ?::jsonb, ?::jsonb,
+                'open', 'open', NOW(), NOW()
+            )
+            """,
+            (
+                _text(reason) or "identity_alias_conflict",
+                unionid,
+                _text(candidate_unionid),
+                external_userid,
+                openid,
+                mobile,
+                source_key,
+                _json_dumps({"candidate_count": 1 if candidate_unionid else 0}),
+                _json_dumps({"source": "wecom_external_contact_detail"}),
+            ),
+        )
+
     def enqueue_identity_resolution(self, record: dict[str, Any], *, reason: str) -> None:
         external_userid = _text(record.get("external_userid"))
         source_key = external_userid or _text(record.get("openid")) or _text(record.get("mobile"))
@@ -374,18 +469,11 @@ class PostgresIdentityBridgeRepository:
         normalized = [dict(item or {}) for item in list(follow_users or []) if _text((item or {}).get("userid"))]
         userids = {_text(item.get("userid")) for item in normalized}
         preferred = _text(preferred_userid)
-        existing_primary = db.execute(
-            """
-            SELECT primary_owner_userid AS user_id
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (external, external),
-        ).fetchone()
-        old_primary = _text((existing_primary or {}).get("user_id"))
+        resolution = self._resolve_identity(external_userid=external, for_update=True)
+        unionid = resolved_unionid(resolution)
+        if not unionid or resolution.identity is None:
+            raise IdentityBridgeRepositoryError("canonical identity is required")
+        old_primary = _text(resolution.identity.owner_userid)
         if preferred and preferred in userids:
             primary = preferred
         elif old_primary and old_primary in userids:
@@ -401,25 +489,30 @@ class PostgresIdentityBridgeRepository:
             SET follow_users_json = ?::jsonb,
                 primary_owner_userid = COALESCE(NULLIF(?, ''), primary_owner_userid),
                 updated_at = NOW()
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
+            WHERE unionid = ?
+              AND identity_status = 'active'
             """,
-            (_json_dumps(normalized), primary, external, external),
+            (_json_dumps(normalized), primary, unionid),
         )
         db.commit()
 
     def refresh_external_contact_identity_owner(self, corp_id: str, external_userid: str) -> None:
         db = get_db()
+        resolution = self._resolve_identity(external_userid=external_userid, for_update=True)
+        unionid = resolved_unionid(resolution)
+        if not unionid:
+            return
         row = db.execute(
             """
             SELECT elem->>'userid' AS user_id
             FROM crm_user_identity,
                  jsonb_array_elements(follow_users_json) AS elem
-            WHERE (primary_external_userid = ? OR jsonb_exists(external_userids_json, ?))
+            WHERE unionid = ?
               AND COALESCE(elem->>'userid', '') <> ''
+            ORDER BY elem->>'userid'
             LIMIT 1
             """,
-            (_text(external_userid), _text(external_userid)),
+            (unionid,),
         ).fetchone()
         owner = _text((row or {}).get("user_id"))
         if owner:
@@ -430,60 +523,44 @@ class PostgresIdentityBridgeRepository:
                     identity_status = 'active',
                     last_seen_at = NOW(),
                     updated_at = NOW()
-                WHERE primary_external_userid = ?
-                   OR jsonb_exists(external_userids_json, ?)
+                WHERE unionid = ?
+                  AND identity_status = 'active'
                 """,
-                (owner, _text(external_userid), _text(external_userid)),
+                (owner, unionid),
             )
             db.commit()
 
     def get_contact_binding_status(self, external_userid: str, owner_userid: str = "") -> dict[str, Any]:
         external = _text(external_userid)
-        identity = get_db().execute(
-            """
-            SELECT unionid,
-                   mobile,
-                   primary_external_userid AS external_userid,
-                   primary_owner_userid AS owner_userid,
-                   customer_name,
-                   remark
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (external, external),
-        ).fetchone()
-        if identity and _text(identity.get("mobile")):
-            payload = _row_dict(identity)
+        resolution = self._resolve_identity(external_userid=external)
+        identity = resolution.identity if resolution.status == "resolved" else None
+        if identity and _text(identity.mobile):
             return {
                 "is_bound": True,
                 "person_id": "",
-                "unionid": _text(payload.get("unionid")),
+                "unionid": _text(identity.unionid),
                 "external_userid": external,
-                "owner_userid": _text(owner_userid) or _text(payload.get("owner_userid")),
-                "customer_name": _text(payload.get("customer_name")),
-                "remark": _text(payload.get("remark")),
-                "display_name": _text(payload.get("customer_name")) or external,
-                "mobile": _text(payload.get("mobile")),
+                "owner_userid": _text(owner_userid) or _text(identity.owner_userid),
+                "customer_name": _text(identity.customer_name),
+                "remark": _text(identity.remark),
+                "display_name": _text(identity.customer_name) or external,
+                "mobile": _text(identity.mobile),
                 "third_party_user_id": "",
                 "first_bound_by_userid": "",
                 "first_owner_userid": "",
-                "last_owner_userid": _text(owner_userid) or _text(payload.get("owner_userid")),
+                "last_owner_userid": _text(owner_userid) or _text(identity.owner_userid),
                 "created_at": None,
                 "updated_at": None,
             }
-        payload = _row_dict(identity)
         return {
             "is_bound": False,
             "person_id": "",
-            "unionid": _text(payload.get("unionid")),
+            "unionid": _text(identity.unionid) if identity else "",
             "external_userid": external,
-            "owner_userid": _text(owner_userid) or _text(payload.get("owner_userid")),
-            "customer_name": _text(payload.get("customer_name")),
-            "remark": _text(payload.get("remark")),
-            "display_name": _text(payload.get("customer_name")) or _text(payload.get("remark")) or external,
+            "owner_userid": _text(owner_userid) or (_text(identity.owner_userid) if identity else ""),
+            "customer_name": _text(identity.customer_name) if identity else "",
+            "remark": _text(identity.remark) if identity else "",
+            "display_name": (_text(identity.customer_name) or _text(identity.remark) or external) if identity else external,
             "mobile": "",
             "third_party_user_id": "",
             "first_bound_by_userid": "",
@@ -494,51 +571,35 @@ class PostgresIdentityBridgeRepository:
         }
 
     def _identity_sources(self, external_userid: str) -> tuple[list[str], list[str]]:
-        identity = get_db().execute(
-            """
-            SELECT unionid, openids_json
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (_text(external_userid), _text(external_userid)),
-        ).fetchone()
-        if not identity:
+        resolution = self._resolve_identity(external_userid=external_userid)
+        unionid = resolved_unionid(resolution)
+        if not unionid:
             return [], []
-        raw_openids = identity.get("openids_json") or []
+        identity = get_db().execute(
+            "SELECT openids_json FROM crm_user_identity WHERE unionid = ?",
+            (unionid,),
+        ).fetchone()
+        raw_openids = (identity or {}).get("openids_json") or []
         if isinstance(raw_openids, str):
             try:
                 raw_openids = json.loads(raw_openids)
             except json.JSONDecodeError:
                 raw_openids = []
         openids = sorted({_text(value) for value in raw_openids if _text(value)})
-        unionids = [_text(identity.get("unionid"))] if _text(identity.get("unionid")) else []
-        return openids, unionids
+        return openids, [unionid]
 
     def get_unique_mobile_candidate_from_identity_sources(self, external_userid: str) -> dict[str, Any] | None:
-        external = _text(external_userid)
-        row = get_db().execute(
-            """
-            SELECT mobile_normalized AS mobile,
-                   1 AS matched_count,
-                   last_seen_at AS latest_matched_at,
-                   ARRAY['crm_user_identity'] AS sources
-            FROM crm_user_identity
-            WHERE (
-                primary_external_userid = ?
-                OR jsonb_exists(external_userids_json, ?)
-            )
-              AND COALESCE(mobile_normalized, '') ~ '^1[3-9][0-9]{9}$'
-            ORDER BY last_seen_at DESC NULLS LAST, updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            (external, external),
-        ).fetchall()
-        if len(row) != 1:
+        resolution = self._resolve_identity(external_userid=external_userid)
+        identity = resolution.identity if resolution.status == "resolved" else None
+        mobile = _normalize_mobile(identity.mobile if identity else "")
+        if not mobile:
             return None
-        return _row_dict(row[0])
+        return {
+            "mobile": mobile,
+            "matched_count": 1,
+            "latest_matched_at": None,
+            "sources": ["crm_user_identity"],
+        }
 
     def list_unbound_external_userids_with_identity_sources(self, limit: int = 500) -> list[str]:
         rows = get_db().execute(
@@ -546,7 +607,7 @@ class PostgresIdentityBridgeRepository:
             SELECT DISTINCT primary_external_userid AS external_userid
             FROM crm_user_identity
             WHERE COALESCE(primary_external_userid, '') <> ''
-              AND COALESCE(mobile, '') = ''
+              AND COALESCE(mobile_normalized, '') = ''
             ORDER BY primary_external_userid
             LIMIT ?
             """,
@@ -573,26 +634,42 @@ class PostgresIdentityBridgeRepository:
         db = get_db()
         external = _text(external_userid)
         normalized_mobile = _normalize_mobile(mobile)
+        resolution = self._resolve_identity(external_userid=external, for_update=True)
+        unionid = resolved_unionid(resolution)
+        if not unionid:
+            raise IdentityBridgeRepositoryError("canonical identity is required")
+        existing_mobile = _normalize_mobile(resolution.identity.mobile if resolution.identity else "")
+        if existing_mobile and normalized_mobile and existing_mobile != normalized_mobile and not force_rebind:
+            raise IdentityBridgeRepositoryError("canonical mobile rebind blocked")
+        mobile_resolution = self._resolve_identity(mobile=normalized_mobile, for_update=True) if normalized_mobile else None
+        mobile_unionid = resolved_unionid(mobile_resolution) if mobile_resolution else ""
+        if mobile_resolution and (
+            mobile_resolution.status in {"pending", "conflict"}
+            or (mobile_unionid and mobile_unionid != unionid)
+        ):
+            self._record_identity_conflict(
+                {"unionid": unionid, "external_userid": external, "mobile": normalized_mobile},
+                reason="mobile_alias_conflict",
+                candidate_unionid=mobile_unionid,
+            )
+            raise IdentityBridgeRepositoryError("identity alias conflict")
         db.execute(
             """
             UPDATE crm_user_identity
             SET mobile = COALESCE(NULLIF(?, ''), mobile),
                 mobile_normalized = COALESCE(NULLIF(?, ''), mobile_normalized),
                 mobile_verified = TRUE,
-                mobile_source = COALESCE(NULLIF(mobile_source, ''), 'legacy_binding'),
+                mobile_source = COALESCE(NULLIF(mobile_source, ''), 'identity_bridge_mobile_bind'),
                 primary_owner_userid = COALESCE(NULLIF(?, ''), primary_owner_userid),
-                legacy_person_id = COALESCE(NULLIF(legacy_person_id, ''), ?),
                 updated_at = NOW()
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
+            WHERE unionid = ?
+              AND identity_status = 'active'
             """,
             (
                 normalized_mobile,
                 normalized_mobile,
                 _text(owner_userid),
-                str(person_id or ""),
-                external,
-                external,
+                unionid,
             ),
         )
         db.commit()
@@ -602,19 +679,8 @@ class PostgresIdentityBridgeRepository:
         owner = _text(owner_userid)
         if owner:
             return owner
-        external = _text(external_userid)
-        row = get_db().execute(
-            """
-            SELECT primary_owner_userid
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY updated_at DESC
-            LIMIT 1
-            """,
-            (external, external),
-        ).fetchone()
-        owner = _text((row or {}).get("primary_owner_userid"))
+        resolution = self._resolve_identity(external_userid=external_userid)
+        owner = _text(resolution.identity.owner_userid) if resolution.status == "resolved" and resolution.identity else ""
         if owner:
             return owner
         return ""

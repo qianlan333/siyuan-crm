@@ -6,7 +6,6 @@ from aicrm_next.channel_entry.wecom_adapter import get_wecom_adapter, set_wecom_
 from aicrm_next.platform_foundation.external_effects import (
     ExternalEffectService,
     WECOM_CONTACT_TAG_MARK,
-    WECOM_MESSAGE_PRIVATE_SEND,
     WECOM_WELCOME_MESSAGE_SEND,
     reset_external_effect_fixture_state,
 )
@@ -42,7 +41,8 @@ def test_active_channel_baseline_emits_only_channel_entry_without_program_admiss
     calls, previous = _patch_repo(monkeypatch, bindings=[{"id": 20, "program_id": 30, "program_status": "active"}])
     wakeups: list[tuple[int, str, str]] = []
 
-    def fake_wake(job_id, *, reason, effect_type):
+    def fake_wake(job_id, *, reason, effect_type, adapter_registry=None):
+        del adapter_registry
         wakeups.append((int(job_id or 0), reason, effect_type))
         return False
 
@@ -59,9 +59,8 @@ def test_active_channel_baseline_emits_only_channel_entry_without_program_admiss
     assert result["welcome_message"]["queued"] is True
     assert result["entry_tag"]["queued"] is True
     assert result["welcome_message"]["immediate_dispatch_scheduled"] is False
-    assert result["welcome_message"]["welcome_effect_cancelled_for_fallback"] is True
-    assert result["welcome_message"]["fallback_message"]["queued"] is True
-    assert result["welcome_message"]["fallback_message"]["effect_type"] == WECOM_MESSAGE_PRIVATE_SEND
+    assert result["welcome_message"]["welcome_effect_cancelled_for_fallback"] is False
+    assert result["welcome_message"]["fallback_message"] == {}
     assert result["entry_tag"]["immediate_dispatch_scheduled"] is False
     assert [item[1:] for item in wakeups] == [
         ("channel_entry_welcome_message", "wecom.welcome_message.send"),
@@ -77,15 +76,7 @@ def test_active_channel_baseline_emits_only_channel_entry_without_program_admiss
         {"effect_type": WECOM_WELCOME_MESSAGE_SEND, "target_id": "union-a"},
         limit=10,
     )
-    fallback_jobs, _ = ExternalEffectService().list_jobs(
-        {"effect_type": WECOM_MESSAGE_PRIVATE_SEND, "target_id": "union-a"},
-        limit=10,
-    )
-    assert welcome_jobs[0].status == "cancelled"
-    assert fallback_jobs[0].business_type == "channel_entry_welcome_fallback"
-    assert fallback_jobs[0].payload_json["channel"] == "wecom_private"
-    assert fallback_jobs[0].payload_json["external_userids"] == ["wm-a"]
-    assert fallback_jobs[0].payload_json["content_text"] == "hello"
+    assert welcome_jobs[0].status == "queued"
 
 
 def test_archived_program_state_is_not_part_of_channel_baseline(monkeypatch):
@@ -141,19 +132,13 @@ def test_entry_without_unionid_still_queues_external_userid_effects(monkeypatch)
         {"effect_type": WECOM_WELCOME_MESSAGE_SEND, "target_id": "wm-no-union"},
         limit=10,
     )
-    fallback_jobs, _ = ExternalEffectService().list_jobs(
-        {"effect_type": WECOM_MESSAGE_PRIVATE_SEND, "target_id": "wm-no-union"},
-        limit=10,
-    )
     tag_jobs, _ = ExternalEffectService().list_jobs(
         {"effect_type": WECOM_CONTACT_TAG_MARK, "target_id": "wm-no-union"},
         limit=10,
     )
     assert welcome_jobs[0].target_type == "external_userid"
-    assert fallback_jobs[0].target_type == "external_userid"
     assert tag_jobs[0].target_type == "external_userid"
     assert "target_unionid" not in welcome_jobs[0].payload_json
-    assert "target_unionid" not in fallback_jobs[0].payload_json
     assert "target_unionid" not in tag_jobs[0].payload_json
 
 

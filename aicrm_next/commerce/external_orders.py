@@ -10,12 +10,9 @@ from fastapi import APIRouter, Path, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from aicrm_next.customer_read_model.application import GetCustomerDetailQuery
-from aicrm_next.customer_read_model.dto import CustomerDetailRequest
 from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
 from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
 from aicrm_next.shared.errors import NotFoundError
-from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .admin_unified_orders import get_order, list_orders
 
@@ -25,7 +22,6 @@ ROUTE_OWNER = "ai_crm_next"
 SOURCE_STATUS_LIST = "external_orders"
 SOURCE_STATUS_DETAIL = "external_order_detail"
 SOURCE_STATUS_USER_BASIC = "external_user_basic"
-TOKEN_ENV_KEY = "AUTOMATION_INTERNAL_API_TOKEN"
 PAID_STATUSES = {"paid", "refund_processing", "partial_refunded", "full_refunded"}
 REFUND_STATUSES = {"refund_processing", "partial_refunded", "full_refunded"}
 
@@ -53,34 +49,6 @@ def _error(*, error_code: str, message: str, status_code: int, source_status: st
         },
         status_code=status_code,
     )
-
-
-def _auth_failure(request: Request, *, source_status: str) -> JSONResponse | None:
-    expected = _text(runtime_setting(TOKEN_ENV_KEY))
-    if not expected:
-        return _error(
-            error_code="internal_token_not_configured",
-            message="internal token not configured",
-            status_code=503,
-            source_status=source_status,
-        )
-    auth_header = _text(request.headers.get("Authorization"))
-    provided = _text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
-    if not provided:
-        return _error(
-            error_code="missing_internal_token",
-            message="missing internal token",
-            status_code=401,
-            source_status=source_status,
-        )
-    if provided != expected:
-        return _error(
-            error_code="invalid_internal_token",
-            message="invalid internal token",
-            status_code=401,
-            source_status=source_status,
-        )
-    return None
 
 
 def _encode_cursor(offset: int | None) -> str:
@@ -125,11 +93,7 @@ def _is_paid(order: dict[str, Any]) -> bool:
 
 
 def _is_refunded(order: dict[str, Any]) -> bool:
-    return (
-        _status(order) in REFUND_STATUSES
-        or _int(order.get("refunded_amount_total")) > 0
-        or _int(order.get("active_refund_amount_total")) > 0
-    )
+    return _status(order) in REFUND_STATUSES or _int(order.get("refunded_amount_total")) > 0 or _int(order.get("active_refund_amount_total")) > 0
 
 
 def _order_no(order: dict[str, Any]) -> str:
@@ -184,9 +148,6 @@ def list_external_orders(
     limit: int = Query(100, ge=1, le=500, description="分页条数，最大 500"),
     cursor: str | None = Query(None, description="下一页游标"),
 ) -> JSONResponse:
-    auth_failure = _auth_failure(request, source_status=SOURCE_STATUS_LIST)
-    if auth_failure:
-        return auth_failure
     try:
         offset = _decode_cursor(cursor)
         payload = list_orders(
@@ -235,9 +196,6 @@ def get_external_order(
     order_no: str = Path(..., description="商户订单号、订单 ID 或平台交易号"),
     provider: str = Query("auto", description="auto/wechat/alipay/wechat_shop"),
 ) -> JSONResponse:
-    auth_failure = _auth_failure(request, source_status=SOURCE_STATUS_DETAIL)
-    if auth_failure:
-        return auth_failure
     try:
         payload = get_order(order_no, provider=provider)
     except NotFoundError:
@@ -268,11 +226,14 @@ def _model_dump(value: Any) -> dict[str, Any]:
     return dict(value)
 
 
-def _customer_detail(external_userid: str) -> dict[str, Any]:
+def _customer_detail(request: Request, external_userid: str) -> dict[str, Any]:
     if not external_userid:
         return {}
+    query = getattr(request.app.state, "external_customer_detail_query", None)
+    if not callable(query):
+        return {}
     try:
-        payload = GetCustomerDetailQuery()(CustomerDetailRequest(external_userid=external_userid))
+        payload = query(external_userid)
     except NotFoundError:
         return {}
     if not payload.get("ok"):
@@ -298,11 +259,7 @@ def _project_user_basic(identity: dict[str, Any], customer: dict[str, Any]) -> d
         "owner_display_name": _text(customer.get("owner_display_name")),
         "remark": _text(customer.get("remark")),
         "follow_user_userid": _text(identity.get("follow_user_userid")),
-        "follow_user_userids": [
-            _text(item)
-            for item in list(customer.get("follow_user_userids") or [])
-            if _text(item)
-        ],
+        "follow_user_userids": [_text(item) for item in list(customer.get("follow_user_userids") or []) if _text(item)],
         "binding_status": _text(customer.get("binding_status") or identity.get("binding_status")),
         "is_bound": bool(customer.get("is_bound") or mobile),
         "matched_by": _text(identity.get("matched_by")),
@@ -337,9 +294,6 @@ def resolve_external_user_basic(
     mobile: str | None = Query(None, description="手机号"),
     openid: str | None = Query(None, description="微信 openid"),
 ) -> JSONResponse:
-    auth_failure = _auth_failure(request, source_status=SOURCE_STATUS_USER_BASIC)
-    if auth_failure:
-        return auth_failure
     if not any(_text(value) for value in (unionid, external_userid, mobile, openid)):
         return _error(
             error_code="invalid_request",
@@ -365,7 +319,7 @@ def resolve_external_user_basic(
             mobile=mobile,
             openid=openid,
         )
-    customer = _customer_detail(_text(identity.get("external_userid") or external_userid))
+    customer = _customer_detail(request, _text(identity.get("external_userid") or external_userid))
     if not identity and not customer:
         return _error(error_code="not_found", message="user not found", status_code=404, source_status=SOURCE_STATUS_USER_BASIC)
 

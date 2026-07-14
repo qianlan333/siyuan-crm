@@ -18,11 +18,11 @@ POST https://www.youcangogogo.com/api/automation/group-ops/broadcast
 ## 鉴权与幂等
 
 ```http
-Authorization: Bearer <GROUP_BROADCAST_INTERNAL_API_TOKEN>
+Authorization: Bearer <short-lived-client-credentials-jwt>
 Idempotency-Key: <本次业务唯一值>
 ```
 
-服务端使用常量时间比较验证 Bearer token。`Idempotency-Key` 必填；同一 key 重放不会重新上传素材或再次群发，而是返回原任务状态。
+调用方必须使用独立注册的 `group_broadcast` 客户端，通过 TLS `POST /oauth/token` 以 `audience=external_integration`、`scope=write` 换取短期 JWT；服务端同时校验 purpose 与 `group_broadcast_execute` capability。换取流程见 [`auth_client_credentials.md`](auth_client_credentials.md)。`Idempotency-Key` 必填；同一 key 重放不会重新上传素材或再次群发，而是返回原任务状态。
 
 ## JSON 请求
 

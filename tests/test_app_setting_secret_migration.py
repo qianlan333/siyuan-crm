@@ -9,7 +9,6 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 from aicrm_next.shared.secret_store import FileSecretStore, SecretStoreError, is_secret_reference
-from aicrm_next.shared.internal_service_tokens import LEGACY_FALLBACK_ENABLED_KEY, TOKEN_PURPOSES
 from scripts.ops import migrate_app_setting_secrets as migration_script
 from scripts.ops.check_secret_reference_cutover import reconcile_secret_reference_cutover
 from scripts.ops.migrate_app_setting_secrets import (
@@ -173,6 +172,7 @@ def test_mixed_raw_reference_and_environment_rows_migrate_idempotently(tmp_path:
     assert existing_reference not in rendered
 
 
+@pytest.mark.skip(reason="removed with RAUTH shared-token replacement")
 def test_legacy_shared_token_migration_generates_distinct_purpose_credentials(monkeypatch, tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     root = tmp_path / "secrets"
@@ -251,6 +251,7 @@ def test_legacy_shared_token_migration_generates_distinct_purpose_credentials(mo
     assert ["identity", "mcp"] in collision_report["duplicate_internal_token_purposes"]
 
 
+@pytest.mark.skip(reason="removed with RAUTH shared-token replacement")
 def test_existing_cutover_repairs_duplicate_internal_token_and_redacts_historical_audit(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     root = tmp_path / "secrets"
@@ -333,6 +334,7 @@ def test_existing_cutover_repairs_duplicate_internal_token_and_redacts_historica
     assert sorted(store.list_references()) == references_after_first
 
 
+@pytest.mark.skip(reason="removed with RAUTH shared-token replacement")
 def test_secret_migration_dry_run_reports_duplicate_rotation_and_audit_redaction_without_writes(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     root = tmp_path / "secrets"
@@ -371,6 +373,7 @@ def test_secret_migration_dry_run_reports_duplicate_rotation_and_audit_redaction
     assert shared_token in str(before_json)
 
 
+@pytest.mark.skip(reason="removed with RAUTH shared-token replacement")
 def test_reconciliation_blocks_incomplete_internal_token_split(tmp_path: Path) -> None:
     engine = _engine(tmp_path)
     store = FileSecretStore(tmp_path / "secrets")
@@ -509,7 +512,7 @@ def test_migration_collapses_duplicate_sensitive_environment_assignments(tmp_pat
     engine = _engine(tmp_path)
     root = tmp_path / "secrets"
     store = FileSecretStore(root)
-    key = "MCP_BEARER_TOKEN"
+    key = "AICRM_AUTH_SESSION_HASH_PEPPER"
     raw = "duplicate-environment-secret-sentinel"
     reference = store.write(key, "canonical-mcp-secret")
     _upsert(engine, key, reference)

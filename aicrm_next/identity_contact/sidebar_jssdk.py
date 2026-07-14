@@ -22,9 +22,12 @@ from aicrm_next.integration_gateway.wecom_admin_auth_client import (
 )
 from aicrm_next.shared.runtime import production_environment
 from aicrm_next.shared.runtime_settings import runtime_setting
-from aicrm_next.shared.signed_context import build_sidebar_owner_context_token, sidebar_owner_context_ttl_seconds
+from aicrm_next.shared.signed_context import (
+    SIDEBAR_VIEWER_SESSION_COOKIE,
+    build_sidebar_owner_context_token,
+    sidebar_owner_context_ttl_seconds,
+)
 from aicrm_next.shared.signed_session import (
-    ADMIN_SESSION_COOKIE,
     DEFAULT_SESSION_MAX_AGE_SECONDS,
     session_cookie_secure,
     sign_session_payload,
@@ -38,10 +41,11 @@ from .application import ListExternalContactOwnerCandidatesQuery
 
 router = APIRouter()
 DEFAULT_SIDEBAR_JSSDK_ALLOWED_HOSTS = {"youcangogogo.com", "www.youcangogogo.com"}
-SIDEBAR_VIEWER_COOKIE = "aicrm_sidebar_viewer_session"
 SIDEBAR_OAUTH_ENABLE_ENV = "AICRM_SIDEBAR_WECOM_OAUTH_ENABLE_REAL"
 SIDEBAR_OAUTH_REDIRECT_URI_ENV = "AICRM_SIDEBAR_OAUTH_REDIRECT_URI"
 ADMIN_AUTH_ENABLE_ENV = "AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL"
+# Import compatibility only; the cookie now carries a customer-bound OAuth session.
+SIDEBAR_VIEWER_COOKIE = SIDEBAR_VIEWER_SESSION_COOKIE
 
 
 @router.api_route("/api/sidebar/jssdk-config", methods=["GET", "HEAD", "OPTIONS"])
@@ -208,7 +212,7 @@ def sidebar_oauth_callback(request: Request) -> Response:
     if not viewer_userid:
         return _sidebar_oauth_error_redirect(next_path, "wecom_userid_missing")
     owner_candidates = _owner_userids_from_external_userid(external_userid)
-    if owner_candidates and viewer_userid not in owner_candidates:
+    if not owner_candidates or viewer_userid not in owner_candidates:
         return _sidebar_oauth_error_redirect(next_path, "viewer_not_in_contact_owner_scope")
 
     response = RedirectResponse(
@@ -217,12 +221,14 @@ def sidebar_oauth_callback(request: Request) -> Response:
         headers=_sidebar_oauth_headers(real_external_call_executed=True),
     )
     response.set_cookie(
-        SIDEBAR_VIEWER_COOKIE,
+        SIDEBAR_VIEWER_SESSION_COOKIE,
         sign_session_payload(
             {
                 "auth_source": "wecom_sidebar_oauth",
                 "wecom_userid": viewer_userid,
                 "external_userid": external_userid,
+                "corp_id": oauth["corp_id"],
+                "session_id": secrets.token_urlsafe(24),
                 "iat": int(time()),
             }
         ),
@@ -237,12 +243,31 @@ def sidebar_oauth_callback(request: Request) -> Response:
 
 def _with_sidebar_owner_context(request: Request, payload: dict) -> dict:
     result = dict(payload)
-    viewer_userid = _viewer_userid_from_request(request)
+    viewer_session = _viewer_session_from_request(request)
+    viewer_userid = str(viewer_session.get("wecom_userid") or "").strip()
     external_userid = _external_userid_from_request(request)
     owner_candidates = _owner_userids_from_external_userid(external_userid)
-    source = "sidebar_jssdk_request_context"
+    source = "sidebar_jssdk_oauth_session"
     status = "issued"
-    if viewer_userid and owner_candidates and viewer_userid not in owner_candidates:
+    if not viewer_userid:
+        return _without_sidebar_owner_token(
+            request,
+            result,
+            status="viewer_session_required",
+            external_userid=external_userid,
+            source="sidebar_jssdk_viewer_required",
+            owner_candidates_count=len(owner_candidates),
+        )
+    if str(viewer_session.get("external_userid") or "").strip() != external_userid:
+        return _without_sidebar_owner_token(
+            request,
+            result,
+            status="viewer_session_customer_mismatch",
+            external_userid=external_userid,
+            source="sidebar_jssdk_viewer_scope_rejected",
+            owner_candidates_count=len(owner_candidates),
+        )
+    if not owner_candidates or viewer_userid not in owner_candidates:
         return _without_sidebar_owner_token(
             request,
             result,
@@ -251,31 +276,19 @@ def _with_sidebar_owner_context(request: Request, payload: dict) -> dict:
             source="sidebar_jssdk_viewer_scope_rejected",
             owner_candidates_count=len(owner_candidates),
         )
-    if not viewer_userid:
-        viewer_userid = next(iter(owner_candidates)) if len(owner_candidates) == 1 else ""
-        source = "sidebar_jssdk_identity_owner_fallback" if viewer_userid else "missing"
-        status = "issued_identity_owner" if viewer_userid else "viewer_missing_multi_owner" if owner_candidates else "viewer_missing"
-        if not viewer_userid:
-            return _without_sidebar_owner_token(
-                request,
-                result,
-                status=status,
-                external_userid=external_userid,
-                source="sidebar_jssdk_viewer_required" if owner_candidates else source,
-                owner_candidates_count=len(owner_candidates),
-            )
     ttl_seconds = sidebar_owner_context_ttl_seconds()
     result["sidebar_owner_token"] = build_sidebar_owner_context_token(
         viewer_userid=viewer_userid,
+        external_userid=external_userid,
+        session_id=str(viewer_session.get("session_id") or ""),
         corp_id=str(result.get("corp_id") or result.get("corpId") or ""),
-        bind_by_userid=_bind_by_userid_from_request(request) or viewer_userid,
         ttl_seconds=ttl_seconds,
     )
     result["sidebar_owner_token_status"] = status
     result["sidebar_owner_context"] = {
         "viewer_userid": viewer_userid,
         "owner_userid": viewer_userid,
-        "bind_by_userid": _bind_by_userid_from_request(request) or viewer_userid,
+        "bind_by_userid": viewer_userid,
         "corp_id": str(result.get("corp_id") or result.get("corpId") or ""),
         "external_userid": _external_userid_from_request(request),
         "expires_in": ttl_seconds,
@@ -309,46 +322,14 @@ def _without_sidebar_owner_token(
     return result
 
 
-def _viewer_userid_from_request(request: Request) -> str:
-    params = request.query_params
-    for value in (
-        params.get("viewer_userid"),
-        params.get("viewerUserId"),
-        params.get("operator_userid"),
-        params.get("operatorUserId"),
-        params.get("owner_userid"),
-        params.get("ownerUserid"),
-        params.get("userid"),
-        request.headers.get("x-wecom-viewer-userid"),
-        request.headers.get("x-wecom-userid"),
-        request.headers.get("x-aicrm-sidebar-viewer-userid"),
-    ):
-        normalized = str(value or "").strip()
-        if normalized:
-            return normalized
-    session = verify_session_payload(request.cookies.get(ADMIN_SESSION_COOKIE))
-    session_userid = str((session or {}).get("wecom_userid") or "").strip()
-    if session_userid:
-        return session_userid
-    sidebar_session = verify_session_payload(request.cookies.get(SIDEBAR_VIEWER_COOKIE))
-    sidebar_session_userid = str((sidebar_session or {}).get("wecom_userid") or "").strip()
-    if sidebar_session_userid:
-        return sidebar_session_userid
-    return ""
-
-
-def _bind_by_userid_from_request(request: Request) -> str:
-    params = request.query_params
-    for value in (
-        params.get("bind_by_userid"),
-        params.get("bindByUserid"),
-        params.get("operator_userid"),
-        params.get("operatorUserId"),
-    ):
-        normalized = str(value or "").strip()
-        if normalized:
-            return normalized
-    return ""
+def _viewer_session_from_request(request: Request) -> dict[str, Any]:
+    session = verify_session_payload(request.cookies.get(SIDEBAR_VIEWER_SESSION_COOKIE))
+    if not session or str(session.get("auth_source") or "").strip() != "wecom_sidebar_oauth":
+        return {}
+    required = ("wecom_userid", "external_userid", "corp_id", "session_id")
+    if any(not str(session.get(field) or "").strip() for field in required):
+        return {}
+    return dict(session)
 
 
 def _external_userid_from_request(request: Request) -> str:

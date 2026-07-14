@@ -1,10 +1,15 @@
 from __future__ import annotations
 
-import os
-import time
 from typing import Any, Callable
 
-from aicrm_next.shared.runtime_settings import runtime_setting
+from .wecom_runtime import (
+    TOKEN_INVALID_ERRCODES,
+    SingleFlightAccessTokenProvider,
+    WeComProviderError,
+    classify_wecom_provider_error,
+    load_wecom_execution_config,
+    shared_token_provider,
+)
 
 
 HttpRequest = Callable[..., Any]
@@ -27,11 +32,37 @@ class WeComAdapterBlocked(RuntimeError):
         self.missing_config = list(missing_config or [])
 
 
-class WeComApiError(RuntimeError):
-    def __init__(self, message: str, *, payload: dict[str, Any] | None = None) -> None:
-        super().__init__("wecom_api_error")
-        self.message = message
-        self.payload = dict(payload or {})
+class WeComApiError(WeComProviderError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        payload: dict[str, Any] | None = None,
+        error_code: str = "",
+        classification: str = "",
+        status_code: int | None = None,
+        retry_after_seconds: float | None = None,
+        real_external_call_executed: bool = True,
+    ) -> None:
+        safe_payload = dict(payload or {})
+        provider_errcode = int(safe_payload.get("errcode") or 0)
+        if not error_code or not classification:
+            derived_code, derived_classification = classify_wecom_provider_error(
+                provider_errcode=provider_errcode,
+                status_code=status_code,
+            )
+            error_code = error_code or derived_code
+            classification = classification or derived_classification
+        super().__init__(
+            message,
+            error_code=error_code,
+            classification=classification,
+            payload=safe_payload,
+            provider_errcode=provider_errcode,
+            status_code=status_code,
+            retry_after_seconds=retry_after_seconds,
+            real_external_call_executed=real_external_call_executed,
+        )
 
 
 class GuardedWeComAdapter:
@@ -102,18 +133,31 @@ class ProductionWeComAdapter:
         api_base: str | None = None,
         timeout: float | None = None,
         http_request: HttpRequest | None = None,
+        token_provider: SingleFlightAccessTokenProvider | None = None,
     ) -> None:
-        self.corp_id = _text(corp_id or os.getenv("WECOM_CORP_ID"))
-        self.secret = _text(secret or runtime_setting("WECOM_CONTACT_SECRET") or runtime_setting("WECOM_SECRET"))
-        self.api_base = _text(api_base or os.getenv("WECOM_API_BASE") or "https://qyapi.weixin.qq.com").rstrip("/")
-        self.timeout = float(timeout or os.getenv("WECOM_TIMEOUT_SECONDS") or 15)
+        config = load_wecom_execution_config()
+        self.corp_id = _text(corp_id or config.corp_id)
+        self.secret = _text(secret or config.contact_secret)
+        self.api_base = _text(api_base or config.api_base).rstrip("/")
+        self.timeout = float(timeout if timeout is not None else config.timeout_seconds)
         self.http_request = http_request or _default_http_request
-        self._access_token = ""
-        self._token_expires_at = 0.0
+        self._token_provider = token_provider or (
+            SingleFlightAccessTokenProvider()
+            if http_request is not None
+            else shared_token_provider(corp_id=self.corp_id, secret=self.secret, api_base=self.api_base)
+        )
 
     def get_access_token(self) -> str:
-        if self._access_token and self._token_expires_at > time.time():
-            return self._access_token
+        return self._token_provider.get(self._refresh_access_token)
+
+    def _refresh_access_token(self) -> tuple[str, int]:
+        if not self.corp_id or not self.secret:
+            raise WeComApiError(
+                "WeCom credentials are not configured",
+                error_code="config_missing",
+                classification="blocked",
+                real_external_call_executed=False,
+            )
         payload = self._request_without_token(
             "GET",
             "/cgi-bin/gettoken",
@@ -125,9 +169,16 @@ class ProductionWeComAdapter:
         if not token:
             raise WeComApiError("gettoken missing access_token", payload=payload)
         expires_in = int(payload.get("expires_in") or 7200)
-        self._access_token = token
-        self._token_expires_at = time.time() + max(60, expires_in - 60)
-        return token
+        return token, expires_in
+
+    @staticmethod
+    def _retry_after_seconds(response: Any) -> float | None:
+        headers = getattr(response, "headers", None) or {}
+        value = headers.get("Retry-After") if hasattr(headers, "get") else None
+        try:
+            return max(0.0, float(value)) if value not in (None, "") else None
+        except (TypeError, ValueError):
+            return None
 
     def _request_without_token(
         self,
@@ -137,6 +188,7 @@ class ProductionWeComAdapter:
         params: dict[str, Any] | None = None,
         json_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        response: Any | None = None
         try:
             response = self.http_request(
                 method,
@@ -145,10 +197,37 @@ class ProductionWeComAdapter:
                 json=json_payload,
                 timeout=self.timeout,
             )
-            response.raise_for_status()
             payload = response.json()
         except Exception as exc:
-            raise WeComApiError(str(exc)) from exc
+            error_response = getattr(exc, "response", None) or response
+            status_code = int(getattr(error_response, "status_code", 0) or 0) or None
+            name = exc.__class__.__name__.lower()
+            error_code, classification = classify_wecom_provider_error(
+                status_code=status_code,
+                transport_error=status_code is None,
+                timeout="timeout" in name,
+            )
+            raise WeComApiError(
+                str(exc),
+                error_code=error_code,
+                classification=classification,
+                status_code=status_code,
+                retry_after_seconds=self._retry_after_seconds(error_response),
+            ) from exc
+        status_code = int(getattr(response, "status_code", 200) or 200)
+        if status_code >= 400:
+            error_code, classification = classify_wecom_provider_error(
+                provider_errcode=int((payload or {}).get("errcode") or 0) if isinstance(payload, dict) else 0,
+                status_code=status_code,
+            )
+            raise WeComApiError(
+                f"WeCom HTTP {status_code}",
+                payload=dict(payload or {}) if isinstance(payload, dict) else {},
+                error_code=error_code,
+                classification=classification,
+                status_code=status_code,
+                retry_after_seconds=self._retry_after_seconds(response),
+            )
         return dict(payload or {})
 
     def _request(
@@ -159,13 +238,19 @@ class ProductionWeComAdapter:
         params: dict[str, Any] | None = None,
         json_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        access_token = self.get_access_token()
-        request_params = {"access_token": access_token}
-        request_params.update(params or {})
-        payload = self._request_without_token(method, path, params=request_params, json_payload=json_payload)
-        if int(payload.get("errcode") or 0) != 0:
+        for attempt in range(2):
+            access_token = self.get_access_token()
+            request_params = {"access_token": access_token}
+            request_params.update(params or {})
+            payload = self._request_without_token(method, path, params=request_params, json_payload=json_payload)
+            errcode = int(payload.get("errcode") or 0)
+            if not errcode:
+                return payload
+            if errcode in TOKEN_INVALID_ERRCODES and attempt == 0:
+                self._token_provider.invalidate(access_token)
+                continue
             raise WeComApiError(f"WeCom API failed for {path}", payload=payload)
-        return payload
+        raise WeComApiError("WeCom token refresh retry exhausted", error_code="token_refresh_exhausted", classification="terminal")
 
     def send_welcome_msg(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._request("POST", "/cgi-bin/externalcontact/send_welcome_msg", json_payload=payload)
@@ -217,28 +302,33 @@ class ProductionWeComAdapter:
 
 
 def real_wecom_calls_enabled() -> bool:
-    return _text(os.getenv("AICRM_NEXT_WECOM_REAL_CALLS_ENABLED")).lower() in {"1", "true", "yes", "on"}
+    return load_wecom_execution_config().real_calls_enabled
 
 
 def missing_wecom_config() -> list[str]:
+    config = load_wecom_execution_config()
     missing: list[str] = []
-    if not _text(os.getenv("WECOM_CORP_ID")):
+    if not config.corp_id:
         missing.append("WECOM_CORP_ID")
-    if not (_text(runtime_setting("WECOM_CONTACT_SECRET")) or _text(runtime_setting("WECOM_SECRET"))):
+    if not config.contact_secret:
         missing.append("WECOM_CONTACT_SECRET")
     return missing
 
 
 def wecom_adapter_diagnostics() -> dict[str, Any]:
+    config = load_wecom_execution_config()
     missing = missing_wecom_config()
-    enabled = real_wecom_calls_enabled() and not missing
+    enabled = config.real_calls_enabled and not missing
     if enabled:
         reason = "enabled"
+    elif config.conflict:
+        reason = "wecom_execution_config_conflict"
     elif missing:
         reason = "missing_wecom_config"
     else:
         reason = "wecom_real_calls_disabled"
     return {
+        **config.diagnostics(),
         "real_wecom_adapter_enabled": enabled,
         "real_wecom_adapter_reason": reason,
         "missing_config": missing,

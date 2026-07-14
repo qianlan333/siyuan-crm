@@ -25,7 +25,6 @@ from aicrm_next.shared.repository_provider import (
 
 PRODUCTION_ENV = {
     "AICRM_NEXT_ENV": "production",
-    "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": "1",
     "DATABASE_URL": "postgresql://probe:probe@127.0.0.1:1/aicrm_probe",
     "SECRET_KEY": "repository-provider-hardening",
 }
@@ -109,7 +108,6 @@ def _fixture_mode_matrix() -> dict[str, dict[str, Any]]:
     with patched_env(
         {
             "AICRM_NEXT_ENV": "experiment",
-            "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": None,
             "DATABASE_URL": None,
             "AICRM_NEXT_ALLOW_FIXTURE_REPO_IN_PROD": None,
         }

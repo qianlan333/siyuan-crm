@@ -61,9 +61,11 @@ curl -sS "$BASE_URL/api/admin/internal-events?event_type=payment.succeeded&trace
 
 4. Preview consumers:
 
+   `AICRM_ACCESS_TOKEN` 必须是 `automation_worker` 的短期 JWT（`audience=internal_worker`、`scope=write`）；见 [`../auth_client_credentials.md`](../auth_client_credentials.md)。
+
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due/preview" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"event_types":["payment.succeeded"]}' \
   | jq '{counts,dry_run,real_external_call_executed,items}'
@@ -73,7 +75,7 @@ curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due/preview" \
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"dry_run":true,"event_types":["payment.succeeded"]}' \
   | jq '{counts,dry_run,real_external_call_executed}'
@@ -85,7 +87,7 @@ curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
 export AICRM_INTERNAL_EVENTS_SHADOW_ONLY=0
 
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"dry_run":false,"event_types":["payment.succeeded"],"consumer_names":["order_projection_consumer"]}' \
   | jq '{counts,dry_run,items}'
@@ -95,7 +97,7 @@ curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"dry_run":false,"event_types":["payment.succeeded"],"consumer_names":["ai_audience_source_poke_consumer"]}' \
   | jq '{counts,items}'
@@ -106,7 +108,7 @@ curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"dry_run":false,"event_types":["payment.succeeded"],"consumer_names":["webhook_order_paid_consumer"]}' \
   | jq '{counts,items}'

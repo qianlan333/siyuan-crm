@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from time import time
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.main import create_app
+from tests.admin_auth_test_helpers import admin_session_cookies
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,19 +22,8 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def _admin_cookies() -> dict[str, str]:
-    return {
-        SESSION_COOKIE: sign_session(
-            {
-                "auth_source": "break_glass",
-                "login_type": "break_glass",
-                "username": "admin",
-                "display_name": "admin",
-                "roles": ["super_admin"],
-                "iat": int(time()),
-            }
-        )
-    }
+def _admin_cookies(client: TestClient) -> dict[str, str]:
+    return admin_session_cookies(client, "super_admin")
 
 
 def test_retired_automation_project_pages_return_gone(monkeypatch) -> None:
@@ -50,11 +38,11 @@ def test_retired_automation_project_pages_return_gone(monkeypatch) -> None:
     ]
 
     for url in urls:
-        response = client.get(url, cookies=_admin_cookies())
+        response = client.get(url, cookies=_admin_cookies(client))
         assert response.status_code == 410, url
         assert "旧自动化运营方案页面已下架，请使用 AI 自动化运营人群包" in response.text
 
-    list_response = client.get("/admin/automation-conversion", cookies=_admin_cookies())
+    list_response = client.get("/admin/automation-conversion", cookies=_admin_cookies(client))
     assert list_response.status_code == 200
     assert "AI 自动化运营" in list_response.text
     assert "人群包列表" in list_response.text
@@ -67,7 +55,7 @@ def test_retired_automation_project_pages_return_gone(monkeypatch) -> None:
     assert "AICRM_AI_AUDIENCE_API_TOKEN" not in list_response.text
     assert "/api/ai/audience/packages" not in list_response.text
 
-    legacy_response = client.get("/admin/automation-conversion/legacy", cookies=_admin_cookies())
+    legacy_response = client.get("/admin/automation-conversion/legacy", cookies=_admin_cookies(client))
     assert legacy_response.status_code == 404
 
 

@@ -41,7 +41,7 @@ def _healthy_mapping() -> dict[str, tuple[int, str]]:
         "127.0.0.1:5001/health": (200, '{"ok":true}'),
         "127.0.0.1:5002/health": (
             200,
-            '{"ok":true,"runtime":"ai_crm_wecom_ingress","time_sensitive_inline_enabled":true}',
+            '{"ok":true,"runtime":"ai_crm_wecom_ingress","durable_inbox_only":true,"ack_boundary":"signature_decrypt_and_durable_inbox_only"}',
         ),
         "/admin/webhook-inbox": (200, "<html></html>"),
         "/api/admin/webhook-inbox/metrics": (
@@ -65,7 +65,7 @@ def test_deploy_smoke_accepts_local_callback_runtime_and_admin_routes(monkeypatc
     assert payload["base_urls_distinct"] is True
     assert payload["web_health_ok"] is True
     assert payload["ingress_health_ok"] is True
-    assert payload["ingress_time_sensitive_inline_ready"] is True
+    assert payload["ingress_durable_ack_ready"] is True
     assert payload["admin_page_deployed"] is True
     assert payload["admin_api_deployed"] is True
     assert payload["admin_detail_route_deployed"] is True
@@ -94,7 +94,7 @@ def test_deploy_smoke_rejects_same_web_and_ingress_base_url(monkeypatch) -> None
     mapping = _healthy_mapping()
     mapping["same.example/health"] = (
         200,
-        '{"ok":true,"runtime":"ai_crm_wecom_ingress","time_sensitive_inline_enabled":true}',
+        '{"ok":true,"runtime":"ai_crm_wecom_ingress","durable_inbox_only":true,"ack_boundary":"signature_decrypt_and_durable_inbox_only"}',
     )
     monkeypatch.setattr(smoke, "urlopen", _fake_urlopen(mapping))
 
@@ -104,7 +104,7 @@ def test_deploy_smoke_rejects_same_web_and_ingress_base_url(monkeypatch) -> None
     assert payload["base_urls_distinct"] is False
     assert payload["web_health_ok"] is True
     assert payload["ingress_health_ok"] is True
-    assert payload["ingress_time_sensitive_inline_ready"] is True
+    assert payload["ingress_durable_ack_ready"] is True
     assert any("must be distinct" in warning for warning in payload["warnings"])
 
 
@@ -182,7 +182,7 @@ def test_deploy_smoke_rejects_missing_isolated_ingress_runtime(monkeypatch) -> N
     assert payload["admin_page_deployed"] is True
 
 
-def test_deploy_smoke_rejects_ingress_runtime_without_inline_welcome_signal(monkeypatch) -> None:
+def test_deploy_smoke_rejects_ingress_runtime_without_durable_ack_signal(monkeypatch) -> None:
     mapping = _healthy_mapping()
     mapping["127.0.0.1:5002/health"] = (200, '{"ok":true,"runtime":"ai_crm_wecom_ingress"}')
     monkeypatch.setattr(smoke, "urlopen", _fake_urlopen(mapping))
@@ -191,5 +191,5 @@ def test_deploy_smoke_rejects_ingress_runtime_without_inline_welcome_signal(monk
 
     assert payload["ok"] is False
     assert payload["ingress_health_ok"] is True
-    assert payload["ingress_time_sensitive_inline_ready"] is False
-    assert any("time-sensitive inline" in warning for warning in payload["warnings"])
+    assert payload["ingress_durable_ack_ready"] is False
+    assert any("durable-only ACK" in warning for warning in payload["warnings"])

@@ -1,13 +1,22 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("composed_internal_event_registry")
+
 from fastapi.testclient import TestClient
 
+from aicrm_next.ai_audience_ops import register_ai_audience_event_consumers
 from aicrm_next.platform_foundation.external_effects import WEBHOOK_ORDER_PAID_PUSH, ExternalEffectService, reset_external_effect_fixture_state
+from aicrm_next.internal_event_composition import register_payment_succeeded_consumers
 from aicrm_next.platform_foundation.internal_events import InternalEventService, reset_internal_event_fixture_state
+from aicrm_next.platform_foundation.internal_events.outbox import InternalEventOutboxRelay
 from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE
+from aicrm_next.platform_foundation.internal_events.repository import build_internal_event_repository
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
 from aicrm_next.public_product import h5_wechat_pay
 from aicrm_next.public_product.h5_wechat_pay import _apply_transaction
+from tests.admin_auth_test_helpers import install_admin_action_tokens
 
 
 PAYMENT_CONSUMERS = {
@@ -142,6 +151,11 @@ def _enable_shadow_payment_events(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE", "0")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES", "")
     monkeypatch.setattr("aicrm_next.commerce.external_push_admin.resolve_and_validate_public_https_url", lambda url: url)
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "enqueue_transactional_internal_event_outbox",
+        lambda conn, request: build_internal_event_repository().enqueue_outbox(request).to_dict(),
+    )
 
 
 def _reset_state() -> None:
@@ -149,19 +163,33 @@ def _reset_state() -> None:
     reset_external_effect_fixture_state()
 
 
-def _patch_legacy_outbox(monkeypatch) -> None:
-    monkeypatch.setattr(
-        h5_wechat_pay,
-        "enqueue_transaction_paid_outbox",
-        lambda conn, order: {"id": 9101, "event_type": "transaction.paid"},
-    )
-
-
 def _emit_payment(monkeypatch, *, out_trade_no: str = "WXP_SINGLE_CONSUMER"):
     _reset_state()
     _enable_shadow_payment_events(monkeypatch)
-    _patch_legacy_outbox(monkeypatch)
+
+    def fake_external_push_plan(*, order, transaction, domain_event_outbox_id):
+        del transaction, domain_event_outbox_id
+        job = ExternalEffectService().plan_effect(
+            effect_type=WEBHOOK_ORDER_PAID_PUSH,
+            adapter_name="webhook",
+            operation="order_paid_push",
+            target_type="external_push_delivery",
+            target_id=f"deliv_{order['id']}",
+            business_type="commerce_order",
+            business_id=str(order["id"]),
+            payload={"webhook_url": "https://example.com/order-paid"},
+            idempotency_key=f"commerce-external-push:deliv_{order['id']}",
+        )
+        return {"ok": True, "external_effect_job_id": job["id"]}
+
+    monkeypatch.setattr(
+        "aicrm_next.internal_event_composition._plan_order_paid_external_push_effect_from_db",
+        fake_external_push_plan,
+    )
     _apply_transaction(_PaymentConn(out_trade_no=out_trade_no), _transaction(out_trade_no))
+    register_payment_succeeded_consumers()
+    register_ai_audience_event_consumers()
+    assert InternalEventOutboxRelay().relay_due(limit=10)["ok"] is True
     event = InternalEventService().list_events({"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE})[0][0]
     runs, total = InternalEventService().list_consumer_runs({"event_id": event.event_id})
     assert total == 7
@@ -195,11 +223,14 @@ def test_single_consumer_run_requires_token(next_client: TestClient, monkeypatch
     assert response.status_code == 401
     assert response.json()["error"] in {"automation_internal_token_not_configured", "internal_token_required", "缺少 admin_action_token"}
 
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "single-consumer-token")
+    token = install_admin_action_tokens(
+        next_client,
+        ("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/run"),
+    )[("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/run")]
     authorized = next_client.post(
         f"/api/admin/internal-events/{event.event_id}/consumers/order_projection_consumer/run",
         json={"reason": "production_gray_single_consumer"},
-        headers={"Authorization": "Bearer single-consumer-token"},
+        headers={"X-Admin-Action-Token": token},
     )
     attempts = InternalEventService().list_attempts(event_id=event.event_id)
 
@@ -251,29 +282,28 @@ def test_single_consumer_execute_only_updates_specified_consumer(monkeypatch) ->
     assert attempts[0].consumer_name == "order_projection_consumer"
 
 
-def test_webhook_single_consumer_reuses_shadow_external_effect_without_external_attempt(monkeypatch) -> None:
+def test_webhook_single_consumer_creates_external_effect_without_external_attempt(monkeypatch) -> None:
     event = _emit_payment(monkeypatch)
-    legacy_jobs, legacy_total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH, "business_id": "881"})
-    legacy_job = legacy_jobs[0]
+    jobs_before, total_before = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH, "business_id": "881"})
 
     result = _run(event.event_id, "webhook_order_paid_consumer")
     jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_ORDER_PAID_PUSH, "business_id": "881"})
-    attempts = ExternalEffectService().list_attempts(legacy_job.id)
+    attempts = ExternalEffectService().list_attempts(jobs[0].id)
     response_summary = result["attempt"]["response_summary_json"]
 
-    assert legacy_total == 1
+    assert jobs_before == []
+    assert total_before == 0
     assert result["counts"]["succeeded_count"] == 1
     assert result["real_external_call_executed"] is False
     assert total == 1
-    assert jobs[0].id == legacy_job.id
     assert jobs[0].idempotency_key.startswith("commerce-external-push:")
     assert jobs[0].execution_mode == "execute"
     assert jobs[0].status == "queued"
     assert jobs[0].payload_json["webhook_url"] == "https://example.com/order-paid"
     assert jobs[0].attempt_count == 0
     assert attempts == []
-    assert response_summary["external_effect_job_reused"] is True
-    assert response_summary["external_effect_job_created"] is False
+    assert response_summary["external_effect_job_reused"] is False
+    assert response_summary["external_effect_job_created"] is True
     assert event.event_id
 
 
@@ -311,7 +341,8 @@ def test_repeated_webhook_single_consumer_does_not_duplicate_external_effect_job
 
     assert first["counts"]["succeeded_count"] == 1
     assert second["counts"]["succeeded_count"] == 1
-    assert first["attempt"]["response_summary_json"]["external_effect_job_reused"] is True
+    assert first["attempt"]["response_summary_json"]["external_effect_job_created"] is True
+    assert first["attempt"]["response_summary_json"]["external_effect_job_reused"] is False
     assert second["attempt"]["response_summary_json"]["external_effect_job_reused"] is True
     assert total == 1
     assert jobs[0].idempotency_key.startswith("commerce-external-push:")

@@ -31,7 +31,7 @@ REQUIRED_ASSETS = {
     "callback_ingress_entrypoint": "scripts/run_wecom_callback_ingress.py",
     "callback_ingress_systemd_unit": "deploy/openclaw-wecom-callback-ingress.service",
     "callback_worker_systemd_unit": "deploy/openclaw-wecom-callback-inbox-worker.service",
-    "callback_worker_systemd_timer": "deploy/openclaw-wecom-callback-inbox-worker.timer",
+    "typed_wecom_runtime": "aicrm_next/integration_gateway/wecom_runtime.py",
     "canonical_web_systemd_unit": "deploy/openclaw-wecom-postgres.service",
     "canonical_wecom_ingress_systemd_unit": "deploy/aicrm-wecom-ingress.service",
     "canonical_callback_worker_systemd_unit": "deploy/aicrm-wecom-callback-worker.service",
@@ -68,7 +68,7 @@ REQUIRED_TEST_PROOFS = {
         "tests/test_wecom_callback_inbox.py",
         "test_wecom_callback_worker_entrypoint_defaults_to_dry_run_and_requires_execute",
     ),
-    "worker_systemd_default_dry_run": (
+    "worker_systemd_persistent_service": (
         "tests/test_deploy_workflow_contract.py",
         "test_wecom_callback_inbox_worker_systemd_units_are_deployable",
     ),
@@ -172,13 +172,13 @@ REQUIRED_TEST_PROOFS = {
         "tests/test_next_channel_entry_orchestrator.py",
         "test_active_channel_baseline_emits_only_channel_entry_without_program_admission",
     ),
-    "external_effect_realtime_retryable_failure": (
+    "external_effect_realtime_unknown_quarantine": (
         "tests/test_external_effects_realtime.py",
-        "test_realtime_adapter_exception_leaves_job_retryable_for_worker",
+        "test_realtime_adapter_exception_quarantines_job_for_reconciliation",
     ),
-    "external_effect_stale_dispatching_reclaim": (
+    "external_effect_stale_dispatching_quarantine": (
         "tests/test_external_effects_mvp.py",
-        "test_external_effect_due_queue_reclaims_stale_dispatching_jobs",
+        "test_external_effect_due_queue_quarantines_stale_dispatching_jobs",
     ),
     "schema_contract": ("tests/test_webhook_inbox_migration_contract.py", "test_webhook_inbox_migration_locks_status_and_idempotency_contracts"),
     "webhook_inbox_service_models": (
@@ -244,14 +244,14 @@ OBJECTIVE_REQUIREMENTS = {
             "callback_processor_module",
             "callback_worker_entrypoint",
             "callback_worker_systemd_unit",
-            "callback_worker_systemd_timer",
+            "typed_wecom_runtime",
             "webhook_processing_checker",
         ],
         "tests": [
             "worker_retry_dead_letter",
             "worker_dry_run_preview_only",
             "worker_entrypoint_dry_run_gate",
-            "worker_systemd_default_dry_run",
+            "worker_systemd_persistent_service",
             "stale_processing_reclaim",
             "callback_worker_processor_boundary",
             "worker_dispatch_one",
@@ -271,8 +271,8 @@ OBJECTIVE_REQUIREMENTS = {
         "tests": [
             "external_effect_boundary",
             "channel_entry_effect_realtime_wakeup",
-            "external_effect_realtime_retryable_failure",
-            "external_effect_stale_dispatching_reclaim",
+            "external_effect_realtime_unknown_quarantine",
+            "external_effect_stale_dispatching_quarantine",
         ],
         "readiness": ["downstream_worker_isolation_ok"],
     },

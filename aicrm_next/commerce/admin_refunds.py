@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from aicrm_next.shared.runtime import database_mode
 
 from .admin_transactions import create_wechat_refund_request
@@ -14,19 +13,6 @@ from .wechat_shop_service import create_wechat_shop_refund_request, fixture_wech
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _record_refund_legacy_marker(provider: str, payload: dict[str, Any]) -> None:
-    try:
-        LegacyWebhookCleanupService().record_runtime_marker(
-            "old_payment_refund_direct_request",
-            marker="legacy_path_invoked",
-            operator="commerce.admin_refunds",
-            metadata={"provider": provider, "order_no_present": bool(_text(payload.get("order_no") or payload.get("out_trade_no")))},
-            real_external_call_executed=False,
-        )
-    except Exception:
-        pass
 
 
 def _int(value: Any) -> int:
@@ -190,7 +176,6 @@ def list_refunds(
 
 def request_refund(payload: dict[str, Any]) -> dict[str, Any]:
     provider = normalize_provider(payload.get("provider") or "wechat", default="wechat")
-    _record_refund_legacy_marker(provider, payload)
     if provider == "alipay":
         raise ValueError("provider_refund_not_supported")
     if provider == "wechat_shop":

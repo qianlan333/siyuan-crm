@@ -21,7 +21,6 @@ from aicrm_next.platform_foundation.internal_events.shadow import (
     emit_owner_migration_executed_shadow_event,
     safe_emit,
 )
-from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from aicrm_next.shared.runtime import production_data_ready
 
 from .repo import FixtureOwnerMigrationRepository, PostgresOwnerMigrationRepository
@@ -49,19 +48,6 @@ MOVE_FLAG_ALIASES = {
 
 def clean_text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _record_legacy_runtime_marker(metadata: dict[str, Any] | None = None) -> None:
-    try:
-        LegacyWebhookCleanupService().record_runtime_marker(
-            "old_owner_migration_legacy_execute_path",
-            marker="legacy_path_invoked",
-            operator="owner_migration.application",
-            metadata=metadata or {},
-            real_external_call_executed=False,
-        )
-    except Exception:
-        pass
 
 
 @dataclass(frozen=True)
@@ -360,7 +346,6 @@ class OwnerMigrationService:
         return {"ok": True, "content": body, "filename": f"owner_migration_result_{result_id}.xlsx"}
 
     def _run_legacy(self, command: OwnerMigrationCommand) -> dict[str, Any]:
-        _record_legacy_runtime_marker({"execute": bool(command.execute), "scoped_flow": False})
         source = clean_text(command.source_owner_userid)
         target = clean_text(command.target_owner_userid)
         operator = clean_text(command.operator) or "crm_console"

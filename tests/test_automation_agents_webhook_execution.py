@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 from urllib.parse import urlparse
 
@@ -9,27 +7,38 @@ from sqlalchemy import text
 
 from aicrm_next.automation_agents.context_builder import referenced_context_keys
 from aicrm_next.automation_agents.worker import AutomationAgentWorker
+from aicrm_next.external_effect_composition import build_external_effect_continuation_registry
 from aicrm_next.platform_foundation.command_bus.models import CommandContext
 from aicrm_next.platform_foundation.external_effects.adapters import ExternalEffectAdapterRegistry, WebhookAdapter
 from aicrm_next.platform_foundation.external_effects.models import WEBHOOK_GENERIC_PUSH
 from aicrm_next.platform_foundation.external_effects.service import ExternalEffectService
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
+from aicrm_next.platform_foundation.auth_platform.webhook_hmac import WebhookHmacSigner
 from aicrm_next.shared.db_session import get_session_factory
+from tests.webhook_hmac_test_helpers import (
+    install_webhook_hmac_client,
+    outbound_webhook_hmac_signer,
+    signed_headers,
+)
 
 
-def _insert_package(session, *, package_key: str = "agent_callback_pkg", secret: str = "callback-secret") -> int:
-    row = session.execute(
-        text(
-            """
+def _insert_package(session, *, package_key: str = "agent_callback_pkg") -> int:
+    row = (
+        session.execute(
+            text(
+                """
             INSERT INTO ai_audience_package (
-                package_key, name, status, inbound_webhook_secret, created_at, updated_at
+                package_key, name, status, created_at, updated_at
             )
-            VALUES (:package_key, 'Agent Callback Package', 'active', :secret, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            VALUES (:package_key, 'Agent Callback Package', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             RETURNING id
             """
-        ),
-        {"package_key": package_key, "secret": secret},
-    ).mappings().one()
+            ),
+            {"package_key": package_key},
+        )
+        .mappings()
+        .one()
+    )
     return int(row["id"])
 
 
@@ -40,45 +49,43 @@ def _insert_agent(
     automation_type: str = "agent",
     status: str = "active",
     package_key: str = "agent_callback_pkg",
-    secret: str = "agent-secret",
-    token: str = "agent-token",
     role_prompt: str = "你是助手，参考{{用户标签}}",
     task_prompt: str = "输出话术：{{最近20条聊天信息}}",
     fixed_content_package: str = '{"image_library_ids":[12],"miniprogram_library_ids":[],"attachment_library_ids":[],"content_text":""}',
 ) -> int:
-    row = session.execute(
-        text(
-            """
+    row = (
+        session.execute(
+            text(
+                """
             INSERT INTO automation_agent_runtime_config (
                 agent_code, agent_name, automation_type, bound_package_key, status,
                 draft_role_prompt, draft_task_prompt, published_role_prompt, published_task_prompt,
-                draft_version, published_version, fixed_content_package_json, inbound_webhook_secret,
-                inbound_webhook_token, send_webhook_url,
+                draft_version, published_version, fixed_content_package_json, send_webhook_url,
                 created_at, updated_at
             )
             VALUES (
                 :agent_code, '激活 Agent', :automation_type, :package_key, :status,
                 :role_prompt, :task_prompt, :role_prompt, :task_prompt,
-                1, 1, CAST(:fixed_content_package AS jsonb), :secret,
-                :token, :send_webhook_url,
+                1, 1, CAST(:fixed_content_package AS jsonb), :send_webhook_url,
                 CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
             )
             RETURNING id
             """
-        ),
-        {
-            "agent_code": agent_code,
-            "automation_type": automation_type,
-            "package_key": package_key,
-            "status": status,
-            "secret": secret,
-            "token": token,
-            "role_prompt": role_prompt,
-            "task_prompt": task_prompt,
-            "fixed_content_package": fixed_content_package,
-            "send_webhook_url": f"/api/ai/audience/packages/{package_key}/webhook",
-        },
-    ).mappings().one()
+            ),
+            {
+                "agent_code": agent_code,
+                "automation_type": automation_type,
+                "package_key": package_key,
+                "status": status,
+                "role_prompt": role_prompt,
+                "task_prompt": task_prompt,
+                "fixed_content_package": fixed_content_package,
+                "send_webhook_url": f"/api/ai/audience/packages/{package_key}/webhook",
+            },
+        )
+        .mappings()
+        .one()
+    )
     return int(row["id"])
 
 
@@ -110,10 +117,6 @@ def _insert_identities(session, *external_userids: str) -> None:
         )
 
 
-def _signature(secret: str, raw: bytes) -> str:
-    return hmac.new(secret.encode("utf-8"), raw, hashlib.sha256).hexdigest()
-
-
 def _count(table: str) -> int:
     with get_session_factory()() as session:
         return int(session.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar() or 0)
@@ -123,14 +126,16 @@ def _json_mapping(value):
     return json.loads(value) if isinstance(value, str) else value
 
 
-def _registry_with_post(fake_post) -> ExternalEffectAdapterRegistry:
+def _registry_with_post(fake_post, *, signer: WebhookHmacSigner | None = None) -> ExternalEffectAdapterRegistry:
     registry = ExternalEffectAdapterRegistry()
-    registry._adapters["outbound_webhook"] = WebhookAdapter(http_post=fake_post)  # type: ignore[attr-defined]
-    registry._adapters["webhook"] = WebhookAdapter(http_post=fake_post)  # type: ignore[attr-defined]
+    actual_signer = signer or outbound_webhook_hmac_signer()
+    registry._adapters["outbound_webhook"] = WebhookAdapter(http_post=fake_post, signer=actual_signer)  # type: ignore[attr-defined]
+    registry._adapters["webhook"] = WebhookAdapter(http_post=fake_post, signer=actual_signer)  # type: ignore[attr-defined]
     return registry
 
 
-def test_agent_webhook_accepts_url_token_and_optional_hmac(next_client, next_pg_schema) -> None:
+def test_agent_webhook_uses_registered_hmac_and_business_idempotency(next_client, next_pg_schema, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     with get_session_factory()() as session:
         _insert_package(session)
         _insert_agent(session)
@@ -138,63 +143,59 @@ def test_agent_webhook_accepts_url_token_and_optional_hmac(next_client, next_pg_
         session.commit()
 
     raw = json.dumps(["wm_001", "", "wm_001", "wm_002"], ensure_ascii=False, separators=(",", ":")).encode()
-    missing = next_client.post("/api/ai/agents/activation_agent/audience-webhook", content=raw, headers={"Content-Type": "application/json"})
-    assert missing.status_code == 401
-    assert missing.json()["error"] == "missing_token"
-
-    wrong_token = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=wrong",
-        content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+    credentials = install_webhook_hmac_client(
+        next_client,
+        capability="automation_agent_webhook_receive",
+        client_id="pytest-automation-agent-source",
     )
-    assert wrong_token.status_code == 401
-    assert wrong_token.json()["error"] == "invalid_token"
-
-    token_only = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
-        content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Idempotency-Key": "token-only-key"},
-    )
-    assert token_only.status_code == 200
-    assert token_only.json()["accepted_count"] == 2
-
-    invalid = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
-        content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": "bad"},
-    )
-    assert invalid.status_code == 401
-    assert invalid.json()["error"] == "invalid_signature"
-
+    headers = {
+        **signed_headers(credentials, body=raw, event_id="agent-source-event-0001"),
+        "X-AICRM-Event-Type": "audience.entered",
+        "X-AICRM-Idempotency-Key": "dedupe-key-1",
+    }
     accepted = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/activation_agent/audience-webhook",
         content=raw,
-        headers={
-            "Content-Type": "application/json",
-            "X-AICRM-Signature": _signature("agent-secret", raw),
-            "X-AICRM-Event-Type": "audience.entered",
-            "X-AICRM-Idempotency-Key": "dedupe-key-1",
-        },
+        headers=headers,
     )
     assert accepted.status_code == 200
     assert accepted.json()["mode"] == "queued"
     assert accepted.json()["received_count"] == 4
     assert accepted.json()["deduped_count"] == 2
     assert accepted.json()["accepted_count"] == 2
-    assert _count("automation_agent_webhook_batch") == 2
-    assert _count("automation_agent_webhook_item") == 4
+    assert _count("automation_agent_webhook_batch") == 1
+    assert _count("automation_agent_webhook_item") == 2
 
     replay = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/activation_agent/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw), "X-AICRM-Idempotency-Key": "dedupe-key-1"},
+        headers=headers,
     )
-    assert replay.status_code == 200
-    assert _count("automation_agent_webhook_batch") == 2
-    assert _count("automation_agent_webhook_item") == 4
+    assert replay.status_code == 401
+    assert replay.json()["error"] == "webhook_event_replayed"
+
+    query_token_only = next_client.post(
+        "/api/ai/agents/activation_agent/audience-webhook?token=obsolete-token",
+        content=raw,
+        headers={"Content-Type": "application/json"},
+    )
+    assert query_token_only.status_code == 401
+
+    business_replay = next_client.post(
+        "/api/ai/agents/activation_agent/audience-webhook",
+        content=raw,
+        headers={
+            **signed_headers(credentials, body=raw, event_id="agent-source-event-0002"),
+            "X-AICRM-Idempotency-Key": "dedupe-key-1",
+        },
+    )
+    assert business_replay.status_code == 200
+    assert _count("automation_agent_webhook_batch") == 1
+    assert _count("automation_agent_webhook_item") == 2
 
 
-def test_agent_webhook_rejects_inactive_and_large_payload(next_client, next_pg_schema) -> None:
+def test_agent_webhook_rejects_inactive_and_large_payload(next_client, next_pg_schema, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     with get_session_factory()() as session:
         _insert_package(session)
         _insert_agent(session, agent_code="paused_agent", status="paused")
@@ -203,10 +204,15 @@ def test_agent_webhook_rejects_inactive_and_large_payload(next_client, next_pg_s
         session.commit()
 
     raw = b'{"external_userids":["wm_001"]}'
+    credentials = install_webhook_hmac_client(
+        next_client,
+        capability="automation_agent_webhook_receive",
+        client_id="pytest-automation-agent-validation",
+    )
     paused = next_client.post(
-        "/api/ai/agents/paused_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/paused_agent/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+        headers=signed_headers(credentials, body=raw, event_id="agent-paused-event-0001"),
     )
     assert paused.status_code == 409
     assert paused.json()["error"] == "agent_not_active"
@@ -214,9 +220,9 @@ def test_agent_webhook_rejects_inactive_and_large_payload(next_client, next_pg_s
     large_payload = {"external_userids": [f"wm_{i:03d}" for i in range(201)]}
     large_raw = json.dumps(large_payload, separators=(",", ":")).encode()
     large = next_client.post(
-        "/api/ai/agents/large_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/large_agent/audience-webhook",
         content=large_raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", large_raw)},
+        headers=signed_headers(credentials, body=large_raw, event_id="agent-large-event-000001"),
     )
     assert large.status_code == 400
     assert large.json()["error"] == "too_many_external_userids"
@@ -269,7 +275,7 @@ def test_context_builder_hydrates_questionnaire_from_bound_audience_payload(monk
     monkeypatch.setattr(
         context_builder,
         "GetCustomerContextQuery",
-        lambda *args, **kwargs: (lambda request: {"customer": {"external_userid": request.external_userid}, "recent_messages": []}),
+        lambda *args, **kwargs: lambda request: {"customer": {"external_userid": request.external_userid}, "recent_messages": []},
     )
     monkeypatch.setattr(
         context_builder,
@@ -299,16 +305,16 @@ def test_worker_fake_mode_generates_package_and_enqueues_send_plan(next_client, 
     monkeypatch.setenv("AICRM_AI_AUDIENCE_AGENT_FAKE_OUTPUT", "你好，这是 Agent 生成的话术")
 
     with get_session_factory()() as session:
-        _insert_package(session, secret="callback-secret")
+        _insert_package(session)
         _insert_agent(session)
         _insert_identities(session, "wm_001")
         session.commit()
 
     raw = b'{"external_userids":["wm_001"]}'
     accepted = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/activation_agent/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+        headers={"Content-Type": "application/json"},
     )
     batch_id = accepted.json()["batch_id"]
 
@@ -353,16 +359,16 @@ def test_worker_rejects_prompt_like_llm_output_before_callback(next_client, next
     monkeypatch.setenv("AICRM_AI_AUDIENCE_AGENT_FAKE_OUTPUT", "输出话术：{{最近20条聊天信息}}")
 
     with get_session_factory()() as session:
-        _insert_package(session, secret="callback-secret")
+        _insert_package(session)
         _insert_agent(session)
         _insert_identities(session, "wm_001")
         session.commit()
 
     raw = b'{"external_userids":["wm_001"]}'
     accepted = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/activation_agent/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+        headers={"Content-Type": "application/json"},
     )
     batch_id = accepted.json()["batch_id"]
 
@@ -398,7 +404,7 @@ def test_worker_human_review_gate_blocks_auto_send(next_client, next_pg_schema, 
     monkeypatch.setenv("AICRM_AI_AUDIENCE_AGENT_FAKE_OUTPUT", "你好，这是需要审核的话术")
 
     with get_session_factory()() as session:
-        _insert_package(session, secret="callback-secret")
+        _insert_package(session)
         _insert_agent(session)
         _insert_identities(session, "wm_001")
         session.execute(text("UPDATE automation_agent_runtime_config SET need_human_review = TRUE WHERE agent_code = 'activation_agent'"))
@@ -406,9 +412,9 @@ def test_worker_human_review_gate_blocks_auto_send(next_client, next_pg_schema, 
 
     raw = b'{"external_userids":["wm_001"]}'
     accepted = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/activation_agent/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+        headers={"Content-Type": "application/json"},
     )
     batch_id = accepted.json()["batch_id"]
 
@@ -438,7 +444,7 @@ def test_worker_human_review_gate_blocks_auto_send(next_client, next_pg_schema, 
 
 def test_external_effect_agent_webhook_continuation_enqueues_broadcast_job(next_client, next_pg_schema, monkeypatch) -> None:
     with get_session_factory()() as session:
-        _insert_package(session, secret="callback-secret")
+        _insert_package(session)
         _insert_agent(
             session,
             automation_type="fixed_script",
@@ -461,14 +467,22 @@ def test_external_effect_agent_webhook_continuation_enqueues_broadcast_job(next_
     )
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE", "1")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES", WEBHOOK_GENERIC_PUSH)
+    monkeypatch.setenv("AICRM_PUBLIC_BASE_URL", "https://testserver")
 
     calls: list[dict] = []
+    credentials = install_webhook_hmac_client(
+        next_client,
+        capability="automation_agent_webhook_receive",
+        client_id="pytest-agent-continuation-source",
+    )
+    signer = WebhookHmacSigner(client_id=credentials.client_id, secret=credentials.secret)
 
-    def loopback_post(url, *, json, headers, timeout):
+    def loopback_post(url, *, data, headers, timeout):
         parsed = urlparse(url)
-        request_path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
-        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
-        return next_client.post(request_path, json=json, headers=headers)
+        calls.append({"url": url, "json": json.loads(data.decode("utf-8")), "headers": headers, "timeout": timeout})
+        with monkeypatch.context() as route_policy:
+            route_policy.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+            return next_client.post(parsed.path, content=data, headers=headers)
 
     job = ExternalEffectService().plan_effect(
         effect_type=WEBHOOK_GENERIC_PUSH,
@@ -477,7 +491,7 @@ def test_external_effect_agent_webhook_continuation_enqueues_broadcast_job(next_
         target_type="automation_agent_audience_webhook",
         target_id="activation_agent",
         payload={
-            "webhook_url": "https://testserver/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+            "webhook_url": "https://testserver/api/ai/agents/activation_agent/audience-webhook",
             "body": {"external_userids": ["wm_001"]},
             "headers": {
                 "X-AICRM-Event-Type": "audience.incremental.entered",
@@ -493,7 +507,10 @@ def test_external_effect_agent_webhook_continuation_enqueues_broadcast_job(next_
         status="queued",
     )
 
-    result = ExternalEffectWorker(adapter_registry=_registry_with_post(loopback_post)).run_due(
+    result = ExternalEffectWorker(
+        adapter_registry=_registry_with_post(loopback_post, signer=signer),
+        continuation_registry=build_external_effect_continuation_registry(),
+    ).run_due(
         batch_size=1,
         dry_run=False,
         effect_types=[WEBHOOK_GENERIC_PUSH],
@@ -529,7 +546,7 @@ def test_external_effect_agent_webhook_continuation_enqueues_broadcast_job(next_
 
 def test_worker_fixed_script_uses_configured_text_without_agent_generation(next_client, next_pg_schema, monkeypatch) -> None:
     with get_session_factory()() as session:
-        _insert_package(session, secret="callback-secret")
+        _insert_package(session)
         _insert_agent(
             session,
             agent_code="fixed_script_agent",
@@ -541,9 +558,9 @@ def test_worker_fixed_script_uses_configured_text_without_agent_generation(next_
 
     raw = b'{"external_userids":["wm_001"]}'
     accepted = next_client.post(
-        "/api/ai/agents/fixed_script_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/fixed_script_agent/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+        headers={"Content-Type": "application/json"},
     )
     batch_id = accepted.json()["batch_id"]
 
@@ -584,16 +601,16 @@ def test_worker_fixed_script_uses_configured_text_without_agent_generation(next_
 
 def test_worker_fixed_script_fails_when_content_text_missing(next_client, next_pg_schema, monkeypatch) -> None:
     with get_session_factory()() as session:
-        _insert_package(session, secret="callback-secret")
+        _insert_package(session)
         _insert_agent(session, agent_code="empty_fixed_script", automation_type="fixed_script")
         _insert_identities(session, "wm_001")
         session.commit()
 
     raw = b'{"external_userids":["wm_001"]}'
     accepted = next_client.post(
-        "/api/ai/agents/empty_fixed_script/audience-webhook?token=agent-token",
+        "/api/ai/agents/empty_fixed_script/audience-webhook",
         content=raw,
-        headers={"Content-Type": "application/json", "X-AICRM-Signature": _signature("agent-secret", raw)},
+        headers={"Content-Type": "application/json"},
     )
     batch_id = accepted.json()["batch_id"]
 
@@ -630,7 +647,7 @@ def test_worker_hydrates_questionnaire_prompt_from_bound_audience_submission(nex
 
     external_userid = "wm_questionnaire_001"
     with get_session_factory()() as session:
-        package_id = _insert_package(session, package_key="bound_questionnaire_pkg", secret="callback-secret")
+        package_id = _insert_package(session, package_key="bound_questionnaire_pkg")
         _insert_agent(
             session,
             package_key="bound_questionnaire_pkg",
@@ -732,11 +749,10 @@ def test_worker_hydrates_questionnaire_prompt_from_bound_audience_submission(nex
 
     raw = json.dumps([external_userid], ensure_ascii=False, separators=(",", ":")).encode()
     accepted = next_client.post(
-        "/api/ai/agents/activation_agent/audience-webhook?token=agent-token",
+        "/api/ai/agents/activation_agent/audience-webhook",
         content=raw,
         headers={
             "Content-Type": "application/json",
-            "X-AICRM-Signature": _signature("agent-secret", raw),
             "X-AICRM-Event-Type": "audience.incremental.entered",
             "X-AICRM-Refresh-Run-Id": str(run_id),
             "X-AICRM-Idempotency-Key": "bound-questionnaire-run",

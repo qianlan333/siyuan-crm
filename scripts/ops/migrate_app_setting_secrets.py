@@ -21,7 +21,6 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from aicrm_next.shared.db_session import get_engine  # noqa: E402
-from aicrm_next.shared.internal_service_tokens import TOKEN_PURPOSES  # noqa: E402
 from aicrm_next.shared.secret_store import (  # noqa: E402
     SECRET_REFERENCE_CUTOVER_KEY,
     SECRET_STORE_DIR_KEY,
@@ -35,7 +34,6 @@ from aicrm_next.shared.secret_store import (  # noqa: E402
 
 _ENV_ASSIGNMENT = re.compile(r"^(?P<prefix>\s*(?:export\s+)?)(?P<key>[A-Za-z_][A-Za-z0-9_]*)=")
 _AUDIT_REDACTION = "[redacted]"
-_AUTOMATION_WORKER_SETTING_KEY = TOKEN_PURPOSES["automation_worker"].setting_key
 
 
 @dataclass(frozen=True)
@@ -87,22 +85,6 @@ def _resolved_candidate_values(candidates: list[_Candidate], store: FileSecretSt
     return resolved
 
 
-def _internal_token_rotation_keys(resolved_by_key: Mapping[str, str]) -> list[str]:
-    internal_keys = {credential.setting_key for credential in TOKEN_PURPOSES.values()}
-    keys_by_value: dict[str, list[str]] = {}
-    for key in sorted(internal_keys):
-        value = str(resolved_by_key.get(key) or "")
-        if value:
-            keys_by_value.setdefault(value, []).append(key)
-    rotate: list[str] = []
-    for keys in keys_by_value.values():
-        if len(keys) < 2:
-            continue
-        keeper = _AUTOMATION_WORKER_SETTING_KEY if _AUTOMATION_WORKER_SETTING_KEY in keys else keys[0]
-        rotate.extend(key for key in keys if key != keeper)
-    return sorted(rotate)
-
-
 def _all_secret_values(candidates: list[_Candidate], store: FileSecretStore) -> set[str]:
     values = set(_resolved_candidate_values(candidates, store).values())
     for reference in store.list_references():
@@ -142,9 +124,7 @@ def _audit_redaction_plan(connection: Connection, secret_values: set[str]) -> li
     ordered_secret_values = tuple(sorted(secret_values, key=lambda value: (-len(value), value)))
     if not ordered_secret_values:
         return []
-    rows = connection.execute(
-        text("SELECT id, before_json, after_json FROM admin_operation_logs ORDER BY id")
-    ).mappings().all()
+    rows = connection.execute(text("SELECT id, before_json, after_json FROM admin_operation_logs ORDER BY id")).mappings().all()
     updates: list[dict[str, Any]] = []
     for row in rows:
         before = _parsed_audit_value(row.get("before_json"))
@@ -211,7 +191,12 @@ def _write_all(file_descriptor: int, data: bytes) -> None:
         offset += written
 
 
-def _persist_environment_values(path: Path, values: Mapping[str, str]) -> None:
+def _persist_environment_values(
+    path: Path,
+    values: Mapping[str, str],
+    *,
+    remove_keys: set[str] | frozenset[str] = frozenset(),
+) -> None:
     target = path.expanduser()
     if not target.is_absolute():
         raise ValueError("runtime environment file path must be absolute")
@@ -229,12 +214,17 @@ def _persist_environment_values(path: Path, values: Mapping[str, str]) -> None:
         mode = 0o600
 
     managed = {str(key): str(value) for key, value in values.items()}
+    removed = {str(key) for key in remove_keys}
+    if set(managed) & removed:
+        raise ValueError("environment key cannot be managed and removed together")
     pending = dict(managed)
     persisted: set[str] = set()
     lines: list[str] = []
     for line in body.splitlines():
         match = _ENV_ASSIGNMENT.match(line)
         key = str(match.group("key")) if match else ""
+        if key in removed:
+            continue
         if key in managed:
             if key in persisted:
                 continue
@@ -329,53 +319,11 @@ def migrate_app_setting_secrets(
     plaintext_pending = 0
     migrated = 0
     already_referenced = 0
-    generated = 0
-    generated_pending = 0
-    generated_keys: set[str] = set()
-    rotated_keys: set[str] = set()
-    resolved_before_migration = _resolved_candidate_values(candidates, store)
-    internal_token_rotations_pending = len(_internal_token_rotation_keys(resolved_before_migration))
     audit_secret_values = _all_secret_values(candidates, store)
     with engine.connect() as connection:
         audit_rows_redaction_pending = len(_audit_redaction_plan(connection, audit_secret_values))
-    legacy_token_present = any(
-        candidate.key == "AUTOMATION_INTERNAL_API_TOKEN" and bool(candidate.value)
-        for candidate in candidates
-    )
-    split_keys = {
-        credential.setting_key
-        for credential in TOKEN_PURPOSES.values()
-        if credential.purpose != "automation_worker"
-    }
-
     for candidate in candidates:
         if not candidate.value:
-            if legacy_token_present and candidate.key in split_keys:
-                if dry_run:
-                    generated_pending += 1
-                    items.append(
-                        _safe_item(
-                            key=candidate.key,
-                            source="generated",
-                            present=False,
-                            status="generation_pending",
-                        )
-                    )
-                    continue
-                reference = store.write(candidate.key, secrets.token_urlsafe(48))
-                prepared[candidate.key] = reference
-                generated_keys.add(candidate.key)
-                generated += 1
-                items.append(
-                    _safe_item(
-                        key=candidate.key,
-                        source="generated",
-                        present=True,
-                        status="generated",
-                        reference=reference,
-                    )
-                )
-                continue
             items.append(_safe_item(key=candidate.key, source=candidate.source, present=False, status="missing"))
             continue
         if is_secret_reference(candidate.value):
@@ -418,21 +366,12 @@ def migrate_app_setting_secrets(
 
     if dry_run:
         return {
-            "ok": bool(
-                plaintext_pending == 0
-                and generated_pending == 0
-                and internal_token_rotations_pending == 0
-                and audit_rows_redaction_pending == 0
-            ),
+            "ok": bool(plaintext_pending == 0 and audit_rows_redaction_pending == 0),
             "dry_run": True,
             "configured": sum(1 for item in items if item["present"]),
             "plaintext_pending": plaintext_pending,
             "migrated": 0,
             "already_referenced": already_referenced,
-            "generated": 0,
-            "generated_pending": generated_pending,
-            "rotated_internal_tokens": 0,
-            "internal_token_rotations_pending": internal_token_rotations_pending,
             "audit_rows_redacted": 0,
             "audit_rows_redaction_pending": audit_rows_redaction_pending,
             "cutover_enabled": False,
@@ -440,28 +379,6 @@ def migrate_app_setting_secrets(
             "items": items,
         }
 
-    resolved_prepared = {key: store.read(reference) for key, reference in prepared.items()}
-    for key in _internal_token_rotation_keys(resolved_prepared):
-        current_reference = prepared[key]
-        prepared[key] = store.write(
-            key,
-            secrets.token_urlsafe(48),
-            current_reference=current_reference,
-        )
-        rotated_keys.add(key)
-        for index, item in enumerate(items):
-            if item["key"] != key:
-                continue
-            if item["status"] == "already_referenced":
-                already_referenced -= 1
-            items[index] = _safe_item(
-                key=key,
-                source=str(item["source"]),
-                present=True,
-                status="rotated_duplicate",
-                reference=prepared[key],
-            )
-            break
     audit_secret_values = _all_secret_values(candidates, store)
 
     environment_file_updated = False
@@ -472,11 +389,6 @@ def migrate_app_setting_secrets(
     with engine.begin() as connection:
         current = _read_app_settings(connection)
         for key, reference in prepared.items():
-            if key in generated_keys:
-                if str(current.get(key) or "").strip():
-                    raise RuntimeError(f"app setting appeared during secret migration for key={key}")
-                _insert_reference(connection, key=key, reference=reference)
-                continue
             original = original_by_key[key]
             current_value = str(current.get(key) or "").strip()
             if original.source == "app_settings" and current_value != original.value:
@@ -485,7 +397,7 @@ def migrate_app_setting_secrets(
                 raise RuntimeError(f"app setting appeared during secret migration for key={key}")
             if original.source == "environment":
                 _insert_reference(connection, key=key, reference=reference)
-            elif key in rotated_keys or not is_secret_reference(original.value):
+            elif not is_secret_reference(original.value):
                 _replace_plaintext_reference(
                     connection,
                     key=key,
@@ -504,11 +416,7 @@ def migrate_app_setting_secrets(
             transaction_hook(connection)
 
     if environment_file is not None:
-        environment_references = {
-            key: reference
-            for key, reference in prepared.items()
-            if str(environment.get(key) or "").strip() or key in generated_keys or key in rotated_keys
-        }
+        environment_references = {key: reference for key, reference in prepared.items() if str(environment.get(key) or "").strip()}
         _persist_environment_values(
             environment_file,
             {
@@ -526,10 +434,6 @@ def migrate_app_setting_secrets(
         "plaintext_pending": 0,
         "migrated": migrated,
         "already_referenced": already_referenced,
-        "generated": generated,
-        "generated_pending": 0,
-        "rotated_internal_tokens": len(rotated_keys),
-        "internal_token_rotations_pending": 0,
         "audit_rows_redacted": audit_rows_redacted,
         "audit_rows_redaction_pending": 0,
         "cutover_enabled": True,

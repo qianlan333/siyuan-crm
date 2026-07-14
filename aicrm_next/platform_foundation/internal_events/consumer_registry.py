@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterator
 
 from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerType, InternalEventConsumerRun
 
@@ -100,3 +102,22 @@ class InternalEventConsumerRegistry:
 
 
 DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY = InternalEventConsumerRegistry()
+_SCOPED_INTERNAL_EVENT_CONSUMER_REGISTRY: ContextVar[InternalEventConsumerRegistry | None] = ContextVar(
+    "aicrm_internal_event_consumer_registry",
+    default=None,
+)
+
+
+def current_internal_event_consumer_registry() -> InternalEventConsumerRegistry:
+    return _SCOPED_INTERNAL_EVENT_CONSUMER_REGISTRY.get() or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
+
+
+@contextmanager
+def internal_event_consumer_registry_scope(
+    registry: InternalEventConsumerRegistry,
+) -> Iterator[InternalEventConsumerRegistry]:
+    token = _SCOPED_INTERNAL_EVENT_CONSUMER_REGISTRY.set(registry)
+    try:
+        yield registry
+    finally:
+        _SCOPED_INTERNAL_EVENT_CONSUMER_REGISTRY.reset(token)

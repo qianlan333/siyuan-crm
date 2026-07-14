@@ -1,9 +1,16 @@
 from __future__ import annotations
 
+import os
+
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
-from aicrm_next.customer_read_model.repo import _DEFAULT_LIVE_SOURCE_LIST_LIMIT, build_customer_live_source_repository
+from aicrm_next.customer_read_model.repo import (
+    _DEFAULT_LIVE_SOURCE_LIST_LIMIT,
+    LiveSourceCustomerReadRepository,
+    build_customer_live_source_repository,
+)
+from aicrm_next.shared.database import get_sqlalchemy_database_url
 
 
 def _execute_all(session, statements: list[str]) -> None:
@@ -184,3 +191,55 @@ def test_live_source_repository_uses_safe_default_limit_when_limit_is_none(monke
     assert repo.list_customers(limit=None, offset=0) == []
     assert executed_params[-1]["limit"] == _DEFAULT_LIVE_SOURCE_LIST_LIMIT
     assert executed_params[-1]["limit"] != 100000
+
+
+def test_recent_message_snapshot_supports_legacy_text_send_time(next_pg_schema):
+    engine = create_engine(get_sqlalchemy_database_url(os.environ["DATABASE_URL"]), future=True)
+    connection = engine.connect()
+    transaction = connection.begin()
+    session = sessionmaker(bind=connection, future=True)()
+    try:
+        session.execute(
+            text(
+                """
+                CREATE TEMPORARY TABLE archived_messages (
+                    id BIGINT PRIMARY KEY,
+                    msgid TEXT,
+                    chat_type TEXT,
+                    unionid TEXT,
+                    owner_userid TEXT,
+                    msgtype TEXT,
+                    content TEXT,
+                    send_time TEXT,
+                    created_at TIMESTAMPTZ NOT NULL
+                ) ON COMMIT DROP
+                """
+            )
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO archived_messages (
+                    id, msgid, chat_type, unionid, owner_userid, msgtype,
+                    content, send_time, created_at
+                ) VALUES
+                    (1, 'msg-older', 'single', 'union-legacy', 'owner-a', 'text',
+                     'older', '', '2026-07-12T08:00:00+00:00'),
+                    (2, 'msg-newer', 'single', 'union-legacy', 'owner-a', 'text',
+                     'newer', '2026-07-13T09:00:00+00:00', '2026-07-13T08:00:00+00:00')
+                """
+            )
+        )
+
+        snapshot = LiveSourceCustomerReadRepository(session).snapshot_recent_messages_by_unionid(
+            ["union-legacy"],
+            per_customer_limit=100,
+        )
+
+        assert [item["msgid"] for item in snapshot["union-legacy"]] == ["msg-newer", "msg-older"]
+        assert snapshot["union-legacy"][1]["send_time"].startswith("2026-07-12 ")
+    finally:
+        session.close()
+        transaction.rollback()
+        connection.close()
+        engine.dispose()

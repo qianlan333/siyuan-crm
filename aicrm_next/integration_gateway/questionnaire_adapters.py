@@ -579,9 +579,15 @@ class QuestionnaireSubmitSideEffectGateway:
         *,
         tag_adapter: WeComTagAdapter | None = None,
         push_adapter: QuestionnaireExternalPushAdapter | None = None,
+        local_tag_projector: Callable[..., Json] | None = None,
+        tag_mutation_executor: Callable[..., Json] | None = None,
+        mobile_binder: Callable[..., Json] | None = None,
     ) -> None:
         self._tag_adapter = tag_adapter or build_wecom_tag_adapter()
         self._push_adapter = push_adapter or build_questionnaire_external_push_adapter()
+        self._local_tag_projector = local_tag_projector
+        self._tag_mutation_executor = tag_mutation_executor
+        self._mobile_binder = mobile_binder
 
     def apply_tags(
         self,
@@ -593,26 +599,33 @@ class QuestionnaireSubmitSideEffectGateway:
         unionid: str = "",
         follow_user_userid: str = "",
     ) -> Json:
-        from aicrm_next.customer_tags.local_projection import project_questionnaire_tags
-
-        local_projection = project_questionnaire_tags(
-            unionid=unionid,
-            external_userid=external_userid,
-            owner_userid=follow_user_userid,
-            tag_ids=tag_ids,
-            source="questionnaire_submit_pipeline",
-            questionnaire_id=questionnaire_id,
-            submission_id=submission_id,
-            idempotency_key=make_idempotency_key(
-                operation="questionnaire.tag.local_projection",
-                payload={
-                    "questionnaire_id": questionnaire_id,
-                    "submission_id": submission_id,
-                    "unionid": unionid,
-                    "external_userid": external_userid,
-                    "tag_ids": sorted(tag_ids),
-                },
-            ),
+        projection_key = make_idempotency_key(
+            operation="questionnaire.tag.local_projection",
+            payload={
+                "questionnaire_id": questionnaire_id,
+                "submission_id": submission_id,
+                "unionid": unionid,
+                "external_userid": external_userid,
+                "tag_ids": sorted(tag_ids),
+            },
+        )
+        local_projection = (
+            self._local_tag_projector(
+                unionid=unionid,
+                external_userid=external_userid,
+                owner_userid=follow_user_userid,
+                tag_ids=tag_ids,
+                source="questionnaire_submit_pipeline",
+                questionnaire_id=questionnaire_id,
+                submission_id=submission_id,
+                idempotency_key=projection_key,
+            )
+            if self._local_tag_projector
+            else {
+                "ok": False,
+                "local_projection_updated": False,
+                "source_status": "composition_unavailable",
+            }
         )
         if not tag_ids:
             return self.record_side_effect_audit(
@@ -637,36 +650,33 @@ class QuestionnaireSubmitSideEffectGateway:
                     "local_projection_updated": bool(local_projection.get("local_projection_updated")),
                 },
             )
-        from aicrm_next.customer_tags.live_mutation import execute_wecom_tag_mutation
-        from aicrm_next.customer_tags.mutation_commands import PlanQuestionnaireTagSideEffectCommand
-
-        command = PlanQuestionnaireTagSideEffectCommand(
-            idempotency_key=make_idempotency_key(
-                operation="questionnaire.tag.apply",
-                payload={
+        if self._tag_mutation_executor is None:
+            return self.record_side_effect_audit(
+                operation="apply_tags",
+                target={
                     "questionnaire_id": questionnaire_id,
                     "submission_id": submission_id,
                     "external_userid": external_userid,
-                    "tag_ids": sorted(tag_ids),
+                    "tag_ids": tag_ids,
                 },
-            ),
-            actor_id="questionnaire_submit_pipeline",
-            actor_type="system",
+                result={
+                    "skipped": False,
+                    "reason": "tag_mutation_composition_unavailable",
+                    "external_effect_status": "blocked",
+                    "local_projection": local_projection,
+                    "local_projection_updated": bool(local_projection.get("local_projection_updated")),
+                },
+                error_code="tag_mutation_composition_unavailable",
+            )
+        return self._tag_mutation_executor(
+            questionnaire_id=questionnaire_id,
+            submission_id=submission_id,
             external_userid=external_userid,
             tag_ids=tag_ids,
-            source_route="/api/h5/questionnaires/{slug}/submit",
-            source_context={
-                "source": "questionnaire_submit_pipeline",
-                "questionnaire_id": questionnaire_id,
-                "submission_id": submission_id,
-                "unionid": unionid,
-                "follow_user_userid": follow_user_userid,
-                "local_projection": local_projection,
-                "local_projection_updated": bool(local_projection.get("local_projection_updated")),
-                "bypass_push_capability": True,
-            },
+            unionid=unionid,
+            follow_user_userid=follow_user_userid,
+            local_projection=local_projection,
         )
-        return execute_wecom_tag_mutation(command)
 
     def emit_external_push(self, *, questionnaire_id: int | str, submission_id: str, webhook_url: str | None, payload_summary: dict[str, Any]) -> Json:
         if not webhook_url:
@@ -691,25 +701,27 @@ class QuestionnaireSubmitSideEffectGateway:
                 },
                 result={"skipped": True, "reason": "missing_external_userid_or_mobile"},
             )
-        from aicrm_next.identity_contact.application import BindMobileToExternalContactCommand
-        from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest
-
         target = {
             "questionnaire_id": questionnaire.get("id"),
             "submission_id": submission.get("submission_id"),
             "external_userid": external_userid,
             "mobile_present": True,
         }
+        if self._mobile_binder is None:
+            return self.record_side_effect_audit(
+                operation="bind_mobile",
+                target=target,
+                result={"skipped": False, "reason": "mobile_binding_composition_unavailable"},
+                error_code="mobile_binding_composition_unavailable",
+            )
         try:
-            result = BindMobileToExternalContactCommand()(
-                BindMobileToExternalContactRequest(
-                    external_userid=external_userid,
-                    mobile=mobile,
-                    owner_userid=str(submission.get("owner_userid") or submission.get("follow_user_userid") or "").strip(),
-                    bind_by_userid="questionnaire_submit",
-                    customer_name=str(submission.get("customer_name") or "问卷提交用户").strip(),
-                    force_rebind=True,
-                )
+            result = self._mobile_binder(
+                external_userid=external_userid,
+                mobile=mobile,
+                owner_userid=str(submission.get("owner_userid") or submission.get("follow_user_userid") or "").strip(),
+                bind_by_userid="questionnaire_submit",
+                customer_name=str(submission.get("customer_name") or "问卷提交用户").strip(),
+                force_rebind=True,
             )
         except Exception as exc:
             return self.record_side_effect_audit(

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_jobs.routes import ensure_admin_action_token
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import (
     ExternalEffectService,
@@ -10,6 +9,13 @@ from aicrm_next.platform_foundation.external_effects import (
     reset_external_effect_fixture_state,
 )
 from aicrm_next.platform_foundation.external_effects.repo import build_external_effect_repository
+from tests.admin_auth_test_helpers import install_admin_action_tokens
+
+
+RUN_DUE_ROUTE = "/api/admin/external-effects/run-due"
+PREVIEW_DUE_ROUTE = "/api/admin/external-effects/run-due/preview"
+RETRY_JOB_ROUTE = "/api/admin/external-effects/jobs/{job_id}/retry"
+CANCEL_JOB_ROUTE = "/api/admin/external-effects/jobs/{job_id}/cancel"
 
 
 RAW_MOBILE = "13800138000"
@@ -21,7 +27,7 @@ RAW_OPENID = "openid_sensitive_fixture"
 RAW_UNIONID = "unionid_sensitive_fixture"
 RAW_SECRET = "super-secret-value"
 RAW_AUTHORIZATION = "Bearer authorization-secret"
-RAW_RECEIVER_TOKEN = "receiver-token-secret"
+RECEIPT_EVENT_ID = "event-admin-redaction-0001"
 
 
 SENSITIVE_LITERALS = [
@@ -35,7 +41,6 @@ SENSITIVE_LITERALS = [
     RAW_SECRET,
     RAW_AUTHORIZATION,
     "authorization-secret",
-    RAW_RECEIVER_TOKEN,
 ]
 
 
@@ -118,10 +123,10 @@ def _seed_sensitive_external_effect(*, status: str = "blocked") -> int:
         error_message=f"blocked call to {RAW_WEBHOOK_URL} for {RAW_MOBILE}",
     )
     repo.create_test_receipt(
-        receiver_token=RAW_RECEIVER_TOKEN,
+        event_id=RECEIPT_EVENT_ID,
         job=job,
         request_method="POST",
-        request_path="/api/external-effects/test-receiver/receiver-token-secret",
+        request_path="/api/external-effects/test-receiver",
         headers_summary={"authorization": RAW_AUTHORIZATION},
         payload_summary={"mobile": RAW_MOBILE, "external_userid": RAW_EXTERNAL_USERID},
         payload_hash="safe-payload-hash",
@@ -157,7 +162,7 @@ def test_external_effect_admin_jobs_list_detail_attempts_receipts_and_diagnostic
         params={"problem_only": "false", "target_id": RAW_EXTERNAL_USERID},
     )
     troubleshooting_detail = next_client.get(f"/api/admin/external-effects/troubleshooting/jobs/{job_id}")
-    receipts = next_client.get("/api/admin/external-effects/test-receipts", params={"receiver_token": RAW_RECEIVER_TOKEN})
+    receipts = next_client.get("/api/admin/external-effects/test-receipts", params={"event_id": RECEIPT_EVENT_ID})
     receipt_id = receipts.json()["items"][0]["receipt_id"]
     receipt_detail = next_client.get(f"/api/admin/external-effects/test-receipts/{receipt_id}")
     diagnostics = next_client.get("/api/admin/external-effects/diagnostics", params={"target_id": RAW_EXTERNAL_USERID})
@@ -169,7 +174,13 @@ def test_external_effect_admin_jobs_list_detail_attempts_receipts_and_diagnostic
     listed_body = listed.json()
     assert "payload_json" not in listed_body["items"][0]
     assert "payload_json" not in listed_body["selected_job"]
+    assert "lease_token" not in listed_body["items"][0]
+    assert "lease_token" not in listed_body["selected_job"]
     assert listed_body["items"][0]["payload_json_redacted"] is True
+    assert listed_body["items"][0]["side_effect_executed"] is False
+    assert listed_body["items"][0]["provider_result_received"] is False
+    assert listed_body["items"][0]["reconciliation_required"] is False
+    assert listed_body["items"][0]["result_summary_json"] == {}
     assert listed_body["items"][0]["payload_summary_json"]["mobile"] == "[redacted]"
     assert listed_body["attempts"][0]["request_summary_json"]["endpoint"] == "[redacted]"
     assert listed_body["attempts"][0]["response_summary_json"]["body"] == "[redacted]"
@@ -186,18 +197,29 @@ def test_external_effect_admin_jobs_list_detail_attempts_receipts_and_diagnostic
     troubleshooting_body = troubleshooting.json()
     assert "payload_json" not in troubleshooting_body["items"][0]
     assert troubleshooting_detail.json()["attempts"][0]["request_summary_json"]["Authorization"] == "[redacted]"
-    assert receipts.json()["items"][0]["receiver_token"] == "[redacted]"
+    assert receipts.json()["items"][0]["event_id"] == RECEIPT_EVENT_ID
     assert receipts.json()["items"][0]["body_json"]["external_userid"] == "[redacted]"
     assert receipt_detail.json()["receipt"]["body_json"]["transaction_id"] == "[redacted]"
     assert diagnostics.json()["filters"]["target_id"] == "[pii]"
 
 
-def test_external_effect_retry_and_cancel_responses_are_redacted(next_client: TestClient) -> None:
+def test_external_effect_retry_and_cancel_responses_are_redacted(next_client: TestClient, monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+    tokens = install_admin_action_tokens(
+        next_client,
+        ("POST", RETRY_JOB_ROUTE),
+        ("POST", CANCEL_JOB_ROUTE),
+    )
     job_id = _seed_sensitive_external_effect()
-    token = ensure_admin_action_token()
 
-    retried = next_client.post(f"/api/admin/external-effects/jobs/{job_id}/retry", json={"admin_action_token": token})
-    cancelled = next_client.post(f"/api/admin/external-effects/jobs/{job_id}/cancel", json={"admin_action_token": token})
+    retried = next_client.post(
+        f"/api/admin/external-effects/jobs/{job_id}/retry",
+        json={"admin_action_token": tokens[("POST", RETRY_JOB_ROUTE)]},
+    )
+    cancelled = next_client.post(
+        f"/api/admin/external-effects/jobs/{job_id}/cancel",
+        json={"admin_action_token": tokens[("POST", CANCEL_JOB_ROUTE)]},
+    )
 
     assert retried.status_code == 200
     assert cancelled.status_code == 200
@@ -208,17 +230,22 @@ def test_external_effect_retry_and_cancel_responses_are_redacted(next_client: Te
 
 
 def test_external_effect_run_due_preview_and_dry_run_responses_are_redacted(next_client: TestClient, monkeypatch) -> None:
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "effect-token")
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+    tokens = install_admin_action_tokens(
+        next_client,
+        ("POST", PREVIEW_DUE_ROUTE),
+        ("POST", RUN_DUE_ROUTE),
+    )
     _seed_sensitive_external_effect(status="queued")
 
     preview = next_client.post(
         "/api/admin/external-effects/run-due/preview",
-        headers={"Authorization": "Bearer effect-token"},
+        headers={"X-Admin-Action-Token": tokens[("POST", PREVIEW_DUE_ROUTE)]},
         json={"batch_size": 1, "effect_types": [WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH]},
     )
     dry_run = next_client.post(
         "/api/admin/external-effects/run-due",
-        headers={"Authorization": "Bearer effect-token"},
+        headers={"X-Admin-Action-Token": tokens[("POST", RUN_DUE_ROUTE)]},
         json={"batch_size": 1, "dry_run": True, "effect_types": [WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH]},
     )
 

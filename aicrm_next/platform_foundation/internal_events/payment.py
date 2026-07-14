@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from aicrm_next.platform_foundation.external_effects import ExternalEffectJob, ExternalEffectService, WEBHOOK_ORDER_PAID_PUSH
+from aicrm_next.platform_foundation.command_bus import CommandContext
 
-from .consumer_registry import DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY, InternalEventConsumerRegistry
-from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerRun
-from .repository import plan_order_paid_external_push_effect_from_db, read_wechat_pay_order_for_payment_event
+from .consumer_registry import (
+    InternalEventConsumerHandler,
+    InternalEventConsumerRegistry,
+    current_internal_event_consumer_registry,
+)
+from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerRun, InternalEventCreateRequest
+from .repository import read_wechat_pay_order_for_payment_event
 
 PAYMENT_SUCCEEDED_EVENT_TYPE = "payment.succeeded"
 TRANSACTION_PAID_EVENT_ALIAS = "transaction.paid"
@@ -31,6 +37,69 @@ PAYMENT_SUCCEEDED_PRODUCTION_EVENT_CONSUMERS = tuple(
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _masked_mobile(value: Any) -> str:
+    digits = "".join(char for char in _text(value) if char.isdigit())
+    return f"{digits[:3]}****{digits[-4:]}" if len(digits) >= 7 else ""
+
+
+def build_payment_succeeded_event_request(
+    *,
+    order: dict[str, Any],
+    transaction: dict[str, Any],
+    domain_event_outbox_id: Any = None,
+    source_route: str = "",
+) -> InternalEventCreateRequest | None:
+    out_trade_no = _text(order.get("out_trade_no") or transaction.get("out_trade_no"))
+    aggregate_id = _text(order.get("id") or out_trade_no)
+    if not out_trade_no or not aggregate_id:
+        return None
+    subject_id = (
+        _text(order.get("unionid"))
+        or _text(order.get("external_userid"))
+        or _text(order.get("userid_snapshot"))
+        or _text(order.get("respondent_key"))
+    )
+    return InternalEventCreateRequest(
+        event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
+        event_version=1,
+        aggregate_type="wechat_pay_order",
+        aggregate_id=aggregate_id,
+        subject_type="customer",
+        subject_id=subject_id,
+        idempotency_key=f"payment.succeeded:{out_trade_no}",
+        source_module="public_product.h5_wechat_pay",
+        source_command_id=out_trade_no,
+        correlation_id=out_trade_no,
+        context=CommandContext(
+            actor_id="wechat_pay_notify",
+            actor_type="system",
+            trace_id=out_trade_no,
+            request_id=_text(transaction.get("transaction_id")),
+            source_route=source_route or "/api/h5/wechat-pay/notify",
+        ),
+        payload={
+            "order": dict(order),
+            "transaction": dict(transaction or {}),
+            "domain_event_outbox_id": domain_event_outbox_id,
+            "legacy_event_aliases": [TRANSACTION_PAID_EVENT_ALIAS, PAYMENT_SUCCEEDED_EVENT_ALIAS],
+        },
+        payload_summary={
+            "out_trade_no": out_trade_no,
+            "order_id": order.get("id"),
+            "aggregate_id": aggregate_id,
+            "subject_type": "customer",
+            "subject_id": subject_id,
+            "product_code": order.get("product_code"),
+            "amount_total": int(order.get("amount_total") or order.get("payer_total") or 0),
+            "status": order.get("status"),
+            "trade_state": order.get("trade_state"),
+            "paid_at": str(order.get("paid_at") or ""),
+            "mobile_masked": _masked_mobile(order.get("mobile_snapshot")),
+            "domain_event_outbox_id": domain_event_outbox_id,
+        },
+    )
 
 
 def _order_from_event(event: InternalEvent) -> dict[str, Any]:
@@ -78,8 +147,11 @@ def _plan_order_paid_external_push_from_db(
     order: dict[str, Any],
     transaction: dict[str, Any],
     event: InternalEvent,
+    planner: Callable[..., dict[str, Any] | None] | None,
 ) -> dict[str, Any] | None:
-    return plan_order_paid_external_push_effect_from_db(
+    if planner is None:
+        raise RuntimeError("order-paid external push planner composition is required")
+    return planner(
         order=order,
         transaction=transaction,
         domain_event_outbox_id=(event.payload_json or {}).get("domain_event_outbox_id"),
@@ -113,7 +185,12 @@ def order_projection_consumer(event: InternalEvent, run: InternalEventConsumerRu
     )
 
 
-def webhook_order_paid_consumer(event: InternalEvent, run: InternalEventConsumerRun) -> InternalEventConsumerResult:
+def webhook_order_paid_consumer(
+    event: InternalEvent,
+    run: InternalEventConsumerRun,
+    *,
+    external_push_planner: Callable[..., dict[str, Any] | None] | None = None,
+) -> InternalEventConsumerResult:
     order = _order_from_event(event)
     transaction = _transaction_from_event(event)
     out_trade_no = _text(order.get("out_trade_no") or transaction.get("out_trade_no") or event.aggregate_id)
@@ -146,7 +223,31 @@ def webhook_order_paid_consumer(event: InternalEvent, run: InternalEventConsumer
                 "effect_type": WEBHOOK_ORDER_PAID_PUSH,
             },
         )
-    planned = _plan_order_paid_external_push_from_db(order=order, transaction=transaction, event=event)
+    try:
+        planned = _plan_order_paid_external_push_from_db(
+            order=order,
+            transaction=transaction,
+            event=event,
+            planner=external_push_planner,
+        )
+    except Exception as exc:
+        return InternalEventConsumerResult(
+            status="failed_retryable",
+            request_summary={"event_id": event.event_id, "out_trade_no": out_trade_no},
+            response_summary={"external_effect_job_created": False, "effect_type": WEBHOOK_ORDER_PAID_PUSH},
+            error_code="external_push_plan_failed",
+            error_message=str(exc)[:500],
+            retry_after_seconds=300,
+        )
+    if planned and not planned.get("ok", True):
+        return InternalEventConsumerResult(
+            status="failed_retryable",
+            request_summary={"event_id": event.event_id, "out_trade_no": out_trade_no},
+            response_summary={"external_effect_job_created": False, "effect_type": WEBHOOK_ORDER_PAID_PUSH},
+            error_code="external_push_plan_failed",
+            error_message=_text(planned.get("reason") or "external push planner returned a failed result"),
+            retry_after_seconds=300,
+        )
     if not planned or planned.get("skipped"):
         return InternalEventConsumerResult(
             status="succeeded",
@@ -203,14 +304,29 @@ def ai_assist_notify_consumer(event: InternalEvent, run: InternalEventConsumerRu
     )
 
 
-def register_payment_succeeded_consumers(registry: InternalEventConsumerRegistry | None = None) -> None:
-    registry = registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
-    from aicrm_next.service_period.payment_consumer import service_period_entitlement_consumer
+def register_payment_succeeded_consumers(
+    registry: InternalEventConsumerRegistry | None = None,
+    *,
+    service_period_consumer: InternalEventConsumerHandler | None = None,
+    webhook_order_paid_handler: InternalEventConsumerHandler | None = None,
+) -> None:
+    registry = registry or current_internal_event_consumer_registry()
 
     for event_type in PAYMENT_SUCCEEDED_EVENT_TYPES:
         registry.register(event_type, "order_projection_consumer", order_projection_consumer, consumer_type="projection")
-        registry.register(event_type, "service_period_entitlement_consumer", service_period_entitlement_consumer, consumer_type="projection")
-        registry.register(event_type, "webhook_order_paid_consumer", webhook_order_paid_consumer, consumer_type="external_effect_planner")
+        if service_period_consumer is not None:
+            registry.register(
+                event_type,
+                "service_period_entitlement_consumer",
+                service_period_consumer,
+                consumer_type="projection",
+            )
+        registry.register(
+            event_type,
+            "webhook_order_paid_consumer",
+            webhook_order_paid_handler or webhook_order_paid_consumer,
+            consumer_type="external_effect_planner",
+        )
         registry.register(event_type, "customer_business_summary_consumer", customer_business_summary_consumer, consumer_type="projection")
         registry.register(event_type, "dnd_policy_consumer", dnd_policy_consumer, consumer_type="orchestration")
         registry.register(event_type, "ai_assist_notify_consumer", ai_assist_notify_consumer, consumer_type="orchestration")

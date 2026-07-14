@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.main import create_app
+from tests.admin_auth_test_helpers import install_admin_session
 
 
 def _client(monkeypatch) -> TestClient:
@@ -14,7 +14,7 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def test_get_login_renders_next_page_with_wecom_links_and_form_target(monkeypatch) -> None:
+def test_get_login_renders_wecom_only_identity_entry(monkeypatch) -> None:
     response = _client(monkeypatch).get("/login")
 
     assert response.status_code == 200
@@ -23,13 +23,12 @@ def test_get_login_renders_next_page_with_wecom_links_and_form_target(monkeypatc
     assert "后台登录" in response.text
     assert "/auth/wecom/start?mode=qr" in response.text
     assert "/auth/wecom/start?mode=oauth" in response.text
-    assert 'method="post" action="/login"' in response.text
-    assert "应急入口未启用" in response.text
+    assert 'method="post" action="/login"' not in response.text
+    assert "不提供本地账密入口" in response.text
     assert "配置 &gt; 后台访问" in response.text
     assert "配置 &gt; 登录与权限" not in response.text
-    assert "disabled" in response.text
     assert "api.admin_login" not in response.text
-    assert "本地应急入口状态" in response.text
+    assert "本地应急入口状态" not in response.text
 
 
 def test_get_login_renders_wecom_auth_error(monkeypatch) -> None:
@@ -39,19 +38,9 @@ def test_get_login_renders_wecom_auth_error(monkeypatch) -> None:
     assert "企业微信扫码登录还未启用真实授权" in response.text
 
 
-def test_get_login_renders_live_mode_from_admin_auth_mode_env(monkeypatch) -> None:
-    monkeypatch.delenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", raising=False)
-    monkeypatch.setenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", "live")
-
-    response = _client(monkeypatch).get("/login")
-
-    assert response.status_code == 200
-    assert "<code>live</code>" in response.text
-
-
 def test_login_uses_safe_next_and_redirects_when_session_cookie_is_valid(monkeypatch) -> None:
     client = _client(monkeypatch)
-    client.cookies.set(SESSION_COOKIE, sign_session({"username": "bg-admin", "login_type": "break_glass", "iat": 4_102_444_800}))
+    install_admin_session(client, "super_admin", subject="admin:wecom", principal_id="admin-wecom")
 
     safe = client.get("/login?next=/admin/jobs", follow_redirects=False)
     unsafe = client.get("/login?next=https://evil.example.com", follow_redirects=False)

@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 from typing import Any, Callable
 
-from aicrm_next.automation_engine.group_ops.message_content import normalize_miniprogram_attachment_payload
 from aicrm_next.platform_foundation.external_effects.execution_gates import explicit_wecom_execution_disabled
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
+from aicrm_next.shared.wecom_payload_contract import normalize_miniprogram_attachment_payload
 
 from .audit import record_audit_event
 from .wecom_customer_group_client import WeComCustomerGroupClient, WeComCustomerGroupClientError

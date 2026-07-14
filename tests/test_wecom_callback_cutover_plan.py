@@ -90,16 +90,17 @@ def test_wecom_callback_cutover_plan_covers_install_cutover_pressure_and_rollbac
     ):
         assert source_env in commands[group]
     assert "sudo cp deploy/openclaw-wecom-callback-ingress.service /etc/systemd/system/" in commands["install_and_start"]
-    assert "sudo cp deploy/openclaw-wecom-callback-inbox-worker.timer /etc/systemd/system/" in commands["install_and_start"]
+    assert "sudo cp deploy/openclaw-wecom-callback-inbox-worker.service /etc/systemd/system/" in commands["install_and_start"]
     assert "sudo systemctl restart openclaw-wecom-callback-ingress.service" in commands["install_and_start"]
-    assert "sudo systemctl restart openclaw-wecom-callback-inbox-worker.timer" in commands["install_and_start"]
+    assert "sudo systemctl restart openclaw-wecom-callback-inbox-worker.service" in commands["install_and_start"]
+    assert "sudo systemctl disable --now openclaw-wecom-callback-inbox-worker.timer || true" in commands["install_and_start"]
     assert (
         "set -o pipefail; "
         "python scripts/ops/check_wecom_callback_deploy_smoke.py "
         "--web-base-url http://127.0.0.1:5001 --ingress-base-url http://127.0.0.1:5002 "
         "| tee /tmp/wecom-callback-deploy-smoke.json"
     ) in commands["install_and_start"]
-    assert commands["install_and_start"].index("sudo systemctl restart openclaw-wecom-callback-inbox-worker.timer") < commands[
+    assert commands["install_and_start"].index("sudo systemctl restart openclaw-wecom-callback-inbox-worker.service") < commands[
         "install_and_start"
     ].index(
         "set -o pipefail; "
@@ -125,20 +126,21 @@ def test_wecom_callback_cutover_plan_covers_install_cutover_pressure_and_rollbac
     assert any("--callback-url \"$(cat /tmp/wecom-callback-sample.url)\"" in item for item in commands["pressure_probe"])
     assert any("--callback-body-file /tmp/wecom-callback-sample.xml" in item for item in commands["pressure_probe"])
     assert "worker_isolation_canary" in commands
-    assert "sudo systemctl stop openclaw-wecom-callback-inbox-worker.timer" in commands["worker_isolation_canary"]
+    assert "sudo systemctl stop openclaw-wecom-callback-inbox-worker.service || true" in commands["worker_isolation_canary"]
     assert any("--total-requests 1" in item for item in commands["worker_isolation_canary"])
     assert any("--require-valid-callback-sample" in item for item in commands["worker_isolation_canary"])
     assert any("--callback-url \"$(cat /tmp/wecom-callback-sample.url)\"" in item for item in commands["worker_isolation_canary"])
     assert any("--no-default-samples" in item for item in commands["worker_isolation_canary"])
     assert any("tee /tmp/wecom-callback-worker-isolation.json" in item for item in commands["worker_isolation_canary"])
-    assert "sudo systemctl start openclaw-wecom-callback-inbox-worker.timer" in commands["worker_isolation_canary"]
+    assert "sudo systemctl start openclaw-wecom-callback-inbox-worker.service || true" in commands["worker_isolation_canary"]
     assert "downstream_worker_isolation_canary" in commands
-    assert "sudo systemctl stop openclaw-external-push-worker.service || true" in commands["downstream_worker_isolation_canary"]
+    assert "sudo systemctl disable --now openclaw-external-push-worker.timer || true" in commands["downstream_worker_isolation_canary"]
+    assert "sudo systemctl disable --now openclaw-external-push-worker.service || true" in commands["downstream_worker_isolation_canary"]
     assert any("--total-requests 1" in item for item in commands["downstream_worker_isolation_canary"])
     assert any("--require-valid-callback-sample" in item for item in commands["downstream_worker_isolation_canary"])
     assert any("--callback-url \"$(cat /tmp/wecom-callback-sample.url)\"" in item for item in commands["downstream_worker_isolation_canary"])
     assert any("tee /tmp/wecom-callback-downstream-worker-isolation.json" in item for item in commands["downstream_worker_isolation_canary"])
-    assert "sudo systemctl start openclaw-external-push-worker.service || true" in commands["downstream_worker_isolation_canary"]
+    assert not any("systemctl start openclaw-external-push-worker" in item for item in commands["downstream_worker_isolation_canary"])
     assert "internal_event_worker_isolation_canary" in commands
     assert "sudo systemctl stop openclaw-internal-event-worker.timer" in commands["internal_event_worker_isolation_canary"]
     assert "sudo systemctl stop openclaw-internal-event-worker.service || true" in commands["internal_event_worker_isolation_canary"]
@@ -191,7 +193,7 @@ def test_wecom_callback_cutover_plan_covers_install_cutover_pressure_and_rollbac
     assert "source /srv/venv/bin/activate" in commands["reapply_cutover_after_rollback"]
     assert source_env in commands["reapply_cutover_after_rollback"]
     assert "sudo systemctl start openclaw-wecom-callback-ingress.service" in commands["reapply_cutover_after_rollback"]
-    assert "sudo systemctl start openclaw-wecom-callback-inbox-worker.timer" in commands["reapply_cutover_after_rollback"]
+    assert "sudo systemctl start openclaw-wecom-callback-inbox-worker.service" in commands["reapply_cutover_after_rollback"]
     assert "curl -sSf http://127.0.0.1:5002/health" in commands["reapply_cutover_after_rollback"]
     assert "sudoedit /etc/nginx/app.conf" in commands["reapply_cutover_after_rollback"]
     assert "sudo nginx -t" in commands["reapply_cutover_after_rollback"]
@@ -205,7 +207,7 @@ def test_wecom_callback_cutover_plan_covers_install_cutover_pressure_and_rollbac
     assert any("check_wecom_callback_deploy_smoke.py" in item for item in commands["reapply_cutover_after_rollback"])
     assert any("tee /tmp/wecom-callback-deploy-smoke.json" in item for item in commands["reapply_cutover_after_rollback"])
     assert any("limit_req" in item and "limit_conn" in item for item in payload["completion_evidence"])
-    assert any("worker timer/service is stopped" in item for item in payload["completion_evidence"])
+    assert any("worker service is stopped" in item for item in payload["completion_evidence"])
     assert any("downstream external push worker is stopped" in item for item in payload["completion_evidence"])
     assert any("internal event worker timer/service is stopped" in item for item in payload["completion_evidence"])
     assert any("processing.json" in item for item in payload["completion_evidence"])

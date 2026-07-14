@@ -20,8 +20,11 @@ def test_questionnaire_h5_submit_inventory_documents_group_9_scope() -> None:
     assert "Next CommandBus only" in text
     assert "legacy rollback removed" in text
     assert "deletion_locked" in text
-    assert "adapter_mode=real_mark_tag" in text
-    assert "ProductionWeComAdapter.mark_external_contact_tags()" in text
-    assert "post-success mirror" in text
+    assert "adapter_mode=durable_internal_event" in text
+    assert "questionnaire_tag_consumer" in text
+    assert "questionnaire_webhook_consumer" in text
+    assert "external_effect_job_status=not_planned" in text
+    assert "real_external_call_executed=false" in text
+    assert "post-success `contact_tags` projection" in text
     assert "production_unavailable" in text
     assert "admin read/write" in text

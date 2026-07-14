@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import hmac
 from typing import Any
 
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from starlette.concurrency import run_in_threadpool
 
-from aicrm_next.admin_jobs.routes import validate_admin_action_token
-from aicrm_next.shared.runtime_settings import runtime_setting
+from aicrm_next.shared.admin_action_runtime import validate_admin_action_token
 
-from .adapters import wecom_execution_settings
+from .adapters import DEFAULT_ADAPTER_REGISTRY, ExternalEffectAdapterRegistry, wecom_execution_settings
+from .continuations import EMPTY_EXTERNAL_EFFECT_CONTINUATION_REGISTRY, ExternalEffectContinuationRegistry
 from .repo import build_external_effect_repository
 from .service import ExternalEffectService
 from .test_receiver import create_loopback_job, record_test_receiver_request, safe_current_base_url
@@ -69,29 +68,25 @@ def _json(payload: dict[str, Any], *, status_code: int = 200) -> JSONResponse:
     return JSONResponse(payload, status_code=status_code, headers=headers)
 
 
-def _internal_token_error(request: Request) -> str:
-    header = _text(request.headers.get("Authorization"))
-    if not header.lower().startswith("bearer "):
-        return "internal_token_required"
-    expected = _text(runtime_setting("AUTOMATION_INTERNAL_API_TOKEN"))
-    if not expected:
-        return "automation_internal_token_not_configured"
-    actual = header.split(" ", 1)[1].strip()
-    if not hmac.compare_digest(actual, expected):
-        return "internal_token_required"
-    return ""
-
-
 def _action_or_internal_token_error(request: Request, payload: dict[str, Any]) -> str:
-    internal_error = _internal_token_error(request)
-    if not internal_error:
-        return ""
     token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
     return validate_admin_action_token(token, request=request)
 
 
 def _service() -> ExternalEffectService:
     return ExternalEffectService(build_external_effect_repository())
+
+
+def _continuation_registry(request: Request) -> ExternalEffectContinuationRegistry:
+    return getattr(
+        request.app.state,
+        "external_effect_continuation_registry",
+        EMPTY_EXTERNAL_EFFECT_CONTINUATION_REGISTRY,
+    )
+
+
+def _adapter_registry(request: Request) -> ExternalEffectAdapterRegistry:
+    return getattr(request.app.state, "external_effect_adapter_registry", DEFAULT_ADAPTER_REGISTRY)
 
 
 @router.get("/api/admin/external-effects/jobs")
@@ -242,13 +237,13 @@ def get_external_effect_job(job_id: int) -> JSONResponse:
 
 @router.post("/api/admin/external-effects/run-due/preview")
 async def preview_external_effect_run_due(request: Request) -> JSONResponse:
-    token_error = _internal_token_error(request)
+    token_error = _action_or_internal_token_error(request, {})
     if token_error:
         return _json({"ok": False, "error": token_error, "route_owner": ROUTE_OWNER, "real_external_call_executed": False}, status_code=401)
     payload = await _payload(request)
     repo = build_external_effect_repository()
     result = await run_in_threadpool(
-        ExternalEffectWorker(repo).preview_due,
+        ExternalEffectWorker(repo, _adapter_registry(request)).preview_due,
         batch_size=_int(payload.get("batch_size") or payload.get("limit"), default=10, minimum=1),
         effect_types=[_text(item) for item in payload.get("effect_types") or [] if _text(item)] or None,
         test_only=_bool(payload.get("test_only"), default=False),
@@ -259,14 +254,18 @@ async def preview_external_effect_run_due(request: Request) -> JSONResponse:
 
 @router.post("/api/admin/external-effects/run-due")
 async def run_external_effect_due(request: Request) -> JSONResponse:
-    token_error = _internal_token_error(request)
+    token_error = _action_or_internal_token_error(request, {})
     if token_error:
         return _json({"ok": False, "error": token_error, "route_owner": ROUTE_OWNER, "real_external_call_executed": False}, status_code=401)
     payload = await _payload(request)
     dry_run = _bool(payload.get("dry_run"), default=True)
     repo = build_external_effect_repository()
     result = await run_in_threadpool(
-        ExternalEffectWorker(repo).run_due,
+        ExternalEffectWorker(
+            repo,
+            _adapter_registry(request),
+            continuation_registry=_continuation_registry(request),
+        ).run_due,
         batch_size=_int(payload.get("batch_size") or payload.get("limit"), default=10, minimum=1),
         dry_run=dry_run,
         effect_types=[_text(item) for item in payload.get("effect_types") or [] if _text(item)] or None,
@@ -277,11 +276,10 @@ async def run_external_effect_due(request: Request) -> JSONResponse:
     return _json(redact_external_effect_admin_response(result))
 
 
-@router.post("/api/external-effects/test-receiver/{receiver_token}")
-async def external_effect_test_receiver(receiver_token: str, request: Request) -> JSONResponse:
+@router.post("/api/external-effects/test-receiver")
+async def external_effect_test_receiver(request: Request) -> JSONResponse:
     status_code, payload = await record_test_receiver_request(
         request=request,
-        receiver_token=receiver_token,
         repository=build_external_effect_repository(),
     )
     return _json(payload, status_code=status_code)
@@ -313,7 +311,7 @@ def list_external_effect_test_receipts(
     job_id: str = "",
     effect_type: str = "",
     trace_id: str = "",
-    receiver_token: str = "",
+    event_id: str = "",
     received_from: str = "",
     received_to: str = "",
     limit: int = 50,
@@ -323,7 +321,7 @@ def list_external_effect_test_receipts(
         "job_id": job_id,
         "effect_type": effect_type,
         "trace_id": trace_id,
-        "receiver_token": receiver_token,
+        "event_id": event_id,
         "received_from": received_from,
         "received_to": received_to,
     }
@@ -351,7 +349,33 @@ async def retry_external_effect_job(job_id: int, request: Request) -> JSONRespon
     token_error = _action_or_internal_token_error(request, payload)
     if token_error:
         return _json({"ok": False, "error": token_error, "route_owner": ROUTE_OWNER}, status_code=401)
-    job = _service().retry(job_id)
+    service = _service()
+    existing = service.get(job_id)
+    if existing and existing.status == "unknown_after_dispatch":
+        if not _bool(payload.get("confirm_duplicate_risk")):
+            return _json(
+                {
+                    "ok": False,
+                    "error": "duplicate_risk_confirmation_required",
+                    "route_owner": ROUTE_OWNER,
+                },
+                status_code=409,
+            )
+        if not _text(payload.get("actor")) or not _text(payload.get("reason")):
+            return _json(
+                {
+                    "ok": False,
+                    "error": "manual_retry_actor_and_reason_required",
+                    "route_owner": ROUTE_OWNER,
+                },
+                status_code=422,
+            )
+    job = service.retry(
+        job_id,
+        actor=_text(payload.get("actor")),
+        reason=_text(payload.get("reason")),
+        confirm_duplicate_risk=_bool(payload.get("confirm_duplicate_risk")),
+    )
     if not job:
         return _json({"ok": False, "error": "external_effect_job_not_retryable", "route_owner": ROUTE_OWNER}, status_code=409)
     return _json({"ok": True, "job": external_effect_job_detail_item(job), "route_owner": ROUTE_OWNER})

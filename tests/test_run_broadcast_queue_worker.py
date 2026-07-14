@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 import aicrm_next.background_jobs.broadcast_queue_worker as worker
-from aicrm_next.background_jobs.broadcast_queue_worker import PostgresBroadcastQueueRepository, run_broadcast_queue_worker
+from aicrm_next.background_jobs.broadcast_queue_worker import run_broadcast_queue_worker
 
 
 class FakeRepo:
@@ -16,11 +16,29 @@ class FakeRepo:
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]:
         return self.jobs[:limit]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
-        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count, "claim_token": claim_token})
+    def begin_dispatch(self, job_id: int, *, claim_token: str, now: datetime) -> dict[str, Any] | None:
+        return next(({**job, "status": "dispatching"} for job in self.jobs if int(job["id"]) == job_id), None)
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
-        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type, "claim_token": claim_token})
+    def finalize_dispatch(self, job_id: int, *, claim_token: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        record = {"job_id": job_id, "claim_token": claim_token, **outcome}
+        if outcome["status"] == "sent":
+            self.sent.append(record)
+        else:
+            self.failed.append(record)
+        return record
+
+    def mark_unknown_after_dispatch(
+        self,
+        job_id: int,
+        *,
+        claim_token: str,
+        error: str,
+        side_effect_executed: bool,
+        provider_result_received: bool,
+    ) -> dict[str, Any]:
+        record = {"job_id": job_id, "claim_token": claim_token, "error": error}
+        self.failed.append(record)
+        return record
 
 
 class SuccessDispatcher:
@@ -64,32 +82,22 @@ def test_worker_marks_failed_when_dispatch_fails() -> None:
     assert "401" in repo.failed[0]["error"]
 
 
-def test_postgres_mark_failed_syncs_cloud_plan_recipient_state(monkeypatch) -> None:
-    calls: list[dict[str, Any]] = []
+def test_known_provider_rejection_is_retryable_without_becoming_unknown() -> None:
+    outcome = worker._normalize_dispatch_outcome(
+        _job(),
+        {
+            "ok": False,
+            "failure_type": "external_call_failed_known",
+            "error": "not external contact",
+            "side_effect_executed": True,
+            "provider_result_received": True,
+            "response_payload": {"result": {"errcode": 40096}},
+        },
+    )
 
-    class FakeConnection:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc, tb):
-            return False
-
-        def execute(self, sql: str, params: tuple[Any, ...]) -> None:
-            calls.append({"sql": sql, "params": params})
-
-    monkeypatch.setattr(worker, "connect", lambda: FakeConnection())
-
-    PostgresBroadcastQueueRepository().mark_failed(42, error="not external contact", failure_type="wecom_api_error")
-
-    assert len(calls) == 4
-    assert "UPDATE broadcast_jobs" in calls[0]["sql"]
-    assert calls[0]["params"] == (False, "wecom_api_error", "not external contact", False, 300, 42, "", "")
-    assert "UPDATE cloud_broadcast_plan_recipients" in calls[1]["sql"]
-    assert calls[1]["params"] == ("not external contact", 42, "", "")
-    assert "UPDATE cloud_broadcast_plan_recipient_messages" in calls[2]["sql"]
-    assert calls[2]["params"] == ("not external contact", 42, "", "")
-    assert "SET claim_token = ''" in calls[3]["sql"]
-    assert calls[3]["params"] == (42, "", "")
+    assert outcome["status"] == "failed_retryable"
+    assert outcome["side_effect_executed"] is True
+    assert outcome["provider_result_received"] is True
 
 
 def test_worker_no_due_jobs_returns_empty_summary() -> None:

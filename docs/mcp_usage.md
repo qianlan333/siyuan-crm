@@ -2,7 +2,7 @@
 
 This is the current minimal MCP contract for OpenClaw or another MCP-capable
 assistant. It exposes stable CRM actions through `GET /mcp` and `POST /mcp`
-using bearer-token auth.
+using a registered MCP client and short-lived JWT.
 
 ## Boundary
 
@@ -15,10 +15,10 @@ using bearer-token auth.
 ## Authentication
 
 ```http
-Authorization: Bearer <MCP_BEARER_TOKEN>
+Authorization: Bearer <short-lived-client-credentials-jwt>
 ```
 
-Missing or invalid tokens return `401`.
+The caller must use the dedicated `mcp` client with `audience=external_integration`; `GET` requires `read`/`mcp_read`, while `POST` requires `write`/`mcp_execute`. Token exchange and rotation follow [`auth_client_credentials.md`](auth_client_credentials.md). Missing, invalid, or expired JWTs return `401`; scope or capability violations return `403`. Shared Bearer and fallback credentials are not accepted.
 
 ## Customer Reference Rules
 

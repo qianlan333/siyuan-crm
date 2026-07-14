@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from aicrm_next.external_effect_composition import build_external_effect_adapter_registry
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import (
     ExternalEffectService,
@@ -81,6 +82,8 @@ def test_wecom_welcome_adapter_is_registered_and_advertised() -> None:
 
 def test_wecom_welcome_disabled_execution_mode_blocks_real_send(monkeypatch) -> None:
     reset_external_effect_fixture_state()
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "execute")
+    monkeypatch.setenv("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_WELCOME_MESSAGE_SEND)
     monkeypatch.setattr("aicrm_next.platform_foundation.external_effects.worker._capability_gate_error", lambda job: "")
     repo = build_external_effect_repository()
     _plan_welcome_job(repo=repo, execution_mode="disabled")
@@ -91,16 +94,36 @@ def test_wecom_welcome_disabled_execution_mode_blocks_real_send(monkeypatch) -> 
         adapter_registry=_registry(WeComWelcomeMessageAdapter(adapter_factory=lambda: fake)),
     ).run_due(batch_size=1, dry_run=False, effect_types=[WECOM_WELCOME_MESSAGE_SEND])
 
-    assert result["counts"]["failed_count"] == 1
+    assert result["counts"]["blocked_count"] == 1
     assert result["items"][0]["attempt"]["error_code"] == "shadow_only"
     assert result["real_external_call_executed"] is False
     assert fake.payloads == []
 
 
+def test_wecom_welcome_missing_composition_never_claims_external_call(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "execute")
+    monkeypatch.setenv("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_WELCOME_MESSAGE_SEND)
+    monkeypatch.setattr("aicrm_next.platform_foundation.external_effects.worker._capability_gate_error", lambda job: "")
+    repo = build_external_effect_repository()
+    job = _plan_welcome_job(repo=repo, key="welcome-missing-composition")
+
+    result = ExternalEffectWorker(
+        repo,
+        adapter_registry=_registry(WeComWelcomeMessageAdapter()),
+    ).dispatch_one(job["id"])
+
+    assert result["job"]["status"] == "failed_terminal"
+    assert result["attempt"]["error_code"] == "adapter_composition_missing"
+    assert result["attempt"]["response_summary_json"]["wecom_send_executed"] is False
+    assert result["attempt"]["response_summary_json"]["real_external_call_executed"] is False
+    assert result["real_external_call_executed"] is False
+
+
 def test_wecom_welcome_executes_through_external_effect_worker(monkeypatch) -> None:
     reset_external_effect_fixture_state()
-    monkeypatch.setattr("aicrm_next.platform_foundation.external_effects.adapters._enabled", lambda name: name == "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE")
-    monkeypatch.setattr("aicrm_next.platform_foundation.external_effects.adapters._csv_env", lambda name: {WECOM_WELCOME_MESSAGE_SEND} if name == "AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES" else set())
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "execute")
+    monkeypatch.setenv("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_WELCOME_MESSAGE_SEND)
     monkeypatch.setattr("aicrm_next.platform_foundation.external_effects.worker._capability_gate_error", lambda job: "")
     repo = build_external_effect_repository()
     job = _plan_welcome_job(repo=repo)
@@ -121,6 +144,8 @@ def test_wecom_welcome_executes_through_external_effect_worker(monkeypatch) -> N
 
 def test_channel_entry_welcome_fallback_private_message_preserves_exact_target(monkeypatch) -> None:
     reset_external_effect_fixture_state()
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "execute")
+    monkeypatch.setenv("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_MESSAGE_PRIVATE_SEND)
     calls: list[dict] = []
 
     class _FakePrivateAdapter:
@@ -162,10 +187,10 @@ def test_channel_entry_welcome_fallback_private_message_preserves_exact_target(m
         execution_mode="execute",
     )
 
-    result = ExternalEffectWorker(repo).dispatch_one(job["id"])
+    result = ExternalEffectWorker(repo, build_external_effect_adapter_registry()).dispatch_one(job["id"])
 
-    assert result["job"]["status"] == "succeeded"
-    assert result["attempt"]["status"] == "succeeded"
+    assert result["job"]["status"] == "simulated"
+    assert result["attempt"]["status"] == "simulated"
     assert result["attempt"]["request_summary_json"]["business_type"] == "channel_entry_welcome_fallback"
     assert result["attempt"]["request_summary_json"]["source"] == "channel_entry_welcome_fallback"
     assert calls[0]["payload"]["external_userids"] == ["wm_dynamic_new_contact"]

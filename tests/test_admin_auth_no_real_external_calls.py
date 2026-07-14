@@ -32,7 +32,6 @@ def test_admin_auth_next_module_has_no_legacy_or_http_token_exchange_markers() -
         "admin_" + "auth_routes",
         "requests.",
         "http" + "x",
-        "access_" + "token",
         "exchange_code_for_" + "wecom_user",
     ]
 

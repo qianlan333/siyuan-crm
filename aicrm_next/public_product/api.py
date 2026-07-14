@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import json
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote, urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from aicrm_next.commerce.domain import has_product_page_material
-from aicrm_next.commerce.product_code_aliases import canonical_product_code
+from aicrm_next.shared.product_code_aliases import canonical_product_code
 from aicrm_next.navigation_target.resolver import url_link_resolver_response
 from aicrm_next.shared.errors import NotFoundError
 from aicrm_next.shared.sync_request import read_request_body
+from aicrm_next.shared.runtime import production_environment
+from aicrm_next.shared.signed_context import (
+    SIDEBAR_PRODUCT_CONTEXT_COOKIE,
+    load_sidebar_product_context_token,
+    sidebar_product_context_ttl_seconds,
+)
 
 from .h5_wechat_pay import (
     checkout_page_state,
@@ -46,7 +52,7 @@ def _public_product_alias_redirect(request: Request, path: str) -> Response | No
     canonical = canonical_product_code(path)
     if not canonical or canonical == path:
         return None
-    query = f"?{request.url.query}" if request.url.query else ""
+    query = _noncredential_query(request)
     return RedirectResponse(
         url=f"/p/{quote(canonical)}{query}",
         status_code=302,
@@ -56,7 +62,7 @@ def _public_product_alias_redirect(request: Request, path: str) -> Response | No
 
 def _public_product_checkout_redirect(request: Request, product: dict) -> RedirectResponse:
     product_code = quote(str(product.get("product_code") or "").strip())
-    query = f"?{request.url.query}" if request.url.query else ""
+    query = _noncredential_query(request)
     return RedirectResponse(url=f"/pay/{product_code}{query}", status_code=302, headers=route_headers())
 
 
@@ -76,11 +82,39 @@ def public_product_page(request: Request, path: str) -> Response:
         return HTMLResponse(render_not_found_page(path), status_code=404, headers=route_headers())
     if not has_product_page_material(product):
         return _public_product_checkout_redirect(request, product)
-    context_token = str(request.query_params.get("ctx") or "").strip()
+    context_token = str(request.cookies.get(SIDEBAR_PRODUCT_CONTEXT_COOKIE) or "").strip()
     return HTMLResponse(
-        render_product_page(product, context_token=context_token, context_status=sidebar_product_context_status(context_token)),
+        render_product_page(product, context_status=sidebar_product_context_status(context_token)),
         headers=route_headers(),
     )
+
+
+@router.post("/api/h5/product-context/session", name="api.h5_product_context_session")
+async def h5_product_context_session(request: Request) -> JSONResponse:
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    token = str(payload.get("context_token") or "").strip() if isinstance(payload, dict) else ""
+    result = load_sidebar_product_context_token(token)
+    if not result.get("ok"):
+        return JSONResponse(
+            {"ok": False, "error": "invalid_product_context"},
+            status_code=400,
+            headers=route_headers(),
+        )
+    response = JSONResponse({"ok": True, "context_status": "valid"}, headers=route_headers())
+    forwarded_proto = str(request.headers.get("X-Forwarded-Proto") or "").split(",", 1)[0].strip().lower()
+    response.set_cookie(
+        SIDEBAR_PRODUCT_CONTEXT_COOKIE,
+        token,
+        max_age=sidebar_product_context_ttl_seconds(),
+        httponly=True,
+        secure=production_environment() or request.url.scheme == "https" or forwarded_proto == "https",
+        samesite="lax",
+        path="/",
+    )
+    return response
 
 
 @router.options("/pay/{path:path}", name="api.public_pay_landing_options")
@@ -191,3 +225,12 @@ def public_product_api(path: str) -> JSONResponse:
 @router.api_route("/api/products/{path:path}", methods=["POST", "PUT", "PATCH", "DELETE"], name="api.public_product_api_blocked_write")
 async def public_product_api_blocked_write(request: Request, path: str) -> JSONResponse:
     return JSONResponse(blocked_action_payload(path, method=request.method), status_code=410, headers=route_headers())
+
+
+def _noncredential_query(request: Request) -> str:
+    values = [
+        (key, value)
+        for key, value in parse_qsl(str(request.url.query or ""), keep_blank_values=True)
+        if key.lower() not in {"ctx", "context_token", "token", "access_token"}
+    ]
+    return f"?{urlencode(values)}" if values else ""

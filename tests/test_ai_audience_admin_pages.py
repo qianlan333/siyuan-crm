@@ -2,27 +2,15 @@ from __future__ import annotations
 
 import json
 import os
-from time import time
 
 from sqlalchemy import text
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.shared.db_session import get_session_factory
+from tests.admin_auth_test_helpers import admin_session_cookies
 
 
-def _admin_cookies() -> dict[str, str]:
-    return {
-        SESSION_COOKIE: sign_session(
-            {
-                "auth_source": "break_glass",
-                "login_type": "break_glass",
-                "username": "admin",
-                "display_name": "admin",
-                "roles": ["super_admin"],
-                "iat": int(time()),
-            }
-        )
-    }
+def _admin_cookies(next_client) -> dict[str, str]:
+    return admin_session_cookies(next_client, "super_admin")
 
 
 def _insert_package(
@@ -44,13 +32,13 @@ def _insert_package(
                 INSERT INTO ai_audience_package (
                     package_key, name, status, query_mode, identity_policy,
                     incremental_enabled, daily_enabled, incremental_interval_seconds,
-                    daily_refresh_time, timezone, lookback_seconds, inbound_webhook_secret,
+                    daily_refresh_time, timezone, lookback_seconds,
                     created_at, updated_at
                 )
                 VALUES (
                     :package_key, :name, :status, 'incremental_event', 'external_userid',
                     :incremental_enabled, :daily_enabled, :incremental_interval_seconds,
-                    :daily_refresh_time, 'Asia/Shanghai', 600, 'secret-not-for-browser',
+                    :daily_refresh_time, 'Asia/Shanghai', 600,
                     TIMESTAMPTZ '2026-06-24 08:50:00+08', CAST(:updated_at AS timestamptz)
                 )
                 RETURNING id
@@ -173,7 +161,7 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     invalid_refresh = next_client.post(
         "/api/admin/ai-audience/packages",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"package_key": "create_invalid", "name": "非法刷新", "refresh_mode": "incremental_5m"},
     )
     assert invalid_refresh.status_code == 400
@@ -181,7 +169,7 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     active_create = next_client.post(
         "/api/admin/ai-audience/packages",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"package_key": "create_active", "name": "禁止直接 active", "refresh_mode": "manual", "status": "active"},
     )
     assert active_create.status_code == 400
@@ -189,7 +177,7 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     created = next_client.post(
         "/api/admin/ai-audience/packages",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={
             "package_key": "create_pkg",
             "name": "创建包",
@@ -213,8 +201,17 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     session_factory = get_session_factory()
     with session_factory() as session:
-        package_row = session.execute(text("SELECT status, incremental_enabled, incremental_interval_seconds, next_incremental_refresh_at FROM ai_audience_package WHERE id = :id"), {"id": package_id}).mappings().one()
-        version_row = session.execute(text("SELECT parameters_json FROM ai_audience_package_version WHERE package_id = :id"), {"id": package_id}).mappings().one()
+        package_row = (
+            session.execute(
+                text("SELECT status, incremental_enabled, incremental_interval_seconds, next_incremental_refresh_at FROM ai_audience_package WHERE id = :id"),
+                {"id": package_id},
+            )
+            .mappings()
+            .one()
+        )
+        version_row = (
+            session.execute(text("SELECT parameters_json FROM ai_audience_package_version WHERE package_id = :id"), {"id": package_id}).mappings().one()
+        )
         session.execute(
             text(
                 """
@@ -256,7 +253,7 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     version = next_client.post(
         f"/api/admin/ai-audience/packages/{package_id}/versions",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"incremental_sql_text": sql_text, "parameters": {"questionnaire_id": 202}},
     )
     assert version.status_code == 200
@@ -279,13 +276,13 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
     """
     preview_version = next_client.post(
         f"/api/admin/ai-audience/packages/{package_id}/versions",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"incremental_sql_text": preview_sql, "parameters": {"questionnaire_id": 101}},
     )
     assert preview_version.status_code == 200
     preview = next_client.post(
         f"/api/admin/ai-audience/packages/{package_id}/preview",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"version_id": preview_version.json()["version"]["id"], "sql_kind": "incremental", "params": {"questionnaire_id": 102}, "limit": 5},
     )
     assert preview.status_code == 200
@@ -295,7 +292,7 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     invalid_preview = next_client.post(
         f"/api/admin/ai-audience/packages/{package_id}/preview",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"sql_text": "SELECT * FROM public.users", "limit": 5},
     )
     assert invalid_preview.status_code == 400
@@ -303,7 +300,7 @@ def test_admin_ai_audience_package_create_version_publish_contract(next_client, 
 
     published = next_client.post(
         f"/api/admin/ai-audience/packages/{package_id}/publish",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={},
     )
     assert published.status_code == 200
@@ -363,7 +360,7 @@ def test_admin_ai_audience_packages_api_returns_lightweight_read_model(next_clie
         _insert_run(session, package_id=counted_id, refresh_finished_at="2026-06-24 09:05:12+08")
         session.commit()
 
-    response = next_client.get("/api/admin/ai-audience/packages", cookies=_admin_cookies())
+    response = next_client.get("/api/admin/ai-audience/packages", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store, max-age=0"
@@ -425,7 +422,7 @@ def test_admin_ai_audience_packages_api_returns_lightweight_read_model(next_clie
 def test_admin_ai_audience_list_page_matches_management_contract(next_client, monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "ai-audience-list-page-test")
 
-    response = next_client.get("/admin/automation-conversion", cookies=_admin_cookies())
+    response = next_client.get("/admin/automation-conversion", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     html = response.text
@@ -443,7 +440,7 @@ def test_admin_ai_audience_list_page_matches_management_contract(next_client, mo
         "/api/admin/ai-audience/packages",
         "/api/admin/user-ops/batch-send/preview",
         "/api/admin/user-ops/batch-send/execute",
-        "targetSource: \"ai_audience_package\"",
+        'targetSource: "ai_audience_package"',
         "UserOpsBatchSendModal.open",
         "send_content_composer.css",
         "send_content_composer.js",
@@ -458,7 +455,7 @@ def test_admin_ai_audience_list_page_matches_management_contract(next_client, mo
 def test_admin_ai_audience_detail_page_has_required_sections_without_top_actions(next_client, monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "ai-audience-detail-page-test")
 
-    response = next_client.get("/admin/automation-conversion/packages/123", cookies=_admin_cookies())
+    response = next_client.get("/admin/automation-conversion/packages/123", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     html = response.text
@@ -569,7 +566,7 @@ def test_user_ops_batch_send_modal_static_component_uses_standard_endpoints(next
         "AICRMSendContentComposer.open",
         "target_source",
         "target_source_id",
-        "selection_mode: \"all_filtered\"",
+        'selection_mode: "all_filtered"',
         "requestImages(contentPackage)",
         "requestAttachments(contentPackage)",
         "image_library_ids",
@@ -600,8 +597,7 @@ def test_admin_ai_audience_package_detail_requires_admin_and_redacts_sensitive_f
             text(
                 """
                 UPDATE ai_audience_package
-                SET natural_language_definition = '近 30 天提交问卷且已加微',
-                    inbound_webhook_secret = 'secret-hidden'
+                SET natural_language_definition = '近 30 天提交问卷且已加微'
                 WHERE id = :package_id
                 """
             ),
@@ -613,7 +609,7 @@ def test_admin_ai_audience_package_detail_requires_admin_and_redacts_sensitive_f
     no_cookie = next_client.get(f"/api/admin/ai-audience/packages/{package_id}")
     assert no_cookie.status_code == 401
 
-    response = next_client.get(f"/api/admin/ai-audience/packages/{package_id}", cookies=_admin_cookies())
+    response = next_client.get(f"/api/admin/ai-audience/packages/{package_id}", cookies=_admin_cookies(next_client))
     assert response.status_code == 200
     package = response.json()["package"]
     assert package == {
@@ -642,7 +638,7 @@ def test_admin_ai_audience_package_patch_normalizes_refresh_modes(next_client, n
 
     invalid = next_client.patch(
         f"/api/admin/ai-audience/packages/{package_id}",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"refresh_mode": "incremental_15m"},
     )
     assert invalid.status_code == 400
@@ -650,7 +646,7 @@ def test_admin_ai_audience_package_patch_normalizes_refresh_modes(next_client, n
 
     response = next_client.patch(
         f"/api/admin/ai-audience/packages/{package_id}",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={
             "name": "新名称",
             "natural_language_definition": "新定义",
@@ -687,22 +683,26 @@ def test_admin_ai_audience_activate_incremental_only_package(next_client, next_p
         )
         session.commit()
 
-    response = next_client.post(f"/api/admin/ai-audience/packages/{package_id}/activate", cookies=_admin_cookies())
+    response = next_client.post(f"/api/admin/ai-audience/packages/{package_id}/activate", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     package = response.json()["package"]
     assert package["status"] == "active"
     with session_factory() as session:
-        row = session.execute(
-            text(
-                """
+        row = (
+            session.execute(
+                text(
+                    """
                 SELECT status, next_incremental_refresh_at, next_daily_refresh_at
                 FROM ai_audience_package
                 WHERE id = :package_id
                 """
-            ),
-            {"package_id": package_id},
-        ).mappings().one()
+                ),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .one()
+        )
     assert row["status"] == "active"
     assert row["next_incremental_refresh_at"] is not None
     assert row["next_daily_refresh_at"] is None
@@ -729,7 +729,7 @@ def test_admin_ai_audience_members_api_returns_active_safe_fields(next_client, n
         )
         session.commit()
 
-    response = next_client.get(f"/api/admin/ai-audience/packages/{package_id}/members", cookies=_admin_cookies())
+    response = next_client.get(f"/api/admin/ai-audience/packages/{package_id}/members", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     payload = response.json()
@@ -743,7 +743,7 @@ def test_admin_ai_audience_members_api_returns_active_safe_fields(next_client, n
         assert forbidden not in response_text
 
 
-def test_admin_ai_audience_webhook_api_redacts_and_rotates_secrets(next_client, next_pg_schema, monkeypatch) -> None:
+def test_admin_ai_audience_webhook_api_uses_platform_signature_auth(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
     monkeypatch.setenv("SECRET_KEY", "ai-audience-webhook-test")
     monkeypatch.setenv("AICRM_PUBLIC_BASE_URL", "https://www.youcangogogo.com")
@@ -754,29 +754,26 @@ def test_admin_ai_audience_webhook_api_redacts_and_rotates_secrets(next_client, 
 
     patch = next_client.patch(
         f"/api/admin/ai-audience/packages/{package_id}/webhooks",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={
             "outbound_enabled": True,
             "outbound_webhook_url": "https://agent.example.com/audience/entered",
-            "outbound_signing_secret": "outbound-secret",
         },
     )
     assert patch.status_code == 200
     webhook = patch.json()["webhook"]
     assert webhook["outbound_enabled"] is True
     assert webhook["outbound_webhook_url"] == "https://agent.example.com/audience/entered"
-    assert webhook["outbound_secret_configured"] is True
-    assert webhook["inbound_secret_configured"] is True
+    assert webhook["inbound_auth_mode"] == "aicrm_hmac_sha256"
+    assert webhook["outbound_auth_mode"] == "aicrm_hmac_sha256"
     assert webhook["inbound_webhook_url"] == "https://www.youcangogogo.com/api/ai/audience/packages/webhook_pkg/webhook"
-    assert "outbound-secret" not in json.dumps(patch.json(), ensure_ascii=False)
+    assert "signing_secret" not in json.dumps(patch.json(), ensure_ascii=False)
 
-    rotate = next_client.post(
+    removed_rotate = next_client.post(
         f"/api/admin/ai-audience/packages/{package_id}/webhooks/rotate-inbound-secret",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
     )
-    assert rotate.status_code == 200
-    assert rotate.json()["webhook"]["inbound_secret_configured"] is True
-    assert "audsec_" not in json.dumps(rotate.json(), ensure_ascii=False)
+    assert removed_rotate.status_code == 404
 
 
 def test_admin_ai_audience_sender_whitelist_get_put(next_client, next_pg_schema, monkeypatch) -> None:
@@ -789,7 +786,7 @@ def test_admin_ai_audience_sender_whitelist_get_put(next_client, next_pg_schema,
 
     put = next_client.put(
         f"/api/admin/ai-audience/packages/{package_id}/senders",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={
             "items": [
                 {"sender_userid": "HuangYouCan", "display_name": "HuangYouCan", "priority": 2, "status": "active"},
@@ -800,13 +797,13 @@ def test_admin_ai_audience_sender_whitelist_get_put(next_client, next_pg_schema,
     assert put.status_code == 200
     assert [item["sender_userid"] for item in put.json()["items"]] == ["QianLan", "HuangYouCan"]
 
-    get = next_client.get(f"/api/admin/ai-audience/packages/{package_id}/senders", cookies=_admin_cookies())
+    get = next_client.get(f"/api/admin/ai-audience/packages/{package_id}/senders", cookies=_admin_cookies(next_client))
     assert get.status_code == 200
     assert [item["priority"] for item in get.json()["items"]] == [1, 2]
 
     invalid = next_client.put(
         f"/api/admin/ai-audience/packages/{package_id}/senders",
-        cookies=_admin_cookies(),
+        cookies=_admin_cookies(next_client),
         json={"items": [{"sender_userid": "Bad", "status": "deleted"}]},
     )
     assert invalid.status_code == 400

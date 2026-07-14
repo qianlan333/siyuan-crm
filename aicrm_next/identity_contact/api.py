@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import os
+
 from fastapi import APIRouter, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 
-from aicrm_next.shared.signed_context import load_sidebar_owner_context_token
+from aicrm_next.shared.errors import ContractError
+from aicrm_next.shared.signed_context import (
+    SIDEBAR_VIEWER_SESSION_COOKIE,
+    validate_sidebar_owner_context,
+)
 
 from .application import GetSidebarContactBindingStatusQuery, ResolvePersonIdentityQuery
 from .dto import ResolvePersonIdentityRequest
@@ -45,8 +51,8 @@ def resolve_identity(
     mobile: str | None = None,
     openid: str | None = None,
     unionid: str | None = None,
-) -> dict:
-    result = ResolvePersonIdentityQuery()(
+) -> JSONResponse:
+    resolution = ResolvePersonIdentityQuery().execute_result(
         ResolvePersonIdentityRequest(
             external_userid=external_userid,
             mobile=mobile,
@@ -54,9 +60,14 @@ def resolve_identity(
             unionid=unionid,
         )
     )
-    if result is None:
-        raise HTTPException(status_code=404, detail="identity not found")
-    return {"ok": True, "identity": result.model_dump()}
+    if resolution.status != "resolved" or resolution.identity is None:
+        return _identity_error(
+            error_code=f"identity_{resolution.status}",
+            message=resolution.reason or f"identity {resolution.status}",
+            source_status="next_identity_resolve",
+            status_code=404 if resolution.status == "not_found" else 409,
+        )
+    return JSONResponse({"ok": True, "identity": resolution.identity.model_dump()})
 
 
 @router.get(
@@ -85,7 +96,7 @@ def admin_resolve_identity(
         warnings.append("buyer_id was mapped to openid for this slice")
     if transaction_id:
         warnings.append("transaction_id cannot be mapped by ResolvePersonIdentityRequest in this slice")
-    result = ResolvePersonIdentityQuery()(
+    resolution = ResolvePersonIdentityQuery().execute_result(
         ResolvePersonIdentityRequest(
             external_userid=mapped_external_userid,
             mobile=mobile,
@@ -93,13 +104,14 @@ def admin_resolve_identity(
             unionid=unionid,
         )
     )
-    if result is None:
+    if resolution.status != "resolved" or resolution.identity is None:
         return _identity_error(
-            error_code="not_found",
-            message="identity not found",
+            error_code=resolution.status,
+            message=resolution.reason or f"identity {resolution.status}",
             source_status="next_admin_identity_resolve",
-            status_code=404,
+            status_code=404 if resolution.status == "not_found" else 409,
         )
+    result = resolution.identity
     return JSONResponse(
         {
             "ok": True,
@@ -128,25 +140,49 @@ def admin_identity_links(
         ResolvePersonIdentityRequest(unionid=key),
         ResolvePersonIdentityRequest(openid=key),
     ]
+    resolved_by_unionid: dict[str, object] = {}
+    pending = False
     for request in attempts:
-        result = query(request)
-        if result is not None:
-            return JSONResponse(
-                {
-                    "ok": True,
-                    "identity_key": key,
-                    "links": _identity_links(result),
-                    "identity": result.model_dump(),
-                    "route_owner": "ai_crm_next",
-                    "source_status": "next_admin_identity_links",
-                    "fallback_used": False,
-                }
+        try:
+            resolution = query.execute_result(request)
+        except ContractError:
+            continue
+        if resolution.status == "conflict":
+            return _identity_error(
+                error_code="conflict",
+                message=resolution.reason or "identity conflict",
+                source_status="next_admin_identity_links",
+                status_code=409,
             )
+        if resolution.status == "pending":
+            pending = True
+        if resolution.status == "resolved" and resolution.identity is not None:
+            resolved_by_unionid[str(resolution.identity.unionid or "")] = resolution.identity
+    if len(resolved_by_unionid) > 1:
+        return _identity_error(
+            error_code="conflict",
+            message="identity key resolves to multiple canonical identities",
+            source_status="next_admin_identity_links",
+            status_code=409,
+        )
+    if resolved_by_unionid:
+        result = next(iter(resolved_by_unionid.values()))
+        return JSONResponse(
+            {
+                "ok": True,
+                "identity_key": key,
+                "links": _identity_links(result),
+                "identity": result.model_dump(),
+                "route_owner": "ai_crm_next",
+                "source_status": "next_admin_identity_links",
+                "fallback_used": False,
+            }
+        )
     return _identity_error(
-        error_code="not_found",
-        message="identity links not found",
+        error_code="pending" if pending else "not_found",
+        message="identity resolution pending" if pending else "identity links not found",
         source_status="next_admin_identity_links",
-        status_code=404,
+        status_code=409 if pending else 404,
     )
 
 
@@ -156,8 +192,12 @@ def sidebar_contact_binding_status(
     external_userid: str | None = None,
     owner_userid: str | None = None,
 ):
-    resolved_owner_userid = _sidebar_owner_userid_from_request(request, owner_userid=owner_userid)
-    result = GetSidebarContactBindingStatusQuery()(
+    resolved_owner_userid = _sidebar_owner_userid_from_request(
+        request,
+        external_userid=external_userid,
+        owner_userid=owner_userid,
+    )
+    result = _binding_status_query(request)(
         external_userid=external_userid,
         owner_userid=resolved_owner_userid,
         require_owner_scope=True,
@@ -172,8 +212,12 @@ def sidebar_binding_status(
     external_userid: str | None = None,
     owner_userid: str | None = None,
 ):
-    resolved_owner_userid = _sidebar_owner_userid_from_request(request, owner_userid=owner_userid)
-    result = GetSidebarContactBindingStatusQuery()(
+    resolved_owner_userid = _sidebar_owner_userid_from_request(
+        request,
+        external_userid=external_userid,
+        owner_userid=owner_userid,
+    )
+    result = _binding_status_query(request)(
         external_userid=external_userid,
         owner_userid=resolved_owner_userid,
         require_owner_scope=True,
@@ -182,14 +226,34 @@ def sidebar_binding_status(
     return JSONResponse(result, status_code=status_code)
 
 
-def _sidebar_owner_userid_from_request(request: Request, *, owner_userid: str | None = None) -> str:
-    token = (
-        str(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER) or "").strip()
-        or str(request.query_params.get("sidebar_owner_token") or "").strip()
-        or str(request.query_params.get("owner_token") or "").strip()
-    )
-    token_result = load_sidebar_owner_context_token(token)
-    if token_result.get("ok"):
-        context = dict(token_result.get("context") or {})
-        return str(context.get("owner_userid") or context.get("viewer_userid") or "").strip()
-    return str(owner_userid or "").strip()
+def _binding_status_query(request: Request) -> GetSidebarContactBindingStatusQuery:
+    factory = getattr(request.app.state, "sidebar_contact_binding_status_query_factory", None)
+    return factory() if callable(factory) else GetSidebarContactBindingStatusQuery()
+
+
+def _sidebar_owner_userid_from_request(
+    request: Request,
+    *,
+    external_userid: str | None,
+    owner_userid: str | None = None,
+) -> str:
+    context = dict(getattr(request.state, "sidebar_context", {}) or {})
+    if not context:
+        result = validate_sidebar_owner_context(
+            token=str(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER) or "").strip(),
+            viewer_session_cookie=str(request.cookies.get(SIDEBAR_VIEWER_SESSION_COOKIE) or "").strip(),
+            external_userid=str(external_userid or "").strip(),
+            expected_corp_id=str(os.getenv("WECOM_CORP_ID") or "").strip(),
+        )
+        if not result.get("ok"):
+            status = str(result.get("status") or "").strip()
+            status_code = 401 if status in {"missing", "invalid", "expired", "viewer_session_required", "viewer_session_invalid"} else 403
+            raise HTTPException(status_code=status_code, detail="sidebar context required")
+        context = dict(result.get("context") or {})
+    viewer = str(context.get("owner_userid") or context.get("viewer_userid") or "").strip()
+    claimed_owner = str(owner_userid or "").strip()
+    if claimed_owner and claimed_owner != viewer:
+        raise HTTPException(status_code=403, detail="sidebar owner scope forbidden")
+    if str(context.get("external_userid") or "").strip() != str(external_userid or "").strip():
+        raise HTTPException(status_code=403, detail="sidebar customer scope forbidden")
+    return viewer

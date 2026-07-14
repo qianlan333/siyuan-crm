@@ -146,16 +146,6 @@ def admin_ai_audience_package_webhooks_update(package_id: int, request: Request,
     return _response(AudiencePackageService().update_admin_webhook(package_id, payload))
 
 
-@router.post(
-    "/api/admin/ai-audience/packages/{package_id}/webhooks/rotate-inbound-secret",
-    name="api.admin_ai_audience_package_webhooks_rotate_inbound_secret",
-)
-def admin_ai_audience_package_webhooks_rotate_inbound_secret(package_id: int, request: Request) -> JSONResponse:
-    if auth := admin_api_auth_error(request):
-        return auth
-    return _response(AudiencePackageService().rotate_admin_inbound_secret(package_id, request_base_url=_request_base_url(request)))
-
-
 @router.get("/api/admin/ai-audience/packages/{package_id}/senders", name="api.admin_ai_audience_package_senders")
 def admin_ai_audience_package_senders(package_id: int, request: Request) -> JSONResponse:
     if auth := admin_api_auth_error(request):

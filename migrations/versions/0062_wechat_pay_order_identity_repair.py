@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import inspect
 
 
 revision = "0062_wechat_pay_order_identity_repair"
@@ -12,6 +13,14 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # This revision is one of several historical heads branching from 0061.  A
+    # fresh install may visit it before the separate baseline branch has ever
+    # created ``wechat_pay_orders``.  The repair queue was temporary and is
+    # retired again by 0091, so skipping it is the only valid empty-schema
+    # behavior; deployed schemas that own the source table keep the old repair
+    # migration unchanged.
+    if not inspect(op.get_bind()).has_table("wechat_pay_orders"):
+        return
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS wechat_pay_order_identity_repair (

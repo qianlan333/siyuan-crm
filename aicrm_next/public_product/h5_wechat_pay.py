@@ -15,23 +15,21 @@ from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from aicrm_next.commerce.domain import completion_redirect_projection, safe_completion_redirect_url
-from aicrm_next.commerce.external_push_admin import plan_order_paid_external_push_effect
 from aicrm_next.navigation_target import completion_action_for_target, completion_target_projection
-from aicrm_next.commerce.external_push_outbox import enqueue_transaction_paid_outbox
 from aicrm_next.commerce.order_expiration import close_expired_wechat_pay_orders, pending_order_expires_at_text
-from aicrm_next.commerce.product_code_aliases import product_code_filter_values
+from aicrm_next.shared.product_code_aliases import product_code_filter_values
+from aicrm_next.identity_contact.dto import IdentityResolveResult, ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.integration_gateway.wechat_pay_client import WeChatPayClient, WeChatPayClientConfig, WeChatPayClientError
 from aicrm_next.integration_gateway.wechat_oauth_client import WeChatOAuthClientError, build_wechat_oauth_client
-from aicrm_next.platform_foundation.command_bus import CommandContext
-from aicrm_next.platform_foundation.internal_events import InternalEventService, register_payment_succeeded_consumers
-from aicrm_next.platform_foundation.internal_events.config import event_type_allowed, payment_internal_events_enabled
-from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE
+from aicrm_next.platform_foundation.internal_events.outbox import enqueue_transactional_internal_event_outbox
+from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE, build_payment_succeeded_event_request
 from aicrm_next.questionnaire.oauth import questionnaire_h5_identity_from_cookies
 from aicrm_next.shared.runtime import production_data_ready, runtime_setting
 from aicrm_next.shared.safe_logging import safe_log_exception, safe_log_fields
 
 from .repo import connect_h5_wechat_pay_db as _connect
-from .signed_context import append_ctx_query, load_sidebar_product_context_token
+from aicrm_next.shared.signed_context import SIDEBAR_PRODUCT_CONTEXT_COOKIE, load_sidebar_product_context_token
 from .sidebar_order_context import resolve_sidebar_order_context
 from .service import format_price, get_public_product, product_not_found_payload, route_headers
 
@@ -268,9 +266,9 @@ def checkout_page_state(product: dict[str, Any], request: Request) -> dict[str, 
     identity = _identity_from_request(request)
     code = _normalized_text(product.get("product_code"))
     paid_order = _existing_paid_order_for_checkout(product, identity) if identity.get("openid") else None
-    context_token = _normalized_text(request.query_params.get("ctx"))
+    context_token = _normalized_text(request.cookies.get(SIDEBAR_PRODUCT_CONTEXT_COOKIE))
     context_result = load_sidebar_product_context_token(context_token)
-    pay_path = append_ctx_query(f"/pay/{code}", context_token) if context_token else f"/pay/{code}"
+    pay_path = f"/pay/{code}"
     return {
         "product": {
             "product_code": code,
@@ -289,7 +287,6 @@ def checkout_page_state(product: dict[str, Any], request: Request) -> dict[str, 
         "completion_action": product.get("completion_action") or {"type": "default", "redirect_url": ""},
         "paid_order": paid_order,
         "price_display": format_price(product),
-        "context_token": context_token,
         "context_status": _normalized_text(context_result.get("status")) or "missing",
     }
 
@@ -367,93 +364,27 @@ def _is_order_effectively_paid(row: dict[str, Any]) -> bool:
     return _normalized_text(row.get("status")) == "paid" or _normalized_text(row.get("trade_state")) == "SUCCESS"
 
 
-def _masked_mobile(value: Any) -> str:
-    text = _normalized_text(value)
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if len(digits) >= 7:
-        return f"{digits[:3]}****{digits[-4:]}"
-    return ""
-
-
-def _payment_subject_id(order: dict[str, Any]) -> str:
-    return (
-        _normalized_text(order.get("external_userid"))
-        or _normalized_text(order.get("userid_snapshot"))
-        or _normalized_text(order.get("respondent_key"))
-    )
-
-
-def _emit_payment_succeeded_internal_event(
+def _enqueue_payment_succeeded_internal_event_outbox(
+    conn: Any,
     *,
     order: dict[str, Any],
     transaction: dict[str, Any],
-    outbox: dict[str, Any] | None,
     source_route: str,
 ) -> dict[str, Any] | None:
-    if not payment_internal_events_enabled() or not event_type_allowed(PAYMENT_SUCCEEDED_EVENT_TYPE):
+    request = build_payment_succeeded_event_request(
+        order=order,
+        transaction=transaction,
+        domain_event_outbox_id=None,
+        source_route=source_route,
+    )
+    if request is None:
         return None
-    out_trade_no = _normalized_text(order.get("out_trade_no") or transaction.get("out_trade_no"))
-    aggregate_id = _normalized_text(order.get("id") or out_trade_no)
-    if not out_trade_no or not aggregate_id:
-        return None
-    subject_id = _payment_subject_id(order)
-    try:
-        register_payment_succeeded_consumers()
-        result = InternalEventService().emit_event(
-            event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
-            event_version=1,
-            aggregate_type="wechat_pay_order",
-            aggregate_id=aggregate_id,
-            subject_type="customer",
-            subject_id=subject_id,
-            idempotency_key=f"payment.succeeded:{out_trade_no}",
-            source_module="public_product.h5_wechat_pay",
-            source_command_id=out_trade_no,
-            correlation_id=out_trade_no,
-            context=CommandContext(
-                actor_id="wechat_pay_notify",
-                actor_type="system",
-                trace_id=out_trade_no,
-                request_id=_normalized_text(transaction.get("transaction_id")),
-                source_route=source_route or "/api/h5/wechat-pay/notify",
-            ),
-            payload={
-                "order": dict(order),
-                "transaction": dict(transaction or {}),
-                "domain_event_outbox_id": (outbox or {}).get("id"),
-                "legacy_event_aliases": ["transaction.paid", "payment_succeeded"],
-            },
-            payload_summary={
-                "out_trade_no": out_trade_no,
-                "order_id": order.get("id"),
-                "aggregate_id": aggregate_id,
-                "subject_type": "customer",
-                "subject_id": subject_id,
-                "product_code": order.get("product_code"),
-                "amount_total": int(order.get("amount_total") or order.get("payer_total") or 0),
-                "status": order.get("status"),
-                "trade_state": order.get("trade_state"),
-                "paid_at": str(order.get("paid_at") or ""),
-                "mobile_masked": _masked_mobile(order.get("mobile_snapshot")),
-                "domain_event_outbox_id": (outbox or {}).get("id"),
-            },
-        )
-        LOGGER.info(
-            "payment_succeeded_internal_event_ensured",
-            extra=safe_log_fields(
-                out_trade_no=out_trade_no,
-                event_id=(result.get("event") or {}).get("event_id"),
-            ),
-        )
-        return result
-    except Exception as exc:
-        safe_log_exception(
-            LOGGER,
-            "payment_succeeded_internal_event_failed",
-            exc,
-            out_trade_no=out_trade_no,
-        )
-        return None
+    result = enqueue_transactional_internal_event_outbox(conn, request)
+    LOGGER.info(
+        "payment_succeeded_internal_event_outbox_ensured",
+        extra=safe_log_fields(source_command_id=request.source_command_id, outbox_id=result.get("outbox_id")),
+    )
+    return result
 
 
 def _completion_redirect_from_product(product: dict[str, Any]) -> dict[str, Any]:
@@ -549,47 +480,64 @@ def _lead_qr_for_product_code(conn: Any, product_code: str) -> dict[str, Any]:
     return _resolve_lead_channel_qr(conn, channel_id=channel_id)
 
 
-def _resolve_unionid_for_payment_identity(conn: Any, identity: dict[str, str]) -> str:
+def _resolve_payment_identity(
+    conn: Any,
+    identity: dict[str, str],
+    *,
+    for_update: bool = False,
+) -> IdentityResolveResult:
+    """Resolve only payer-owned aliases; sidebar customer context is not payer identity."""
+
     unionid = _normalized_text(identity.get("unionid"))
-    if unionid:
-        return unionid
-    clauses: list[str] = []
-    params: list[Any] = []
     openid = _normalized_text(identity.get("openid"))
-    if openid:
-        clauses.append("(primary_openid = %s OR jsonb_exists(openids_json, %s))")
-        params.extend([openid, openid])
-    external_userid = _normalized_text(identity.get("external_userid"))
-    if external_userid:
-        clauses.append("(primary_external_userid = %s OR jsonb_exists(external_userids_json, %s))")
-        params.extend([external_userid, external_userid])
-    if not clauses:
-        return ""
-    row = conn.execute(
-        f"""
-        SELECT unionid
-        FROM crm_user_identity
-        WHERE {" OR ".join(clauses)}
-        ORDER BY
-            CASE
-                WHEN primary_external_userid = %s THEN 0
-                WHEN primary_openid = %s THEN 1
-                ELSE 2
-            END,
-            last_seen_at DESC NULLS LAST,
-            updated_at DESC NULLS LAST
-        LIMIT 1
-        """,
-        tuple([*params, external_userid, openid]),
-    ).fetchone()
-    return _normalized_text((row or {}).get("unionid"))
-
-
-def _paid_order_for_product_identity(conn: Any, *, product: dict[str, Any], identity: dict[str, str]) -> dict[str, Any] | None:
-    product_codes = product_code_filter_values(product.get("product_code"))
-    unionid = _normalized_text(identity.get("unionid"))
     if not unionid:
-        unionid = _resolve_unionid_for_payment_identity(conn, identity)
+        return resolve_identity_with_dbapi(
+            conn,
+            ResolvePersonIdentityRequest(openid=openid or None),
+            for_update=for_update,
+        )
+
+    unionid_result = resolve_identity_with_dbapi(
+        conn,
+        ResolvePersonIdentityRequest(unionid=unionid),
+        for_update=for_update,
+    )
+    if unionid_result.status != "resolved" or not openid:
+        return unionid_result
+
+    # OAuth can return a valid unionid before the public-account openid alias has
+    # been projected into crm_user_identity.  A missing/pending openid must not
+    # block that canonical unionid, but an openid that resolves elsewhere still
+    # represents a real payer-identity conflict and remains blocked.
+    openid_result = resolve_identity_with_dbapi(
+        conn,
+        ResolvePersonIdentityRequest(openid=openid),
+        for_update=for_update,
+    )
+    if openid_result.status == "conflict":
+        return openid_result
+    canonical_unionid = resolved_unionid(unionid_result)
+    openid_unionid = resolved_unionid(openid_result)
+    if openid_unionid and openid_unionid != canonical_unionid:
+        return IdentityResolveResult(
+            status="conflict",
+            reason="identity_inputs_disagree",
+            matched_fields=["unionid", "openid"],
+            candidate_count=2,
+            pending_count=max(0, int(openid_result.pending_count)),
+        )
+    return unionid_result
+
+
+def _paid_order_for_product_identity(
+    conn: Any,
+    *,
+    product: dict[str, Any],
+    identity: dict[str, str],
+    canonical_unionid: str = "",
+) -> dict[str, Any] | None:
+    product_codes = product_code_filter_values(product.get("product_code"))
+    unionid = _normalized_text(canonical_unionid) or resolved_unionid(_resolve_payment_identity(conn, identity))
     if not product_codes or not unionid:
         return None
     params: list[Any] = [*product_codes, unionid]
@@ -613,8 +561,19 @@ def _paid_order_for_product_identity(conn: Any, *, product: dict[str, Any], iden
     return dict(row) if row else None
 
 
-def _paid_order_payload_for_product_identity(conn: Any, *, product: dict[str, Any], identity: dict[str, str]) -> dict[str, Any] | None:
-    order = _paid_order_for_product_identity(conn, product=product, identity=identity)
+def _paid_order_payload_for_product_identity(
+    conn: Any,
+    *,
+    product: dict[str, Any],
+    identity: dict[str, str],
+    canonical_unionid: str = "",
+) -> dict[str, Any] | None:
+    order = _paid_order_for_product_identity(
+        conn,
+        product=product,
+        identity=identity,
+        canonical_unionid=canonical_unionid,
+    )
     if not order:
         return None
     completion_redirect = _completion_redirect_from_product(product)
@@ -786,15 +745,35 @@ def _order_metadata_identity(order: dict[str, Any]) -> dict[str, Any]:
 def _project_order_mobile_to_identity(conn: Any, order: dict[str, Any], *, source_route: str) -> dict[str, Any]:
     identity = _order_metadata_identity(order)
     mobile = "".join(ch for ch in _normalized_text(identity.get("mobile")) if ch.isdigit())
-    unionid = _normalized_text(order.get("unionid") or identity.get("unionid"))
-    if not unionid:
-        return {"ok": True, "projected": False, "reason": "missing_unionid"}
     if not mobile:
         return {"ok": True, "projected": False, "reason": "missing_mobile"}
     if not (len(mobile) == 11 and mobile.startswith("1")):
         return {"ok": True, "projected": False, "reason": "invalid_mobile"}
 
     external_userid = _normalized_text(identity.get("external_userid"))
+    base_resolution = resolve_identity_with_dbapi(
+        conn,
+        ResolvePersonIdentityRequest(
+            unionid=_normalized_text(order.get("unionid") or identity.get("unionid")) or None,
+            external_userid=external_userid or None,
+            openid=_normalized_text(identity.get("openid")) or None,
+        ),
+    )
+    unionid = resolved_unionid(base_resolution)
+    if not unionid:
+        return {
+            "ok": False if base_resolution.status == "conflict" else True,
+            "projected": False,
+            "reason": "identity_conflict" if base_resolution.status == "conflict" else "missing_unionid",
+        }
+    mobile_resolution = resolve_identity_with_dbapi(
+        conn,
+        ResolvePersonIdentityRequest(mobile=mobile),
+    )
+    mobile_unionid = resolved_unionid(mobile_resolution)
+    if mobile_resolution.status in {"pending", "conflict"} or (mobile_unionid and mobile_unionid != unionid):
+        return {"ok": False, "projected": False, "reason": "mobile_alias_conflict"}
+
     owner_userid = _normalized_text(identity.get("owner_userid"))
     customer_name = _normalized_text(order.get("payer_name_snapshot") or identity.get("payer_name"))
     row = conn.execute(
@@ -893,47 +872,25 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: 
     is_paid = _normalized_text(order_payload.get("status")) == "paid" or _normalized_text(order_payload.get("trade_state")) == "SUCCESS"
     if is_paid:
         mobile_projection = _safe_project_order_mobile_to_identity(conn, order_payload, source_route=source_route)
-        outbox = enqueue_transaction_paid_outbox(conn, order_payload)
-        _emit_payment_succeeded_internal_event(
+        internal_event_outbox = _enqueue_payment_succeeded_internal_event_outbox(
+            conn,
             order=order_payload,
             transaction=transaction,
-            outbox=outbox,
             source_route=source_route,
         )
-        _plan_order_paid_external_effect_job(conn, order=order_payload, transaction=transaction, outbox=outbox)
         LOGGER.info(
-            "wechat_pay_transaction_paid_outbox_ensured",
+            "wechat_pay_payment_succeeded_outbox_ensured",
             extra=safe_log_fields(
                 order_id=order_payload.get("id"),
                 out_trade_no=_normalized_text(order_payload.get("out_trade_no")),
-                event_type="transaction.paid",
-                outbox_created=bool(outbox),
+                event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
+                internal_event_outbox_id=(internal_event_outbox or {}).get("outbox_id"),
                 was_paid=was_paid,
                 mobile_projected=bool(mobile_projection.get("projected")),
                 mobile_projection_reason=_normalized_text(mobile_projection.get("reason")),
             ),
         )
     return order_payload
-
-
-def _plan_order_paid_external_effect_job(conn: Any, *, order: dict[str, Any], transaction: dict[str, Any], outbox: dict[str, Any] | None) -> None:
-    out_trade_no = _normalized_text(order.get("out_trade_no"))
-    try:
-        result = plan_order_paid_external_push_effect(
-            conn,
-            order=order,
-            transaction=transaction,
-            outbox=outbox,
-            source_module="public_product.h5_wechat_pay",
-            source_route="/api/h5/wechat-pay/notify",
-        )
-        if result.get("skipped"):
-            LOGGER.info(
-                "wechat_pay_order_external_push_skipped",
-                extra=safe_log_fields(out_trade_no=out_trade_no, reason=result.get("reason")),
-            )
-    except Exception as exc:
-        safe_log_exception(LOGGER, "wechat_pay_external_effect_job_failed", exc, out_trade_no=out_trade_no)
 
 
 def create_jsapi_order_response(
@@ -969,7 +926,7 @@ def create_jsapi_order_response(
     except RuntimeError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=503, headers=route_headers())
     mobile = _normalized_text(payload.get("mobile"))
-    context_token = _normalized_text(payload.get("ctx") or payload.get("context_token"))
+    context_token = _normalized_text(request.cookies.get(SIDEBAR_PRODUCT_CONTEXT_COOKIE))
     resolved_context = resolve_sidebar_order_context(
         context_token=context_token,
         payment_identity=identity,
@@ -1009,7 +966,31 @@ def create_jsapi_order_response(
     }
     try:
         with _connect() as conn:
-            existing_paid_order = _paid_order_payload_for_product_identity(conn, product=product, identity=order_identity) if allow_paid_reuse else None
+            identity_resolution = _resolve_payment_identity(conn, identity, for_update=True)
+            canonical_unionid = resolved_unionid(identity_resolution)
+            if not canonical_unionid:
+                conflict = identity_resolution.status == "conflict"
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "identity_conflict" if conflict else "identity_resolution_required",
+                        "identity_status": identity_resolution.status,
+                        "retryable": not conflict,
+                    },
+                    status_code=409,
+                    headers=route_headers(),
+                )
+            order_identity["unionid"] = canonical_unionid
+            existing_paid_order = (
+                _paid_order_payload_for_product_identity(
+                    conn,
+                    product=product,
+                    identity=identity,
+                    canonical_unionid=canonical_unionid,
+                )
+                if allow_paid_reuse
+                else None
+            )
             if existing_paid_order is not None:
                 return JSONResponse({"ok": True, "already_paid": True, "order": existing_paid_order}, headers=route_headers())
             client = WeChatPayClient(config)

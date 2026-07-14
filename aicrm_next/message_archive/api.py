@@ -9,8 +9,6 @@ from fastapi import APIRouter, Query, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
-
 from .application import (
     ListExternalChatRecordsQuery,
     ListArchivedMessagesQuery,
@@ -48,40 +46,6 @@ def _external_error(*, error_code: str, message: str, status_code: int) -> JSONR
     )
 
 
-def _external_auth_failure(request: Request) -> JSONResponse | None:
-    auth_header = _text(request.headers.get("Authorization"))
-    provided = _text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
-    result = validate_internal_service_token("archive", provided)
-    if result.error == "internal_token_not_configured":
-        return _external_error(
-            error_code="internal_token_not_configured",
-            message="internal token not configured",
-            status_code=503,
-        )
-    if not provided:
-        return _external_error(error_code="missing_internal_token", message="missing internal token", status_code=401)
-    if not result.ok:
-        return _external_error(error_code="invalid_internal_token", message="invalid internal token", status_code=401)
-    return None
-
-
-def _internal_auth_failure(request: Request) -> JSONResponse | None:
-    auth_header = _text(request.headers.get("Authorization"))
-    provided = _text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
-    result = validate_internal_service_token("archive", provided)
-    if result.error == "internal_token_not_configured":
-        return _external_error(
-            error_code="internal_token_not_configured",
-            message="internal token not configured",
-            status_code=503,
-        )
-    if not provided:
-        return _external_error(error_code="missing_internal_token", message="missing internal token", status_code=401)
-    if not result.ok:
-        return _external_error(error_code="invalid_internal_token", message="invalid internal token", status_code=401)
-    return None
-
-
 def _encode_cursor(offset: int | None) -> str:
     if offset is None:
         return ""
@@ -112,9 +76,6 @@ def list_external_chat_records(
     with_userid: str | None = Query(None, description="私信场景下对话员工 userid，默认 HuangYouCan"),
     cursor: str | None = Query(None, description="下一页游标"),
 ) -> JSONResponse:
-    auth_failure = _external_auth_failure(request)
-    if auth_failure:
-        return auth_failure
     try:
         offset = _decode_cursor(cursor)
         payload = ListExternalChatRecordsQuery()(
@@ -159,9 +120,6 @@ def list_external_chat_records(
 
 @router.get("/api/archive/health")
 def archive_health(request: Request) -> JSONResponse:
-    auth_failure = _internal_auth_failure(request)
-    if auth_failure:
-        return auth_failure
     try:
         return JSONResponse(jsonable_encoder(archive_health_payload()))
     except Exception as exc:
@@ -180,9 +138,6 @@ def archive_health(request: Request) -> JSONResponse:
 
 @router.post("/api/archive/sync")
 async def archive_sync(request: Request) -> JSONResponse:
-    auth_failure = _internal_auth_failure(request)
-    if auth_failure:
-        return auth_failure
     try:
         raw_payload = await request.json()
     except Exception:

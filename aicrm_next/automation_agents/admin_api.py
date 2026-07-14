@@ -83,6 +83,13 @@ def copy_automation_agent(agent_id: int, request: Request) -> JSONResponse:
     return _response(AutomationAgentAdminService().copy_agent(agent_id, request_base_url=_request_base_url(request)))
 
 
+@router.post("/api/admin/automation-agents/{agent_id}/publish", name="api.admin_automation_agent_publish")
+def publish_automation_agent(agent_id: int, request: Request) -> JSONResponse:
+    if auth := admin_api_auth_error(request):
+        return auth
+    return _response(AutomationAgentAdminService().publish_agent(agent_id, request_base_url=_request_base_url(request)))
+
+
 @router.post("/api/admin/automation-agents/{agent_id}/pause", name="api.admin_automation_agent_pause")
 def pause_automation_agent(agent_id: int, request: Request) -> JSONResponse:
     if auth := admin_api_auth_error(request):
@@ -95,13 +102,6 @@ def activate_automation_agent(agent_id: int, request: Request) -> JSONResponse:
     if auth := admin_api_auth_error(request):
         return auth
     return _response(AutomationAgentAdminService().set_status(agent_id, "active", request_base_url=_request_base_url(request)))
-
-
-@router.post("/api/admin/automation-agents/{agent_id}/reset-token", name="api.admin_automation_agent_reset_token")
-def reset_automation_agent_token(agent_id: int, request: Request) -> JSONResponse:
-    if auth := admin_api_auth_error(request):
-        return auth
-    return _response(AutomationAgentAdminService().reset_inbound_token(agent_id, request_base_url=_request_base_url(request)))
 
 
 @router.delete("/api/admin/automation-agents/{agent_id}", name="api.admin_automation_agent_delete")

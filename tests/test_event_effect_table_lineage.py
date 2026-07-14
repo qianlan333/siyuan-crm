@@ -14,6 +14,7 @@ EVENT_EFFECT_TABLES = {
     "external_push_delivery",
     "outbound_webhook_deliveries",
     "outbound_event_outbox",
+    "internal_event_outbox",
     "internal_event",
     "internal_event_consumer_run",
     "internal_event_consumer_attempt",
@@ -32,6 +33,7 @@ def test_event_effect_tables_are_registered_in_lifecycle_manifest() -> None:
     assert EVENT_EFFECT_TABLES <= set(tables)
 
     assert tables["internal_event"]["lifecycle"] == "event"
+    assert tables["internal_event_outbox"]["lifecycle"] == "queue"
     assert tables["internal_event_consumer_run"]["lifecycle"] == "queue"
     assert tables["external_effect_job"]["lifecycle"] == "queue"
     assert tables["external_effect_attempt"]["lifecycle"] == "audit"

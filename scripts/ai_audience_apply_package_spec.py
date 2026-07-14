@@ -239,7 +239,6 @@ def _apply_webhook_and_senders(service: AudiencePackageService, package_id: int,
             {
                 "outbound_enabled": bool(webhook.get("outbound_enabled")),
                 "outbound_webhook_url": str(webhook.get("outbound_webhook_url") or ""),
-                "outbound_signing_secret": str(webhook.get("outbound_signing_secret") or ""),
             },
         )
     senders = spec.frontmatter.get("senders") if isinstance(spec.frontmatter.get("senders"), list) else []
@@ -257,7 +256,6 @@ def _apply_admin_webhook_and_senders(base: str, cookie: str, package_id: int, sp
             payload={
                 "outbound_enabled": bool(webhook.get("outbound_enabled")),
                 "outbound_webhook_url": str(webhook.get("outbound_webhook_url") or ""),
-                "outbound_signing_secret": str(webhook.get("outbound_signing_secret") or ""),
             },
         )
     senders = spec.frontmatter.get("senders") if isinstance(spec.frontmatter.get("senders"), list) else []
@@ -301,7 +299,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--api-base", default="", help="Use admin API instead of local service.")
     parser.add_argument("--admin-session-cookie-from-env", action="store_true", help="Read admin cookie from AICRM_ADMIN_SESSION_COOKIE.")
     parser.add_argument("--external-api-base", default="", help="Use external spec API instead of local service/admin API.")
-    parser.add_argument("--external-token-from-env", action="store_true", help="Read Bearer token from AICRM_AI_AUDIENCE_SPEC_API_TOKEN.")
+    parser.add_argument(
+        "--oauth-access-token-from-env",
+        action="store_true",
+        help="Read a short-lived OAuth access token from AICRM_AUTH_CLI_ACCESS_TOKEN.",
+    )
     parser.add_argument("--package-key-prefix", default="", help="Prefix package_key, useful for prod_verify_ tests.")
     parser.add_argument("--operator", default="codex")
     parser.add_argument("--confirm-production", action="store_true")
@@ -313,7 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     cookie = os.getenv("AICRM_ADMIN_SESSION_COOKIE", "") if args.admin_session_cookie_from_env else ""
-    token = os.getenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN", "") if args.external_token_from_env else ""
+    token = os.getenv("AICRM_AUTH_CLI_ACCESS_TOKEN", "") if args.oauth_access_token_from_env else ""
     reports: list[dict[str, Any]] = []
     for spec_path in args.specs:
         spec = parse_markdown_spec(spec_path)

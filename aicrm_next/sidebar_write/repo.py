@@ -6,6 +6,8 @@ import re
 from typing import Any
 
 from aicrm_next.customer_read_model.repo import FixtureCustomerReadRepository
+from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.platform_foundation.command_bus.models import utcnow_iso
 from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.runtime import raw_database_url
@@ -327,6 +329,17 @@ class PostgresSidebarWriteRepository:
                     "identity_resolution": resolution,
                 }
 
+            mobile_resolution = resolve_identity_with_dbapi(
+                conn,
+                ResolvePersonIdentityRequest(mobile=normalized_mobile),
+                for_update=True,
+            )
+            mobile_unionid = resolved_unionid(mobile_resolution)
+            if mobile_resolution.status in {"pending", "conflict"} or (
+                mobile_unionid and mobile_unionid != _text(identity.get("unionid"))
+            ):
+                raise ValueError("mobile already bound to another unionid")
+
             existing_mobile = str(identity.get("mobile") or "").strip()
             if existing_mobile == normalized_mobile:
                 binding = self._binding_response(identity, owner_userid=normalized_owner_userid)
@@ -358,6 +371,7 @@ class PostgresSidebarWriteRepository:
                     last_seen_at = NOW(),
                     updated_at = NOW()
                 WHERE unionid = %s
+                  AND identity_status = 'active'
                 RETURNING
                     unionid,
                     primary_external_userid,
@@ -583,29 +597,26 @@ class PostgresSidebarWriteRepository:
             }
 
     def _identity_row(self, conn, external_userid: str) -> JsonDict | None:
-        row = conn.execute(
-            """
-            SELECT
-                unionid,
-                primary_external_userid,
-                external_userids_json,
-                mobile,
-                mobile_normalized,
-                mobile_source,
-                primary_owner_userid,
-                customer_name,
-                remark,
-                created_at,
-                updated_at
-            FROM crm_user_identity
-            WHERE primary_external_userid = %s
-                   OR jsonb_exists(external_userids_json, %s)
-            ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END
-            LIMIT 1
-            """,
-            (external_userid, external_userid, external_userid),
-        ).fetchone()
-        return dict(row) if row else None
+        resolution = resolve_identity_with_dbapi(
+            conn,
+            ResolvePersonIdentityRequest(external_userid=external_userid),
+            for_update=True,
+        )
+        if resolution.status == "conflict":
+            raise ValueError("external identity already bound to multiple unionids")
+        if resolution.status != "resolved" or resolution.identity is None:
+            return None
+        identity = resolution.identity
+        return {
+            "unionid": resolved_unionid(resolution),
+            "primary_external_userid": _text(identity.external_userid),
+            "mobile": _text(identity.mobile),
+            "mobile_normalized": _text(identity.mobile),
+            "mobile_source": _text(identity.mobile_source),
+            "primary_owner_userid": _text(identity.owner_userid),
+            "customer_name": _text(identity.customer_name),
+            "remark": _text(identity.remark),
+        }
 
     def _require_identity_for_write(self, conn, external_userid: str, *, owner_userid: str = "") -> JsonDict:
         identity = self._identity_row(conn, external_userid)

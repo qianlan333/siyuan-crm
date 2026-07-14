@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "description": "Forbidden retired runtime references. Historical migrations and docs remain evidence; active runtime, deploy workflows, and operational tools must not restore them.",
+  "scan_roots": [
+    "aicrm_next",
+    "deploy",
+    ".github/workflows",
+    "scripts",
+    "tools"
+  ],
+  "artifacts": [
+    {
+      "id": "legacy_cleanup_runtime",
+      "kind": "module",
+      "patterns": [
+        "aicrm_next.platform_foundation.legacy_cleanup",
+        "platform_foundation.legacy_cleanup",
+        "LegacyWebhookCleanupService",
+        "legacy_cleanup_execute"
+      ],
+      "allowed_paths": []
+    },
+    {
+      "id": "legacy_cleanup_routes",
+      "kind": "route",
+      "patterns": [
+        "/api/admin/legacy-webhook-cleanup"
+      ],
+      "allowed_paths": []
+    },
+    {
+      "id": "legacy_cleanup_tables",
+      "kind": "table",
+      "patterns": [
+        "legacy_webhook_cleanup_audit",
+        "legacy_webhook_deprecation_registry"
+      ],
+      "allowed_paths": []
+    },
+    {
+      "id": "legacy_production_facade_flags",
+      "kind": "environment",
+      "patterns": [
+        "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE",
+        "AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE"
+      ],
+      "allowed_paths": []
+    },
+    {
+      "id": "retired_runtime_units",
+      "kind": "runtime_unit",
+      "patterns": [
+        "openclaw-wecom-callback-inbox-worker.timer",
+        "openclaw-external-push-worker.timer",
+        "openclaw-external-push-worker.service",
+        "aicrm-reply-monitor-run-due.timer",
+        "aicrm-reply-monitor-capture.timer",
+        "aicrm-automation-jobs-run-due.timer"
+      ],
+      "allowed_paths": [
+        "deploy/production_runtime_units.json",
+        "scripts/ops/prepare_wecom_callback_ingress_cutover.py",
+        "scripts/ops/reconcile_wecom_callback_runtime.py"
+      ]
+    }
+  ]
+}

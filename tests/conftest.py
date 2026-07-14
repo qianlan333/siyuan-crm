@@ -93,6 +93,8 @@ def _resolve_worker_database_url() -> str:
 
 # 测试间需要清理的关键表（FK 反向顺序：子表先清，autouse 用 CASCADE 兜底剩余 FK）
 _TABLES_TO_TRUNCATE = [
+    # durable callback ingress
+    "webhook_inbox",
     # — ai audience ops
     "ai_audience_inbound_webhook_event",
     "ai_audience_package_sender",
@@ -180,8 +182,6 @@ _TABLES_TO_TRUNCATE = [
     # — questionnaire
     "questionnaire_external_push_logs",
     "questionnaire_scrm_apply_logs",
-    "legacy_webhook_cleanup_audit",
-    "legacy_webhook_deprecation_registry",
     "questionnaire_submission_answers",
     "questionnaire_submissions",
     "questionnaire_options",
@@ -192,11 +192,14 @@ _TABLES_TO_TRUNCATE = [
     "internal_event_consumer_attempt",
     "internal_event_consumer_run",
     "internal_event",
+    "internal_event_outbox",
     "external_effect_attempt",
     "external_effect_test_receipt",
     "external_effect_job",
     "external_push_config",
     "domain_event_outbox",
+    "service_period_huangyoucan_usage_sync_runs",
+    "service_period_huangyoucan_usage_snapshot",
     "service_period_events",
     "service_period_entitlements",
     "service_period_products",
@@ -209,6 +212,11 @@ _TABLES_TO_TRUNCATE = [
     "alipay_pay_order_events",
     "alipay_pay_orders",
     # — admin / auth
+    "auth_webhook_replay",
+    "auth_sessions",
+    "auth_security_events",
+    "auth_webhook_clients",
+    "auth_api_clients",
     "admin_wecom_directory_members",
     "admin_users",
     "owner_role_map",
@@ -222,6 +230,10 @@ _TABLES_TO_TRUNCATE = [
     # — contacts / identity
     "contacts",
     "external_contact_bindings",
+    "crm_user_identity_merge_audit",
+    "crm_user_identity_conflicts",
+    "crm_user_identity_resolution_queue",
+    "crm_user_identity",
     "sidebar_customer_profile_fields",
     "wecom_external_contact_identity_map",
     "wecom_external_contact_follow_users",
@@ -235,6 +247,7 @@ _TABLES_TO_TRUNCATE = [
     "class_user_status_current",
     "class_user_status_history",
     # — user_ops
+    "user_ops_send_records_next",
     "user_ops_huangxiaocan_activation_source",
     "user_ops_activation_status_source",
     "signup_tag_rules",
@@ -256,6 +269,12 @@ _TABLES_TO_TRUNCATE = [
     # — broadcast_jobs
     "broadcast_job_events",
     "broadcast_jobs",
+    # — customer read model projection
+    "customer_recent_message_next",
+    "customer_timeline_event_next",
+    "customer_detail_snapshot_next",
+    "customer_list_index_next",
+    "customer_read_model_refresh_state",
     # — archive / system
     "archived_messages",
     "archive_sync_state",
@@ -364,580 +383,9 @@ def _truncate_cached_tables_once() -> None:
 
 
 def _run_next_alembic_upgrade(url: str) -> None:
-    from alembic import command
-    from alembic.config import Config
+    from scripts.ops.bootstrap_database import install_or_upgrade_database
 
-    if not _database_has_alembic_state(url):
-        _bootstrap_next_test_baseline_schema(url)
-    previous_url = os.environ.get("DATABASE_URL")
-    os.environ["DATABASE_URL"] = url
-    try:
-        config = Config(str(_ROOT / "alembic.ini"))
-        config.set_main_option("sqlalchemy.url", url)
-        command.upgrade(config, "head")
-    finally:
-        if previous_url is None:
-            os.environ.pop("DATABASE_URL", None)
-        else:
-            os.environ["DATABASE_URL"] = previous_url
-
-
-def _database_has_alembic_state(url: str) -> bool:
-    import psycopg
-
-    with psycopg.connect(url) as conn:
-        with conn.cursor() as cur:
-            cur.execute("SELECT to_regclass('public.alembic_version') IS NOT NULL")
-            row = cur.fetchone()
-    return bool(row and row[0])
-
-
-def _bootstrap_next_test_baseline_schema(url: str) -> None:
-    """Create the minimal post-legacy baseline that Alembic 0001 assumes exists.
-
-    The production migration chain starts with a no-op 0001 baseline because
-    production databases already had these tables when Alembic was introduced.
-    CI test databases are empty, so tests need a tiny Next-owned bootstrap
-    before running later Alembic revisions. Keep this local to tests and do not
-    read or import the retired legacy schema runner.
-    """
-    import psycopg
-
-    statements = [
-        """
-        CREATE TABLE IF NOT EXISTS conversion_dispatch_log (
-            id BIGSERIAL PRIMARY KEY,
-            external_userid TEXT NOT NULL DEFAULT '',
-            dispatched_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_member (
-            id BIGSERIAL PRIMARY KEY,
-            external_contact_id TEXT NOT NULL DEFAULT '',
-            phone TEXT NOT NULL DEFAULT '',
-            owner_staff_id TEXT NOT NULL DEFAULT '',
-            in_pool BOOLEAN NOT NULL DEFAULT FALSE,
-            current_pool TEXT NOT NULL DEFAULT 'removed',
-            follow_type TEXT NOT NULL DEFAULT '',
-            current_audience_code TEXT NOT NULL DEFAULT 'pending_questionnaire',
-            questionnaire_status TEXT NOT NULL DEFAULT '',
-            joined_at TEXT NOT NULL DEFAULT '',
-            last_ai_push_at TEXT NOT NULL DEFAULT '',
-            ai_cooldown_until TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_channel (
-            id BIGSERIAL PRIMARY KEY,
-            channel_type TEXT NOT NULL DEFAULT 'qrcode',
-            carrier_type TEXT NOT NULL DEFAULT 'qrcode',
-            channel_name TEXT NOT NULL DEFAULT '',
-            channel_code TEXT NOT NULL DEFAULT '',
-            scene_value TEXT NOT NULL DEFAULT '',
-            qr_url TEXT NOT NULL DEFAULT '',
-            qr_ticket TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'active',
-            owner_staff_id TEXT NOT NULL DEFAULT '',
-            customer_channel TEXT NOT NULL DEFAULT '',
-            link_url TEXT NOT NULL DEFAULT '',
-            final_url TEXT NOT NULL DEFAULT '',
-            welcome_message TEXT NOT NULL DEFAULT '',
-            welcome_image_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-            welcome_miniprogram_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-            welcome_attachment_library_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-            auto_accept_friend BOOLEAN NOT NULL DEFAULT FALSE,
-            entry_tag_id TEXT NOT NULL DEFAULT '',
-            entry_tag_name TEXT NOT NULL DEFAULT '',
-            entry_tag_group_name TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_channel_contact (
-            id BIGSERIAL PRIMARY KEY,
-            channel_id BIGINT NOT NULL DEFAULT 0,
-            external_contact_id TEXT NOT NULL DEFAULT '',
-            external_userid TEXT NOT NULL DEFAULT '',
-            owner_staff_id TEXT NOT NULL DEFAULT '',
-            enter_count INTEGER NOT NULL DEFAULT 1,
-            first_channel_entered_at TIMESTAMPTZ,
-            last_channel_entered_at TIMESTAMPTZ,
-            source_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        DO $$
-        BEGIN
-            IF EXISTS (
-                SELECT 1
-                FROM information_schema.columns
-                WHERE table_name = 'automation_channel_contact'
-                  AND column_name = 'external_contact_id'
-            ) THEN
-                CREATE UNIQUE INDEX IF NOT EXISTS uq_automation_channel_contact_external
-                ON automation_channel_contact(channel_id, external_contact_id)
-                WHERE external_contact_id <> '';
-            END IF;
-        END $$;
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_ai_push_log (
-            id BIGSERIAL PRIMARY KEY,
-            member_id BIGINT NOT NULL DEFAULT 0,
-            pushed_at TEXT NOT NULL DEFAULT ''
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_touch_delivery_log (
-            id BIGSERIAL PRIMARY KEY,
-            member_id BIGINT NOT NULL DEFAULT 0,
-            trace_id TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT '',
-            sent_at TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS outbound_tasks (
-            id BIGSERIAL PRIMARY KEY,
-            trace_id TEXT NOT NULL DEFAULT ''
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_agent_run (
-            id BIGSERIAL PRIMARY KEY,
-            trace_id TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_agent_config (
-            id BIGSERIAL PRIMARY KEY,
-            agent_code TEXT NOT NULL DEFAULT '',
-            display_name TEXT NOT NULL DEFAULT '',
-            scenario_code TEXT NOT NULL DEFAULT '',
-            enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_workflow (
-            id BIGSERIAL PRIMARY KEY,
-            review_status TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT '',
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS automation_sop_template (
-            id BIGSERIAL PRIMARY KEY
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS radar_links (
-            id BIGSERIAL PRIMARY KEY,
-            code TEXT NOT NULL DEFAULT '',
-            title TEXT NOT NULL DEFAULT '',
-            target_type TEXT NOT NULL DEFAULT 'link',
-            media_item_id TEXT NOT NULL DEFAULT '',
-            deleted_at TIMESTAMPTZ
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS group_chats (
-            chat_id TEXT PRIMARY KEY,
-            group_name TEXT NOT NULL DEFAULT '',
-            owner_userid TEXT NOT NULL DEFAULT '',
-            notice TEXT NOT NULL DEFAULT '',
-            member_count INTEGER NOT NULL DEFAULT 0,
-            status TEXT NOT NULL DEFAULT 'active',
-            create_time TEXT NOT NULL DEFAULT '',
-            dismissed_at TEXT NOT NULL DEFAULT '',
-            raw_payload TEXT NOT NULL DEFAULT '{}',
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS people (
-            id BIGSERIAL PRIMARY KEY,
-            mobile TEXT NOT NULL DEFAULT '',
-            third_party_user_id TEXT NOT NULL DEFAULT '',
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS external_contact_bindings (
-            external_userid TEXT PRIMARY KEY,
-            person_id TEXT,
-            first_owner_userid TEXT NOT NULL DEFAULT '',
-            last_owner_userid TEXT NOT NULL DEFAULT '',
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS wecom_external_contact_identity_map (
-            id BIGSERIAL PRIMARY KEY,
-            external_userid TEXT NOT NULL DEFAULT '',
-            unionid TEXT NOT NULL DEFAULT '',
-            openid TEXT NOT NULL DEFAULT '',
-            follow_user_userid TEXT NOT NULL DEFAULT '',
-            name TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'active',
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS wecom_external_contact_follow_users (
-            id BIGSERIAL PRIMARY KEY,
-            external_userid TEXT NOT NULL DEFAULT '',
-            user_id TEXT NOT NULL DEFAULT '',
-            relation_status TEXT NOT NULL DEFAULT 'active',
-            is_primary BOOLEAN NOT NULL DEFAULT FALSE,
-            remark TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS crm_user_identity (
-            unionid TEXT PRIMARY KEY,
-            primary_external_userid TEXT NOT NULL DEFAULT '',
-            external_userids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-            primary_openid TEXT NOT NULL DEFAULT '',
-            openids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-            mobile TEXT NOT NULL DEFAULT '',
-            mobile_normalized TEXT NOT NULL DEFAULT '',
-            mobile_verified BOOLEAN NOT NULL DEFAULT FALSE,
-            mobile_source TEXT NOT NULL DEFAULT '',
-            customer_name TEXT NOT NULL DEFAULT '',
-            remark TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            avatar TEXT NOT NULL DEFAULT '',
-            gender INTEGER,
-            profile_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            primary_owner_userid TEXT NOT NULL DEFAULT '',
-            follow_users_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-            legacy_person_id TEXT NOT NULL DEFAULT '',
-            legacy_identity_map_ids_json JSONB NOT NULL DEFAULT '[]'::jsonb,
-            legacy_sources_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            identity_status TEXT NOT NULL DEFAULT 'active',
-            unionid_resolved_at TIMESTAMPTZ,
-            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_polled_at TIMESTAMPTZ,
-            next_poll_at TIMESTAMPTZ,
-            poll_attempt_count INTEGER NOT NULL DEFAULT 0,
-            last_poll_error TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS crm_user_identity_resolution_queue (
-            id BIGSERIAL PRIMARY KEY,
-            source_type TEXT NOT NULL DEFAULT '',
-            source_key TEXT NOT NULL DEFAULT '',
-            source_table TEXT NOT NULL DEFAULT '',
-            source_id TEXT NOT NULL DEFAULT '',
-            corp_id TEXT NOT NULL DEFAULT '',
-            external_userid TEXT NOT NULL DEFAULT '',
-            openid TEXT NOT NULL DEFAULT '',
-            mobile TEXT NOT NULL DEFAULT '',
-            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            raw_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            reason TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'pending',
-            resolved_unionid TEXT NOT NULL DEFAULT '',
-            conflict_reason TEXT NOT NULL DEFAULT '',
-            attempts INTEGER NOT NULL DEFAULT 0,
-            attempt_count INTEGER NOT NULL DEFAULT 0,
-            last_error TEXT NOT NULL DEFAULT '',
-            next_attempt_at TIMESTAMPTZ,
-            resolved_at TIMESTAMPTZ,
-            first_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            last_seen_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS ux_crm_user_identity_resolution_queue_pending_source
-        ON crm_user_identity_resolution_queue (source_type, source_key)
-        WHERE status = 'pending' AND source_type <> '' AND source_key <> ''
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS questionnaires (
-            id BIGSERIAL PRIMARY KEY,
-            slug TEXT NOT NULL DEFAULT '',
-            name TEXT NOT NULL DEFAULT '',
-            title TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS questionnaire_submissions (
-            id BIGSERIAL PRIMARY KEY,
-            questionnaire_id BIGINT NOT NULL DEFAULT 0,
-            respondent_key TEXT NOT NULL DEFAULT '',
-            external_userid TEXT NOT NULL DEFAULT '',
-            follow_user_userid TEXT NOT NULL DEFAULT '',
-            mobile_snapshot TEXT NOT NULL DEFAULT '',
-            source_channel TEXT NOT NULL DEFAULT '',
-            campaign_id TEXT NOT NULL DEFAULT '',
-            staff_id TEXT NOT NULL DEFAULT '',
-            total_score INTEGER NOT NULL DEFAULT 0,
-            final_tags JSONB NOT NULL DEFAULT '[]'::jsonb,
-            assessment_result_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
-            result_token TEXT NOT NULL DEFAULT '',
-            submitted_at TIMESTAMPTZ,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS questionnaire_questions (
-            id BIGSERIAL PRIMARY KEY,
-            questionnaire_id BIGINT NOT NULL DEFAULT 0,
-            type TEXT NOT NULL DEFAULT '',
-            title TEXT NOT NULL DEFAULT '',
-            required BOOLEAN NOT NULL DEFAULT FALSE,
-            sort_order INTEGER NOT NULL DEFAULT 0,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            placeholder_text TEXT NOT NULL DEFAULT '',
-            assessment_dimension_key TEXT NOT NULL DEFAULT '',
-            sidebar_profile_field TEXT NOT NULL DEFAULT ''
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS questionnaire_submission_answers (
-            id BIGSERIAL PRIMARY KEY,
-            submission_id BIGINT NOT NULL DEFAULT 0,
-            question_id BIGINT NOT NULL DEFAULT 0,
-            question_type TEXT NOT NULL DEFAULT '',
-            question_title_snapshot TEXT NOT NULL DEFAULT '',
-            selected_option_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
-            selected_option_texts_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
-            selected_option_scores_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
-            selected_option_tags_snapshot JSONB NOT NULL DEFAULT '[]'::jsonb,
-            text_value TEXT NOT NULL DEFAULT '',
-            score_contribution DOUBLE PRECISION NOT NULL DEFAULT 0,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS wechat_pay_products (
-            id BIGSERIAL PRIMARY KEY,
-            product_code TEXT NOT NULL UNIQUE,
-            name TEXT NOT NULL DEFAULT '',
-            amount_total INTEGER NOT NULL DEFAULT 0,
-            currency TEXT NOT NULL DEFAULT 'CNY',
-            status TEXT NOT NULL DEFAULT 'draft',
-            enabled BOOLEAN NOT NULL DEFAULT FALSE,
-            cta_text TEXT NOT NULL DEFAULT '立即报名',
-            require_mobile BOOLEAN NOT NULL DEFAULT FALSE,
-            lead_program_id BIGINT,
-            lead_channel_id BIGINT,
-            completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE,
-            completion_redirect_url TEXT NOT NULL DEFAULT '',
-            completion_target_json JSONB,
-            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        ALTER TABLE wechat_pay_products
-        ADD COLUMN IF NOT EXISTS completion_redirect_enabled BOOLEAN NOT NULL DEFAULT FALSE
-        """,
-        """
-        ALTER TABLE wechat_pay_products
-        ADD COLUMN IF NOT EXISTS completion_redirect_url TEXT NOT NULL DEFAULT ''
-        """,
-        """
-        ALTER TABLE wechat_pay_products
-        ADD COLUMN IF NOT EXISTS completion_target_json JSONB
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS service_period_products (
-            id BIGSERIAL PRIMARY KEY,
-            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
-            trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
-            link_slug TEXT NOT NULL,
-            membership_config_id TEXT NOT NULL DEFAULT '',
-            membership_config_name TEXT NOT NULL DEFAULT '',
-            duration_days INTEGER NOT NULL CHECK (duration_days > 0),
-            deleted BOOLEAN NOT NULL DEFAULT FALSE,
-            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_service_period_products_trade_product_id
-        ON service_period_products (trade_product_id)
-        """,
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_service_period_products_link_slug
-        ON service_period_products (link_slug)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_service_period_products_updated
-        ON service_period_products (tenant_id, deleted, updated_at DESC, id DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS wechat_pay_orders (
-            id BIGSERIAL PRIMARY KEY,
-            out_trade_no TEXT NOT NULL DEFAULT '',
-            transaction_id TEXT NOT NULL DEFAULT '',
-            order_source TEXT NOT NULL DEFAULT '',
-            client_order_ref TEXT NOT NULL DEFAULT '',
-            product_code TEXT NOT NULL DEFAULT '',
-            product_name TEXT NOT NULL DEFAULT '',
-            description TEXT NOT NULL DEFAULT '',
-            amount_total INTEGER NOT NULL DEFAULT 0,
-            currency TEXT NOT NULL DEFAULT 'CNY',
-            unionid TEXT NOT NULL DEFAULT '',
-            payer_name_snapshot TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'created',
-            trade_state TEXT NOT NULL DEFAULT '',
-            prepay_id TEXT NOT NULL DEFAULT '',
-            bank_type TEXT NOT NULL DEFAULT '',
-            payer_total INTEGER NOT NULL DEFAULT 0,
-            success_url TEXT NOT NULL DEFAULT '',
-            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            request_meta_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            notify_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            last_error TEXT NOT NULL DEFAULT '',
-            expires_at TIMESTAMPTZ,
-            paid_at TIMESTAMPTZ,
-            refunded_amount_total INTEGER NOT NULL DEFAULT 0,
-            refund_status TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS wechat_pay_refunds (
-            id BIGSERIAL PRIMARY KEY,
-            order_id BIGINT NOT NULL DEFAULT 0,
-            out_trade_no TEXT NOT NULL DEFAULT '',
-            transaction_id TEXT NOT NULL DEFAULT '',
-            out_refund_no TEXT NOT NULL DEFAULT '',
-            refund_id TEXT NOT NULL DEFAULT '',
-            reason TEXT NOT NULL DEFAULT '',
-            refund_amount_total INTEGER NOT NULL DEFAULT 0,
-            order_amount_total INTEGER NOT NULL DEFAULT 0,
-            currency TEXT NOT NULL DEFAULT 'CNY',
-            status TEXT NOT NULL DEFAULT '',
-            requested_by TEXT NOT NULL DEFAULT '',
-            request_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            response_payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            error_message TEXT NOT NULL DEFAULT '',
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS service_period_entitlements (
-            id BIGSERIAL PRIMARY KEY,
-            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
-            service_product_id BIGINT NOT NULL REFERENCES service_period_products(id) ON DELETE RESTRICT,
-            trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
-            unionid TEXT NOT NULL,
-            external_userid_snapshot TEXT NOT NULL DEFAULT '',
-            membership_config_id TEXT NOT NULL DEFAULT '',
-            status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','expired','disabled','refunded')),
-            start_at TIMESTAMPTZ NOT NULL,
-            end_at TIMESTAMPTZ NOT NULL,
-            last_order_id BIGINT,
-            last_out_trade_no TEXT NOT NULL DEFAULT '',
-            renewal_count INTEGER NOT NULL DEFAULT 0,
-            metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE (tenant_id, service_product_id, unionid)
-        )
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_service_period_entitlements_product_status_end
-        ON service_period_entitlements (service_product_id, status, end_at)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_service_period_entitlements_unionid
-        ON service_period_entitlements (unionid)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_service_period_entitlements_last_order
-        ON service_period_entitlements (last_order_id)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS service_period_events (
-            id BIGSERIAL PRIMARY KEY,
-            tenant_id TEXT NOT NULL DEFAULT 'aicrm',
-            event_id TEXT NOT NULL UNIQUE,
-            service_product_id BIGINT NOT NULL REFERENCES service_period_products(id) ON DELETE RESTRICT,
-            entitlement_id BIGINT REFERENCES service_period_entitlements(id) ON DELETE SET NULL,
-            trade_product_id BIGINT NOT NULL REFERENCES wechat_pay_products(id) ON DELETE RESTRICT,
-            order_id BIGINT,
-            out_trade_no TEXT NOT NULL DEFAULT '',
-            unionid TEXT NOT NULL DEFAULT '',
-            event_type TEXT NOT NULL CHECK (event_type IN ('activated','renewed','expired','disabled','refunded','grant_failed_missing_unionid','membership_sync_failed','admin_adjusted')),
-            duration_days INTEGER NOT NULL DEFAULT 0,
-            before_start_at TIMESTAMPTZ,
-            before_end_at TIMESTAMPTZ,
-            after_start_at TIMESTAMPTZ,
-            after_end_at TIMESTAMPTZ,
-            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uq_service_period_events_event_once
-        ON service_period_events (tenant_id, event_type, out_trade_no)
-        WHERE out_trade_no <> ''
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_service_period_events_product_created
-        ON service_period_events (service_product_id, created_at DESC, id DESC)
-        """,
-        """
-        CREATE INDEX IF NOT EXISTS idx_service_period_events_unionid_created
-        ON service_period_events (unionid, created_at DESC, id DESC)
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS wechat_pay_order_events (
-            id BIGSERIAL PRIMARY KEY,
-            out_trade_no TEXT NOT NULL DEFAULT '',
-            event_type TEXT NOT NULL DEFAULT '',
-            transaction_id TEXT NOT NULL DEFAULT '',
-            trade_state TEXT NOT NULL DEFAULT '',
-            payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            headers_json JSONB NOT NULL DEFAULT '{}'::jsonb,
-            created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-        """,
-    ]
-    conn = psycopg.connect(url, autocommit=True)
-    try:
-        cur = conn.cursor()
-        try:
-            for statement in statements:
-                cur.execute(statement)
-        finally:
-            cur.close()
-    finally:
-        conn.close()
+    install_or_upgrade_database(url)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -1055,6 +503,17 @@ def next_pg_schema(monkeypatch):
     """Explicit opt-in for tests that require the Next/Alembic PG schema."""
     monkeypatch.setenv("DATABASE_URL", _ensure_pg_url())
     return None
+
+
+@pytest.fixture
+def composed_internal_event_registry():
+    """Bind one isolated, fully composed consumer registry for a whole test."""
+    from aicrm_next.internal_event_composition import build_internal_event_consumer_registry
+    from aicrm_next.platform_foundation.internal_events import internal_event_consumer_registry_scope
+
+    registry = build_internal_event_consumer_registry()
+    with internal_event_consumer_registry_scope(registry):
+        yield registry
 
 
 @pytest.fixture

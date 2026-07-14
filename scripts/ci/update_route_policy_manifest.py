@@ -12,6 +12,38 @@ ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = ROOT / "docs" / "architecture" / "route_ownership_manifest.yml"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
+_HYBRID_ADMIN_EXACT_PATHS = {
+    "/api/admin/cloud-orchestrator/campaigns/run-due",
+    "/api/admin/cloud-orchestrator/campaigns/run-due/preview",
+    "/api/admin/jobs/archive-sync/run",
+    "/api/admin/jobs/deferred-jobs/run",
+    "/api/admin/jobs/message-batches/{batch_id}/ack",
+    "/api/admin/jobs/order-identity-repair/run",
+    "/api/admin/jobs/webhook-deliveries/run",
+    "/api/admin/jobs/webhook-deliveries/{delivery_id}/retry",
+    "/api/admin/broadcast-jobs/feishu-hourly-report/run",
+    "/api/admin/broadcast-jobs/notification-settings/feishu",
+    "/api/admin/broadcast-jobs/notification-settings/feishu/validate",
+    "/api/admin/broadcast-jobs/{job_id}/approve",
+    "/api/admin/broadcast-jobs/{job_id}/cancel",
+    "/api/admin/webhook-inbox/{inbox_id}/retry",
+    "/api/admin/webhook-inbox/{inbox_id}/skip",
+    "/api/admin/webhook-inbox/{inbox_id}/dispatch",
+    "/api/admin/webhook-inbox/run-due",
+    "/api/admin/push-center/jobs/{job_id}/retry",
+    "/api/admin/push-center/jobs/{job_id}/cancel",
+    "/api/admin/external-effects/jobs/{job_id}/retry",
+    "/api/admin/external-effects/jobs/{job_id}/cancel",
+    "/api/admin/external-effects/run-due",
+    "/api/admin/external-effects/run-due/preview",
+    "/api/admin/external-effects/test-loopback/jobs",
+    "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/run",
+    "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/retry",
+    "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/skip",
+    "/api/admin/internal-events/run-due",
+    "/api/admin/internal-events/run-due/preview",
+}
+
 
 def _methods(entry: dict[str, Any]) -> set[str]:
     return {str(method).upper() for method in entry.get("methods") or []}
@@ -70,19 +102,55 @@ def _pii_level(entry: dict[str, Any]) -> str:
     return "none"
 
 
+def _hybrid_admin_route(path: str) -> bool:
+    return path in _HYBRID_ADMIN_EXACT_PATHS
+
+
+def _machine_capability(path: str) -> str:
+    if "cloud-orchestrator" in path:
+        return "cloud_run_due_execute"
+    if "/webhook-inbox/" in path:
+        return "webhook_inbox_execute"
+    if "/push-center/" in path:
+        return "push_queue_execute"
+    if "/external-effects/" in path:
+        return "external_effect_execute"
+    if "/internal-events/" in path:
+        return "internal_event_execute"
+    return "jobs_execute"
+
+
+def _machine_purpose(path: str) -> str:
+    if "archive-sync" in path:
+        return "archive"
+    if "webhook-deliveries" in path:
+        return "callback"
+    return "automation_worker"
+
+
 def _callback_auth(entry: dict[str, Any]) -> str:
     path = str(entry["path"])
     if path.startswith(("/wecom/external-contact/callback", "/api/wecom/events")):
         return "provider_signature"
-    if "/group-ops/webhooks/" in path:
-        return "webhook_bearer"
     if any(marker in path for marker in ("wechat-pay", "alipay", "wechat-shop")) and "notify" in path:
         return "provider_signature"
     if path.startswith("/auth/wecom/callback") or path.startswith("/api/sidebar/oauth/callback") or "oauth/callback" in path:
-        return "oauth_state"
+        return "provider_oauth_state"
+    return "webhook_hmac"
+
+
+def _callback_capability(path: str) -> str:
+    if "/group-ops/webhooks/" in path:
+        return "group_ops_webhook_receive"
+    if "/agents/" in path and "audience-webhook" in path:
+        return "automation_agent_webhook_receive"
+    if "/ai/audience/" in path:
+        return "ai_audience_webhook_receive"
+    if "activation-webhook" in path:
+        return "activation_webhook_receive"
     if "test-receiver" in path:
-        return "path_token"
-    return "scoped_bearer"
+        return "external_effect_receipt_receive"
+    return "callback_receive"
 
 
 def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
@@ -93,10 +161,35 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     if path in {"/login", "/logout"}:
         return _policy("admin", "public", "public", "public", _pii_level(entry), False, "auth_strict")
 
+    if path == "/oauth/token":
+        return _policy(
+            "external_integration",
+            "client_credentials",
+            "client_token_issue",
+            "service",
+            "none",
+            False,
+            "auth_strict",
+        )
+
+    if _hybrid_admin_route(path):
+        return _policy(
+            "admin",
+            "human_or_service",
+            _admin_capability(entry),
+            "global",
+            _pii_level(entry),
+            write,
+            "authenticated",
+            service_audience="internal_worker",
+            service_capability=_machine_capability(path),
+            client_purpose=_machine_purpose(path),
+        )
+
     if _starts(path, "/admin", "/api/admin", "/setup"):
         return _policy(
             "admin",
-            "admin_session",
+            "human_session",
             _admin_capability(entry),
             "global",
             _pii_level(entry),
@@ -107,19 +200,19 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     if path == "/api/automation/group-ops/broadcast":
         return _policy(
             "external_integration",
-            "internal_bearer",
-            "external_write",
+            "api_client_jwt",
+            "group_broadcast_execute",
             "service",
             _pii_level(entry),
             False,
             "integration",
-            token_purpose="group_broadcast",
+            client_purpose="group_broadcast",
         )
 
     if path.startswith("/api/automation/group-ops/") and "/webhooks/" not in path:
         return _policy(
             "admin",
-            "admin_session",
+            "human_session",
             "manage_group_ops" if write else "admin_read",
             "global",
             _pii_level(entry),
@@ -129,12 +222,12 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
 
     if _starts(path, "/api/sidebar"):
         if path.startswith("/api/sidebar/oauth/"):
-            return _policy("sidebar", "oauth_state", "sidebar_read", "self", "none", False, "public_strict")
+            return _policy("sidebar", "provider_oauth_state", "sidebar_read", "self", "none", False, "public_strict")
         if path == "/api/sidebar/jssdk-config":
             return _policy("sidebar", "public", "sidebar_bootstrap", "self", "none", False, "public_strict")
         return _policy(
             "sidebar",
-            "sidebar_signed_context",
+            "sidebar_grant",
             "sidebar_write" if write else "sidebar_read",
             "owner",
             _pii_level(entry),
@@ -145,12 +238,12 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     if path.startswith("/sidebar/"):
         return _policy("sidebar", "public", "sidebar_bootstrap", "self", "none", False, "public_strict")
 
-    callback_markers = ("callback", "notify", "/webhooks/", "activation-webhook", "test-receiver")
-    if path in {"/api/wecom/events"} or any(marker in path for marker in callback_markers):
+    callback_markers = ("callback", "notify", "webhook", "test-receiver")
+    if path in {"/api/wecom/events"} or ("/webhook-deliveries" not in path and any(marker in path for marker in callback_markers)):
         return _policy(
             "callback",
             _callback_auth(entry),
-            "callback_receive",
+            _callback_capability(path),
             "single_resource",
             _pii_level(entry),
             False,
@@ -173,10 +266,10 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     )
     if _starts(path, *public_prefixes):
         blocked_write = str(entry.get("route_name") or "").endswith(("blocked_write", "unknown", "unknown_child"))
-        if path.startswith("/api/h5/questionnaires/") and "/result/" in path:
+        if path.startswith("/api/h5/questionnaires/") and path.endswith("/result"):
             return _policy(
                 "public_h5",
-                "path_token",
+                "public_result_grant",
                 "public_result_read",
                 "single_resource",
                 "sensitive",
@@ -199,43 +292,43 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     if path == "/api/system/runtime-route-map":
         return _policy(
             "internal_worker",
-            "internal_bearer",
-            "internal_read",
+            "api_client_jwt",
+            "runtime_route_read",
             "service",
             "internal",
             False,
             "internal",
-            token_purpose="automation_worker",
+            client_purpose="automation_worker",
         )
 
     if path == "/mcp":
         return _policy(
             "external_integration",
-            "internal_bearer",
-            "external_write" if write else "external_read",
+            "api_client_jwt",
+            "mcp_execute" if write else "mcp_read",
             "service",
             "sensitive",
             False,
             "internal",
-            token_purpose="mcp",
+            client_purpose="mcp",
         )
 
     if path == "/api/identity/resolve":
         return _policy(
             "external_integration",
-            "internal_bearer",
-            "external_write" if write else "external_read",
+            "api_client_jwt",
+            "identity_resolve",
             "service",
             "sensitive",
             False,
             "internal",
-            token_purpose="identity",
+            client_purpose="identity",
         )
 
     if path.startswith(("/api/customers", "/api/users", "/api/messages")):
         return _policy(
             "external_integration",
-            "admin_session",
+            "human_session",
             "send_message" if write else "read_customer",
             "global",
             "sensitive",
@@ -246,25 +339,37 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     if _starts(path, "/api/archive"):
         return _policy(
             "internal_worker",
-            "internal_bearer",
-            "internal_execute" if write else "internal_read",
+            "api_client_jwt",
+            "archive_execute" if write else "archive_read",
             "service",
             _pii_level(entry),
             False,
             "internal",
-            token_purpose="archive",
+            client_purpose="archive",
         )
 
     if _starts(path, "/api/internal"):
         return _policy(
             "internal_worker",
-            "internal_bearer",
+            "api_client_jwt",
             "internal_execute" if write else "internal_read",
             "service",
             _pii_level(entry),
             False,
             "internal",
-            token_purpose="automation_worker",
+            client_purpose="automation_worker",
+        )
+
+    if path == "/api/ai-assist/external/campaigns" or path.startswith("/api/ai-assist/external/campaigns/"):
+        return _policy(
+            "external_integration",
+            "api_client_jwt",
+            "campaign_draft_create" if write else "campaign_status_read",
+            "service",
+            _pii_level(entry),
+            False,
+            "integration",
+            client_purpose="campaign_agent",
         )
 
     external_prefixes = (
@@ -276,7 +381,7 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     if _starts(path, *external_prefixes):
         return _policy(
             "external_integration",
-            "scoped_bearer",
+            "api_client_jwt",
             "external_write" if write else "external_read",
             "service",
             _pii_level(entry),
@@ -285,7 +390,7 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
         )
 
     if owner == "auth_wecom" or path.startswith("/auth/wecom"):
-        return _policy("admin", "oauth_state", "public", "public", "none", False, "auth_strict")
+        return _policy("admin", "provider_oauth_state", "public", "public", "none", False, "auth_strict")
 
     if path == "/{filename}" and entry.get("route_name") == "wechat_domain_verification_file":
         return _policy(
@@ -310,9 +415,23 @@ def _policy(
     csrf: bool,
     rate_limit: str,
     *,
-    token_purpose: str = "none",
+    client_purpose: str = "",
+    service_audience: str = "",
+    service_capability: str = "",
 ) -> dict[str, Any]:
-    return {
+    principal_types = {
+        "api_client_jwt": ["api_client", "service"],
+        "client_credentials": ["api_client", "service"],
+        "human_or_service": ["human", "service"],
+        "human_session": ["human"],
+        "provider_oauth_state": ["provider_callback"],
+        "provider_signature": ["provider_callback"],
+        "public": ["public"],
+        "public_result_grant": ["public"],
+        "sidebar_grant": ["human"],
+        "webhook_hmac": ["api_client"],
+    }[auth_scheme]
+    policy = {
         "audience": audience,
         "auth_scheme": auth_scheme,
         "capability": capability,
@@ -320,8 +439,14 @@ def _policy(
         "pii_level": pii_level,
         "csrf": csrf,
         "rate_limit": rate_limit,
-        "token_purpose": token_purpose,
+        "principal_types": principal_types,
     }
+    if client_purpose:
+        policy["client_purpose"] = client_purpose
+    if auth_scheme == "human_or_service":
+        policy["service_audience"] = service_audience
+        policy["service_capability"] = service_capability
+    return policy
 
 
 def update_manifest(path: Path, *, check: bool) -> int:
@@ -334,11 +459,19 @@ def update_manifest(path: Path, *, check: bool) -> int:
         if not isinstance(entry, dict):
             raise SystemExit("route ownership manifest entries must be mappings")
         expected = _policy_for(entry)
-        expected_requires_auth = expected["auth_scheme"] not in {"public", "oauth_state", "provider_signature", "path_token"}
+        expected_requires_auth = expected["auth_scheme"] != "public"
         for key, value in {"requires_auth": expected_requires_auth, **expected}.items():
             if entry.get(key) != value:
                 changed += 1
                 entry[key] = value
+        for obsolete in (
+            "client_purpose",
+            "service_audience",
+            "service_capability",
+        ):
+            if obsolete not in expected and obsolete in entry:
+                changed += 1
+                entry.pop(obsolete)
     if check:
         if changed:
             raise SystemExit(f"route policy manifest drift: {changed} field values differ; run with --write")

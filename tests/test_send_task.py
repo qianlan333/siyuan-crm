@@ -9,11 +9,22 @@ class EmptyRepo:
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict]:
         return []
 
-    def mark_sent(self, job_id: int, *, outbound_task_id=None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
-        raise AssertionError("no job should be sent")
+    def begin_dispatch(self, job_id: int, *, claim_token: str, now: datetime) -> None:
+        raise AssertionError("no job should begin dispatch")
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
-        raise AssertionError("no job should fail")
+    def finalize_dispatch(self, job_id: int, *, claim_token: str, outcome: dict) -> None:
+        raise AssertionError("no job should finalize")
+
+    def mark_unknown_after_dispatch(
+        self,
+        job_id: int,
+        *,
+        claim_token: str,
+        error: str,
+        side_effect_executed: bool,
+        provider_result_received: bool,
+    ) -> None:
+        raise AssertionError("no job should require reconciliation")
 
 
 def test_send_task_worker_empty_queue_is_successful_noop() -> None:

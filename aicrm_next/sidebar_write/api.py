@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from typing import Any, Type
 from uuid import uuid4
 
@@ -7,8 +8,14 @@ from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
 
+from aicrm_next.shared.signed_context import (
+    SIDEBAR_VIEWER_SESSION_COOKIE,
+    validate_sidebar_owner_context,
+)
+
 from .application import (
     SidebarWriteConflictError,
+    SidebarWriteForbiddenError,
     SidebarWriteInputError,
     SidebarWriteNotFoundError,
     SidebarWriteProductionUnavailableError,
@@ -74,19 +81,23 @@ async def _execute(request: Request, command_type: Type[SidebarWriteCommand]) ->
         return Response(status_code=204)
     try:
         body = await _json_body(request)
-        trusted_owner_userid = str(getattr(request.state, "sidebar_owner_userid", "") or "").strip()
-        if trusted_owner_userid:
-            body["owner_userid"] = trusted_owner_userid
+        external_userid = str(body.get("external_userid") or "").strip()
+        trusted_context = _trusted_sidebar_context(request, external_userid=external_userid)
+        trusted_owner_userid = str(trusted_context.get("owner_userid") or "").strip()
+        claimed_values = {
+            str(body.get(key) or "").strip()
+            for key in ("owner_userid", "bind_by_userid", "actor_id")
+            if str(body.get(key) or "").strip()
+        }
+        if any(value != trusted_owner_userid for value in claimed_values):
+            raise SidebarWriteForbiddenError("sidebar owner scope forbidden")
+        body["owner_userid"] = trusted_owner_userid
+        body["bind_by_userid"] = trusted_owner_userid
         command = command_type(
             idempotency_key=_idempotency_key(request, body),
-            actor_id=str(
-                trusted_owner_userid
-                or body.get("actor_id")
-                or request.headers.get("X-AICRM-Actor-Id")
-                or "sidebar_operator"
-            ),
-            actor_type=str(body.get("actor_type") or request.headers.get("X-AICRM-Actor-Type") or "user"),
-            external_userid=str(body.get("external_userid") or "").strip(),
+            actor_id=trusted_owner_userid,
+            actor_type="sidebar_owner",
+            external_userid=external_userid,
             payload={key: value for key, value in body.items() if key not in {"actor_id", "actor_type", "external_userid", "idempotency_key", "dry_run", "trace_id"}},
             dry_run=_as_bool(body.get("dry_run")),
             source_route=request.url.path,
@@ -98,6 +109,8 @@ async def _execute(request: Request, command_type: Type[SidebarWriteCommand]) ->
         return _error(str(exc), status_code=400, source_status="input_error", write_model_status="input_error")
     except SidebarWriteConflictError as exc:
         return _error(str(exc), status_code=409, source_status="conflict", write_model_status="conflict")
+    except SidebarWriteForbiddenError as exc:
+        return _error(str(exc), status_code=403, source_status="forbidden", write_model_status="blocked")
     except SidebarWriteNotFoundError as exc:
         return _error(str(exc), status_code=404, source_status="not_found", write_model_status="not_found")
     except SidebarWriteProductionUnavailableError as exc:
@@ -114,6 +127,23 @@ async def _json_body(request: Request) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SidebarWriteInputError("json object body is required")
     return payload
+
+
+def _trusted_sidebar_context(request: Request, *, external_userid: str) -> dict[str, Any]:
+    context = dict(getattr(request.state, "sidebar_context", {}) or {})
+    if context:
+        if str(context.get("external_userid") or "").strip() != str(external_userid or "").strip():
+            raise SidebarWriteForbiddenError("sidebar customer scope forbidden")
+        return context
+    result = validate_sidebar_owner_context(
+        token=str(request.headers.get("X-AICRM-Sidebar-Owner-Token") or "").strip(),
+        viewer_session_cookie=str(request.cookies.get(SIDEBAR_VIEWER_SESSION_COOKIE) or "").strip(),
+        external_userid=external_userid,
+        expected_corp_id=str(os.getenv("WECOM_CORP_ID") or "").strip(),
+    )
+    if not result.get("ok"):
+        raise SidebarWriteForbiddenError("sidebar context required")
+    return dict(result.get("context") or {})
 
 
 def _idempotency_key(request: Request, body: dict[str, Any]) -> str:

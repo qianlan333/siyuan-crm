@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from aicrm_next.customer_read_model.application import GetCustomerDetailQuery
-from aicrm_next.customer_read_model.dto import CustomerDetailRequest
 from aicrm_next.integration_gateway.customer_sync_adapters import build_identity_mapping_adapter
 from aicrm_next.platform_foundation.internal_events.customer_identity import emit_customer_phone_bound_event
 from aicrm_next.platform_foundation.internal_events.shadow import safe_emit
 from aicrm_next.shared.runtime import production_data_ready
 from aicrm_next.shared.typing import JsonDict
 
-from .domain import normalize_identity_request, normalize_mobile_binding_request
-from .dto import BindMobileToExternalContactRequest, IdentityResolution, ResolvePersonIdentityRequest
+from .domain import normalize_identity_request, normalize_mobile_binding_request, resolve_single_corp_id
+from .dto import BindMobileToExternalContactRequest, IdentityResolution, IdentityResolveResult, ResolvePersonIdentityRequest
 from .repo import FixtureIdentityRepository, IdentityBindingRepository, PostgresIdentityRepository, build_identity_binding_repository
+from .resolver import resolved_identity_or_none
 
 
 class ResolvePersonIdentityQuery:
@@ -24,17 +23,43 @@ class ResolvePersonIdentityQuery:
         self._postgres_repo = postgres_repo or PostgresIdentityRepository()
         self._identity_adapter = identity_adapter or build_identity_mapping_adapter()
 
-    def execute(self, query: ResolvePersonIdentityRequest) -> IdentityResolution | None:
+    def execute_result(self, query: ResolvePersonIdentityRequest) -> IdentityResolveResult:
         normalized = normalize_identity_request(query)
         if production_data_ready():
-            return self._postgres_repo.resolve(normalized)
+            resolver = getattr(self._postgres_repo, "resolve_result", None)
+            if callable(resolver):
+                return resolver(normalized)
+            identity = self._postgres_repo.resolve(normalized)
+            return IdentityResolveResult(
+                status="resolved" if identity is not None else "not_found",
+                identity=identity,
+                reason="" if identity is not None else "identity_not_found",
+                matched_fields=[
+                    field
+                    for field in ("unionid", "external_userid", "openid", "mobile")
+                    if getattr(normalized, field)
+                ],
+                candidate_count=1 if identity is not None else 0,
+            )
         self._identity_adapter.resolve_person_identity(
             external_userid=normalized.external_userid or "",
             openid=normalized.openid or "",
             unionid=normalized.unionid or "",
             mobile=normalized.mobile or "",
         )
-        return self._repo.resolve(normalized)
+        resolver = getattr(self._repo, "resolve_result", None)
+        if callable(resolver):
+            return resolver(normalized)
+        identity = self._repo.resolve(normalized)
+        return IdentityResolveResult(
+            status="resolved" if identity is not None else "not_found",
+            identity=identity,
+            reason="" if identity is not None else "identity_not_found",
+            candidate_count=1 if identity is not None else 0,
+        )
+
+    def execute(self, query: ResolvePersonIdentityRequest) -> IdentityResolution | None:
+        return resolved_identity_or_none(self.execute_result(query))
 
     __call__ = execute
 
@@ -221,7 +246,7 @@ class GetSidebarContactBindingStatusQuery:
         customer_detail_query=None,
     ) -> None:
         self._identity_query = identity_query or ResolvePersonIdentityQuery()
-        self._customer_detail_query = customer_detail_query or GetCustomerDetailQuery()
+        self._customer_detail_query = customer_detail_query
 
     def execute(
         self,
@@ -257,7 +282,9 @@ class GetSidebarContactBindingStatusQuery:
 
         if production_data_ready():
             try:
-                payload = self._customer_detail_query(CustomerDetailRequest(external_userid=resolved_external_userid))
+                if self._customer_detail_query is None:
+                    raise RuntimeError("customer detail composition unavailable")
+                payload = self._customer_detail_query(resolved_external_userid)
                 if not payload.get("ok"):
                     raise RuntimeError(str(payload.get("page_error") or payload.get("error_code") or "customer detail unavailable"))
                 customer = dict(payload.get("customer") or {})
@@ -332,7 +359,7 @@ class UpsertIdentityMappingCommand:
             unionid=unionid,
             mobile=mobile,
             person_id=person_id,
-            corp_id=corp_id,
+            corp_id=resolve_single_corp_id(corp_id),
             idempotency_key=idempotency_key,
         )
 
@@ -391,7 +418,7 @@ class LinkOpenidUnionidExternalUseridCommand:
             external_userid=external_userid,
             openid=openid,
             unionid=unionid,
-            corp_id=corp_id,
+            corp_id=resolve_single_corp_id(corp_id),
             idempotency_key=idempotency_key,
         )
 

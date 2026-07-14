@@ -3,6 +3,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
+
+from aicrm_next.platform_foundation.auth_platform.context import AuthContext
 from pydantic import ValidationError
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -37,7 +39,6 @@ from .application import (
     PreviewAudienceRuleCommand,
     PreviewGroupOpsSegmentationCommand,
     ReceiveGroupOpsWebhookCommand,
-    RegenerateGroupOpsWebhookCommand,
     RefreshAudienceRuleCommand,
     RefreshGroupOpsMembersFromGroupsCommand,
     RemoveGroupOpsPlanGroupCommand,
@@ -54,7 +55,6 @@ from .broadcast import (
     MAX_IMAGE_BYTES,
     MAX_IMAGES,
     MAX_TOTAL_IMAGE_BYTES,
-    internal_broadcast_token_error,
 )
 from .dto import (
     AudienceRuleCreateRequest,
@@ -106,10 +106,6 @@ def _error_code_for(exc: Exception) -> str:
         return "plan_not_active"
     if "group ops plan is not active" in message:
         return "plan_not_active"
-    if "invalid webhook token" in message:
-        return "invalid_webhook_token"
-    if "invalid webhook signature" in message:
-        return "invalid_webhook_signature"
     if "allowlist" in message:
         return "allowlist_required"
     if "rate limit" in message:
@@ -208,7 +204,6 @@ async def _parse_token_broadcast_request(request: Request) -> tuple[GroupOpsToke
 
 
 @router.get("/api/admin/automation-conversion/group-ops/plans")
-@router.get("/api/automation/group-ops/plans")
 def list_group_ops_plans(
     keyword: str = "",
     plan_type: str = "",
@@ -271,7 +266,6 @@ def list_group_ops_owners() -> JSONResponse:
 
 
 @router.post("/api/admin/automation-conversion/group-ops/plans")
-@router.post("/api/automation/group-ops/plans")
 def create_group_ops_plan(payload: GroupOpsPlanCreateRequest) -> JSONResponse:
     try:
         return _json_result(CreateGroupOpsPlanCommand()(payload))
@@ -280,7 +274,6 @@ def create_group_ops_plan(payload: GroupOpsPlanCreateRequest) -> JSONResponse:
 
 
 @router.get("/api/admin/automation-conversion/group-ops/plans/{plan_id}")
-@router.get("/api/automation/group-ops/plans/{plan_id}")
 def get_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(GetGroupOpsPlanQuery()(_plan_id(plan_id)))
@@ -289,8 +282,6 @@ def get_group_ops_plan(plan_id: int | str) -> JSONResponse:
 
 
 @router.put("/api/admin/automation-conversion/group-ops/plans/{plan_id}")
-@router.patch("/api/automation/group-ops/plans/{plan_id}")
-@router.put("/api/automation/group-ops/plans/{plan_id}")
 def update_group_ops_plan(plan_id: int | str, payload: GroupOpsPlanUpdateRequest) -> JSONResponse:
     try:
         return _json_result(UpdateGroupOpsPlanCommand()(_plan_id(plan_id), payload))
@@ -299,7 +290,6 @@ def update_group_ops_plan(plan_id: int | str, payload: GroupOpsPlanUpdateRequest
 
 
 @router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/enable")
-@router.post("/api/automation/group-ops/plans/{plan_id}/enable")
 def enable_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(EnableGroupOpsPlanCommand()(_plan_id(plan_id)))
@@ -308,7 +298,6 @@ def enable_group_ops_plan(plan_id: int | str) -> JSONResponse:
 
 
 @router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/disable")
-@router.post("/api/automation/group-ops/plans/{plan_id}/disable")
 def disable_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(DisableGroupOpsPlanCommand()(_plan_id(plan_id)))
@@ -317,7 +306,6 @@ def disable_group_ops_plan(plan_id: int | str) -> JSONResponse:
 
 
 @router.delete("/api/admin/automation-conversion/group-ops/plans/{plan_id}")
-@router.delete("/api/automation/group-ops/plans/{plan_id}")
 def archive_group_ops_plan(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(ArchiveGroupOpsPlanCommand()(_plan_id(plan_id)))
@@ -439,7 +427,6 @@ def run_group_ops_plan_due(plan_id: int, payload: GroupOpsRunDueRequest, request
 
 
 @router.get("/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook")
-@router.get("/api/automation/group-ops/plans/{plan_id}/webhook")
 def get_group_ops_webhook_config(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(GetGroupOpsWebhookConfigQuery()(_plan_id(plan_id)))
@@ -447,16 +434,7 @@ def get_group_ops_webhook_config(plan_id: int | str) -> JSONResponse:
         _raise_http(exc)
 
 
-@router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook/regenerate")
-@router.post("/api/automation/group-ops/plans/{plan_id}/webhook/reset-token")
-def regenerate_group_ops_webhook(plan_id: int | str) -> JSONResponse:
-    try:
-        return _json_result(RegenerateGroupOpsWebhookCommand()(_plan_id(plan_id)))
-    except Exception as exc:
-        _raise_http(exc)
-
-
-@router.get("/api/automation/group-ops/plans/{plan_id}/members")
+@router.get("/api/admin/automation-conversion/group-ops/plans/{plan_id}/members")
 def list_group_ops_members(
     plan_id: int | str,
     layerKey: str = "",
@@ -489,7 +467,7 @@ def list_group_ops_members(
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/plans/{plan_id}/members/import")
+@router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/members/import")
 def import_group_ops_members(plan_id: int | str, payload: GroupOpsMemberImportRequest) -> JSONResponse:
     try:
         return _json_result(ImportGroupOpsMembersCommand()(_plan_id(plan_id), payload))
@@ -497,7 +475,7 @@ def import_group_ops_members(plan_id: int | str, payload: GroupOpsMemberImportRe
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/plans/{plan_id}/members/refresh-from-groups")
+@router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/members/refresh-from-groups")
 def refresh_group_ops_members_from_groups(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(RefreshGroupOpsMembersFromGroupsCommand()(_plan_id(plan_id)))
@@ -505,7 +483,7 @@ def refresh_group_ops_members_from_groups(plan_id: int | str) -> JSONResponse:
         _raise_http(exc)
 
 
-@router.get("/api/automation/group-ops/audience-rules")
+@router.get("/api/admin/automation-conversion/group-ops/audience-rules")
 def list_audience_rules() -> JSONResponse:
     try:
         return _json_result(ListAudienceRulesQuery()())
@@ -513,7 +491,7 @@ def list_audience_rules() -> JSONResponse:
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/audience-rules")
+@router.post("/api/admin/automation-conversion/group-ops/audience-rules")
 def create_audience_rule(payload: AudienceRuleCreateRequest) -> JSONResponse:
     try:
         return _json_result(CreateAudienceRuleCommand()(payload))
@@ -521,7 +499,7 @@ def create_audience_rule(payload: AudienceRuleCreateRequest) -> JSONResponse:
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/audience-rules/{rule_key}/versions")
+@router.post("/api/admin/automation-conversion/group-ops/audience-rules/{rule_key}/versions")
 def create_audience_rule_version(rule_key: str, payload: AudienceRuleVersionCreateRequest) -> JSONResponse:
     try:
         return _json_result(CreateAudienceRuleVersionCommand()(rule_key, payload))
@@ -529,7 +507,7 @@ def create_audience_rule_version(rule_key: str, payload: AudienceRuleVersionCrea
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/audience-rules/{rule_key}/preview")
+@router.post("/api/admin/automation-conversion/group-ops/audience-rules/{rule_key}/preview")
 def preview_audience_rule(rule_key: str, payload: AudienceRuleRunRequest) -> JSONResponse:
     try:
         return _json_result(PreviewAudienceRuleCommand()(rule_key, payload))
@@ -537,7 +515,7 @@ def preview_audience_rule(rule_key: str, payload: AudienceRuleRunRequest) -> JSO
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/audience-rules/{rule_key}/refresh")
+@router.post("/api/admin/automation-conversion/group-ops/audience-rules/{rule_key}/refresh")
 def refresh_audience_rule(rule_key: str, payload: AudienceRuleRunRequest) -> JSONResponse:
     try:
         return _json_result(RefreshAudienceRuleCommand()(rule_key, payload))
@@ -545,7 +523,7 @@ def refresh_audience_rule(rule_key: str, payload: AudienceRuleRunRequest) -> JSO
         _raise_http(exc)
 
 
-@router.get("/api/automation/group-ops/audience-rules/{rule_key}/results")
+@router.get("/api/admin/automation-conversion/group-ops/audience-rules/{rule_key}/results")
 def get_audience_rule_results(rule_key: str, planId: int | str = 0, plan_id: int | str = 0, version: int = 1) -> JSONResponse:
     try:
         return _json_result(GetAudienceRuleResultsQuery()(rule_key, plan_id=_plan_id(planId or plan_id), version=version))
@@ -553,7 +531,7 @@ def get_audience_rule_results(rule_key: str, planId: int | str = 0, plan_id: int
         _raise_http(exc)
 
 
-@router.put("/api/automation/group-ops/plans/{plan_id}/segmentation")
+@router.put("/api/admin/automation-conversion/group-ops/plans/{plan_id}/segmentation")
 def save_group_ops_segmentation(plan_id: int | str, payload: GroupOpsSegmentationRequest) -> JSONResponse:
     try:
         return _json_result(SaveGroupOpsSegmentationCommand()(_plan_id(plan_id), payload))
@@ -561,7 +539,7 @@ def save_group_ops_segmentation(plan_id: int | str, payload: GroupOpsSegmentatio
         _raise_http(exc)
 
 
-@router.post("/api/automation/group-ops/plans/{plan_id}/segmentation/preview")
+@router.post("/api/admin/automation-conversion/group-ops/plans/{plan_id}/segmentation/preview")
 def preview_group_ops_segmentation(plan_id: int | str) -> JSONResponse:
     try:
         return _json_result(PreviewGroupOpsSegmentationCommand()(_plan_id(plan_id)))
@@ -569,7 +547,7 @@ def preview_group_ops_segmentation(plan_id: int | str) -> JSONResponse:
         _raise_http(exc)
 
 
-@router.get("/api/automation/group-ops/plans/{plan_id}/executions")
+@router.get("/api/admin/automation-conversion/group-ops/plans/{plan_id}/executions")
 def list_group_ops_executions(
     plan_id: int | str,
     triggerEventId: str = "",
@@ -618,9 +596,7 @@ def receive_group_ops_webhook(
     webhook_key: str,
     payload: GroupOpsWebhookReceiveRequest,
     request: Request,
-    authorization: str | None = Header(default=None),
     x_idempotency_key: str | None = Header(default=None),
-    x_signature: str | None = Header(default=None),
 ) -> JSONResponse:
     try:
         if payload.external_effect_test_loopback:
@@ -629,9 +605,7 @@ def receive_group_ops_webhook(
             ReceiveGroupOpsWebhookCommand()(
                 webhook_key,
                 payload,
-                authorization=authorization,
                 idempotency_key=x_idempotency_key or "",
-                signature=x_signature or "",
             )
         )
     except Exception as exc:
@@ -640,25 +614,20 @@ def receive_group_ops_webhook(
 
 @router.post("/api/automation/group-ops/broadcast")
 async def execute_group_ops_token_broadcast(request: Request) -> JSONResponse:
-    auth_error = internal_broadcast_token_error(request.headers)
-    if auth_error:
-        error, status_code = auth_error
-        return _broadcast_json(
-            {
-                "ok": False,
-                "error": error,
-                "route_owner": "ai_crm_next",
-                "real_external_call_executed": False,
-            },
-            status_code=status_code,
-        )
     try:
         payload, images = await _parse_token_broadcast_request(request)
-        result = ExecuteGroupOpsTokenBroadcastCommand()(
+        context = getattr(request.state, "auth_context", None)
+        result = ExecuteGroupOpsTokenBroadcastCommand(
+            external_effect_adapter_registry=getattr(
+                request.app.state,
+                "external_effect_adapter_registry",
+                None,
+            )
+        )(
             payload,
             idempotency_key=str(request.headers.get("Idempotency-Key") or payload.idempotency_key or ""),
             images=images,
-            actor_id=str(request.headers.get("X-AICRM-Actor") or "external_group_ops_api"),
+            actor_id=context.sub if isinstance(context, AuthContext) else "external_group_ops_api",
         )
     except GroupOpsBroadcastError as exc:
         return _broadcast_json(

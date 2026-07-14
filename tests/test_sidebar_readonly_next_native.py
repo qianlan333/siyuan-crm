@@ -3,11 +3,23 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
-from aicrm_next.shared.signed_context import build_sidebar_owner_context_token
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
-def _client() -> TestClient:
-    return TestClient(create_app())
+def _client(
+    *,
+    external_userid: str = "wx_ext_001",
+    viewer_userid: str = "ZhaoYanFang",
+) -> TestClient:
+    client = TestClient(create_app())
+    client.headers.update(
+        install_sidebar_auth(
+            client,
+            viewer_userid=viewer_userid,
+            external_userid=external_userid,
+        )
+    )
+    return client
 
 
 def _assert_readonly_ok(payload: dict) -> None:
@@ -49,9 +61,12 @@ def test_sidebar_readonly_routes_return_next_native_diagnostics() -> None:
 
 def test_sidebar_readonly_routes_handle_missing_and_unknown_customers() -> None:
     client = _client()
+    unknown_client = _client(external_userid="wx_missing_sidebar")
 
     missing = client.get("/api/sidebar/marketing-status")
-    unknown = client.get("/api/sidebar/marketing-status?external_userid=wx_missing_sidebar&owner_userid=ZhaoYanFang")
+    unknown = unknown_client.get(
+        "/api/sidebar/marketing-status?external_userid=wx_missing_sidebar&owner_userid=ZhaoYanFang"
+    )
 
     assert missing.status_code == 400
     assert missing.json()["source_status"] == "input_error"
@@ -61,10 +76,10 @@ def test_sidebar_readonly_routes_handle_missing_and_unknown_customers() -> None:
     assert unknown.json()["fallback_used"] is False
 
 
-def test_sidebar_readonly_routes_reject_missing_owner_userid_for_pii() -> None:
+def test_sidebar_readonly_routes_use_signed_owner_without_query_owner() -> None:
     client = _client()
 
-    blocked_paths = [
+    scoped_paths = [
         "/api/sidebar/customer-context?external_userid=wx_ext_001",
         "/api/sidebar/profile?external_userid=wx_ext_001",
         "/api/sidebar/tags?external_userid=wx_ext_001",
@@ -76,22 +91,22 @@ def test_sidebar_readonly_routes_reject_missing_owner_userid_for_pii() -> None:
         "/api/sidebar/v2/other-staff-messages?external_userid=wx_ext_001",
     ]
 
-    for path in blocked_paths:
+    for path in scoped_paths:
         response = client.get(path)
-        assert response.status_code in {400, 404}, path
-        assert response.json()["ok"] is False, path
+        expected_status = 503 if "other-staff-messages" in path else 200
+        assert response.status_code == expected_status, path
+        assert response.json()["ok"] is (expected_status == 200), path
         assert response.json()["fallback_used"] is False, path
 
 
 def test_sidebar_binding_status_accepts_signed_owner_token() -> None:
     client = _client()
-    token = build_sidebar_owner_context_token(viewer_userid="ZhaoYanFang", corp_id="ww-test")
 
     for path in [
         "/api/sidebar/binding-status?external_userid=wx_ext_001",
         "/api/sidebar/contact-binding-status?external_userid=wx_ext_001",
     ]:
-        response = client.get(path, headers={"X-AICRM-Sidebar-Owner-Token": token})
+        response = client.get(path)
         assert response.status_code == 200, path
         payload = response.json()
         assert payload["ok"] is True
@@ -123,15 +138,18 @@ def test_sidebar_readonly_routes_filter_by_owner_userid() -> None:
 
     for path in scoped_paths:
         response = client.get(path)
-        assert response.status_code == 404, path
-        assert response.json()["source_status"] == "not_found"
-        assert response.json()["fallback_used"] is False
+        assert response.status_code == 403, path
+        assert all(
+            marker not in response.text
+            for marker in ("13800138000", "union_customer_001", "付费意向", "q_activation")
+        )
 
 
 def test_sidebar_readonly_production_unavailable_is_controlled(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
     monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-readonly:sidebar-readonly@127.0.0.1:1/aicrm_sidebar")
+    monkeypatch.setenv("SECRET_KEY", "sidebar-readonly-production")
     client = _client()
 
     response = client.get("/api/sidebar/customer-context?external_userid=wx_ext_001&owner_userid=ZhaoYanFang")

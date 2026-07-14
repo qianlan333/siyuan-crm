@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
 from aicrm_next.sidebar_write import get_sidebar_write_audit_events
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
 @pytest.fixture()
@@ -87,9 +88,17 @@ def test_sidebar_write_routes_execute_next_commandbus(
     expected_command: str,
     expected_write_status: str,
 ) -> None:
-    response = getattr(client, method)(path, json=payload, headers={"Idempotency-Key": f"test-{path}"})
+    external_userid = str(payload.get("external_userid") or "")
+    viewer_userid = "LiuXiao" if external_userid == "wx_ext_002" else "ZhaoYanFang"
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid=viewer_userid,
+        external_userid=external_userid,
+    )
+    headers["Idempotency-Key"] = f"test-{path}"
+    response = getattr(client, method)(path, json=payload, headers=headers)
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     body = response.json()
     assert body["ok"] is True
@@ -107,25 +116,49 @@ def test_sidebar_write_routes_execute_next_commandbus(
 
 
 def test_sidebar_write_routes_return_controlled_errors(client: TestClient) -> None:
-    missing_external = client.post("/api/sidebar/bind-mobile", json={"mobile": "13800138123"})
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="ZhaoYanFang",
+        external_userid="wx_ext_001",
+    )
+    missing_external = client.post(
+        "/api/sidebar/bind-mobile",
+        json={"mobile": "13800138123"},
+        headers=headers,
+    )
     assert missing_external.status_code == 400
     assert missing_external.json()["source_status"] == "input_error"
     assert missing_external.json()["fallback_used"] is False
 
-    missing_payload = client.post("/api/sidebar/bind-mobile", json={"external_userid": "wx_ext_001"})
+    missing_payload = client.post(
+        "/api/sidebar/bind-mobile",
+        json={"external_userid": "wx_ext_001"},
+        headers=headers,
+    )
     assert missing_payload.status_code == 400
     assert missing_payload.json()["source_status"] == "input_error"
 
+    unknown_headers = install_sidebar_auth(
+        client,
+        viewer_userid="ZhaoYanFang",
+        external_userid="wx_ext_missing",
+    )
     unknown_customer = client.post(
         "/api/sidebar/bind-mobile",
         json={"external_userid": "wx_ext_missing", "mobile": "13800138123"},
+        headers=unknown_headers,
     )
-    assert unknown_customer.status_code == 404
-    assert unknown_customer.json()["source_status"] == "not_found"
+    assert unknown_customer.status_code == 403
+    assert unknown_customer.json()["source_status"] == "forbidden"
     assert unknown_customer.json()["fallback_used"] is False
 
 
 def test_sidebar_write_routes_filter_by_owner_userid(client: TestClient) -> None:
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="ZhaoYanFang",
+        external_userid="wx_ext_001",
+    )
     allowed = client.post(
         "/api/sidebar/lead-pool/upsert-class-term",
         json={
@@ -134,6 +167,7 @@ def test_sidebar_write_routes_filter_by_owner_userid(client: TestClient) -> None
             "class_term": "term-2026-06",
             "status": "active",
         },
+        headers=headers,
     )
     blocked = client.post(
         "/api/sidebar/lead-pool/upsert-class-term",
@@ -143,11 +177,12 @@ def test_sidebar_write_routes_filter_by_owner_userid(client: TestClient) -> None
             "class_term": "term-2026-06",
             "status": "active",
         },
+        headers=headers,
     )
 
     assert allowed.status_code == 200
-    assert blocked.status_code == 404
-    assert blocked.json()["source_status"] == "not_found"
+    assert blocked.status_code == 403
+    assert blocked.json()["source_status"] == "forbidden"
     assert blocked.json()["fallback_used"] is False
 
 
@@ -155,11 +190,18 @@ def test_sidebar_write_production_unavailable_does_not_fallback(monkeypatch: pyt
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:1/aicrm_sidebar")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
     monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
+    monkeypatch.setenv("SECRET_KEY", "sidebar-write-production-unavailable")
 
     client = TestClient(create_app())
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="ZhaoYanFang",
+        external_userid="wx_ext_001",
+    )
     response = client.post(
         "/api/sidebar/bind-mobile",
         json={"external_userid": "wx_ext_001", "mobile": "13800138123"},
+        headers=headers,
     )
 
     assert response.status_code == 503
@@ -172,6 +214,7 @@ def test_sidebar_write_production_unavailable_does_not_fallback(monkeypatch: pyt
 def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "sidebar-write-postgres-binding")
 
     class FakeResult:
         def __init__(self, row=None, rows=None):
@@ -211,6 +254,8 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
 
         def execute(self, sql, params=()):
             compact_sql = " ".join(sql.split())
+            if compact_sql.startswith("SELECT DISTINCT owner_userid"):
+                return FakeResult(rows=[{"owner_userid": "sales_09"}])
             if "FROM crm_user_identity" in compact_sql:
                 return FakeResult(self.identities.get(params[0]))
             if "FROM wecom_external_contact_follow_users" in compact_sql:
@@ -249,6 +294,11 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
     monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
 
     client = TestClient(create_app())
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="sales_09",
+        external_userid="wm_prod_sidebar_001",
+    )
     response = client.post(
         "/api/sidebar/bind-mobile",
         json={
@@ -258,9 +308,10 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
             "mobile": "17380533527",
             "force_rebind": True,
         },
+        headers=headers,
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.text
     body = response.json()
     assert body["ok"] is True
     assert body["source_status"] == "next_command"
@@ -271,12 +322,13 @@ def test_sidebar_bind_mobile_executes_postgres_binding_in_production(monkeypatch
     assert body["binding"]["owner_userid"] == "sales_09"
     assert body["lead_pool_merge"]["action_type"] == "customer_mobile_bound_event"
     assert "production-ready for command execution" not in response.text
-    assert connections[0].commits == 1
+    assert sum(connection.commits for connection in connections) == 1
 
 
 def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "sidebar-write-active-follow")
 
     class FakeResult:
         def __init__(self, row=None, rows=None):
@@ -314,6 +366,13 @@ def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monke
 
         def execute(self, sql, params=()):
             compact_sql = " ".join(sql.split())
+            if compact_sql.startswith("SELECT DISTINCT owner_userid"):
+                return FakeResult(
+                    rows=[
+                        {"owner_userid": "HuangYouCan"},
+                        {"owner_userid": "ZhaoYanFang"},
+                    ]
+                )
             if "FROM crm_user_identity" in compact_sql:
                 return FakeResult(self.identity)
             if "FROM wecom_external_contact_follow_users" in compact_sql:
@@ -356,6 +415,11 @@ def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monke
     monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
 
     client = TestClient(create_app())
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="HuangYouCan",
+        external_userid="wmbNXyCwAA48u3o0zHSMvMrGAHbBrHxw",
+    )
     response = client.post(
         "/api/sidebar/bind-mobile",
         json={
@@ -365,6 +429,7 @@ def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monke
             "mobile": "18826079430",
             "force_rebind": True,
         },
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -373,12 +438,13 @@ def test_sidebar_bind_mobile_allows_active_follow_user_owner_in_production(monke
     assert body["binding"]["owner_userid"] == "HuangYouCan"
     assert body["binding"]["unionid"] == "union_meixin"
     assert body["write_model_status"] == "updated"
-    assert connections[0].commits == 1
+    assert sum(connection.commits for connection in connections) == 1
 
 
 def test_sidebar_profile_fields_execute_postgres_projection_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "sidebar-write-profile-fields")
 
     class FakeResult:
         def __init__(self, row=None, rows=None):
@@ -415,6 +481,8 @@ def test_sidebar_profile_fields_execute_postgres_projection_in_production(monkey
 
         def execute(self, sql, params=()):
             compact_sql = " ".join(sql.split())
+            if compact_sql.startswith("SELECT DISTINCT owner_userid"):
+                return FakeResult(rows=[{"owner_userid": "sales_09"}])
             if "FROM crm_user_identity" in compact_sql:
                 return FakeResult(self.identity)
             if "FROM wecom_external_contact_follow_users" in compact_sql:
@@ -449,6 +517,11 @@ def test_sidebar_profile_fields_execute_postgres_projection_in_production(monkey
     monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
 
     client = TestClient(create_app())
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="sales_09",
+        external_userid="wm_prod_sidebar_001",
+    )
     response = client.put(
         "/api/sidebar/v2/profile",
         json={
@@ -460,6 +533,7 @@ def test_sidebar_profile_fields_execute_postgres_projection_in_production(monkey
             "needs_blockers_followup": "需要补发体验课资料",
             "updated_by": "sales_09",
         },
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -470,13 +544,15 @@ def test_sidebar_profile_fields_execute_postgres_projection_in_production(monkey
     assert body["side_effect_plan"]["adapter_mode"] == "real_blocked"
     assert body["write"]["changes"]["profile_fields"]["industry"] == "教育培训"
     assert "production-ready for command execution" not in response.text
-    assert connections[0].profile_fields["needs_blockers_followup"] == "需要补发体验课资料"
-    assert connections[0].commits == 1
+    write_connection = next(connection for connection in connections if connection.profile_fields)
+    assert write_connection.profile_fields["needs_blockers_followup"] == "需要补发体验课资料"
+    assert sum(connection.commits for connection in connections) == 1
 
 
 def test_sidebar_material_send_uses_postgres_plan_and_cached_media_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DATABASE_URL", "postgresql://sidebar-write:sidebar-write@127.0.0.1:5432/aicrm_sidebar")
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
+    monkeypatch.setenv("SECRET_KEY", "sidebar-write-material-send")
 
     class FakeResult:
         def __init__(self, row=None, rows=None):
@@ -513,7 +589,9 @@ def test_sidebar_material_send_uses_postgres_plan_and_cached_media_in_production
 
         def execute(self, sql, params=()):
             compact_sql = " ".join(sql.split())
-            if "FROM crm_user_identity" in compact_sql and compact_sql.startswith("SELECT"):
+            if compact_sql.startswith("SELECT DISTINCT owner_userid"):
+                return FakeResult(rows=[{"owner_userid": "sales_09"}])
+            if "FROM crm_user_identity" in compact_sql:
                 return FakeResult(self.identity)
             if "FROM wecom_external_contact_follow_users" in compact_sql:
                 return FakeResult(rows=[{"owner_userid": "sales_09"}])
@@ -544,6 +622,11 @@ def test_sidebar_material_send_uses_postgres_plan_and_cached_media_in_production
     monkeypatch.setitem(sys.modules, "psycopg.rows", rows)
 
     client = TestClient(create_app())
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="sales_09",
+        external_userid="wm_prod_sidebar_001",
+    )
     response = client.post(
         "/api/sidebar/v2/materials/send",
         json={
@@ -554,6 +637,7 @@ def test_sidebar_material_send_uses_postgres_plan_and_cached_media_in_production
             "operator": "sales_09",
             "delivery_mode": "chat_toolbar",
         },
+        headers=headers,
     )
 
     assert response.status_code == 200
@@ -564,7 +648,8 @@ def test_sidebar_material_send_uses_postgres_plan_and_cached_media_in_production
     assert body["real_external_call_executed"] is False
     assert body["side_effect_plan"]["adapter_mode"] == "real_blocked"
     assert body["side_effect_plan"]["real_external_call_executed"] is False
-    assert '"material_id": "42"' in connections[0].material_plan_json
-    assert '"media_id": "media-real-image-001"' in connections[0].material_plan_json
+    write_connection = next(connection for connection in connections if connection.material_plan_json)
+    assert '"material_id": "42"' in write_connection.material_plan_json
+    assert '"media_id": "media-real-image-001"' in write_connection.material_plan_json
     assert "production-ready for command execution" not in response.text
-    assert connections[0].commits == 1
+    assert sum(connection.commits for connection in connections) == 1

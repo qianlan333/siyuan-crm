@@ -23,7 +23,7 @@ def test_sidebar_workbench_v2_page_is_next_owned(client):
     assert 'data-periodic-orders-url="/api/sidebar/v2/periodic-orders"' in html
     assert 'data-periodic-order-remark-url="/api/sidebar/v2/periodic-orders"' in html
     assert "sidebar_workbench/sidebar_workbench.js" in html
-    assert "sidebar_workbench/sidebar_workbench.js?v=20260709-periodic-product-tabs" in html
+    assert "sidebar_workbench/sidebar_workbench.js?v=20260713-huangyoucan-usage" in html
     assert "sidebar_workbench/sidebar_workbench.css?v=20260709-periodic-product-tabs" in html
     assert "自动化转化操作区" not in html
 
@@ -63,6 +63,11 @@ def test_sidebar_workbench_static_contract_has_next_surface_only():
     assert "renderPeriodicOrders" in script
     assert "data-periodic-order-remark" in script
     assert "savePeriodicOrderRemarkSoon" in script
+    periodic_renderer = script[script.index("function renderPeriodicOrders()") : script.index("function renderMaterials()")]
+    for label in ("剩余有效期", "正式登录", "token 消耗", "学习计划进度", "近 7 天打开次数", "最后打开时间"):
+        assert label in periodic_renderer
+    assert '<span>状态</span>' not in periodic_renderer
+    assert '<span>到期时间</span>' not in periodic_renderer
     assert 'queryUrl(endpoint("periodicOrdersUrl"), customerContextQuery())' in script
     assert 'queryUrl(endpoint("periodicOrderRemarkUrl") + "/" + encodeURIComponent(id) + "/remark", customerContextQuery())' in script
     assert 'data-periodic-orders-url="/api/sidebar/v2/periodic-orders"' in template

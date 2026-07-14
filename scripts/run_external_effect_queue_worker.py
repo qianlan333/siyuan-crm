@@ -11,6 +11,10 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 
 ensure_repo_root_on_path()
 
+from aicrm_next.external_effect_composition import (
+    build_external_effect_adapter_registry,
+    build_external_effect_continuation_registry,
+)
 from aicrm_next.platform_foundation.external_effects.jobs import run_scheduled_external_effects
 
 
@@ -32,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=dry_run,
         limit=int(args.limit or 0) or None,
         operator=str(args.operator or "").strip() or "external_effect_queue_worker",
+        adapter_registry=build_external_effect_adapter_registry(),
+        continuation_registry=build_external_effect_continuation_registry(),
     )
     print_json(payload)
     return 0 if payload.get("ok") else 1

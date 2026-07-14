@@ -45,7 +45,7 @@ def test_shape_checker_accepts_items_and_questionnaires_datetime_strings():
         "GET /api/h5/questionnaires/hxc-activation-v1": {
             "json": {"ok": True, "questionnaire": {"slug": "prod-questionnaire"}, "questions": []}
         },
-        "GET /api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61": {
+        "GET /api/h5/questionnaires/hxc-activation-v1/result": {
             "json": {"ok": True, "result": {}, "result_message": "ok"}
         },
     }
@@ -54,6 +54,28 @@ def test_shape_checker_accepts_items_and_questionnaires_datetime_strings():
 
     assert blockers == []
     assert warnings == []
+
+
+def test_shape_checker_accepts_session_bound_result_rejection_without_grant():
+    probes = {
+        "GET /api/admin/questionnaires?limit=1": {
+            "json": {"ok": True, "items": []},
+        },
+        "GET /api/h5/questionnaires/hxc-activation-v1": {
+            "json": {"ok": True, "questionnaire": {}, "questions": []},
+        },
+        "GET /api/h5/questionnaires/hxc-activation-v1/result": {
+            "status_code": 403,
+            "json": {
+                "ok": False,
+                "error_code": "questionnaire_result_access_forbidden",
+            },
+        },
+    }
+
+    blockers, _warnings = checker._add_shape_blockers(probes)
+
+    assert blockers == []
 
 
 def test_production_fixture_slug_success_is_blocker():
@@ -127,6 +149,7 @@ class _ServerHandler(BaseHTTPRequestHandler):
 
     def do_GET(self):  # noqa: N802
         self.seen_methods.append("GET")
+        status_code = 200
         payload = {"ok": True}
         body = "ok"
         content_type = "text/plain"
@@ -159,15 +182,19 @@ class _ServerHandler(BaseHTTPRequestHandler):
             payload = {"ok": True, "source_status": "fake", "redirect_url": "/s/hxc"}
             body = json.dumps(payload)
             content_type = "application/json"
-        elif self.path.startswith("/api/h5/questionnaires") and "/result/" in self.path:
-            payload = {"ok": True, "result": {"submission_id": "server-sub"}, "result_message": "ok"}
+        elif self.path.startswith("/api/h5/questionnaires") and self.path.endswith("/result"):
+            status_code = 403
+            payload = {
+                "ok": False,
+                "error_code": "questionnaire_result_access_forbidden",
+            }
             body = json.dumps(payload)
             content_type = "application/json"
         elif self.path.startswith("/api/h5/questionnaires"):
             payload = {"ok": True, "questionnaire": {"slug": "prod-questionnaire"}, "questions": []}
             body = json.dumps(payload)
             content_type = "application/json"
-        self.send_response(200)
+        self.send_response(status_code)
         self.send_header("Content-Type", content_type)
         self.send_header("X-AICRM-Route-Owner", "ai_crm_next")
         self.send_header("X-AICRM-App", "ai_crm_next")

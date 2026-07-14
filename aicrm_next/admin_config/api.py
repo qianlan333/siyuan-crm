@@ -253,7 +253,7 @@ def admin_runtime_config(request: Request):
     _real_data_context(
         context,
         payload=GetAdminConfigPageQuery()(),
-        title="运行配置",
+        title="运行状态快照",
         summary="展示数据库模式、release、callback fallback、OAuth、企微和支付配置预检状态；不展示 secrets。",
     )
     return templates.TemplateResponse(request, "admin_console/real_data_page.html", context)

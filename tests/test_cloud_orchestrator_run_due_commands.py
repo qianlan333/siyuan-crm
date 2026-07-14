@@ -16,7 +16,6 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_campaign_read_fixture_state()
     reset_run_due_fixture_state()
     return TestClient(create_app(), raise_server_exceptions=False)

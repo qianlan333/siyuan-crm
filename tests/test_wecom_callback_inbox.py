@@ -104,7 +104,7 @@ def test_callback_ingress_decrypts_and_ingests_webhook_inbox(monkeypatch):
     assert "cookie" not in repo.rows[0]["raw_headers_json"]
 
 
-def test_callback_ingress_enables_time_sensitive_inline_processing(monkeypatch):
+def test_callback_ingress_uses_durable_only_ack_boundary(monkeypatch):
     calls: list[dict] = []
 
     monkeypatch.setattr(
@@ -113,7 +113,7 @@ def test_callback_ingress_enables_time_sensitive_inline_processing(monkeypatch):
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.callback_ingress.ingest_wecom_callback",
-        lambda **kwargs: calls.append(kwargs) or {"ok": True, "id": 1, "time_sensitive_inline": True},
+        lambda **kwargs: calls.append(kwargs) or {"ok": True, "id": 1, "ack_boundary": "durable_inbox_only"},
     )
 
     result = ingest_wecom_external_contact_callback(
@@ -124,7 +124,8 @@ def test_callback_ingress_enables_time_sensitive_inline_processing(monkeypatch):
     )
 
     assert result["ok"] is True
-    assert calls[0]["process_time_sensitive"] is True
+    assert result["ack_boundary"] == "durable_inbox_only"
+    assert "process_time_sensitive" not in calls[0]
 
 
 def test_callback_ingress_validation_error_is_returned_as_400(monkeypatch):
@@ -171,28 +172,14 @@ def test_ingest_wecom_callback_deduplicates_by_event_key():
     assert "authorization" not in repo.rows[0]["raw_headers_json"]
 
 
-def test_ingest_time_sensitive_welcome_callback_processes_inline(monkeypatch):
+def test_ingest_time_sensitive_welcome_callback_stays_durable_until_worker_claim(monkeypatch):
     repo = InMemoryWebhookInboxRepository()
     processed: list[ProcessWeComExternalContactEventCommand] = []
 
-    def processor(command: ProcessWeComExternalContactEventCommand) -> dict:
-        processed.append(command)
-        return {
-            "handled": True,
-            "event_log": {"id": 42},
-            "identity_sync": {"status": "success"},
-            "entry_result": {
-                "mode": "channel_baseline_only",
-                "reason": "channel_entry_baseline_recorded",
-                "channel_entry_internal_event": {"event_id": "iev_42", "consumer_run_count": 1},
-                "baseline_effects": {
-                    "welcome_message": {"external_effect_job_id": 101},
-                    "entry_tag": {"external_effect_job_id": 102},
-                },
-            },
-        }
-
-    monkeypatch.setattr("aicrm_next.channel_entry.inbox.process_wecom_external_contact_event", processor)
+    monkeypatch.setattr(
+        "aicrm_next.channel_entry.inbox.process_wecom_external_contact_event",
+        lambda command: processed.append(command) or (_ for _ in ()).throw(AssertionError("ingress must not process callback")),
+    )
 
     result = ingest_wecom_callback(
         query={},
@@ -202,20 +189,17 @@ def test_ingest_time_sensitive_welcome_callback_processes_inline(monkeypatch):
         plain_xml="<xml>plain</xml>",
         route="/wecom/external-contact/callback",
         repository=repo,
-        process_time_sensitive=True,
     )
 
-    assert result["time_sensitive_inline"] is True
-    assert result["status"] == "succeeded"
-    assert result["inline_processing"]["event_log_id"] == 42
-    assert processed[0].event_data["WelcomeCode"] == "welcome-a"
-    assert repo.rows[0]["status"] == "succeeded"
+    assert result["ack_boundary"] == "durable_inbox_only"
+    assert result["status"] == "received"
+    assert processed == []
+    assert repo.rows[0]["status"] == "received"
     assert repo.rows[0]["locked_at"] is None
-    assert repo.rows[0]["processing_summary_json"]["external_effect_job_ids"] == [101, 102]
-    assert repo.preview_due(provider="wecom", limit=10) == []
+    assert len(repo.preview_due(provider="wecom", limit=10)) == 1
 
 
-def test_ingest_non_welcome_callback_stays_async_even_when_inline_enabled(monkeypatch):
+def test_ingest_non_welcome_callback_stays_durable(monkeypatch):
     repo = InMemoryWebhookInboxRepository()
 
     monkeypatch.setattr(
@@ -231,10 +215,9 @@ def test_ingest_non_welcome_callback_stays_async_even_when_inline_enabled(monkey
         plain_xml="<xml>plain</xml>",
         route="/wecom/external-contact/callback",
         repository=repo,
-        process_time_sensitive=True,
     )
 
-    assert result["time_sensitive_inline"] is False
+    assert result["ack_boundary"] == "durable_inbox_only"
     assert result["status"] == "received"
     assert repo.rows[0]["status"] == "received"
     assert len(repo.preview_due(provider="wecom", limit=10)) == 1

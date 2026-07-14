@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import hmac
 import os
 import socket
 import struct
@@ -11,6 +12,8 @@ import xml.etree.ElementTree as ET
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
 BLOCK_SIZE = 32
+CALLBACK_MAX_AGE_SECONDS = 300
+CALLBACK_MAX_FUTURE_SKEW_SECONDS = 60
 
 
 class WeComCallbackError(RuntimeError):
@@ -42,8 +45,27 @@ def compute_signature(token: str, timestamp: str, nonce: str, encrypted: str) ->
 
 
 def verify_signature(token: str, timestamp: str, nonce: str, encrypted: str, signature: str) -> None:
-    if compute_signature(token, timestamp, nonce, encrypted) != signature:
+    expected = compute_signature(token, timestamp, nonce, encrypted)
+    if not hmac.compare_digest(expected, str(signature or "")):
         raise WeComCallbackError("invalid callback signature")
+
+
+def validate_callback_timestamp(
+    timestamp: str,
+    *,
+    now: float | None = None,
+    max_age_seconds: int = CALLBACK_MAX_AGE_SECONDS,
+    max_future_skew_seconds: int = CALLBACK_MAX_FUTURE_SKEW_SECONDS,
+) -> None:
+    try:
+        callback_time = int(str(timestamp or "").strip())
+    except (TypeError, ValueError) as exc:
+        raise WeComCallbackError("invalid callback timestamp") from exc
+    current_time = int(time.time() if now is None else now)
+    if callback_time < current_time - max(1, int(max_age_seconds)):
+        raise WeComCallbackError("expired callback timestamp")
+    if callback_time > current_time + max(0, int(max_future_skew_seconds)):
+        raise WeComCallbackError("callback timestamp is too far in the future")
 
 
 def decrypt_message(encrypted: str, aes_key: str, corp_id: str) -> str:

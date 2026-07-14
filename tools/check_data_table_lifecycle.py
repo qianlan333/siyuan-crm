@@ -153,12 +153,26 @@ def _retired_runtime_reference_violations(root: Path, tables: dict[str, dict[str
     runtime_root = root / "aicrm_next"
     violations: list[str] = []
     runtime_files = sorted(runtime_root.rglob("*.py")) if runtime_root.exists() else []
+    # Read every runtime source exactly once.  The previous table-major loop
+    # re-read the entire runtime tree once per retired table (currently dozens
+    # of times), which made the first live data-health request take more than a
+    # minute on production storage even though the scan itself is read-only.
+    runtime_sources: list[tuple[Path, str, str]] = []
+    for path in runtime_files:
+        source = path.read_text(encoding="utf-8")
+        runtime_sources.append((path, source, source.casefold()))
     for table_name, entry in sorted(tables.items()):
         if entry.get("lifecycle") != "retired":
             continue
+        folded_table_name = table_name.casefold()
         patterns = _runtime_reference_patterns(table_name)
-        for path in runtime_files:
-            source = path.read_text(encoding="utf-8")
+        for path, source, folded_source in runtime_sources:
+            # A literal table name must be present for every supported SQL or
+            # _table_exists reference.  This cheap C-level filter avoids
+            # running seven regexes across every source file for every retired
+            # table while preserving the exact match rules below.
+            if folded_table_name not in folded_source:
+                continue
             for pattern in patterns:
                 if pattern.search(source):
                     violations.append(f"{path.relative_to(root)} references retired table {table_name}")

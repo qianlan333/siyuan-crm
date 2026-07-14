@@ -365,12 +365,10 @@ def _loopback_payload_for_candidate(
     payload: dict[str, Any] = {"body": body}
     if loopback_mode:
         base_url = str(command.payload.get("test_receiver_base_url") or "").rstrip("/")
-        token = "eert_ai_assist_" + uuid4().hex
         payload_hash = canonical_payload_hash(body)
         payload.update(
             {
-                "webhook_url": f"{base_url}{TEST_RECEIVER_PATH_PREFIX}/{token}" if base_url else "",
-                "receiver_token": token,
+                "webhook_url": f"{base_url}{TEST_RECEIVER_PATH_PREFIX}" if base_url else "",
                 "receiver_response_status": _receiver_response_status(command),
                 "test_receiver_expires_at": public_datetime(utcnow() + timedelta(hours=12)),
                 "execution_scope": "test_loopback",

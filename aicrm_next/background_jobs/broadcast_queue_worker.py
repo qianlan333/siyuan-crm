@@ -22,8 +22,17 @@ class BroadcastDispatcher(Protocol):
 
 class BroadcastQueueRepository(Protocol):
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]: ...
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None: ...
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None: ...
+    def begin_dispatch(self, job_id: int, *, claim_token: str, now: datetime) -> dict[str, Any] | None: ...
+    def finalize_dispatch(self, job_id: int, *, claim_token: str, outcome: dict[str, Any]) -> dict[str, Any] | None: ...
+    def mark_unknown_after_dispatch(
+        self,
+        job_id: int,
+        *,
+        claim_token: str,
+        error: str,
+        side_effect_executed: bool,
+        provider_result_received: bool,
+    ) -> dict[str, Any] | None: ...
 
 
 class SafeSkippedBroadcastDispatcher:
@@ -47,6 +56,22 @@ class SafeSkippedBroadcastDispatcher:
 
 
 class PostgresBroadcastQueueRepository:
+    _FINAL_STATUSES = {
+        "sent",
+        "simulated",
+        "failed_retryable",
+        "failed_terminal",
+        "blocked",
+        "unknown_after_dispatch",
+    }
+
+    def __init__(self, *, fault_injector=None) -> None:
+        self._fault_injector = fault_injector
+
+    def _fault(self, stage: str) -> None:
+        if self._fault_injector is not None:
+            self._fault_injector(stage)
+
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]:
         with connect() as conn:
             rows = conn.execute(
@@ -86,99 +111,312 @@ class PostgresBroadcastQueueRepository:
             ).fetchall()
             return [dict(row) for row in rows]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
-        token = str(claim_token or "")
+    def begin_dispatch(self, job_id: int, *, claim_token: str, now: datetime) -> dict[str, Any] | None:
+        token = _text(claim_token)
+        if not token:
+            raise ValueError("claim_token is required")
         with connect() as conn:
-            conn.execute(
+            row = conn.execute(
                 """
                 UPDATE broadcast_jobs
-                SET status = 'sent',
+                SET status = 'dispatching',
+                    dispatch_started_at = %s,
+                    reconciliation_required = FALSE,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+                  AND status = 'claimed'
+                  AND claim_token = %s
+                RETURNING *
+                """,
+                (now, int(job_id), token),
+            ).fetchone()
+            if not row:
+                return None
+            conn.execute(
+                """
+                UPDATE cloud_broadcast_plan_recipients recipient
+                SET send_status = 'dispatching', last_error = '', updated_at = CURRENT_TIMESTAMP
+                FROM broadcast_jobs job
+                WHERE job.id = %s
+                  AND job.source_type = 'cloud_plan'
+                  AND job.source_table = 'cloud_broadcast_plan_recipients'
+                  AND recipient.broadcast_job_id = job.id
+                  AND recipient.send_status IN ('pending', 'queued', 'sending', 'failed_retryable')
+                """,
+                (int(job_id),),
+            )
+            conn.execute(
+                """
+                WITH next_message AS (
+                    SELECT message.id
+                    FROM cloud_broadcast_plan_recipient_messages message
+                    JOIN cloud_broadcast_plan_recipients recipient ON recipient.id = message.recipient_id
+                    WHERE recipient.broadcast_job_id = %s
+                      AND message.status IN ('pending', 'queued', 'failed_retryable')
+                    ORDER BY message.sequence_index ASC, message.id ASC
+                    LIMIT 1
+                )
+                UPDATE cloud_broadcast_plan_recipient_messages message
+                SET status = 'dispatching', last_error = '', updated_at = CURRENT_TIMESTAMP
+                FROM next_message
+                WHERE message.id = next_message.id
+                """,
+                (int(job_id),),
+            )
+            conn.execute(
+                """
+                INSERT INTO broadcast_job_events (
+                    job_id, event_type, from_status, to_status, event_payload, actor_type, actor_id
+                ) VALUES (%s, 'dispatch_started', 'claimed', 'dispatching', '{}'::jsonb, 'worker', %s)
+                """,
+                (int(job_id), token[:200]),
+            )
+            return dict(row)
+
+    def finalize_dispatch(self, job_id: int, *, claim_token: str, outcome: dict[str, Any]) -> dict[str, Any] | None:
+        token = _text(claim_token)
+        if not token:
+            raise ValueError("claim_token is required")
+        final_status = _text(outcome.get("status"))
+        if final_status not in self._FINAL_STATUSES:
+            raise ValueError(f"unsupported broadcast final status: {final_status}")
+        error_text = _text(outcome.get("error") or outcome.get("reason"))[:1000]
+        failure_type = _text(outcome.get("failure_type"))[:200]
+        side_effect_executed = bool(outcome.get("side_effect_executed"))
+        provider_result_received = bool(outcome.get("provider_result_received"))
+        reconciliation_required = final_status == "unknown_after_dispatch"
+        request_payload = _json_dict(outcome.get("request_payload"))
+        response_payload = _json_dict(outcome.get("response_payload"))
+        wecom_task_id = _text(
+            outcome.get("wecom_msgid")
+            or response_payload.get("wecom_msgid")
+            or response_payload.get("msgid")
+            or _json_dict(response_payload.get("result")).get("msgid")
+            or _json_dict(response_payload.get("result")).get("task_id")
+        )
+        task_type = _text(outcome.get("task_type")) or "broadcast_job/group_ops"
+        retry_delay_seconds = int(os.getenv("BROADCAST_QUEUE_RETRY_DELAY_SECONDS", "300"))
+        with connect() as conn:
+            job = conn.execute(
+                """
+                SELECT *
+                FROM broadcast_jobs
+                WHERE id = %s
+                  AND status = 'dispatching'
+                  AND claim_token = %s
+                FOR UPDATE
+                """,
+                (int(job_id), token),
+            ).fetchone()
+            if not job:
+                return None
+            self._fault("before_outbound_task")
+            outbound_task = conn.execute(
+                """
+                INSERT INTO outbound_tasks (
+                    broadcast_job_id, task_type, request_payload, response_payload,
+                    wecom_task_id, status, trace_id
+                ) VALUES (%s, %s, CAST(%s AS jsonb), CAST(%s AS jsonb), %s, %s, %s)
+                ON CONFLICT (broadcast_job_id) WHERE broadcast_job_id IS NOT NULL
+                DO UPDATE SET
+                    task_type = EXCLUDED.task_type,
+                    request_payload = EXCLUDED.request_payload,
+                    response_payload = EXCLUDED.response_payload,
+                    wecom_task_id = EXCLUDED.wecom_task_id,
+                    status = EXCLUDED.status,
+                    trace_id = EXCLUDED.trace_id
+                RETURNING id
+                """,
+                (
+                    int(job_id),
+                    task_type,
+                    _json_dumps(request_payload),
+                    _json_dumps(response_payload),
+                    wecom_task_id,
+                    final_status,
+                    _text(job.get("trace_id")),
+                ),
+            ).fetchone()
+            outbound_task_id = int((outbound_task or {}).get("id") or 0) or None
+            self._fault("after_outbound_task")
+            conn.execute(
+                """
+                UPDATE cloud_broadcast_plan_recipients recipient
+                SET send_status = %s,
+                    last_error = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM broadcast_jobs job
+                WHERE job.id = %s
+                  AND job.source_type = 'cloud_plan'
+                  AND job.source_table = 'cloud_broadcast_plan_recipients'
+                  AND recipient.broadcast_job_id = job.id
+                  AND recipient.send_status = 'dispatching'
+                """,
+                (final_status, error_text, int(job_id)),
+            )
+            conn.execute(
+                """
+                UPDATE cloud_broadcast_plan_recipient_messages message
+                SET status = %s,
+                    sent_at = CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE NULL END,
+                    last_error = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM cloud_broadcast_plan_recipients recipient
+                WHERE recipient.broadcast_job_id = %s
+                  AND message.recipient_id = recipient.id
+                  AND message.status = 'dispatching'
+                """,
+                (final_status, final_status, error_text, int(job_id)),
+            )
+            self._fault("after_projection_updates")
+            result_summary = {
+                "status": final_status,
+                "failure_type": failure_type,
+                "side_effect_executed": side_effect_executed,
+                "provider_result_received": provider_result_received,
+                "wecom_task_id_present": bool(wecom_task_id),
+            }
+            finalized = conn.execute(
+                """
+                UPDATE broadcast_jobs
+                SET status = %s,
                     outbound_task_id = %s,
                     sent_count = %s,
                     failed_count = %s,
-                    claim_token = '',
-                    lease_expires_at = NULL,
-                    next_retry_at = NULL,
-                    sent_at = CURRENT_TIMESTAMP,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = %s
-                  AND (%s = '' OR claim_token = %s)
-                """,
-                (outbound_task_id, int(sent_count), int(failed_count), int(job_id), token, token),
-            )
-
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
-        error_text = str(error or "")[:1000]
-        token = str(claim_token or "")
-        terminal_failure = failure_type in {"identity_external_userid_missing", "invalid_payload", "cancelled"}
-        retry_delay_seconds = int(os.getenv("BROADCAST_QUEUE_RETRY_DELAY_SECONDS", "300"))
-        with connect() as conn:
-            conn.execute(
-                """
-                UPDATE broadcast_jobs
-                SET status = CASE
-                        WHEN %s THEN 'blocked'
-                        WHEN attempt_count >= COALESCE(max_attempts, 3) THEN 'failed_terminal'
-                        ELSE 'failed_retryable'
-                    END,
                     failure_type = %s,
                     last_error = %s,
+                    side_effect_executed = %s,
+                    provider_result_received = %s,
+                    result_summary_json = CAST(%s AS jsonb),
+                    reconciliation_required = %s,
                     claim_token = '',
-                    lease_expires_at = NULL,
-                    next_retry_at = CASE
-                        WHEN %s OR attempt_count >= COALESCE(max_attempts, 3) THEN NULL
-                        ELSE CURRENT_TIMESTAMP + (%s * INTERVAL '1 second')
-                    END,
-                    updated_at = CURRENT_TIMESTAMP
+                    lease_expires_at = NULL
+                    ,next_retry_at = CASE WHEN %s = 'failed_retryable'
+                        THEN CURRENT_TIMESTAMP + (%s * INTERVAL '1 second') ELSE NULL END
+                    ,sent_at = CASE WHEN %s = 'sent' THEN CURRENT_TIMESTAMP ELSE NULL END
+                    ,completed_at = CASE WHEN %s = 'failed_retryable' THEN NULL ELSE CURRENT_TIMESTAMP END
+                    ,updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
-                  AND (%s = '' OR claim_token = %s)
+                  AND status = 'dispatching'
+                  AND claim_token = %s
+                RETURNING *
                 """,
-                (terminal_failure, failure_type, error_text, terminal_failure, retry_delay_seconds, int(job_id), token, token),
+                (
+                    final_status,
+                    outbound_task_id,
+                    int_value(outcome.get("sent_count")),
+                    int_value(outcome.get("failed_count")),
+                    failure_type,
+                    error_text,
+                    side_effect_executed,
+                    provider_result_received,
+                    _json_dumps(result_summary),
+                    reconciliation_required,
+                    final_status,
+                    retry_delay_seconds,
+                    final_status,
+                    final_status,
+                    int(job_id),
+                    token,
+                ),
+            ).fetchone()
+            if not finalized:
+                raise RuntimeError("broadcast finalizer lost claim ownership")
+            conn.execute(
+                """
+                INSERT INTO broadcast_job_events (
+                    job_id, event_type, from_status, to_status, event_payload, actor_type, actor_id
+                ) VALUES (%s, 'dispatch_finalized', 'dispatching', %s, CAST(%s AS jsonb), 'worker', %s)
+                """,
+                (int(job_id), final_status, _json_dumps(result_summary), token[:200]),
+            )
+            self._fault("before_commit")
+            return dict(finalized)
+
+    def mark_unknown_after_dispatch(
+        self,
+        job_id: int,
+        *,
+        claim_token: str,
+        error: str,
+        side_effect_executed: bool,
+        provider_result_received: bool,
+    ) -> dict[str, Any] | None:
+        token = _text(claim_token)
+        error_text = _text(error)[:1000]
+        if not token:
+            return None
+        with connect() as conn:
+            job = conn.execute(
+                """
+                SELECT id FROM broadcast_jobs
+                WHERE id = %s AND status = 'dispatching' AND claim_token = %s
+                FOR UPDATE
+                """,
+                (int(job_id), token),
+            ).fetchone()
+            if not job:
+                return None
+            conn.execute(
+                """
+                UPDATE cloud_broadcast_plan_recipients recipient
+                SET send_status = 'unknown_after_dispatch', last_error = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE recipient.broadcast_job_id = %s AND recipient.send_status = 'dispatching'
+                """,
+                (error_text, int(job_id)),
             )
             conn.execute(
                 """
-                UPDATE cloud_broadcast_plan_recipients r
-                SET send_status = 'failed',
-                    last_error = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                FROM broadcast_jobs j
-                WHERE j.id = %s
-                  AND j.source_type = 'cloud_plan'
-                  AND j.source_table = 'cloud_broadcast_plan_recipients'
-                  AND (%s = '' OR j.claim_token = %s)
-                  AND r.broadcast_job_id = j.id
-                  AND r.send_status IN ('pending', 'queued', 'sending')
+                UPDATE cloud_broadcast_plan_recipient_messages message
+                SET status = 'unknown_after_dispatch', sent_at = NULL,
+                    last_error = %s, updated_at = CURRENT_TIMESTAMP
+                FROM cloud_broadcast_plan_recipients recipient
+                WHERE recipient.broadcast_job_id = %s
+                  AND message.recipient_id = recipient.id
+                  AND message.status = 'dispatching'
                 """,
-                (error_text, int(job_id), token, token),
+                (error_text, int(job_id)),
             )
-            conn.execute(
-                """
-                UPDATE cloud_broadcast_plan_recipient_messages m
-                SET status = 'failed',
-                    last_error = %s,
-                    updated_at = CURRENT_TIMESTAMP
-                FROM cloud_broadcast_plan_recipients r
-                JOIN broadcast_jobs j ON j.id = r.broadcast_job_id
-                WHERE j.id = %s
-                  AND j.source_type = 'cloud_plan'
-                  AND j.source_table = 'cloud_broadcast_plan_recipients'
-                  AND (%s = '' OR j.claim_token = %s)
-                  AND m.plan_id = r.plan_id
-                  AND m.recipient_id = r.id
-                  AND m.status IN ('pending', 'queued')
-                """,
-                (error_text, int(job_id), token, token),
-            )
-            conn.execute(
+            summary = {
+                "status": "unknown_after_dispatch",
+                "failure_type": "post_provider_persistence_unknown",
+                "side_effect_executed": bool(side_effect_executed),
+                "provider_result_received": bool(provider_result_received),
+            }
+            updated = conn.execute(
                 """
                 UPDATE broadcast_jobs
-                SET claim_token = '',
-                    lease_expires_at = NULL
-                WHERE id = %s
-                  AND (%s = '' OR claim_token = %s)
+                SET status = 'unknown_after_dispatch',
+                    failure_type = 'post_provider_persistence_unknown',
+                    last_error = %s,
+                    side_effect_executed = %s,
+                    provider_result_received = %s,
+                    result_summary_json = CAST(%s AS jsonb),
+                    reconciliation_required = TRUE,
+                    claim_token = '', lease_expires_at = NULL, next_retry_at = NULL,
+                    completed_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE id = %s AND status = 'dispatching' AND claim_token = %s
+                RETURNING *
                 """,
-                (int(job_id), token, token),
+                (
+                    error_text,
+                    bool(side_effect_executed),
+                    bool(provider_result_received),
+                    _json_dumps(summary),
+                    int(job_id),
+                    token,
+                ),
+            ).fetchone()
+            conn.execute(
+                """
+                INSERT INTO broadcast_job_events (
+                    job_id, event_type, from_status, to_status, event_payload, actor_type, actor_id
+                ) VALUES (%s, 'dispatch_reconciliation_required', 'dispatching', 'unknown_after_dispatch',
+                          CAST(%s AS jsonb), 'worker', %s)
+                """,
+                (int(job_id), _json_dumps(summary), token[:200]),
             )
+            return dict(updated) if updated else None
 
 
 def _summary(*, limit: int, dry_run: bool) -> dict[str, Any]:
@@ -190,10 +428,104 @@ def _summary(*, limit: int, dry_run: bool) -> dict[str, Any]:
         "scanned_at": utcnow().isoformat(),
         "claimed": 0,
         "sent_ok": 0,
+        "simulated": 0,
         "sent_failed": 0,
+        "unknown_after_dispatch": 0,
         "skipped": 0,
         "results": [],
         "errors": [],
+    }
+
+
+_TERMINAL_PRE_PROVIDER_FAILURES = {
+    WECOM_EXECUTION_DISABLED_CODE,
+    "before_external_call",
+    "content_text_or_attachment_missing",
+    "identity_external_userid_missing",
+    "material_resolve_failed",
+    "next_native_dispatch_skipped",
+    "production_guard_failed",
+    "sender_userid_missing",
+    "target_count_mismatch",
+    "target_unionids_missing",
+    "validation_failed",
+    "wecom_group_message_disabled",
+}
+
+_AMBIGUOUS_PROVIDER_FAILURES = {
+    "external_call_unknown",
+    "wecom_group_exact_target_not_verified",
+    "wecom_group_message_partial_failure",
+}
+
+
+def _normalize_dispatch_outcome(job: dict[str, Any], raw: Any) -> dict[str, Any]:
+    outcome = dict(raw) if isinstance(raw, dict) else {}
+    raw_status = _text(outcome.get("status")).lower()
+    failure_type = _text(outcome.get("failure_type") or outcome.get("error_code"))
+    error = _text(outcome.get("error") or outcome.get("reason") or outcome.get("error_message"))
+    response_payload = _json_dict(outcome.get("response_payload"))
+    request_payload = _json_dict(outcome.get("request_payload"))
+    side_effect_explicit = "side_effect_executed" in outcome
+    side_effect_executed = bool(outcome.get("side_effect_executed")) if side_effect_explicit else bool(outcome.get("ok"))
+    provider_explicit = "provider_result_received" in outcome
+    provider_result_received = (
+        bool(outcome.get("provider_result_received"))
+        if provider_explicit
+        else side_effect_executed
+        and bool(
+            _json_dict(response_payload.get("result"))
+            or outcome.get("wecom_msgid")
+            or response_payload.get("wecom_msgid")
+            or response_payload.get("msgid")
+        )
+    )
+    simulated = raw_status == "simulated" or _is_simulated_success(outcome)
+    if simulated:
+        final_status = "simulated"
+        side_effect_executed = False
+        provider_result_received = False
+    elif outcome.get("ok"):
+        final_status = "sent"
+    elif raw_status == "unknown_after_dispatch" or failure_type in _AMBIGUOUS_PROVIDER_FAILURES:
+        final_status = "unknown_after_dispatch"
+    elif side_effect_executed and not provider_result_received:
+        final_status = "unknown_after_dispatch"
+    elif side_effect_executed:
+        provider_result = _json_dict(response_payload.get("result"))
+        if provider_result and int_value(provider_result.get("errcode")) != 0:
+            final_status = "failed_retryable"
+        else:
+            final_status = "unknown_after_dispatch"
+    elif raw_status == "skipped" or failure_type in _TERMINAL_PRE_PROVIDER_FAILURES:
+        final_status = "blocked"
+    else:
+        final_status = "failed_retryable"
+    if not failure_type and not outcome.get("ok"):
+        failure_type = "next_native_dispatch_skipped" if raw_status == "skipped" else "handler_error"
+    if not error and not outcome.get("ok"):
+        error = "next_native_dispatch_failed"
+    target_count = int_value(outcome.get("target_count")) or _count_targets(job)
+    sent_count = int_value(outcome.get("sent_count")) if final_status == "sent" else 0
+    if final_status == "sent" and sent_count == 0:
+        sent_count = target_count
+    failed_count = int_value(outcome.get("failed_count"))
+    if final_status not in {"sent", "simulated"} and failed_count == 0:
+        failed_count = target_count
+    return {
+        **outcome,
+        "status": final_status,
+        "sent_count": sent_count,
+        "failed_count": failed_count,
+        "target_count": target_count,
+        "failure_type": failure_type,
+        "error": error,
+        "side_effect_executed": side_effect_executed,
+        "provider_result_received": provider_result_received,
+        "request_payload": request_payload,
+        "response_payload": response_payload,
+        "task_type": _text(outcome.get("task_type")) or "broadcast_job/group_ops",
+        "was_skipped": raw_status == "skipped",
     }
 
 
@@ -233,6 +565,11 @@ def _text(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _is_simulated_success(result: dict[str, Any]) -> bool:
+    mode = _text(result.get("mode") or result.get("adapter_mode")).lower()
+    return bool(result.get("ok")) and mode in {"fake", "fixture", "simulated", "test_fake"} and result.get("side_effect_executed") is False
+
+
 def _is_wecom_customer_group_job(job: dict[str, Any], payload: dict[str, Any]) -> bool:
     return (
         str(payload.get("channel") or "").strip() == "wecom_customer_group"
@@ -251,40 +588,6 @@ def _is_wecom_private_job(job: dict[str, Any], payload: dict[str, Any]) -> bool:
             and _text(job.get("content_type")) == "private_message"
         )
     )
-
-
-def _record_outbound_task(
-    *,
-    job: dict[str, Any],
-    request_payload: dict[str, Any],
-    response_payload: dict[str, Any],
-    status: str,
-    task_type: str = "broadcast_job/group_ops",
-) -> int | None:
-    task_id = str(
-        response_payload.get("wecom_msgid")
-        or response_payload.get("msgid")
-        or _json_dict(response_payload.get("result")).get("msgid")
-        or _json_dict(response_payload.get("result")).get("task_id")
-        or ""
-    )
-    with connect() as conn:
-        row = conn.execute(
-            """
-            INSERT INTO outbound_tasks (task_type, request_payload, response_payload, wecom_task_id, status, trace_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            RETURNING id
-            """,
-            (
-                task_type,
-                _json_dumps(request_payload),
-                _json_dumps(response_payload),
-                task_id,
-                status,
-                str(job.get("trace_id") or ""),
-            ),
-        ).fetchone()
-    return int((row or {}).get("id") or 0) or None
 
 
 def _extract_target_unionids(job: dict[str, Any], payload: dict[str, Any]) -> list[str]:
@@ -357,7 +660,7 @@ def _load_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any
             FROM cloud_broadcast_plan_recipient_messages
             WHERE plan_id = %s
               AND recipient_id = %s
-              AND status IN ('queued', 'pending')
+              AND status IN ('queued', 'pending', 'dispatching')
             ORDER BY sequence_index ASC, id ASC
             LIMIT 1
             """,
@@ -387,30 +690,6 @@ def _with_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any
     if message.get("cloud_plan_message_id"):
         hydrated["cloud_plan_message_id"] = message.get("cloud_plan_message_id")
     return hydrated
-
-
-def _mark_cloud_plan_recipient_message_sent(payload: dict[str, Any], *, outbound_task_id: int | None) -> None:
-    message_id = int_value(payload.get("cloud_plan_message_id"))
-    recipient_id = int_value(payload.get("recipient_id"))
-    if not message_id or not recipient_id:
-        return
-    with connect() as conn:
-        conn.execute(
-            """
-            UPDATE cloud_broadcast_plan_recipient_messages
-            SET status = 'sent', sent_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            """,
-            (message_id,),
-        )
-        conn.execute(
-            """
-            UPDATE cloud_broadcast_plan_recipients
-            SET send_status = 'sent', updated_at = CURRENT_TIMESTAMP
-            WHERE id = %s
-            """,
-            (recipient_id,),
-        )
 
 
 def _merge_content_package(target: dict[str, Any], source: Any) -> None:
@@ -478,6 +757,8 @@ def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dic
             "error": wecom_execution_disabled_message(),
             "failure_type": WECOM_EXECUTION_DISABLED_CODE,
             "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
         }
     payload = _with_cloud_plan_recipient_message(payload)
     target_unionids = _extract_target_unionids(job, payload)
@@ -486,32 +767,77 @@ def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dic
     sender_userid = _extract_private_sender(payload)
     content_text = _extract_private_text(payload)
     if not target_unionids:
-        return {"ok": False, "error": "target_unionids_missing", "failure_type": "validation_failed"}
+        return {
+            "ok": False,
+            "error": "target_unionids_missing",
+            "failure_type": "validation_failed",
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
+        }
     if missing_unionids:
         return {
             "ok": False,
             "error": "identity_external_userid_missing",
             "failure_type": "identity_external_userid_missing",
             "missing_unionids": missing_unionids,
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
         }
     if target_count != len(target_unionids):
-        return {"ok": False, "error": "target_count_mismatch", "failure_type": "validation_failed"}
+        return {
+            "ok": False,
+            "error": "target_count_mismatch",
+            "failure_type": "validation_failed",
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
+        }
     if not sender_userid:
-        return {"ok": False, "error": "sender_userid_missing", "failure_type": "validation_failed"}
+        return {
+            "ok": False,
+            "error": "sender_userid_missing",
+            "failure_type": "validation_failed",
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
+        }
     content_package = _extract_private_content_package(payload)
     try:
         attachments = _resolve_private_attachments(content_package)
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "failure_type": "material_resolve_failed"}
+        return {
+            "ok": False,
+            "error": str(exc),
+            "failure_type": "material_resolve_failed",
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
+        }
     try:
         attachments = _normalize_private_attachments_for_wecom(attachments)
     except Exception as exc:
-        return {"ok": False, "error": str(exc), "failure_type": "material_resolve_failed"}
+        return {
+            "ok": False,
+            "error": str(exc),
+            "failure_type": "material_resolve_failed",
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
+        }
     direct_attachments = _json_list(payload.get("attachments")) or _json_list(payload.get("attachments_json"))
     if direct_attachments:
         attachments = direct_attachments + attachments
     if not content_text and not attachments:
-        return {"ok": False, "error": "content_text_or_attachment_missing", "failure_type": "validation_failed"}
+        return {
+            "ok": False,
+            "error": "content_text_or_attachment_missing",
+            "failure_type": "validation_failed",
+            "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_private",
+        }
     request_payload = {
         "job_id": int_value(job.get("id")),
         "source_type": _text(job.get("source_type")),
@@ -536,29 +862,40 @@ def _dispatch_wecom_private(job: dict[str, Any], payload: dict[str, Any]) -> dic
         idempotency_key=_text(job.get("idempotency_key") or job.get("trace_id") or job.get("id")),
     )
     failure_type = _text(result.get("error_code")) or "handler_error"
-    outbound_task_id = _record_outbound_task(
-        job=job,
-        request_payload=request_payload,
-        response_payload=result,
-        status="created" if result.get("ok") else "failed",
-        task_type="broadcast_job/wecom_private",
-    )
+    simulated = _is_simulated_success(result)
+    side_effect_executed = bool(result.get("side_effect_executed"))
+    provider_result_received = side_effect_executed and bool(_json_dict(result.get("result")))
+    evidence = {
+        "request_payload": request_payload,
+        "response_payload": result,
+        "task_type": "broadcast_job/wecom_private",
+        "side_effect_executed": side_effect_executed,
+        "provider_result_received": provider_result_received,
+    }
     if not result.get("ok"):
         return {
             "ok": False,
             "error": _text(result.get("error_message") or result.get("error_code") or "wecom private message dispatch failed"),
             "failure_type": failure_type,
-            "outbound_task_id": outbound_task_id,
+            **evidence,
         }
-    if not outbound_task_id:
-        return {"ok": False, "error": "outbound_task_record_missing", "failure_type": "handler_error"}
-    _mark_cloud_plan_recipient_message_sent(payload, outbound_task_id=outbound_task_id)
+    if simulated:
+        return {
+            "ok": True,
+            "status": "simulated",
+            "simulated": True,
+            "sent_count": 0,
+            "failed_count": 0,
+            "target_count": len(targets),
+            **evidence,
+        }
     return {
         "ok": True,
+        "status": "sent",
         "sent_count": len(targets),
         "failed_count": 0,
-        "outbound_task_id": outbound_task_id,
         "wecom_msgid": _text(result.get("wecom_msgid") or _json_dict(result.get("result")).get("msgid")),
+        **evidence,
     }
 
 
@@ -571,36 +908,68 @@ def _dispatch_wecom_customer_group(job: dict[str, Any], payload: dict[str, Any])
             "error": wecom_execution_disabled_message(),
             "failure_type": WECOM_EXECUTION_DISABLED_CODE,
             "side_effect_executed": False,
+            "provider_result_received": False,
+            "task_type": "broadcast_job/wecom_group",
         }
-    existing_outbound_task_id = int_value(job.get("outbound_task_id"))
-    if existing_outbound_task_id:
+    try:
+        result = build_wecom_group_message_adapter().create_group_message_task(
+            payload,
+            idempotency_key=str(job.get("idempotency_key") or job.get("trace_id") or job.get("id") or ""),
+        )
+    except ValueError as exc:
         return {
-            "ok": True,
-            "sent_count": len(list(payload.get("chat_ids") or [])),
-            "failed_count": 0,
-            "outbound_task_id": existing_outbound_task_id,
+            "ok": False,
+            "error": str(exc),
+            "failure_type": "validation_failed",
+            "request_payload": payload,
+            "response_payload": {},
+            "task_type": "broadcast_job/wecom_group",
+            "side_effect_executed": False,
+            "provider_result_received": False,
         }
-    result = build_wecom_group_message_adapter().create_group_message_task(
-        payload,
-        idempotency_key=str(job.get("idempotency_key") or job.get("trace_id") or job.get("id") or ""),
-    )
+    side_effect_executed = bool(result.get("side_effect_executed"))
+    provider_result_received = side_effect_executed and bool(_json_dict(result.get("result")))
+    evidence = {
+        "request_payload": payload,
+        "response_payload": result,
+        "task_type": "broadcast_job/wecom_group",
+        "side_effect_executed": side_effect_executed,
+        "provider_result_received": provider_result_received,
+    }
     if result.get("ok") and result.get("exact_target_verified") is not True:
         chats = ",".join([str(item) for item in list(result.get("requested_chat_ids") or payload.get("chat_ids") or [])])
-        return {"ok": False, "error": f"exact target not verified for requested chat ids: {chats}"}
-    outbound_task_id = _record_outbound_task(
-        job=job,
-        request_payload=payload,
-        response_payload=result,
-        status="created" if result.get("ok") else "failed",
-    )
+        return {
+            "ok": False,
+            "error": f"exact target not verified for requested chat ids: {chats}",
+            "failure_type": "wecom_group_exact_target_not_verified",
+            **evidence,
+        }
+    simulated = _is_simulated_success(result)
     if not result.get("ok"):
         error = str(result.get("error_message") or result.get("error_code") or "wecom group message dispatch failed")
-        return {"ok": False, "error": error, "outbound_task_id": outbound_task_id}
+        return {
+            "ok": False,
+            "error": error,
+            "failure_type": _text(result.get("error_code")) or "handler_error",
+            **evidence,
+        }
+    if simulated:
+        return {
+            "ok": True,
+            "status": "simulated",
+            "simulated": True,
+            "sent_count": 0,
+            "failed_count": 0,
+            "target_count": len(list(payload.get("chat_ids") or [])),
+            **evidence,
+        }
     return {
         "ok": True,
+        "status": "sent",
         "sent_count": len(list(payload.get("chat_ids") or [])),
         "failed_count": 0,
-        "outbound_task_id": outbound_task_id,
+        "wecom_msgid": _text(result.get("wecom_msgid") or _json_dict(result.get("result")).get("msgid")),
+        **evidence,
     }
 
 
@@ -634,31 +1003,108 @@ def run_broadcast_queue_worker(
         for job in jobs:
             job_id = int(job.get("id") or 0)
             try:
-                outcome = dispatcher.dispatch(job)
-                if outcome.get("ok"):
-                    sent_count = int_value(outcome.get("sent_count")) or _count_targets(job)
-                    repo.mark_sent(
-                        job_id,
-                        outbound_task_id=outcome.get("outbound_task_id") or outcome.get("task_id"),
-                        sent_count=sent_count,
-                        failed_count=int_value(outcome.get("failed_count")),
-                        claim_token=claim_token,
+                dispatching_job = repo.begin_dispatch(job_id, claim_token=claim_token, now=current_time)
+                if dispatching_job is None:
+                    summary["ok"] = False
+                    summary["sent_failed"] += 1
+                    summary["results"].append(
+                        {
+                            "id": job_id,
+                            "status": "claim_lost",
+                            "reason": "broadcast dispatch ownership was lost before provider call",
+                        }
                     )
-                    summary["sent_ok"] += 1
-                    summary["results"].append({"id": job_id, "status": "sent", "sent_count": sent_count})
                     continue
-                reason = str(outcome.get("reason") or outcome.get("error") or "next_native_dispatch_failed")
-                failure_type = str(outcome.get("failure_type") or ("next_native_dispatch_skipped" if outcome.get("status") == "skipped" else "handler_error"))
-                repo.mark_failed(job_id, error=reason, failure_type=failure_type, claim_token=claim_token)
-                summary["sent_failed"] += 1
-                if outcome.get("status") == "skipped":
-                    summary["skipped"] += 1
-                summary["results"].append({"id": job_id, "status": outcome.get("status") or "failed_retryable", "reason": reason, "failure_type": failure_type})
+                try:
+                    outcome = _normalize_dispatch_outcome(dispatching_job, dispatcher.dispatch(dispatching_job))
+                except Exception as exc:
+                    reason = str(exc)
+                    repo.mark_unknown_after_dispatch(
+                        job_id,
+                        claim_token=claim_token,
+                        error=reason,
+                        side_effect_executed=True,
+                        provider_result_received=False,
+                    )
+                    summary["ok"] = False
+                    summary["sent_failed"] += 1
+                    summary["unknown_after_dispatch"] += 1
+                    summary["results"].append(
+                        {
+                            "id": job_id,
+                            "status": "unknown_after_dispatch",
+                            "reason": reason,
+                            "failure_type": "dispatcher_exception_after_dispatch_started",
+                        }
+                    )
+                    continue
+                try:
+                    finalized = repo.finalize_dispatch(job_id, claim_token=claim_token, outcome=outcome)
+                    if finalized is None:
+                        raise RuntimeError("broadcast finalizer lost dispatch ownership")
+                except Exception as exc:
+                    reason = str(exc)
+                    repo.mark_unknown_after_dispatch(
+                        job_id,
+                        claim_token=claim_token,
+                        error=reason,
+                        side_effect_executed=bool(outcome.get("side_effect_executed")),
+                        provider_result_received=bool(outcome.get("provider_result_received")),
+                    )
+                    summary["ok"] = False
+                    summary["sent_failed"] += 1
+                    summary["unknown_after_dispatch"] += 1
+                    summary["results"].append(
+                        {
+                            "id": job_id,
+                            "status": "unknown_after_dispatch",
+                            "reason": reason,
+                            "failure_type": "finalization_failed_after_dispatch",
+                        }
+                    )
+                    continue
+                status = _text(outcome.get("status"))
+                if status == "sent":
+                    summary["sent_ok"] += 1
+                elif status == "simulated":
+                    summary["simulated"] += 1
+                else:
+                    summary["sent_failed"] += 1
+                    if outcome.get("was_skipped"):
+                        summary["skipped"] += 1
+                    if status == "unknown_after_dispatch":
+                        summary["ok"] = False
+                        summary["unknown_after_dispatch"] += 1
+                result_item = {"id": job_id, "status": status}
+                if status == "sent":
+                    result_item["sent_count"] = int_value(outcome.get("sent_count"))
+                elif status == "simulated":
+                    result_item.update(
+                        {
+                            "target_count": int_value(outcome.get("target_count")),
+                            "side_effect_executed": False,
+                        }
+                    )
+                else:
+                    result_item.update(
+                        {
+                            "reason": _text(outcome.get("error")),
+                            "failure_type": _text(outcome.get("failure_type")),
+                        }
+                    )
+                summary["results"].append(result_item)
             except Exception as exc:
                 reason = str(exc)
-                repo.mark_failed(job_id, error=reason, failure_type="handler_exception", claim_token=claim_token)
+                summary["ok"] = False
                 summary["sent_failed"] += 1
-                summary["results"].append({"id": job_id, "status": "failed_retryable", "reason": reason, "failure_type": "handler_exception"})
+                summary["results"].append(
+                    {
+                        "id": job_id,
+                        "status": "worker_error",
+                        "reason": reason,
+                        "failure_type": "worker_exception",
+                    }
+                )
         return summary
     except Exception as exc:
         return {**summary, "ok": False, "errors": [{"code": "broadcast_queue_worker_failed", "message": str(exc)}]}

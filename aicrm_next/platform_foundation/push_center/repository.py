@@ -16,6 +16,15 @@ class PushCenterRepository:
     def list_jobs(self, filters: dict[str, Any] | None = None, *, limit: int = 50, offset: int = 0) -> tuple[list[dict[str, Any]], int]:
         return self._service.list_projections(filters or {}, limit=limit, offset=offset)
 
+    def list_jobs_with_summary(
+        self,
+        filters: dict[str, Any] | None = None,
+        *,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[dict[str, Any]], int, dict[str, Any], list[dict[str, Any]]]:
+        return self._service.query_projections(filters or {}, limit=limit, offset=offset)
+
     def get_job(self, job_id: int | str) -> dict[str, Any] | None:
         return self._service.get_projection(str(job_id))
 
@@ -31,3 +40,6 @@ class PushCenterRepository:
 
     def sections(self, filters: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         return self._service.sections(filters or {})
+
+    def summary(self, filters: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        return self._service.summary(filters or {})

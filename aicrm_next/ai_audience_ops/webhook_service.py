@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 from typing import Any
 
 from aicrm_next.platform_foundation.command_bus.models import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WECOM_MESSAGE_PRIVATE_SEND
 from aicrm_next.send_content.application import normalize_send_content_package
-from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
+from aicrm_next.shared.runtime_settings import runtime_bool
 
 from .repository import AudienceRepository, build_audience_repository, _json_dumps, _text
 
@@ -21,13 +20,10 @@ class AudienceInboundWebhookService:
         self._repo = repository or build_audience_repository()
         self._external_effects = external_effects or ExternalEffectService()
 
-    def handle(self, package_key: str, payload: dict[str, Any], *, raw_body: bytes, signature: str = "") -> dict[str, Any]:
+    def handle(self, package_key: str, payload: dict[str, Any], *, raw_body: bytes) -> dict[str, Any]:
         package = self._repo.get_package_by_key(package_key)
         if not package:
             return {"ok": False, "error": "package_not_found"}
-        valid = self._verify(package, raw_body=raw_body, signature=signature)
-        if not valid:
-            return {"ok": False, "error": "invalid_signature"}
         normalized = dict(payload or {})
         normalized["idempotency_key"] = self._idempotency_key(package, normalized)
         automation_send_plan = self._maybe_enqueue_automation_send_plan(package, normalized)
@@ -46,16 +42,6 @@ class AudienceInboundWebhookService:
             "record_only": external_effect_job_id is None and automation_send_plan is None,
             "real_external_call_executed": False,
         }
-
-    def _verify(self, package: dict[str, Any], *, raw_body: bytes, signature: str) -> bool:
-        secret = _text(package.get("inbound_webhook_secret") or runtime_setting("AICRM_AI_AUDIENCE_INBOUND_WEBHOOK_SECRET"))
-        if not secret:
-            return False
-        provided = _text(signature)
-        if provided.startswith("sha256="):
-            provided = provided[len("sha256=") :]
-        expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(provided, expected)
 
     def _idempotency_key(self, package: dict[str, Any], payload: dict[str, Any]) -> str:
         external_event_id = _text(payload.get("external_event_id"))

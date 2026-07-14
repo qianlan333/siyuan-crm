@@ -1,9 +1,5 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
-
 from aicrm_next.ai_audience_ops.e2e_runner import (
     TEST_EXTERNAL_USERID,
     TEST_SENDER_USERID,
@@ -19,29 +15,16 @@ from aicrm_next.platform_foundation.external_effects import WEBHOOK_GENERIC_PUSH
 from aicrm_next.platform_foundation.external_effects.models import ExternalEffectJob
 
 
-TOKEN = "external-spec-test-token"
-
-
-def _headers(token: str = TOKEN) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
-
-
-def test_external_e2e_route_auth_and_default_disabled(next_client, next_pg_schema, monkeypatch) -> None:
+def test_external_e2e_route_is_removed(next_client, next_pg_schema, monkeypatch) -> None:
     del next_pg_schema
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_SPEC_API_TOKEN", TOKEN)
     monkeypatch.delenv("AICRM_AI_AUDIENCE_E2E_RUNNER_ENABLED", raising=False)
 
     missing = next_client.post("/api/external/ai-audience/e2e/run", json={})
-    assert missing.status_code == 401
-    assert missing.json()["error"] == "external_token_required"
-
-    wrong = next_client.post("/api/external/ai-audience/e2e/run", headers=_headers("bad"), json={})
-    assert wrong.status_code == 401
-    assert wrong.json()["error"] == "external_token_invalid"
+    assert missing.status_code == 404
 
     disabled = next_client.post(
         "/api/external/ai-audience/e2e/run",
-        headers=_headers(),
+        headers={"Authorization": "Bearer retired-shared-token"},
         json={
             "run_id": "e2e_test",
             "external_userid": TEST_EXTERNAL_USERID,
@@ -51,13 +34,20 @@ def test_external_e2e_route_auth_and_default_disabled(next_client, next_pg_schem
         },
     )
     assert disabled.status_code == 404
-    assert disabled.json()["error"] == "e2e_runner_disabled"
-    assert TOKEN not in disabled.text
+    assert "retired-shared-token" not in disabled.text
 
 
 def test_e2e_runner_hard_guards(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_AI_AUDIENCE_E2E_RUNNER_ENABLED", "true")
-    runner = AudienceRealE2ERunner(repository=object(), package_service=object(), refresh_service=object(), outbound_service=object(), external_effects=object(), worker=object(), preview_command=object(), execute_command=object())
+    runner = AudienceRealE2ERunner(
+        repository=object(),
+        package_service=object(),
+        refresh_service=object(),
+        outbound_service=object(),
+        external_effects=object(),
+        worker=object(),
+        user_ops_gateway=object(),
+    )
 
     base = {
         "run_id": "e2e_guard",
@@ -92,29 +82,22 @@ def test_e2e_generated_specs_are_linted_and_hard_filter_test_user() -> None:
 
 
 def test_test_agent_accepts_run_level_external_userid_array(monkeypatch) -> None:
-    outbound_secret = "outbound-secret"
-    inbound_secret = "inbound-secret"
     package_key = "prod_e2e_questionnaire_added_wecom_auto_send_e2e_test"
     body = [TEST_EXTERNAL_USERID]
-    signature = hmac.new(
-        outbound_secret.encode("utf-8"),
-        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
 
     class Repo:
         def get_package_by_key(self, value):
             assert value == package_key
-            return {"id": 7, "package_key": package_key, "inbound_webhook_secret": inbound_secret}
+            return {"id": 7, "package_key": package_key}
 
         def list_subscriptions(self, package_id, active_only=True, trigger_event_type="entered"):
             assert package_id == 7
             assert active_only is True
             assert trigger_event_type == "entered"
-            return [{"id": 1, "signing_secret": outbound_secret}]
+            return [{"id": 1}]
 
     class Inbound:
-        def handle(self, package, payload, *, raw_body, signature):
+        def handle(self, package, payload, *, raw_body):
             assert package == package_key
             assert payload["action"]["target_external_userid"] == TEST_EXTERNAL_USERID
             assert payload["action"]["sender_userid"] == TEST_SENDER_USERID
@@ -129,7 +112,6 @@ def test_test_agent_accepts_run_level_external_userid_array(monkeypatch) -> None
 
     result = AudienceTestAgentService(repository=Repo(), inbound_service=Inbound()).handle(
         body,
-        signature=f"sha256={signature}",
         headers={
             "X-AICRM-Package-Key": package_key,
             "X-AICRM-Event-Type": "audience.incremental.entered",
@@ -145,27 +127,20 @@ def test_test_agent_accepts_run_level_external_userid_array(monkeypatch) -> None
 
 
 def test_test_agent_allows_prod_e2e_package_when_runner_enabled(monkeypatch) -> None:
-    outbound_secret = "outbound-secret"
-    inbound_secret = "inbound-secret"
     package_key = "prod_e2e_questionnaire_added_wecom_auto_send_e2e_test"
     body = [TEST_EXTERNAL_USERID]
-    signature = hmac.new(
-        outbound_secret.encode("utf-8"),
-        json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
 
     class Repo:
         def get_package_by_key(self, value):
             assert value == package_key
-            return {"id": 7, "package_key": package_key, "inbound_webhook_secret": inbound_secret}
+            return {"id": 7, "package_key": package_key}
 
         def list_subscriptions(self, package_id, active_only=True, trigger_event_type="entered"):
             assert package_id == 7
-            return [{"id": 1, "signing_secret": outbound_secret}]
+            return [{"id": 1}]
 
     class Inbound:
-        def handle(self, package, payload, *, raw_body, signature):
+        def handle(self, package, payload, *, raw_body):
             assert payload["action"]["target_external_userid"] == TEST_EXTERNAL_USERID
             return {"ok": True, "external_effect_job_id": 99, "record_only": False}
 
@@ -177,7 +152,6 @@ def test_test_agent_allows_prod_e2e_package_when_runner_enabled(monkeypatch) -> 
 
     result = AudienceTestAgentService(repository=Repo(), inbound_service=Inbound()).handle(
         body,
-        signature=f"sha256={signature}",
         headers={
             "X-AICRM-Package-Key": package_key,
             "X-AICRM-Event-Type": "audience.incremental.entered",
@@ -197,7 +171,6 @@ def test_test_agent_rejects_non_test_array_member(monkeypatch) -> None:
 
     result = AudienceTestAgentService(repository=object(), inbound_service=object()).handle(
         ["wm_other"],
-        signature="sha256=fake",
         headers={
             "X-AICRM-Package-Key": package_key,
             "X-AICRM-Event-Type": "audience.incremental.entered",

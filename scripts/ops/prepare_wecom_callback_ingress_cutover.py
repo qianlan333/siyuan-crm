@@ -45,7 +45,6 @@ REQUIRED_ASSETS = [
     "scripts/ops/probe_wecom_callback_pressure.py",
     "deploy/openclaw-wecom-callback-ingress.service",
     "deploy/openclaw-wecom-callback-inbox-worker.service",
-    "deploy/openclaw-wecom-callback-inbox-worker.timer",
     "deploy/nginx-wecom-callback-ingress.conf.example",
     "docs/runbooks/wecom_callback_storm.md",
     "docs/reports/production_wecom_callback_storm_20260627.md",
@@ -105,12 +104,12 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         source_env,
         "sudo cp deploy/openclaw-wecom-callback-ingress.service /etc/systemd/system/",
         "sudo cp deploy/openclaw-wecom-callback-inbox-worker.service /etc/systemd/system/",
-        "sudo cp deploy/openclaw-wecom-callback-inbox-worker.timer /etc/systemd/system/",
         "sudo systemctl daemon-reload",
+        "sudo systemctl disable --now openclaw-wecom-callback-inbox-worker.timer || true",
         "sudo systemctl enable openclaw-wecom-callback-ingress.service",
         "sudo systemctl restart openclaw-wecom-callback-ingress.service",
-        "sudo systemctl enable openclaw-wecom-callback-inbox-worker.timer",
-        "sudo systemctl restart openclaw-wecom-callback-inbox-worker.timer",
+        "sudo systemctl enable openclaw-wecom-callback-inbox-worker.service",
+        "sudo systemctl restart openclaw-wecom-callback-inbox-worker.service",
         f"curl -sSf {args.ingress_health_url}",
         "python scripts/run_wecom_callback_inbox_worker.py --limit 20",
         "set -o pipefail; "
@@ -173,9 +172,8 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         f"cd {remote_repo}",
         source_venv,
         source_env,
-        "sudo systemctl stop openclaw-wecom-callback-inbox-worker.timer",
         "sudo systemctl stop openclaw-wecom-callback-inbox-worker.service || true",
-        "systemctl is-active openclaw-wecom-callback-inbox-worker.timer || true",
+        "systemctl is-active openclaw-wecom-callback-inbox-worker.service || true",
         "set -o pipefail; python scripts/ops/probe_wecom_callback_pressure.py "
         "--callback-url \"$(cat /tmp/wecom-callback-sample.url)\" "
         "--callback-body-file /tmp/wecom-callback-sample.xml "
@@ -187,15 +185,16 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "--callback-target-p95-ms 200 "
         "--callback-target-p99-ms 500 "
         "| tee /tmp/wecom-callback-worker-isolation.json",
-        "sudo systemctl start openclaw-wecom-callback-inbox-worker.timer",
         "sudo systemctl start openclaw-wecom-callback-inbox-worker.service || true",
-        "sudo systemctl is-active openclaw-wecom-callback-inbox-worker.timer",
+        "sudo systemctl is-active openclaw-wecom-callback-inbox-worker.service",
     ]
     downstream_worker_isolation_canary = [
         f"cd {remote_repo}",
         source_venv,
         source_env,
-        "sudo systemctl stop openclaw-external-push-worker.service || true",
+        "sudo systemctl disable --now openclaw-external-push-worker.timer || true",
+        "sudo systemctl disable --now openclaw-external-push-worker.service || true",
+        "systemctl is-active openclaw-external-push-worker.timer || true",
         "systemctl is-active openclaw-external-push-worker.service || true",
         "set -o pipefail; python scripts/ops/probe_wecom_callback_pressure.py "
         "--callback-url \"$(cat /tmp/wecom-callback-sample.url)\" "
@@ -207,7 +206,6 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         "--callback-target-p95-ms 200 "
         "--callback-target-p99-ms 500 "
         "| tee /tmp/wecom-callback-downstream-worker-isolation.json",
-        "sudo systemctl start openclaw-external-push-worker.service || true",
     ]
     internal_event_worker_isolation_canary = [
         f"cd {remote_repo}",
@@ -239,7 +237,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         f"sudo cp \"$AICRM_CALLBACK_CUTOVER_BACKUP\" {nginx_config}",
         "sudo nginx -t",
         "sudo systemctl reload nginx",
-        "sudo systemctl stop openclaw-wecom-callback-inbox-worker.timer || true",
+        "sudo systemctl stop openclaw-wecom-callback-inbox-worker.service || true",
         "sudo systemctl stop openclaw-wecom-callback-ingress.service || true",
         f"curl -sSf {args.web_health_url}",
     ]
@@ -248,7 +246,7 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
         source_venv,
         source_env,
         "sudo systemctl start openclaw-wecom-callback-ingress.service",
-        "sudo systemctl start openclaw-wecom-callback-inbox-worker.timer",
+        "sudo systemctl start openclaw-wecom-callback-inbox-worker.service",
         f"curl -sSf {args.ingress_health_url}",
         "sudoedit " + nginx_config,
         "sudo nginx -t",
@@ -277,14 +275,14 @@ def build_plan(args: argparse.Namespace) -> dict[str, Any]:
     completion_evidence = [
         "alembic current shows 0054_webhook_inbox",
         "openclaw-wecom-callback-ingress.service is active on 127.0.0.1:5002",
-        "openclaw-wecom-callback-inbox-worker.timer is active",
+        "openclaw-wecom-callback-inbox-worker.service is active and the retired timer is disabled",
         "nginx callback routes proxy to 127.0.0.1:5002 and no longer contain return 200 success",
         "nginx callback routes include limit_req, limit_conn, and 429 overload status",
         "valid callbacks enqueue into webhook_inbox and /tmp/wecom-callback-ingestion.json proves the sampled idempotency_key row",
         "/tmp/wecom-callback-processing.json proves the worker consumed the sampled row without business side effects",
         "readiness same_sample_evidence.ok proves pressure, ingestion, and processing JSON share the same idempotency_key",
         "invalid callback POST returns 400 from app-level ingress rather than nginx-level plain success",
-        "single valid callback ACK succeeds while callback worker timer/service is stopped, then worker is restored",
+        "single valid callback ACK succeeds while callback worker service is stopped, then the durable row is recovered after restart",
         "single valid callback ACK and page samples succeed while downstream external push worker is stopped, then worker is restored",
         "single valid callback ACK and page samples succeed while internal event worker timer/service is stopped, then worker is restored",
         "/tmp/wecom-callback-rollback.json proves emergency quick ACK can be restored and the permanent cutover was re-applied after the drill",

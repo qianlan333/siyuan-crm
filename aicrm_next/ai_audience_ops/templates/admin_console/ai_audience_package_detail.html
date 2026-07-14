@@ -502,7 +502,6 @@
           </div>
         </div>
         <div class="ai-panel-actions">
-          <button class="ai-btn" id="rotateInboundSecretBtn" type="button">重置接收 secret</button>
           <button class="ai-btn primary" id="saveWebhookBtn" type="button">保存 Webhook</button>
         </div>
         <div class="ai-status-line" id="webhookStatusLine"></div>
@@ -569,7 +568,6 @@
     const packageApiUrl = {{ ai_audience_package_api_url | tojson }};
     const membersApiUrl = {{ ai_audience_package_members_api_url | tojson }};
     const webhooksApiUrl = {{ ai_audience_package_webhooks_api_url | tojson }};
-    const rotateWebhookApiUrl = {{ ai_audience_package_webhooks_rotate_api_url | tojson }};
     const sendersApiUrl = {{ ai_audience_package_senders_api_url | tojson }};
 
     const els = {
@@ -586,7 +584,6 @@
       packageStatusLine: document.getElementById("packageStatusLine"),
       inboundWebhookUrl: document.getElementById("inboundWebhookUrl"),
       outboundWebhookInput: document.getElementById("outboundWebhookInput"),
-      rotateInboundSecretBtn: document.getElementById("rotateInboundSecretBtn"),
       saveWebhookBtn: document.getElementById("saveWebhookBtn"),
       webhookStatusLine: document.getElementById("webhookStatusLine"),
       addSenderBtn: document.getElementById("addSenderBtn"),
@@ -733,14 +730,6 @@
       });
       renderWebhook(payload.webhook || {});
       setStatus(els.webhookStatusLine, "Webhook 已保存", "success");
-    };
-
-    const rotateWebhookSecret = async () => {
-      if (!window.confirm("确认重置接收 webhook secret？")) return;
-      setStatus(els.webhookStatusLine, "重置中...");
-      const payload = await fetchJson(rotateWebhookApiUrl, { method: "POST" });
-      renderWebhook(payload.webhook || {});
-      setStatus(els.webhookStatusLine, "接收 secret 已重置", "success");
     };
 
     const normalizeSenders = (items) => items.map((item, index) => ({
@@ -977,9 +966,6 @@
     });
     els.saveWebhookBtn.addEventListener("click", () => {
       saveWebhook().catch((error) => setStatus(els.webhookStatusLine, error.message || "保存失败", "error"));
-    });
-    els.rotateInboundSecretBtn.addEventListener("click", () => {
-      rotateWebhookSecret().catch((error) => setStatus(els.webhookStatusLine, error.message || "重置失败", "error"));
     });
     els.addSenderBtn.addEventListener("click", () => {
       addSender();

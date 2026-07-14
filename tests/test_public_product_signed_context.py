@@ -5,7 +5,7 @@ from pathlib import Path
 
 from itsdangerous import URLSafeSerializer
 
-from aicrm_next.public_product import signed_context
+from aicrm_next.shared import signed_context
 
 
 def test_sidebar_product_context_token_roundtrip(monkeypatch) -> None:
@@ -86,16 +86,16 @@ def test_sidebar_product_context_ttl_clamp(monkeypatch) -> None:
     assert signed_context.sidebar_product_context_ttl_seconds() == 7200
 
 
-def test_append_ctx_query() -> None:
+def test_append_ctx_fragment_keeps_credential_out_of_http_request_target() -> None:
     token = "token.with/special+chars"
 
-    assert signed_context.append_ctx_query("/pay/a", token) == "/pay/a?ctx=token.with%2Fspecial%2Bchars"
-    assert signed_context.append_ctx_query("/pay/a?x=1", token) == "/pay/a?x=1&ctx=token.with%2Fspecial%2Bchars"
-    assert signed_context.append_ctx_query("/pay/a", "") == "/pay/a"
+    assert signed_context.append_ctx_fragment("/pay/a", token) == "/pay/a#aicrm_ctx=token.with%2Fspecial%2Bchars"
+    assert signed_context.append_ctx_fragment("/pay/a?x=1", token) == "/pay/a?x=1#aicrm_ctx=token.with%2Fspecial%2Bchars"
+    assert signed_context.append_ctx_fragment("/pay/a", "") == "/pay/a"
 
 
 def test_signed_context_has_no_legacy_imports() -> None:
-    source = Path("aicrm_next/public_product/signed_context.py").read_text(encoding="utf-8")
+    source = Path("aicrm_next/shared/signed_context.py").read_text(encoding="utf-8")
     forbidden = ["wecom_" + "ability_service", "current_" + "app", "fl" + "ask"]
 
     for marker in forbidden:

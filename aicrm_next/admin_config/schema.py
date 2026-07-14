@@ -231,7 +231,7 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
                 "required": False,
                 "label": "认证模式",
                 "default": "wecom_sso",
-                "help": "wecom_sso | break_glass | disabled",
+                "help": "固定使用 wecom_sso；企业微信是唯一人类登录上游。",
             },
             "ADMIN_LOGIN_REDIRECT_URI": {
                 "type": "string",
@@ -242,22 +242,6 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
                 "type": "string",
                 "required": False,
                 "label": "可信域名",
-            },
-            "ADMIN_BREAK_GLASS_LOGIN_ENABLED": {
-                "type": "string",
-                "required": False,
-                "label": "紧急登录开关",
-                "default": "",
-            },
-            "ADMIN_BREAK_GLASS_USERNAME": {
-                "type": "string",
-                "required": False,
-                "label": "紧急登录用户名",
-            },
-            "ADMIN_BREAK_GLASS_PASSWORD_HASH": {
-                "type": "secret",
-                "required": False,
-                "label": "紧急登录密码Hash",
             },
         },
     },
@@ -319,50 +303,10 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "OpenClaw Webhook地址",
                 "default": "http://claw.youcangogogo.com/webhook",
             },
-            "OPENCLAW_FOCUS_MESSAGE_WEBHOOK_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "OpenClaw Token",
-            },
             "QUESTIONNAIRE_SUBMIT_WEBHOOK_URL": {
                 "type": "string",
                 "required": False,
                 "label": "问卷提交Webhook地址",
-            },
-            "QUESTIONNAIRE_SUBMIT_WEBHOOK_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "问卷提交Token",
-            },
-            "AUTOMATION_INTERNAL_API_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "自动化内部API Token",
-            },
-            "IDENTITY_INTERNAL_API_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "身份解析内部API Token",
-            },
-            "ARCHIVE_INTERNAL_API_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "消息归档内部API Token",
-            },
-            "GROUP_BROADCAST_INTERNAL_API_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "群发内部API Token",
-            },
-            "CALLBACK_INTERNAL_API_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "回调任务内部API Token",
-            },
-            "AUTOMATION_ACTIVATION_WEBHOOK_TOKEN": {
-                "type": "secret",
-                "required": False,
-                "label": "激活Webhook Token",
             },
         },
     },
@@ -376,10 +320,69 @@ CONFIG_SCHEMA: dict[str, dict[str, Any]] = {
                 "label": "Redis连接地址",
                 "help": "如 redis://localhost:6379/0，配置后启用持久化任务队列",
             },
-            "MCP_BEARER_TOKEN": {
+            "AICRM_AUTH_ISSUER": {
+                "type": "string",
+                "required": True,
+                "label": "统一授权平台 Issuer",
+            },
+            "AICRM_AUTH_SESSION_HASH_PEPPER": {
                 "type": "secret",
+                "required": True,
+                "label": "会话凭据哈希 Pepper",
+            },
+            "AICRM_AUTH_JWT_SIGNING_KEY": {
+                "type": "secret",
+                "required": True,
+                "label": "机器访问 JWT 签名密钥",
+            },
+            "AICRM_AUTH_TRUSTED_PROXY_ADDRESSES": {
+                "type": "string",
                 "required": False,
-                "label": "MCP Bearer Token",
+                "label": "授权平台可信代理地址",
+            },
+            "AICRM_AUTH_CA_FILE": {
+                "type": "string",
+                "required": False,
+                "label": "授权平台 CA 路径",
+            },
+            **{
+                key: {
+                    "type": "string",
+                    "required": True,
+                    "label": label,
+                }
+                for key, label in (
+                    ("AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "自动化 Worker Client ID"),
+                    ("AICRM_AUTH_ARCHIVE_WORKER_CLIENT_ID", "消息归档 Worker Client ID"),
+                    ("AICRM_AUTH_CALLBACK_WORKER_CLIENT_ID", "回调 Worker Client ID"),
+                    ("AICRM_AUTH_GROUP_BROADCAST_CLIENT_ID", "群发 Worker Client ID"),
+                    ("AICRM_AUTH_IDENTITY_CLIENT_ID", "身份解析 Client ID"),
+                    ("AICRM_AUTH_MCP_CLIENT_ID", "MCP Client ID"),
+                    ("AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "外部 Agent Client ID"),
+                    ("AICRM_AUTH_CAMPAIGN_AGENT_CLIENT_ID", "Campaign Agent Client ID"),
+                )
+            },
+            **{
+                key.removesuffix("_CLIENT_ID") + "_CLIENT_SECRET_REF": {
+                    "type": "string",
+                    "required": True,
+                    "label": label.replace("Client ID", "Client Secret 引用"),
+                }
+                for key, label in (
+                    ("AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "自动化 Worker Client ID"),
+                    ("AICRM_AUTH_ARCHIVE_WORKER_CLIENT_ID", "消息归档 Worker Client ID"),
+                    ("AICRM_AUTH_CALLBACK_WORKER_CLIENT_ID", "回调 Worker Client ID"),
+                    ("AICRM_AUTH_GROUP_BROADCAST_CLIENT_ID", "群发 Worker Client ID"),
+                    ("AICRM_AUTH_IDENTITY_CLIENT_ID", "身份解析 Client ID"),
+                    ("AICRM_AUTH_MCP_CLIENT_ID", "MCP Client ID"),
+                    ("AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "外部 Agent Client ID"),
+                    ("AICRM_AUTH_CAMPAIGN_AGENT_CLIENT_ID", "Campaign Agent Client ID"),
+                )
+            },
+            "AICRM_AUTH_OUTBOUND_WEBHOOK_CLIENT_ID": {
+                "type": "string",
+                "required": True,
+                "label": "出站 Webhook Client ID",
             },
         },
     },
@@ -467,22 +470,26 @@ def validate_config(settings: dict[str, str]) -> list[dict[str, str]]:
         for field_key, field in group["fields"].items():
             value = settings.get(field_key, "").strip()
             if field.get("required") and not value:
-                errors.append({
-                    "group": group["label"],
-                    "field": field.get("label", field_key),
-                    "key": field_key,
-                    "error": "必填项不能为空",
-                })
+                errors.append(
+                    {
+                        "group": group["label"],
+                        "field": field.get("label", field_key),
+                        "key": field_key,
+                        "error": "必填项不能为空",
+                    }
+                )
             if value and field.get("type") == "integer":
                 try:
                     int_value = int(value)
                 except ValueError:
-                    errors.append({
-                        "group": group["label"],
-                        "field": field.get("label", field_key),
-                        "key": field_key,
-                        "error": "必须为整数",
-                    })
+                    errors.append(
+                        {
+                            "group": group["label"],
+                            "field": field.get("label", field_key),
+                            "key": field_key,
+                            "error": "必须为整数",
+                        }
+                    )
                     continue
                 # Range validation when ``min``/``max`` declared on the field.
                 # Catches "fat-fingered" reliability knobs like a timeout of
@@ -491,19 +498,23 @@ def validate_config(settings: dict[str, str]) -> list[dict[str, str]]:
                 min_value = field.get("min")
                 max_value = field.get("max")
                 if min_value is not None and int_value < int(min_value):
-                    errors.append({
-                        "group": group["label"],
-                        "field": field.get("label", field_key),
-                        "key": field_key,
-                        "error": f"不能小于 {min_value}",
-                    })
+                    errors.append(
+                        {
+                            "group": group["label"],
+                            "field": field.get("label", field_key),
+                            "key": field_key,
+                            "error": f"不能小于 {min_value}",
+                        }
+                    )
                 if max_value is not None and int_value > int(max_value):
-                    errors.append({
-                        "group": group["label"],
-                        "field": field.get("label", field_key),
-                        "key": field_key,
-                        "error": f"不能大于 {max_value}",
-                    })
+                    errors.append(
+                        {
+                            "group": group["label"],
+                            "field": field.get("label", field_key),
+                            "key": field_key,
+                            "error": f"不能大于 {max_value}",
+                        }
+                    )
     return errors
 
 
@@ -518,20 +529,24 @@ def build_config_checklist(settings: dict[str, str]) -> list[dict[str, Any]]:
             required = bool(field.get("required"))
             if required and not configured:
                 all_ok = False
-            items.append({
-                "key": field_key,
-                "label": field.get("label", field_key),
-                "required": required,
-                "configured": configured,
-                "type": field.get("type", "string"),
-            })
-        checklist.append({
-            "group_key": group_key,
-            "group_label": group["label"],
-            "required": bool(group.get("required")),
-            "complete": all_ok,
-            "fields": items,
-        })
+            items.append(
+                {
+                    "key": field_key,
+                    "label": field.get("label", field_key),
+                    "required": required,
+                    "configured": configured,
+                    "type": field.get("type", "string"),
+                }
+            )
+        checklist.append(
+            {
+                "group_key": group_key,
+                "group_label": group["label"],
+                "required": bool(group.get("required")),
+                "complete": all_ok,
+                "fields": items,
+            }
+        )
     return checklist
 
 

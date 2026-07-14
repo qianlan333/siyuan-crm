@@ -24,11 +24,29 @@ class FakeBroadcastRepo:
     def claim_due_jobs(self, *, limit: int, now: datetime, claim_token: str, lease_seconds: int) -> list[dict[str, Any]]:
         return self.jobs[:limit]
 
-    def mark_sent(self, job_id: int, *, outbound_task_id: Any = None, sent_count: int = 0, failed_count: int = 0, claim_token: str = "") -> None:
-        self.sent.append({"job_id": job_id, "outbound_task_id": outbound_task_id, "sent_count": sent_count, "failed_count": failed_count, "claim_token": claim_token})
+    def begin_dispatch(self, job_id: int, *, claim_token: str, now: datetime) -> dict[str, Any] | None:
+        return next(({**job, "status": "dispatching"} for job in self.jobs if int(job["id"]) == job_id), None)
 
-    def mark_failed(self, job_id: int, *, error: str, failure_type: str = "handler_error", claim_token: str = "") -> None:
-        self.failed.append({"job_id": job_id, "error": error, "failure_type": failure_type, "claim_token": claim_token})
+    def finalize_dispatch(self, job_id: int, *, claim_token: str, outcome: dict[str, Any]) -> dict[str, Any]:
+        record = {"job_id": job_id, "claim_token": claim_token, **outcome}
+        if outcome["status"] == "sent":
+            self.sent.append(record)
+        else:
+            self.failed.append(record)
+        return record
+
+    def mark_unknown_after_dispatch(
+        self,
+        job_id: int,
+        *,
+        claim_token: str,
+        error: str,
+        side_effect_executed: bool,
+        provider_result_received: bool,
+    ) -> dict[str, Any]:
+        record = {"job_id": job_id, "claim_token": claim_token, "error": error}
+        self.failed.append(record)
+        return record
 
 
 class FakeDispatcher:
@@ -91,9 +109,8 @@ def test_broadcast_queue_worker_fake_dispatch_success() -> None:
     assert result["ok"] is True
     assert result["claimed"] == 1
     assert result["sent_ok"] == 1
-    assert {key: repo.sent[0][key] for key in ("job_id", "outbound_task_id", "sent_count", "failed_count")} == {
+    assert {key: repo.sent[0][key] for key in ("job_id", "sent_count", "failed_count")} == {
         "job_id": 11,
-        "outbound_task_id": 101,
         "sent_count": 2,
         "failed_count": 0,
     }

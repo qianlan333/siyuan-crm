@@ -3,17 +3,16 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from time import time
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from aicrm_next.main import create_app
-from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE, sign_session
 from aicrm_next.platform_foundation.external_effects.adapters import webhook_execution_settings, wecom_execution_settings
 from aicrm_next.platform_foundation.external_effects.realtime import realtime_wakeup_state
 from aicrm_next.shared.db_session import reset_engine_cache_for_tests
 from aicrm_next.shared.secret_store import FileSecretStore, is_secret_reference
+from tests.admin_auth_test_helpers import install_admin_session
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -236,21 +235,7 @@ def _prepare_client(monkeypatch, tmp_path) -> TestClient:
             )
         )
     client = TestClient(create_app(), raise_server_exceptions=False)
-    csrf_token = "admin-config-next-csrf"
-    client.cookies.set(
-        SESSION_COOKIE,
-        sign_session(
-            {
-                "username": "admin-config-test",
-                "roles": ["super_admin"],
-                "login_type": "pytest",
-                "iat": int(time()),
-                "csrf_token": csrf_token,
-            }
-        ),
-    )
-    client.cookies.set(CSRF_COOKIE, csrf_token)
-    client.headers["X-CSRF-Token"] = csrf_token
+    install_admin_session(client, "super_admin")
     return client
 
 
@@ -462,10 +447,10 @@ def test_admin_access_detail_combines_settings_and_member_picker_authorization(m
     assert "后台管理员" in response.text
     assert "超级管理员" in response.text
     assert "编辑管理员" in response.text
-    assert 'data-admin-access-detail' in response.text
-    assert 'data-admin-access-member-picker' in response.text
-    assert 'data-admin-access-member-feedback' in response.text
-    assert 'data-admin-access-super-admin' in response.text
+    assert "data-admin-access-detail" in response.text
+    assert "data-admin-access-member-picker" in response.text
+    assert "data-admin-access-member-feedback" in response.text
+    assert "data-admin-access-super-admin" in response.text
     assert 'type="hidden" name="wecom_userid"' in response.text
     assert 'type="text" name="wecom_userid"' not in response.text
     assert '<select name="wecom_userid"' not in response.text
@@ -496,7 +481,9 @@ def test_retired_reply_monitor_chat_settings_are_not_exposed(monkeypatch, tmp_pa
     fields = [field for block in response.json()["config"]["blocks"] for field in block["fields"]]
     keys = {field["key"] for field in fields}
     assert "DEEPSEEK_ENABLED" in keys
-    assert "AUTOMATION_INTERNAL_API_TOKEN" in keys
+    assert "AUTOMATION_INTERNAL_API_TOKEN" not in keys
+    assert "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID" in keys
+    assert "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_SECRET_REF" in keys
     assert not {key for key in keys if key.startswith("LAOHUANG_CHAT_")}
 
 
@@ -731,6 +718,26 @@ def test_config_category_check_and_invalid_category_are_controlled(monkeypatch, 
 
 
 def test_setup_wizard_saves_and_repeated_submit_is_noop(monkeypatch, tmp_path) -> None:
+    required_auth_settings = {
+        "AICRM_AUTH_ISSUER": "https://crm.example.test/oauth",
+        "AICRM_AUTH_SESSION_HASH_PEPPER": "secretref:file:AICRM_AUTH_SESSION_HASH_PEPPER:v1_test",
+        "AICRM_AUTH_JWT_SIGNING_KEY": "secretref:file:AICRM_AUTH_JWT_SIGNING_KEY:v1_test",
+        "AICRM_AUTH_OUTBOUND_WEBHOOK_CLIENT_ID": "aicrm-outbound-webhook",
+    }
+    for purpose in (
+        "AUTOMATION_WORKER",
+        "ARCHIVE_WORKER",
+        "CALLBACK_WORKER",
+        "GROUP_BROADCAST",
+        "IDENTITY",
+        "MCP",
+        "EXTERNAL_AGENT",
+        "CAMPAIGN_AGENT",
+    ):
+        required_auth_settings[f"AICRM_AUTH_{purpose}_CLIENT_ID"] = f"pytest-{purpose.lower().replace('_', '-')}"
+        required_auth_settings[f"AICRM_AUTH_{purpose}_CLIENT_SECRET_REF"] = f"secretref:file:AICRM_AUTH_{purpose}_CLIENT_SECRET:v1_test"
+    for key, value in required_auth_settings.items():
+        monkeypatch.setenv(key, value)
     client = _prepare_client(monkeypatch, tmp_path)
     token = _token(
         client.get("/setup/wizard").text,
@@ -913,9 +920,7 @@ def test_admin_config_routes_no_longer_forward_to_legacy_facade() -> None:
 
 
 def test_marketing_automation_config_page_points_to_ai_audience_not_legacy_programs() -> None:
-    template = (ROOT / "aicrm_next/frontend_compat/templates/admin_console/config_marketing_automation.html").read_text(
-        encoding="utf-8"
-    )
+    template = (ROOT / "aicrm_next/frontend_compat/templates/admin_console/config_marketing_automation.html").read_text(encoding="utf-8")
 
     assert "AI 自动化运营入口" in template
     assert "进入 AI 自动化运营" in template

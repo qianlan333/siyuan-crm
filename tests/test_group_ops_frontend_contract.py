@@ -146,7 +146,7 @@ def test_group_ops_detail_frontend_contract_matches_standard_and_webhook_require
     assert "group_picker_keyword" in source
     assert "groupPickerNotice" in source
     assert "绑定中" in source
-    assert "requestErrorMessage(error, \"绑定失败\")" in source
+    assert 'requestErrorMessage(error, "绑定失败")' in source
     assert "配置话术和素材" in source
     assert "AICRMSendContentComposer.open" in source
     assert "配置群运营动作内容" in source
@@ -161,11 +161,24 @@ def test_group_ops_detail_frontend_contract_matches_standard_and_webhook_require
     assert "素材 JSON" not in source
     for forbidden_time in ["入群后 10 分钟", "入群后 30 分钟", "入群后 1 小时"]:
         assert forbidden_time not in GROUP_OPS_JS.read_text(encoding="utf-8")
-    for label in ["Webhook", "POST", "复制地址", "Token 状态"]:
+    for label in ["Webhook", "POST", "复制地址", "认证方式", "HTTP Message Signatures"]:
         assert label in source
     assert "历史素材已保留，保存新素材不会自动删除历史素材" in source
 
-    for forbidden in ["适用场景", "JSON 示例", "请求字段说明大表", "请求字段说明", "明文 token", "明文 Token", "Token 状态 / 重置入口", "Token：", "一次性 token", "复制后不可再次查看", "接收方式", "默认动作"]:
+    for forbidden in [
+        "适用场景",
+        "JSON 示例",
+        "请求字段说明大表",
+        "请求字段说明",
+        "明文 token",
+        "明文 Token",
+        "Token 状态 / 重置入口",
+        "Token：",
+        "一次性 token",
+        "复制后不可再次查看",
+        "接收方式",
+        "默认动作",
+    ]:
         assert forbidden not in source
     assert "查看所有群" not in detail_source
     assert "创建计划" not in detail_source
@@ -174,22 +187,20 @@ def test_group_ops_detail_frontend_contract_matches_standard_and_webhook_require
     assert "group-ops__stats-grid" not in detail_source
 
 
-def test_group_ops_webhook_plan_uses_read_copy_and_regenerate_only():
+def test_group_ops_webhook_plan_uses_read_copy_and_platform_signatures_only():
     source = _source()
     load_source = _function_source("loadDetailPage")
-    reset_source = _function_source("resetWebhook")
     copy_source = _function_source("copyWebhook")
 
     assert "renderWebhook()" in source
     assert "copy-webhook" in source
-    assert "reset-webhook" in source
-    assert "apiWebhookRegenerate" in reset_source
-    assert "method: \"POST\"" in reset_source
     assert "navigator.clipboard.writeText(url)" in copy_source
     assert "routes.apiWebhook(planId)" in load_source
     assert "routes.apiPlanNodes(planId)" in load_source
     assert "PATCH" not in source
-    assert "/webhook/regenerate" in source
+    assert "reset-webhook" not in source
+    assert "apiWebhookRegenerate" not in source
+    assert "/webhook/regenerate" not in source
     assert "/webhook`" in source
 
 
@@ -294,9 +305,9 @@ def test_group_ops_standard_plan_keeps_node_actions_on_existing_interfaces():
     assert "delete-node" in source
     assert "routes.apiPlanNodes(state.plan.id)" in save_source
     assert "routes.apiPlanNode(state.plan.id, nodeId)" in save_source
-    assert "method: nodeId ? \"PUT\" : \"POST\"" in save_source
+    assert 'method: nodeId ? "PUT" : "POST"' in save_source
     assert "routes.apiPlanNode(state.plan.id, nodeId)" in delete_source
-    assert "method: \"DELETE\"" in delete_source
+    assert 'method: "DELETE"' in delete_source
 
 
 def test_group_ops_detail_refresh_owner_groups_contract_is_manual_and_owner_scoped():

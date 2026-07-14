@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from aicrm_next.shared.runtime import raw_database_url
 
 PENDING_FAILED_STATUSES = ("received", "processing", "failed_retryable", "failed_terminal", "dead_letter")
+WEBHOOK_PRIORITY_MAX_WAIT_SECONDS = 5
 
 
 def _text(value: Any) -> str:
@@ -45,6 +46,31 @@ def _filter_datetime(value: Any) -> datetime | None:
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
     return parsed.astimezone(timezone.utc)
+
+
+def _is_time_sensitive_callback(row: dict[str, Any]) -> bool:
+    summary = row.get("payload_summary_json") or {}
+    return bool(
+        isinstance(summary, dict)
+        and summary.get("welcome_code_present") is True
+        and summary.get("state_present") is True
+    )
+
+
+def _due_priority(row: dict[str, Any], *, now: datetime) -> tuple[int, datetime, int]:
+    received_at = row.get("received_at")
+    if not isinstance(received_at, datetime):
+        received_at = now
+    if received_at.tzinfo is None:
+        received_at = received_at.replace(tzinfo=timezone.utc)
+    aged = received_at <= now - timedelta(seconds=WEBHOOK_PRIORITY_MAX_WAIT_SECONDS)
+    if aged:
+        priority = 0
+    elif _is_time_sensitive_callback(row):
+        priority = 1
+    else:
+        priority = 2
+    return priority, received_at, int(row.get("id") or 0)
 
 
 def _psycopg_url(url: str) -> str:
@@ -262,7 +288,15 @@ class PostgresWebhookInboxRepository:
                       AND locked_at <= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
                     )
                   )
-                ORDER BY received_at ASC, id ASC
+                ORDER BY
+                  CASE
+                    WHEN received_at <= CURRENT_TIMESTAMP - INTERVAL '5 seconds' THEN 0
+                    WHEN payload_summary_json->>'welcome_code_present' = 'true'
+                     AND payload_summary_json->>'state_present' = 'true' THEN 1
+                    ELSE 2
+                  END ASC,
+                  received_at ASC,
+                  id ASC
                 LIMIT %s
                 """,
                 (_text(provider), max(1, min(int(limit or 50), 500))),
@@ -337,7 +371,15 @@ class PostgresWebhookInboxRepository:
                           AND locked_at <= CURRENT_TIMESTAMP - INTERVAL '5 minutes'
                         )
                       )
-                    ORDER BY received_at ASC, id ASC
+                    ORDER BY
+                      CASE
+                        WHEN received_at <= CURRENT_TIMESTAMP - INTERVAL '5 seconds' THEN 0
+                        WHEN payload_summary_json->>'welcome_code_present' = 'true'
+                         AND payload_summary_json->>'state_present' = 'true' THEN 1
+                        ELSE 2
+                      END ASC,
+                      received_at ASC,
+                      id ASC
                     LIMIT %s
                     FOR UPDATE SKIP LOCKED
                 )
@@ -757,7 +799,7 @@ class InMemoryWebhookInboxRepository:
             for row in self.rows
             if row.get("provider") == provider and is_due(row)
         ]
-        due.sort(key=lambda item: (item.get("received_at") or now, int(item.get("id") or 0)))
+        due.sort(key=lambda item: _due_priority(item, now=now))
         return [deepcopy(row) for row in due[: max(1, int(limit or 50))]]
 
     def list_items(self, filters: dict[str, Any] | None = None, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
@@ -803,7 +845,7 @@ class InMemoryWebhookInboxRepository:
                 row["started_at"] = row.get("started_at") or now
                 row["updated_at"] = now
                 claimed.append(deepcopy(row))
-        claimed.sort(key=lambda item: (item.get("received_at") or now, int(item.get("id") or 0)))
+        claimed.sort(key=lambda item: _due_priority(item, now=now))
         return claimed
 
     def claim_one(self, inbox_id: int, *, locked_by: str = "webhook-inbox-worker") -> dict[str, Any] | None:

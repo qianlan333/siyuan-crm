@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
-import sys
-from pathlib import Path
 from typing import Any
 
 try:
@@ -127,7 +124,7 @@ def _scan_and_backfill(conn: Any, *, order_id: int | None, product_code: str, li
         "scanned_count": len(candidates),
         "inserted_count": inserted,
         "items": items,
-        "next_step": "systemctl start openclaw-external-push-worker.service",
+        "next_step": "run canonical commerce reconciliation and internal/external effect workers",
     }
 
 
@@ -137,7 +134,6 @@ def main() -> int:
     parser.add_argument("--product-code", default="")
     parser.add_argument("--limit", type=int, default=200)
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--run-worker", action="store_true")
     args = parser.parse_args()
 
     with _connect() as conn:
@@ -148,20 +144,6 @@ def main() -> int:
             limit=args.limit,
             dry_run=bool(args.dry_run),
         )
-    if args.run_worker and not args.dry_run:
-        worker = Path(__file__).resolve().parent / "run_external_push_worker.py"
-        completed = subprocess.run(
-            [sys.executable, str(worker), "--limit", str(max(1, payload["inserted_count"] or 1))],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        payload["worker"] = {
-            "returncode": completed.returncode,
-            "stdout": completed.stdout.strip(),
-            "stderr": completed.stderr.strip(),
-        }
-        payload["ok"] = bool(payload["ok"] and completed.returncode == 0)
     print_json(payload)
     return 0 if payload.get("ok") else 1
 

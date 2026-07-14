@@ -4,9 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_jobs.routes import ensure_admin_action_token
 from aicrm_next.main import create_app
 from aicrm_next.platform_foundation.webhook_inbox import InMemoryWebhookInboxRepository
+from tests.admin_auth_test_helpers import install_admin_action_tokens
 
 
 def _seed(repo: InMemoryWebhookInboxRepository, key: str = "event-1") -> dict:
@@ -140,19 +140,23 @@ def test_webhook_inbox_admin_retry_and_skip_require_token(monkeypatch):
     row = _seed(repo)
     repo.mark_dead_letter(row["id"], error_code="RuntimeError", error_message="boom")
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
-    monkeypatch.setenv("CALLBACK_INTERNAL_API_TOKEN", "test-token")
     client = TestClient(create_app(), raise_server_exceptions=False)
+    tokens = install_admin_action_tokens(
+        client,
+        ("POST", "/api/admin/webhook-inbox/{inbox_id}/retry"),
+        ("POST", "/api/admin/webhook-inbox/{inbox_id}/skip"),
+    )
 
     rejected = client.post(f"/api/admin/webhook-inbox/{row['id']}/retry", json={"reason": "manual replay"})
     accepted = client.post(
         f"/api/admin/webhook-inbox/{row['id']}/retry",
         json={"reason": "manual replay"},
-        headers={"Authorization": "Bearer test-token"},
+        headers={"X-Admin-Action-Token": tokens[("POST", "/api/admin/webhook-inbox/{inbox_id}/retry")]},
     )
     skipped = client.post(
         f"/api/admin/webhook-inbox/{row['id']}/skip",
         json={"reason": "operator reviewed"},
-        headers={"Authorization": "Bearer test-token"},
+        headers={"X-Admin-Action-Token": tokens[("POST", "/api/admin/webhook-inbox/{inbox_id}/skip")]},
     )
 
     assert rejected.status_code == 401
@@ -176,19 +180,22 @@ def test_webhook_inbox_admin_dispatch_one_requires_token_and_supports_execute(mo
             return {"ok": True, "id": int(inbox_id), "status": "succeeded", "dry_run": bool(dry_run)}
 
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
-    monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api.WeComCallbackInboxWorker", FakeWorker)
-    monkeypatch.setenv("CALLBACK_INTERNAL_API_TOKEN", "test-token")
     client = TestClient(create_app(), raise_server_exceptions=False)
+    client.app.state.wecom_callback_inbox_worker_factory = FakeWorker
+    token = install_admin_action_tokens(
+        client,
+        ("POST", "/api/admin/webhook-inbox/{inbox_id}/dispatch"),
+    )[("POST", "/api/admin/webhook-inbox/{inbox_id}/dispatch")]
 
     rejected = client.post(f"/api/admin/webhook-inbox/{row['id']}/dispatch", json={"dry_run": False})
     preview = client.post(
         f"/api/admin/webhook-inbox/{row['id']}/dispatch",
-        json={"admin_action_token": ensure_admin_action_token()},
+        json={"admin_action_token": token},
     )
     executed = client.post(
         f"/api/admin/webhook-inbox/{row['id']}/dispatch",
         json={"dry_run": False, "reason": "manual replay"},
-        headers={"Authorization": "Bearer test-token"},
+        headers={"X-Admin-Action-Token": token},
     )
 
     assert rejected.status_code == 401
@@ -206,13 +213,16 @@ def test_webhook_inbox_admin_run_due_defaults_to_dry_run(monkeypatch):
     repo = InMemoryWebhookInboxRepository()
     _seed(repo)
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
-    monkeypatch.setenv("CALLBACK_INTERNAL_API_TOKEN", "test-token")
     client = TestClient(create_app(), raise_server_exceptions=False)
+    token = install_admin_action_tokens(
+        client,
+        ("POST", "/api/admin/webhook-inbox/run-due"),
+    )[("POST", "/api/admin/webhook-inbox/run-due")]
 
     response = client.post(
         "/api/admin/webhook-inbox/run-due",
         json={"provider": "wecom", "limit": 5},
-        headers={"Authorization": "Bearer test-token"},
+        headers={"X-Admin-Action-Token": token},
     )
 
     assert response.status_code == 200
@@ -226,10 +236,14 @@ def test_webhook_inbox_admin_run_due_accepts_admin_action_token(monkeypatch):
     _seed(repo)
     monkeypatch.setattr("aicrm_next.platform_foundation.webhook_inbox.api._repo", lambda: repo)
     client = TestClient(create_app(), raise_server_exceptions=False)
+    token = install_admin_action_tokens(
+        client,
+        ("POST", "/api/admin/webhook-inbox/run-due"),
+    )[("POST", "/api/admin/webhook-inbox/run-due")]
 
     response = client.post(
         "/api/admin/webhook-inbox/run-due",
-        json={"provider": "wecom", "limit": 5, "dry_run": True, "admin_action_token": ensure_admin_action_token()},
+        json={"provider": "wecom", "limit": 5, "dry_run": True, "admin_action_token": token},
     )
 
     assert response.status_code == 200

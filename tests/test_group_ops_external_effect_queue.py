@@ -1,29 +1,44 @@
 from __future__ import annotations
 
+import json
 from urllib.parse import urlparse
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import (
     GROUP_OPS_MESSAGE_LOOPBACK,
-    GROUP_OPS_WEBHOOK_ACTION_LOOPBACK,
     WECOM_MESSAGE_GROUP_SEND,
     ExternalEffectService,
 )
-from aicrm_next.platform_foundation.external_effects.adapters import DEFAULT_ADAPTER_REGISTRY, WebhookAdapter
+from aicrm_next.platform_foundation.external_effects.adapters import (
+    DEFAULT_ADAPTER_REGISTRY,
+    WeComGroupMessageExternalEffectAdapter,
+    WebhookAdapter,
+)
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
-from tests.group_ops_test_helpers import group_ops_api_client
+from aicrm_next.platform_foundation.auth_platform.webhook_hmac import WebhookHmacSigner
+from tests.webhook_hmac_test_helpers import install_webhook_hmac_client, signed_headers
+
+pytest_plugins = ("tests.group_ops_test_helpers",)
 
 
 def _install_loopback_http_adapter(monkeypatch, client) -> list[dict]:
     calls: list[dict] = []
+    credentials = install_webhook_hmac_client(
+        client,
+        capability="external_effect_receipt_receive",
+        client_id="pytest-group-ops-outbound",
+    )
+    signer = WebhookHmacSigner(client_id=credentials.client_id, secret=credentials.secret)
 
-    def loopback_post(url, *, json, headers, timeout):
-        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+    def loopback_post(url, *, data, headers, timeout):
+        calls.append({"url": url, "json": json.loads(data.decode("utf-8")), "headers": headers, "timeout": timeout})
         parsed = urlparse(url)
-        return client.post(parsed.path, json=json, headers=headers)
+        with monkeypatch.context() as route_policy:
+            route_policy.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+            return client.post(parsed.path, content=data, headers=headers)
 
-    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "outbound_webhook", WebhookAdapter(http_post=loopback_post))  # type: ignore[attr-defined]
-    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "webhook", WebhookAdapter(http_post=loopback_post))  # type: ignore[attr-defined]
+    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "outbound_webhook", WebhookAdapter(http_post=loopback_post, signer=signer))  # type: ignore[attr-defined]
+    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "webhook", WebhookAdapter(http_post=loopback_post, signer=signer))  # type: ignore[attr-defined]
     return calls
 
 
@@ -53,9 +68,13 @@ def _install_fake_wecom_group_message_adapter(monkeypatch) -> list[dict]:
                 "error_message": "",
             }
 
-    from aicrm_next.integration_gateway import wecom_group_adapter
-
-    monkeypatch.setattr(wecom_group_adapter, "build_wecom_group_message_adapter", lambda: FakeWeComGroupMessageAdapter())
+    monkeypatch.setitem(
+        DEFAULT_ADAPTER_REGISTRY._adapters,  # type: ignore[attr-defined]
+        "wecom_group_message",
+        WeComGroupMessageExternalEffectAdapter(
+            adapter_factory=lambda: FakeWeComGroupMessageAdapter()
+        ),
+    )
     return calls
 
 
@@ -150,12 +169,13 @@ def test_group_ops_loopback_without_test_receiver_is_blocked_before_webhook_url_
 
     assert result["real_external_call_executed"] is False
     assert updated is not None
-    assert updated.status == "failed_terminal"
+    assert updated.status == "blocked"
     assert updated.last_error_code == "group_ops_loopback_requires_test_receiver"
     assert attempts[0].error_code == "group_ops_loopback_requires_test_receiver"
+    assert attempts[0].status == "blocked"
 
 
-def test_group_ops_webhook_receive_shadow_logs_action_and_creates_external_effect_job(group_ops_api_client, monkeypatch):
+def test_group_ops_webhook_receive_logs_action_and_creates_wecom_group_effect(group_ops_api_client, monkeypatch):
     monkeypatch.setenv("AICRM_GROUP_OPS_OUTBOUND_MODE", "shadow")
     calls: list[dict] = []
 
@@ -169,7 +189,7 @@ def test_group_ops_webhook_receive_shadow_logs_action_and_creates_external_effec
         lambda: FakeActionPort(),
     )
     created = group_ops_api_client.post(
-        "/api/automation/group-ops/plans",
+        "/api/admin/automation-conversion/group-ops/plans",
         json={
             "name": "Webhook external effect plan",
             "type": "webhook_receiver",
@@ -179,28 +199,42 @@ def test_group_ops_webhook_receive_shadow_logs_action_and_creates_external_effec
             "allowNoSop": True,
         },
     ).json()
-    group_ops_api_client.post(f"/api/automation/group-ops/plans/{created['id']}/enable")
+    group_ops_api_client.post(f"/api/admin/automation-conversion/group-ops/plans/{created['id']}/enable")
 
-    response = group_ops_api_client.post(
-        f"/api/automation/group-ops/webhooks/{created['webhook']['endpointKey']}",
-        headers={"Authorization": f"Bearer {created['webhook']['token']}", "X-Idempotency-Key": "pytest-group-action-effect"},
-        json={
-            "event": "synthetic_group_event",
-            "source": "pytest",
-            "recipients": [{"group_id": "test_chat_group_ops_001", "external_user_id": "test_external_userid_group_ops_001"}],
-            "action": {"action_type": "send_group_message", "content": "synthetic group content"},
-        },
+    endpoint_key = created["webhook"]["endpointKey"]
+    payload = {
+        "event": "synthetic_group_event",
+        "source": "pytest",
+        "recipients": [{"group_id": "test_chat_group_ops_001", "external_user_id": "test_external_userid_group_ops_001"}],
+        "action": {"action_type": "send_group_message", "content": "synthetic group content"},
+    }
+    raw_body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    credentials = install_webhook_hmac_client(
+        group_ops_api_client,
+        capability="group_ops_webhook_receive",
+        owner_scope={"webhook_key": [endpoint_key]},
+        client_id="pytest-group-ops-inbound",
     )
-    jobs = _jobs(GROUP_OPS_WEBHOOK_ACTION_LOOPBACK)
-    logs = group_ops_api_client.get(f"/api/automation/group-ops/plans/{created['id']}/executions")
+    headers = signed_headers(credentials, body=raw_body, event_id="pytest-group-action-effect")
+    headers["X-Idempotency-Key"] = "pytest-group-action-effect"
+    with monkeypatch.context() as route_policy:
+        route_policy.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+        response = group_ops_api_client.post(
+            f"/api/automation/group-ops/webhooks/{endpoint_key}",
+            headers=headers,
+            content=raw_body,
+        )
+    jobs = _jobs(WECOM_MESSAGE_GROUP_SEND)
+    logs = group_ops_api_client.get(f"/api/admin/automation-conversion/group-ops/plans/{created['id']}/executions")
 
-    assert response.status_code == 202
+    assert response.status_code == 202, response.text
     assert response.json()["external_effect_job_ids"] == [jobs[0].id]
     assert response.json()["real_external_call_executed"] is False
     assert response.json()["wecom_send_executed"] is False
     assert calls[0]["action"]["action_type"] == "send_group_message"
     assert logs.json()["total"] == 1
     assert jobs[0].status == "queued"
+    assert jobs[0].adapter_name == "wecom_group_message"
     assert jobs[0].payload_summary_json["chat_count"] == 1
 
 
@@ -267,7 +301,7 @@ def test_group_ops_legacy_bundle_external_effect_creates_wecom_group_job(group_o
     assert jobs[0].payload_json["chat_ids"] == ["wrOgAAA001"]
 
 
-def test_wecom_group_external_effect_adapter_defaults_to_success_path(group_ops_api_client, monkeypatch):
+def test_wecom_group_external_effect_requires_typed_execution_gate(group_ops_api_client, monkeypatch):
     monkeypatch.setenv("AICRM_GROUP_OPS_OUTBOUND_MODE", "external_effect")
     monkeypatch.setenv("AICRM_GROUP_OPS_EXTERNAL_EFFECT_SEND_MODE", "wecom_group")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES", WECOM_MESSAGE_GROUP_SEND)
@@ -288,11 +322,11 @@ def test_wecom_group_external_effect_adapter_defaults_to_success_path(group_ops_
     disabled = ExternalEffectWorker().run_due(batch_size=1, dry_run=False, effect_types=[WECOM_MESSAGE_GROUP_SEND], test_only=False)
     disabled_updated = ExternalEffectService().get(disabled_job.id if disabled_job else 0)
 
-    assert disabled["counts"]["succeeded_count"] == 1
-    assert disabled["real_external_call_executed"] is True
+    assert disabled["counts"]["blocked_count"] == 1
+    assert disabled["real_external_call_executed"] is False
     assert disabled_updated is not None
-    assert disabled_updated.status == "succeeded"
-    assert len(wecom_calls) == 1
+    assert disabled_updated.status == "blocked"
+    assert wecom_calls == []
 
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE", "1")
     response = group_ops_api_client.post(
@@ -316,9 +350,9 @@ def test_wecom_group_external_effect_adapter_defaults_to_success_path(group_ops_
     assert executed["real_external_call_executed"] is True
     assert updated is not None
     assert updated.status == "succeeded"
-    assert len(wecom_calls) == 2
-    assert wecom_calls[1]["payload"]["sender"] == "owner_001"
-    assert wecom_calls[1]["payload"]["chat_ids"] == ["wrOgAAA001"]
+    assert len(wecom_calls) == 1
+    assert wecom_calls[0]["payload"]["sender"] == "owner_001"
+    assert wecom_calls[0]["payload"]["chat_ids"] == ["wrOgAAA001"]
     assert executed["items"][0]["attempt"]["response_summary_json"]["wecom_send_executed"] is True
 
 
@@ -480,7 +514,7 @@ def test_group_ops_loopback_2xx_succeeds_with_receipt(group_ops_api_client, monk
 
     assert response.status_code == 202
     assert job is not None
-    assert job.payload_json["webhook_url"].startswith("https://crm.example.test/api/external-effects/test-receiver/")
+    assert job.payload_json["webhook_url"] == "https://crm.example.test/api/external-effects/test-receiver"
     assert preview["real_external_call_executed"] is False
     assert dry_run["real_external_call_executed"] is False
     assert executed["real_external_call_executed"] is True
@@ -539,10 +573,10 @@ def test_group_ops_loopback_500_retryable_allowlist_miss_and_test_only_gate(grou
     blocked = ExternalEffectWorker().run_due(batch_size=1, dry_run=False, effect_types=[GROUP_OPS_MESSAGE_LOOPBACK], test_only=True)
     blocked_updated = ExternalEffectService().get(blocked_job.id if blocked_job else 0)
 
-    assert blocked["counts"]["failed_count"] == 1
+    assert blocked["counts"]["blocked_count"] == 1
     assert blocked["real_external_call_executed"] is False
     assert blocked_updated is not None
-    assert blocked_updated.status == "failed_terminal"
+    assert blocked_updated.status == "blocked"
     assert blocked_updated.last_error_code == "effect_type_not_allowed"
     assert len(calls) == 1
 

@@ -9,6 +9,7 @@ from .repo import _connect, json_safe, text
 
 
 SyncFunc = Callable[[dict[str, Any], str, int | None], dict[str, Any]]
+DEFAULT_CLAIM_LEASE_SECONDS = 600
 
 
 class IdentityResolutionBackfillWorker:
@@ -18,13 +19,17 @@ class IdentityResolutionBackfillWorker:
         connection_factory: Callable[[], Any] | None = None,
         sync_func: SyncFunc | None = None,
         locked_by: str = "identity-resolution-worker",
+        claim_lease_seconds: int = DEFAULT_CLAIM_LEASE_SECONDS,
     ) -> None:
         self.connection_factory = connection_factory or _connect
-        self.sync_func = sync_func or self._sync
+        self.sync_func = sync_func
         self.locked_by = text(locked_by) or "identity-resolution-worker"
+        self.claim_lease_seconds = max(30, min(int(claim_lease_seconds or DEFAULT_CLAIM_LEASE_SECONDS), 3600))
 
     def run_due(self, *, limit: int = 100, max_attempts: int = 5, dry_run: bool = True) -> dict[str, Any]:
         conn = self.connection_factory()
+        bounded_limit = max(1, min(int(limit or 100), 500))
+        runtime_reserve = 0
         processed = 0
         resolved = 0
         retryable = 0
@@ -32,17 +37,35 @@ class IdentityResolutionBackfillWorker:
         runtime_processed = 0
         details: list[dict[str, Any]] = []
         try:
-            queue_rows = _claim_queue_rows(conn, limit=limit, locked_by=self.locked_by)
-            runtime_rows = _claim_runtime_rows(
+            runtime_reserve = _runtime_reserve(
                 conn,
-                limit=max(0, int(limit or 100) - len(queue_rows)),
+                limit=bounded_limit,
                 max_attempts=max_attempts,
             )
+            queue_limit = max(0, bounded_limit - runtime_reserve)
+            queue_rows = (
+                _claim_queue_rows(
+                    conn,
+                    limit=queue_limit,
+                    locked_by=self.locked_by,
+                    lease_seconds=self.claim_lease_seconds,
+                )
+                if queue_limit > 0
+                else []
+            )
             if dry_run:
+                runtime_rows = _claim_runtime_rows(
+                    conn,
+                    limit=max(0, bounded_limit - len(queue_rows)),
+                    max_attempts=max_attempts,
+                    locked_by=self.locked_by,
+                    lease_seconds=self.claim_lease_seconds,
+                )
                 conn.rollback()
                 return {
                     "ok": True,
                     "dry_run": True,
+                    "runtime_reserved_count": runtime_reserve,
                     "claimed_count": len(queue_rows),
                     "runtime_claimed_count": len(runtime_rows),
                     "resolved_count": 0,
@@ -58,10 +81,20 @@ class IdentityResolutionBackfillWorker:
                     ],
                     "source_status": "identity_resolution_backfill_worker",
                 }
+            # The claim transaction must end before any adapter call. Identity
+            # synchronization can enqueue the same pending source through a
+            # separate connection; holding the claim row lock here would create
+            # a deterministic self-deadlock.
+            conn.commit()
             for row in queue_rows:
                 processed += 1
                 event = _event_from_queue_row(row)
-                result = self.sync_func(event, text(row.get("corp_id")), None)
+                result = self._sync_event(
+                    event,
+                    text(row.get("corp_id")),
+                    None,
+                    persist_runtime_identity=True,
+                )
                 status = text(result.get("status"))
                 if status == "success":
                     _mark_queue_resolved(conn, row, result)
@@ -75,10 +108,28 @@ class IdentityResolutionBackfillWorker:
                         _mark_queue_retryable(conn, row, result)
                         retryable += 1
                 details.append({"source": "queue", "id": row.get("id"), "status": status, "reason": text(result.get("reason"))})
+                conn.commit()
+
+            # Queue synchronization may have resolved matching runtime rows.
+            # Claim runtime work only afterwards so those rows are not called a
+            # second time from a stale pre-queue snapshot.
+            runtime_rows = _claim_runtime_rows(
+                conn,
+                limit=max(0, bounded_limit - len(queue_rows)),
+                max_attempts=max_attempts,
+                locked_by=self.locked_by,
+                lease_seconds=self.claim_lease_seconds,
+            )
+            conn.commit()
             for row in runtime_rows:
                 runtime_processed += 1
                 event = _event_from_runtime_row(row)
-                result = self.sync_func(event, text(row.get("corp_id")), int(row.get("event_log_id") or 0) or None)
+                result = self._sync_event(
+                    event,
+                    text(row.get("corp_id")),
+                    int(row.get("event_log_id") or 0) or None,
+                    persist_runtime_identity=False,
+                )
                 status = text(result.get("status")) or "pending"
                 attempts = int(row.get("identity_attempt_count") or 0)
                 terminal_after_attempt = status != "success" and attempts + 1 >= max(1, int(max_attempts))
@@ -90,30 +141,77 @@ class IdentityResolutionBackfillWorker:
                 else:
                     retryable += 1
                 details.append({"source": "runtime", "id": row.get("id"), "status": status, "reason": text(result.get("reason"))})
-            conn.commit()
+                conn.commit()
         except Exception:
             conn.rollback()
             raise
         finally:
             conn.close()
         return {
-            "ok": terminal == 0,
+            # A terminal row is a successfully classified business outcome,
+            # not a worker-process failure. Keeping the process green lets the
+            # timer continue draining the remaining queue while the count-only
+            # result still exposes terminal outcomes to operators.
+            "ok": True,
             "dry_run": False,
+            "runtime_reserved_count": runtime_reserve,
             "processed_count": processed,
             "runtime_processed_count": runtime_processed,
             "resolved_count": resolved,
             "retryable_count": retryable,
             "terminal_count": terminal,
+            "terminal_results_present": terminal > 0,
             "details": details,
             "source_status": "identity_resolution_backfill_worker",
         }
 
-    @staticmethod
-    def _sync(event: dict[str, Any], corp_id: str, event_log_id: int | None) -> dict[str, Any]:
-        return application._sync_identity_best_effort(event, corp_id=corp_id, event_log_id=event_log_id)
+    def _sync_event(
+        self,
+        event: dict[str, Any],
+        corp_id: str,
+        event_log_id: int | None,
+        *,
+        persist_runtime_identity: bool,
+    ) -> dict[str, Any]:
+        if self.sync_func is not None:
+            return self.sync_func(event, corp_id, event_log_id)
+        return application._sync_identity_best_effort(
+            event,
+            corp_id=corp_id,
+            event_log_id=event_log_id,
+            persist_runtime_identity=persist_runtime_identity,
+        )
 
 
-def _claim_queue_rows(conn: Any, *, limit: int, locked_by: str) -> list[dict[str, Any]]:
+def _runtime_reserve(conn: Any, *, limit: int, max_attempts: int) -> int:
+    """Reserve bounded capacity when runtime identity work is already due.
+
+    Queue rows are intentionally synchronized first so they can resolve matching
+    runtime rows before those rows are claimed. Without a small reservation, a
+    perpetually due queue backlog can consume the whole batch and starve runtime
+    rows forever.
+    """
+
+    row = conn.execute(
+        """
+        SELECT EXISTS (
+            SELECT 1
+            FROM automation_channel_entry_runtime
+            WHERE identity_status IN ('pending', 'pending_identity', 'failed')
+              AND COALESCE(identity_attempt_count, 0) < %s
+              AND (identity_next_attempt_at IS NULL OR identity_next_attempt_at <= CURRENT_TIMESTAMP)
+        ) AS runtime_due
+        """,
+        (max(1, int(max_attempts or 5)),),
+    ).fetchone()
+    runtime_due = bool((row or {}).get("runtime_due"))
+    if not runtime_due:
+        return 0
+    bounded_limit = max(1, min(int(limit or 1), 500))
+    return min(bounded_limit, 5, max(1, bounded_limit // 4))
+
+
+def _claim_queue_rows(conn: Any, *, limit: int, locked_by: str, lease_seconds: int) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
         WITH due AS (
@@ -126,36 +224,61 @@ def _claim_queue_rows(conn: Any, *, limit: int, locked_by: str) -> list[dict[str
             FOR UPDATE SKIP LOCKED
         )
         UPDATE crm_user_identity_resolution_queue q
-        SET status = 'polling',
-            attempts = COALESCE(attempts, 0) + 1,
+        SET attempts = COALESCE(attempts, 0) + 1,
             attempt_count = COALESCE(attempt_count, 0) + 1,
             last_seen_at = CURRENT_TIMESTAMP,
+            next_attempt_at = CURRENT_TIMESTAMP + make_interval(secs => %s),
             updated_at = CURRENT_TIMESTAMP,
             payload_json = payload_json || %s
         FROM due
         WHERE q.id = due.id
         RETURNING q.*
         """,
-        (max(1, min(int(limit or 100), 500)), Jsonb({"locked_by": locked_by})),
+        (
+            max(1, min(int(limit or 100), 500)),
+            max(30, min(int(lease_seconds or DEFAULT_CLAIM_LEASE_SECONDS), 3600)),
+            Jsonb({"identity_backfill_claim": {"locked_by": locked_by, "lease_seconds": lease_seconds}}),
+        ),
     ).fetchall()
     return [dict(row) for row in rows or []]
 
 
-def _claim_runtime_rows(conn: Any, *, limit: int, max_attempts: int) -> list[dict[str, Any]]:
+def _claim_runtime_rows(
+    conn: Any,
+    *,
+    limit: int,
+    max_attempts: int,
+    locked_by: str,
+    lease_seconds: int,
+) -> list[dict[str, Any]]:
     if limit <= 0:
         return []
     rows = conn.execute(
         """
-        SELECT *
-        FROM automation_channel_entry_runtime
-        WHERE identity_status IN ('pending', 'pending_identity', 'failed')
-          AND COALESCE(identity_attempt_count, 0) < %s
-          AND (identity_next_attempt_at IS NULL OR identity_next_attempt_at <= CURRENT_TIMESTAMP)
-        ORDER BY COALESCE(identity_next_attempt_at, updated_at) ASC, id ASC
-        LIMIT %s
-        FOR UPDATE SKIP LOCKED
+        WITH due AS (
+            SELECT id
+            FROM automation_channel_entry_runtime
+            WHERE identity_status IN ('pending', 'pending_identity', 'failed')
+              AND COALESCE(identity_attempt_count, 0) < %s
+              AND (identity_next_attempt_at IS NULL OR identity_next_attempt_at <= CURRENT_TIMESTAMP)
+            ORDER BY COALESCE(identity_next_attempt_at, updated_at) ASC, id ASC
+            LIMIT %s
+            FOR UPDATE SKIP LOCKED
+        )
+        UPDATE automation_channel_entry_runtime runtime
+        SET identity_next_attempt_at = CURRENT_TIMESTAMP + make_interval(secs => %s),
+            payload_json = payload_json || %s,
+            updated_at = CURRENT_TIMESTAMP
+        FROM due
+        WHERE runtime.id = due.id
+        RETURNING runtime.*
         """,
-        (max(1, int(max_attempts or 5)), max(1, min(int(limit or 100), 500))),
+        (
+            max(1, int(max_attempts or 5)),
+            max(1, min(int(limit or 100), 500)),
+            max(30, min(int(lease_seconds or DEFAULT_CLAIM_LEASE_SECONDS), 3600)),
+            Jsonb({"identity_backfill_claim": {"locked_by": locked_by, "lease_seconds": lease_seconds}}),
+        ),
     ).fetchall()
     return [dict(row) for row in rows or []]
 

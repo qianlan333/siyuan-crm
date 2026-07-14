@@ -34,16 +34,18 @@ ALLOWED_LAYERS = {"api", "admin_page", "h5", "webhook", "static", "integration"}
 ALLOWED_DATA_SOURCES = {"read_model", "command", "external_adapter", "static"}
 ALLOWED_AUDIENCES = {"admin", "sidebar", "public_h5", "callback", "internal_worker", "external_integration"}
 ALLOWED_AUTH_SCHEMES = {
-    "admin_session",
-    "internal_bearer",
-    "oauth_state",
-    "path_token",
+    "api_client_jwt",
+    "client_credentials",
+    "human_or_service",
+    "human_session",
+    "provider_oauth_state",
     "provider_signature",
     "public",
-    "scoped_bearer",
-    "sidebar_signed_context",
-    "webhook_bearer",
+    "public_result_grant",
+    "sidebar_grant",
+    "webhook_hmac",
 }
+ALLOWED_PRINCIPAL_TYPES = {"human", "api_client", "service", "public", "provider_callback"}
 ALLOWED_ACCESS_SCOPES = {"global", "owner", "public", "self", "service", "single_resource"}
 ALLOWED_PII_LEVELS = {"none", "internal", "customer", "sensitive", "financial"}
 ALLOWED_RATE_LIMITS = {
@@ -308,9 +310,7 @@ def _validate_manifest_entry(entry: dict[str, Any], index: int) -> list[str]:
     if entry.get("runtime_owner") not in ALLOWED_RUNTIME_OWNERS:
         errors.append(_format_error(index, key, "invalid_runtime_owner", f"`runtime_owner` must be one of {sorted(ALLOWED_RUNTIME_OWNERS)}."))
     if entry.get("external_effects") not in ALLOWED_EXTERNAL_EFFECTS:
-        errors.append(
-            _format_error(index, key, "invalid_external_effects", f"`external_effects` must be one of {sorted(ALLOWED_EXTERNAL_EFFECTS)}.")
-        )
+        errors.append(_format_error(index, key, "invalid_external_effects", f"`external_effects` must be one of {sorted(ALLOWED_EXTERNAL_EFFECTS)}."))
     if entry.get("layer") not in ALLOWED_LAYERS:
         errors.append(_format_error(index, key, "invalid_layer", f"`layer` must be one of {sorted(ALLOWED_LAYERS)}."))
     if entry.get("data_source") not in ALLOWED_DATA_SOURCES:
@@ -318,9 +318,7 @@ def _validate_manifest_entry(entry: dict[str, Any], index: int) -> list[str]:
     if entry.get("audience") not in ALLOWED_AUDIENCES:
         errors.append(_format_error(index, key, "invalid_audience", f"`audience` must be one of {sorted(ALLOWED_AUDIENCES)}."))
     if entry.get("auth_scheme") not in ALLOWED_AUTH_SCHEMES:
-        errors.append(
-            _format_error(index, key, "invalid_auth_scheme", f"`auth_scheme` must be one of {sorted(ALLOWED_AUTH_SCHEMES)}.")
-        )
+        errors.append(_format_error(index, key, "invalid_auth_scheme", f"`auth_scheme` must be one of {sorted(ALLOWED_AUTH_SCHEMES)}."))
     if entry.get("access_scope") not in ALLOWED_ACCESS_SCOPES:
         errors.append(_format_error(index, key, "invalid_access_scope", f"`access_scope` must be one of {sorted(ALLOWED_ACCESS_SCOPES)}."))
     if entry.get("pii_level") not in ALLOWED_PII_LEVELS:
@@ -331,11 +329,35 @@ def _validate_manifest_entry(entry: dict[str, Any], index: int) -> list[str]:
         errors.append(_format_error(index, key, "invalid_requires_auth", "`requires_auth` must be true or false."))
     if not isinstance(entry.get("csrf"), bool):
         errors.append(_format_error(index, key, "invalid_csrf", "`csrf` must be true or false."))
-    if entry.get("csrf") is True and entry.get("auth_scheme") != "admin_session":
-        errors.append(_format_error(index, key, "invalid_csrf_auth_scheme", "CSRF can only be required for admin_session routes."))
+    principal_types = entry.get("principal_types")
+    if not isinstance(principal_types, list) or not principal_types:
+        errors.append(_format_error(index, key, "invalid_principal_types", "`principal_types` must be a non-empty list."))
+    elif any(value not in ALLOWED_PRINCIPAL_TYPES for value in principal_types):
+        errors.append(
+            _format_error(
+                index,
+                key,
+                "invalid_principal_types",
+                f"`principal_types` values must be in {sorted(ALLOWED_PRINCIPAL_TYPES)}.",
+            )
+        )
+    if entry.get("csrf") is True and entry.get("auth_scheme") not in {"human_session", "human_or_service"}:
+        errors.append(
+            _format_error(
+                index,
+                key,
+                "invalid_csrf_auth_scheme",
+                "CSRF can only be required for human_session or human_or_service routes.",
+            )
+        )
+    if entry.get("auth_scheme") == "human_or_service":
+        if not str(entry.get("service_audience") or "").strip():
+            errors.append(_format_error(index, key, "missing_service_audience", "human_or_service requires service_audience."))
+        if not str(entry.get("service_capability") or "").strip():
+            errors.append(_format_error(index, key, "missing_service_capability", "human_or_service requires service_capability."))
     if entry.get("csrf") is True and not (set(normalize_methods(entry.get("methods") or ())) - {"GET", "HEAD", "OPTIONS", "TRACE"}):
         errors.append(_format_error(index, key, "csrf_on_safe_method", "CSRF must only be required for unsafe HTTP methods."))
-    expected_requires_auth = entry.get("auth_scheme") not in {"public", "oauth_state", "path_token", "provider_signature"}
+    expected_requires_auth = entry.get("auth_scheme") != "public"
     if isinstance(entry.get("requires_auth"), bool) and entry.get("requires_auth") != expected_requires_auth:
         errors.append(
             _format_error(

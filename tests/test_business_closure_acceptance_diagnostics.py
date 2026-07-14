@@ -9,6 +9,11 @@ from scripts.diagnose_business_closure_acceptance import SCENARIOS, run
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "diagnose_business_closure_acceptance.py"
+EXTERNAL_AGENT_ENV = {
+    "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID": "external-orders-agent",
+    "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF": "secretref:file:AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET:v1_test",
+}
+VALID_ACCESS_TOKEN = "header.payload.signature"
 
 
 def test_all_business_closure_scenarios_are_dry_run_and_safe_by_default() -> None:
@@ -40,7 +45,9 @@ def test_business_closure_summary_can_claim_90_plus_only_with_complete_core_evid
     env = {
         "AICRM_GROUP_OPS_GRAY_SEND_APPROVED": "true",
         "AICRM_GROUP_OPS_GRAY_SEND_RECEIVER_ALLOWLIST": "receiver-a",
-        "AUTOMATION_INTERNAL_API_TOKEN": "server-token",
+        "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID": "automation-worker",
+        "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_SECRET_REF": "secretref:file:AICRM_AUTH_AUTOMATION_WORKER_CLIENT_SECRET:v1_test",
+        **EXTERNAL_AGENT_ENV,
         "AICRM_EXTERNAL_ORDERS_GRAY_APPROVED": "true",
         "WECOM_CORP_ID": "corp-id",
         "WECOM_AGENT_ID": "agent-id",
@@ -52,7 +59,7 @@ def test_business_closure_summary_can_claim_90_plus_only_with_complete_core_evid
         scenario="all",
         execute=True,
         receiver_token="receiver-a",
-        request_token="server-token",
+        request_token=VALID_ACCESS_TOKEN,
         order_no="order_42",
         external_order_id="ext_order_42",
         idempotency_key="idem_42",
@@ -99,7 +106,7 @@ def test_business_closure_summary_can_claim_90_plus_only_with_complete_core_evid
         item["blocking_reasons"] == [] or item["blocking_reasons"][0]["code"] in {"order_linked", "callback_linked"}
         for item in summary["items"]
     )
-    assert "server-token" not in dumped
+    assert VALID_ACCESS_TOKEN not in dumped
     assert "callback-secret" not in dumped
     assert "receiver-a" not in dumped
 
@@ -190,12 +197,15 @@ def test_group_ops_evidence_skeleton_uses_not_provided_placeholders() -> None:
 
 
 def test_external_orders_readiness_reports_internal_token_without_leaking_value() -> None:
-    payload = run(scenario="external_orders", request_token="secret-token", env={"AUTOMATION_INTERNAL_API_TOKEN": "secret-token"})
+    payload = run(scenario="external_orders", request_token=VALID_ACCESS_TOKEN, env=EXTERNAL_AGENT_ENV)
     item = payload["items"][0]
     evidence = item["external_orders_evidence"]
 
     assert item["missing_env"] == []
-    assert item["required_env"] == [{"key": "AUTOMATION_INTERNAL_API_TOKEN", "configured": True, "value": "[redacted]"}]
+    assert item["required_env"] == [
+        {"key": "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "configured": True, "value": "[redacted]"},
+        {"key": "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF", "configured": True, "value": "[redacted]"},
+    ]
     assert "/api/external/orders" in item["routes"]
     assert item["inputs"]["request_token"] == "[redacted]"
     assert evidence["token_configured"] is True
@@ -205,7 +215,7 @@ def test_external_orders_readiness_reports_internal_token_without_leaking_value(
     assert evidence["auth_status"] == "valid_token_readiness"
     assert evidence["route_owner"] == "ai_crm_next"
     assert evidence["fallback_used"] is False
-    assert "secret-token" not in json.dumps(payload, ensure_ascii=False)
+    assert VALID_ACCESS_TOKEN not in json.dumps(payload, ensure_ascii=False)
 
 
 def test_external_orders_missing_internal_token_is_controlled_disabled() -> None:
@@ -218,20 +228,18 @@ def test_external_orders_missing_internal_token_is_controlled_disabled() -> None
     assert evidence["token_configured"] is False
     assert evidence["request_mode"] == "dry_run"
     assert evidence["auth_status"] == "controlled_disabled"
-    assert evidence["controlled_disabled_reason"] == "AUTOMATION_INTERNAL_API_TOKEN not configured"
+    assert evidence["controlled_disabled_reason"] == "external-agent client credentials not configured"
     assert "missing_internal_token_config" in {reason["code"] for reason in evidence["blocking_reasons"]}
     assert evidence["real_external_call_executed"] is False
     assert evidence["production_write_executed"] is False
 
 
 def test_external_orders_missing_and_invalid_request_token_paths() -> None:
-    no_token = run(scenario="external_orders", env={"AUTOMATION_INTERNAL_API_TOKEN": "server-token"})["items"][0][
-        "external_orders_evidence"
-    ]
+    no_token = run(scenario="external_orders", env=EXTERNAL_AGENT_ENV)["items"][0]["external_orders_evidence"]
     wrong_token_payload = run(
         scenario="external_orders",
         request_token="wrong-token",
-        env={"AUTOMATION_INTERNAL_API_TOKEN": "server-token"},
+        env=EXTERNAL_AGENT_ENV,
     )
     wrong_token = wrong_token_payload["items"][0]["external_orders_evidence"]
 
@@ -246,8 +254,8 @@ def test_external_orders_missing_and_invalid_request_token_paths() -> None:
 def test_external_orders_valid_token_remains_readiness_without_order_evidence() -> None:
     payload = run(
         scenario="external_orders",
-        request_token="server-token",
-        env={"AUTOMATION_INTERNAL_API_TOKEN": "server-token"},
+        request_token=VALID_ACCESS_TOKEN,
+        env=EXTERNAL_AGENT_ENV,
     )
     evidence = payload["items"][0]["external_orders_evidence"]
     codes = {reason["code"] for reason in evidence["blocking_reasons"]}
@@ -263,7 +271,7 @@ def test_external_orders_valid_token_remains_readiness_without_order_evidence() 
 def test_external_orders_complete_order_evidence_links_order_without_sensitive_output() -> None:
     payload = run(
         scenario="external_orders",
-        request_token="server-token",
+        request_token=VALID_ACCESS_TOKEN,
         order_no="order_42",
         external_order_id="ext_order_42",
         idempotency_key="idem_42",
@@ -272,7 +280,7 @@ def test_external_orders_complete_order_evidence_links_order_without_sensitive_o
         source="gray_partner",
         internal_event_id="evt_42",
         admin_order_visibility="visible",
-        env={"AUTOMATION_INTERNAL_API_TOKEN": "server-token"},
+        env=EXTERNAL_AGENT_ENV,
     )
     item = payload["items"][0]
     evidence = item["external_orders_evidence"]
@@ -295,7 +303,7 @@ def test_external_orders_complete_order_evidence_links_order_without_sensitive_o
             "message": "Order, idempotency, customer/channel/source, event, and admin visibility evidence are attached.",
         }
     ]
-    assert "server-token" not in json.dumps(payload, ensure_ascii=False)
+    assert VALID_ACCESS_TOKEN not in json.dumps(payload, ensure_ascii=False)
 
 
 def test_wecom_auth_missing_config_returns_specific_blocking_reasons() -> None:

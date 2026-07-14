@@ -37,6 +37,8 @@ export AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES=payment.succeeded,questionnaire
 
 ## Admin APIs
 
+以下写请求使用 `automation_worker` 换取的短期 JWT（`audience=internal_worker`、`scope=write`），通过环境变量 `AICRM_ACCESS_TOKEN` 注入；见 [`../auth_client_credentials.md`](../auth_client_credentials.md)。人员在后台操作时改用企微 Session + CSRF/action grant。
+
 List and inspect events:
 
 ```bash
@@ -49,7 +51,7 @@ Preview due consumers:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due/preview" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"event_types":["payment.succeeded"]}'
 ```
@@ -58,7 +60,7 @@ Dry-run due consumers:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"dry_run":true,"event_types":["payment.succeeded"]}'
 ```
@@ -67,7 +69,7 @@ Execute one allowed event type after gray approval:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/internal-events/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"batch_size":1,"dry_run":false,"event_types":["payment.succeeded"],"consumer_names":["ai_audience_source_poke_consumer"]}'
 ```

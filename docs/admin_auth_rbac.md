@@ -2,84 +2,45 @@
 
 ## 认证与授权边界
 
-- 认证：企业微信 SSO
-- 授权：CRM 本地 RBAC
-- 本地用户名 / 密码不是后台主登录方案
-- break-glass 仅是默认关闭的应急兜底入口
+- 人员唯一上游身份是企业微信 OAuth/扫码登录。
+- AI-CRM 使用本地 `admin_users`、角色和 capability 决定“能做什么”。
+- 本地用户名/密码登录和 break-glass 密码入口已移除，`POST /login` 不会签发 Session。
+- 机器调用使用独立 client credentials；人员 Session 与机器 JWT 不混用。完整机器认证见 [`auth_client_credentials.md`](auth_client_credentials.md)。
 
-也就是：
-
-- 企业微信负责“你是谁”
-- CRM 本地负责“你能干什么”
-
-后台会在企微回调成功后拿到 `UserId`，再用 `UserId + CorpId` 匹配本地 `admin_users`，最后通过 `admin_user_roles` 决定可访问模块与写权限。
-
-`admin_users` 的主模型是企微成员授权，不保存日常后台登录密码；本地用户名 / 密码只存在于 break-glass 配置项中。
+企微回调成功后，系统使用 `UserId + CorpId` 匹配已启用的 `admin_users`，读取角色和 `session_version`，再签发服务端 Session。未授权或已停用成员不能进入后台。
 
 ## 登录入口
 
-- 登录页：`/login`
-- 登出：`/logout`
-- 企微登录启动：`/auth/wecom/start`
-- 企微登录回调：`/auth/wecom/callback`
+- 登录页：`GET /login`
+- 企微登录启动：`GET /auth/wecom/start`
+- 企微登录回调：`GET /auth/wecom/callback`
+- 登出：`GET /logout`
 
-## 角色说明
+## 角色
 
-- `super_admin`
-  - 可访问全部后台模块
-  - 可管理授权成员与角色
-- `automation_admin`
-  - 可访问自动化运营、API 文档
-- `questionnaire_admin`
-  - 可访问问卷、API 文档
-- `config_admin`
-  - 可访问配置、API 文档
-- `viewer`
-  - 可读访问四个主模块
-  - 不允许写操作
+- `super_admin`：全部后台能力和授权成员管理。
+- `automation_admin`：自动化与运营相关读写能力。
+- `questionnaire_admin`：问卷相关读写能力。
+- `config_admin`：系统配置相关读写能力。
+- `viewer`：只读；所有写操作返回 `403`。
 
-## 会话机制
+最终授权以 route policy 声明的 capability 和 `aicrm_next/admin_auth/capabilities.py` 映射为准。
 
-- 后台页面使用 Flask session 保存登录态
-- session 至少包含：
-  - `admin_user_id`
-  - `wecom_userid`
-  - `role list`
-  - `login_type`
-- 页面内写操作继续使用 `admin_action_token` 做防误操作保护
+## Session 与 CSRF
+
+- Session Cookie：`aicrm_next_admin_session`，只保存随机凭据；数据库只保存 HMAC digest。
+- CSRF Cookie：`aicrm_next_csrf`，人员写请求同时提交 `X-CSRF-Token` 或同源表单字段。
+- 默认有效期：8 小时。
+- Cookie：`SameSite=Lax`；Session 为 `HttpOnly`；生产环境强制 `Secure`。
+- 登录成功会签发新 Session；登出、成员停用、角色/权限变化或 `session_version` 增加都会使旧 Session 失效。
+- 高风险人员写操作在 Session + CSRF 之外，还需要绑定 session、capability、method、route 和 action 的短期 action grant。
 
 ## 授权管理
 
 入口：`/admin/config/detail/admin_access`
 
-支持：
+支持查看授权成员、创建成员、编辑角色、启停成员以及查看最近登录审计。修改授权后必须验证旧 Session 被拒绝，并由成员重新企微登录。
 
-- 查看已授权企微成员
-- 创建授权成员
-- 编辑角色
-- 启停成员
-- 查看最近登录时间
-- 查看最近登录审计
+## 机器调用边界
 
-## break-glass 兜底入口
-
-- 默认关闭
-- 仅在企业微信 SSO 故障时启用
-- 通过配置项控制：
-  - `ADMIN_BREAK_GLASS_LOGIN_ENABLED`
-  - `ADMIN_BREAK_GLASS_USERNAME`
-  - `ADMIN_BREAK_GLASS_PASSWORD_HASH`
-
-推荐流程：
-
-1. 临时开启 break-glass
-2. 使用 break-glass 登录后台
-3. 到 `/admin/config/detail/admin_access` 绑定或修复企微管理员权限
-4. 验证企微 SSO 正常
-5. 关闭 break-glass
-
-## 与内部 Token 的边界
-
-- 后台登录仅用于人访问后台页面
-- 内部自动化动作仍继续使用 `AUTOMATION_INTERNAL_API_TOKEN` / Bearer Token
-- 两套认证不混用，避免后台 session 影响自动化链路
+内部 Worker、CLI 和外部 Agent 不使用后台 Cookie，也不接受共享静态 Bearer。独立进程按 workload 使用注册 client 换取短期 JWT；同进程任务直接传受控 `AuthContext`。业务 Handler 不读取 Cookie、Authorization 或 secret，只消费统一 middleware 注入的 `AuthContext`。

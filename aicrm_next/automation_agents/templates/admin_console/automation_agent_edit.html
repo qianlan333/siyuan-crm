@@ -391,14 +391,14 @@
   <div class="automation-agent-page-head">
     <div>
       <div class="automation-agent-crumb">客户管理后台 / 配置及后台 / Agent / 编辑</div>
-      <h1 class="automation-agent-title" id="editTitle">编辑 Agent</h1>
+      <div class="automation-agent-title" id="editTitle">编辑 Agent</div>
     </div>
   </div>
 
   <div class="automation-agent-grid">
     <section class="automation-agent-card automation-agent-section" aria-label="编辑 Agent">
       <div class="automation-agent-section-head">
-        <h2 class="automation-agent-subtitle">编辑 Agent</h2>
+        <h2 class="automation-agent-subtitle">基本信息</h2>
         <span class="automation-agent-pill green" id="statusBadge">启用中</span>
       </div>
       <div class="automation-agent-form-grid">
@@ -424,7 +424,6 @@
       <div class="automation-agent-url-row">
         <input class="automation-agent-input automation-agent-code" id="receiveUrl" value="" readonly>
         <button class="automation-agent-copy-btn" type="button" data-copy="#receiveUrl" aria-label="复制接收地址">⧉</button>
-        <button class="automation-agent-btn" id="resetToken" type="button">重置 token</button>
       </div>
 
       <label class="automation-agent-label" for="sendUrl">发送地址 <span class="automation-agent-method">POST</span></label>
@@ -529,7 +528,6 @@
   (() => {
     const agentApiUrl = {{ automation_agent_api_url | tojson }};
     const fixedContentApiUrl = {{ automation_agent_fixed_content_api_url | tojson }};
-    const resetTokenApiUrl = {{ automation_agent_reset_token_api_url | tojson }};
     const state = {
       agent: null,
       focusPrompt: null,
@@ -550,7 +548,6 @@
       statusBadge: document.getElementById("statusBadge"),
       receiveUrl: document.getElementById("receiveUrl"),
       sendUrl: document.getElementById("sendUrl"),
-      resetToken: document.getElementById("resetToken"),
       rolePrompt: document.getElementById("rolePrompt"),
       taskPrompt: document.getElementById("taskPrompt"),
       fixedScriptText: document.getElementById("fixedScriptText"),
@@ -814,12 +811,15 @@
       toast("固定素材已保存");
     };
 
-    const resetInboundToken = async () => {
-      if (!window.confirm("确认重置接收地址 token？重置后旧地址将失效。")) return;
-      const payload = await fetchJson(resetTokenApiUrl, { method: "POST" });
+    const publishAgent = async () => {
+      await saveAgent("草稿已保存");
+      const payload = await fetchJson(`${agentApiUrl}/publish`, {
+        method: "POST",
+        body: {},
+      });
       state.agent = payload.agent;
       applyAgent(payload.agent);
-      toast("接收 token 已重置");
+      toast("已发布");
     };
 
     const applyAgent = (agent) => {
@@ -898,7 +898,7 @@
     });
     document.getElementById("saveCurrent").addEventListener("click", () => saveAgent("已保存").catch((error) => window.alert(error.message || "保存失败")));
     document.getElementById("saveDraft").addEventListener("click", () => saveAgent("草稿已保存").catch((error) => window.alert(error.message || "保存失败")));
-    document.getElementById("publishAgent").addEventListener("click", () => saveAgent("已发布").catch((error) => window.alert(error.message || "发布失败")));
+    document.getElementById("publishAgent").addEventListener("click", () => publishAgent().catch((error) => window.alert(error.message || "发布失败")));
     document.getElementById("loadPublished").addEventListener("click", () => {
       els.rolePrompt.value = state.agent.published_role_prompt || "";
       els.taskPrompt.value = state.agent.published_task_prompt || "";
@@ -908,10 +908,6 @@
     els.automationType.addEventListener("change", renderMode);
     els.fixedScriptText.addEventListener("input", renderMode);
     els.agentStatus.addEventListener("change", renderStatus);
-    els.resetToken.addEventListener("click", () => {
-      resetInboundToken().catch((error) => window.alert(error.message || "重置失败"));
-    });
-
     loadAgent().catch((error) => window.alert(error.message || "加载失败"));
   })();
 </script>

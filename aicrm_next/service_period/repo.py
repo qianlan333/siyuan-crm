@@ -7,6 +7,8 @@ import logging
 from typing import Any, Protocol
 
 from aicrm_next.commerce.repo import build_commerce_repository
+from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.shared.db_session import connect_pooled_postgres
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.repository_provider import assert_repository_allowed
@@ -25,6 +27,7 @@ from .domain import (
     utcnow,
     validate_duration_days,
 )
+from .huangyoucan_usage import huangyoucan_usage_match_joins, huangyoucan_usage_select_fields, public_huangyoucan_usage_fields
 
 
 LOGGER = logging.getLogger(__name__)
@@ -64,9 +67,21 @@ def _order_identity(order: dict[str, Any]) -> dict[str, str]:
     }
 
 
+def _resolve_paid_order_unionid(conn: Any, identity: dict[str, str]) -> str:
+    canonical_unionid = text(identity.get("unionid"))
+    if canonical_unionid:
+        query = ResolvePersonIdentityRequest(unionid=canonical_unionid)
+    else:
+        query = ResolvePersonIdentityRequest(
+            external_userid=text(identity.get("external_userid")) or None,
+            openid=text(identity.get("openid")) or None,
+            mobile=text(identity.get("mobile")) or None,
+        )
+    return resolved_unionid(resolve_identity_with_dbapi(conn, query))
+
+
 def _order_paid_at(order: dict[str, Any], transaction: dict[str, Any] | None = None) -> datetime:
-    transaction = transaction or {}
-    return parse_datetime(order.get("paid_at")) or parse_datetime(transaction.get("success_time")) or utcnow()
+    return parse_datetime(order.get("paid_at")) or parse_datetime((transaction or {}).get("success_time")) or utcnow()
 
 
 def _duration_end(start: datetime, duration_days: int) -> datetime:
@@ -75,10 +90,6 @@ def _duration_end(start: datetime, duration_days: int) -> datetime:
 
 def _duration_start(end: datetime, duration_days: int) -> datetime:
     return end - timedelta(days=duration_days)
-
-
-def _to_service_id(value: Any) -> str:
-    return text(value)
 
 
 def _compact_trade_product_payload(product: dict[str, Any], *, product_id: Any | None = None) -> dict[str, Any]:
@@ -594,6 +605,7 @@ class InMemoryServicePeriodRepository:
             "last_order_amount": int(last_order.get("amount_total") or 0),
             "last_order_duration_days": int((self._find_product(row.get("service_product_id")) or {}).get("duration_days") or 0),
             "remark": text(metadata.get("admin_remark") or metadata.get("remark")),
+            **public_huangyoucan_usage_fields({}),
         }
 
 
@@ -882,7 +894,6 @@ class PostgresServicePeriodRepository:
                         NULLIF(NULLIF(c.customer_name, ''), '问卷提交用户'),
                         NULLIF(NULLIF(c.profile_json->>'name', ''), '问卷提交用户'),
                         NULLIF(wim.name, ''),
-                        NULLIF(wim.raw_profile->>'name', ''),
                         NULLIF(c.customer_name, ''),
                         NULLIF(e.metadata_json->>'payer_name', ''),
                         NULLIF(o.payer_name_snapshot, '')
@@ -893,13 +904,14 @@ class PostgresServicePeriodRepository:
                         NULLIF(wim.external_userid, '')
                     ) AS external_userid,
                     COALESCE(NULLIF(c.mobile, ''), NULLIF(c.mobile_normalized, '')) AS mobile,
-                    COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark
+                    COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark,
+                    {huangyoucan_usage_select_fields()}
                 FROM service_period_entitlements e
                 JOIN service_period_products p ON p.id = e.service_product_id
                 LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
                 LEFT JOIN crm_user_identity c ON c.unionid = e.unionid
                 LEFT JOIN LATERAL (
-                    SELECT im.external_userid, im.name, im.raw_profile
+                    SELECT im.external_userid, im.name
                     FROM wecom_external_contact_identity_map im
                     WHERE im.unionid = e.unionid
                     ORDER BY im.updated_at DESC NULLS LAST, im.id DESC
@@ -913,6 +925,7 @@ class PostgresServicePeriodRepository:
                     ORDER BY fu.is_primary DESC NULLS LAST, fu.updated_at DESC NULLS LAST, fu.id DESC
                     LIMIT 1
                 ) wfu ON TRUE
+                {huangyoucan_usage_match_joins(unionid_sql="e.unionid", mobile_sql="COALESCE(NULLIF(c.mobile, ''), NULLIF(c.mobile_normalized, ''))")}
                 WHERE {" AND ".join(where)}
                 ORDER BY e.end_at DESC, e.id DESC
                 LIMIT %s OFFSET %s
@@ -936,6 +949,7 @@ class PostgresServicePeriodRepository:
                 "last_order_amount": int(row.get("last_order_amount") or 0),
                 "last_order_duration_days": int(row.get("last_order_duration_days") or 0),
                 "remark": text(row.get("remark")),
+                **public_huangyoucan_usage_fields(dict(row)),
             }
             for row in rows
         ]
@@ -967,7 +981,6 @@ class PostgresServicePeriodRepository:
                         NULLIF(NULLIF(c.customer_name, ''), '问卷提交用户'),
                         NULLIF(NULLIF(c.profile_json->>'name', ''), '问卷提交用户'),
                         NULLIF(wim.name, ''),
-                        NULLIF(wim.raw_profile->>'name', ''),
                         NULLIF(c.customer_name, ''),
                         NULLIF(e.metadata_json->>'payer_name', ''),
                         NULLIF(o.payer_name_snapshot, '')
@@ -984,7 +997,7 @@ class PostgresServicePeriodRepository:
                 LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
                 LEFT JOIN crm_user_identity c ON c.unionid = e.unionid
                 LEFT JOIN LATERAL (
-                    SELECT im.external_userid, im.name, im.raw_profile
+                    SELECT im.external_userid, im.name
                     FROM wecom_external_contact_identity_map im
                     WHERE im.unionid = e.unionid
                     ORDER BY im.updated_at DESC NULLS LAST, im.id DESC
@@ -1052,7 +1065,8 @@ class PostgresServicePeriodRepository:
                 return {"ok": True, "skipped": True, "reason": "not_service_period_product"}
             if self._event_exists(conn, out_trade_no, {"activated", "renewed"}):
                 return {"ok": True, "idempotent": True, "skipped": True, "reason": "event_already_applied"}
-            unionid = self._resolve_order_unionid(conn, order)
+            identity = _order_identity(order)
+            unionid = _resolve_paid_order_unionid(conn, identity)
             if not unionid:
                 event = self._insert_event(
                     conn,
@@ -1293,32 +1307,6 @@ class PostgresServicePeriodRepository:
             (out_trade_no, list(event_types)),
         ).fetchone()
         return bool(row)
-
-    def _resolve_order_unionid(self, conn: Any, order: dict[str, Any]) -> str:
-        identity = _order_identity(order)
-        if identity["unionid"]:
-            return identity["unionid"]
-        clauses: list[str] = []
-        params: list[Any] = []
-        if identity["openid"]:
-            clauses.append("(primary_openid = %s OR jsonb_exists(openids_json, %s))")
-            params.extend([identity["openid"], identity["openid"]])
-        if identity["external_userid"]:
-            clauses.append("(primary_external_userid = %s OR jsonb_exists(external_userids_json, %s))")
-            params.extend([identity["external_userid"], identity["external_userid"]])
-        if not clauses:
-            return ""
-        row = conn.execute(
-            f"""
-            SELECT unionid
-            FROM crm_user_identity
-            WHERE {" OR ".join(clauses)}
-            ORDER BY updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            tuple(params),
-        ).fetchone()
-        return text((row or {}).get("unionid"))
 
     def _grant_or_renew_with_unionid(
         self,

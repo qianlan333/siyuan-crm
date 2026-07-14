@@ -61,7 +61,6 @@ def admin_automation_agent_edit_page(request: Request, agent_id: int):
             "agent_id": agent_id,
             "automation_agent_api_url": f"/api/admin/automation-agents/{agent_id}",
             "automation_agent_fixed_content_api_url": f"/api/admin/automation-agents/{agent_id}/fixed-content",
-            "automation_agent_reset_token_api_url": f"/api/admin/automation-agents/{agent_id}/reset-token",
         }
     )
     return templates.TemplateResponse(

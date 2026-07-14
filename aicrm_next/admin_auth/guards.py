@@ -6,9 +6,12 @@ from urllib.parse import quote
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 
+from aicrm_next.platform_foundation.auth_platform.api import auth_session_service
+from aicrm_next.platform_foundation.auth_platform.context import AuthContext
+from aicrm_next.platform_foundation.auth_platform.sessions import SessionIntrospection
 from aicrm_next.shared.runtime import production_data_ready, production_environment
 
-from .service import CSRF_COOKIE, SESSION_COOKIE, csrf_token_from_session, normalize_text, route_headers, safe_next_path, verify_session
+from .service import SESSION_COOKIE, normalize_text, route_headers, safe_next_path
 
 
 PROTECTED_ROUTE_PREFIXES = (
@@ -23,11 +26,12 @@ PROTECTED_ROUTE_PREFIXES = (
 
 PUBLIC_ROUTE_PREFIXES = (
     "/auth/wecom/",
+    "/oauth/",
+    "/.well-known/",
     "/api/h5/",
     "/api/wecom/events",
     "/wecom/external-contact/callback",
     "/static/",
-    "/mcp",
 )
 
 PUBLIC_EXACT_ROUTES = {
@@ -40,11 +44,28 @@ PUBLIC_EXACT_ROUTES = {
 }
 
 ADMIN_PAGE_ROUTE_PREFIXES = ("/admin", "/setup")
-CSRF_SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 
 
-def current_admin_session(request: Request) -> dict | None:
-    return verify_session(request.cookies.get(SESSION_COOKIE))
+def current_admin_introspection(request: Request) -> SessionIntrospection:
+    cached = getattr(request.state, "auth_session_introspection", None)
+    if isinstance(cached, SessionIntrospection):
+        return cached
+    session_cookie = normalize_text(request.cookies.get(SESSION_COOKIE, ""))
+    if not session_cookie:
+        result = SessionIntrospection(active=False, error="session_required")
+    else:
+        result = auth_session_service(request).introspect(session_cookie)
+    request.state.auth_session_introspection = result
+    if result.active and result.context is not None:
+        request.state.auth_context = result.context
+    return result
+
+
+def current_auth_context(request: Request) -> AuthContext | None:
+    cached = getattr(request.state, "auth_context", None)
+    if isinstance(cached, AuthContext):
+        return cached
+    return current_admin_introspection(request).context
 
 
 def admin_auth_enforcement_enabled() -> bool:
@@ -78,32 +99,26 @@ def is_protected_admin_path(path: str) -> bool:
 
 
 def admin_auth_required_response(request: Request) -> Response | None:
-    if not admin_auth_enforcement_enabled():
+    if not admin_auth_enforcement_enabled() or not is_protected_admin_path(str(request.url.path or "/")):
         return None
-    if not is_protected_admin_path(str(request.url.path or "/")):
-        return None
-    session = current_admin_session(request)
-    if session:
-        csrf_response = admin_csrf_required_response(request, session)
-        if csrf_response is not None:
-            return csrf_response
+    if current_auth_context(request) is not None:
         return None
     if str(request.url.path or "").startswith(ADMIN_PAGE_ROUTE_PREFIXES):
         return admin_page_auth_redirect(request)
     return admin_api_auth_error(request)
 
 
-def require_admin(request: Request) -> dict:
-    session = current_admin_session(request)
-    if session is None:
+def require_admin(request: Request) -> AuthContext:
+    context = current_auth_context(request)
+    if context is None:
         raise HTTPException(status_code=401, detail="admin_auth_required")
-    return session
+    return context
 
 
 def admin_api_auth_error(request: Request) -> JSONResponse | None:
     if not admin_auth_enforcement_enabled():
         return None
-    if current_admin_session(request):
+    if current_auth_context(request) is not None:
         return None
     return JSONResponse(
         {
@@ -117,35 +132,10 @@ def admin_api_auth_error(request: Request) -> JSONResponse | None:
     )
 
 
-def admin_csrf_required_response(request: Request, session: dict) -> JSONResponse | None:
-    if str(request.method or "").upper() in CSRF_SAFE_METHODS:
-        return None
-    expected = csrf_token_from_session(session)
-    actual = normalize_text(request.cookies.get(CSRF_COOKIE))
-    if expected and actual and hmac_compare(expected, actual):
-        return None
-    return JSONResponse(
-        {
-            "ok": False,
-            "error": "admin_csrf_required",
-            "route_owner": "ai_crm_next",
-            "real_external_call_executed": False,
-        },
-        status_code=403,
-        headers=route_headers(),
-    )
-
-
-def hmac_compare(left: str, right: str) -> bool:
-    import hmac
-
-    return hmac.compare_digest(left, right)
-
-
 def admin_page_auth_redirect(request: Request) -> RedirectResponse | None:
     if not admin_auth_enforcement_enabled():
         return None
-    if current_admin_session(request):
+    if current_auth_context(request) is not None:
         return None
     next_path = safe_next_path(str(request.url.path or "/admin"))
     if request.url.query:

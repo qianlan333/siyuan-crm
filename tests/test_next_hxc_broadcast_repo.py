@@ -60,8 +60,8 @@ def test_postgres_preview_resolves_hxc_snapshot_unionids_and_dnd() -> None:
                 )
                 VALUES
                     ('13900001001', '13900001001', 'union_hxc_ready', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP),
-                    ('13900001002', '13900001002', '', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP),
-                    ('13900001003', '13900001003', '', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP)
+                    ('13900001002', '13900001002', 'union_hxc_dnd', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP),
+                    ('13900001003', '13900001003', 'union_hxc_mobile', 'QianLan', true, true, 'member', CURRENT_TIMESTAMP)
                 """
             )
         )
@@ -78,7 +78,7 @@ def test_postgres_preview_resolves_hxc_snapshot_unionids_and_dnd() -> None:
     repo = PostgresHxcDashboardBroadcastRepository(os.environ["DATABASE_URL"])
 
     preview = repo.preview_audience(
-        selected_customer_ids=["union_hxc_ready", "wm_hxc_dnd", "13900001003"],
+        selected_customer_ids=["union_hxc_ready", "union_hxc_dnd", "union_hxc_mobile"],
         audience_filter={},
         sender_userid="QianLan",
     )

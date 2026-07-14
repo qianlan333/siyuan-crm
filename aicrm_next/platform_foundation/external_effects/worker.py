@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import replace
 import logging
 from typing import Any
-from urllib.parse import urlparse
 from uuid import uuid4
 
 from aicrm_next.platform_foundation.push_center.capability_registry import capability_for_section
@@ -12,21 +11,27 @@ from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
 from aicrm_next.shared.safe_logging import safe_log_exception
 
 from .adapters import DEFAULT_ADAPTER_REGISTRY, ExternalEffectAdapterRegistry
+from .continuations import (
+    EMPTY_EXTERNAL_EFFECT_CONTINUATION_REGISTRY,
+    ExternalEffectContinuationRegistry,
+)
 from .execution_gates import (
-    WECOM_EXECUTION_DISABLED_CODE,
-    explicit_wecom_execution_disabled,
     is_wecom_effect_type,
+    typed_wecom_execution_block_reason,
     wecom_execution_disabled_message,
 )
+from .execution_policy import normalize_dispatch_result
 from .models import (
     WECOM_MESSAGE_GROUP_SEND,
-    WEBHOOK_GENERIC_PUSH,
+    ExternalEffectDispatchResult,
     ExternalEffectJob,
 )
 from .repo import ExternalEffectRepository, build_external_effect_repository
 from .retry_policy import next_retry_at, status_for_failure
 
 LOGGER = logging.getLogger(__name__)
+
+
 def _enabled(name: str) -> bool:
     return runtime_bool(name)
 
@@ -61,24 +66,45 @@ class ExternalEffectWorker:
         repository: ExternalEffectRepository | None = None,
         adapter_registry: ExternalEffectAdapterRegistry | None = None,
         *,
+        continuation_registry: ExternalEffectContinuationRegistry | None = None,
         locked_by: str = "",
+        lease_seconds: int = 300,
     ):
         self._repo = repository or build_external_effect_repository()
         self._adapters = adapter_registry or DEFAULT_ADAPTER_REGISTRY
+        self._continuations = continuation_registry or EMPTY_EXTERNAL_EFFECT_CONTINUATION_REGISTRY
         self._locked_by = locked_by or f"external-effect-worker-{uuid4().hex[:8]}"
+        self._lease_seconds = max(30, min(int(lease_seconds or 300), 3600))
+
+    @staticmethod
+    def _empty_counts(*, candidate_count: int = 0) -> dict[str, int]:
+        return {
+            "candidate_count": int(candidate_count),
+            "processed_count": 0,
+            "succeeded_count": 0,
+            "simulated_count": 0,
+            "skipped_count": 0,
+            "unknown_after_dispatch_count": 0,
+            "failed_count": 0,
+            "blocked_count": 0,
+            "lost_lease_count": 0,
+        }
 
     def preview_due(self, *, batch_size: int = 10, effect_types: list[str] | None = None, test_only: bool = False) -> dict[str, Any]:
         jobs = self._repo.list_due_jobs(limit=batch_size, effect_types=effect_types, test_only=test_only)
+        counts = self._empty_counts(candidate_count=len(jobs))
+        counts["skipped_count"] = len(jobs)
         return {
             "ok": True,
-            "items": [job.to_dict() for job in jobs],
-            "counts": {
-                "candidate_count": len(jobs),
-                "processed_count": 0,
-                "succeeded_count": 0,
-                "failed_count": 0,
-                "blocked_count": 0,
-            },
+            "items": [
+                {
+                    **job.to_dict(),
+                    "dispatch_status": "skipped",
+                    "preview_only": True,
+                }
+                for job in jobs
+            ],
+            "counts": counts,
             "dry_run": True,
             "test_only": bool(test_only),
             "real_external_call_executed": False,
@@ -94,7 +120,7 @@ class ExternalEffectWorker:
                 "ok": False,
                 "error": "batch_size_one_required",
                 "items": [],
-                "counts": {"candidate_count": 0, "processed_count": 0, "succeeded_count": 0, "failed_count": 0, "blocked_count": 0},
+                "counts": self._empty_counts(),
                 "dry_run": False,
                 "test_only": bool(test_only),
                 "real_external_call_executed": False,
@@ -104,77 +130,99 @@ class ExternalEffectWorker:
                 "ok": False,
                 "error": "test_only_required",
                 "items": [],
-                "counts": {"candidate_count": 0, "processed_count": 0, "succeeded_count": 0, "failed_count": 0, "blocked_count": 0},
+                "counts": self._empty_counts(),
                 "dry_run": False,
                 "test_only": False,
                 "real_external_call_executed": False,
             }
 
-        jobs = self._repo.acquire_due_jobs(limit=batch_size, locked_by=self._locked_by, effect_types=effect_types, test_only=test_only)
+        quarantined_count = self._repo.quarantine_stale_dispatching()
+        jobs = self._repo.acquire_due_jobs(
+            limit=batch_size,
+            locked_by=self._locked_by,
+            effect_types=effect_types,
+            test_only=test_only,
+            lease_seconds=self._lease_seconds,
+        )
         items: list[dict[str, Any]] = []
-        counts = {"candidate_count": len(jobs), "processed_count": 0, "succeeded_count": 0, "failed_count": 0, "blocked_count": 0}
+        counts = self._empty_counts(candidate_count=len(jobs))
+        counts["unknown_after_dispatch_count"] = int(quarantined_count)
         real_external_call_executed = False
         for job in jobs:
-            result = self.dispatch_one(job)
+            result = self._dispatch_claimed(job)
             items.append(result)
             counts["processed_count"] += 1
             status = str(result.get("job", {}).get("status") or "")
             if status == "succeeded":
                 counts["succeeded_count"] += 1
+            elif status == "simulated":
+                counts["simulated_count"] += 1
+            elif status == "unknown_after_dispatch":
+                counts["unknown_after_dispatch_count"] += 1
             elif status == "blocked":
                 counts["blocked_count"] += 1
             elif status.startswith("failed"):
                 counts["failed_count"] += 1
+            if result.get("error") == "lost_lease":
+                counts["lost_lease_count"] += 1
             real_external_call_executed = real_external_call_executed or bool(result.get("real_external_call_executed"))
+        ok = not any(counts[key] for key in ("unknown_after_dispatch_count", "failed_count", "blocked_count", "lost_lease_count"))
         return {
-            "ok": True,
+            "ok": ok,
+            "exit_code": 0 if ok else 1,
             "items": items,
             "counts": counts,
+            "quarantined_stale_dispatching_count": int(quarantined_count),
             "dry_run": False,
             "test_only": bool(test_only),
             "real_external_call_executed": real_external_call_executed,
         }
 
     def dispatch_one(self, job_or_id: int | ExternalEffectJob) -> dict[str, Any]:
-        job = job_or_id if isinstance(job_or_id, ExternalEffectJob) else self._repo.get_job(int(job_or_id))
-        if job is None:
+        job_id = int(job_or_id.id if isinstance(job_or_id, ExternalEffectJob) else job_or_id)
+        existing = self._repo.get_job(job_id)
+        if existing is None:
             return {"ok": False, "error": "job_not_found", "real_external_call_executed": False}
-        self._repo.mark_dispatching(job.id, locked_by=self._locked_by)
-        wecom_disabled = self._block_if_wecom_execution_disabled(job)
-        if wecom_disabled is not None:
-            return wecom_disabled
-        if _enabled("AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY") and not _is_test_job(job):
-            attempt = self._repo.record_attempt(
-                job=job,
-                status="failed_terminal",
+        claimed = self._repo.acquire_job(job_id, locked_by=self._locked_by, lease_seconds=self._lease_seconds)
+        if claimed is None:
+            current = self._repo.get_job(job_id)
+            return {
+                "ok": False,
+                "error": "not_claimed",
+                "job": current.to_dict() if current else existing.to_dict(),
+                "real_external_call_executed": False,
+            }
+        return self._dispatch_claimed(claimed)
+
+    def _dispatch_claimed(self, job: ExternalEffectJob) -> dict[str, Any]:
+        active = self._repo.get_active_claim(job.id, lease_token=job.lease_token)
+        if active is None:
+            return {
+                "ok": False,
+                "error": "lost_lease",
+                "job": (self._repo.get_job(job.id) or job).to_dict(),
+                "real_external_call_executed": False,
+            }
+        job = active
+        dispatch_result = self._block_if_wecom_execution_disabled(job)
+        if dispatch_result is None and _enabled("AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY") and not _is_test_job(job):
+            dispatch_result = ExternalEffectDispatchResult(
+                status="blocked",
                 adapter_mode=job.execution_mode or "execute",
                 request_summary={"effect_type": job.effect_type, "test_execution_only": True},
                 response_summary={"blocked": True, "real_external_call_executed": False},
                 error_code="test_execution_only_required",
                 error_message="AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY=1 blocks non-test jobs.",
             )
-            updated = self._repo.mark_failed_terminal(
-                job.id,
-                attempt_id=attempt.attempt_id,
-                error_code="test_execution_only_required",
-                error_message="AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY=1 blocks non-test jobs.",
-            )
-            return {
-                "ok": False,
-                "job": updated.to_dict() if updated else job.to_dict(),
-                "attempt": attempt.to_dict(),
-                "real_external_call_executed": False,
-            }
         capability_error = _capability_gate_error(job)
-        if capability_error:
+        if dispatch_result is None and capability_error:
             message = (
                 "Push capability is disabled by admin config."
                 if capability_error == "push_capability_disabled"
                 else "Push capability does not support real execution."
             )
-            attempt = self._repo.record_attempt(
-                job=job,
-                status="failed_terminal",
+            dispatch_result = ExternalEffectDispatchResult(
+                status="blocked",
                 adapter_mode=job.execution_mode or "execute",
                 request_summary={
                     "effect_type": job.effect_type,
@@ -186,73 +234,38 @@ class ExternalEffectWorker:
                 error_code=capability_error,
                 error_message=message,
             )
-            updated = self._repo.mark_failed_terminal(
-                job.id,
-                attempt_id=attempt.attempt_id,
-                error_code=capability_error,
-                error_message=message,
-            )
-            return {
-                "ok": False,
-                "job": updated.to_dict() if updated else job.to_dict(),
-                "attempt": attempt.to_dict(),
-                "real_external_call_executed": False,
-            }
-        try:
-            dispatch_result = self._adapters.get(job.adapter_name).dispatch(job)
-        except Exception as exc:
-            safe_log_exception(
-                LOGGER,
-                "external effect adapter dispatch raised",
-                exc,
-                external_effect_job_id=int(job.id or 0),
-                effect_type=job.effect_type,
-                adapter_name=job.adapter_name,
-            )
-            error_code = "adapter_exception"
-            error_message = str(exc)[:500]
-            attempt = self._repo.record_attempt(
-                job=job,
-                status="failed_retryable",
-                adapter_mode=job.execution_mode or "execute",
-                request_summary={
-                    "effect_type": job.effect_type,
-                    "adapter_name": job.adapter_name,
-                    "operation": job.operation,
-                    "adapter_exception": True,
-                },
-                response_summary={
-                    "adapter_exception": True,
-                    "real_external_call_executed": False,
-                },
-                error_code=error_code,
-                error_message=error_message,
-            )
-            if status_for_failure(
-                error_code=error_code,
-                attempt_count=int(job.attempt_count or 0) + 1,
-                max_attempts=int(job.max_attempts or 5),
-            ) == "failed_retryable":
-                updated = self._repo.mark_failed_retryable(
-                    job.id,
-                    attempt_id=attempt.attempt_id,
-                    error_code=error_code,
-                    error_message=error_message,
-                    next_retry_at=next_retry_at(job.attempt_count),
+        if dispatch_result is None:
+            try:
+                dispatch_result = self._adapters.get(job.adapter_name).dispatch(job)
+            except Exception as exc:
+                safe_log_exception(
+                    LOGGER,
+                    "external effect adapter dispatch raised",
+                    exc,
+                    external_effect_job_id=int(job.id or 0),
+                    effect_type=job.effect_type,
+                    adapter_name=job.adapter_name,
                 )
-            else:
-                updated = self._repo.mark_failed_terminal(
-                    job.id,
-                    attempt_id=attempt.attempt_id,
-                    error_code=error_code,
-                    error_message=error_message,
+                dispatch_result = ExternalEffectDispatchResult(
+                    status="unknown_after_dispatch",
+                    adapter_mode=job.execution_mode or "execute",
+                    request_summary={
+                        "effect_type": job.effect_type,
+                        "adapter_name": job.adapter_name,
+                        "operation": job.operation,
+                        "dispatch_started": True,
+                    },
+                    response_summary={
+                        "adapter_exception": True,
+                        "provider_result_received": False,
+                    },
+                    error_code="adapter_exception",
+                    error_message=str(exc)[:500],
+                    real_external_call_executed=False,
+                    provider_result_received=False,
                 )
-            return {
-                "ok": False,
-                "job": updated.to_dict() if updated else job.to_dict(),
-                "attempt": attempt.to_dict(),
-                "real_external_call_executed": False,
-            }
+
+        dispatch_result = normalize_dispatch_result(job, dispatch_result)
         continuation = self._run_post_success_continuations(job, dispatch_result)
         if continuation.get("applicable"):
             dispatch_result = replace(
@@ -262,56 +275,91 @@ class ExternalEffectWorker:
                     "post_success_continuation": continuation,
                 },
             )
-        attempt = self._repo.record_attempt(
-            job=job,
-            status=dispatch_result.status,
-            adapter_mode=dispatch_result.adapter_mode,
-            request_summary=dispatch_result.request_summary,
-            response_summary=dispatch_result.response_summary,
-            error_code=dispatch_result.error_code,
-            error_message=dispatch_result.error_message,
-        )
-        if dispatch_result.status == "succeeded":
-            updated = self._repo.mark_succeeded(job.id, attempt_id=attempt.attempt_id)
-        elif dispatch_result.status == "failed_retryable" and status_for_failure(
-            error_code=dispatch_result.error_code,
-            attempt_count=int(job.attempt_count or 0) + 1,
-            max_attempts=int(job.max_attempts or 5),
-        ) == "failed_retryable":
-            updated = self._repo.mark_failed_retryable(
-                job.id,
-                attempt_id=attempt.attempt_id,
+            if not continuation.get("ok"):
+                dispatch_result = replace(
+                    dispatch_result,
+                    status="unknown_after_dispatch",
+                    error_code="post_success_continuation_unknown",
+                    error_message=str(continuation.get("error") or "Post-success continuation did not complete."),
+                )
+
+        if (
+            dispatch_result.status == "failed_retryable"
+            and status_for_failure(
                 error_code=dispatch_result.error_code,
-                error_message=dispatch_result.error_message,
-                next_retry_at=next_retry_at(job.attempt_count),
+                attempt_count=int(job.attempt_count or 0) + 1,
+                max_attempts=int(job.max_attempts or 5),
             )
-        elif dispatch_result.status in {"failed_retryable", "failed_terminal"}:
-            updated = self._repo.mark_failed_terminal(
-                job.id,
-                attempt_id=attempt.attempt_id,
-                error_code=dispatch_result.error_code,
-                error_message=dispatch_result.error_message,
+            != "failed_retryable"
+        ):
+            dispatch_result = replace(dispatch_result, status="failed_terminal")
+
+        retry_at = None
+        if dispatch_result.status == "failed_retryable":
+            retry_at = next_retry_at(
+                job.attempt_count,
+                retry_after_seconds=(dispatch_result.response_summary or {}).get("retry_after_seconds"),
             )
-        else:
-            updated = self._repo.mark_failed_terminal(
-                job.id,
-                attempt_id=attempt.attempt_id,
-                error_code=dispatch_result.error_code or "adapter_blocked",
-                error_message=dispatch_result.error_message,
+
+        try:
+            completed = self._repo.complete_dispatch(job=job, result=dispatch_result, next_retry_at=retry_at)
+        except Exception as exc:
+            safe_log_exception(
+                LOGGER,
+                "external effect result persistence failed",
+                exc,
+                external_effect_job_id=int(job.id or 0),
+                effect_type=job.effect_type,
             )
+            try:
+                updated = self._repo.mark_dispatch_unknown(
+                    job=job,
+                    error_code="result_persistence_failed",
+                    error_message=str(exc)[:500],
+                    side_effect_executed=dispatch_result.real_external_call_executed,
+                    provider_result_received=dispatch_result.provider_result_received,
+                )
+            except Exception as mark_exc:
+                safe_log_exception(
+                    LOGGER,
+                    "external effect unknown-result persistence failed",
+                    mark_exc,
+                    external_effect_job_id=int(job.id or 0),
+                )
+                updated = None
+            return {
+                "ok": False,
+                "error": "result_persistence_failed",
+                "job": updated.to_dict() if updated else job.to_dict(),
+                "post_success_continuation": continuation,
+                "real_external_call_executed": dispatch_result.real_external_call_executed,
+            }
+        if completed is None:
+            current = self._repo.get_job(job.id)
+            return {
+                "ok": False,
+                "error": "lost_lease",
+                "job": current.to_dict() if current else job.to_dict(),
+                "post_success_continuation": continuation,
+                "real_external_call_executed": dispatch_result.real_external_call_executed,
+            }
+        updated, attempt = completed
         return {
-            "ok": dispatch_result.ok,
-            "job": updated.to_dict() if updated else job.to_dict(),
+            "ok": updated.status in {"succeeded", "simulated"},
+            "job": updated.to_dict(),
             "attempt": attempt.to_dict(),
             "post_success_continuation": continuation,
             "real_external_call_executed": dispatch_result.real_external_call_executed,
         }
 
-    def _block_if_wecom_execution_disabled(self, job: ExternalEffectJob) -> dict[str, Any] | None:
-        if not is_wecom_effect_type(job.effect_type) or not explicit_wecom_execution_disabled():
+    def _block_if_wecom_execution_disabled(self, job: ExternalEffectJob) -> ExternalEffectDispatchResult | None:
+        if not is_wecom_effect_type(job.effect_type):
             return None
-        attempt = self._repo.record_attempt(
-            job=job,
+        block_code = typed_wecom_execution_block_reason(job.effect_type)
+        if not block_code:
+            return None
+        block_message = wecom_execution_disabled_message(effect_type=job.effect_type)
+        return ExternalEffectDispatchResult(
             status="blocked",
             adapter_mode="disabled",
             request_summary={
@@ -320,72 +368,18 @@ class ExternalEffectWorker:
                 "operation": job.operation,
                 "target_type": job.target_type,
                 "target_id": job.target_id,
-                "execution_gate": WECOM_EXECUTION_DISABLED_CODE,
+                "execution_gate": block_code,
             },
             response_summary={
                 "blocked": True,
-                "execution_gate": WECOM_EXECUTION_DISABLED_CODE,
+                "execution_gate": block_code,
                 "real_external_call_executed": False,
             },
-            error_code=WECOM_EXECUTION_DISABLED_CODE,
-            error_message=wecom_execution_disabled_message(),
+            error_code=block_code,
+            error_message=block_message,
         )
-        updated = self._repo.mark_blocked(
-            job.id,
-            attempt_id=attempt.attempt_id,
-            error_code=WECOM_EXECUTION_DISABLED_CODE,
-            error_message=wecom_execution_disabled_message(),
-        )
-        return {
-            "ok": False,
-            "job": updated.to_dict() if updated else job.to_dict(),
-            "attempt": attempt.to_dict(),
-            "real_external_call_executed": False,
-        }
 
     def _run_post_success_continuations(self, job: ExternalEffectJob, dispatch_result) -> dict[str, Any]:
         if dispatch_result.status != "succeeded":
             return {"applicable": False, "reason": "dispatch_not_succeeded"}
-        if not _is_automation_agent_audience_webhook_job(job):
-            return {"applicable": False, "reason": "not_automation_agent_audience_webhook"}
-        batch_id = _automation_agent_batch_id(dispatch_result.response_summary)
-        if not batch_id:
-            return {"applicable": True, "ok": False, "error": "automation_agent_batch_id_missing"}
-        try:
-            from aicrm_next.automation_agents.worker import AutomationAgentWorker
-
-            result = AutomationAgentWorker().run_batch_and_enqueue_broadcast_jobs(
-                batch_id,
-                operator="external_effect_agent_continuation",
-            )
-        except Exception as exc:
-            safe_log_exception(
-                LOGGER,
-                "automation agent post-success continuation failed",
-                exc,
-                external_effect_job_id=int(job.id or 0),
-                batch_id=batch_id,
-            )
-            return {"applicable": True, "ok": False, "batch_id": batch_id, "error": str(exc)[:500]}
-        return {"applicable": True, **result}
-
-
-def _is_automation_agent_audience_webhook_job(job: ExternalEffectJob) -> bool:
-    if job.effect_type != WEBHOOK_GENERIC_PUSH:
-        return False
-    payload = dict(job.payload_json or {})
-    url = str(payload.get("webhook_url") or payload.get("target_url") or "").strip()
-    path = urlparse(url).path if url else ""
-    return path.startswith("/api/ai/agents/") and path.endswith("/audience-webhook")
-
-
-def _automation_agent_batch_id(response_summary: dict[str, Any] | None) -> str:
-    summary = dict(response_summary or {})
-    candidates = [summary.get("automation_agent_batch_id"), summary.get("batch_id")]
-    response_json = summary.get("response_json") if isinstance(summary.get("response_json"), dict) else {}
-    candidates.extend([response_json.get("automation_agent_batch_id"), response_json.get("batch_id")])
-    for candidate in candidates:
-        value = str(candidate or "").strip()
-        if value.startswith("agent_batch_"):
-            return value
-    return ""
+        return self._continuations.run(job, dispatch_result)

@@ -4,7 +4,6 @@ from typing import Any
 
 from aicrm_next.admin_read_model.application import (
     GetAdminAiAssistantPageQuery,
-    GetAdminApiDocsPageQuery,
     GetAdminConfigPageQuery,
     GetAdminFunnelPageQuery,
     GetAdminJobsPageQuery,
@@ -45,7 +44,3 @@ def jobs_payload() -> dict[str, Any]:
 
 def config_payload() -> dict[str, Any]:
     return GetAdminConfigPageQuery()()
-
-
-def api_docs_payload() -> dict[str, Any]:
-    return GetAdminApiDocsPageQuery()()

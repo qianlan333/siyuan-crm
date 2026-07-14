@@ -6,18 +6,13 @@ from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
 
+from aicrm_next.admin_auth.browser_sessions import issue_browser_session, set_browser_session_cookies
+
 from .service import (
-    CSRF_COOKIE,
-    SESSION_COOKIE,
-    SESSION_MAX_AGE_SECONDS,
-    admin_cookie_secure,
     auth_route_headers,
     auth_safe_next_path,
     build_authorize_url,
-    csrf_token_from_session,
     handle_callback,
-    session_payload_with_csrf,
-    signed_session_cookie,
 )
 
 router = APIRouter()
@@ -133,29 +128,10 @@ def auth_wecom_callback(request: Request):
         ip=request.client.host if request.client else "",
         user_agent=request.headers.get("user-agent", ""),
     )
-    if result.ok and result.session_payload:
-        session_payload = session_payload_with_csrf(result.session_payload)
-        csrf_token = csrf_token_from_session(session_payload)
-        secure_cookie = admin_cookie_secure()
+    if result.ok and result.identity_claims:
+        issued = issue_browser_session(request, result.identity_claims)
         response = RedirectResponse(result.next_path, status_code=302, headers=auth_route_headers())
-        response.set_cookie(
-            SESSION_COOKIE,
-            signed_session_cookie(session_payload),
-            max_age=SESSION_MAX_AGE_SECONDS,
-            httponly=True,
-            samesite="lax",
-            secure=secure_cookie,
-            path="/",
-        )
-        response.set_cookie(
-            CSRF_COOKIE,
-            csrf_token,
-            max_age=SESSION_MAX_AGE_SECONDS,
-            httponly=False,
-            samesite="lax",
-            secure=secure_cookie,
-            path="/",
-        )
+        set_browser_session_cookies(response, issued)
         return response
     if _wants_html(request):
         return _login_redirect(result.next_path, result.error_code or "wecom_admin_auth_failed")

@@ -20,10 +20,29 @@ from aicrm_next.customer_read_model.sidebar_v2 import (
 from aicrm_next.main import create_app
 from aicrm_next.media_library.postgres_repo import PostgresMediaLibraryRepository
 from aicrm_next.shared.errors import NotFoundError
-from aicrm_next.shared.signed_context import build_sidebar_owner_context_token
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
-def _client(monkeypatch) -> TestClient:
+def _client(
+    monkeypatch,
+    *,
+    external_userid: str = "wx_ext_001",
+    viewer_userid: str = "ZhaoYanFang",
+) -> TestClient:
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    client.headers.update(
+        install_sidebar_auth(
+            client,
+            viewer_userid=viewer_userid,
+            external_userid=external_userid,
+        )
+    )
+    return client
+
+
+def _unauthenticated_client(monkeypatch) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     return TestClient(create_app(), raise_server_exceptions=False)
@@ -131,7 +150,7 @@ def test_sidebar_workflow_title_uses_preserved_channel_link_tables_after_retirem
     source = inspect.getsource(SidebarV2SqlRepository.get_workflow_title_for_customer)
     assert "automation_member" not in source
     assert "automation_channel_contact" in source
-    assert "crm_user_identity" in source
+    assert "_resolve_identity" in source
 
 
 def test_sidebar_user_visible_read_paths_do_not_join_retired_automation_tables() -> None:
@@ -162,23 +181,19 @@ def test_sidebar_v2_workbench_and_read_panels_are_next_owned(monkeypatch):
         assert payload["source_status"] in {"next_read_model", "production_unavailable"}
 
 
-def test_sidebar_v2_owner_token_takes_precedence_over_query_owner(monkeypatch):
+def test_sidebar_v2_rejects_query_owner_impersonation(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "sidebar-v2-owner-token")
     client = _client(monkeypatch)
-    token = build_sidebar_owner_context_token(viewer_userid="ZhaoYanFang", corp_id="ww-test")
 
     response = client.get(
         "/api/sidebar/v2/products?external_userid=wx_ext_001&owner_userid=LiuXiao",
-        headers={"X-AICRM-Sidebar-Owner-Token": token},
     )
 
-    assert response.status_code == 200
-    payload = response.json()
-    _assert_next(payload)
-    assert payload["products"]
+    assert response.status_code == 403
+    assert response.json()["detail"] == "sidebar owner scope forbidden"
 
 
-def test_sidebar_v2_workbench_uses_readonly_owner_fallback_when_viewer_missing(monkeypatch):
+def test_sidebar_v2_workbench_rejects_missing_viewer_without_returning_customer(monkeypatch):
     class FakeSidebarRepo:
         def get_contact_snapshot(self, external_userid: str) -> dict:
             return {"external_userid": external_userid, "customer_name": "只读客户", "owner_userid": ""}
@@ -203,21 +218,17 @@ def test_sidebar_v2_workbench_uses_readonly_owner_fallback_when_viewer_missing(m
 
     monkeypatch.setattr("aicrm_next.customer_read_model.api.SidebarV2SqlRepository", FakeSidebarRepo)
     monkeypatch.setattr("aicrm_next.customer_read_model.sidebar_v2.SidebarV2SqlRepository", FakeSidebarRepo)
-    client = _client(monkeypatch)
+    client = _unauthenticated_client(monkeypatch)
 
     response = client.get("/api/sidebar/v2/workbench?external_userid=wx_ext_001")
 
-    assert response.status_code == 200
+    assert response.status_code == 403
     payload = response.json()
-    _assert_next(payload)
-    assert payload["customer"]["external_userid"] == "wx_ext_001"
-    assert payload["customer"]["owner_pending"] is True
-    assert payload["customer"]["owner_userid"] == ""
-    assert payload["diagnostics"]["owner_context_source"] == "readonly_owner_pending"
-    assert payload["diagnostics"]["owner_verified"] is False
+    assert payload == {"detail": "sidebar context required"}
+    assert "customer" not in payload
 
 
-def test_sidebar_v2_empty_readonly_fallback_returns_owner_pending_shell(monkeypatch):
+def test_sidebar_v2_empty_owner_scope_rejects_all_panels_without_pii(monkeypatch):
     class EmptySidebarRepo:
         def get_contact_snapshot(self, external_userid: str) -> dict:
             return {}
@@ -267,7 +278,7 @@ def test_sidebar_v2_empty_readonly_fallback_returns_owner_pending_shell(monkeypa
     monkeypatch.setattr("aicrm_next.customer_read_model.api.SidebarV2SqlRepository", EmptySidebarRepo)
     monkeypatch.setattr("aicrm_next.customer_read_model.sidebar_v2.SidebarV2SqlRepository", EmptySidebarRepo)
     monkeypatch.setattr("aicrm_next.customer_read_model.sidebar_v2.build_commerce_repository", lambda: FakeCommerceRepo())
-    client = _client(monkeypatch)
+    client = _unauthenticated_client(monkeypatch)
 
     workbench = client.get("/api/sidebar/v2/workbench?external_userid=wx_ext_missing")
     questionnaires = client.get("/api/sidebar/v2/questionnaires?external_userid=wx_ext_missing")
@@ -276,23 +287,10 @@ def test_sidebar_v2_empty_readonly_fallback_returns_owner_pending_shell(monkeypa
     products = client.get("/api/sidebar/v2/products?external_userid=wx_ext_missing")
 
     for response in (workbench, questionnaires, orders, periodic_orders, products):
-        assert response.status_code == 200
+        assert response.status_code == 403
         payload = response.json()
-        _assert_next(payload)
-        assert payload["diagnostics"]["owner_context_source"] == "readonly_owner_pending"
-        assert payload["diagnostics"]["owner_pending"] is True
-        assert payload["diagnostics"]["owner_verified"] is False
-        assert payload["customer"]["owner_pending"] is True
-        assert payload["customer"]["owner_userid"] == ""
-
-    assert workbench.json()["customer"]["external_userid"] == "wx_ext_missing"
-    assert questionnaires.json()["questionnaires"] == []
-    assert orders.json()["orders"] == []
-    assert periodic_orders.json()["periodic_orders"] == []
-    product = products.json()["products"][0]
-    assert product["context_status"] == "owner_pending"
-    assert "?ctx=" not in product["product_url"]
-    assert "?ctx=" not in product["checkout_url"]
+        assert payload == {"detail": "sidebar context required"}
+        assert "customer" not in payload
 
 
 def test_sidebar_products_include_service_period_products_with_signed_links(monkeypatch) -> None:
@@ -365,7 +363,7 @@ def test_sidebar_products_include_service_period_products_with_signed_links(monk
     assert periodic["price_label"] == "¥999"
     assert periodic["duration_days"] == 90
     assert periodic["link_slug"] == "periodic-quarter"
-    assert periodic["product_url"].startswith("/s/periodic-quarter?ctx=")
+    assert periodic["product_url"].startswith("/s/periodic-quarter#aicrm_ctx=")
     assert periodic["context_status"] == "signed"
 
 
@@ -563,6 +561,14 @@ def test_sidebar_periodic_orders_include_active_and_expired_with_member_remark()
                     "last_order_paid_at": "2026-07-09 07:47:00+08:00",
                     "remark": "高意向，提醒续费",
                     "unionid": "union_periodic",
+                    "huangyoucan_match_status": "matched_unionid",
+                    "huangyoucan_formally_logged_in": True,
+                    "huangyoucan_has_token_usage": True,
+                    "huangyoucan_learning_plan_current": 4,
+                    "huangyoucan_learning_plan_total": 8,
+                    "huangyoucan_open_count_7d": 6,
+                    "huangyoucan_last_open_at": "2026-07-13T01:30:00+00:00",
+                    "huangyoucan_data_refreshed_at": "2026-07-13T01:00:00+00:00",
                 },
                 {
                     "entitlement_id": "ent_expired",
@@ -610,9 +616,17 @@ def test_sidebar_periodic_orders_include_active_and_expired_with_member_remark()
     assert active["remaining_days"] > 0
     assert active["remark"] == "高意向，提醒续费"
     assert active["detail_url"] == "/admin/wechat-pay/transactions/order_active"
+    assert active["huangyoucan_formally_logged_in"] is True
+    assert active["huangyoucan_has_token_usage"] is True
+    assert active["huangyoucan_learning_plan_progress"] == {"current": 4, "total": 8}
+    assert active["huangyoucan_open_count_7d"] == 6
+    assert active["huangyoucan_last_open_at"] == "2026-07-13T01:30:00+00:00"
+    assert active["huangyoucan_match_status"] == "matched_unionid"
     assert expired["status_label"] == "已过期"
     assert expired["remaining_days"] == 0
     assert expired["remark"] == "已过期，待跟进"
+    assert expired["huangyoucan_match_status"] == "not_found"
+    assert expired["huangyoucan_open_count_7d"] is None
 
 
 def test_sidebar_periodic_order_remark_target_keeps_customer_scope() -> None:
@@ -702,6 +716,8 @@ def test_sidebar_periodic_order_sql_reuses_service_period_member_remark_contract
     assert "metadata_json->>'admin_remark'" in source
     assert "metadata_json->>'remark'" in source
     assert "metadata_json->>'admin_remark'" in target_source
+    assert "e.mobile_snapshot" not in source
+    assert "e.mobile_snapshot" not in target_source
 
 
 def test_sidebar_periodic_order_remark_route_writes_service_period_member_remark(monkeypatch) -> None:
@@ -735,7 +751,11 @@ def test_sidebar_periodic_order_remark_route_writes_service_period_member_remark
     monkeypatch.setattr("aicrm_next.customer_read_model.api.UpdateServicePeriodMemberRemarkCommand", lambda: FakeRemarkCommand())
     monkeypatch.setattr("aicrm_next.customer_read_model.api._verify_sidebar_owner_scope", lambda *args, **kwargs: None)
     monkeypatch.setattr("aicrm_next.customer_read_model.api._request_scoped_customer_context_query", lambda _db: (object(), None))
-    client = _client(monkeypatch)
+    client = _client(
+        monkeypatch,
+        external_userid="wx_periodic",
+        viewer_userid="HuangYouCan",
+    )
 
     response = client.put(
         "/api/sidebar/v2/periodic-orders/ent_active/remark?owner_userid=HuangYouCan",
@@ -747,7 +767,7 @@ def test_sidebar_periodic_order_remark_route_writes_service_period_member_remark
     _assert_next(payload)
     assert payload["source_status"] == "next_command"
     assert payload["periodic_order"]["remark"] == "新备注"
-    assert ("target", "wx_periodic", "HuangYouCan", False, "ent_active") in calls
+    assert ("target", "wx_periodic", "HuangYouCan", True, "ent_active") in calls
     assert ("remark", "sp_active", "union_periodic", "新备注") in calls
 
 
@@ -827,7 +847,7 @@ def test_sidebar_orders_identity_snapshot_fallback_keeps_owner_scope() -> None:
         def get_bindable_wechat_pay_order_mobile(self, external_userid: str) -> dict | None:
             return None
 
-    with pytest.raises(NotFoundError):
+    with pytest.raises(sidebar_v2.CustomerScopeForbiddenError):
         SidebarCommerceReadModel(repo=FakeRepo(), context_query=FailingContextQuery()).orders(
             external_userid="wmbNXyCwAAncAArq9MSmXQq6yUo8fC8g",
             owner_userid="OtherOwner",
@@ -994,7 +1014,7 @@ def test_sidebar_workbench_identity_snapshot_fallback_keeps_owner_scope() -> Non
         def get_bindable_wechat_pay_order_mobile(self, external_userid: str) -> dict | None:
             return None
 
-    with pytest.raises(NotFoundError):
+    with pytest.raises(sidebar_v2.CustomerScopeForbiddenError):
         SidebarWorkbenchReadModel(repo=FakeRepo(), context_query=FailingContextQuery())(
             external_userid="wmbNXyCwAABrzB-3rPps07AecwEGRGMA",
             owner_userid="OtherOwner",

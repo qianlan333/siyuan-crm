@@ -15,9 +15,7 @@ from .domain import (
     clean_text,
     derive_node_scheduled_time,
     generate_webhook_key,
-    generate_webhook_token,
     group_manageable_by_userid,
-    hash_webhook_token,
     mask_sensitive_payload,
     normalize_group_admin_userids,
     normalize_plan_payload,
@@ -53,7 +51,6 @@ class GroupOpsRepository(Protocol):
     def create_node(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any]: ...
     def update_node(self, plan_id: int, node_id: int, payload: dict[str, Any]) -> dict[str, Any]: ...
     def delete_node(self, plan_id: int, node_id: int) -> bool: ...
-    def regenerate_webhook(self, plan_id: int) -> dict[str, Any]: ...
     def list_plan_members(self, plan_id: int, filters: dict[str, Any]) -> tuple[list[dict[str, Any]], int]: ...
     def upsert_plan_members(self, plan_id: int, members: list[dict[str, Any]], *, source_type: str, source_ref_id: str = "") -> int: ...
     def get_segmentation(self, plan_id: int) -> dict[str, Any] | None: ...
@@ -64,7 +61,9 @@ class GroupOpsRepository(Protocol):
     def create_audience_rule_version(self, rule_key: str, payload: dict[str, Any]) -> dict[str, Any]: ...
     def get_audience_rule_version(self, rule_key: str, version: int) -> dict[str, Any] | None: ...
     def replace_audience_rule_results(self, rule_key: str, version: int, plan_id: int, results: list[dict[str, Any]]) -> int: ...
-    def list_audience_rule_results(self, rule_key: str, version: int, plan_id: int, filters: dict[str, Any] | None = None) -> tuple[list[dict[str, Any]], int]: ...
+    def list_audience_rule_results(
+        self, rule_key: str, version: int, plan_id: int, filters: dict[str, Any] | None = None
+    ) -> tuple[list[dict[str, Any]], int]: ...
     def create_trigger_event(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any]: ...
     def find_trigger_event(self, plan_id: int, idempotency_key: str) -> dict[str, Any] | None: ...
     def update_trigger_event(self, event_id: str, payload: dict[str, Any]) -> dict[str, Any]: ...
@@ -129,7 +128,6 @@ class InMemoryGroupOpsRepository:
 
     def __init__(self, *, seed_groups: bool = True) -> None:
         now = utc_now_iso()
-        token = "fixture-webhook-token"
         self._plans: dict[int, dict[str, Any]] = {
             1: {
                 "id": 1,
@@ -144,7 +142,6 @@ class InMemoryGroupOpsRepository:
                 "allow_external_recipients": True,
                 "description": "",
                 "webhook_key": "",
-                "webhook_token_hash": "",
                 "created_by": "fixture",
                 "updated_by": "fixture",
                 "created_at": now,
@@ -164,7 +161,6 @@ class InMemoryGroupOpsRepository:
                 "allow_external_recipients": True,
                 "description": "Fixture webhook plan",
                 "webhook_key": "daily-lesson-8f3a",
-                "webhook_token_hash": hash_webhook_token(token),
                 "created_by": "fixture",
                 "updated_by": "fixture",
                 "created_at": now,
@@ -184,7 +180,6 @@ class InMemoryGroupOpsRepository:
                 "allow_external_recipients": True,
                 "description": "",
                 "webhook_key": "",
-                "webhook_token_hash": "",
                 "created_by": "fixture",
                 "updated_by": "fixture",
                 "created_at": now,
@@ -349,19 +344,14 @@ class InMemoryGroupOpsRepository:
         now = utc_now_iso()
         plan_code = normalized["plan_code"] or f"group_plan_{plan_id:03d}"
         webhook_key = ""
-        webhook_token_hash = ""
-        plaintext_token = ""
         if normalized["plan_type"] == "webhook":
             webhook_key = generate_webhook_key(normalized["plan_name"])
-            plaintext_token = generate_webhook_token()
-            webhook_token_hash = hash_webhook_token(plaintext_token)
         row = {
             "id": plan_id,
             **normalized,
             "plan_code": plan_code,
             "owner_name": "",
             "webhook_key": webhook_key,
-            "webhook_token_hash": webhook_token_hash,
             "created_at": now,
             "updated_at": now,
             "archived_at": "",
@@ -370,10 +360,7 @@ class InMemoryGroupOpsRepository:
         self._plan_groups.setdefault(plan_id, {})
         self._nodes.setdefault(plan_id, {})
         self._replace_payload_scopes(plan_id, payload)
-        result = deepcopy(row)
-        if plaintext_token:
-            result["plaintext_token"] = plaintext_token
-        return result
+        return deepcopy(row)
 
     def update_plan(self, plan_id: int, payload: dict[str, Any]) -> dict[str, Any]:
         current = self._plans.get(int(plan_id))
@@ -521,9 +508,7 @@ class InMemoryGroupOpsRepository:
         if not owner:
             return []
         return [
-            deepcopy(group)
-            for group in self._groups.values()
-            if group_manageable_by_userid(group, owner) and clean_text(group.get("owner_userid")) != owner
+            deepcopy(group) for group in self._groups.values() if group_manageable_by_userid(group, owner) and clean_text(group.get("owner_userid")) != owner
         ]
 
     def list_admin_candidate_group_assets(self, owner_userid: str, *, limit: int = 100) -> list[dict[str, Any]]:
@@ -531,11 +516,7 @@ class InMemoryGroupOpsRepository:
         if not owner:
             return []
         max_items = clamp_limit(limit, default=100)
-        candidates = [
-            deepcopy(group)
-            for group in self._groups.values()
-            if clean_text(group.get("owner_userid")) != owner
-        ]
+        candidates = [deepcopy(group) for group in self._groups.values() if clean_text(group.get("owner_userid")) != owner]
         return candidates[:max_items]
 
     def list_owners(self) -> list[dict[str, Any]]:
@@ -596,18 +577,6 @@ class InMemoryGroupOpsRepository:
         current["updated_at"] = utc_now_iso()
         return True
 
-    def regenerate_webhook(self, plan_id: int) -> dict[str, Any]:
-        plan = self._plans.get(int(plan_id))
-        if not plan:
-            raise NotFoundError("group ops plan not found")
-        plaintext_token = generate_webhook_token()
-        plan["webhook_key"] = plan.get("webhook_key") or generate_webhook_key(plan["plan_name"])
-        plan["webhook_token_hash"] = hash_webhook_token(plaintext_token)
-        plan["updated_at"] = utc_now_iso()
-        result = deepcopy(plan)
-        result["plaintext_token"] = plaintext_token
-        return result
-
     def find_webhook_event(self, plan_id: int, idempotency_key: str) -> dict[str, Any] | None:
         key = clean_text(idempotency_key)
         for event in self._webhook_events.values():
@@ -650,11 +619,7 @@ class InMemoryGroupOpsRepository:
         if source_type:
             rows = [item for item in rows if item.get("source_type") == source_type]
         if keyword:
-            rows = [
-                item
-                for item in rows
-                if keyword in f"{item.get('user_id')} {item.get('external_user_id')} {item.get('group_id')}".lower()
-            ]
+            rows = [item for item in rows if keyword in f"{item.get('user_id')} {item.get('external_user_id')} {item.get('group_id')}".lower()]
         rows.sort(key=lambda item: int(item["id"]))
         offset = max(0, int(filters.get("offset") or 0))
         limit = max(1, int(filters.get("limit") or 50))

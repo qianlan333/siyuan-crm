@@ -4,7 +4,10 @@ from pathlib import Path
 
 import yaml
 
-from tools.check_repository_ownership import check_repository_ownership
+from tools.check_repository_ownership import (
+    check_repository_ownership,
+    extract_repository_sql_access,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -133,7 +136,7 @@ def test_repository_ownership_requires_every_repo_file(tmp_path: Path) -> None:
 
 
 def test_repository_ownership_blocks_retired_reads(tmp_path: Path) -> None:
-    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", "")
+    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", 'SQL = "SELECT * FROM retired_table"\n')
     registry = _write_registry(
         tmp_path,
         repositories={
@@ -152,7 +155,7 @@ def test_repository_ownership_blocks_retired_reads(tmp_path: Path) -> None:
 
 
 def test_repository_ownership_blocks_write_owner_mismatch(tmp_path: Path) -> None:
-    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", "")
+    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", 'SQL = "INSERT INTO active_table (id) VALUES (1)"\n')
     registry = _write_registry(
         tmp_path,
         repositories={
@@ -171,7 +174,10 @@ def test_repository_ownership_blocks_write_owner_mismatch(tmp_path: Path) -> Non
 
 
 def test_repository_ownership_accepts_manifest_write_owner_prefix(tmp_path: Path) -> None:
-    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", "")
+    _write(
+        tmp_path / "aicrm_next" / "demo" / "repo.py",
+        'READ_SQL = "SELECT * FROM active_table"\nWRITE_SQL = "INSERT INTO active_table (id) VALUES (1)"\n',
+    )
     registry = _write_registry(
         tmp_path,
         repositories={
@@ -188,7 +194,7 @@ def test_repository_ownership_accepts_manifest_write_owner_prefix(tmp_path: Path
 
 
 def test_repository_ownership_accepts_manifest_write_owners(tmp_path: Path) -> None:
-    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", "")
+    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", 'SQL = "INSERT INTO active_table (id) VALUES (1)"\n')
     registry = _write_registry(
         tmp_path,
         repositories={
@@ -211,6 +217,172 @@ def test_repository_ownership_accepts_manifest_write_owners(tmp_path: Path) -> N
     assert check_repository_ownership(root=tmp_path, registry_path=registry, manifest_path=manifest) == []
 
 
+def test_repository_sql_extractor_handles_ctes_multiline_and_all_write_verbs(tmp_path: Path) -> None:
+    repository = tmp_path / "repo.py"
+    _write(
+        repository,
+        '''
+SQL = """WITH due AS (
+    SELECT source.id FROM source_table source
+    JOIN lookup_table lookup ON lookup.id = source.id
+)
+INSERT INTO target_table (id)
+SELECT id FROM due
+"""
+UPDATE_SQL = "UPDATE target_table SET id = id WHERE id > 0"
+DELETE_SQL = "DELETE FROM deletion_table WHERE id > 0"
+''',
+    )
+
+    access = extract_repository_sql_access(repository)
+
+    assert access.table_reads == frozenset({"lookup_table", "source_table"})
+    assert access.table_writes == frozenset({"deletion_table", "target_table"})
+
+
+def test_repository_sql_extractor_scopes_cte_names_to_each_statement(tmp_path: Path) -> None:
+    repository = tmp_path / "repo.py"
+    _write(
+        repository,
+        '''
+CTE_SQL = """WITH shared_name AS (
+    SELECT id FROM source_table
+)
+SELECT id FROM shared_name
+"""
+TABLE_SQL = "SELECT id FROM shared_name"
+''',
+    )
+
+    access = extract_repository_sql_access(repository)
+
+    assert access.table_reads == frozenset({"shared_name", "source_table"})
+
+
+def test_repository_ownership_blocks_undeclared_sql_access(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "aicrm_next" / "demo" / "repo.py",
+        'SQL = "SELECT * FROM active_table"\n',
+    )
+    registry = _write_registry(
+        tmp_path,
+        repositories={
+            "aicrm_next/demo/repo.py": {
+                "capability_owner": "aicrm_next.demo",
+                "table_reads": [],
+                "table_writes": [],
+            }
+        },
+    )
+    manifest = _write_manifest(tmp_path, active_write_owner="aicrm_next.demo")
+
+    violations = check_repository_ownership(
+        root=tmp_path,
+        registry_path=registry,
+        manifest_path=manifest,
+    )
+
+    assert [violation.rule for violation in violations] == [
+        "repository_sql_access_missing_declaration"
+    ]
+
+
+def test_repository_ownership_blocks_declaration_without_literal_or_explicit_non_literal_access(tmp_path: Path) -> None:
+    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", "")
+    registry = _write_registry(
+        tmp_path,
+        repositories={
+            "aicrm_next/demo/repo.py": {
+                "capability_owner": "aicrm_next.demo",
+                "table_reads": ["active_table"],
+                "table_writes": [],
+            }
+        },
+    )
+    manifest = _write_manifest(tmp_path, active_write_owner="aicrm_next.demo")
+
+    violations = check_repository_ownership(root=tmp_path, registry_path=registry, manifest_path=manifest)
+
+    assert [violation.rule for violation in violations] == [
+        "repository_sql_declaration_without_access"
+    ]
+
+
+def test_repository_ownership_accepts_explicit_non_literal_access(tmp_path: Path) -> None:
+    _write(tmp_path / "aicrm_next" / "demo" / "repo.py", "")
+    registry = _write_registry(
+        tmp_path,
+        repositories={
+            "aicrm_next/demo/repo.py": {
+                "capability_owner": "aicrm_next.demo",
+                "table_reads": ["active_table"],
+                "table_writes": [],
+                "non_literal_table_reads": ["active_table"],
+            }
+        },
+    )
+    manifest = _write_manifest(tmp_path, active_write_owner="aicrm_next.demo")
+
+    assert check_repository_ownership(root=tmp_path, registry_path=registry, manifest_path=manifest) == []
+
+
+def test_repository_ownership_blocks_stale_non_literal_access_exception(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "aicrm_next" / "demo" / "repo.py",
+        'SQL = "SELECT * FROM active_table"\n',
+    )
+    registry = _write_registry(
+        tmp_path,
+        repositories={
+            "aicrm_next/demo/repo.py": {
+                "capability_owner": "aicrm_next.demo",
+                "table_reads": ["active_table"],
+                "table_writes": [],
+                "non_literal_table_reads": ["active_table"],
+            }
+        },
+    )
+    manifest = _write_manifest(tmp_path, active_write_owner="aicrm_next.demo")
+
+    violations = check_repository_ownership(root=tmp_path, registry_path=registry, manifest_path=manifest)
+
+    assert [violation.rule for violation in violations] == [
+        "repository_stale_non_literal_access_exception"
+    ]
+
+
+def test_repository_ownership_requires_relation_lifecycle_or_explicit_exception(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "aicrm_next" / "demo" / "repo.py",
+        'SQL = "SELECT * FROM current_view"\n',
+    )
+    repositories = {
+        "aicrm_next/demo/repo.py": {
+            "capability_owner": "aicrm_next.demo",
+            "table_reads": ["current_view"],
+            "table_writes": [],
+        }
+    }
+    registry = _write_registry(tmp_path, repositories=repositories)
+    manifest = _write_manifest(tmp_path, active_write_owner="aicrm_next.demo")
+    violations = check_repository_ownership(
+        root=tmp_path,
+        registry_path=registry,
+        manifest_path=manifest,
+    )
+    assert [violation.rule for violation in violations] == [
+        "repository_relation_missing_lifecycle"
+    ]
+
+    repositories["aicrm_next/demo/repo.py"]["non_table_relations"] = ["current_view"]
+    registry = _write_registry(tmp_path, repositories=repositories)
+    assert check_repository_ownership(
+        root=tmp_path,
+        registry_path=registry,
+        manifest_path=manifest,
+    ) == []
+
+
 def _write_registry(tmp_path: Path, *, repositories: dict) -> Path:
     registry = tmp_path / "docs" / "architecture" / "repository_ownership.yml"
     lines = ["version: 1", "repositories:"]
@@ -219,6 +391,8 @@ def _write_registry(tmp_path: Path, *, repositories: dict) -> Path:
     for path, entry in repositories.items():
         lines.append(f"  {path}:")
         lines.append(f"    capability_owner: {entry['capability_owner']}")
+        if entry.get("access_scope"):
+            lines.append(f"    access_scope: {entry['access_scope']}")
         lines.append("    table_reads:")
         for table in entry["table_reads"]:
             lines.append(f"      - {table}")
@@ -229,6 +403,19 @@ def _write_registry(tmp_path: Path, *, repositories: dict) -> Path:
             lines.append(f"      - {table}")
         if not entry["table_writes"]:
             lines[-1] = "    table_writes: []"
+        for field in (
+            "non_table_relations",
+            "optional_relations",
+            "non_literal_table_reads",
+            "non_literal_table_writes",
+        ):
+            if field not in entry:
+                continue
+            lines.append(f"    {field}:")
+            for relation in entry[field]:
+                lines.append(f"      - {relation}")
+            if not entry[field]:
+                lines[-1] = f"    {field}: []"
     _write(registry, "\n".join(lines) + "\n")
     return registry
 

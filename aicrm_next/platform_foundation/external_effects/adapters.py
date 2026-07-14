@@ -1,20 +1,25 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 from typing import Any, Protocol
 
 import requests
 
-from aicrm_next.external_push.https_transport import (
+from aicrm_next.shared.wecom_runtime import load_wecom_execution_config
+from aicrm_next.platform_foundation.auth_platform.webhook_hmac import (
+    WebhookHmacSigner,
+    runtime_outbound_webhook_signer,
+)
+
+from aicrm_next.shared.outbound_https.transport import (
     CallableHttpsTransport,
     HttpsTransport,
     HttpsTransportError,
     HttpsTransportTimeout,
     PinnedHttpsTransport,
 )
-from aicrm_next.external_push.security import Resolver, WebhookUrlValidationError, resolve_and_validate_public_https_target
+from aicrm_next.shared.outbound_https.security import Resolver, WebhookUrlValidationError, resolve_and_validate_public_https_target
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_csv, runtime_setting
 from aicrm_next.shared.sensitive_data import redact_sensitive_data, redact_sensitive_text
 
@@ -58,8 +63,7 @@ WECOM_EFFECT_TYPES = (
 
 
 class ExternalEffectAdapter(Protocol):
-    def dispatch(self, job: ExternalEffectJob) -> ExternalEffectDispatchResult:
-        ...
+    def dispatch(self, job: ExternalEffectJob) -> ExternalEffectDispatchResult: ...
 
 
 def _enabled(name: str) -> bool:
@@ -75,33 +79,18 @@ def _runtime_present(*names: str) -> bool:
 
 
 def _normalized_wecom_execution_mode() -> tuple[str, str]:
-    raw = runtime_setting("AICRM_WECOM_EXECUTION_MODE", "").strip().lower()
-    if raw in {"disabled", "dry_run", "execute"}:
-        return raw, "AICRM_WECOM_EXECUTION_MODE"
-    if _enabled("AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE"):
-        return "execute", "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE"
-    return "disabled", "default"
+    config = load_wecom_execution_config()
+    return config.execution_mode, config.execution_mode_source
 
 
 def _enabled_wecom_effect_types() -> tuple[list[str], str]:
+    config = load_wecom_execution_config()
     supported = set(WECOM_EFFECT_TYPES)
-    configured = _csv_env("AICRM_WECOM_ENABLED_EFFECT_TYPES")
-    if configured:
-        return sorted(item for item in configured if item in supported), "AICRM_WECOM_ENABLED_EFFECT_TYPES"
-    legacy = _csv_env("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES")
-    if legacy:
-        return sorted(item for item in legacy if item in supported), "AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES"
-    return [], "default_empty"
+    return sorted(item for item in config.enabled_effect_types if item in supported), config.enabled_effect_types_source
 
 
 def _configured_wecom_sender(fallback: str = "") -> str:
-    raw = runtime_setting("AICRM_WECOM_DEFAULT_SENDER_USERID", "") or runtime_setting("AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS", "")
-    candidates = [
-        item.strip()
-        for item in raw.replace("\n", ",").replace(" ", ",").split(",")
-        if item.strip()
-    ]
-    return candidates[0] if candidates else str(fallback or "").strip()
+    return load_wecom_execution_config().default_sender_userid or str(fallback or "").strip()
 
 
 def _safe_response_json_summary(response: Any) -> dict[str, Any]:
@@ -142,6 +131,45 @@ def _safe_error_message(value: Any, *, limit: int = 500) -> str:
     return redact_sensitive_text(value)[: max(0, int(limit))]
 
 
+def _wecom_provider_failure(
+    exc: Exception,
+    *,
+    default_error_code: str,
+    executed_key: str,
+) -> tuple[str, str, bool, dict[str, Any]]:
+    error_code = default_error_code
+    error_message = _safe_error_message(exc)
+    retryable = False
+    response_summary: dict[str, Any] = {"real_external_call_executed": True, executed_key: False}
+    try:
+        if hasattr(exc, "classification") and hasattr(exc, "error_code"):
+            payload = dict(getattr(exc, "payload", {}) or {})
+            response_summary.update(
+                {
+                    "errcode": int(payload.get("errcode") or getattr(exc, "provider_errcode", 0) or 0),
+                    "errmsg_present": bool(str(payload.get("errmsg") or "").strip()),
+                    "provider_error_classification": getattr(exc, "classification", ""),
+                    "http_status": getattr(exc, "status_code", None),
+                    "retry_after_seconds": getattr(exc, "retry_after_seconds", None),
+                    "real_external_call_executed": bool(getattr(exc, "real_external_call_executed", True)),
+                }
+            )
+            error_code = str(getattr(exc, "error_code", default_error_code) or default_error_code)
+            error_message = _safe_error_message(payload.get("errmsg") or getattr(exc, "message", "") or exc)
+            retryable = bool(getattr(exc, "retryable", False))
+    except Exception:
+        pass
+    if error_message.startswith("missing_wecom_config:"):
+        error_code = "config_missing"
+        retryable = False
+        response_summary["real_external_call_executed"] = False
+    elif error_message.endswith("_adapter_composition_missing"):
+        error_code = "adapter_composition_missing"
+        retryable = False
+        response_summary["real_external_call_executed"] = False
+    return error_code, error_message, retryable, response_summary
+
+
 def _target_unionid(payload: dict[str, Any]) -> str:
     return str(payload.get("target_unionid") or payload.get("unionid") or "").strip()
 
@@ -163,27 +191,14 @@ def webhook_execution_settings() -> dict[str, Any]:
 
 
 def wecom_execution_settings() -> dict[str, Any]:
-    execution_mode, mode_source = _normalized_wecom_execution_mode()
+    config = load_wecom_execution_config()
+    execution_mode, mode_source = config.execution_mode, config.execution_mode_source
     enabled_types, enabled_types_source = _enabled_wecom_effect_types()
     default_sender = _configured_wecom_sender()
-    deprecated_settings_present = [
-        key
-        for key in (
-            "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE",
-            "AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES",
-            "AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS",
-        )
-        if runtime_setting(key, "")
-    ]
-    blocking_reasons: list[str] = []
-    if execution_mode == "disabled":
-        blocking_reasons.append("wecom_execution_disabled")
+    deprecated_settings_present = list(config.deprecated_settings_present)
+    blocking_reasons: list[str] = list(config.blocking_reasons)
     if execution_mode == "execute" and not enabled_types:
         blocking_reasons.append("wecom_enabled_effect_types_empty")
-    if execution_mode == "execute" and not _runtime_present("WECOM_CORP_ID"):
-        blocking_reasons.append("wecom_corp_id_missing")
-    if execution_mode == "execute" and not _runtime_present("WECOM_CONTACT_SECRET", "WECOM_SECRET"):
-        blocking_reasons.append("wecom_contact_secret_missing")
     if execution_mode == "execute" and not default_sender:
         blocking_reasons.append("default_sender_userid_missing")
     return {
@@ -198,10 +213,13 @@ def wecom_execution_settings() -> dict[str, Any]:
         "allowed_owner_userids": [default_sender] if default_sender else [],
         "allowed_group_chat_ids": "all",
         "supported_types": list(WECOM_EFFECT_TYPES),
-        "corp_id_present": _runtime_present("WECOM_CORP_ID"),
-        "contact_secret_present": _runtime_present("WECOM_CONTACT_SECRET", "WECOM_SECRET"),
+        "corp_id_present": bool(config.corp_id),
+        "contact_secret_present": bool(config.contact_secret),
         "default_sender_userid_present": bool(default_sender),
         "deprecated_settings_present": deprecated_settings_present,
+        "deprecated_settings_owner": "integration_gateway",
+        "deprecated_settings_delete_after": "2026-10-01",
+        "config_conflict": config.conflict,
         "blocking_reasons": blocking_reasons,
     }
 
@@ -234,11 +252,13 @@ class WebhookAdapter:
         *,
         transport: HttpsTransport | None = None,
         resolver: Resolver | None = None,
+        signer: WebhookHmacSigner | None = None,
     ) -> None:
         if http_post is not None and transport is not None:
             raise ValueError("provide either http_post or transport, not both")
         self._transport = transport or (CallableHttpsTransport(http_post) if http_post is not None else PinnedHttpsTransport())
         self._resolver = resolver or (self._injected_test_resolver if http_post is not None else None)
+        self._signer = signer
 
     @staticmethod
     def _injected_test_resolver(_hostname: str, _port: int) -> list[str]:
@@ -286,14 +306,15 @@ class WebhookAdapter:
                 real_external_call_executed=False,
             )
         timeout = float(runtime_setting("AICRM_EXTERNAL_EFFECT_WEBHOOK_TIMEOUT_SECONDS", "5") or "5")
-        headers, signature_configured = self._headers(payload=payload, body=body)
+        signer = self._signer or runtime_outbound_webhook_signer()
         request_summary = {
             "effect_type": job.effect_type,
             "operation": job.operation,
             "target_url_present": True,
             "timeout_seconds": timeout,
             "body_type": type(body).__name__,
-            "signature_configured": signature_configured,
+            "signature_configured": signer is not None,
+            "signature_scheme": "aicrm_hmac_sha256",
             "redirect_policy": "deny",
         }
         try:
@@ -308,11 +329,28 @@ class WebhookAdapter:
                 error_message="webhook target failed public HTTPS validation",
                 real_external_call_executed=False,
             )
+        if signer is None:
+            return ExternalEffectDispatchResult(
+                status="failed_terminal",
+                adapter_mode="execute",
+                request_summary=request_summary,
+                response_summary={"blocked": True, "real_external_call_executed": False},
+                error_code="auth_signature_config_missing",
+                error_message="registered outbound webhook HMAC credentials are required",
+                real_external_call_executed=False,
+            )
+        body_bytes = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        headers = self._headers(
+            payload=payload,
+            body=body_bytes,
+            signer=signer,
+            event_id=_webhook_event_id(job.idempotency_key or f"external-effect-{job.id}"),
+        )
         request_summary["resolved_ip_count"] = len(target.ip_addresses)
         try:
             response = self._transport.post(
                 target,
-                json_body=body,
+                body=body_bytes,
                 headers=headers,
                 timeout=timeout,
             )
@@ -368,6 +406,7 @@ class WebhookAdapter:
             error_code="" if status == "succeeded" else http_error_code(status_code),
             error_message="" if status == "succeeded" else _safe_error_message(response.text),
             real_external_call_executed=True,
+            provider_result_received=True,
         )
 
     def _execution_gate_error(self, job: ExternalEffectJob) -> str:
@@ -392,14 +431,17 @@ class WebhookAdapter:
         elif "payload" in payload:
             body = payload.get("payload")
         else:
-            body = {
-                key: value
-                for key, value in payload.items()
-                if key not in {"webhook_url", "target_url", "signature_secret", "signing_secret"}
-            }
+            body = {key: value for key, value in payload.items() if key not in {"webhook_url", "target_url"}}
         return body if isinstance(body, (dict, list)) else None
 
-    def _headers(self, *, payload: dict[str, Any], body: dict[str, Any] | list[Any]) -> tuple[dict[str, str], bool]:
+    def _headers(
+        self,
+        *,
+        payload: dict[str, Any],
+        body: bytes,
+        signer: WebhookHmacSigner,
+        event_id: str,
+    ) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
         extra_headers = payload.get("headers")
         if isinstance(extra_headers, dict):
@@ -408,22 +450,21 @@ class WebhookAdapter:
                 if not header_name or any(sensitive in header_name.lower() for sensitive in ("authorization", "token", "secret", "cookie")):
                     continue
                 headers[header_name] = str(value or "")
-        secret = str(
-            payload.get("signature_secret")
-            or payload.get("signing_secret")
-            or runtime_setting("AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET")
-            or ""
-        ).strip()
-        if not secret:
-            return headers, False
-        canonical_body = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-        signature = hmac.new(secret.encode("utf-8"), canonical_body.encode("utf-8"), hashlib.sha256).hexdigest()
-        headers["X-AICRM-External-Effect-Signature"] = signature
-        headers["X-AICRM-External-Effect-Signature-Alg"] = "hmac-sha256"
-        return headers, True
+        headers.update(signer.sign_headers(body=body, event_id=event_id))
+        return headers
+
+
+def _webhook_event_id(value: str) -> str:
+    normalized = str(value or "").strip()
+    if 16 <= len(normalized) <= 256:
+        return normalized
+    return f"evt_{hashlib.sha256(normalized.encode('utf-8')).hexdigest()}"
 
 
 class WeComPrivateMessageAdapter:
+    def __init__(self, adapter_factory=None) -> None:
+        self._adapter_factory = adapter_factory
+
     def dispatch(self, job: ExternalEffectJob) -> ExternalEffectDispatchResult:
         payload = dict(job.payload_json or {})
         external_userids = [str(item or "").strip() for item in list(payload.get("external_userids") or []) if str(item or "").strip()]
@@ -466,9 +507,9 @@ class WeComPrivateMessageAdapter:
         if isinstance(attachments, list) and attachments:
             adapter_payload["attachments"] = attachments
         try:
-            from aicrm_next.integration_gateway.wecom_private_adapter import build_wecom_private_message_adapter
-
-            result = build_wecom_private_message_adapter().create_private_message_task(
+            if self._adapter_factory is None:
+                raise RuntimeError("wecom_private_adapter_composition_missing")
+            result = self._adapter_factory().create_private_message_task(
                 adapter_payload,
                 idempotency_key=job.idempotency_key or str(job.id),
             )
@@ -500,6 +541,7 @@ class WeComPrivateMessageAdapter:
                 request_summary=request_summary,
                 response_summary=response_summary,
                 real_external_call_executed=side_effect_executed,
+                provider_result_received=bool(side_effect_executed and response_summary.get("wecom_msgid_present")),
             )
         if not side_effect_executed:
             return ExternalEffectDispatchResult(
@@ -548,6 +590,9 @@ class WeComPrivateMessageAdapter:
 
 
 class WeComGroupMessageExternalEffectAdapter:
+    def __init__(self, adapter_factory=None) -> None:
+        self._adapter_factory = adapter_factory
+
     def dispatch(self, job: ExternalEffectJob) -> ExternalEffectDispatchResult:
         payload = dict(job.payload_json or {})
         gate_error = self._execution_gate_error(job, payload)
@@ -570,9 +615,9 @@ class WeComGroupMessageExternalEffectAdapter:
 
         wecom_payload = self._wecom_payload(payload)
         try:
-            from aicrm_next.integration_gateway.wecom_group_adapter import build_wecom_group_message_adapter
-
-            result = build_wecom_group_message_adapter().create_group_message_task(
+            if self._adapter_factory is None:
+                raise RuntimeError("wecom_group_adapter_composition_missing")
+            result = self._adapter_factory().create_group_message_task(
                 wecom_payload,
                 idempotency_key=job.idempotency_key or job.trace_id or str(job.id),
             )
@@ -606,6 +651,9 @@ class WeComGroupMessageExternalEffectAdapter:
                 request_summary=request_summary,
                 response_summary=response_summary,
                 real_external_call_executed=bool(result.get("side_effect_executed")),
+                provider_result_received=bool(
+                    result.get("side_effect_executed") and (response_summary.get("wecom_msgid_present") or response_summary.get("audit_id"))
+                ),
             )
         error_code = str(result.get("error_code") or "wecom_group_message_failed").strip()
         return ExternalEffectDispatchResult(
@@ -658,9 +706,7 @@ class WeComGroupMessageExternalEffectAdapter:
     def _wecom_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
         content_payload = dict(payload.get("content_payload") or {})
         result = dict(content_payload)
-        result["sender"] = _configured_wecom_sender(
-            str(payload.get("owner_userid") or payload.get("sender") or content_payload.get("sender") or "").strip()
-        )
+        result["sender"] = _configured_wecom_sender(str(payload.get("owner_userid") or payload.get("sender") or content_payload.get("sender") or "").strip())
         result["chat_ids"] = self._chat_ids(payload)
         return result
 
@@ -707,6 +753,7 @@ class WeComWelcomeMessageAdapter:
                 "wecom_send_executed": True,
             },
             real_external_call_executed=True,
+            provider_result_received=True,
         )
 
     def _request_summary(self, job: ExternalEffectJob, payload: dict[str, Any]) -> dict[str, Any]:
@@ -738,9 +785,7 @@ class WeComWelcomeMessageAdapter:
             return "owner_userid_missing"
         if not str(payload.get("welcome_code") or "").strip():
             return "welcome_code_missing"
-        has_text = isinstance(payload.get("text"), dict) and bool(
-            str((payload.get("text") or {}).get("content") or "").strip()
-        )
+        has_text = isinstance(payload.get("text"), dict) and bool(str((payload.get("text") or {}).get("content") or "").strip())
         has_attachments = isinstance(payload.get("attachments"), list) and bool(payload.get("attachments"))
         if not has_text and not has_attachments:
             return "payload_invalid"
@@ -755,44 +800,16 @@ class WeComWelcomeMessageAdapter:
         return result
 
     def _build_adapter(self):
-        if self._adapter_factory is not None:
-            return self._adapter_factory()
-        from aicrm_next.integration_gateway.wecom_channel_entry_client import (
-            ProductionWeComAdapter,
-            missing_wecom_config,
-        )
-
-        missing = missing_wecom_config()
-        if missing:
-            raise RuntimeError("missing_wecom_config:" + ",".join(missing))
-        return ProductionWeComAdapter()
+        if self._adapter_factory is None:
+            raise RuntimeError("wecom_welcome_adapter_composition_missing")
+        return self._adapter_factory()
 
     def _failure_result(self, exc: Exception, *, request_summary: dict[str, Any]) -> ExternalEffectDispatchResult:
-        error_code = "wecom_welcome_send_failed"
-        error_message = _safe_error_message(exc)
-        retryable = False
-        response_summary: dict[str, Any] = {"real_external_call_executed": True, "wecom_send_executed": False}
-        try:
-            from aicrm_next.integration_gateway.wecom_channel_entry_client import WeComApiError
-
-            if isinstance(exc, WeComApiError):
-                payload = dict(exc.payload or {})
-                errcode = int(payload.get("errcode") or 0)
-                response_summary.update(
-                    {
-                        "errcode": errcode,
-                        "errmsg_present": bool(str(payload.get("errmsg") or "").strip()),
-                    }
-                )
-                error_code = f"wecom_error_{errcode}" if errcode else "network_error"
-                error_message = _safe_error_message(payload.get("errmsg") or exc.message or exc)
-                retryable = errcode in {-1, 42001, 45009, 45011} or errcode == 0
-        except Exception:
-            pass
-        if error_message.startswith("missing_wecom_config:"):
-            error_code = "config_missing"
-            retryable = False
-            response_summary["real_external_call_executed"] = False
+        error_code, error_message, retryable, response_summary = _wecom_provider_failure(
+            exc,
+            default_error_code="wecom_welcome_send_failed",
+            executed_key="wecom_send_executed",
+        )
         return ExternalEffectDispatchResult(
             status="failed_retryable" if retryable else "failed_terminal",
             adapter_mode="execute",
@@ -850,6 +867,7 @@ class WeComContactTagAdapter:
                 "wecom_tag_executed": True,
             },
             real_external_call_executed=True,
+            provider_result_received=True,
         )
 
     def _request_summary(self, job: ExternalEffectJob, payload: dict[str, Any]) -> dict[str, Any]:
@@ -889,44 +907,16 @@ class WeComContactTagAdapter:
         return ""
 
     def _build_adapter(self):
-        if self._adapter_factory is not None:
-            return self._adapter_factory()
-        from aicrm_next.integration_gateway.wecom_channel_entry_client import (
-            ProductionWeComAdapter,
-            missing_wecom_config,
-        )
-
-        missing = missing_wecom_config()
-        if missing:
-            raise RuntimeError("missing_wecom_config:" + ",".join(missing))
-        return ProductionWeComAdapter()
+        if self._adapter_factory is None:
+            raise RuntimeError("wecom_tag_adapter_composition_missing")
+        return self._adapter_factory()
 
     def _failure_result(self, exc: Exception, *, request_summary: dict[str, Any]) -> ExternalEffectDispatchResult:
-        error_code = "wecom_tag_mark_failed"
-        error_message = _safe_error_message(exc)
-        retryable = False
-        response_summary: dict[str, Any] = {"real_external_call_executed": True, "wecom_tag_executed": False}
-        try:
-            from aicrm_next.integration_gateway.wecom_channel_entry_client import WeComApiError
-
-            if isinstance(exc, WeComApiError):
-                payload = dict(exc.payload or {})
-                errcode = int(payload.get("errcode") or 0)
-                response_summary.update(
-                    {
-                        "errcode": errcode,
-                        "errmsg_present": bool(str(payload.get("errmsg") or "").strip()),
-                    }
-                )
-                error_code = f"wecom_error_{errcode}" if errcode else "network_error"
-                error_message = _safe_error_message(payload.get("errmsg") or exc.message or exc)
-                retryable = errcode in {-1, 42001, 45009, 45011} or errcode == 0
-        except Exception:
-            pass
-        if error_message.startswith("missing_wecom_config:"):
-            error_code = "config_missing"
-            retryable = False
-            response_summary["real_external_call_executed"] = False
+        error_code, error_message, retryable, response_summary = _wecom_provider_failure(
+            exc,
+            default_error_code="wecom_tag_mark_failed",
+            executed_key="wecom_tag_executed",
+        )
         return ExternalEffectDispatchResult(
             status="failed_retryable" if retryable else "failed_terminal",
             adapter_mode="execute",
@@ -1004,6 +994,7 @@ class WeComProfileUpdateAdapter:
                 "wecom_profile_update_executed": True,
             },
             real_external_call_executed=True,
+            provider_result_received=True,
         )
 
     def _request_summary(self, job: ExternalEffectJob, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1035,44 +1026,16 @@ class WeComProfileUpdateAdapter:
         return ""
 
     def _build_adapter(self):
-        if self._adapter_factory is not None:
-            return self._adapter_factory()
-        from aicrm_next.integration_gateway.wecom_channel_entry_client import (
-            ProductionWeComAdapter,
-            missing_wecom_config,
-        )
-
-        missing = missing_wecom_config()
-        if missing:
-            raise RuntimeError("missing_wecom_config:" + ",".join(missing))
-        return ProductionWeComAdapter()
+        if self._adapter_factory is None:
+            raise RuntimeError("wecom_profile_adapter_composition_missing")
+        return self._adapter_factory()
 
     def _failure_result(self, exc: Exception, *, request_summary: dict[str, Any]) -> ExternalEffectDispatchResult:
-        error_code = "wecom_profile_update_failed"
-        error_message = _safe_error_message(exc)
-        retryable = False
-        response_summary: dict[str, Any] = {"real_external_call_executed": True, "wecom_profile_update_executed": False}
-        try:
-            from aicrm_next.integration_gateway.wecom_channel_entry_client import WeComApiError
-
-            if isinstance(exc, WeComApiError):
-                payload = dict(exc.payload or {})
-                errcode = int(payload.get("errcode") or 0)
-                response_summary.update(
-                    {
-                        "errcode": errcode,
-                        "errmsg_present": bool(str(payload.get("errmsg") or "").strip()),
-                    }
-                )
-                error_code = f"wecom_error_{errcode}" if errcode else "network_error"
-                error_message = _safe_error_message(payload.get("errmsg") or exc.message or exc)
-                retryable = errcode in {-1, 42001, 45009, 45011} or errcode == 0
-        except Exception:
-            pass
-        if error_message.startswith("missing_wecom_config:"):
-            error_code = "config_missing"
-            retryable = False
-            response_summary["real_external_call_executed"] = False
+        error_code, error_message, retryable, response_summary = _wecom_provider_failure(
+            exc,
+            default_error_code="wecom_profile_update_failed",
+            executed_key="wecom_profile_update_executed",
+        )
         return ExternalEffectDispatchResult(
             status="failed_retryable" if retryable else "failed_terminal",
             adapter_mode="execute",
@@ -1164,6 +1127,7 @@ class WeChatPaymentAdapter:
                 "order_refund_status": str(sync_result.get("order_refund_status") or "") if isinstance(sync_result, dict) else "",
             },
             real_external_call_executed=True,
+            provider_result_received=True,
         )
 
     def _request_summary(self, job: ExternalEffectJob, payload: dict[str, Any], request_payload: dict[str, Any]) -> dict[str, Any]:
@@ -1213,37 +1177,23 @@ class WeChatPaymentAdapter:
         return ""
 
     def _build_client(self):
-        if self._client_factory is not None:
-            return self._client_factory()
-        from aicrm_next.integration_gateway.wechat_pay_client import WeChatPayClient, wechat_pay_client_config_from_env
-
-        return WeChatPayClient(wechat_pay_client_config_from_env())
+        if self._client_factory is None:
+            raise RuntimeError("wechat_pay_adapter_composition_missing")
+        return self._client_factory()
 
     def _apply_refund_result(self, refund_payload: dict[str, Any]) -> dict[str, Any]:
-        if self._refund_result_sync is not None:
-            return dict(self._refund_result_sync(refund_payload) or {})
-        from aicrm_next.commerce.admin_transactions import apply_wechat_refund_result
-
-        return dict(apply_wechat_refund_result(refund_payload) or {})
+        if self._refund_result_sync is None:
+            raise RuntimeError("refund_result_sync_composition_missing")
+        return dict(self._refund_result_sync(refund_payload) or {})
 
     def _mark_refund_failed(self, out_refund_no: str, *, error_code: str, error_message: str, response_payload: dict[str, Any]) -> dict[str, Any]:
         if not out_refund_no:
             return {"ok": False, "reason": "out_refund_no_missing"}
         try:
-            if self._refund_failure_sync is not None:
-                return dict(
-                    self._refund_failure_sync(
-                        out_refund_no,
-                        error_code=error_code,
-                        error_message=error_message,
-                        response_payload=response_payload,
-                    )
-                    or {}
-                )
-            from aicrm_next.commerce.admin_transactions import mark_wechat_refund_request_failed
-
+            if self._refund_failure_sync is None:
+                return {"ok": False, "reason": "refund_failure_sync_composition_missing"}
             return dict(
-                mark_wechat_refund_request_failed(
+                self._refund_failure_sync(
                     out_refund_no,
                     error_code=error_code,
                     error_message=error_message,
@@ -1294,8 +1244,8 @@ class WeChatPaymentAdapter:
 
 
 class ExternalEffectAdapterRegistry:
-    def __init__(self) -> None:
-        self._adapters: dict[str, ExternalEffectAdapter] = {
+    def __init__(self, adapters: dict[str, ExternalEffectAdapter] | None = None) -> None:
+        self._adapters: dict[str, ExternalEffectAdapter] = adapters or {
             "outbound_webhook": WebhookAdapter(),
             "webhook": WebhookAdapter(),
             "wechat_payment": WeChatPaymentAdapter(),

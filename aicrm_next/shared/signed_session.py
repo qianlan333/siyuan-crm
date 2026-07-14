@@ -8,7 +8,7 @@ import os
 from time import time
 from typing import Any
 
-from aicrm_next.shared.runtime import production_environment, require_signing_secret
+from aicrm_next.shared.runtime import require_signing_secret, secure_cookie_environment
 
 
 ADMIN_SESSION_COOKIE = "aicrm_next_admin_session"
@@ -43,10 +43,12 @@ def verify_state_payload(value: str | None, *, max_age_seconds: int = DEFAULT_ST
 
 
 def session_cookie_secure() -> bool:
+    if secure_cookie_environment():
+        return True
     value = str(os.getenv("AICRM_ADMIN_SESSION_COOKIE_SECURE") or "").strip().lower()
     if value:
         return value in {"1", "true", "yes", "on"}
-    return production_environment()
+    return False
 
 
 def _load_signed_payload(value: str | None) -> dict[str, Any] | None:

@@ -5,79 +5,9 @@ import json
 from datetime import datetime, timedelta
 from typing import Any
 
-from aicrm_next.platform_foundation.command_bus import CommandContext
-from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH
 from aicrm_next.platform_foundation.external_effects.models import public_datetime, utcnow
-from aicrm_next.shared.runtime_settings import runtime_setting
 
 QUESTIONNAIRE_EXTERNAL_PUSH_MODE = "queue"
-
-
-def plan_questionnaire_external_push_effect(
-    *,
-    questionnaire: dict[str, Any],
-    submission: dict[str, Any],
-    computed_result: dict[str, Any],
-    context: CommandContext,
-    source_command_id: str,
-    source_event_id: str = "",
-    idempotency_key: str = "",
-    mode: str | None = None,
-    external_push_result: dict[str, Any] | None = None,
-    service: ExternalEffectService | None = None,
-) -> dict[str, Any] | None:
-    config = dict(questionnaire.get("external_push_config") or {})
-    enabled = _bool(config.get("enabled") or questionnaire.get("external_push_enabled"))
-    target_url = _text(config.get("webhook_url") or questionnaire.get("external_push_url"))
-    if not enabled or not target_url:
-        return None
-
-    selected_mode = "queue"
-    body = build_questionnaire_external_push_payload(
-        questionnaire=questionnaire,
-        submission=submission,
-        computed_result=computed_result,
-    )
-    payload = build_questionnaire_external_effect_payload(
-        questionnaire=questionnaire,
-        submission=submission,
-        computed_result=computed_result,
-        target_url=target_url,
-        body=body,
-    )
-    result = dict(external_push_result or {})
-    try:
-        job = (service or ExternalEffectService()).plan_effect(
-            effect_type=WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH,
-            adapter_name="outbound_webhook",
-            operation="post",
-            target_type="questionnaire_submission",
-            target_id=_text(submission.get("submission_id")),
-            business_type="questionnaire",
-            business_id=_text(questionnaire.get("id")),
-            payload=payload,
-            payload_summary=_questionnaire_external_effect_payload_summary(
-                questionnaire=questionnaire,
-                submission=submission,
-                body=body,
-                payload=payload,
-                mode=selected_mode,
-                external_push_result=result,
-            ),
-            context=context,
-            source_module="questionnaire.external_push",
-            source_event_id=source_event_id,
-            source_command_id=source_command_id,
-            risk_level="medium",
-            requires_approval=False,
-            execution_mode="execute",
-            status="queued",
-            idempotency_key=idempotency_key
-            or f"{source_command_id}:external-effect:{WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH}",
-        )
-        return job
-    except Exception:
-        return None
 
 
 def build_questionnaire_external_effect_payload(
@@ -98,9 +28,8 @@ def build_questionnaire_external_effect_payload(
         "webhook_url": target_url,
         "body": request_body,
         "signature": {
-            "enabled": bool(runtime_setting("AICRM_EXTERNAL_EFFECT_WEBHOOK_SIGNING_SECRET")),
-            "alg": "hmac-sha256",
-            "header": "X-AICRM-External-Effect-Signature",
+            "mode": "aicrm_hmac_sha256",
+            "credential_source": "registered_webhook_client",
         },
     }
     _copy_test_loopback_config(payload, config, request_body)
@@ -144,46 +73,16 @@ def build_questionnaire_external_push_payload(
 
 
 def _copy_test_loopback_config(payload: dict[str, Any], config: dict[str, Any], body: dict[str, Any]) -> None:
-    receiver_token = _text(config.get("receiver_token") or config.get("test_receiver_token"))
-    if not receiver_token:
+    execution_scope = _text(config.get("execution_scope"))
+    loopback_enabled = execution_scope == "test_loopback" or bool(config.get("test_loopback_enabled"))
+    if not loopback_enabled:
         return
-    payload["receiver_token"] = receiver_token
     payload["receiver_response_status"] = int(config.get("receiver_response_status") or config.get("test_receiver_response_status") or 200)
     payload["execution_scope"] = "test_loopback"
     payload["is_test"] = True
     payload["expected_payload_hash"] = _canonical_payload_hash(body)
     expires_at = _text(config.get("test_receiver_expires_at"))
     payload["test_receiver_expires_at"] = expires_at or public_datetime(utcnow() + timedelta(hours=12))
-
-
-def _questionnaire_external_effect_payload_summary(
-    *,
-    questionnaire: dict[str, Any],
-    submission: dict[str, Any],
-    body: dict[str, Any],
-    payload: dict[str, Any],
-    mode: str,
-    external_push_result: dict[str, Any],
-) -> dict[str, Any]:
-    answers = body.get("answers") if isinstance(body.get("answers"), list) else []
-    return {
-        "questionnaire_id": int(questionnaire.get("id") or 0),
-        "slug": _text(questionnaire.get("slug")),
-        "submission_id": _text(submission.get("submission_id")),
-        "external_push_mode": mode,
-        "external_push_enabled": bool(external_push_result.get("enabled", True)),
-        "external_push_attempted": bool(external_push_result.get("attempted")),
-        "external_push_status": _text(external_push_result.get("status")),
-        "target_url_present": bool(payload.get("webhook_url")),
-        "signature_configured": bool((payload.get("signature") or {}).get("enabled")) if isinstance(payload.get("signature"), dict) else False,
-        "body_type": type(body).__name__,
-        "answer_count": len(answers),
-        "phone_number_present": bool(_text(body.get("phone_number")) and _text(body.get("phone_number")) != "NULL"),
-        "user_id_present": bool(_text(body.get("user_id"))),
-        "execution_scope": _text(payload.get("execution_scope")),
-        "is_test": bool(payload.get("is_test")),
-        "expected_payload_hash": _text(payload.get("expected_payload_hash")),
-    }
 
 
 def _canonical_payload_hash(body: dict[str, Any]) -> str:
@@ -264,7 +163,3 @@ def _iso_datetime(value: Any) -> str:
 
 def _text(value: Any) -> str:
     return "" if value is None else str(value).strip()
-
-
-def _bool(value: Any) -> bool:
-    return str(value if value is not None else "").strip().lower() in {"1", "true", "yes", "on", "t"}

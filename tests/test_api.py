@@ -4,12 +4,21 @@ from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
 from aicrm_next.questionnaire.repo import reset_questionnaire_fixture_state
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
 def _client(monkeypatch) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     reset_questionnaire_fixture_state()
-    return TestClient(create_app(), raise_server_exceptions=False)
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    client.headers.update(
+        install_sidebar_auth(
+            client,
+            viewer_userid="ZhaoYanFang",
+            external_userid="wx_ext_001",
+        )
+    )
+    return client
 
 
 def _assert_next_response(response) -> dict:

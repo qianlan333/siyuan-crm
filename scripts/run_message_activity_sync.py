@@ -3,7 +3,14 @@ from __future__ import annotations
 import urllib.request
 
 from scripts import internal_http
-from scripts.script_runtime import emit_json, read_app_host, read_app_port, read_internal_api_token
+from scripts.script_runtime import (
+    emit_json,
+    read_app_host,
+    read_app_port,
+    read_internal_access_token,
+    read_internal_api_base_url,
+    read_internal_tls_context,
+)
 
 
 DEFAULT_PATH = "/api/admin/automation-conversion/message-activity-sync/run"
@@ -12,7 +19,7 @@ DEFAULT_PATH = "/api/admin/automation-conversion/message-activity-sync/run"
 def run() -> str:
     host = read_app_host()
     port = read_app_port()
-    token = read_internal_api_token()
+    token = read_internal_access_token(purpose="automation_worker", scopes=("write",))
     payload = {
         "trigger_source": "scheduled",
         "operator": "cron_message_activity_sync",
@@ -21,6 +28,8 @@ def run() -> str:
         host=host,
         port=port,
         token=token,
+        base_url=read_internal_api_base_url(),
+        ssl_context=read_internal_tls_context(),
         path=DEFAULT_PATH,
         payload=payload,
         timeout_seconds=180,

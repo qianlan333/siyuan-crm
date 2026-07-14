@@ -8,7 +8,8 @@ from .application import decrypt_callback_body
 from .inbox import ingest_wecom_callback
 
 
-CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED = True
+CALLBACK_MAX_BODY_BYTES = 1024 * 1024
+CALLBACK_ACK_BOUNDARY = "signature_decrypt_and_durable_inbox_only"
 
 
 class WeComCallbackIngressValidationError(ValueError):
@@ -23,6 +24,8 @@ def ingest_wecom_external_contact_callback(
     route: str,
     repository: WebhookInboxRepository | None = None,
 ) -> dict[str, Any]:
+    if len(body or b"") > CALLBACK_MAX_BODY_BYTES:
+        raise WeComCallbackIngressValidationError("callback body exceeds size limit")
     try:
         event_data, plain_xml = decrypt_callback_body(query=query, body=body)
     except Exception as exc:
@@ -35,5 +38,4 @@ def ingest_wecom_external_contact_callback(
         plain_xml=plain_xml,
         route=route,
         repository=repository,
-        process_time_sensitive=CALLBACK_INGRESS_TIME_SENSITIVE_INLINE_ENABLED,
     )

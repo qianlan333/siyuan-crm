@@ -5,6 +5,7 @@ import json
 from typing import Any
 
 from aicrm_next.public_product.service import _render_detail_media, render_pay_landing, route_headers
+from aicrm_next.shared.signed_context import product_context_fragment_bootstrap_script
 
 
 def _price_yuan(product: dict[str, Any]) -> str:
@@ -319,6 +320,7 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
         .catch(function () {{}});
     }})();
   </script>
+  {product_context_fragment_bootstrap_script()}
 </body>
 </html>"""
 

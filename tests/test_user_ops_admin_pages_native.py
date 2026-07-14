@@ -19,26 +19,11 @@ def _endpoint_module(path: str) -> str:
     raise AssertionError(f"missing route for {path}")
 
 
-def test_user_ops_ui_page_renders_from_native_shell(monkeypatch) -> None:
-    from aicrm_next.ops_enrollment import admin_pages
+def test_user_ops_ui_compatibility_entry_redirects_to_native_workspace() -> None:
+    response = _client().get("/admin/user-ops/ui", follow_redirects=False)
 
-    class FakeAdminFunnelPageQuery:
-        def __call__(self) -> dict:
-            return {
-                "ok": True,
-                "source_status": "test_read_model",
-                "cards": [{"label": "生产客户", "value": "3", "description": "fixture"}],
-                "sections": [{"title": "客户统计", "headers": ["项目", "值"], "rows": [["客户", "3"]]}],
-            }
-
-    monkeypatch.setattr(admin_pages, "GetAdminFunnelPageQuery", FakeAdminFunnelPageQuery)
-
-    response = _client().get("/admin/user-ops/ui")
-
-    assert response.status_code == 200
-    assert "客户激活 / 客户列表" in response.text
-    assert "生产客户、问卷、订单和 AI 人群包统计" in response.text
-    assert "test_read_model" in response.text
+    assert response.status_code == 302
+    assert response.headers["location"] == "/admin/user-ops"
     assert "X-AICRM-Compatibility-Facade" not in response.headers
 
 

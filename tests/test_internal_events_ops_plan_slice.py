@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("composed_internal_event_registry")
+
 from fastapi.testclient import TestClient
 
 from aicrm_next.cloud_orchestrator.application import ApproveCloudPlanCommand
@@ -9,7 +13,8 @@ from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, reset_external_effect_fixture_state
 from aicrm_next.platform_foundation.internal_events import InternalEventService, reset_internal_event_fixture_state
 from aicrm_next.platform_foundation.internal_events.repository import build_internal_event_repository
-from aicrm_next.platform_foundation.internal_events.shadow import OPS_PLAN_APPROVED_EVENT_TYPE, register_shadow_event_consumers
+from aicrm_next.internal_event_composition import register_shadow_event_consumers
+from aicrm_next.platform_foundation.internal_events.shadow import OPS_PLAN_APPROVED_EVENT_TYPE
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
 
 OPS_PLAN_CONSUMERS = [
@@ -90,6 +95,7 @@ def test_ops_plan_flag_off_does_not_emit(monkeypatch) -> None:
 
 def test_ops_plan_approved_emits_once_with_expected_consumers(monkeypatch) -> None:
     _configure(monkeypatch)
+    register_shadow_event_consumers()
 
     result = _approve(operator="ops-operator")
     duplicate = _approve(operator="ops-operator")

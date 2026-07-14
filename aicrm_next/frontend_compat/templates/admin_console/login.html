@@ -96,59 +96,18 @@
       </ul>
     </section>
 
-    {% if break_glass_enabled %}
     <section class="admin-card">
       <div class="admin-card-head admin-card-head--tight">
         <div>
-          <h2>本地应急入口</h2>
-          <p>仅在企业微信登录失效或首次修复企微授权时临时使用；默认关闭，不作为主登录方式。</p>
-        </div>
-      </div>
-      <form class="admin-form-grid admin-form-grid--stacked" method="post" action="{{ url_for('api.admin_login') }}">
-        <input type="hidden" name="next" value="{{ next_path }}">
-        <input type="hidden" name="login_type" value="break_glass">
-        <label>
-          <span>应急账号</span>
-          <input type="text" name="username" placeholder="应急用户名" required>
-        </label>
-        <label>
-          <span>应急密码</span>
-          <input type="password" name="password" placeholder="应急密码" required>
-        </label>
-        <div class="admin-form-actions">
-          <button class="admin-button admin-button--secondary" type="submit">使用应急入口登录</button>
-        </div>
-      </form>
-    </section>
-    {% else %}
-    <section class="admin-card">
-      <div class="admin-card-head admin-card-head--tight">
-        <div>
-          <h2>本地应急入口状态</h2>
-          <p>本地兜底账号默认关闭且隐藏，需要显式配置后才会开放。</p>
+          <h2>统一人类身份入口</h2>
+          <p>后台仅接受企业微信 OAuth 登录，成功后由服务端 Session、RBAC、CSRF 和 Action Token 继续授权。</p>
         </div>
       </div>
       <div class="admin-state admin-state--empty">
-        <strong>当前未启用</strong>
-        <span>如需应急入口，请配置 <code>ADMIN_BREAK_GLASS_LOGIN_ENABLED</code>、<code>ADMIN_BREAK_GLASS_USERNAME</code>、<code>ADMIN_BREAK_GLASS_PASSWORD_HASH</code>；日常仍应使用企业微信登录。</span>
+        <strong>不提供本地账密入口</strong>
+        <span>请使用上方扫码或企微应用授权入口。</span>
       </div>
-      <form class="admin-form-grid admin-form-grid--stacked" method="post" action="{{ url_for('api.admin_login') }}">
-        <input type="hidden" name="next" value="{{ next_path }}">
-        <input type="hidden" name="login_type" value="break_glass">
-        <label>
-          <span>应急账号</span>
-          <input type="text" name="username" placeholder="应急用户名" disabled>
-        </label>
-        <label>
-          <span>应急密码</span>
-          <input type="password" name="password" placeholder="应急密码" disabled>
-        </label>
-        <div class="admin-form-actions">
-          <button class="admin-button admin-button--secondary" type="submit" disabled>应急入口未启用</button>
-        </div>
-      </form>
     </section>
-    {% endif %}
   </main>
 </body>
 </html>

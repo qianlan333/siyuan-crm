@@ -1,16 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from aicrm_next.integration_gateway.fake_adapters import FakeWeComDispatchAdapter
-from aicrm_next.platform_foundation.internal_events.legacy_path_markers import mark_legacy_path_invoked
-from aicrm_next.platform_foundation.internal_events.shadow import emit_broadcast_task_created_shadow_event, safe_emit
+from aicrm_next.identity_contact.dto import IdentityResolveResult, ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import classify_identity_candidates, resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.shared.errors import ContractError
 from aicrm_next.shared.postgres_connection import get_db
+from aicrm_next.shared.runtime import database_mode
 
 from .domain import clean_text, normalize_action_payload
 
@@ -37,27 +37,29 @@ def _recipient_unionid(input_data: dict[str, Any]) -> str:
     return clean_text(recipient.get("unionid") or recipient.get("unionId") or input_data.get("unionid") or input_data.get("unionId"))
 
 
-def _resolve_unionid_by_external_userid(external_userid: str) -> str:
-    external_userid = clean_text(external_userid)
-    if not external_userid:
-        return ""
-    try:
-        db = get_db()
-        row = db.execute(
-            """
-            SELECT unionid
-            FROM crm_user_identity
-            WHERE primary_external_userid = ?
-               OR jsonb_exists(external_userids_json, ?)
-            ORDER BY CASE WHEN primary_external_userid = ? THEN 0 ELSE 1 END,
-                     updated_at DESC
-            LIMIT 1
-            """,
-            (external_userid, external_userid, external_userid),
-        ).fetchone()
-    except Exception:
-        return ""
-    return clean_text((row or {}).get("unionid"))
+def _default_identity_resolver(request: ResolvePersonIdentityRequest) -> IdentityResolveResult:
+    if database_mode() == "postgres":
+        return resolve_identity_with_dbapi(get_db(), request, placeholder="?")
+    external_userid = clean_text(request.external_userid)
+    unionid = clean_text(request.unionid)
+    if not unionid and external_userid:
+        unionid = f"fixture_unionid_{hashlib.sha256(external_userid.encode('utf-8')).hexdigest()[:16]}"
+    if not unionid:
+        return IdentityResolveResult(status="not_found", reason="identity_not_found")
+    return classify_identity_candidates(
+        request,
+        [
+            {
+                "unionid": unionid,
+                "external_userid": external_userid,
+                "status": "active",
+                "matched_unionid": bool(request.unionid),
+                "matched_external_userid": bool(request.external_userid),
+                "matched_openid": False,
+                "matched_mobile": False,
+            }
+        ],
+    )
 
 
 def _recipient_snapshot(input_data: dict[str, Any]) -> dict[str, str]:
@@ -205,106 +207,7 @@ class NextOutboundMessageQueueGateway:
             ),
         ).fetchone()
         db.commit()
-        job_id = int((row or {}).get("id") or 0)
-        if job_id:
-            mark_legacy_path_invoked(
-                legacy_path="broadcast_task.legacy_group_ops_private_queue",
-                replacement_event_type="broadcast_task.created",
-                replacement_consumer="broadcast_queue_projection_consumer",
-                source_module="automation_engine.group_ops.action_dispatcher",
-                source_route="NextOutboundMessageQueueGateway.enqueue_private_message",
-                aggregate_id=command.idempotency_key,
-                reason="group_ops_private_queue_replaced_by_broadcast_task_created",
-            )
-            safe_emit(
-                "broadcast_task.created",
-                emit_broadcast_task_created_shadow_event,
-                job={
-                    "id": job_id,
-                    "source_type": "workflow",
-                    "source_table": "automation_group_ops_plans",
-                    "source_id": source_id,
-                    "idempotency_key": command.idempotency_key,
-                    "target_count": 1,
-                    "batch_key": f"group_ops:{command.plan_id}",
-                    "trace_id": command.idempotency_key,
-                    "created_by": command.created_by,
-                },
-                source_module="automation_engine.group_ops.action_dispatcher",
-                source_route="group_ops.action_dispatcher.enqueue_private_message",
-                operator=command.created_by,
-                source="group_ops_private_message",
-            )
-        return job_id
-
-
-class NextPrivateMessageTaskGateway:
-    def __init__(
-        self,
-        *,
-        mode: str | None = None,
-        fake_adapter: FakeWeComDispatchAdapter | None = None,
-        env: Callable[[str, str], str] | None = None,
-    ) -> None:
-        self._mode = clean_text(mode or os.getenv("AICRM_GROUP_OPS_PRIVATE_MESSAGE_MODE") or "real_blocked").lower()
-        self._fake_adapter = fake_adapter or FakeWeComDispatchAdapter()
-        self._env = env or os.getenv
-
-    def send_private_message(self, command: GroupOpsActionCommand) -> dict[str, Any]:
-        if self._mode == "fake":
-            result = self._fake_adapter.create_private_message_task(
-                sender_userid=command.sender,
-                external_userids=[command.external_userid],
-                content=command.content,
-            )
-            return {
-                "ok": True,
-                "status": "sent_fake",
-                "action_ref_id": clean_text(result.get("task_id")),
-                "side_effect_executed": False,
-                "wecom_result": result,
-                "error_code": "",
-                "error_message": "",
-            }
-        if self._mode in {"production", "real"}:
-            enabled = clean_text(self._env("AICRM_ENABLE_REAL_GROUP_OPS_PRIVATE_MESSAGE", "")).lower() in {"1", "true", "yes", "on"}
-            raw_action = command.action.get("raw") if isinstance(command.action.get("raw"), dict) else {}
-            approved = bool(
-                command.action.get("approved")
-                or command.action.get("approval_token")
-                or command.action.get("approved_by")
-                or raw_action.get("approved")
-                or raw_action.get("approval_token")
-                or raw_action.get("approved_by")
-            )
-            if enabled and approved:
-                return {
-                    "ok": False,
-                    "status": "blocked",
-                    "action_ref_id": "",
-                    "side_effect_executed": False,
-                    "wecom_result": {},
-                    "error_code": "real_private_message_adapter_not_configured",
-                    "error_message": "real group ops private-message adapter is not configured in Next",
-                }
-            return {
-                "ok": False,
-                "status": "blocked",
-                "action_ref_id": "",
-                "side_effect_executed": False,
-                "wecom_result": {},
-                "error_code": "real_send_guard_failed",
-                "error_message": "real group ops private-message send requires explicit enablement and approval",
-            }
-        return {
-            "ok": False,
-            "status": "blocked",
-            "action_ref_id": "",
-            "side_effect_executed": False,
-            "wecom_result": {},
-            "error_code": "real_blocked",
-            "error_message": "group ops send_message is blocked by default",
-        }
+        return int((row or {}).get("id") or 0)
 
 
 class GroupOpsActionDispatcher:
@@ -312,12 +215,12 @@ class GroupOpsActionDispatcher:
         self,
         *,
         queue_gateway: NextOutboundMessageQueueGateway | None = None,
-        private_message_gateway: NextPrivateMessageTaskGateway | None = None,
         audit: GroupOpsActionAudit | None = None,
+        identity_resolver: Callable[[ResolvePersonIdentityRequest], IdentityResolveResult] | None = None,
     ) -> None:
         self._queue_gateway = queue_gateway or NextOutboundMessageQueueGateway()
-        self._private_message_gateway = private_message_gateway or NextPrivateMessageTaskGateway()
         self._audit = audit or GroupOpsActionAudit()
+        self._identity_resolver = identity_resolver or _default_identity_resolver
 
     def dispatch(self, input_data: dict[str, Any]) -> dict[str, Any]:
         action = normalize_action_payload(input_data.get("action"), default_action_type="record_only")
@@ -326,7 +229,7 @@ class GroupOpsActionDispatcher:
         if action_type == "record_only":
             audit = self._audit.record(command=command, action_type=action_type, status="recorded", side_effect_executed=False)
             return {"ok": True, "status": "recorded", "action_ref_id": "", "side_effect_executed": False, "audit": audit}
-        if action_type in {"enqueue", "publish_task"}:
+        if action_type in {"enqueue", "publish_task", "send_message"}:
             queued = self._queue_gateway.enqueue_private_message(command)
             audit = self._audit.record(command=command, action_type=action_type, status=queued["status"], side_effect_executed=False, detail=queued)
             return {
@@ -335,20 +238,6 @@ class GroupOpsActionDispatcher:
                 "action_ref_id": str(queued.get("job_id") or ""),
                 "side_effect_executed": False,
                 "audit": audit,
-            }
-        if action_type == "send_message":
-            result = self._private_message_gateway.send_private_message(command)
-            audit = self._audit.record(
-                command=command,
-                action_type=action_type,
-                status=result["status"],
-                side_effect_executed=bool(result.get("side_effect_executed")),
-                detail={key: value for key, value in result.items() if key not in {"wecom_result"}},
-            )
-            return {
-                **result,
-                "audit": audit,
-                "recipient": command.recipient,
             }
         if action_type == "add_to_audience":
             audit = self._audit.record(command=command, action_type=action_type, status="added", side_effect_executed=False)
@@ -376,7 +265,15 @@ class GroupOpsActionDispatcher:
         external_userid = _recipient_external_userid(input_data)
         if not external_userid and action["action_type"] in {"enqueue", "publish_task", "send_message"}:
             raise ContractError(f"external_user_id is required for {action['action_type']}")
-        unionid = _recipient_unionid(input_data) or _resolve_unionid_by_external_userid(external_userid)
+        resolution = self._identity_resolver(
+            ResolvePersonIdentityRequest(
+                unionid=_recipient_unionid(input_data) or None,
+                external_userid=external_userid or None,
+            )
+        )
+        unionid = resolved_unionid(resolution)
+        if action["action_type"] in {"enqueue", "publish_task", "send_message"} and not unionid:
+            raise ContractError("identity_pending_unionid")
         content = clean_text(action.get("content"))
         if action["action_type"] == "send_message" and not content:
             raise ContractError("content is required for send_message")

@@ -28,8 +28,6 @@ from .automation_engine.api import router as automation_router
 from .automation_engine.channel_admin_pages import router as channel_admin_pages_router
 from .automation_engine.channels_api import router as automation_channels_router
 from .automation_engine.group_ops.admin_pages import router as group_ops_admin_pages_router
-from .automation_engine.group_ops.draft_api import router as group_ops_draft_api_router
-from .automation_engine.group_ops.governance_api import router as group_ops_governance_api_router
 from .auth_wecom.api import router as auth_wecom_router
 from .channel_entry.api import router as channel_entry_router
 from .class_user_management.api import router as class_user_management_router
@@ -57,9 +55,9 @@ from .ops_enrollment.admin_pages import router as user_ops_admin_pages_router
 from .ops_enrollment.api import router as user_ops_router
 from .owner_migration.api import router as owner_migration_router
 from .platform_foundation.api import router as platform_router
+from .platform_foundation.auth_platform.api import router as auth_platform_router
 from .platform_foundation.external_effects.api import router as external_effects_router
 from .platform_foundation.internal_events.api import router as internal_events_router
-from .platform_foundation.legacy_cleanup.api import router as legacy_cleanup_router
 from .platform_foundation.push_center.api import router as push_center_router
 from .platform_foundation.verification_files import router as verification_files_router
 from .platform_foundation.webhook_inbox.api import router as webhook_inbox_router
@@ -83,8 +81,8 @@ class RouterSpec:
 
 ROUTER_SPECS: tuple[RouterSpec, ...] = (
     RouterSpec("platform_foundation", "platform", platform_router, "foundation health and shell contracts"),
+    RouterSpec("platform_foundation", "auth_platform", auth_platform_router, "unified OAuth 2.0 and OIDC platform"),
     RouterSpec("platform_foundation", "external_effects", external_effects_router, "external effects job/admin APIs"),
-    RouterSpec("platform_foundation", "legacy_cleanup", legacy_cleanup_router, "legacy cleanup read/command APIs"),
     RouterSpec("platform_foundation", "internal_events", internal_events_router, "internal event center APIs"),
     RouterSpec("platform_foundation", "push_center", push_center_router, "push center APIs"),
     RouterSpec("platform_foundation", "webhook_inbox", webhook_inbox_router, "webhook inbox metrics and operations APIs"),
@@ -124,8 +122,6 @@ ROUTER_SPECS: tuple[RouterSpec, ...] = (
     RouterSpec("radar_links", "radar_links", radar_links_router),
     RouterSpec("auth_wecom", "auth_wecom", auth_wecom_router),
     RouterSpec("automation_engine", "group_ops_admin_pages", group_ops_admin_pages_router),
-    RouterSpec("automation_engine", "group_ops_draft_api", group_ops_draft_api_router, "P1 Group Ops workspace draft persistence APIs"),
-    RouterSpec("automation_engine", "group_ops_governance_api", group_ops_governance_api_router, "P1 Group Ops workspace governance request/read/step APIs"),
     RouterSpec("ai_audience_ops", "ai_audience_admin_pages", ai_audience_admin_pages_router, "AI audience admin package list page"),
     RouterSpec("ai_audience_ops", "ai_audience_admin_api", ai_audience_admin_api_router, "AI audience admin read APIs"),
     RouterSpec("ai_audience_ops", "ai_audience_external_api", ai_audience_external_api_router, "AI audience external package spec APIs"),

@@ -7,8 +7,6 @@ from fastapi import APIRouter, Body, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse
 
-from .e2e_runner import AudienceRealE2ERunner
-from .external_auth import external_spec_auth_error
 from .package_spec import package_payload_from_spec, parse_markdown_spec_text, validate_spec
 from .repository import build_audience_repository, _text
 from .schemas import SimpleSqlApplyRequest, SimpleSqlPreviewRequest
@@ -27,50 +25,88 @@ _HEADERS = {
 
 @router.post("/api/external/ai-audience/spec/dry-run", name="api.external_ai_audience_spec_dry_run")
 def external_ai_audience_spec_dry_run(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     result = _dry_run(payload, repo=repo)
-    _audit(repo, operator=_operator(payload), action_type="external_spec_dry_run", package_key=_text(result.get("package_key")), before=_audit_before(payload), after=result)
+    _audit(
+        repo,
+        operator=_operator(payload),
+        action_type="external_spec_dry_run",
+        package_key=_text(result.get("package_key")),
+        before=_audit_before(payload),
+        after=result,
+    )
     return _response(result, status_code=403 if result.get("error") == "unsafe_package_key_prefix" else 200)
 
 
 @router.post("/api/external/ai-audience/spec/apply", name="api.external_ai_audience_spec_apply")
 def external_ai_audience_spec_apply(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     dry = _dry_run(payload, repo=repo)
     if not dry.get("ok"):
-        _audit(repo, operator=_operator(payload), action_type="external_spec_apply_rejected", package_key=_text(dry.get("package_key")), before=_audit_before(payload), after=dry)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_spec_apply_rejected",
+            package_key=_text(dry.get("package_key")),
+            before=_audit_before(payload),
+            after=dry,
+        )
         return _response(dry, status_code=403 if dry.get("error") == "unsafe_package_key_prefix" else 400)
     if bool(payload.get("publish")) and not _allow_publish():
         result = {**dry, "ok": False, "error": "publish_not_allowed", "published": False}
-        _audit(repo, operator=_operator(payload), action_type="external_spec_apply_rejected", package_key=_text(dry.get("package_key")), before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_spec_apply_rejected",
+            package_key=_text(dry.get("package_key")),
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=403)
     result = _apply(payload, dry, repo=repo, publish=bool(payload.get("publish")))
-    _audit(repo, operator=_operator(payload), action_type="external_spec_apply", package_key=_text(result.get("package_key")), before=_audit_before(payload), after=result)
+    _audit(
+        repo,
+        operator=_operator(payload),
+        action_type="external_spec_apply",
+        package_key=_text(result.get("package_key")),
+        before=_audit_before(payload),
+        after=result,
+    )
     return _response(result)
 
 
 @router.post("/api/external/ai-audience/spec/publish", name="api.external_ai_audience_spec_publish")
 def external_ai_audience_spec_publish(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     package_key = _text(payload.get("package_key"))
     if gate := _prefix_gate_error(package_key):
         result = {"ok": False, "error": gate, "package_key": package_key, "published": False}
-        _audit(repo, operator=_operator(payload), action_type="external_spec_publish_rejected", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_spec_publish_rejected",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=403)
     if not _allow_publish():
         result = {"ok": False, "error": "publish_not_allowed", "package_key": package_key, "published": False}
-        _audit(repo, operator=_operator(payload), action_type="external_spec_publish_rejected", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_spec_publish_rejected",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=403)
     package = repo.get_package_by_key(package_key)
     if not package:
         result = {"ok": False, "error": "package_not_found", "package_key": package_key, "published": False}
-        _audit(repo, operator=_operator(payload), action_type="external_spec_publish_failed", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo, operator=_operator(payload), action_type="external_spec_publish_failed", package_key=package_key, before=_audit_before(payload), after=result
+        )
         return _response(result, status_code=404)
     service = AudiencePackageService(repository=repo)
     result = service.publish_external_package(int(package["id"]), version_id=payload.get("version_id"))
@@ -90,18 +126,25 @@ def external_ai_audience_spec_publish(request: Request, payload: dict[str, Any] 
 
 @router.post("/api/external/ai-audience/packages/{package_key}/archive", name="api.external_ai_audience_package_archive")
 def external_ai_audience_package_archive(package_key: str, request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     package_key = _text(package_key)
     if gate := _prefix_gate_error(package_key):
         result = {"ok": False, "error": gate, "package_key": package_key, "archived": False}
-        _audit(repo, operator=_operator(payload), action_type="external_spec_archive_rejected", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_spec_archive_rejected",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=403)
     package = repo.get_package_by_key(package_key)
     if not package:
         result = {"ok": False, "error": "package_not_found", "package_key": package_key, "archived": False}
-        _audit(repo, operator=_operator(payload), action_type="external_spec_archive_failed", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo, operator=_operator(payload), action_type="external_spec_archive_failed", package_key=package_key, before=_audit_before(payload), after=result
+        )
         return _response(result, status_code=404)
     archived = AudiencePackageService(repository=repo).archive_admin_package(int(package["id"]))
     result = {
@@ -118,10 +161,17 @@ def external_ai_audience_package_archive(package_key: str, request: Request, pay
 
 @router.post("/api/external/ai-audience/e2e/run", name="api.external_ai_audience_e2e_run")
 def external_ai_audience_e2e_run(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
-    result = AudienceRealE2ERunner(repository=repo).run(payload)
+    runner_factory = getattr(request.app.state, "ai_audience_e2e_runner_factory", None)
+    if runner_factory is None:
+        result = {
+            "ok": False,
+            "error": "e2e_runner_composition_unavailable",
+            "status_code": 503,
+            "real_external_call_executed": False,
+        }
+    else:
+        result = runner_factory(repository=repo).run(payload)
     _audit(
         repo,
         operator=_operator(payload),
@@ -135,42 +185,71 @@ def external_ai_audience_e2e_run(request: Request, payload: dict[str, Any] = Bod
 
 @router.post("/api/external/ai-audience/simple/preview", name="api.external_ai_audience_simple_preview")
 def external_ai_audience_simple_preview(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     result = _simple_preview(payload, repo=repo)
-    _audit(repo, operator=_operator(payload), action_type="external_simple_preview", package_key=_text(result.get("package_key")), before=_audit_before(payload), after=result)
+    _audit(
+        repo,
+        operator=_operator(payload),
+        action_type="external_simple_preview",
+        package_key=_text(result.get("package_key")),
+        before=_audit_before(payload),
+        after=result,
+    )
     return _response(result, status_code=403 if result.get("error") == "unsafe_package_key_prefix" else 200)
 
 
 @router.post("/api/external/ai-audience/simple/apply", name="api.external_ai_audience_simple_apply")
 def external_ai_audience_simple_apply(request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     preview = _simple_preview(payload, repo=repo)
     if not preview.get("ok"):
-        _audit(repo, operator=_operator(payload), action_type="external_simple_apply_rejected", package_key=_text(preview.get("package_key")), before=_audit_before(payload), after=preview)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_simple_apply_rejected",
+            package_key=_text(preview.get("package_key")),
+            before=_audit_before(payload),
+            after=preview,
+        )
         return _response(preview, status_code=403 if preview.get("error") == "unsafe_package_key_prefix" else 400)
     result = _simple_apply(payload, preview, repo=repo)
-    _audit(repo, operator=_operator(payload), action_type="external_simple_apply", package_key=_text(result.get("package_key")), before=_audit_before(payload), after=result)
+    _audit(
+        repo,
+        operator=_operator(payload),
+        action_type="external_simple_apply",
+        package_key=_text(result.get("package_key")),
+        before=_audit_before(payload),
+        after=result,
+    )
     return _response(result)
 
 
 @router.post("/api/external/ai-audience/simple/{package_key}/activate", name="api.external_ai_audience_simple_activate")
 def external_ai_audience_simple_activate(package_key: str, request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     package_key = _text(package_key)
     if gate := _prefix_gate_error(package_key):
         result = {"ok": False, "error": gate, "package_key": package_key, "activated": False}
-        _audit(repo, operator=_operator(payload), action_type="external_simple_activate_rejected", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_simple_activate_rejected",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=403)
     package = repo.get_package_by_key(package_key)
     if not package:
         result = {"ok": False, "error": "package_not_found", "package_key": package_key, "activated": False}
-        _audit(repo, operator=_operator(payload), action_type="external_simple_activate_failed", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_simple_activate_failed",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=404)
     activated = AudiencePackageService(repository=repo).activate_admin_package(int(package["id"]))
     result = {
@@ -188,18 +267,30 @@ def external_ai_audience_simple_activate(package_key: str, request: Request, pay
 
 @router.post("/api/external/ai-audience/simple/{package_key}/archive", name="api.external_ai_audience_simple_archive")
 def external_ai_audience_simple_archive(package_key: str, request: Request, payload: dict[str, Any] = Body(default_factory=dict)) -> JSONResponse:
-    if auth := external_spec_auth_error(request):
-        return auth
     repo = build_audience_repository()
     package_key = _text(package_key)
     if gate := _prefix_gate_error(package_key):
         result = {"ok": False, "error": gate, "package_key": package_key, "archived": False}
-        _audit(repo, operator=_operator(payload), action_type="external_simple_archive_rejected", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_simple_archive_rejected",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=403)
     package = repo.get_package_by_key(package_key)
     if not package:
         result = {"ok": False, "error": "package_not_found", "package_key": package_key, "archived": False}
-        _audit(repo, operator=_operator(payload), action_type="external_simple_archive_failed", package_key=package_key, before=_audit_before(payload), after=result)
+        _audit(
+            repo,
+            operator=_operator(payload),
+            action_type="external_simple_archive_failed",
+            package_key=package_key,
+            before=_audit_before(payload),
+            after=result,
+        )
         return _response(result, status_code=404)
     archived = AudiencePackageService(repository=repo).archive_admin_package(int(package["id"]))
     result = {
@@ -328,7 +419,12 @@ def _simple_apply(payload: dict[str, Any], preview: dict[str, Any], *, repo) -> 
     else:
         created_result = service.create_admin_package(package_payload)
         if not created_result.get("ok"):
-            return {**preview, "ok": False, "error": created_result.get("error", "package_create_failed"), "validation_errors": created_result.get("validation_errors", [])}
+            return {
+                **preview,
+                "ok": False,
+                "error": created_result.get("error", "package_create_failed"),
+                "validation_errors": created_result.get("validation_errors", []),
+            }
         package_id = int((created_result.get("package") or {}).get("id") or 0)
         version = {"ok": True, "version": created_result.get("version")}
         created = True
@@ -338,7 +434,14 @@ def _simple_apply(payload: dict[str, Any], preview: dict[str, Any], *, repo) -> 
         return {**preview, "ok": False, "package_id": package_id, "version_id": version_id or None, "validation_errors": version.get("validation_errors", [])}
     published = service.publish_external_package(package_id, version_id=version_id)
     if not published.get("ok"):
-        return {**preview, "ok": False, "package_id": package_id, "version_id": version_id, "error": published.get("error", "publish_failed"), "validation_errors": published.get("validation_errors", [])}
+        return {
+            **preview,
+            "ok": False,
+            "package_id": package_id,
+            "version_id": version_id,
+            "error": published.get("error", "publish_failed"),
+            "validation_errors": published.get("validation_errors", []),
+        }
     _apply_simple_webhook_and_senders(service, package_id, request)
     return {
         **preview,
@@ -379,7 +482,12 @@ def _apply(payload: dict[str, Any], dry: dict[str, Any], *, repo, publish: bool)
     else:
         created_result = service.create_admin_package(package_payload)
         if not created_result.get("ok"):
-            return {**dry, "ok": False, "error": created_result.get("error", "package_create_failed"), "validation_errors": created_result.get("validation_errors", [])}
+            return {
+                **dry,
+                "ok": False,
+                "error": created_result.get("error", "package_create_failed"),
+                "validation_errors": created_result.get("validation_errors", []),
+            }
         package_id = int((created_result.get("package") or {}).get("id") or 0)
         version = {"ok": True, "version": created_result.get("version")}
         created = True
@@ -418,7 +526,6 @@ def _apply_webhook_and_senders(service: AudiencePackageService, package_id: int,
             {
                 "outbound_enabled": bool(webhook.get("outbound_enabled")),
                 "outbound_webhook_url": _text(webhook.get("outbound_webhook_url")),
-                "outbound_signing_secret": _text(webhook.get("outbound_signing_secret")),
             },
         )
     senders = spec.frontmatter.get("senders") if isinstance(spec.frontmatter.get("senders"), list) else []
@@ -483,7 +590,6 @@ def _apply_simple_webhook_and_senders(service: AudiencePackageService, package_i
         {
             "outbound_enabled": bool(webhook_url),
             "outbound_webhook_url": webhook_url,
-            "outbound_signing_secret": "",
         },
     )
     service.replace_admin_senders(

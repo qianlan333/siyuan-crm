@@ -11,7 +11,8 @@ def _client() -> TestClient:
     return TestClient(create_app(), raise_server_exceptions=False)
 
 
-def test_questionnaire_h5_submit_resolves_identity_into_result_contract():
+def test_questionnaire_h5_submit_resolves_identity_into_result_contract(monkeypatch):
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     client = _client()
 
     response = client.post(
@@ -31,8 +32,9 @@ def test_questionnaire_h5_submit_resolves_identity_into_result_contract():
     assert payload["real_external_call_executed"] is False
     assert payload["external_userid"] == "wx_ext_001"
     assert payload["mobile"] == "13800138000"
+    assert "result_access_token" not in payload
 
-    result = client.get(f"/api/h5/questionnaires/hxc-activation-v1/result/{payload['result_access_token']}")
+    result = client.get("/api/h5/questionnaires/hxc-activation-v1/result")
     assert result.status_code == 200
     assert result.json()["result"]["submission_id"] == payload["submission_id"]
 

@@ -23,6 +23,9 @@ JOB_DISPLAY_FIELDS = [
     "trace_id",
     "idempotency_key",
     "attempt_count",
+    "side_effect_executed",
+    "provider_result_received",
+    "reconciliation_required",
     "last_error_code",
     "last_error_message",
     "created_at",
@@ -37,8 +40,10 @@ EXPECTED_INDEXES = [
     "idx_external_effect_job_effect_type",
     "idx_external_effect_attempt_job",
     "idx_external_effect_attempt_trace",
+    "idx_external_effect_job_lease_due",
+    "idx_external_effect_job_reconciliation",
 ]
-PROBLEM_STATUSES = {"failed_retryable", "failed_terminal", "blocked", "dispatching"}
+PROBLEM_STATUSES = {"failed_retryable", "failed_terminal", "blocked", "dispatching", "unknown_after_dispatch"}
 REDACTED = SECRET_MASK
 SENSITIVE_KEY_FRAGMENTS = (
     "authorization",
@@ -160,10 +165,17 @@ def external_effect_job_list_item(job: ExternalEffectJob) -> dict[str, Any]:
         "next_retry_at": job.next_retry_at,
         "locked_at": job.locked_at,
         "locked_by": _safe_value(job.locked_by, key="locked_by"),
+        "lease_expires_at": job.lease_expires_at,
+        "dispatch_started_at": job.dispatch_started_at,
+        "side_effect_executed": job.side_effect_executed,
+        "provider_result_received": job.provider_result_received,
+        "reconciliation_required": job.reconciliation_required,
+        "result_summary_json": redact_external_effect_payload(dict(job.result_summary_json or {})),
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "approved_at": job.approved_at,
         "executed_at": job.executed_at,
+        "completed_at": job.completed_at,
         "cancelled_at": job.cancelled_at,
         "payload_summary_json": redact_external_effect_payload(dict(job.payload_summary_json or {})),
         "payload_redacted": True,
@@ -201,7 +213,7 @@ def external_effect_receipt_item(receipt: ExternalEffectTestReceipt) -> dict[str
     return {
         "id": receipt.id,
         "receipt_id": _safe_value(receipt.receipt_id, key="receipt_id"),
-        "receiver_token": REDACTED if receipt.receiver_token else "",
+        "event_id": _safe_value(receipt.event_id, key="event_id"),
         "job_id": receipt.job_id,
         "effect_type": receipt.effect_type,
         "trace_id": _safe_value(receipt.trace_id, key="trace_id"),
@@ -355,6 +367,8 @@ def _problem_label(job: ExternalEffectJob) -> str:
         return "terminal_failure"
     if job.status == "blocked":
         return "blocked_by_policy"
+    if job.status == "unknown_after_dispatch":
+        return "provider_outcome_requires_reconciliation"
     if job.status == "dispatching":
         return "possibly_stuck_dispatching"
     if job.last_error_code or job.last_error_message:
@@ -409,7 +423,7 @@ def build_troubleshooting_summary_payload(
     counts = service.count_jobs(base_filters)
     queue_metrics = service.queue_metrics(base_filters)
     by_status = dict(counts.get("by_status") or {})
-    problem_count = sum(int(by_status.get(status, 0) or 0) for status in ("failed_retryable", "failed_terminal", "blocked"))
+    problem_count = sum(int(by_status.get(status, 0) or 0) for status in PROBLEM_STATUSES)
     return {
         "ok": True,
         "route_owner": ROUTE_OWNER,

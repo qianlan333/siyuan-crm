@@ -9,8 +9,8 @@
       "ci_scope": "admin_auth_security",
       "real_external_call_expected": false,
       "contracts": {
-        "success": "tests/test_admin_auth_login_submit.py::test_break_glass_success_sets_next_cookie_and_redirects_safe_next",
-        "failure": "tests/test_admin_auth_login_submit.py::test_invalid_or_disabled_break_glass_login_is_controlled",
+        "success": "tests/test_auth_wecom_real_flow.py::test_real_wecom_auth_start_and_callback_issues_opaque_admin_session",
+        "failure": "tests/test_admin_auth_login_submit.py::test_local_password_login_route_is_absent_and_cannot_issue_session",
         "replay_or_concurrency": "tests/test_questionnaire_oauth_state_security.py::test_oauth_state_replay_is_rejected"
       }
     },
@@ -28,23 +28,23 @@
     {
       "domain": "payment",
       "owner": "commerce/platform_foundation",
-      "ci_scope": "ci_deploy",
+      "ci_scope": "commerce_fulfillment_reliability",
       "real_external_call_expected": false,
       "contracts": {
-        "success": "tests/test_internal_events_payment_slice.py::test_payment_success_emits_payment_succeeded_and_duplicate_notify_is_idempotent",
-        "failure": "tests/test_internal_events_payment_slice.py::test_webhook_order_paid_consumer_skips_when_no_configured_job_or_production_config",
+        "success": "tests/test_r08_commerce_fulfillment_postgres.py::test_payment_state_and_unique_outbox_share_one_postgres_transaction",
+        "failure": "tests/test_r08_commerce_fulfillment_postgres.py::test_external_push_delivery_and_effect_job_are_atomic_and_idempotent",
         "replay_or_concurrency": "tests/test_internal_events_single_consumer_run.py::test_repeated_webhook_single_consumer_does_not_duplicate_external_effect_job"
       }
     },
     {
       "domain": "refund_entitlement",
       "owner": "commerce/service_period",
-      "ci_scope": "commerce",
+      "ci_scope": "commerce_fulfillment_reliability",
       "real_external_call_expected": false,
       "contracts": {
-        "success": "tests/test_next_wechat_pay_refunds.py::test_next_postgres_refund_result_updates_order_once",
-        "failure": "tests/test_next_wechat_pay_refunds.py::test_next_postgres_refund_does_not_call_wechat_pay_when_client_would_reject",
-        "replay_or_concurrency": "tests/test_next_wechat_pay_refunds.py::test_next_postgres_refund_result_is_idempotent_when_already_success"
+        "success": "tests/test_r08_commerce_fulfillment_postgres.py::test_entitlement_recovers_after_unionid_backfill_and_refund_retry_is_idempotent",
+        "failure": "tests/test_r08_commerce_fulfillment_postgres.py::test_refund_success_and_outbox_are_atomic_and_duplicate_notify_does_not_double_count",
+        "replay_or_concurrency": "tests/test_r08_commerce_fulfillment_postgres.py::test_refund_request_rolls_back_on_effect_fault_and_concurrent_requests_cannot_overspend"
       }
     },
     {
@@ -64,9 +64,20 @@
       "ci_scope": "broadcast_group_ops",
       "real_external_call_expected": false,
       "contracts": {
-        "success": "tests/test_group_ops_token_broadcast_api.py::test_group_ops_broadcast_sends_text_only",
-        "failure": "tests/test_group_ops_token_broadcast_api.py::test_group_ops_broadcast_requires_internal_bearer_token",
-        "replay_or_concurrency": "tests/test_group_ops_token_broadcast_api.py::test_group_ops_broadcast_idempotency_does_not_send_twice"
+        "success": "tests/test_group_ops_single_path_planning.py::test_send_message_enqueues_one_private_broadcast_job",
+        "failure": "tests/test_group_ops_single_path_planning.py::test_scheduler_planner_failure_produces_non_success_summary",
+        "replay_or_concurrency": "tests/test_group_ops_scheduler_postgres_concurrency.py::test_concurrent_group_ops_schedulers_create_exactly_one_external_effect"
+      }
+    },
+    {
+      "domain": "broadcast_delivery",
+      "owner": "background_jobs",
+      "ci_scope": "broadcast_group_ops",
+      "real_external_call_expected": false,
+      "contracts": {
+        "success": "tests/test_broadcast_queue_worker_postgres_state_machine.py::test_claim_begin_and_atomic_success_finalization_keep_all_projections_aligned",
+        "failure": "tests/test_broadcast_queue_worker_postgres_faults.py::test_finalization_fault_rolls_back_outbound_evidence_and_terminal_projections",
+        "replay_or_concurrency": "tests/test_broadcast_queue_worker_postgres_faults.py::test_worker_marks_post_provider_finalization_failure_unknown_and_never_resends"
       }
     },
     {

@@ -5,12 +5,11 @@ import json
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, time, timezone, timedelta
-from typing import Any, Callable
+from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aicrm_next.shared.errors import ContractError
 
-from .duplicate_checker import build_group_ops_duplicate_checker
 from .domain import build_node_group_message_content, clean_text, derive_node_scheduled_time
 from .external_effects import GROUP_OPS_MESSAGE_LOOPBACK, plan_group_ops_external_effect
 from .integration_gateway import resolve_group_ops_content_package_materials
@@ -73,10 +72,6 @@ def _content_hash(payload: dict[str, Any]) -> str:
     return _stable_hash(payload_for_hash, length=16)
 
 
-def _default_duplicate_checker(idempotency_key: str) -> bool:
-    return build_group_ops_duplicate_checker().exists(idempotency_key)
-
-
 @dataclass
 class GroupOpsSchedulerSummary:
     scanned_at: str
@@ -84,6 +79,7 @@ class GroupOpsSchedulerSummary:
     group_ops_due_nodes: int = 0
     group_ops_enqueued_jobs: int = 0
     group_ops_external_effect_jobs: int = 0
+    group_ops_reused_external_effect_jobs: int = 0
     group_ops_skipped_future: int = 0
     group_ops_skipped_duplicate: int = 0
     errors: list[dict[str, Any]] = field(default_factory=list)
@@ -95,6 +91,7 @@ class GroupOpsSchedulerSummary:
             "group_ops_due_nodes": self.group_ops_due_nodes,
             "group_ops_enqueued_jobs": self.group_ops_enqueued_jobs,
             "group_ops_external_effect_jobs": self.group_ops_external_effect_jobs,
+            "group_ops_reused_external_effect_jobs": self.group_ops_reused_external_effect_jobs,
             "group_ops_skipped_future": self.group_ops_skipped_future,
             "group_ops_skipped_duplicate": self.group_ops_skipped_duplicate,
             "errors": self.errors,
@@ -106,10 +103,8 @@ class GroupOpsDueScheduler:
         self,
         *,
         repo: GroupOpsRepository | None = None,
-        duplicate_checker: Callable[[str], bool] | None = None,
     ) -> None:
         self._repo = repo
-        self._duplicate_checker = duplicate_checker or _default_duplicate_checker
 
     def run_due(self, *, now: datetime | None = None, operator: str = "automation_ops_scheduler") -> dict[str, Any]:
         current_time = now or datetime.now(timezone.utc)
@@ -211,12 +206,8 @@ class GroupOpsDueScheduler:
             source_id = f"{int(plan['id'])}:node:{int(node['id'])}:due:{_minute_key(due_at)}:groups:{chat_hash}"
             scheduled_at = due_at.isoformat(timespec="seconds")
             idempotency_key = f"group_ops:{source_id}:{scheduled_at}"
-            if self._duplicate_checker(idempotency_key):
-                summary.group_ops_skipped_duplicate += 1
-                continue
             content_payload = dict(base_payload)
             content_payload["chat_ids"] = chat_ids
-            outbound_mode = "external_effect"
             planned = plan_group_ops_external_effect(
                 effect_type=GROUP_OPS_MESSAGE_LOOPBACK,
                 plan_id=int(plan["id"]),
@@ -232,21 +223,22 @@ class GroupOpsDueScheduler:
                 source_route="group_ops_due_scheduler",
                 source_command_id=source_id,
                 idempotency_key=idempotency_key,
-                outbound_mode=outbound_mode,
                 scheduled_at=scheduled_at,
             )
             if planned and int(planned.get("id") or 0):
-                summary.group_ops_external_effect_jobs += 1
+                if planned.get("created_on_plan") is False:
+                    summary.group_ops_reused_external_effect_jobs += 1
+                    summary.group_ops_skipped_duplicate += 1
+                else:
+                    summary.group_ops_external_effect_jobs += 1
 
 
 def run_group_ops_due_scheduler(
     *,
     repo: GroupOpsRepository | None = None,
-    duplicate_checker: Callable[[str], bool] | None = None,
     now: datetime | None = None,
     operator: str = "automation_ops_scheduler",
 ) -> dict[str, Any]:
     return GroupOpsDueScheduler(
         repo=repo,
-        duplicate_checker=duplicate_checker,
     ).run_due(now=now, operator=operator)

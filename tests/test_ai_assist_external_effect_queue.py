@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from aicrm_next.external_effect_composition import build_external_effect_adapter_registry
+import json
 from urllib.parse import urlparse
 
 from fastapi.testclient import TestClient
@@ -20,6 +22,8 @@ from aicrm_next.platform_foundation.external_effects import (
 )
 from aicrm_next.platform_foundation.external_effects.adapters import DEFAULT_ADAPTER_REGISTRY, WebhookAdapter
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
+from aicrm_next.platform_foundation.auth_platform.webhook_hmac import WebhookHmacSigner
+from tests.webhook_hmac_test_helpers import install_webhook_hmac_client
 
 
 def _reset_fixture_state() -> None:
@@ -30,14 +34,22 @@ def _reset_fixture_state() -> None:
 
 def _install_loopback_http_adapter(monkeypatch, client: TestClient) -> list[dict]:
     calls: list[dict] = []
+    credentials = install_webhook_hmac_client(
+        client,
+        capability="external_effect_receipt_receive",
+        client_id="pytest-aicrm-outbound",
+    )
+    signer = WebhookHmacSigner(client_id=credentials.client_id, secret=credentials.secret)
 
-    def loopback_post(url, *, json, headers, timeout):
-        calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
+    def loopback_post(url, *, data, headers, timeout):
+        calls.append({"url": url, "json": json.loads(data.decode("utf-8")), "headers": headers, "timeout": timeout})
         parsed = urlparse(url)
-        return client.post(parsed.path, json=json, headers=headers)
+        with monkeypatch.context() as route_policy:
+            route_policy.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+            return client.post(parsed.path, content=data, headers=headers)
 
-    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "outbound_webhook", WebhookAdapter(http_post=loopback_post))  # type: ignore[attr-defined]
-    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "webhook", WebhookAdapter(http_post=loopback_post))  # type: ignore[attr-defined]
+    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "outbound_webhook", WebhookAdapter(http_post=loopback_post, signer=signer))  # type: ignore[attr-defined]
+    monkeypatch.setitem(DEFAULT_ADAPTER_REGISTRY._adapters, "webhook", WebhookAdapter(http_post=loopback_post, signer=signer))  # type: ignore[attr-defined]
     return calls
 
 
@@ -120,7 +132,7 @@ def test_ai_assist_campaign_loopback_execute_succeeds_with_test_receiver(next_cl
     assert job.status == "queued"
     assert job.execution_mode == "execute"
     assert job.payload_json["execution_scope"] == "test_loopback"
-    assert job.payload_json["webhook_url"].startswith("https://crm.example.test/api/external-effects/test-receiver/")
+    assert job.payload_json["webhook_url"] == "https://crm.example.test/api/external-effects/test-receiver"
 
     preview = ExternalEffectWorker().preview_due(batch_size=1, effect_types=[AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK], test_only=True)
     dry_run = ExternalEffectWorker().run_due(batch_size=1, dry_run=True, effect_types=[AI_ASSIST_CAMPAIGN_MESSAGE_LOOPBACK], test_only=True)
@@ -149,7 +161,6 @@ def test_ai_assist_campaign_loopback_execute_succeeds_with_test_receiver(next_cl
 
 def test_ai_assist_campaign_run_due_api_injects_current_host_loopback_url(next_client: TestClient, monkeypatch) -> None:
     _reset_fixture_state()
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_TEST_RECEIVER_ENABLED", "1")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY", "1")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE", "1")
@@ -177,13 +188,12 @@ def test_ai_assist_campaign_run_due_api_injects_current_host_loopback_url(next_c
     assert body["real_external_call_executed"] is False
     assert body["wecom_send_executed"] is False
     assert job is not None
-    assert job.payload_json["webhook_url"].startswith("https://crm.example.test/api/external-effects/test-receiver/")
+    assert job.payload_json["webhook_url"] == "https://crm.example.test/api/external-effects/test-receiver"
     assert "attacker.example.com" not in job.payload_json["webhook_url"]
 
 
 def test_ai_assist_campaign_run_due_api_env_test_mode_injects_loopback_url(next_client: TestClient, monkeypatch) -> None:
     _reset_fixture_state()
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     monkeypatch.setenv("AI_ASSIST_EXTERNAL_EFFECT_TEST_MODE", "1")
 
     response = next_client.post(
@@ -206,7 +216,7 @@ def test_ai_assist_campaign_run_due_api_env_test_mode_injects_loopback_url(next_
     assert job.status == "queued"
     assert job.execution_mode == "execute"
     assert job.payload_json["execution_scope"] == "test_loopback"
-    assert job.payload_json["webhook_url"].startswith("https://crm.example.test/api/external-effects/test-receiver/")
+    assert job.payload_json["webhook_url"] == "https://crm.example.test/api/external-effects/test-receiver"
 
 
 def test_ai_assist_campaign_loopback_allowlist_miss_blocks_without_receipt(next_client: TestClient, monkeypatch) -> None:
@@ -233,10 +243,10 @@ def test_ai_assist_campaign_loopback_allowlist_miss_blocks_without_receipt(next_
     attempts = service.list_attempts(job_id)
     receipts, total = service.list_test_receipts({"job_id": job_id}, limit=10)
 
-    assert blocked["counts"]["failed_count"] == 1
+    assert blocked["counts"]["blocked_count"] == 1
     assert blocked["real_external_call_executed"] is False
     assert updated is not None
-    assert updated.status == "failed_terminal"
+    assert updated.status == "blocked"
     assert attempts[0].error_code == "effect_type_not_allowed"
     assert calls == []
     assert receipts == []
@@ -276,7 +286,7 @@ def test_ai_assist_campaign_run_due_wecom_private_mode_creates_approval_gated_ex
     assert job.payload_json["content_text"] == "fixture hello"
 
 
-def test_wecom_private_external_effect_default_executes_without_wecom_gate(monkeypatch) -> None:
+def test_wecom_private_external_effect_default_is_blocked_without_typed_gate(monkeypatch) -> None:
     _reset_fixture_state()
     monkeypatch.setenv("AI_ASSIST_EXTERNAL_EFFECT_SEND_MODE", "wecom_private")
     monkeypatch.setenv("AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS", "HuangYouCan")
@@ -308,13 +318,13 @@ def test_wecom_private_external_effect_default_executes_without_wecom_gate(monke
     updated = ExternalEffectService().get(job_id)
     attempts = ExternalEffectService().list_attempts(job_id)
 
-    assert result["counts"]["succeeded_count"] == 1
-    assert result["real_external_call_executed"] is True
-    assert len(calls) == 1
-    assert calls[0]["payload"]["sender"] == "HuangYouCan"
+    assert result["counts"]["blocked_count"] == 1
+    assert result["real_external_call_executed"] is False
+    assert calls == []
     assert updated is not None
-    assert updated.status == "succeeded"
-    assert attempts[0].status == "succeeded"
+    assert updated.status == "blocked"
+    assert attempts[0].status == "blocked"
+    assert attempts[0].error_code == "wecom_execution_disabled"
 
 
 def test_wecom_private_external_effect_allowlisted_execute_succeeds(monkeypatch) -> None:
@@ -351,9 +361,10 @@ def test_wecom_private_external_effect_allowlisted_execute_succeeds(monkeypatch)
     job_id = plan["external_effect_job_ids"][0]
     ExternalEffectService().approve(job_id)
 
-    preview = ExternalEffectWorker().preview_due(batch_size=1, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
-    dry_run = ExternalEffectWorker().run_due(batch_size=1, dry_run=True, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
-    result = ExternalEffectWorker().run_due(batch_size=1, dry_run=False, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
+    worker = ExternalEffectWorker(adapter_registry=build_external_effect_adapter_registry())
+    preview = worker.preview_due(batch_size=1, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
+    dry_run = worker.run_due(batch_size=1, dry_run=True, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
+    result = worker.run_due(batch_size=1, dry_run=False, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
     updated = ExternalEffectService().get(job_id)
     attempts = ExternalEffectService().list_attempts(job_id)
 
@@ -388,6 +399,7 @@ def test_wecom_private_external_effect_ignores_target_allowlist_miss(monkeypatch
                 "side_effect_executed": True,
                 "exact_target_verified": True,
                 "requested_external_userids": ["wm_fixture_a"],
+                "wecom_msgid": "msg-target-allowlist-independent",
             }
 
     monkeypatch.setattr("aicrm_next.integration_gateway.wecom_private_adapter.build_wecom_private_message_adapter", lambda: _Adapter())
@@ -401,7 +413,9 @@ def test_wecom_private_external_effect_ignores_target_allowlist_miss(monkeypatch
     job_id = plan["external_effect_job_ids"][0]
     ExternalEffectService().approve(job_id)
 
-    result = ExternalEffectWorker().run_due(batch_size=1, dry_run=False, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
+    result = ExternalEffectWorker(
+        adapter_registry=build_external_effect_adapter_registry()
+    ).run_due(batch_size=1, dry_run=False, effect_types=[WECOM_MESSAGE_PRIVATE_SEND], test_only=False)
     updated = ExternalEffectService().get(job_id)
     attempts = ExternalEffectService().list_attempts(job_id)
 

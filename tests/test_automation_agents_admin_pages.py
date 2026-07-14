@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from time import time
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
+from tests.admin_auth_test_helpers import admin_session_cookies
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -13,19 +12,8 @@ LIST_TEMPLATE = TEMPLATE_DIR / "automation_agent_list.html"
 EDIT_TEMPLATE = TEMPLATE_DIR / "automation_agent_edit.html"
 
 
-def _admin_cookies() -> dict[str, str]:
-    return {
-        SESSION_COOKIE: sign_session(
-            {
-                "auth_source": "break_glass",
-                "login_type": "break_glass",
-                "username": "admin",
-                "display_name": "admin",
-                "roles": ["super_admin"],
-                "iat": int(time()),
-            }
-        )
-    }
+def _admin_cookies(next_client) -> dict[str, str]:
+    return admin_session_cookies(next_client, "super_admin")
 
 
 def _read(path: Path) -> str:
@@ -48,7 +36,7 @@ def test_automation_agent_admin_pages_require_admin_session(next_client, monkeyp
 def test_automation_agent_list_page_contract(next_client, monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "automation-agent-list-page-test")
 
-    response = next_client.get("/admin/automation-agents", cookies=_admin_cookies())
+    response = next_client.get("/admin/automation-agents", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     html = response.text
@@ -129,7 +117,7 @@ def test_automation_agent_list_table_uses_available_desktop_width() -> None:
 def test_automation_agent_edit_page_contract(next_client, monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "automation-agent-edit-page-test")
 
-    response = next_client.get("/admin/automation-agents/123/edit", cookies=_admin_cookies())
+    response = next_client.get("/admin/automation-agents/123/edit", cookies=_admin_cookies(next_client))
 
     assert response.status_code == 200
     html = response.text
@@ -140,7 +128,6 @@ def test_automation_agent_edit_page_contract(next_client, monkeypatch) -> None:
         "fixed_script",
         "接收地址",
         "发送地址",
-        "重置 token",
         "receive_webhook_url",
         "role_prompt",
         "task_prompt",
@@ -162,7 +149,8 @@ def test_automation_agent_edit_page_contract(next_client, monkeypatch) -> None:
         "AICRMMaterialPicker.open",
         "/api/admin/automation-agents/123",
         "/api/admin/automation-agents/123/fixed-content",
-        "/api/admin/automation-agents/123/reset-token",
+        "`${agentApiUrl}/publish`",
+        'method: "POST"',
         "send_webhook_url: els.sendUrl.value.trim()",
         'id="sendUrl" value=""',
     ):
@@ -182,6 +170,8 @@ def test_automation_agent_edit_page_contract(next_client, monkeypatch) -> None:
         'id="agentCode"',
         'id="planName"',
         'id="packageKey"',
+        "重置 token",
+        "/api/admin/automation-agents/123/reset-token",
     ):
         assert forbidden not in html
     assert 'id="sendUrl" value="" readonly' not in html
@@ -204,9 +194,9 @@ def test_automation_agent_material_modal_and_preview_logic() -> None:
     for expected in (
         'id="materialModal"',
         "配置固定素材",
-        "data-add-asset=\"image\"",
-        "data-add-asset=\"miniprogram\"",
-        "data-add-asset=\"attachment\"",
+        'data-add-asset="image"',
+        'data-add-asset="miniprogram"',
+        'data-add-asset="attachment"',
         "+图片",
         "+小程序",
         "+附件",
@@ -219,7 +209,7 @@ def test_automation_agent_material_modal_and_preview_logic() -> None:
         "state.contentPackage.miniprogram_library_ids",
         "state.contentPackage.attachment_library_ids",
         "fixedContentApiUrl",
-        "method: \"PUT\"",
+        'method: "PUT"',
     ):
         assert expected in source
 
@@ -232,6 +222,6 @@ def test_automation_agent_prompt_tokens_and_dependency_detection() -> None:
     assert "state.focusPrompt" in source
     assert "selectionStart" in source
     assert "selectionEnd" in source
-    assert 'const text = `${els.rolePrompt.value}\\n${els.taskPrompt.value}`;' in source
+    assert "const text = `${els.rolePrompt.value}\\n${els.taskPrompt.value}`;" in source
     assert ".filter(([token]) => text.includes(token))" in source
     assert "renderDeps()" in source

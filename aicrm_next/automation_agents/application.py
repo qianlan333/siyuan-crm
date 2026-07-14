@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 from typing import Any
-from urllib.parse import quote, urlparse
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -12,8 +11,6 @@ from aicrm_next.send_content.application import PreviewSendContentPackageQuery, 
 from aicrm_next.send_content.dto import SendContentPackage, SendContentPreviewRequest
 from aicrm_next.send_content.repo import build_send_content_repository
 from aicrm_next.shared.errors import ContractError
-from aicrm_next.shared.runtime import production_environment
-from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .dto import AutomationAgentCreateRequest, AutomationAgentUpdateRequest
 from .repository import AutomationAgentRepository, build_automation_agent_repository, _text
@@ -28,14 +25,8 @@ def _base_url(request_base_url: str = "") -> str:
     return _text(request_base_url).rstrip("/")
 
 
-def _new_webhook_token() -> str:
-    return f"agtok_{uuid4().hex}"
-
-
-def _receive_webhook_url(agent_code: str, token: str = "", request_base_url: str = "") -> str:
+def _receive_webhook_url(agent_code: str, request_base_url: str = "") -> str:
     path = f"/api/ai/agents/{_text(agent_code)}/audience-webhook"
-    if _text(token):
-        path = f"{path}?token={quote(_text(token), safe='')}"
     return f"{_base_url(request_base_url)}{path}" if _base_url(request_base_url) else path
 
 
@@ -143,10 +134,10 @@ def _agent_payload(row: dict[str, Any], *, request_base_url: str = "", include_d
             {
                 "receive_webhook_url": _receive_webhook_url(
                     item["agent_code"],
-                    _text(row.get("inbound_webhook_token")),
                     request_base_url,
                 ),
-                "receive_webhook_token_configured": bool(_text(row.get("inbound_webhook_token"))),
+                "receive_webhook_auth_mode": "aicrm_hmac_sha256",
+                "receive_webhook_capability": "automation_agent_webhook_receive",
                 "send_webhook_url": _text(row.get("send_webhook_url")) or _default_send_webhook_url(item["bound_package_key"]),
                 "draft_role_prompt": _text(row.get("draft_role_prompt")),
                 "draft_task_prompt": _text(row.get("draft_task_prompt")),
@@ -154,6 +145,11 @@ def _agent_payload(row: dict[str, Any], *, request_base_url: str = "", include_d
                 "published_task_prompt": _text(row.get("published_task_prompt")),
                 "draft_version": int(row.get("draft_version") or 0),
                 "published_version": int(row.get("published_version") or 0),
+                "has_unpublished_changes": (
+                    int(row.get("draft_version") or 0) != int(row.get("published_version") or 0)
+                    or _text(row.get("draft_role_prompt")) != _text(row.get("published_role_prompt"))
+                    or _text(row.get("draft_task_prompt")) != _text(row.get("published_task_prompt"))
+                ),
                 "fixed_content_package": content_package,
                 "fixed_content_package_preview": preview.get("preview", {}),
             }
@@ -199,8 +195,6 @@ class AutomationAgentAdminService:
                 **request.model_dump(exclude={"fixed_content_package"}),
                 "automation_type": automation_type,
                 "fixed_content_package": content_package,
-                "inbound_webhook_secret": uuid4().hex,
-                "inbound_webhook_token": _new_webhook_token(),
                 "send_webhook_url": send_webhook_url,
             }
         )
@@ -263,12 +257,20 @@ class AutomationAgentAdminService:
                 "role_prompt": _text(source.get("draft_role_prompt")),
                 "task_prompt": _text(source.get("draft_task_prompt")),
                 "fixed_content_package": source.get("fixed_content_package_json") or {},
-                "inbound_webhook_secret": uuid4().hex,
-                "inbound_webhook_token": _new_webhook_token(),
                 "send_webhook_url": _text(source.get("send_webhook_url")) or _default_send_webhook_url(_text(source.get("bound_package_key"))),
             }
         )
         detail = self._repo.get_agent(int(copied["id"])) or copied
+        return {"ok": True, "agent": _agent_payload(detail, request_base_url=request_base_url, include_detail=True)}
+
+    def publish_agent(self, agent_id: int, *, request_base_url: str = "") -> dict[str, Any]:
+        existing = self._repo.get_agent(agent_id)
+        if not existing or _text(existing.get("status")) == "archived":
+            return {"ok": False, "error": "agent_not_found"}
+        row = self._repo.publish_agent(agent_id)
+        if not row:
+            return {"ok": False, "error": "agent_not_found"}
+        detail = self._repo.get_agent(agent_id) or row
         return {"ok": True, "agent": _agent_payload(detail, request_base_url=request_base_url, include_detail=True)}
 
     def set_status(self, agent_id: int, status: str, *, request_base_url: str = "") -> dict[str, Any]:
@@ -277,13 +279,6 @@ class AutomationAgentAdminService:
             return {"ok": False, "error": "agent_not_found"}
         if status == "archived":
             return {"ok": True, "agent": {"id": int(agent_id), "status": "archived"}}
-        detail = self._repo.get_agent(agent_id) or row
-        return {"ok": True, "agent": _agent_payload(detail, request_base_url=request_base_url, include_detail=True)}
-
-    def reset_inbound_token(self, agent_id: int, *, request_base_url: str = "") -> dict[str, Any]:
-        row = self._repo.rotate_inbound_token(agent_id, _new_webhook_token())
-        if not row:
-            return {"ok": False, "error": "agent_not_found"}
         detail = self._repo.get_agent(agent_id) or row
         return {"ok": True, "agent": _agent_payload(detail, request_base_url=request_base_url, include_detail=True)}
 
@@ -328,11 +323,6 @@ def parse_external_userids(payload: Any) -> tuple[list[str], int]:
     return result, received_count
 
 
-def _strip_sha256(value: str) -> str:
-    value = _text(value)
-    return value[len("sha256=") :] if value.startswith("sha256=") else value
-
-
 class AutomationAgentWebhookService:
     def __init__(self, repository: AutomationAgentRepository | None = None) -> None:
         self._repo = repository or build_automation_agent_repository()
@@ -344,32 +334,12 @@ class AutomationAgentWebhookService:
         *,
         raw_body: bytes,
         headers: dict[str, Any],
-        token: str = "",
     ) -> tuple[dict[str, Any], int]:
         agent = self._repo.get_agent_by_code(agent_code)
         if not agent:
             return {"ok": False, "error": "agent_not_found"}, 404
         if _text(agent.get("status")) != "active":
             return {"ok": False, "error": "agent_not_active"}, 409
-        configured_token = _text(agent.get("inbound_webhook_token"))
-        provided_token = _text(token or headers.get("X-AICRM-Webhook-Token") or headers.get("x-aicrm-webhook-token"))
-        if configured_token or production_environment():
-            if not configured_token and production_environment():
-                return {"ok": False, "error": "webhook_token_not_configured"}, 503
-            if not provided_token:
-                return {"ok": False, "error": "missing_token"}, 401
-            if not hmac.compare_digest(configured_token, provided_token):
-                return {"ok": False, "error": "invalid_token"}, 401
-        secret = _text(agent.get("inbound_webhook_secret") or runtime_setting("AICRM_AUTOMATION_AGENT_WEBHOOK_SECRET"))
-        signature = _text(headers.get("X-AICRM-Signature") or headers.get("x-aicrm-signature"))
-        if signature:
-            if not secret and production_environment():
-                return {"ok": False, "error": "webhook_secret_not_configured"}, 503
-            expected = hmac.new(secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(_strip_sha256(signature), expected):
-                return {"ok": False, "error": "invalid_signature"}, 401
-        elif not configured_token and (secret or production_environment()):
-            return {"ok": False, "error": "missing_signature"}, 401
         external_userids, received_count = parse_external_userids(payload)
         if len(external_userids) > MAX_WEBHOOK_USERS:
             return {"ok": False, "error": "too_many_external_userids", "limit": MAX_WEBHOOK_USERS}, 400

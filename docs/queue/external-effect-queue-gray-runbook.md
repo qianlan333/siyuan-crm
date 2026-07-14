@@ -104,9 +104,11 @@ be used as a shortcut to enable WeCom or payment-query execution.
 
 Preview never dispatches adapters and must be the first step:
 
+`AICRM_ACCESS_TOKEN` 必须是 `automation_worker` 通过 `audience=internal_worker`、`scope=write` 换取的短期 JWT；见 [`../auth_client_credentials.md`](../auth_client_credentials.md)。
+
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/external-effects/run-due/preview" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "batch_size": 10,
@@ -129,7 +131,7 @@ Expected:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/external-effects/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "batch_size": 10,
@@ -154,7 +156,7 @@ single job:
 
 ```bash
 curl -sS -X POST "$BASE_URL/api/admin/external-effects/run-due" \
-  -H "Authorization: Bearer $AUTOMATION_INTERNAL_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
     "batch_size": 1,

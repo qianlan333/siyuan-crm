@@ -8,7 +8,6 @@ from urllib.parse import urlsplit
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, FEISHU_WEBHOOK_NOTIFY
-from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from zoneinfo import ZoneInfo
 
 from .domain import normalized_bool, normalized_text
@@ -29,19 +28,6 @@ class FeishuWebhookValidationError(ValueError):
 
 
 HourlyReportSender = Callable[[str, str], dict[str, Any]]
-
-
-def _record_legacy_marker(legacy_key: str, *, metadata: dict[str, Any] | None = None) -> None:
-    try:
-        LegacyWebhookCleanupService().record_runtime_marker(
-            legacy_key,
-            marker="legacy_path_invoked",
-            operator="admin_jobs.notification_settings",
-            metadata=metadata or {},
-            real_external_call_executed=False,
-        )
-    except Exception:
-        pass
 
 
 def validate_feishu_webhook_url(webhook_url: str) -> None:
@@ -156,7 +142,6 @@ def validate_feishu_webhook(
     repo: AdminJobsRepository | None = None,
     sender: Callable[[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    _record_legacy_marker("old_broadcast_jobs_feishu_hourly_report", metadata={"operation": "validate_feishu_webhook", "enabled": bool(enabled)})
     repo = repo or build_admin_jobs_repository()
     try:
         validate_feishu_webhook_url(webhook_url)
@@ -312,7 +297,6 @@ def send_broadcast_job_hourly_feishu_report(
     repo: AdminJobsRepository | None = None,
     sender: HourlyReportSender | None = None,
 ) -> dict[str, Any]:
-    _record_legacy_marker("old_broadcast_jobs_feishu_hourly_report", metadata={"operation": "send_broadcast_job_hourly_feishu_report"})
     repo = repo or build_admin_jobs_repository()
     setting = repo.get_broadcast_notification_setting(FEISHU_CHANNEL)
     if not setting or not normalized_text(setting.get("webhook_url")):

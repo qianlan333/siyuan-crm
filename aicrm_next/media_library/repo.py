@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import os
 from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Protocol
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.repository_provider import assert_repository_allowed
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
 
-from aicrm_next.commerce.domain import now_iso
 from .variants import (
     THUMBNAIL_SIZE_TO_VARIANT,
     add_image_variant_urls,
@@ -22,6 +22,10 @@ from .variants import (
 MEDIA_LIBRARY_BACKEND_ENV = "AICRM_MEDIA_LIBRARY_REPO_BACKEND"
 MEDIA_LIBRARY_DATABASE_URL_ENV = "AICRM_MEDIA_LIBRARY_DATABASE_URL"
 MEDIA_LIBRARY_SQL_BACKENDS = {"sql", "postgres", "postgresql", "psycopg"}
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 class MediaLibraryRepository(Protocol):

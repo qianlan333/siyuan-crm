@@ -30,9 +30,10 @@ def test_runtime_contract_inventory_covers_r00_behavior_surfaces() -> None:
     assert all(route["capability_owner"] for route in routes)
     assert all("responses" in route["contract"] for route in routes)
 
-    assert inventory["migration_heads"] == ["0098_admin_session_revocation"]
+    assert inventory["migration_heads"] == ["0109_questionnaire_auto_execute"]
     assert len(inventory["tables"]) >= 150
-    assert all(table["write_owner"] for table in inventory["tables"] if table["lifecycle"] != "retired")
+    owned_lifecycles = {"canonical", "read_model", "event", "queue", "config"}
+    assert all(table["write_owner"] for table in inventory["tables"] if table["lifecycle"] in owned_lifecycles)
     assert inventory["internal_event_consumers"]
     assert inventory["external_effects"]
     runtime_manifest = ROOT / "deploy" / "production_runtime_units.json"
@@ -42,14 +43,14 @@ def test_runtime_contract_inventory_covers_r00_behavior_surfaces() -> None:
         assert inventory["runtime_units"] == []
     assert "DATABASE_URL" in inventory["environment_variables"]
     assert {
-        "AICRM_LEGACY_INTERNAL_TOKEN_FALLBACK_ENABLED",
-        "ARCHIVE_INTERNAL_API_TOKEN",
-        "AUTOMATION_INTERNAL_API_TOKEN",
-        "CALLBACK_INTERNAL_API_TOKEN",
-        "GROUP_BROADCAST_INTERNAL_API_TOKEN",
-        "IDENTITY_INTERNAL_API_TOKEN",
-        "MCP_BEARER_TOKEN",
+        "AICRM_AUTH_ARCHIVE_WORKER_CLIENT_ID",
+        "AICRM_AUTH_ARCHIVE_WORKER_CLIENT_SECRET_REF",
+        "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID",
+        "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_SECRET_REF",
+        "AICRM_AUTH_ISSUER",
+        "AICRM_AUTH_JWT_SIGNING_KEY",
     } <= set(inventory["environment_variables"])
+    assert "AUTOMATION_INTERNAL_API_TOKEN" not in inventory["environment_variables"]
     assert all("value" not in item for item in inventory["environment_variable_references"])
 
 
@@ -73,7 +74,7 @@ def test_runtime_contract_inventory_write_and_check_detect_drift(tmp_path: Path)
 
     diff = check_inventory(ROOT, destination)
     assert "drifted_head" in diff
-    assert "0098_admin_session_revocation" in diff
+    assert "0100_external_effect_delivery_lease" in diff
 
 
 def test_checked_in_runtime_contract_inventory_matches_current_runtime() -> None:

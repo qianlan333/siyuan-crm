@@ -81,12 +81,10 @@ PRODUCTION_CONFIG_PATTERNS = ("nginx", "systemd", ".service", ".timer", "deploy/
 def local_admin_probe_env():
     old = {
         "AICRM_NEXT_ENV": os.environ.get("AICRM_NEXT_ENV"),
-        "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": os.environ.get("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE"),
         "DATABASE_URL": os.environ.get("DATABASE_URL"),
         "SECRET_KEY": os.environ.get("SECRET_KEY"),
     }
     os.environ.pop("AICRM_NEXT_ENV", None)
-    os.environ.pop("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", None)
     os.environ.pop("DATABASE_URL", None)
     os.environ.setdefault("SECRET_KEY", "next-admin-ui-data-parity")
     try:

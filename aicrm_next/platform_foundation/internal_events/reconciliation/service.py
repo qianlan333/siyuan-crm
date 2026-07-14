@@ -8,11 +8,8 @@ from aicrm_next.platform_foundation.external_effects.service import ExternalEffe
 from aicrm_next.platform_foundation.external_effects.view_model import external_effect_job_list_item
 
 from ..config import (
-    allowed_consumers,
-    allowed_event_consumer_pairs,
-    allowed_event_consumers,
-    allowed_event_types,
     consumer_metadata,
+    worker_allows,
 )
 from ..models import InternalEvent, InternalEventConsumerAttempt, InternalEventConsumerRun
 from ..repository import InternalEventRepository, build_internal_event_repository
@@ -88,8 +85,9 @@ class InternalEventReconciliationService:
         if run.status in OPEN_CONSUMER_STATUSES and not self._worker_allows(event.event_type, run.consumer_name):
             return {
                 "category": "allowlist_blocked",
-                "message": "worker allowlist 未开放，当前不会被自动扫描执行",
-                "actionable": True,
+                "message": "灰度执行白名单未开放；这是保留的迁移观察记录，不计入当前业务待办，也不会自动重放",
+                "actionable": False,
+                "rollout_gated": True,
             }
         if run.status in {"pending", "running"}:
             return {
@@ -104,16 +102,7 @@ class InternalEventReconciliationService:
         }
 
     def _worker_allows(self, event_type: str, consumer_name: str) -> bool:
-        configured_pairs = allowed_event_consumer_pairs()
-        if configured_pairs or allowed_event_consumers():
-            return (_text(event_type), _text(consumer_name)) in set(configured_pairs)
-        configured_event_types = set(allowed_event_types())
-        if configured_event_types and _text(event_type) not in configured_event_types:
-            return False
-        configured_consumers = set(allowed_consumers())
-        if configured_consumers and _text(consumer_name) not in configured_consumers:
-            return False
-        return True
+        return worker_allows(event_type, consumer_name)
 
     def _find_external_effect_jobs(
         self,

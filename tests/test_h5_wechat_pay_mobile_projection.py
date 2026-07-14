@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from aicrm_next.identity_contact.dto import IdentityResolution, IdentityResolveResult
 from aicrm_next.public_product import h5_wechat_pay
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,8 +27,23 @@ class _ProjectionConn:
         return _Cursor(self.row)
 
 
+def _resolved(unionid: str) -> IdentityResolveResult:
+    return IdentityResolveResult(
+        status="resolved",
+        identity=IdentityResolution(
+            person_id=None,
+            external_userid="wm_order_001",
+            mobile="15812345678",
+            unionid=unionid,
+            binding_status="bound",
+        ),
+        candidate_count=1,
+    )
+
+
 def test_project_order_mobile_to_identity_uses_order_metadata(monkeypatch) -> None:
     monkeypatch.setattr(h5_wechat_pay, "_jsonb", lambda value: json.dumps(value, ensure_ascii=False))
+    monkeypatch.setattr(h5_wechat_pay, "resolve_identity_with_dbapi", lambda *_args, **_kwargs: _resolved("union_order_001"))
     conn = _ProjectionConn({"unionid": "union_order_001", "mobile": "15812345678"})
 
     result = h5_wechat_pay._project_order_mobile_to_identity(
@@ -57,6 +73,11 @@ def test_project_order_mobile_to_identity_uses_order_metadata(monkeypatch) -> No
 
 def test_project_order_mobile_to_identity_skips_invalid_or_missing_identity(monkeypatch) -> None:
     monkeypatch.setattr(h5_wechat_pay, "_jsonb", lambda value: json.dumps(value, ensure_ascii=False))
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "resolve_identity_with_dbapi",
+        lambda *_args, **_kwargs: IdentityResolveResult(status="not_found", reason="identity_not_found"),
+    )
     conn = _ProjectionConn({"unionid": "union_order_001"})
 
     missing_unionid = h5_wechat_pay._project_order_mobile_to_identity(
@@ -72,11 +93,20 @@ def test_project_order_mobile_to_identity_skips_invalid_or_missing_identity(monk
 
     assert missing_unionid["reason"] == "missing_unionid"
     assert invalid_mobile["reason"] == "invalid_mobile"
-    assert conn.calls == []
+    assert not any("UPDATE crm_user_identity" in call["query"] for call in conn.calls)
 
 
 def test_project_order_mobile_to_identity_does_not_overwrite_conflicting_mobile(monkeypatch) -> None:
     monkeypatch.setattr(h5_wechat_pay, "_jsonb", lambda value: json.dumps(value, ensure_ascii=False))
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "resolve_identity_with_dbapi",
+        lambda _conn, query, **_kwargs: (
+            IdentityResolveResult(status="not_found", reason="identity_not_found")
+            if query.mobile
+            else _resolved("union_order_001")
+        ),
+    )
     conn = _ProjectionConn(None)
 
     result = h5_wechat_pay._project_order_mobile_to_identity(
@@ -96,7 +126,7 @@ def test_project_order_mobile_to_identity_does_not_overwrite_conflicting_mobile(
     }
 
 
-def test_apply_transaction_runs_mobile_projection_before_order_side_effects(monkeypatch) -> None:
+def test_apply_transaction_runs_mobile_projection_before_canonical_internal_event(monkeypatch) -> None:
     calls: list[str] = []
 
     class Conn:
@@ -123,18 +153,8 @@ def test_apply_transaction_runs_mobile_projection_before_order_side_effects(monk
     )
     monkeypatch.setattr(
         h5_wechat_pay,
-        "enqueue_transaction_paid_outbox",
-        lambda conn, order: calls.append("outbox") or {"id": 1},
-    )
-    monkeypatch.setattr(
-        h5_wechat_pay,
-        "_emit_payment_succeeded_internal_event",
-        lambda **kwargs: calls.append("event"),
-    )
-    monkeypatch.setattr(
-        h5_wechat_pay,
-        "_plan_order_paid_external_effect_job",
-        lambda conn, *, order, transaction, outbox: calls.append("external_effect"),
+        "_enqueue_payment_succeeded_internal_event_outbox",
+        lambda conn, **kwargs: calls.append("event_outbox"),
     )
 
     order = h5_wechat_pay._apply_transaction(
@@ -148,7 +168,7 @@ def test_apply_transaction_runs_mobile_projection_before_order_side_effects(monk
     )
 
     assert order["status"] == "paid"
-    assert calls == ["project", "outbox", "event", "external_effect"]
+    assert calls == ["project", "event_outbox"]
 
 
 def test_order_read_models_fallback_to_metadata_mobile_for_historical_orders() -> None:

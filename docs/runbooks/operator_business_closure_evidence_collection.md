@@ -216,16 +216,16 @@ docs/reports/external_orders_enablement_evidence_template.md
 
 前置条件：
 
-- `AUTOMATION_INTERNAL_API_TOKEN` 只能由 operator 在 git 外配置。
-- 不得提交 token 或 Authorization header。
+- `external_agent` client 必须由 operator 通过 RAUTH bootstrap 在 git 外配置。
+- 不得提交 client secret、JWT 或 Authorization header。
 - 灰度来源、灰度订单和幂等规则已批准。
 
 必须验证：
 
-- token 未配置时是 controlled disabled。
-- request token 缺失时被拒绝。
-- request token 错误时被拒绝。
-- valid token readiness 不写入 Git token 明文。
+- client 注册或 secret reference 缺失时是 controlled disabled。
+- request JWT 缺失时被拒绝。
+- request JWT 错误或过期时被拒绝。
+- valid client readiness 不写入 Git secret/JWT 明文。
 - 重复订单具备幂等 evidence。
 - 订单能关联 customer/channel/source。
 - 订单能关联 internal_event。

@@ -63,6 +63,9 @@ IDENTITY_BOUNDARY_TABLE_NAMES = {
 APPROVED_LEGACY_IDENTITY_MIGRATION_BOUNDARIES = {
     ("0095_service_period_products.py", "upgrade", "service_period_entitlements", "mobile_snapshot"),
     ("0097_service_period_unionid_cleanup.py", "downgrade", "service_period_entitlements", "mobile_snapshot"),
+    ("0102_questionnaire_radar_invariants.py", "_radar_click_events", "radar_click_events", "external_userid"),
+    ("0102_questionnaire_radar_invariants.py", "_radar_click_events", "radar_click_events", "openid"),
+    ("0102_questionnaire_radar_invariants.py", "_radar_click_events", "radar_click_events", "person_id"),
 }
 _UNQUOTED_SQL_IDENTIFIER = r"[a-zA-Z_][a-zA-Z0-9_]*"
 _QUOTED_SQL_IDENTIFIER = r'"[^"]+"'
@@ -126,10 +129,7 @@ def check_sql_static_guard(root: Path = ROOT, manifest_path: Path = DEFAULT_MANI
         if not is_pre_guard_migration:
             if not (
                 _is_migration(literal.path, root=root)
-                and (
-                    _is_drop_table_statement(normalized)
-                    or _is_downgrade_retired_table_restore(literal, normalized, retired_tables, root)
-                )
+                and (_is_drop_table_statement(normalized) or _is_downgrade_retired_table_restore(literal, normalized, retired_tables, root))
             ):
                 violations.extend(_retired_table_violations(literal, normalized, retired_tables))
             violations.extend(_legacy_identity_column_violations(literal, normalized))

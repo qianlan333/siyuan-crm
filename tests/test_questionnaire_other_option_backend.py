@@ -76,7 +76,10 @@ def _submit(client: TestClient, slug: str, answers: dict, *, external_userid: st
 
 
 def _result(client: TestClient, slug: str, submission_id: str) -> dict:
-    response = client.get(f"/api/h5/questionnaires/{slug}/result/{submission_id}")
+    del submission_id
+    with pytest.MonkeyPatch.context() as route_policy:
+        route_policy.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+        response = client.get(f"/api/h5/questionnaires/{slug}/result")
     assert response.status_code == 200, response.text
     return response.json()["result"]
 
@@ -171,7 +174,7 @@ def test_h5_submit_single_choice_other_object_saves_text_value(client: TestClien
     _create_questionnaire(client, _choice_questionnaire_payload(slug=slug))
 
     body = _submit(client, slug, {"q_single": {"selected_option_ids": ["other"], "other_text": "线下沙龙"}})
-    result = _result(client, slug, body["result_access_token"])
+    result = _result(client, slug, body["submission_id"])
 
     assert body["score"] == 5
     assert body["final_tags"] == ["tag_other"]
@@ -188,7 +191,7 @@ def test_h5_submit_multi_choice_regular_plus_other_saves_text_value(client: Test
         slug,
         {"q_multi": {"selected_option_ids": ["regular", "other"], "other_text": "线下社群承接"}},
     )
-    result = _result(client, slug, body["result_access_token"])
+    result = _result(client, slug, body["submission_id"])
 
     assert body["score"] == 8
     assert body["final_tags"] == ["tag_regular", "tag_other"]
@@ -230,7 +233,7 @@ def test_h5_submit_ignores_other_text_when_other_not_selected(client: TestClient
     _create_questionnaire(client, _choice_questionnaire_payload(slug=slug))
 
     body = _submit(client, slug, {"q_single": {"selected_option_ids": ["regular"], "other_text": "不要保存"}})
-    result = _result(client, slug, body["result_access_token"])
+    result = _result(client, slug, body["submission_id"])
 
     assert result["answers"]["q_single"] == "regular"
     assert result["answer_snapshots"][0]["text_value"] == ""

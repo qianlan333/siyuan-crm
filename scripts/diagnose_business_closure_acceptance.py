@@ -38,7 +38,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             "/api/admin/cloud-orchestrator/campaigns/{campaign_code}/approve",
             "/api/admin/push-center/jobs",
         ],
-        "required_env": ["AUTOMATION_INTERNAL_API_TOKEN"],
+        "required_env": ["AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID", "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_SECRET_REF"],
         "checks": [
             "approval event creates or reuses one internal_event",
             "consumer run creates or links one business job",
@@ -50,7 +50,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "title": "External orders enablement acceptance",
         "capability_owner": "commerce",
         "routes": ["/api/external/orders", "/api/external/orders/{order_no}"],
-        "required_env": ["AUTOMATION_INTERNAL_API_TOKEN"],
+        "required_env": ["AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF"],
         "checks": [
             "missing server token remains controlled unavailable",
             "missing or wrong bearer token is rejected",
@@ -62,7 +62,7 @@ SCENARIOS: dict[str, dict[str, Any]] = {
         "title": "External orders enablement acceptance",
         "capability_owner": "commerce",
         "routes": ["/api/external/orders", "/api/external/orders/{order_no}"],
-        "required_env": ["AUTOMATION_INTERNAL_API_TOKEN"],
+        "required_env": ["AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF"],
         "checks": [
             "missing server token remains controlled unavailable",
             "missing or wrong bearer token is rejected",
@@ -78,7 +78,11 @@ SCENARIOS: dict[str, dict[str, Any]] = {
             "/api/admin/wechat-shop/orders/{order_id}/sync",
             "/api/admin/push-center/jobs/{job_id}/reconciliation",
         ],
-        "required_env": ["AUTOMATION_INTERNAL_API_TOKEN", "AICRM_EXTERNAL_ORDERS_GRAY_APPROVED"],
+        "required_env": [
+            "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID",
+            "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF",
+            "AICRM_EXTERNAL_ORDERS_GRAY_APPROVED",
+        ],
         "checks": [
             "gray source is approved before live order calls",
             "duplicate order payload is idempotent",
@@ -191,10 +195,7 @@ def _group_ops_blocking_reasons(env: dict[str, str], *, receiver_token: str) -> 
 
 
 def _generic_blocking_reasons(missing_env: list[str], *, receiver_required: bool, receiver_token: str) -> list[dict[str, str]]:
-    reasons = [
-        {"code": "missing_required_env", "message": f"{key} is required before operator execution readiness."}
-        for key in missing_env
-    ]
+    reasons = [{"code": "missing_required_env", "message": f"{key} is required before operator execution readiness."} for key in missing_env]
     if receiver_required and not str(receiver_token or "").strip():
         reasons.append({"code": "missing_receiver_token", "message": "--receiver-token is required for this gray scenario."})
     return reasons
@@ -335,7 +336,7 @@ def _ops_plan_e2e_evidence(
     }
 
 
-def _external_orders_request_mode(*, token_configured: bool, request_token: str, request_mode: str, env_token: str) -> str:
+def _external_orders_request_mode(*, token_configured: bool, request_token: str, request_mode: str) -> str:
     explicit = str(request_mode or "").strip().lower()
     if explicit:
         return explicit
@@ -343,7 +344,7 @@ def _external_orders_request_mode(*, token_configured: bool, request_token: str,
         return "dry_run"
     if not str(request_token or "").strip():
         return "no_token"
-    if str(request_token).strip() != str(env_token or "").strip():
+    if str(request_token).strip().count(".") != 2:
         return "wrong_token"
     return "valid_token"
 
@@ -366,13 +367,17 @@ def _external_orders_evidence(
     internal_event_id: str,
     admin_order_visibility: str,
 ) -> dict[str, Any]:
-    server_token = str(env.get("AUTOMATION_INTERNAL_API_TOKEN") or "").strip()
-    token_configured = bool(server_token)
+    token_configured = all(
+        str(env.get(key) or "").strip()
+        for key in (
+            "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID",
+            "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF",
+        )
+    )
     mode = _external_orders_request_mode(
         token_configured=token_configured,
         request_token=request_token,
         request_mode=request_mode,
-        env_token=server_token,
     )
     blocking_reasons: list[dict[str, str]] = []
 
@@ -380,7 +385,7 @@ def _external_orders_evidence(
         blocking_reasons.append(
             {
                 "code": "missing_internal_token_config",
-                "message": "AUTOMATION_INTERNAL_API_TOKEN is not configured; external order routes should stay controlled-disabled.",
+                "message": "External-agent client credentials are not configured; external order routes should stay controlled-disabled.",
             }
         )
     elif mode == "no_token":
@@ -448,8 +453,10 @@ def _external_orders_evidence(
             }
         )
 
-    derived_status = "order_linked" if token_configured and mode == "valid_token" and evidence_complete else (
-        "controlled_disabled" if not token_configured else "readiness_only"
+    derived_status = (
+        "order_linked"
+        if token_configured and mode == "valid_token" and evidence_complete
+        else ("controlled_disabled" if not token_configured else "readiness_only")
     )
     auth_status = {
         "dry_run": "not_executed",
@@ -461,7 +468,9 @@ def _external_orders_evidence(
         auth_status = "controlled_disabled"
 
     if derived_status == "order_linked":
-        blocking_reasons = [{"code": "order_linked", "message": "Order, idempotency, customer/channel/source, event, and admin visibility evidence are attached."}]
+        blocking_reasons = [
+            {"code": "order_linked", "message": "Order, idempotency, customer/channel/source, event, and admin visibility evidence are attached."}
+        ]
 
     return {
         "evidence_status": "ORDER_LINKED_EVIDENCE_ATTACHED" if derived_status == "order_linked" else "READINESS_ONLY",
@@ -471,7 +480,7 @@ def _external_orders_evidence(
         "auth_status": auth_status,
         "route_owner": "ai_crm_next",
         "fallback_used": False,
-        "controlled_disabled_reason": "AUTOMATION_INTERNAL_API_TOKEN not configured" if not token_configured else "",
+        "controlled_disabled_reason": "external-agent client credentials not configured" if not token_configured else "",
         "request_mode": mode,
         "order_id": _value_or_not_provided(order_no),
         "external_order_id": _value_or_not_provided(external_order_id),
@@ -535,15 +544,21 @@ def _wecom_evidence(
     if not agent_id_configured:
         blocking_reasons.append({"code": "missing_agent_id", "message": "WECOM_AGENT_ID must be configured outside git before operator auth readiness."})
     if not redirect_uri_configured:
-        blocking_reasons.append({"code": "missing_redirect_uri", "message": "ADMIN_LOGIN_REDIRECT_URI must be configured outside git before auth start readiness."})
+        blocking_reasons.append(
+            {"code": "missing_redirect_uri", "message": "ADMIN_LOGIN_REDIRECT_URI must be configured outside git before auth start readiness."}
+        )
     if not _status_is_verified(auth_status, {"verified_302", "observed_302", "expected_302"}):
-        blocking_reasons.append({"code": "auth_start_not_verified", "message": "Attach auth start 302 readiness evidence; the diagnostic does not start a real OAuth exchange."})
+        blocking_reasons.append(
+            {"code": "auth_start_not_verified", "message": "Attach auth start 302 readiness evidence; the diagnostic does not start a real OAuth exchange."}
+        )
     if not str(operator_identity_evidence or "").strip():
         blocking_reasons.append({"code": "missing_operator_identity", "message": "Attach redacted operator identity evidence after approved operator auth."})
 
     signature_invalid = signature_status in {"invalid", "failed", "bad_signature"}
     if signature_status == "not_provided":
-        blocking_reasons.append({"code": "missing_callback_signature_evidence", "message": "Attach callback signature verification evidence before claiming callback readiness."})
+        blocking_reasons.append(
+            {"code": "missing_callback_signature_evidence", "message": "Attach callback signature verification evidence before claiming callback readiness."}
+        )
     elif signature_invalid:
         blocking_reasons.append({"code": "invalid_callback_signature", "message": "Invalid callback signature evidence must not enqueue work."})
     if not str(callback_event_id or "").strip():
@@ -557,7 +572,9 @@ def _wecom_evidence(
         for value in [permission_scope_evidence, customer_event_visibility, group_ops_permission_evidence, material_permission_evidence]
     )
     if not permission_complete:
-        blocking_reasons.append({"code": "missing_permission_scope", "message": "Attach customer, group ops, material, and operator permission scope evidence."})
+        blocking_reasons.append(
+            {"code": "missing_permission_scope", "message": "Attach customer, group ops, material, and operator permission scope evidence."}
+        )
 
     auth_ready = bool(
         corp_id_configured
@@ -578,17 +595,27 @@ def _wecom_evidence(
 
     if callback_ready:
         derived_status = "callback_linked"
-        blocking_reasons = [{"code": "callback_linked", "message": "Operator auth, signature, callback event, inbound event, idempotency, and permission evidence are attached."}]
+        blocking_reasons = [
+            {
+                "code": "callback_linked",
+                "message": "Operator auth, signature, callback event, inbound event, idempotency, and permission evidence are attached.",
+            }
+        ]
     elif auth_ready:
         derived_status = "operator_auth_ready"
-        blocking_reasons = [{"code": "operator_auth_ready", "message": "Operator auth readiness and permission evidence are attached; callback linkage still needs gray evidence."}]
+        blocking_reasons = [
+            {
+                "code": "operator_auth_ready",
+                "message": "Operator auth readiness and permission evidence are attached; callback linkage still needs gray evidence.",
+            }
+        ]
     else:
         derived_status = "readiness_only"
 
     return {
-        "evidence_status": "CALLBACK_LINKED_EVIDENCE_ATTACHED" if derived_status == "callback_linked" else (
-            "OPERATOR_AUTH_READY_EVIDENCE_ATTACHED" if derived_status == "operator_auth_ready" else "READINESS_ONLY"
-        ),
+        "evidence_status": "CALLBACK_LINKED_EVIDENCE_ATTACHED"
+        if derived_status == "callback_linked"
+        else ("OPERATOR_AUTH_READY_EVIDENCE_ATTACHED" if derived_status == "operator_auth_ready" else "READINESS_ONLY"),
         "corp_id_configured": corp_id_configured,
         "agent_id_configured": agent_id_configured,
         "redirect_uri_configured": redirect_uri_configured,
@@ -621,9 +648,9 @@ def _wecom_evidence(
                 else "WeCom auth/callback acceptance remains readiness-only until config, auth start, operator identity, signature, callback, idempotency, and permission evidence are attached."
             )
         ),
-        "next_action_label": "Attach final callback evidence report" if derived_status == "callback_linked" else (
-            "Collect callback gray evidence" if derived_status == "operator_auth_ready" else "Resolve WeCom blocking reasons"
-        ),
+        "next_action_label": "Attach final callback evidence report"
+        if derived_status == "callback_linked"
+        else ("Collect callback gray evidence" if derived_status == "operator_auth_ready" else "Resolve WeCom blocking reasons"),
         "real_external_call_executed": False,
         "production_write_executed": False,
         "callback_enqueue_allowed": derived_status == "callback_linked",
@@ -643,11 +670,7 @@ def _closeout_evidence_for_item(item: dict[str, Any]) -> dict[str, Any]:
     scenario = str(item.get("scenario", ""))
     if scenario == "group_ops_gray_send":
         evidence = dict(item.get("operator_evidence") or {})
-        missing = [
-            field
-            for field in ["plan_id", "effect_job_id", "attempt_id", "push_center_job_id"]
-            if _not_provided(evidence.get(field))
-        ]
+        missing = [field for field in ["plan_id", "effect_job_id", "attempt_id", "push_center_job_id"] if _not_provided(evidence.get(field))]
         if evidence.get("operator_action_required"):
             missing.append("operator_approval_or_receiver_allowlist")
         return {
@@ -655,27 +678,21 @@ def _closeout_evidence_for_item(item: dict[str, Any]) -> dict[str, Any]:
             "evidence_status": "EVIDENCE_COLLECTED" if not missing and not _reason_codes(item) else evidence.get("evidence_status", "READINESS_ONLY"),
             "derived_status": str(item.get("status") or evidence.get("push_center_status") or "readiness_only"),
             "missing_operator_evidence": missing,
-            "next_required_operator_action": (
-                "Attach Push Center reconciliation evidence"
-                if missing
-                else "Operator review of gray-send evidence"
-            ),
+            "next_required_operator_action": ("Attach Push Center reconciliation evidence" if missing else "Operator review of gray-send evidence"),
             "business_explanation": evidence.get("business_explanation", item.get("success_criteria", "")),
         }
     if scenario == "ops_plan_to_broadcast":
         evidence = dict(item.get("e2e_evidence") or {})
-        missing = [
-            field
-            for field in ["plan_id", "internal_event_id", "consumer_run_id"]
-            if _not_provided(evidence.get(field))
-        ]
+        missing = [field for field in ["plan_id", "internal_event_id", "consumer_run_id"] if _not_provided(evidence.get(field))]
         if _not_provided(evidence.get("broadcast_job_id")) and _not_provided(evidence.get("external_effect_job_id")):
             missing.append("broadcast_job_id_or_external_effect_job_id")
         if _not_provided(evidence.get("push_center_job_id")):
             missing.append("push_center_job_id")
         return {
             "evidence": evidence,
-            "evidence_status": "EVIDENCE_COLLECTED" if evidence.get("derived_status") == "job_linked" and not missing else evidence.get("evidence_status", "READINESS_ONLY"),
+            "evidence_status": "EVIDENCE_COLLECTED"
+            if evidence.get("derived_status") == "job_linked" and not missing
+            else evidence.get("evidence_status", "READINESS_ONLY"),
             "derived_status": evidence.get("derived_status", item.get("status", "readiness_only")),
             "missing_operator_evidence": missing,
             "next_required_operator_action": evidence.get("next_action_label", "Attach ops plan E2E evidence"),
@@ -685,12 +702,23 @@ def _closeout_evidence_for_item(item: dict[str, Any]) -> dict[str, Any]:
         evidence = dict(item.get("external_orders_evidence") or {})
         missing = [
             field
-            for field in ["order_id", "external_order_id", "idempotency_key", "customer_id", "channel_id", "source", "internal_event_id", "admin_order_visibility"]
+            for field in [
+                "order_id",
+                "external_order_id",
+                "idempotency_key",
+                "customer_id",
+                "channel_id",
+                "source",
+                "internal_event_id",
+                "admin_order_visibility",
+            ]
             if _not_provided(evidence.get(field))
         ]
         return {
             "evidence": evidence,
-            "evidence_status": "EVIDENCE_COLLECTED" if evidence.get("derived_status") == "order_linked" and not missing else evidence.get("evidence_status", "READINESS_ONLY"),
+            "evidence_status": "EVIDENCE_COLLECTED"
+            if evidence.get("derived_status") == "order_linked" and not missing
+            else evidence.get("evidence_status", "READINESS_ONLY"),
             "derived_status": evidence.get("derived_status", item.get("status", "readiness_only")),
             "missing_operator_evidence": missing,
             "next_required_operator_action": evidence.get("next_action_label", "Attach external order evidence"),
@@ -714,7 +742,9 @@ def _closeout_evidence_for_item(item: dict[str, Any]) -> dict[str, Any]:
         ]
         return {
             "evidence": evidence,
-            "evidence_status": "EVIDENCE_COLLECTED" if evidence.get("derived_status") == "callback_linked" and not missing else evidence.get("evidence_status", "READINESS_ONLY"),
+            "evidence_status": "EVIDENCE_COLLECTED"
+            if evidence.get("derived_status") == "callback_linked" and not missing
+            else evidence.get("evidence_status", "READINESS_ONLY"),
             "derived_status": evidence.get("derived_status", item.get("status", "readiness_only")),
             "missing_operator_evidence": missing,
             "next_required_operator_action": evidence.get("next_action_label", "Attach WeCom auth/callback evidence"),
@@ -812,9 +842,7 @@ def _closeout_summary(items: list[dict[str, Any]]) -> dict[str, Any]:
         },
         "items": summary_items,
         "next_required_operator_actions": [
-            {"scenario": item["scenario"], "action": item["next_required_operator_action"]}
-            for item in summary_items
-            if not item["can_claim_90_plus"]
+            {"scenario": item["scenario"], "action": item["next_required_operator_action"]} for item in summary_items if not item["can_claim_90_plus"]
         ],
     }
 
@@ -884,10 +912,7 @@ def _scenario_payload(
         "status": status,
         "routes": list(spec["routes"]),
         "blocking_reasons": blocking_reasons if unsafe_execute_requested else [],
-        "required_env": [
-            {"key": key, "configured": _present(env, key), "value": "[redacted]" if _present(env, key) else ""}
-            for key in spec["required_env"]
-        ],
+        "required_env": [{"key": key, "configured": _present(env, key), "value": "[redacted]" if _present(env, key) else ""} for key in spec["required_env"]],
         "missing_env": missing,
         "inputs": {
             "receiver_token_configured": bool(receiver_token),

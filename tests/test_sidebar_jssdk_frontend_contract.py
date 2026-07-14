@@ -16,7 +16,7 @@ def test_frontend_declares_and_consumes_jssdk_config_contract() -> None:
     script = SCRIPT.read_text(encoding="utf-8")
 
     assert 'data-jssdk-config-url="/api/sidebar/jssdk-config"' in template
-    assert "sidebar_workbench.js?v=20260709-periodic-product-tabs" in template
+    assert "sidebar_workbench.js?v=20260713-huangyoucan-usage" in template
     assert "jssdkConfigUrl()" in script
     assert 'url.searchParams.set("external_userid", state.external_userid)' in script
     assert "applySidebarOwnerToken(configPayload)" in script
@@ -42,7 +42,10 @@ def test_frontend_refreshes_owner_token_after_external_userid_resolution() -> No
     assert 'target.searchParams.set("next", currentSidebarNextPath())' in script
     assert 'window.location.assign(target.toString())' in script
     assert "if (!state.sidebar_owner_token) {" in script
-    assert 'firstQueryValue(["owner_userid", "ownerUserid", "viewer_userid", "viewerUserId", "operator_userid", "operatorUserId", "userid"])' in script
+    assert 'firstQueryValue(["owner_userid"' not in script
+    assert 'firstQueryValue(["sidebar_owner_token"' not in script
+    assert 'url.searchParams.set("viewer_userid"' not in script
+    assert 'url.searchParams.set("bind_by_userid"' not in script
     assert 'applyWeComViewerIdentity(res || {}, "agentConfig", { allowUserId: true });' in script
     assert 'const contextPayload = await invokeWeCom("getContext", {}, SDK_TIMEOUT_MS);' in script
     assert 'applyWeComViewerIdentity(contextPayload || {}, "getContext", { allowUserId: true });' in script

@@ -1,5 +1,5 @@
 {
-  "fallback_seconds_per_item": 3.117812,
+  "fallback_seconds_per_item": 3.090868,
   "files": {
     "tests/test_active_automation_run_due_guardrails.py": {
       "duration_seconds": 16.444,
@@ -665,10 +665,6 @@
       "duration_seconds": 8.366,
       "items": 16
     },
-    "tests/test_group_ops_duplicate_checker.py": {
-      "duration_seconds": 22.15,
-      "items": 7
-    },
     "tests/test_group_ops_external_effect_queue.py": {
       "duration_seconds": 73.888,
       "items": 13
@@ -1152,30 +1148,6 @@
     "tests/test_p1_error_handling_guard.py": {
       "duration_seconds": 21.21,
       "items": 4
-    },
-    "tests/test_p1_group_ops_workspace_bridge_hardening.py": {
-      "duration_seconds": 20.242,
-      "items": 5
-    },
-    "tests/test_p1_group_ops_workspace_draft_api.py": {
-      "duration_seconds": 57.314,
-      "items": 12
-    },
-    "tests/test_p1_group_ops_workspace_final_closeout.py": {
-      "duration_seconds": 3.935,
-      "items": 6
-    },
-    "tests/test_p1_group_ops_workspace_frontend_contract.py": {
-      "duration_seconds": 35.654,
-      "items": 9
-    },
-    "tests/test_p1_group_ops_workspace_governance_api.py": {
-      "duration_seconds": 116.623,
-      "items": 18
-    },
-    "tests/test_p1_group_ops_workspace_production_validation_remediation.py": {
-      "duration_seconds": 20.223,
-      "items": 7
     },
     "tests/test_p1_runtime_security.py": {
       "duration_seconds": 1.617,
@@ -1956,7 +1928,7 @@
   },
   "source_run_id": 29104632060,
   "source_sha": "f5905e36f74e9f34d811499b7bd5f88b206f13d0",
-  "total_duration_seconds": 9063.479,
-  "total_items": 2907,
+  "total_duration_seconds": 8787.338,
+  "total_items": 2843,
   "version": 1
 }

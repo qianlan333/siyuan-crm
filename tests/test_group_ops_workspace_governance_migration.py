@@ -183,42 +183,13 @@ def test_group_ops_workspace_governance_migration_does_not_add_runtime_writers_o
         assert forbidden not in migration_source.split("def upgrade", 1)[1]
 
     manifest = yaml.safe_load(ROUTE_MANIFEST.read_text(encoding="utf-8"))
-    allowed_step_routes = {
-        "/api/admin/p1/group-ops-workspace/governance/{review_id}/steps/{step_id}/approve",
-        "/api/admin/p1/group-ops-workspace/governance/{review_id}/steps/{step_id}/reject",
-        "/api/admin/p1/group-ops-workspace/governance/{review_id}/expire",
-    }
-    allowed_bridge_routes = {
-        "/api/admin/p1/group-ops-workspace/governance/{review_id}/bridge-push-center",
-        "/api/admin/p1/group-ops-workspace/governance/{review_id}/push-center-bridge",
-    }
-    step_routes = {
-        route["path"]
-        for route in manifest["routes"]
-        if "/api/admin/p1/group-ops-workspace/" in route["path"]
-        and (
-            "/steps/" in route["path"]
-            or route["path"].endswith("/expire")
-        )
-    }
-    assert allowed_step_routes.issubset(step_routes)
-    bridge_routes = {
-        route["path"]
-        for route in manifest["routes"]
-        if "/api/admin/p1/group-ops-workspace/" in route["path"]
-        and "/push-center" in route["path"]
-    }
-    assert bridge_routes.issubset(allowed_bridge_routes)
-    forbidden_execution_routes = [
+    retired_runtime_routes = [
         route
         for route in manifest["routes"]
-        if "/api/admin/p1/group-ops-workspace/" in route["path"]
-        and (
-            "/execute" in route["path"]
-            or "/send" in route["path"]
-        )
+        if "/api/admin/p1/group-ops-workspace" in route["path"]
+        or route["path"] == "/admin/p1/group-ops-workspace"
     ]
-    assert forbidden_execution_routes == []
+    assert retired_runtime_routes == []
 
     group_ops_runtime_sources = "\n".join(
         path.read_text(encoding="utf-8")

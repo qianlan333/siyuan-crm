@@ -70,8 +70,25 @@ jobs:
               cat /tmp/aicrm_channels_smoke.json
               exit 1
             fi
-            if ! python scripts/ops/check_admin_read_pages_smoke.py --base-url http://127.0.0.1:5001 --require-admin-cookie | tee /tmp/aicrm-admin-read-pages-smoke.json; then
+            deploy_smoke_session_file="$(mktemp /tmp/aicrm-deploy-smoke-session.XXXXXX)"
+            python3 scripts/ops/create_deploy_smoke_session.py issue \
+              --output-file "$deploy_smoke_session_file" \
+              --ttl-seconds 300 \
+              | tee /tmp/aicrm-deploy-smoke-session-issue.json
+            if ! python scripts/ops/check_admin_read_pages_smoke.py \
+              --base-url http://127.0.0.1:5001 \
+              --require-admin-cookie \
+              --admin-cookie-file "$deploy_smoke_session_file" \
+              | tee /tmp/aicrm-admin-read-pages-smoke.json; then
               sudo systemctl status openclaw-wecom-postgres.service --no-pager || true
               sudo journalctl -u openclaw-wecom-postgres.service -n 120 --no-pager || true
+              python3 scripts/ops/create_deploy_smoke_session.py revoke \
+                --cookie-file "$deploy_smoke_session_file" \
+                | tee /tmp/aicrm-deploy-smoke-session-revoke.json || true
+              rm -f -- "$deploy_smoke_session_file"
               exit 1
             fi
+            python3 scripts/ops/create_deploy_smoke_session.py revoke \
+              --cookie-file "$deploy_smoke_session_file" \
+              | tee /tmp/aicrm-deploy-smoke-session-revoke.json
+            rm -f -- "$deploy_smoke_session_file"

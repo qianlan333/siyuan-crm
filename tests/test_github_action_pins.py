@@ -18,7 +18,12 @@ def test_repository_external_actions_are_immutable_and_trusted() -> None:
     errors, workflow_count, external_use_count = check_workflows(ROOT)
 
     assert errors == []
-    assert workflow_count >= 4
+    assert workflow_count == 3
+    assert {path.name for path in (ROOT / ".github" / "workflows").glob("*.yml")} == {
+        "ci-fast.yml",
+        "deploy.yml",
+        "full-regression.yml",
+    }
     assert external_use_count > 0
 
 

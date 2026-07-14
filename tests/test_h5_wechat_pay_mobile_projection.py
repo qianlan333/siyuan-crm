@@ -1,9 +1,11 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from aicrm_next.identity_contact.dto import IdentityResolution, IdentityResolveResult
+from aicrm_next.identity_contact import payment_projection
+from aicrm_next.platform_foundation.internal_events.models import InternalEvent, InternalEventConsumerRun
+from aicrm_next.platform_foundation.internal_events.payment import order_projection_consumer
 from aicrm_next.public_product import h5_wechat_pay
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -42,8 +44,7 @@ def _resolved(unionid: str) -> IdentityResolveResult:
 
 
 def test_project_order_mobile_to_identity_uses_order_metadata(monkeypatch) -> None:
-    monkeypatch.setattr(h5_wechat_pay, "_jsonb", lambda value: json.dumps(value, ensure_ascii=False))
-    monkeypatch.setattr(h5_wechat_pay, "resolve_identity_with_dbapi", lambda *_args, **_kwargs: _resolved("union_order_001"))
+    monkeypatch.setattr(payment_projection, "resolve_identity_with_dbapi", lambda *_args, **_kwargs: _resolved("union_order_001"))
     conn = _ProjectionConn({"unionid": "union_order_001", "mobile": "15812345678"})
 
     result = h5_wechat_pay._project_order_mobile_to_identity(
@@ -65,16 +66,17 @@ def test_project_order_mobile_to_identity_uses_order_metadata(monkeypatch) -> No
 
     assert result == {"ok": True, "projected": True, "unionid": "union_order_001", "mobile": "15812345678"}
     call = conn.calls[0]
-    assert "UPDATE crm_user_identity" in call["query"]
-    assert "COALESCE(mobile, '') = '' OR mobile = %s OR mobile_normalized = %s" in call["query"]
-    assert call["params"][0:5] == ("15812345678", "15812345678", "wm_order_001", "HuangYouCan", "付款人")
-    assert call["params"][6:] == ("union_order_001", "15812345678", "15812345678")
+    assert "INSERT INTO crm_user_identity" in call["query"]
+    assert "ON CONFLICT (unionid) DO UPDATE SET" in call["query"]
+    assert "WHERE COALESCE(crm_user_identity.mobile, '') = ''" in call["query"]
+    assert call["params"][0:4] == ("union_order_001", "wm_order_001", "wm_order_001", "wm_order_001")
+    assert call["params"][7:11] == ("15812345678", "15812345678", "wechat_pay_order", "付款人")
+    assert call["params"][12] == "HuangYouCan"
 
 
 def test_project_order_mobile_to_identity_skips_invalid_or_missing_identity(monkeypatch) -> None:
-    monkeypatch.setattr(h5_wechat_pay, "_jsonb", lambda value: json.dumps(value, ensure_ascii=False))
     monkeypatch.setattr(
-        h5_wechat_pay,
+        payment_projection,
         "resolve_identity_with_dbapi",
         lambda *_args, **_kwargs: IdentityResolveResult(status="not_found", reason="identity_not_found"),
     )
@@ -93,13 +95,36 @@ def test_project_order_mobile_to_identity_skips_invalid_or_missing_identity(monk
 
     assert missing_unionid["reason"] == "missing_unionid"
     assert invalid_mobile["reason"] == "invalid_mobile"
-    assert not any("UPDATE crm_user_identity" in call["query"] for call in conn.calls)
+    assert not any("INSERT INTO crm_user_identity" in call["query"] for call in conn.calls)
+
+
+def test_project_order_mobile_to_identity_creates_canonical_row_when_identity_arrives_late(monkeypatch) -> None:
+    monkeypatch.setattr(
+        payment_projection,
+        "resolve_identity_with_dbapi",
+        lambda *_args, **_kwargs: IdentityResolveResult(status="not_found", reason="identity_not_found"),
+    )
+    conn = _ProjectionConn({"unionid": "union_late_001", "mobile": "15812345678"})
+
+    result = h5_wechat_pay._project_order_mobile_to_identity(
+        conn,
+        {
+            "out_trade_no": "WXP_IDENTITY_LATE",
+            "unionid": "union_late_001",
+            "metadata_json": {"payer_identity": {"mobile": "15812345678", "openid": "op_late_001"}},
+        },
+        source_route="/api/h5/wechat-pay/notify",
+    )
+
+    assert result == {"ok": True, "projected": True, "unionid": "union_late_001", "mobile": "15812345678"}
+    assert len(conn.calls) == 1
+    assert "INSERT INTO crm_user_identity" in conn.calls[0]["query"]
+    assert "ON CONFLICT (unionid) DO UPDATE SET" in conn.calls[0]["query"]
 
 
 def test_project_order_mobile_to_identity_does_not_overwrite_conflicting_mobile(monkeypatch) -> None:
-    monkeypatch.setattr(h5_wechat_pay, "_jsonb", lambda value: json.dumps(value, ensure_ascii=False))
     monkeypatch.setattr(
-        h5_wechat_pay,
+        payment_projection,
         "resolve_identity_with_dbapi",
         lambda _conn, query, **_kwargs: (
             IdentityResolveResult(status="not_found", reason="identity_not_found")
@@ -119,9 +144,9 @@ def test_project_order_mobile_to_identity_does_not_overwrite_conflicting_mobile(
     )
 
     assert result == {
-        "ok": True,
+        "ok": False,
         "projected": False,
-        "reason": "identity_missing_or_mobile_conflict",
+        "reason": "mobile_alias_conflict",
         "unionid": "union_order_001",
     }
 
@@ -171,6 +196,75 @@ def test_apply_transaction_runs_mobile_projection_before_canonical_internal_even
     assert calls == ["project", "event_outbox"]
 
 
+def test_payment_order_projection_consumer_retries_transient_identity_write_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "aicrm_next.platform_foundation.internal_events.payment._read_order_from_db",
+        lambda _event: {},
+    )
+    event = InternalEvent(
+        event_type="payment.succeeded",
+        aggregate_id="WXP_RETRY_MOBILE",
+        payload_json={
+            "order": {
+                "out_trade_no": "WXP_RETRY_MOBILE",
+                "status": "paid",
+                "trade_state": "SUCCESS",
+                "unionid": "union_retry_001",
+                "metadata_json": {"payer_identity": {"mobile": "15812345678"}},
+            }
+        },
+    )
+
+    def fail_projection(**_kwargs):
+        raise RuntimeError("temporary database failure")
+
+    result = order_projection_consumer(
+        event,
+        InternalEventConsumerRun(consumer_name="order_projection_consumer"),
+        identity_projector=fail_projection,
+    )
+
+    assert result.status == "failed_retryable"
+    assert result.error_code == "payment_identity_projection_failed"
+    assert result.retry_after_seconds == 60
+    assert "15812345678" not in str(result.response_summary)
+
+
+def test_payment_order_projection_consumer_records_successful_mobile_retry(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "aicrm_next.platform_foundation.internal_events.payment._read_order_from_db",
+        lambda _event: {},
+    )
+    event = InternalEvent(
+        event_type="payment.succeeded",
+        aggregate_id="WXP_RETRY_MOBILE_OK",
+        payload_json={
+            "order": {
+                "out_trade_no": "WXP_RETRY_MOBILE_OK",
+                "status": "paid",
+                "trade_state": "SUCCESS",
+                "unionid": "union_retry_ok_001",
+            }
+        },
+    )
+
+    result = order_projection_consumer(
+        event,
+        InternalEventConsumerRun(consumer_name="order_projection_consumer"),
+        identity_projector=lambda **_kwargs: {
+            "ok": True,
+            "projected": True,
+            "unionid": "union_retry_ok_001",
+            "mobile": "15812345678",
+        },
+    )
+
+    assert result.status == "succeeded"
+    assert result.response_summary["mobile_projection_attempted"] is True
+    assert result.response_summary["mobile_projected"] is True
+    assert "15812345678" not in str(result.response_summary)
+
+
 def test_order_read_models_fallback_to_metadata_mobile_for_historical_orders() -> None:
     sidebar_source = (ROOT / "aicrm_next/customer_read_model/sidebar_v2.py").read_text(encoding="utf-8")
     transactions_source = (ROOT / "aicrm_next/commerce/admin_transactions.py").read_text(encoding="utf-8")
@@ -178,7 +272,9 @@ def test_order_read_models_fallback_to_metadata_mobile_for_historical_orders() -
 
     assert "o.metadata_json #>> '{payer_identity,mobile}'" in sidebar_source
     assert "o.metadata_json #>> '{buyer_identity,mobile}'" in sidebar_source
+    assert "NULLIF((SELECT identity.mobile" in transactions_source
     assert "metadata_json #>> '{{payer_identity,mobile}}'" in transactions_source
     assert "metadata_json #>> '{{buyer_identity,mobile}}'" in transactions_source
+    assert "NULLIF((SELECT identity.mobile" in detail_source
     assert "o.metadata_json #>> '{{payer_identity,mobile}}'" in detail_source
     assert "o.metadata_json #>> '{{buyer_identity,mobile}}'" in detail_source

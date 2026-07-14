@@ -446,6 +446,8 @@
         "tests/test_admin_p0_commerce_api.py",
         "tests/test_commerce_admin_transaction_detail.py",
         "tests/test_h5_wechat_pay_mobile_projection.py",
+        "tests/test_wechat_shop_mobile_projection.py",
+        "tests/test_wechat_shop_mobile_projection_migration.py",
         "tests/test_next_wechat_pay_refunds.py",
         "tests/test_p1_error_handling_guard.py",
         "tests/test_wechat_pay_*.py",
@@ -460,6 +462,8 @@
         "tests/test_wechat_products_admin_page_contract.py",
         "tests/test_product_external_push.py",
         "tests/test_h5_wechat_pay_mobile_projection.py",
+        "tests/test_wechat_shop_mobile_projection.py",
+        "tests/test_wechat_shop_mobile_projection_migration.py",
         "tests/test_next_wechat_pay_refunds.py",
         "tests/test_p1_error_handling_guard.py",
         "tests/test_public_pay_landing.py",
@@ -597,7 +601,8 @@
         "tests/test_sidebar_*.py",
         "tests/test_customer_*read_model*.py",
         "tests/test_db_session_runtime_audit.py",
-        "tests/test_next_sidebar_workbench_routes.py"
+        "tests/test_next_sidebar_workbench_routes.py",
+        "tests/frontend/sidebar_progressive_loading.test.mjs"
       ],
       "python_tests": [
         "tests/test_sidebar_v2_api.py",
@@ -606,6 +611,9 @@
         "tests/test_db_session_runtime_audit.py",
         "tests/test_sidebar_workbench_frontend.py",
         "tests/test_sidebar_jssdk_frontend_contract.py"
+      ],
+      "frontend_tests": [
+        "tests/frontend/sidebar_progressive_loading.test.mjs"
       ],
       "needs_postgres": false,
       "architecture_gate": "fast"
@@ -1123,7 +1131,8 @@
         "tests/frontend/p1_wecom_status.test.mjs",
         "tests/frontend/p1_interaction_shell.test.mjs",
         "tests/frontend/p1_business_pages_interaction_shell.test.mjs",
-        "tests/frontend/p1_preview_board.test.mjs"
+        "tests/frontend/p1_preview_board.test.mjs",
+        "tests/frontend/sidebar_progressive_loading.test.mjs"
       ],
       "needs_postgres": false,
       "architecture_gate": "none"

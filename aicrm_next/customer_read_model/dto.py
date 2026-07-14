@@ -35,6 +35,7 @@ class CustomerContextRequest(BaseModel):
     owner_userid: str | None = None
     require_owner_scope: bool = False
     owner_verified: bool = False
+    include_activity: bool = True
     recent_message_limit: int = Field(default=20, ge=1, le=100)
     timeline_limit: int = Field(default=20, ge=1, le=100)
 

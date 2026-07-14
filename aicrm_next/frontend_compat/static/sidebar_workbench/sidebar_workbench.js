@@ -48,6 +48,8 @@
     other_staff_messages: 9000,
   };
   const PANEL_CACHE_TTL_MS = 2 * 60 * 1000;
+  const JSSDK_CONFIG_CACHE_SAFETY_MS = 30 * 1000;
+  const JSSDK_CONFIG_CACHE_MAX_TTL_MS = 5 * 60 * 1000;
   const PRODUCT_CARD_IMAGE_PATH = "/static/sidebar_workbench/product-card-cover.png";
 
   const state = {
@@ -78,6 +80,9 @@
     toastTimer: null,
     lastError: null,
     panelCache: {},
+    panelRequests: new Map(),
+    jssdkConfigRequests: new Map(),
+    jssdkConfigCache: new Map(),
   };
 
   const debugEnabled = root && root.dataset.debugEnabled === "true";
@@ -247,10 +252,52 @@
     return url.toString();
   }
 
+  function jssdkConfigCacheTtlMs(payload) {
+    const context = (payload && payload.sidebar_owner_context) || {};
+    const expiresInMs = Number(context.expires_in) * 1000;
+    if (!Number.isFinite(expiresInMs) || expiresInMs <= JSSDK_CONFIG_CACHE_SAFETY_MS) return 0;
+    return Math.min(JSSDK_CONFIG_CACHE_MAX_TTL_MS, expiresInMs - JSSDK_CONFIG_CACHE_SAFETY_MS);
+  }
+
+  function readJssdkConfigCache(url) {
+    const cached = state.jssdkConfigCache.get(url);
+    if (!cached) return null;
+    if (cached.expiresAt <= Date.now()) {
+      state.jssdkConfigCache.delete(url);
+      return null;
+    }
+    return cached.payload;
+  }
+
+  function writeJssdkConfigCache(url, payload) {
+    const ttlMs = jssdkConfigCacheTtlMs(payload);
+    if (ttlMs <= 0) return;
+    state.jssdkConfigCache.set(url, {
+      payload,
+      expiresAt: Date.now() + ttlMs,
+    });
+  }
+
+  async function requestJssdkConfig() {
+    const url = jssdkConfigUrl();
+    const cached = readJssdkConfigCache(url);
+    if (cached) return cached;
+    const pending = state.jssdkConfigRequests.get(url);
+    if (pending) return pending;
+    const request = requestJson(url, { timeoutMs: SDK_TIMEOUT_MS, retryCount: 1, retryDelayMs: 300 })
+      .then((payload) => {
+        writeJssdkConfigCache(url, payload);
+        return payload;
+      })
+      .finally(() => state.jssdkConfigRequests.delete(url));
+    state.jssdkConfigRequests.set(url, request);
+    return request;
+  }
+
   async function refreshSidebarOwnerToken() {
     if (!state.owner_userid && !state.external_userid) return false;
     try {
-      const payload = await requestJson(jssdkConfigUrl(), { timeoutMs: SDK_TIMEOUT_MS, retryCount: 1, retryDelayMs: 300 });
+      const payload = await requestJssdkConfig();
       applySidebarOwnerToken(payload);
       writeDebug("sidebar owner token refreshed", { status: state.sidebar_owner_token_status, has_token: Boolean(state.sidebar_owner_token) });
       return Boolean(state.sidebar_owner_token);
@@ -421,14 +468,21 @@
   async function requestPanelJson(tab, url, options) {
     const cached = readPanelCache(tab, url);
     if (cached) return cached;
-    const payload = await requestJson(url, {
+    const key = panelCacheKey(tab, url);
+    const pending = state.panelRequests.get(key);
+    if (pending) return pending;
+    const request = requestJson(url, {
       timeoutMs: PANEL_TIMEOUT_MS[tab] || DEFAULT_TIMEOUT_MS,
-      retryCount: 1,
-      retryDelayMs: 420,
+      retryCount: 0,
       ...(options || {}),
-    });
-    writePanelCache(tab, url, payload);
-    return payload;
+    })
+      .then((payload) => {
+        writePanelCache(tab, url, payload);
+        return payload;
+      })
+      .finally(() => state.panelRequests.delete(key));
+    state.panelRequests.set(key, request);
+    return request;
   }
 
   function absoluteUrl(path) {
@@ -517,11 +571,16 @@
     return '<div class="empty">' + escapeHtml(message) + "</div>";
   }
 
+  function isWorkbenchReady() {
+    return Boolean(state.workbench) && (state.status === WORKBENCH_STATES.ready || state.status === WORKBENCH_STATES.degraded_ready);
+  }
+
   function renderTabs() {
     tabsNode.innerHTML = tabs
       .map(([key, label]) => {
         const active = key === state.activeTab ? " active" : "";
-        return '<button class="tab' + active + '" type="button" data-tab="' + key + '">' + escapeHtml(label) + "</button>";
+        const disabled = key !== "profile" && !isWorkbenchReady() ? ' disabled aria-disabled="true"' : "";
+        return '<button class="tab' + active + '" type="button" data-tab="' + key + '"' + disabled + ">" + escapeHtml(label) + "</button>";
       })
       .join("");
   }
@@ -738,9 +797,22 @@
     );
   }
 
+  function materialTypeControls() {
+    return '<div class="seg">' + materialTabs.map(([key, label]) => '<button type="button" class="' + (key === state.materialType ? "active" : "") + '" data-material-type="' + key + '">' + escapeHtml(label) + "</button>").join("") + "</div>";
+  }
+
+  function renderMaterialLoadError(type, error) {
+    content.innerHTML = panel(
+      "素材",
+      materialTypeControls() +
+        '<div class="status error">' + escapeHtml((error && error.message) || "加载失败") + "</div>" +
+        '<div class="row-actions"><button class="btn primary" type="button" data-retry-material-type="' + escapeHtml(type) + '">重试</button></div>'
+    );
+  }
+
   function renderMaterials() {
     const rows = state.data.materials[state.materialType] || [];
-    const controls = '<div class="seg">' + materialTabs.map(([key, label]) => '<button type="button" class="' + (key === state.materialType ? "active" : "") + '" data-material-type="' + key + '">' + escapeHtml(label) + "</button>").join("") + "</div>";
+    const controls = materialTypeControls();
     if (!rows.length) {
       content.innerHTML = panel("素材", controls + empty("暂无素材"));
       return;
@@ -816,6 +888,7 @@
       workflow: {},
       diagnostics: { context_source_status: "owner_pending" },
     };
+    setWorkbenchState(WORKBENCH_STATES.degraded_ready, { stage: "owner_pending", message: message || "" });
     renderTop();
     renderTabs();
     content.innerHTML = panel(
@@ -823,7 +896,6 @@
       '<div class="status error">' + escapeHtml(message || "员工身份待确认，请从企微侧边栏重新打开或稍后重试。") + "</div>" +
         '<div class="row-actions"><button class="btn primary" type="button" data-retry-boot>重试</button></div>'
     );
-    setWorkbenchState(WORKBENCH_STATES.degraded_ready, { stage: "owner_pending", message: message || "" });
   }
 
   async function loadWorkbench() {
@@ -842,22 +914,10 @@
     state.external_userid = customer.external_userid || state.external_userid;
     state.owner_userid = customer.owner_userid || state.owner_userid;
     if (!state.bind_by_userid) state.bind_by_userid = state.owner_userid;
+    setWorkbenchState(payload.diagnostics && payload.diagnostics.context_source_status === "error" ? WORKBENCH_STATES.degraded_ready : WORKBENCH_STATES.ready, payload.diagnostics || {});
     renderTop();
     renderTabs();
     renderActiveTab();
-    setWorkbenchState(payload.diagnostics && payload.diagnostics.context_source_status === "error" ? WORKBENCH_STATES.degraded_ready : WORKBENCH_STATES.ready, payload.diagnostics || {});
-    prefetchTabs(["questionnaires", "orders", "periodic_orders"]);
-  }
-
-  function prefetchTabs(tabNames) {
-    window.setTimeout(() => {
-      (tabNames || []).forEach((tab) => {
-        if (state.loaded[tab]) return;
-        loadTabData(tab)
-          .then(() => writeDebug("prefetch success", { tab }))
-          .catch((error) => writeDebug("prefetch skipped", { tab, message: error.message || String(error) }));
-      });
-    }, 160);
   }
 
   async function loadTabData(tab) {
@@ -915,6 +975,21 @@
     state.data.materials[type] = payload.materials || [];
   }
 
+  async function switchMaterialType(type) {
+    if (!materialTabs.some((item) => item[0] === type)) return;
+    state.materialType = type;
+    if (state.activeTab !== "materials") return;
+    setPanelLoading("素材");
+    try {
+      await loadMaterials(type);
+      if (state.activeTab !== "materials" || state.materialType !== type) return;
+      renderMaterials();
+    } catch (error) {
+      if (state.activeTab !== "materials" || state.materialType !== type) return;
+      renderMaterialLoadError(type, error);
+    }
+  }
+
   function renderActiveTab() {
     if (state.activeTab === "profile") renderProfile();
     if (state.activeTab === "questionnaires") renderQuestionnaires();
@@ -926,14 +1001,23 @@
   }
 
   async function switchTab(tab) {
+    if (tab !== "profile" && !isWorkbenchReady()) return;
     state.activeTab = tab;
     renderTabs();
-    setPanelLoading(tabs.find((item) => item[0] === tab)?.[1] || "");
+    const label = tabs.find((item) => item[0] === tab)?.[1] || "";
+    const materialType = tab === "materials" ? state.materialType : "";
+    setPanelLoading(label);
     try {
       await loadTabData(tab);
+      if (state.activeTab !== tab || (tab === "materials" && state.materialType !== materialType)) return;
       renderActiveTab();
     } catch (error) {
-      content.innerHTML = panel(tabs.find((item) => item[0] === tab)?.[1] || "", '<div class="status error">' + escapeHtml(error.message || "加载失败") + "</div>");
+      if (state.activeTab !== tab || (tab === "materials" && state.materialType !== materialType)) return;
+      content.innerHTML = panel(
+        label,
+        '<div class="status error">' + escapeHtml(error.message || "加载失败") + "</div>" +
+          '<div class="row-actions"><button class="btn primary" type="button" data-retry-tab="' + escapeHtml(tab) + '">重试</button></div>'
+      );
     }
   }
 
@@ -1081,7 +1165,7 @@
     if (!window.wx) return { ok: false, status: WORKBENCH_STATES.sdk_unavailable, reason: "wx_missing" };
     let configPayload;
     try {
-      configPayload = await requestJson(jssdkConfigUrl(), { timeoutMs: SDK_TIMEOUT_MS, retryCount: 1, retryDelayMs: 300 });
+      configPayload = await requestJssdkConfig();
       applySidebarOwnerToken(configPayload);
       writeDebug("jssdk config response", {
         has_config: Boolean(configPayload && configPayload.config),
@@ -1199,8 +1283,8 @@
   }
 
   async function boot() {
-    renderTabs();
     setWorkbenchState(WORKBENCH_STATES.identifying_customer);
+    renderTabs();
     setPanelLoading("");
     try {
       const hasQuery = await resolveContextFromQuery();
@@ -1234,7 +1318,7 @@
 
   tabsNode.addEventListener("click", (event) => {
     const button = event.target.closest("[data-tab]");
-    if (!button) return;
+    if (!button || button.disabled) return;
     switchTab(button.dataset.tab);
   });
 
@@ -1278,6 +1362,18 @@
       boot();
       return;
     }
+    const retryTabButton = event.target.closest("[data-retry-tab]");
+    if (retryTabButton) {
+      retryTabButton.disabled = true;
+      await switchTab(retryTabButton.dataset.retryTab);
+      return;
+    }
+    const retryMaterialTypeButton = event.target.closest("[data-retry-material-type]");
+    if (retryMaterialTypeButton) {
+      retryMaterialTypeButton.disabled = true;
+      await switchMaterialType(retryMaterialTypeButton.dataset.retryMaterialType);
+      return;
+    }
     const qButton = event.target.closest("[data-toggle-questionnaire]");
     if (qButton) {
       const card = content.querySelector('[data-questionnaire-card="' + qButton.dataset.toggleQuestionnaire + '"]');
@@ -1286,14 +1382,7 @@
     }
     const materialTypeButton = event.target.closest("[data-material-type]");
     if (materialTypeButton) {
-      state.materialType = materialTypeButton.dataset.materialType;
-      setPanelLoading("素材");
-      try {
-        await loadMaterials(state.materialType);
-        renderMaterials();
-      } catch (error) {
-        content.innerHTML = panel("素材", '<div class="status error">' + escapeHtml(error.message || "加载失败") + "</div>");
-      }
+      await switchMaterialType(materialTypeButton.dataset.materialType);
       return;
     }
     const materialSendButton = event.target.closest("[data-material-send]");

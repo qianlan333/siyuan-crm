@@ -61,9 +61,7 @@ def plan_public_payload(repo: Any, plan: dict[str, Any]) -> dict[str, Any]:
             "layers": [{"layerKey": key, "count": value} for key, value in sorted(counts.items())],
         }
     execution_rows, execution_total = (
-        _optional_detail(([], 0), lambda: repo.list_execution_logs(plan_id, {"limit": 1, "offset": 0}))
-        if hasattr(repo, "list_execution_logs")
-        else ([], 0)
+        _optional_detail(([], 0), lambda: repo.list_execution_logs(plan_id, {"limit": 1, "offset": 0})) if hasattr(repo, "list_execution_logs") else ([], 0)
     )
     result_rows = []
     if segmentation and hasattr(repo, "list_audience_rule_results"):
@@ -98,16 +96,12 @@ def plan_public_payload(repo: Any, plan: dict[str, Any]) -> dict[str, Any]:
         "boundGroups": groups,
         "boundGroupIds": [clean_text(item.get("chat_id") or item.get("scope_ref_id")) for item in groups]
         + [clean_text(item.get("scope_ref_id")) for item in scopes if item.get("scope_type") == "group"],
-        "boundAudienceIds": [
-            clean_text(item.get("scope_ref_id")) for item in scopes if item.get("scope_type") == "audience"
-        ],
+        "boundAudienceIds": [clean_text(item.get("scope_ref_id")) for item in scopes if item.get("scope_type") == "audience"],
         "webhook": {
             "endpointKey": webhook_key,
             "url": f"/api/automation/group-ops/webhooks/{webhook_key}" if webhook_key else "",
             "method": "POST",
-            "tokenStatus": "generated" if plan.get("webhook_token_hash") else "missing",
-            "signatureEnabled": bool(plan.get("signature_secret_hash")),
-            "lastRotatedAt": clean_text(plan.get("last_rotated_at") or plan.get("updated_at")),
+            "authMode": "aicrm_hmac_sha256",
         },
         "segmentation": segmentation or {},
         "lastRefreshAt": max([clean_text(item.get("computed_at")) for item in result_rows] or [""]),
@@ -120,9 +114,6 @@ def plan_public_payload(repo: Any, plan: dict[str, Any]) -> dict[str, Any]:
         "updated_at": clean_text(plan.get("updated_at")),
         "archived_at": clean_text(plan.get("archived_at")),
     }
-    if plan.get("plaintext_token"):
-        payload["webhook"]["token"] = clean_text(plan.get("plaintext_token"))
-        payload["webhook"]["tokenStatus"] = "generated"
     return payload
 
 

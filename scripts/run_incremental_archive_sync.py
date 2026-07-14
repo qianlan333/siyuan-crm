@@ -4,7 +4,16 @@ import os
 import urllib.request
 
 from scripts import internal_http
-from scripts.script_runtime import emit_json, ensure_repo_root_on_path, read_app_host, read_app_port, read_int_env, read_internal_api_token
+from scripts.script_runtime import (
+    emit_json,
+    ensure_repo_root_on_path,
+    read_app_host,
+    read_app_port,
+    read_int_env,
+    read_internal_access_token,
+    read_internal_api_base_url,
+    read_internal_tls_context,
+)
 
 
 DEFAULT_PATH = "/api/archive/sync"
@@ -47,11 +56,13 @@ def run_direct() -> str:
 def run_http() -> str:
     host = read_app_host()
     port = read_app_port()
-    token = read_internal_api_token(purpose="archive")
+    token = read_internal_access_token(purpose="archive", scopes=("write",))
     response_payload = internal_http.post_json(
         host=host,
         port=port,
         token=token,
+        base_url=read_internal_api_base_url(),
+        ssl_context=read_internal_tls_context(),
         path=DEFAULT_PATH,
         payload=_payload(),
         timeout_seconds=read_int_env("WECOM_ARCHIVE_SYNC_TIMEOUT_SECONDS", 600),

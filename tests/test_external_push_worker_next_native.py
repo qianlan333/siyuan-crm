@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKER = ROOT / "scripts/run_external_push_worker.py"
 
 
-def test_worker_script_uses_next_native_service_without_legacy_imports() -> None:
+def test_retired_worker_uses_count_only_reconciliation_without_legacy_sender_imports() -> None:
     source = WORKER.read_text(encoding="utf-8")
     tree = ast.parse(source)
     imported_modules: list[str] = []
@@ -26,63 +26,56 @@ def test_worker_script_uses_next_native_service_without_legacy_imports() -> None
     assert "import " + "wecom_ability" + "_service" not in source
     assert "create_app" not in source
     assert "app_context" not in source
-    assert "aicrm_next.external_push" in source
+    assert "aicrm_next.external_push" not in source
+    assert "aicrm_next.commerce.fulfillment_reconciliation" in source
+    assert "run_due_external_push_events" not in source
+    assert "run_due_external_push_retries" not in source
 
 
-def test_worker_default_runs_events_and_retries(monkeypatch, capsys) -> None:
-    calls: list[tuple[str, int]] = []
+def test_retired_worker_default_is_count_only_and_never_sends(monkeypatch, capsys) -> None:
+    calls: list[str] = []
 
-    def fake_events(*, limit: int):
-        calls.append(("events", limit))
-        return {"ok": True, "scanned_count": 1}
+    class Reconciliation:
+        def diagnose(self):
+            calls.append("diagnose")
+            return {"ok": True, "mode": "count_only", "counts": {"legacy_domain_outbox_pending": 2}}
 
-    def fake_retries(*, limit: int):
-        calls.append(("retries", limit))
-        return {"ok": True, "retried_count": 2}
-
-    monkeypatch.setattr(run_external_push_worker.external_push_service, "run_due_external_push_events", fake_events)
-    monkeypatch.setattr(run_external_push_worker.external_push_service, "run_due_external_push_retries", fake_retries)
+    monkeypatch.setattr(run_external_push_worker, "CommerceFulfillmentReconciliationService", Reconciliation)
 
     assert run_external_push_worker.main([]) == 0
     payload = json.loads(capsys.readouterr().out)
 
-    assert calls == [("events", 50), ("retries", 50)]
+    assert calls == ["diagnose"]
     assert payload["ok"] is True
-    assert payload["events"]["scanned_count"] == 1
-    assert payload["retries"]["retried_count"] == 2
+    assert payload["legacy_worker_retired"] is True
+    assert payload["replacement_owner"] == "payment.succeeded:webhook_order_paid_consumer"
+    assert payload["database_mutation_performed"] is False
+    assert payload["consumer_executed"] is False
+    assert payload["real_external_call_executed"] is False
 
 
-def test_worker_limit_and_skip_flags(monkeypatch, capsys) -> None:
-    calls: list[tuple[str, int]] = []
+def test_legacy_flags_remain_parse_compatible_but_cannot_restore_sending(monkeypatch, capsys) -> None:
+    calls: list[str] = []
 
-    def fake_events(*, limit: int):
-        calls.append(("events", limit))
-        return {"ok": True}
+    class Reconciliation:
+        def diagnose(self):
+            calls.append("diagnose")
+            return {"ok": True, "mode": "count_only", "counts": {}}
 
-    def fake_retries(*, limit: int):
-        calls.append(("retries", limit))
-        return {"ok": True}
-
-    monkeypatch.setattr(run_external_push_worker.external_push_service, "run_due_external_push_events", fake_events)
-    monkeypatch.setattr(run_external_push_worker.external_push_service, "run_due_external_push_retries", fake_retries)
+    monkeypatch.setattr(run_external_push_worker, "CommerceFulfillmentReconciliationService", Reconciliation)
 
     assert run_external_push_worker.main(["--limit", "7", "--skip-events"]) == 0
-    retry_payload = json.loads(capsys.readouterr().out)
-    assert calls == [("retries", 7)]
-    assert "events" not in retry_payload
-    assert "retries" in retry_payload
+    first_payload = json.loads(capsys.readouterr().out)
+    assert calls == ["diagnose"]
+    assert first_payload["mode"] == "count_only"
 
     calls.clear()
     assert run_external_push_worker.main(["--limit", "9", "--skip-retries"]) == 0
-    event_payload = json.loads(capsys.readouterr().out)
-    assert calls == [("events", 9)]
-    assert "events" in event_payload
-    assert "retries" not in event_payload
+    second_payload = json.loads(capsys.readouterr().out)
+    assert calls == ["diagnose"]
+    assert second_payload["real_external_call_executed"] is False
 
 
-def test_deploy_service_still_runs_same_worker_script() -> None:
-    service = (ROOT / "deploy/openclaw-external-push-worker.service").read_text(encoding="utf-8")
-    timer = (ROOT / "deploy/openclaw-external-push-worker.timer").read_text(encoding="utf-8")
-
-    assert "python scripts/run_external_push_worker.py" in service
-    assert "openclaw-external-push-worker.service" in timer
+def test_retired_worker_has_no_deployable_systemd_units() -> None:
+    assert not (ROOT / "deploy/openclaw-external-push-worker.service").exists()
+    assert not (ROOT / "deploy/openclaw-external-push-worker.timer").exists()

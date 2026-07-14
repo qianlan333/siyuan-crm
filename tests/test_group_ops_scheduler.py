@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -77,24 +76,14 @@ def _node(**overrides):
     }
 
 
-def _run(repo, seen=None, now=None):
+def _run(repo, now=None):
     from aicrm_next.automation_engine.group_ops.scheduler import run_group_ops_due_scheduler
 
-    seen = seen if seen is not None else set()
-    old_mode = os.environ.get("AICRM_GROUP_OPS_OUTBOUND_MODE")
-    os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = "shadow"
-    try:
-        return run_group_ops_due_scheduler(
-            repo=repo,
-            duplicate_checker=lambda key: key in seen or any(job.idempotency_key == key for job in _wecom_group_jobs()),
-            now=now or datetime(2026, 5, 28, 10, 1, tzinfo=timezone.utc),
-            operator="pytest-scheduler",
-        )
-    finally:
-        if old_mode is None:
-            os.environ.pop("AICRM_GROUP_OPS_OUTBOUND_MODE", None)
-        else:
-            os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = old_mode
+    return run_group_ops_due_scheduler(
+        repo=repo,
+        now=now or datetime(2026, 5, 28, 10, 1, tzinfo=timezone.utc),
+        operator="pytest-scheduler",
+    )
 
 
 def _wecom_group_jobs():
@@ -134,20 +123,11 @@ def test_group_ops_scheduler_uses_external_effect_payload_contract():
         },
     )
 
-    old_mode = os.environ.get("AICRM_GROUP_OPS_OUTBOUND_MODE")
-    os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = "shadow"
-    try:
-        summary = run_group_ops_due_scheduler(
-            repo=repo,
-            duplicate_checker=lambda key: False,
-            now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc),
-            operator="pytest-scheduler",
-        )
-    finally:
-        if old_mode is None:
-            os.environ.pop("AICRM_GROUP_OPS_OUTBOUND_MODE", None)
-        else:
-            os.environ["AICRM_GROUP_OPS_OUTBOUND_MODE"] = old_mode
+    summary = run_group_ops_due_scheduler(
+        repo=repo,
+        now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc),
+        operator="pytest-scheduler",
+    )
 
     jobs = _wecom_group_jobs()
     assert summary["group_ops_enqueued_jobs"] == 0
@@ -479,22 +459,7 @@ def test_group_ops_unresolvable_content_package_records_node_error(monkeypatch):
     assert "image_library_resolve_failed:id=404" in summary["errors"][0]["error"]
 
 
-def test_scheduler_injected_duplicate_checker_still_wins():
-    repo = FakeGroupOpsRepo(plans=[_plan()], groups={1: [_group()]}, nodes={1: [_node()]})
-
-    from aicrm_next.automation_engine.group_ops.scheduler import run_group_ops_due_scheduler
-
-    summary = run_group_ops_due_scheduler(
-        repo=repo,
-        duplicate_checker=lambda key: True,
-        now=datetime(2026, 5, 28, 2, 1, tzinfo=timezone.utc),
-        operator="pytest-scheduler",
-    )
-
-    assert summary["group_ops_enqueued_jobs"] == 0
-    assert summary["group_ops_skipped_duplicate"] == 1
-
-def test_scheduler_default_duplicate_checker_has_no_legacy_imports():
+def test_scheduler_has_no_check_then_plan_duplicate_checker():
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
@@ -503,3 +468,4 @@ def test_scheduler_default_duplicate_checker_has_no_legacy_imports():
     assert "wecom_ability" + "_service" not in source
     assert "broadcast_jobs.service" not in source
     assert "legacy_flask_facade" not in source
+    assert "duplicate_checker" not in source

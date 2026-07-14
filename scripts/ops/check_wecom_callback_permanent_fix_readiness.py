@@ -33,7 +33,7 @@ DEFAULT_ADMIN_WEBHOOK_INBOX_METRICS_URL = "http://127.0.0.1:5001/api/admin/webho
 DEFAULT_ADMIN_WEBHOOK_INBOX_ITEMS_URL = "http://127.0.0.1:5001/api/admin/webhook-inbox/items?provider=wecom&event_family=external_contact&status=pending_failed&limit=1"
 DEFAULT_ADMIN_WEBHOOK_INBOX_RECONCILIATION_URL = "http://127.0.0.1:5001/api/admin/wecom/callback/reconciliation?limit=1"
 DEFAULT_CALLBACK_INGRESS_SERVICE = "openclaw-wecom-callback-ingress.service"
-DEFAULT_CALLBACK_WORKER_TIMER = "openclaw-wecom-callback-inbox-worker.timer"
+DEFAULT_CALLBACK_WORKER_SERVICE = "openclaw-wecom-callback-inbox-worker.service"
 MIN_PRESSURE_RATE_PER_MINUTE = 1200.0
 MAX_CALLBACK_P95_MS = 200.0
 MAX_CALLBACK_P99_MS = 500.0
@@ -803,7 +803,7 @@ def read_deploy_smoke_evidence(path: str) -> dict[str, Any]:
         "base_urls_distinct": payload.get("base_urls_distinct") is True,
         "web_health_ok": payload.get("web_health_ok") is True,
         "ingress_health_ok": payload.get("ingress_health_ok") is True,
-        "ingress_time_sensitive_inline_ready": payload.get("ingress_time_sensitive_inline_ready") is True,
+        "ingress_durable_ack_ready": payload.get("ingress_durable_ack_ready") is True,
         "admin_page_deployed": payload.get("admin_page_deployed") is True,
         "admin_api_deployed": payload.get("admin_api_deployed") is True,
         "admin_detail_route_deployed": payload.get("admin_detail_route_deployed") is True,
@@ -819,7 +819,7 @@ def read_deploy_smoke_evidence(path: str) -> dict[str, Any]:
         "ingress_base_url": payload.get("ingress_base_url"),
         "ingress_callback_route_checks": ingress_callback_route_checks,
         "warnings": payload.get("warnings") if isinstance(payload.get("warnings"), list) else [],
-        "error": "" if ok else "deploy smoke evidence does not prove distinct web/ingress runtimes, inline welcome handling, admin API, detail routes, and ingress callback routes are deployed",
+        "error": "" if ok else "deploy smoke evidence does not prove distinct web/ingress runtimes, durable-only ACK, admin API, detail routes, and ingress callback routes are deployed",
     }
 
 
@@ -835,7 +835,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--admin-webhook-inbox-reconciliation-url", default=DEFAULT_ADMIN_WEBHOOK_INBOX_RECONCILIATION_URL)
     parser.add_argument("--probe-timeout", type=float, default=2.0)
     parser.add_argument("--callback-ingress-service", default=DEFAULT_CALLBACK_INGRESS_SERVICE)
-    parser.add_argument("--callback-worker-timer", default=DEFAULT_CALLBACK_WORKER_TIMER)
+    parser.add_argument("--callback-worker-service", default=DEFAULT_CALLBACK_WORKER_SERVICE)
     parser.add_argument("--pressure-evidence-file", default="")
     parser.add_argument("--ingestion-evidence-file", default="")
     parser.add_argument("--processing-evidence-file", default="")
@@ -908,7 +908,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
     )
     services = {
         "callback_ingress": _service_state(str(args.callback_ingress_service), skip_systemctl=bool(args.skip_systemctl)),
-        "callback_worker_timer": _service_state(str(args.callback_worker_timer), skip_systemctl=bool(args.skip_systemctl)),
+        "callback_worker_service": _service_state(str(args.callback_worker_service), skip_systemctl=bool(args.skip_systemctl)),
     }
     pressure_evidence = read_pressure_evidence(str(args.pressure_evidence_file))
     webhook_ingestion_evidence = read_webhook_ingestion_evidence(str(args.ingestion_evidence_file))

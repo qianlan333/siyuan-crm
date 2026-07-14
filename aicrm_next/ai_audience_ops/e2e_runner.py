@@ -4,10 +4,8 @@ import os
 import re
 import secrets
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
-from aicrm_next.ops_enrollment.application import ExecuteUserOpsBatchSendCommand, PreviewUserOpsBatchSendCommand
-from aicrm_next.ops_enrollment.dto import BatchSendRequest
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_GENERIC_PUSH, WECOM_MESSAGE_PRIVATE_SEND
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
 from aicrm_next.shared.runtime_settings import runtime_bool
@@ -36,6 +34,12 @@ class ScenarioPackage:
     archived: bool = False
 
 
+class AudienceUserOpsE2EGateway(Protocol):
+    def preview(self, *, package_id: int, content: str) -> dict[str, Any]: ...
+
+    def execute(self, *, package_id: int, content: str, confirm: bool) -> dict[str, Any]: ...
+
+
 class AudienceRealE2ERunner:
     def __init__(
         self,
@@ -46,8 +50,7 @@ class AudienceRealE2ERunner:
         outbound_service: AudienceOutboundService | None = None,
         external_effects: ExternalEffectService | None = None,
         worker: ExternalEffectWorker | None = None,
-        preview_command: PreviewUserOpsBatchSendCommand | None = None,
-        execute_command: ExecuteUserOpsBatchSendCommand | None = None,
+        user_ops_gateway: AudienceUserOpsE2EGateway | None = None,
     ) -> None:
         self._repo = repository or build_audience_repository()
         self._package_service = package_service or AudiencePackageService(repository=self._repo)
@@ -55,8 +58,7 @@ class AudienceRealE2ERunner:
         self._external_effects = external_effects or ExternalEffectService()
         self._outbound_service = outbound_service or AudienceOutboundService(repository=self._repo, external_effects=self._external_effects)
         self._worker = worker or ExternalEffectWorker(locked_by="ai-audience-real-e2e")
-        self._preview_command = preview_command or PreviewUserOpsBatchSendCommand()
-        self._execute_command = execute_command or ExecuteUserOpsBatchSendCommand()
+        self._user_ops_gateway = user_ops_gateway
 
     def run(self, payload: dict[str, Any]) -> dict[str, Any]:
         guard = self._guard(payload)
@@ -196,7 +198,6 @@ class AudienceRealE2ERunner:
                 {
                     "outbound_enabled": scenario in AUTO_SCENARIOS,
                     "outbound_webhook_url": _test_agent_url(),
-                    "outbound_signing_secret": "e2e_" + secrets.token_urlsafe(32),
                 },
             )
             self._package_service.replace_admin_senders(
@@ -247,7 +248,9 @@ class AudienceRealE2ERunner:
         private_ok = bool(private_dispatch.get("ok"))
         return {
             "ok": private_ok,
-            "error": "" if private_ok else _text(private_dispatch.get("error")) or _text((private_dispatch.get("job") or {}).get("last_error_code")) or "private_dispatch_failed",
+            "error": ""
+            if private_ok
+            else _text(private_dispatch.get("error")) or _text((private_dispatch.get("job") or {}).get("last_error_code")) or "private_dispatch_failed",
             "package_key": package.package_key,
             "package_id": package.package_id,
             "version_id": package.version_id,
@@ -286,11 +289,11 @@ class AudienceRealE2ERunner:
         package = next((item for item in packages if item.scenario in AUTO_SCENARIOS), None)
         if not package:
             return {"ok": False, "error": "package_required"}
-        request = _batch_request(package.package_id, "【E2E-白名单】preview only")
-        preview = self._preview_command(request)
+        gateway = self._require_user_ops_gateway()
+        preview = gateway.preview(package_id=package.package_id, content="【E2E-白名单】preview only")
         resolved = _owner_userids(preview)
         empty = self._package_service.replace_admin_senders(package.package_id, {"items": []})
-        empty_preview = self._preview_command(request)
+        empty_preview = gateway.preview(package_id=package.package_id, content="【E2E-白名单】preview only")
         no_allowed_sender_count = _skipped_count(empty_preview.get("skipped_summary"), "no_allowed_sender")
         self._package_service.replace_admin_senders(
             package.package_id,
@@ -312,17 +315,18 @@ class AudienceRealE2ERunner:
             package.package_id,
             {"items": [{"sender_userid": TEST_SENDER_USERID, "display_name": TEST_SENDER_USERID, "priority": 1, "status": "active"}]},
         )
-        request = _batch_request(package.package_id, f"【E2E-标准群发】run_id={run_id}：User Ops 标准群发复用测试。")
-        preview = self._preview_command(request)
+        gateway = self._require_user_ops_gateway()
+        content = f"【E2E-标准群发】run_id={run_id}：User Ops 标准群发复用测试。"
+        preview = gateway.preview(package_id=package.package_id, content=content)
         target_guard = _preview_guard(preview)
         if target_guard:
             return {"ok": False, "error": target_guard, "preview": _compact_preview(preview)}
         confirm_false_failed = False
         try:
-            self._execute_command(BatchSendRequest(**{**request.model_dump(), "confirm": False}))
+            gateway.execute(package_id=package.package_id, content=content, confirm=False)
         except Exception:
             confirm_false_failed = True
-        execute = self._execute_command(BatchSendRequest(**{**request.model_dump(), "confirm": True}))
+        execute = gateway.execute(package_id=package.package_id, content=content, confirm=True)
         execute_guard = _execute_guard(execute)
         if execute_guard:
             return {"ok": False, "error": execute_guard, "preview": _compact_preview(preview), "execute": _compact_execute(execute)}
@@ -339,6 +343,11 @@ class AudienceRealE2ERunner:
             "preview": _compact_preview(preview),
             "execute": _compact_execute(execute),
         }
+
+    def _require_user_ops_gateway(self) -> AudienceUserOpsE2EGateway:
+        if self._user_ops_gateway is None:
+            raise RuntimeError("ai audience E2E User Ops gateway is not configured")
+        return self._user_ops_gateway
 
     def _guard_refresh(self, package: ScenarioPackage, refresh: dict[str, Any]) -> dict[str, Any] | None:
         if not refresh.get("ok"):
@@ -587,20 +596,6 @@ def _scenarios(value: Any) -> list[str]:
     return [item for item in requested if item in allowed]
 
 
-def _batch_request(package_id: int, content: str) -> BatchSendRequest:
-    return BatchSendRequest(
-        target_source="ai_audience_package",
-        target_source_id=int(package_id),
-        selection_mode="all_filtered",
-        content=content,
-        images=[],
-        attachments=[],
-        include_do_not_disturb=False,
-        confirm=False,
-        operator="prod-e2e",
-    )
-
-
 def _webhook_job_guard(job, run_id: int) -> str:
     payload = dict(job.payload_json or {})
     if job.effect_type != WEBHOOK_GENERIC_PUSH:
@@ -653,7 +648,13 @@ def _execute_guard(execute: dict[str, Any]) -> str:
 
 
 def _owner_userids(preview: dict[str, Any]) -> list[str]:
-    return sorted({_text(item.get("owner_userid") or item.get("sender_userid")) for item in preview.get("owner_buckets") or [] if _text(item.get("owner_userid") or item.get("sender_userid"))})
+    return sorted(
+        {
+            _text(item.get("owner_userid") or item.get("sender_userid"))
+            for item in preview.get("owner_buckets") or []
+            if _text(item.get("owner_userid") or item.get("sender_userid"))
+        }
+    )
 
 
 def _skipped_count(summary: Any, reason: str) -> int:

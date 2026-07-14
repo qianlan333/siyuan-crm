@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.2.0
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
@@ -65,10 +65,3 @@ jobs:
               sudo journalctl -u openclaw-wecom-postgres.service -n 120 --no-pager || true
               exit 1
             fi
-            sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/
-            sudo cp deploy/openclaw-external-push-worker.timer /etc/systemd/system/
-            sudo systemctl daemon-reload
-            sudo systemctl enable openclaw-external-push-worker.timer
-            sudo systemctl restart openclaw-external-push-worker.timer
-            sudo systemctl start openclaw-external-push-worker.service
-            sudo systemctl status openclaw-external-push-worker.timer --no-pager

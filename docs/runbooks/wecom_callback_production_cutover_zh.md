@@ -85,12 +85,12 @@ source /home/ubuntu/venvs/openclaw/bin/activate
 set -a && source /home/ubuntu/.openclaw-wecom-pg.env && set +a
 sudo cp deploy/openclaw-wecom-callback-ingress.service /etc/systemd/system/
 sudo cp deploy/openclaw-wecom-callback-inbox-worker.service /etc/systemd/system/
-sudo cp deploy/openclaw-wecom-callback-inbox-worker.timer /etc/systemd/system/
 sudo systemctl daemon-reload
+sudo systemctl disable --now openclaw-wecom-callback-inbox-worker.timer || true
 sudo systemctl enable openclaw-wecom-callback-ingress.service
 sudo systemctl restart openclaw-wecom-callback-ingress.service
-sudo systemctl enable openclaw-wecom-callback-inbox-worker.timer
-sudo systemctl restart openclaw-wecom-callback-inbox-worker.timer
+sudo systemctl enable openclaw-wecom-callback-inbox-worker.service
+sudo systemctl restart openclaw-wecom-callback-inbox-worker.service
 curl -sSf http://127.0.0.1:5002/health
 python scripts/run_wecom_callback_inbox_worker.py --limit 20
 set -o pipefail; python scripts/ops/check_wecom_callback_deploy_smoke.py --web-base-url http://127.0.0.1:5001 --ingress-base-url http://127.0.0.1:5002 | tee /tmp/wecom-callback-deploy-smoke.json
@@ -99,7 +99,8 @@ set -o pipefail; python scripts/ops/check_wecom_callback_deploy_smoke.py --web-b
 Go 条件：
 
 - `http://127.0.0.1:5002/health` 返回 2xx
-- worker dry-run 不执行真实业务批处理
+- worker service 为 `active`，旧 minute timer 为 disabled/inactive
+- ingress health 明确返回 `durable_inbox_only=true`
 - deploy smoke 通过，并且 `base_urls_distinct=true`
 - `/tmp/wecom-callback-deploy-smoke.json` 保存成功
 
@@ -229,7 +230,7 @@ test -f "$AICRM_CALLBACK_CUTOVER_BACKUP"
 sudo cp "$AICRM_CALLBACK_CUTOVER_BACKUP" /etc/nginx/sites-enabled/youcangogogo.conf
 sudo nginx -t
 sudo systemctl reload nginx
-sudo systemctl stop openclaw-wecom-callback-inbox-worker.timer || true
+sudo systemctl stop openclaw-wecom-callback-inbox-worker.service || true
 sudo systemctl stop openclaw-wecom-callback-ingress.service || true
 curl -sSf http://127.0.0.1:5001/health
 ```

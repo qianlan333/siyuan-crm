@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 LEGACY_POSTGRES_MIGRATIONS = ROOT / ("wecom_ability" + "_service") / "db" / "migrations" / "postgres_migrations.py"
 ALEMBIC_GROUP_OPS = ROOT / "migrations" / "versions" / "0015_group_ops_plans.py"
+BROADCAST_DELIVERY_MIGRATION = ROOT / "migrations" / "versions" / "0103_broadcast_delivery_state_machine.py"
 
 GROUP_OPS_TABLES = {
     "automation_group_ops_plans",
@@ -47,3 +48,11 @@ def test_group_ops_admin_userids_column_is_alembic_managed() -> None:
 
     assert "admin_userids TEXT NOT NULL DEFAULT '[]'" in migration_source
     assert "ADD COLUMN IF NOT EXISTS admin_userids TEXT NOT NULL DEFAULT '[]'" in followup_migration
+
+
+def test_group_ops_broadcast_delivery_state_is_alembic_managed() -> None:
+    migration_source = BROADCAST_DELIVERY_MIGRATION.read_text(encoding="utf-8")
+
+    assert "ADD COLUMN IF NOT EXISTS dispatch_started_at" in migration_source
+    assert "ADD COLUMN IF NOT EXISTS broadcast_job_id" in migration_source
+    assert "idx_broadcast_jobs_reconciliation" in migration_source

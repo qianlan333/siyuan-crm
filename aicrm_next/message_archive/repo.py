@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from typing import Any, Protocol
 
+from aicrm_next.identity_contact.resolver import resolve_external_userid_with_dbapi
 from aicrm_next.shared.repository_provider import assert_repository_allowed
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
 from aicrm_next.shared.runtime_settings import runtime_setting
@@ -239,7 +240,7 @@ class PostgresMessageArchiveReadRepository:
     ) -> list[JsonDict]:
         normalized = str(chat_type or "").strip().lower()
         with self._connect() as conn:
-            unionid = _resolve_unionid_for_external(conn, str(external_userid or "").strip())
+            unionid = resolve_external_userid_with_dbapi(conn, str(external_userid or "").strip())
             if not unionid:
                 return []
             clauses = ["message.unionid = %s"]
@@ -293,7 +294,7 @@ class PostgresMessageArchiveReadRepository:
     ) -> tuple[list[JsonDict], int]:
         scene_values = ("private", "single") if chat_scene == "private" else ("group",)
         with self._connect() as conn:
-            unionid = _resolve_unionid_for_external(conn, str(external_userid or "").strip())
+            unionid = resolve_external_userid_with_dbapi(conn, str(external_userid or "").strip())
             if not unionid:
                 return [], 0
             clauses = ["message.unionid = %s", "message.chat_type = ANY(%s)", "message.send_time >= %s"]
@@ -398,7 +399,7 @@ class PostgresArchiveSyncRepository:
                 for message in messages:
                     unionid = str(message.get("unionid") or "").strip()
                     if not unionid:
-                        unionid = _resolve_unionid_for_external(conn, str(message.get("external_userid") or "").strip())
+                        unionid = resolve_external_userid_with_dbapi(conn, str(message.get("external_userid") or "").strip())
                     if not unionid:
                         _enqueue_archive_identity_resolution(conn, message)
                         continue
@@ -483,25 +484,6 @@ def _json_payload(value: Any) -> dict[str, Any]:
             return {}
         return dict(parsed) if isinstance(parsed, dict) else {}
     return {}
-
-
-def _resolve_unionid_for_external(conn, external_userid: str) -> str:
-    normalized = str(external_userid or "").strip()
-    if not normalized:
-        return ""
-    row = conn.execute(
-        """
-        SELECT unionid
-        FROM crm_user_identity
-        WHERE primary_external_userid = %s
-           OR jsonb_exists(external_userids_json, %s)
-        ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END,
-                 updated_at DESC
-        LIMIT 1
-        """,
-        (normalized, normalized, normalized),
-    ).fetchone()
-    return str((row or {}).get("unionid") or "").strip()
 
 
 def _enqueue_archive_identity_resolution(conn, message: JsonDict) -> None:

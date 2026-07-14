@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from scripts.ops import probe_wecom_callback_pressure as probe
 from aicrm_next.channel_entry.wecom_crypto import compute_signature, encrypt_message
 
@@ -90,11 +91,11 @@ def test_pressure_probe_allows_custom_sample_target(monkeypatch) -> None:
     assert payload["ok"] is True
 
 
-def _valid_callback_sample() -> tuple[str, str, str, str, str]:
+def _valid_callback_sample() -> tuple[str, str, str, str, str, str]:
     corp_id = "ww-test"
     token = "token"
     aes_key = "abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"
-    timestamp = "1782530000"
+    timestamp = str(int(time.time()))
     nonce = "nonce-a"
     plain_xml = (
         "<xml>"
@@ -103,7 +104,7 @@ def _valid_callback_sample() -> tuple[str, str, str, str, str]:
         "<ChangeType>add_external_contact</ChangeType>"
         "<ExternalUserID>wm-a</ExternalUserID>"
         "<UserID>sales-a</UserID>"
-        "<CreateTime>1782530000</CreateTime>"
+        f"<CreateTime>{timestamp}</CreateTime>"
         "<WelcomeCode>welcome-a</WelcomeCode>"
         "<State>scene-a</State>"
         "</xml>"
@@ -112,11 +113,11 @@ def _valid_callback_sample() -> tuple[str, str, str, str, str]:
     signature = compute_signature(token, timestamp, nonce, encrypted)
     body = f"<xml><Encrypt>{encrypted}</Encrypt></xml>"
     url = f"http://example.test/callback?timestamp={timestamp}&nonce={nonce}&msg_signature={signature}"
-    return corp_id, token, aes_key, url, body
+    return corp_id, token, aes_key, timestamp, url, body
 
 
 def test_pressure_probe_validates_encrypted_callback_sample(monkeypatch) -> None:
-    corp_id, token, aes_key, url, body = _valid_callback_sample()
+    corp_id, token, aes_key, timestamp, url, body = _valid_callback_sample()
     monkeypatch.setenv("WECOM_CORP_ID", corp_id)
     monkeypatch.setenv("WECOM_CALLBACK_TOKEN", token)
     monkeypatch.setenv("WECOM_CALLBACK_AES_KEY", aes_key)
@@ -126,7 +127,7 @@ def test_pressure_probe_validates_encrypted_callback_sample(monkeypatch) -> None
     assert payload["ok"] is True
     assert payload["event_summary"]["Event"] == "change_external_contact"
     assert payload["event_summary"]["ExternalUserID_present"] is True
-    assert payload["idempotency_key"] == "ww-test|change_external_contact|add_external_contact|wm-a|sales-a|1782530000|welcome-a|scene-a"
+    assert payload["idempotency_key"] == f"ww-test|change_external_contact|add_external_contact|wm-a|sales-a|{timestamp}|welcome-a|scene-a"
 
 
 def test_pressure_probe_requires_valid_sample_before_sending_requests(monkeypatch) -> None:

@@ -74,7 +74,7 @@ def test_realtime_wakeup_is_disabled_by_default() -> None:
     assert repo.list_attempts(job["id"]) == []
 
 
-def test_missing_realtime_config_derives_wakeup_from_welcome_capability(monkeypatch) -> None:
+def test_missing_realtime_config_derives_wakeup_from_typed_wecom_config(monkeypatch) -> None:
     repo = InMemoryExternalEffectRepository()
     job = _plan_welcome(repo, key="welcome-realtime-derived")
     fake = _FakeWelcomeAdapter()
@@ -103,10 +103,11 @@ def test_missing_realtime_config_derives_wakeup_from_welcome_capability(monkeypa
     assert updated is not None
     assert updated.status == "succeeded"
     assert state["enabled"] is True
-    assert state["enabled_source"] == "welcome_message_capability"
-    assert state["allowed_types_source"] == "welcome_message_capability"
+    assert state["enabled_source"] == "wecom_execution_config"
+    assert state["allowed_types_source"] == "wecom_execution_config"
     assert WECOM_WELCOME_MESSAGE_SEND in state["allowed_types"]
-    assert state["derived_from_welcome_message_capability"] is True
+    assert state["derived_from_welcome_message_capability"] is False
+    assert state["uses_process_local_executor"] is False
 
 
 def test_explicit_realtime_disabled_overrides_welcome_capability(monkeypatch) -> None:
@@ -128,7 +129,7 @@ def test_explicit_realtime_disabled_overrides_welcome_capability(monkeypatch) ->
 
     assert scheduled is False
     assert repo.get_job(job["id"]).status == "queued"  # type: ignore[union-attr]
-    assert realtime_wakeup_state()["enabled_source"] == "explicit"
+    assert realtime_wakeup_state()["enabled_source"] == "legacy_realtime_flag"
 
 
 def test_explicit_wecom_execution_disabled_blocks_realtime_even_when_legacy_gates_enabled(monkeypatch) -> None:
@@ -177,7 +178,7 @@ def test_derived_realtime_wakeup_still_requires_execution_gate(monkeypatch) -> N
     state = realtime_wakeup_state()
     assert scheduled is False
     assert repo.get_job(job["id"]).status == "queued"  # type: ignore[union-attr]
-    assert state["enabled"] is True
+    assert state["enabled"] is False
     assert state["allowed_types"] == []
 
 
@@ -248,7 +249,7 @@ def test_realtime_wakeup_dispatches_allowed_welcome_job(monkeypatch) -> None:
     assert fake.payloads == [{"welcome_code": "welcome-code", "text": {"content": "欢迎加入"}}]
 
 
-def test_realtime_adapter_exception_leaves_job_retryable_for_worker(monkeypatch) -> None:
+def test_realtime_adapter_exception_quarantines_job_for_reconciliation(monkeypatch) -> None:
     repo = InMemoryExternalEffectRepository()
     job = _plan_welcome(repo, key="welcome-realtime-adapter-exception")
     registry = ExternalEffectAdapterRegistry()
@@ -272,9 +273,10 @@ def test_realtime_adapter_exception_leaves_job_retryable_for_worker(monkeypatch)
     attempts = repo.list_attempts(job["id"])
     assert scheduled is True
     assert updated is not None
-    assert updated.status == "failed_retryable"
+    assert updated.status == "unknown_after_dispatch"
     assert updated.locked_by == ""
     assert updated.locked_at == ""
-    assert updated.next_retry_at
+    assert updated.next_retry_at == ""
+    assert updated.reconciliation_required is True
     assert attempts[0].error_code == "adapter_exception"
     assert attempts[0].response_summary_json["real_external_call_executed"] is False

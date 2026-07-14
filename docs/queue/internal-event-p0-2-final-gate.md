@@ -250,7 +250,7 @@ Before P1:
 - External Effects guard must prevent drift back to executable.
 - `allowed_event_consumers` must remain payment-only unless a single pair is
   approved.
-- `AUTOMATION_INTERNAL_API_TOKEN` should be available for full preview evidence.
+- A registered `automation_worker` and a short-lived `internal_worker` JWT should be available for full preview evidence.
 - Payment automation needs a natural payment worker auto-execute proof.
 - No legacy path deletion before 7 clean observation days.
 - Any refund, media upload, Feishu, WeCom, broadcast send, or webhook real

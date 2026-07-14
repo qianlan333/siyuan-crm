@@ -20,8 +20,8 @@ from aicrm_next.navigation_target import safe_completion_url
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.pii_audit import infer_pii_result_count, set_pii_audit_result_count
 from aicrm_next.shared.runtime import production_data_ready
-from aicrm_next.shared.runtime_settings import runtime_setting
 from aicrm_next.shared.safe_logging import safe_log_fields
+from aicrm_next.shared.signed_session import session_cookie_secure
 
 from .admin_write import (
     QuestionnaireAdminWriteCommand,
@@ -60,13 +60,13 @@ from .application import (
 from .dto import OAuthCallbackRequest, OAuthStartRequest
 from .oauth import COOKIE_NAME, questionnaire_oauth_state_context
 from .public_access import QuestionnaireRespondentIdentityService
+from .result_access import issue_questionnaire_result_grant
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "frontend_compat" / "templates"
 templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 _EXTERNAL_SOURCE_STATUS = "external_questionnaire_submissions"
-_EXTERNAL_TOKEN_ENV_KEY = "AUTOMATION_INTERNAL_API_TOKEN"
 
 _QUESTIONNAIRE_IDENTITY_HINT_FIELDS = (
     "respondent_key",
@@ -138,23 +138,6 @@ def _external_error(*, error_code: str, message: str, status_code: int) -> JSONR
         },
         status_code=status_code,
     )
-
-
-def _external_auth_failure(request: Request) -> JSONResponse | None:
-    expected = _external_text(runtime_setting(_EXTERNAL_TOKEN_ENV_KEY))
-    if not expected:
-        return _external_error(
-            error_code="internal_token_not_configured",
-            message="internal token not configured",
-            status_code=503,
-        )
-    auth_header = _external_text(request.headers.get("Authorization"))
-    provided = _external_text(auth_header[7:]) if auth_header.startswith("Bearer ") else ""
-    if not provided:
-        return _external_error(error_code="missing_internal_token", message="missing internal token", status_code=401)
-    if provided != expected:
-        return _external_error(error_code="invalid_internal_token", message="invalid internal token", status_code=401)
-    return None
 
 
 def _external_encode_cursor(offset: int | None) -> str:
@@ -236,9 +219,7 @@ async def _execute_admin_write(
             command_name=command_name,
             questionnaire_id=questionnaire_id,
             payload={
-                key: value
-                for key, value in payload.items()
-                if key not in {"actor_id", "actor_type", "idempotency_key", "dry_run", "trace_id", "command_id"}
+                key: value for key, value in payload.items() if key not in {"actor_id", "actor_type", "idempotency_key", "dry_run", "trace_id", "command_id"}
             },
             command_id=str(payload.get("command_id") or uuid4().hex),
             idempotency_key=str(request.headers.get("Idempotency-Key") or payload.get("idempotency_key") or "").strip(),
@@ -306,9 +287,6 @@ def list_external_questionnaire_submissions(
     limit: int = Query(100, ge=1, le=500, description="分页条数，最大 500"),
     cursor: str | None = Query(None, description="下一页游标"),
 ) -> JSONResponse:
-    auth_failure = _external_auth_failure(request)
-    if auth_failure:
-        return auth_failure
     if not any(_external_text(value) for value in (mobile, unionid, external_userid)):
         return _external_error(
             error_code="invalid_request",
@@ -501,13 +479,7 @@ def _h5_answer_items_to_answers(items: list[Any]) -> dict[str, Any]:
     for index, item in enumerate(items):
         if not isinstance(item, dict):
             raise QuestionnaireH5WriteInputError(f"answer item {index} must be an object")
-        question_id = str(
-            item.get("question_id")
-            or item.get("question_key")
-            or item.get("id")
-            or item.get("key")
-            or ""
-        ).strip()
+        question_id = str(item.get("question_id") or item.get("question_key") or item.get("id") or item.get("key") or "").strip()
         if not question_id:
             raise QuestionnaireH5WriteInputError(f"answer item {index} question_id is required")
         value_missing = object()
@@ -555,6 +527,11 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
             )
         submit_identity = dict(request_identity)
         submit_identity.update(_h5_identity_payload(payload))
+        submission_identity_result = QuestionnaireRespondentIdentityService().resolve(
+            cookies=request.cookies,
+            request_identity=submit_identity,
+            slug=slug,
+        )
         command = QuestionnaireH5SubmitCommand(
             questionnaire_slug=slug,
             answers=_h5_submit_answers_payload(payload),
@@ -568,8 +545,26 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
             source_route=request.url.path,
             trace_id=str(payload.get("trace_id") or request.headers.get("X-Request-Id") or uuid4().hex),
         )
-        response = execute_questionnaire_h5_submit(command)
-        return JSONResponse(jsonable_encoder(response), status_code=200)
+        payload_response = execute_questionnaire_h5_submit(command)
+        public_payload = dict(payload_response)
+        public_payload.pop("result_access_token", None)
+        response = JSONResponse(jsonable_encoder(public_payload), status_code=200)
+        result_access_token = str(payload_response.get("result_access_token") or "").strip()
+        if result_access_token:
+            grant = issue_questionnaire_result_grant(
+                slug=slug,
+                result_access_token=result_access_token,
+            )
+            response.set_cookie(
+                grant.cookie_name,
+                grant.cookie_value,
+                httponly=True,
+                secure=session_cookie_secure(),
+                samesite="lax",
+                max_age=grant.max_age_seconds,
+                path=grant.cookie_path,
+            )
+        return _with_identity_cookie(response, submission_identity_result)
     except QuestionnaireH5WriteInputError as exc:
         return _h5_write_error(
             str(exc),
@@ -683,19 +678,14 @@ def _public_questionnaire_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(questions, list):
         return normalized
     public_questions = [
-        {key: value for key, value in question.items() if key != "sidebar_profile_field"}
-        if isinstance(question, dict)
-        else question
-        for question in questions
+        {key: value for key, value in question.items() if key != "sidebar_profile_field"} if isinstance(question, dict) else question for question in questions
     ]
     questionnaire = normalized.get("questionnaire")
     if isinstance(questionnaire, dict):
         questionnaire = {
             **questionnaire,
             "questions": [
-                {key: value for key, value in question.items() if key != "sidebar_profile_field"}
-                if isinstance(question, dict)
-                else question
+                {key: value for key, value in question.items() if key != "sidebar_profile_field"} if isinstance(question, dict) else question
                 for question in questionnaire.get("questions", [])
             ],
         }
@@ -768,7 +758,7 @@ def _with_identity_cookie(response: Response, identity_result: dict[str, Any]) -
             str(identity_result.get("cookie_name") or COOKIE_NAME),
             cookie_value,
             httponly=True,
-            secure=False,
+            secure=session_cookie_secure(),
             samesite="lax",
             max_age=60 * 60 * 24 * 365,
             path="/",
@@ -933,18 +923,21 @@ def public_get_questionnaire(request: Request, slug: str) -> Response:
         identity_result = _questionnaire_identity_result_from_request(request)
         submission_status = GetPublicQuestionnaireSubmissionStatusQuery()(slug, identity=identity_result["identity"])
         if submission_status.get("submitted"):
-            return _with_identity_cookie(JSONResponse(
-                {
-                    "ok": False,
-                    "error": "already_submitted",
-                    "message": "已经提交过该问卷",
-                    "redirect_url": submission_status.get("redirect_url") or submission_status.get("submitted_url"),
-                    "completion_target": submission_status.get("completion_target"),
-                    "completion_target_enabled": submission_status.get("completion_target_enabled"),
-                    "completion_target_type": submission_status.get("completion_target_type"),
-                },
-                status_code=409,
-            ), identity_result)
+            return _with_identity_cookie(
+                JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "already_submitted",
+                        "message": "已经提交过该问卷",
+                        "redirect_url": submission_status.get("redirect_url") or submission_status.get("submitted_url"),
+                        "completion_target": submission_status.get("completion_target"),
+                        "completion_target_enabled": submission_status.get("completion_target_enabled"),
+                        "completion_target_type": submission_status.get("completion_target_type"),
+                    },
+                    status_code=409,
+                ),
+                identity_result,
+            )
         return _with_identity_cookie(JSONResponse(jsonable_encoder(GetPublicQuestionnaireQuery()(slug))), identity_result)
     except Exception as exc:
         _raise_http(exc)
@@ -970,8 +963,22 @@ def public_questionnaire_client_diagnostics_options(slug: str) -> Response:
     return _h5_options_response()
 
 
-@router.get("/api/h5/questionnaires/{slug}/result/{submission_id}")
-def public_submission_result(slug: str, submission_id: str) -> dict:
+@router.get("/api/h5/questionnaires/{slug}/result")
+def public_submission_result(request: Request, slug: str) -> dict:
+    submission_id = str(getattr(request.state, "questionnaire_result_access_token", "") or "").strip()
+    if not submission_id:
+        set_pii_audit_result_count(request, 0)
+        return JSONResponse(
+            {
+                "ok": False,
+                "error_code": "questionnaire_result_access_forbidden",
+                "message": "questionnaire result access forbidden",
+                "route_owner": "ai_crm_next",
+                "source_status": "access_forbidden",
+                "fallback_used": False,
+            },
+            status_code=403,
+        )
     try:
         return GetSubmissionResultQuery()(slug, submission_id)
     except Exception as exc:
@@ -1077,7 +1084,7 @@ def wechat_oauth_callback(
                     COOKIE_NAME,
                     signed_cookie,
                     httponly=True,
-                    secure=False,
+                    secure=session_cookie_secure(),
                     samesite="lax",
                     max_age=3600,
                     path="/",
@@ -1105,7 +1112,7 @@ def wechat_oauth_callback(
             COOKIE_NAME,
             signed_cookie,
             httponly=True,
-            secure=False,
+            secure=session_cookie_secure(),
             samesite="lax",
             max_age=3600,
             path="/",
@@ -1138,13 +1145,14 @@ def public_questionnaire_h5_page(request: Request, slug: str):
     should_require_oauth = is_wechat_browser and oauth_configured and not is_authorized
     submission_status = GetPublicQuestionnaireSubmissionStatusQuery()(slug, identity=identity)
     if submission_status.get("submitted") and not should_require_oauth:
-        redirect_url = _completion_target_redirect_url(
-            slug,
-            submission_status.get("completion_target"),
-            fallback_url=submission_status.get("redirect_url") or "",
-        ) or str(
-            submission_status.get("redirect_url") or submission_status.get("submitted_url") or f"/s/{slug}/submitted"
-        ).strip()
+        redirect_url = (
+            _completion_target_redirect_url(
+                slug,
+                submission_status.get("completion_target"),
+                fallback_url=submission_status.get("redirect_url") or "",
+            )
+            or str(submission_status.get("redirect_url") or submission_status.get("submitted_url") or f"/s/{slug}/submitted").strip()
+        )
         return _with_identity_cookie(RedirectResponse(redirect_url, status_code=302), identity_result)
     page_mode = "auth_gate" if should_require_oauth else "questionnaire"
     env_notice = ""

@@ -182,10 +182,11 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
     web_health_ok = _is_2xx(probes["web_health"])
     ingress_health_ok = _is_2xx(probes["ingress_health"])
     ingress_health_payload = _json_payload(probes["ingress_health"])
-    ingress_time_sensitive_inline_ready = bool(
+    ingress_durable_ack_ready = bool(
         ingress_health_ok
         and ingress_health_payload.get("runtime") == "ai_crm_wecom_ingress"
-        and ingress_health_payload.get("time_sensitive_inline_enabled") is True
+        and ingress_health_payload.get("durable_inbox_only") is True
+        and ingress_health_payload.get("ack_boundary") == "signature_decrypt_and_durable_inbox_only"
     )
     admin_page_deployed = _is_route_deployed(probes["admin_webhook_inbox"])
     admin_api_deployed = bool(
@@ -227,7 +228,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         base_urls_distinct
         and web_health_ok
         and ingress_health_ok
-        and ingress_time_sensitive_inline_ready
+        and ingress_durable_ack_ready
         and admin_page_deployed
         and admin_api_deployed
         and ingress_callback_routes_ready
@@ -240,8 +241,8 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         warnings.append("5001 web health is not 2xx")
     if not ingress_health_ok:
         warnings.append("5002 callback ingress health is not 2xx")
-    if not ingress_time_sensitive_inline_ready:
-        warnings.append("5002 callback ingress health does not prove time-sensitive inline welcome handling")
+    if not ingress_durable_ack_ready:
+        warnings.append("5002 callback ingress health does not prove the durable-only ACK boundary")
     if not admin_page_deployed:
         warnings.append("/admin/webhook-inbox route is not deployed or is returning 5xx")
     if not admin_api_deployed:
@@ -260,7 +261,7 @@ def run(argv: list[str] | None = None) -> dict[str, Any]:
         "base_urls_distinct": base_urls_distinct,
         "web_health_ok": web_health_ok,
         "ingress_health_ok": ingress_health_ok,
-        "ingress_time_sensitive_inline_ready": ingress_time_sensitive_inline_ready,
+        "ingress_durable_ack_ready": ingress_durable_ack_ready,
         "admin_page_deployed": admin_page_deployed,
         "admin_api_deployed": admin_api_deployed,
         "admin_detail_route_deployed": _detail_route_deployed(probes["admin_webhook_inbox_detail"]),

@@ -18,6 +18,7 @@ REQUIRED_DOMAINS = {
     "refund_entitlement",
     "questionnaire",
     "group_ops",
+    "broadcast_delivery",
     "delivery",
 }
 REQUIRED_CASES = {"success", "failure", "replay_or_concurrency"}

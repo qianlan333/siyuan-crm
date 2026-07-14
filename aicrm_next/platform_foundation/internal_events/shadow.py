@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from collections.abc import Callable
 from typing import Any
 
 from aicrm_next.platform_foundation.command_bus import Command, CommandContext
@@ -17,11 +18,10 @@ from .config import (
     owner_migration_internal_events_enabled,
     questionnaire_internal_events_enabled,
 )
-from .consumer_registry import DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY, InternalEventConsumerRegistry
+from .consumer_registry import InternalEventConsumerRegistry, current_internal_event_consumer_registry
 from .legacy_path_markers import mark_legacy_path_invoked
 from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerRun
 from .customer_identity import register_customer_identity_event_consumers
-from .questionnaire import register_questionnaire_event_consumers
 from .service import InternalEventService
 
 LOGGER = logging.getLogger(__name__)
@@ -443,7 +443,12 @@ def _ops_plan_type_from_event(event: InternalEvent) -> str:
     return _text(payload_summary.get("plan_type") or payload.get("plan_type") or "cloud_plan")
 
 
-def broadcast_task_planner_consumer(event: InternalEvent, run: InternalEventConsumerRun) -> InternalEventConsumerResult:
+def broadcast_task_planner_consumer(
+    event: InternalEvent,
+    run: InternalEventConsumerRun,
+    *,
+    repository_factory: Callable[[], Any] | None = None,
+) -> InternalEventConsumerResult:
     plan_id = _ops_plan_id_from_event(event)
     plan_type = _ops_plan_type_from_event(event)
     request_summary = {
@@ -474,9 +479,19 @@ def broadcast_task_planner_consumer(event: InternalEvent, run: InternalEventCons
                 "planner_result": "planner_skipped_non_applicable",
             },
         )
-    from aicrm_next.cloud_orchestrator.repository import build_cloud_plan_repository
-
-    result = build_cloud_plan_repository().create_or_reuse_plan_broadcast_job(
+    if repository_factory is None:
+        return InternalEventConsumerResult(
+            status="failed_terminal",
+            request_summary=request_summary,
+            response_summary={
+                "error": "broadcast planner composition missing",
+                "real_external_call_executed": False,
+            },
+            result_summary={"reason": "broadcast_planner_composition_missing"},
+            error_code="broadcast_planner_composition_missing",
+            error_message="broadcast planner composition missing",
+        )
+    result = repository_factory().create_or_reuse_plan_broadcast_job(
         plan_id,
         operator=event.actor_id or "internal_event_worker",
         source_event_id=event.event_id,
@@ -639,9 +654,12 @@ def webhook_owner_migration_consumer(event: InternalEvent, run: InternalEventCon
     return _skipped("owner_migration_webhook_not_configured", event, run)
 
 
-def register_shadow_event_consumers(registry: InternalEventConsumerRegistry | None = None) -> None:
-    registry = registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
-    register_questionnaire_event_consumers(registry)
+def register_shadow_event_consumers(
+    registry: InternalEventConsumerRegistry | None = None,
+    *,
+    broadcast_task_planner_handler: Any | None = None,
+) -> None:
+    registry = registry or current_internal_event_consumer_registry()
     register_customer_identity_event_consumers(registry)
 
     for event_type in (CUSTOMER_TAGGED_EVENT_TYPE, CUSTOMER_UNTAGGED_EVENT_TYPE):
@@ -652,7 +670,12 @@ def register_shadow_event_consumers(registry: InternalEventConsumerRegistry | No
     for event_type in (AI_CAMPAIGN_CREATED_EVENT_TYPE, AI_CAMPAIGN_APPROVED_EVENT_TYPE, AI_CAMPAIGN_STARTED_EVENT_TYPE):
         registry.register(event_type, "ai_campaign_ai_assist_notify_consumer", ai_campaign_ai_assist_notify_consumer, consumer_type="orchestration")
         registry.register(event_type, "campaign_summary_consumer", campaign_summary_consumer, consumer_type="projection")
-        registry.register(event_type, "broadcast_task_planner_consumer", broadcast_task_planner_consumer, consumer_type="orchestration")
+        registry.register(
+            event_type,
+            "broadcast_task_planner_consumer",
+            broadcast_task_planner_handler or broadcast_task_planner_consumer,
+            consumer_type="orchestration",
+        )
         registry.register(event_type, "audit_projection_consumer", audit_projection_consumer, consumer_type="projection")
 
     registry.register(BROADCAST_TASK_CREATED_EVENT_TYPE, "broadcast_queue_projection_consumer", broadcast_queue_projection_consumer, consumer_type="projection")
@@ -664,7 +687,12 @@ def register_shadow_event_consumers(registry: InternalEventConsumerRegistry | No
     registry.register(OPS_PLAN_APPROVED_EVENT_TYPE, "automation_schedule_refresh_consumer", automation_schedule_refresh_consumer, consumer_type="orchestration")
     registry.register(OPS_PLAN_APPROVED_EVENT_TYPE, "ops_plan_ai_assist_notify_consumer", ops_plan_ai_assist_notify_consumer, consumer_type="orchestration")
     registry.register(OPS_PLAN_APPROVED_EVENT_TYPE, "audit_projection_consumer", audit_projection_consumer, consumer_type="projection")
-    registry.register(OPS_PLAN_APPROVED_EVENT_TYPE, "broadcast_task_planner_consumer", broadcast_task_planner_consumer, consumer_type="orchestration")
+    registry.register(
+        OPS_PLAN_APPROVED_EVENT_TYPE,
+        "broadcast_task_planner_consumer",
+        broadcast_task_planner_handler or broadcast_task_planner_consumer,
+        consumer_type="orchestration",
+    )
     registry.register_handler_alias(OPS_PLAN_APPROVED_EVENT_TYPE, "ai_assist_notify_consumer", legacy_ops_plan_ai_assist_notify_consumer)
 
     registry.register(OWNER_MIGRATION_EXECUTED_EVENT_TYPE, "customer_owner_projection_consumer", customer_owner_projection_consumer, consumer_type="projection")
@@ -689,7 +717,6 @@ def emit_questionnaire_submitted_shadow_event(
     submission_id = _text(submission.get("submission_id"))
     if not submission_id:
         return {"status": "skipped", "reason": "submission_id_missing"}
-    register_shadow_event_consumers()
     answer_snapshots = [
         dict(item)
         for item in (submission.get("answer_snapshots") or [])
@@ -787,7 +814,6 @@ def emit_customer_tag_shadow_event(
         return {"status": "skipped", "reason": "internal_events_disabled_or_event_type_not_allowed"}
     if not _text(external_userid):
         return {"status": "skipped", "reason": "external_userid_missing"}
-    register_shadow_event_consumers()
     stable_key = command.idempotency_key or command.command_id or f"{event_type}:{external_userid}:{','.join(tag_ids)}"
     source = _source_context_source(source_context, command.context.source_route)
     normalized_tags = list(tag_ids or [])
@@ -854,7 +880,6 @@ def emit_ai_campaign_shadow_event(
     campaign_code = _text(campaign.get("campaign_code") or command.payload.get("campaign_code"))
     if not campaign_code:
         return {"status": "skipped", "reason": "campaign_code_missing"}
-    register_shadow_event_consumers()
     status = _text(campaign.get("run_status") or campaign.get("status"))
     review_status = _text(campaign.get("review_status"))
     event_version_key = _ai_campaign_event_version_key(event_type=event_type, campaign=campaign)
@@ -1016,7 +1041,6 @@ def emit_broadcast_task_created_shadow_event(
         "content_summary_present": bool(_text(job.get("content_summary"))),
         "target_external_userids_count": len(job.get("target_external_userids") or []) if isinstance(job.get("target_external_userids"), list) else target_count,
     }
-    register_shadow_event_consumers()
     result = InternalEventService().emit_event(
         event_type=BROADCAST_TASK_CREATED_EVENT_TYPE,
         event_version=1,
@@ -1084,7 +1108,6 @@ def emit_ops_plan_approved_shadow_event(
     campaign_code = _text(plan.get("campaign_code") or plan.get("campaign_id"))
     plan_type = _text(plan.get("plan_type") or plan.get("source_type") or aggregate_type)
     stage = review_status or run_status or "approved"
-    register_shadow_event_consumers()
     service = InternalEventService()
     legacy_idempotency_key = f"ops_plan.approved:{aggregate_type}:{plan_id}"
     legacy_events, legacy_total = service.list_events({"idempotency_key": legacy_idempotency_key}, limit=1)
@@ -1221,7 +1244,6 @@ def emit_owner_migration_executed_shadow_event(
     source_command_id = f"owner_migration.executed:{result_id}"
     trace_id = source_command_id
     customer_scope_hash = _hash_text("|".join(sorted(external_userids or touched_external_userids or requested_external_userids)))
-    register_shadow_event_consumers()
     result_payload = InternalEventService().emit_event(
         event_type=OWNER_MIGRATION_EXECUTED_EVENT_TYPE,
         event_version=1,
@@ -1309,6 +1331,8 @@ def emit_owner_migration_executed_shadow_event(
 
 
 def safe_emit(label: str, func, **kwargs: Any) -> dict[str, Any]:
+    """Best-effort shadow telemetry only; business events must use transactional outbox."""
+
     try:
         return func(**kwargs)
     except Exception as exc:

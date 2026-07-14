@@ -9,8 +9,8 @@ from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .archive_sdk import (
     WeComArchiveError,
-    configure_sdk,
     decrypt_chat_payload,
+    decrypt_chat_payloads,
     extract_text_record,
     fetch_chatdata_page,
 )
@@ -47,8 +47,6 @@ class ArchiveSyncConfig:
 class WeComArchiveSdkClient:
     def __init__(self, config: ArchiveSyncConfig) -> None:
         self._config = config
-        self._lib = None
-        self._sdk_ptr = None
 
     def health(self) -> dict[str, Any]:
         return {
@@ -60,36 +58,45 @@ class WeComArchiveSdkClient:
             "private_key_exists": Path(self._config.private_key_path).exists(),
         }
 
-    def _ensure_sdk(self):
-        if self._lib is not None and self._sdk_ptr is not None:
-            return self._lib, self._sdk_ptr
+    def _validate_config(self) -> None:
         if not self._config.corp_id or not self._config.archive_secret:
             raise WeComArchiveError("WECOM_CORP_ID or WECOM_ARCHIVE_SECRET is not configured")
-        lib = configure_sdk(self._config.sdk_lib_path)
-        sdk_ptr = lib.NewSdk()
-        if not sdk_ptr:
-            raise WeComArchiveError("NewSdk returned null")
-        init_ret = lib.Init(sdk_ptr, self._config.corp_id.encode("utf-8"), self._config.archive_secret.encode("utf-8"))
-        if init_ret != 0:
-            lib.DestroySdk(sdk_ptr)
-            raise WeComArchiveError(f"Init failed with code {init_ret}")
-        self._lib = lib
-        self._sdk_ptr = sdk_ptr
-        return lib, sdk_ptr
+        if not self._config.sdk_lib_path:
+            raise WeComArchiveError("WECOM_SDK_LIB_PATH is not configured")
+        if not self._config.private_key_path:
+            raise WeComArchiveError("WECOM_PRIVATE_KEY_PATH is not configured")
 
     def fetch_page(self, *, seq: int, limit: int) -> dict[str, Any]:
-        lib, sdk_ptr = self._ensure_sdk()
-        return fetch_chatdata_page(lib, sdk_ptr, seq, limit, self._config.timeout)
+        self._validate_config()
+        return fetch_chatdata_page(
+            self._config.sdk_lib_path,
+            self._config.corp_id,
+            self._config.archive_secret,
+            seq,
+            limit,
+            self._config.timeout,
+        )
 
     def decrypt_record(self, record: dict[str, Any]) -> dict[str, Any]:
-        lib, _sdk_ptr = self._ensure_sdk()
-        return decrypt_chat_payload(lib, self._config.private_key_path, record)
+        self._validate_config()
+        return decrypt_chat_payload(
+            self._config.sdk_lib_path,
+            self._config.private_key_path,
+            record,
+            timeout=self._config.timeout,
+        )
+
+    def decrypt_records(self, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        self._validate_config()
+        return decrypt_chat_payloads(
+            self._config.sdk_lib_path,
+            self._config.private_key_path,
+            records,
+            timeout=self._config.timeout,
+        )
 
     def close(self) -> None:
-        if self._lib is not None and self._sdk_ptr is not None:
-            self._lib.DestroySdk(self._sdk_ptr)
-        self._lib = None
-        self._sdk_ptr = None
+        return None
 
 
 def build_archive_sdk_client() -> WeComArchiveSdkClient:
@@ -155,15 +162,21 @@ def execute_archive_sync(
             encrypted_records = list(payload.get("chatdata") or [])
             if not encrypted_records:
                 break
+            decrypt_many = getattr(client, "decrypt_records", None)
+            if callable(decrypt_many):
+                decrypted_records = list(decrypt_many(encrypted_records))
+                if len(decrypted_records) != len(encrypted_records):
+                    raise WeComArchiveError("archive SDK returned a mismatched decrypt batch")
+            else:
+                decrypted_records = [client.decrypt_record(record) for record in encrypted_records]
             total_fetched += len(encrypted_records)
             accepted_rows: list[dict[str, Any]] = []
             seq_from = int(encrypted_records[0].get("seq") or max_seq)
             seq_to = seq_from
-            for record in encrypted_records:
+            for record, decrypted in zip(encrypted_records, decrypted_records):
                 seq = int(record.get("seq") or 0)
                 seq_to = max(seq_to, seq)
                 max_seq = max(max_seq, seq)
-                decrypted = client.decrypt_record(record)
                 normalized = extract_text_record(seq, record, decrypted, fallback_owner_userid=str(request["owner_userid"]))
                 if not normalized:
                     continue

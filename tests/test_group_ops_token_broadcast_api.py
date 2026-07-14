@@ -3,35 +3,52 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from tests.admin_auth_test_helpers import access_token_headers, install_access_token
 
 pytest_plugins = ("tests.group_ops_test_helpers",)
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"synthetic-png-payload"
-AUTH_HEADERS = {
-    "Authorization": "Bearer pytest-internal-token",
-    "Idempotency-Key": "pytest-group-broadcast-001",
-}
-
-
 @pytest.fixture(autouse=True)
 def _broadcast_runtime(monkeypatch):
-    monkeypatch.setenv("GROUP_BROADCAST_INTERNAL_API_TOKEN", "pytest-internal-token")
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     monkeypatch.setenv("AICRM_GROUP_OPS_BROADCAST_PLAN_ID", "2")
     monkeypatch.setenv("AICRM_GROUP_OPS_MINIPROGRAM_APPID", "wx-fixture-miniprogram")
     monkeypatch.setenv("AICRM_GROUP_OPS_OUTBOUND_MODE", "external_effect")
     monkeypatch.setenv("AICRM_WECOM_GROUP_ADAPTER_MODE", "fake")
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "execute")
+    monkeypatch.setenv("AICRM_WECOM_ENABLED_EFFECT_TYPES", "wecom.message.group.send")
+
+
+def _machine_headers(client, *, idempotency_key: str = "pytest-group-broadcast-001") -> dict[str, str]:
+    token = getattr(client.app.state, "test_group_broadcast_access_token", "")
+    if not token:
+        token = install_access_token(
+            client,
+            audience="external_integration",
+            capabilities=("group_broadcast_execute",),
+            scopes=("write",),
+            client_id="pytest-group-broadcast",
+            purpose="group_broadcast",
+        )
+        client.app.state.test_group_broadcast_access_token = token
+    headers = access_token_headers(token)
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
+    return headers
 
 
 def _post_json(client, payload: dict[str, Any], *, idempotency_key: str = "pytest-group-broadcast-001"):
     return client.post(
         "/api/automation/group-ops/broadcast",
-        headers={**AUTH_HEADERS, "Idempotency-Key": idempotency_key},
+        headers=_machine_headers(client, idempotency_key=idempotency_key),
         json=payload,
     )
 
 
 def test_group_ops_broadcast_requires_internal_bearer_token(group_ops_api_client, monkeypatch):
+    del monkeypatch
+    _machine_headers(group_ops_api_client)
     missing = group_ops_api_client.post(
         "/api/automation/group-ops/broadcast",
         headers={"Idempotency-Key": "missing-token"},
@@ -45,24 +62,22 @@ def test_group_ops_broadcast_requires_internal_bearer_token(group_ops_api_client
 
     assert missing.status_code == 401
     assert invalid.status_code == 401
-    assert missing.json()["error"] == "internal_token_required"
-    assert invalid.json()["error"] == "internal_token_required"
-    assert "pytest-internal-token" not in missing.text + invalid.text
+    assert missing.json()["error"] == "access_token_required"
+    assert invalid.json()["error"] == "invalid_access_token"
 
-    monkeypatch.setenv("AICRM_ADMIN_AUTH_ENFORCED", "true")
     machine_authorized = _post_json(
         group_ops_api_client,
         {"text": "machine auth without admin session"},
         idempotency_key="machine-auth-no-admin-session",
     )
     assert machine_authorized.status_code == 200
-    assert machine_authorized.json()["status"] == "succeeded"
+    assert machine_authorized.json()["status"] == "simulated"
 
 
 def test_group_ops_broadcast_requires_idempotency_and_content(group_ops_api_client):
     no_idempotency = group_ops_api_client.post(
         "/api/automation/group-ops/broadcast",
-        headers={"Authorization": "Bearer pytest-internal-token"},
+        headers=_machine_headers(group_ops_api_client, idempotency_key=""),
         json={"text": "hello"},
     )
     empty = _post_json(group_ops_api_client, {}, idempotency_key="empty-content")
@@ -79,7 +94,7 @@ def test_group_ops_broadcast_sends_text_only(group_ops_api_client):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["status"] == "succeeded"
+    assert body["status"] == "simulated"
     assert body["external_effect_job_id"] > 0
     assert body["requested_chat_count"] == 1
     assert body["exact_target_verified"] is True
@@ -92,14 +107,14 @@ def test_group_ops_broadcast_sends_text_only(group_ops_api_client):
 def test_group_ops_broadcast_accepts_multipart_images(group_ops_api_client):
     response = group_ops_api_client.post(
         "/api/automation/group-ops/broadcast",
-        headers=AUTH_HEADERS,
+        headers=_machine_headers(group_ops_api_client),
         files=[("images", ("cover.png", PNG_BYTES, "image/png"))],
     )
 
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["status"] == "succeeded"
+    assert body["status"] == "simulated"
     assert body["content"]["text_present"] is False
     assert body["content"]["uploaded_image_count"] == 1
     assert body["content"]["image_count"] == 1
@@ -125,7 +140,7 @@ def test_group_ops_broadcast_accepts_card_and_combined_content(group_ops_api_cli
     monkeypatch.setattr(broadcast, "build_lesson_card_cover_client", lambda: FakeCoverClient())
     response = group_ops_api_client.post(
         "/api/automation/group-ops/broadcast",
-        headers={**AUTH_HEADERS, "Idempotency-Key": "combined-card-image"},
+        headers=_machine_headers(group_ops_api_client, idempotency_key="combined-card-image"),
         data={
             "text": "今日日课——《测试卡片标题》",
             "card_path": "pages/article/article?lesson_id=2fe19357-3b07-4547-9a3f-c14696cc81f5&from=learn",
@@ -164,7 +179,7 @@ def test_group_ops_broadcast_rejects_invalid_card_path_and_image(group_ops_api_c
     )
     invalid_image = group_ops_api_client.post(
         "/api/automation/group-ops/broadcast",
-        headers={**AUTH_HEADERS, "Idempotency-Key": "invalid-image"},
+        headers=_machine_headers(group_ops_api_client, idempotency_key="invalid-image"),
         files=[("images", ("fake.png", b"not-an-image", "image/png"))],
     )
 
@@ -188,7 +203,7 @@ def test_group_ops_broadcast_rejects_invalid_existing_media_id(group_ops_api_cli
 def test_group_ops_broadcast_rejects_more_than_three_images(group_ops_api_client):
     response = group_ops_api_client.post(
         "/api/automation/group-ops/broadcast",
-        headers=AUTH_HEADERS,
+        headers=_machine_headers(group_ops_api_client),
         files=[
             ("images", (f"image-{index}.png", PNG_BYTES, "image/png"))
             for index in range(4)
@@ -207,4 +222,4 @@ def test_group_ops_broadcast_idempotency_does_not_send_twice(group_ops_api_clien
     assert duplicate.status_code == 200
     assert first.json()["external_effect_job_id"] == duplicate.json()["external_effect_job_id"]
     assert duplicate.json()["duplicate"] is True
-    assert duplicate.json()["status"] == "succeeded"
+    assert duplicate.json()["status"] == "simulated"

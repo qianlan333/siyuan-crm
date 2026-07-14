@@ -7,6 +7,8 @@ from typing import Any
 from aicrm_next.admin_read_model.application import GetAdminProductsPageQuery
 from aicrm_next.admin_read_model.dto import AdminReadDiagnostics
 from aicrm_next.admin_read_model.errors import AdminReadModelError
+from aicrm_next.admin_read_model.projections import config_payload
+from aicrm_next.admin_read_model.repo import LocalContractAdminReadRepository
 from tools import check_admin_read_model_boundary as checker
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -60,3 +62,13 @@ def test_admin_read_model_boundary_checker_returns_ok():
 
     assert result["ok"] is True
     assert result["blockers"] == []
+
+
+def test_runtime_config_projection_has_no_retired_callback_fallback_state() -> None:
+    payload = config_payload(LocalContractAdminReadRepository())
+    rendered = json.dumps(payload, ensure_ascii=False)
+
+    assert "5013" not in rendered
+    assert "callback_fallback" not in rendered
+    assert "回调兜底" not in rendered
+    assert [card["label"] for card in payload["cards"]] == ["数据库", "生产数据"]

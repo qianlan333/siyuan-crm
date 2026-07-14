@@ -81,9 +81,7 @@ def build_jobs_payload(params: dict[str, Any] | None = None, *, repository: Push
     limit = _int((params or {}).get("limit"), default=50, minimum=1, maximum=200)
     offset = _int((params or {}).get("offset"), default=0, minimum=0, maximum=100000)
     try:
-        jobs, total = repository.list_jobs(filters, limit=limit, offset=offset)
-        counts = repository.counts(filters)
-        sections = repository.sections(filters)
+        jobs, total, counts, sections = repository.list_jobs_with_summary(filters, limit=limit, offset=offset)
     except Exception as exc:
         return _read_unavailable_payload(filters, exc, limit=limit, offset=offset, include_sections=True)
     return {
@@ -105,8 +103,7 @@ def build_stats_payload(params: dict[str, Any] | None = None, *, repository: Pus
     repository = repository or PushCenterRepository()
     filters = push_center_filters(params)
     try:
-        counts = repository.counts(filters)
-        sections = repository.sections(filters)
+        counts, sections = repository.summary(filters)
     except Exception as exc:
         return _read_unavailable_payload(filters, exc, include_sections=True)
     return {
@@ -224,6 +221,20 @@ def _reconciliation_decision(job: dict[str, Any], attempts: list[dict[str, Any]]
             "retryable": False,
             "operator_action_required": True,
             "next_action_label": "检查影子链路",
+        }
+    if effective_status == "simulated":
+        return {
+            "business_explanation": "任务仅完成模拟执行，没有发生真实外部发送。",
+            "retryable": False,
+            "operator_action_required": False,
+            "next_action_label": "无需操作",
+        }
+    if effective_status == "unknown_after_dispatch":
+        return {
+            "business_explanation": "外部调用结果不确定；必须先核对服务商回执，禁止自动重试。",
+            "retryable": False,
+            "operator_action_required": True,
+            "next_action_label": "核对服务商结果",
         }
     if effective_status == "shadow_failed_not_business_failed":
         return {

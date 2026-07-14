@@ -1,0 +1,5 @@
+schema_version: 1
+package: aicrm_next
+max_lines: 1500
+
+allowlisted_modules: []

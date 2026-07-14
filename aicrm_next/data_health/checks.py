@@ -7,6 +7,10 @@ from typing import Callable
 
 from sqlalchemy import text
 
+from aicrm_next.shared.release_cutovers import (
+    QUESTIONNAIRE_AUTO_EXECUTE_CUTOVER_AT,
+    QUESTIONNAIRE_AUTO_EXECUTE_CUTOVER_SQL,
+)
 from aicrm_next.shared.db_session import get_session_factory
 from tools.check_data_table_lifecycle import check_data_table_lifecycle
 
@@ -23,7 +27,13 @@ ROOT = Path(__file__).resolve().parents[2]
 PROJECTION_FRESHNESS_MAX_MINUTES = int(os.getenv("AICRM_DATA_HEALTH_PROJECTION_FRESHNESS_MAX_MINUTES", "60") or 60)
 BROADCAST_BLOCKED_MAX_COUNT = int(os.getenv("AICRM_DATA_HEALTH_BROADCAST_BLOCKED_MAX_COUNT", "0") or 0)
 BROADCAST_RETRYABLE_DUE_MAX_COUNT = int(os.getenv("AICRM_DATA_HEALTH_BROADCAST_RETRYABLE_DUE_MAX_COUNT", "100") or 100)
+BROADCAST_TERMINAL_LOOKBACK_HOURS = max(
+    1,
+    int(os.getenv("AICRM_DATA_HEALTH_BROADCAST_TERMINAL_LOOKBACK_HOURS", "24") or 24),
+)
 EXTERNAL_EFFECT_RETRYABLE_DUE_MAX_COUNT = int(os.getenv("AICRM_DATA_HEALTH_EXTERNAL_EFFECT_RETRYABLE_DUE_MAX_COUNT", "100") or 100)
+QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL = QUESTIONNAIRE_AUTO_EXECUTE_CUTOVER_SQL
+COMMERCE_CONTINUATION_CUTOVER_SQL = "TIMESTAMPTZ '2026-07-13 09:46:09+00'"
 
 
 def run_all_checks() -> list[DataHealthCheckResult]:
@@ -50,11 +60,7 @@ def _table_lifecycle_manifest_guard() -> DataHealthCheckResult:
 
 
 def _retired_table_runtime_reference_guard() -> DataHealthCheckResult:
-    violations = [
-        violation
-        for violation in _lifecycle_violations()
-        if "references retired table" in violation
-    ]
+    violations = [violation for violation in _lifecycle_violations() if "references retired table" in violation]
     return _static_guard_result(
         check_id="retired_table_runtime_reference_guard",
         title="Retired table runtime reference guard",
@@ -167,11 +173,140 @@ def _db_unavailable_placeholder(check_id: str, title: str, source_tables: list[s
     return _db_backed_placeholder(check_id, title, source_tables)
 
 
+def _database_probe_failure(
+    check_id: str,
+    title: str,
+    exc: Exception,
+    source_tables: list[str],
+) -> DataHealthCheckResult:
+    return DataHealthCheckResult(
+        check_id=check_id,
+        title=title,
+        status="fail",
+        severity="red",
+        summary="The production-safe database probe could not be completed.",
+        evidence={"error": type(exc).__name__, "source_tables": source_tables},
+        remediation="Verify the migrated schema and read access, then rerun the check.",
+    )
+
+
 def _unionid_orphan_fact_guard() -> DataHealthCheckResult:
-    return _db_backed_placeholder(
-        "unionid_orphan_fact_guard",
-        "Unionid orphan fact guard",
-        ["questionnaire_submissions", "wechat_pay_orders", "broadcast_jobs"],
+    check_id = "unionid_orphan_fact_guard"
+    title = "Unionid orphan fact guard"
+    source_tables = [
+        "questionnaire_submissions",
+        "wechat_pay_orders",
+        "alipay_pay_orders",
+        "wechat_shop_orders",
+        "broadcast_jobs",
+        "crm_user_identity",
+    ]
+    if not database_schema_available():
+        return _db_unavailable_placeholder(check_id, title, source_tables)
+    try:
+        with get_session_factory()() as session:
+            row = (
+                session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            (
+                                SELECT COUNT(*) FROM questionnaire_submissions fact
+                                WHERE fact.submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND NULLIF(BTRIM(fact.unionid), '') IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM crm_user_identity identity
+                                      WHERE identity.unionid = fact.unionid
+                                  )
+                            ) AS questionnaire_orphan_count,
+                            (
+                                SELECT COUNT(*) FROM wechat_pay_orders fact
+                                WHERE COALESCE(fact.paid_at, fact.created_at) >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (fact.status = 'paid' OR fact.trade_state = 'SUCCESS')
+                                  AND NULLIF(BTRIM(fact.unionid), '') IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM crm_user_identity identity
+                                      WHERE identity.unionid = fact.unionid
+                                  )
+                            ) AS wechat_pay_orphan_count,
+                            (
+                                SELECT COUNT(*) FROM alipay_pay_orders fact
+                                WHERE COALESCE(fact.paid_at, fact.created_at) >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (fact.status = 'paid' OR fact.trade_status IN ('TRADE_SUCCESS', 'TRADE_FINISHED'))
+                                  AND NULLIF(BTRIM(fact.unionid), '') IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM crm_user_identity identity
+                                      WHERE identity.unionid = fact.unionid
+                                  )
+                            ) AS alipay_pay_orphan_count,
+                            (
+                                SELECT COUNT(*) FROM wechat_shop_orders fact
+                                WHERE COALESCE(fact.paid_at, fact.created_at) >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND fact.paid_at IS NOT NULL
+                                  AND NULLIF(BTRIM(fact.unionid), '') IS NOT NULL
+                                  AND NOT EXISTS (
+                                      SELECT 1 FROM crm_user_identity identity
+                                      WHERE identity.unionid = fact.unionid
+                                  )
+                            ) AS wechat_shop_orphan_count,
+                            (
+                                SELECT COUNT(DISTINCT job.id)
+                                FROM broadcast_jobs job
+                                WHERE job.created_at >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND EXISTS (
+                                      SELECT 1
+                                      FROM jsonb_array_elements_text(
+                                          CASE
+                                              WHEN jsonb_typeof(job.target_unionids_json) = 'array'
+                                              THEN job.target_unionids_json
+                                              ELSE '[]'::jsonb
+                                          END
+                                      ) target(unionid)
+                                      WHERE NULLIF(BTRIM(target.unionid), '') IS NOT NULL
+                                        AND NOT EXISTS (
+                                            SELECT 1 FROM crm_user_identity identity
+                                            WHERE identity.unionid = target.unionid
+                                        )
+                                  )
+                            ) AS broadcast_orphan_count
+                        """
+                    )
+                )
+                .mappings()
+                .first()
+                or {}
+            )
+    except Exception as exc:  # pragma: no cover - defensive health endpoint guard
+        return _database_probe_failure(check_id, title, exc, source_tables)
+    counts = {
+        key: int(row.get(key) or 0)
+        for key in (
+            "questionnaire_orphan_count",
+            "wechat_pay_orphan_count",
+            "alipay_pay_orphan_count",
+            "wechat_shop_orphan_count",
+            "broadcast_orphan_count",
+        )
+    }
+    violations = [f"{key}={value}" for key, value in counts.items() if value]
+    if violations:
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="fail",
+            severity="red",
+            summary="Post-cutover business facts reference unionids missing from the canonical identity table.",
+            evidence={**counts, "violations": violations},
+            remediation="Repair canonical identity before replaying the affected continuation; do not invent or overwrite unionids.",
+        )
+    return DataHealthCheckResult(
+        check_id=check_id,
+        title=title,
+        status="ok",
+        severity="green",
+        summary="Post-cutover questionnaire, paid-order, shop-order, and broadcast facts all resolve to canonical identities.",
+        evidence=counts,
+        remediation="",
     )
 
 
@@ -253,12 +388,22 @@ def _projection_freshness_customer_read_model() -> DataHealthCheckResult:
                         SELECT
                             (SELECT COUNT(*) FROM customer_list_index_next) AS list_count,
                             (SELECT COUNT(*) FROM customer_detail_snapshot_next) AS detail_count,
+                            EXISTS (
+                                SELECT 1 FROM customer_read_model_refresh_state WHERE singleton_id = 1
+                            ) AS refresh_state_present,
+                            (
+                                SELECT source_count FROM customer_read_model_refresh_state WHERE singleton_id = 1
+                            ) AS refresh_source_count,
+                            (
+                                SELECT target_count FROM customer_read_model_refresh_state WHERE singleton_id = 1
+                            ) AS refresh_target_count,
                             EXTRACT(EPOCH FROM (
-                                CURRENT_TIMESTAMP - (SELECT MAX(updated_at) FROM customer_list_index_next)
-                            )) / 60 AS list_stale_minutes,
-                            EXTRACT(EPOCH FROM (
-                                CURRENT_TIMESTAMP - (SELECT MAX(updated_at) FROM customer_detail_snapshot_next)
-                            )) / 60 AS detail_stale_minutes
+                                CURRENT_TIMESTAMP - (
+                                    SELECT last_succeeded_at
+                                    FROM customer_read_model_refresh_state
+                                    WHERE singleton_id = 1
+                                )
+                            )) / 60 AS refresh_age_minutes
                         """
                     )
                 )
@@ -279,22 +424,32 @@ def _projection_freshness_customer_read_model() -> DataHealthCheckResult:
 
     list_count = int(row.get("list_count") or 0)
     detail_count = int(row.get("detail_count") or 0)
-    list_stale_minutes = float(row.get("list_stale_minutes") or 0)
-    detail_stale_minutes = float(row.get("detail_stale_minutes") or 0)
+    refresh_state_present = bool(row.get("refresh_state_present"))
+    refresh_source_count = int(row.get("refresh_source_count") or 0)
+    refresh_target_count = int(row.get("refresh_target_count") or 0)
+    refresh_age_minutes = float(row.get("refresh_age_minutes") or 0)
     violations = []
     if list_count <= 0:
         violations.append("customer_list_index_next is empty")
     if detail_count <= 0:
         violations.append("customer_detail_snapshot_next is empty")
-    if list_stale_minutes > PROJECTION_FRESHNESS_MAX_MINUTES:
-        violations.append(f"list_stale_minutes={list_stale_minutes:.1f} exceeds {PROJECTION_FRESHNESS_MAX_MINUTES}")
-    if detail_stale_minutes > PROJECTION_FRESHNESS_MAX_MINUTES:
-        violations.append(f"detail_stale_minutes={detail_stale_minutes:.1f} exceeds {PROJECTION_FRESHNESS_MAX_MINUTES}")
+    if list_count != detail_count:
+        violations.append(f"projection_count_mismatch={list_count}:{detail_count}")
+    if not refresh_state_present:
+        violations.append("customer read model has no successful managed refresh")
+    elif refresh_age_minutes > PROJECTION_FRESHNESS_MAX_MINUTES:
+        violations.append(f"refresh_age_minutes={refresh_age_minutes:.1f} exceeds {PROJECTION_FRESHNESS_MAX_MINUTES}")
+    if refresh_state_present and refresh_target_count != list_count:
+        violations.append(f"refresh_target_count={refresh_target_count} does not match list_count={list_count}")
+    if refresh_state_present and refresh_source_count != refresh_target_count:
+        violations.append(f"refresh_count_mismatch={refresh_source_count}:{refresh_target_count}")
     evidence = {
         "list_count": list_count,
         "detail_count": detail_count,
-        "list_stale_minutes": list_stale_minutes,
-        "detail_stale_minutes": detail_stale_minutes,
+        "refresh_state_present": refresh_state_present,
+        "refresh_source_count": refresh_source_count,
+        "refresh_target_count": refresh_target_count,
+        "refresh_age_minutes": refresh_age_minutes,
         "max_stale_minutes": PROJECTION_FRESHNESS_MAX_MINUTES,
     }
     if violations:
@@ -329,10 +484,18 @@ def _broadcast_job_blocked_backlog() -> DataHealthCheckResult:
             row = (
                 session.execute(
                     text(
-                        """
+                        f"""
                         SELECT
-                            COUNT(*) FILTER (WHERE status = 'blocked') AS blocked_count,
-                            COUNT(*) FILTER (WHERE status = 'failed_terminal') AS failed_terminal_count,
+                            COUNT(*) FILTER (
+                                WHERE status = 'blocked'
+                                  AND updated_at >= CURRENT_TIMESTAMP - make_interval(hours => {BROADCAST_TERMINAL_LOOKBACK_HOURS})
+                            ) AS recent_blocked_count,
+                            COUNT(*) FILTER (
+                                WHERE status = 'failed_terminal'
+                                  AND updated_at >= CURRENT_TIMESTAMP - make_interval(hours => {BROADCAST_TERMINAL_LOOKBACK_HOURS})
+                            ) AS recent_failed_terminal_count,
+                            COUNT(*) FILTER (WHERE status = 'blocked') AS historical_blocked_count,
+                            COUNT(*) FILTER (WHERE status = 'failed_terminal') AS historical_failed_terminal_count,
                             COUNT(*) FILTER (
                                 WHERE status = 'failed_retryable'
                                   AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
@@ -361,8 +524,10 @@ def _broadcast_job_blocked_backlog() -> DataHealthCheckResult:
             remediation="Verify broadcast_jobs migrations and DATABASE_URL read access.",
         )
 
-    blocked_count = int(row.get("blocked_count") or 0)
-    failed_terminal_count = int(row.get("failed_terminal_count") or 0)
+    blocked_count = int(row.get("recent_blocked_count", row.get("blocked_count")) or 0)
+    failed_terminal_count = int(row.get("recent_failed_terminal_count", row.get("failed_terminal_count")) or 0)
+    historical_blocked_count = int(row.get("historical_blocked_count") or blocked_count)
+    historical_failed_terminal_count = int(row.get("historical_failed_terminal_count") or failed_terminal_count)
     due_retryable_count = int(row.get("due_retryable_count") or 0)
     oldest_terminal_hours = float(row.get("oldest_terminal_hours") or 0)
     violations = []
@@ -375,6 +540,9 @@ def _broadcast_job_blocked_backlog() -> DataHealthCheckResult:
     evidence = {
         "blocked_count": blocked_count,
         "failed_terminal_count": failed_terminal_count,
+        "historical_blocked_count": historical_blocked_count,
+        "historical_failed_terminal_count": historical_failed_terminal_count,
+        "terminal_lookback_hours": BROADCAST_TERMINAL_LOOKBACK_HOURS,
         "due_retryable_count": due_retryable_count,
         "oldest_terminal_hours": oldest_terminal_hours,
         "due_retryable_threshold": BROADCAST_RETRYABLE_DUE_MAX_COUNT,
@@ -534,57 +702,388 @@ def _fake_stub_route_exposed() -> DataHealthCheckResult:
 
 
 def _external_effect_approved_not_queued() -> DataHealthCheckResult:
-    return _db_backed_placeholder(
-        "external_effect_approved_not_queued",
-        "External effect approved-not-queued guard",
-        ["external_effect_job"],
+    check_id = "external_effect_approved_not_queued"
+    title = "External effect approved-not-queued guard"
+    source_tables = ["external_effect_job"]
+    if not database_schema_available():
+        return _db_unavailable_placeholder(check_id, title, source_tables)
+    try:
+        with get_session_factory()() as session:
+            row = (
+                session.execute(
+                    text(
+                        """
+                        SELECT
+                            COUNT(*) FILTER (
+                                WHERE approved_at IS NOT NULL
+                                  AND status IN (
+                                      'pending_approval', 'awaiting_approval',
+                                      'planned', 'approved', 'blocked'
+                                  )
+                            ) AS approved_not_runnable_count,
+                            COUNT(*) FILTER (WHERE approved_at IS NOT NULL) AS approved_job_count
+                        FROM external_effect_job
+                        """
+                    )
+                )
+                .mappings()
+                .first()
+                or {}
+            )
+    except Exception as exc:  # pragma: no cover - defensive health endpoint guard
+        return _database_probe_failure(check_id, title, exc, source_tables)
+    blocked = int(row.get("approved_not_runnable_count") or 0)
+    evidence = {
+        "approved_not_runnable_count": blocked,
+        "approved_job_count": int(row.get("approved_job_count") or 0),
+    }
+    if blocked:
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="fail",
+            severity="red",
+            summary="Approved external-effect jobs remain in a non-runnable approval state.",
+            evidence=evidence,
+            remediation="Inspect approval projection and explicitly queue or cancel each approved job.",
+        )
+    return DataHealthCheckResult(
+        check_id=check_id,
+        title=title,
+        status="ok",
+        severity="green",
+        summary="No approved external-effect job is stranded before the runnable queue.",
+        evidence=evidence,
+        remediation="",
     )
 
 
 def _questionnaire_submission_without_user_guard() -> DataHealthCheckResult:
-    return _db_backed_placeholder(
-        "questionnaire_submission_without_user_guard",
-        "Questionnaire submissions without identity",
-        ["questionnaire_submissions", "crm_user_identity"],
+    check_id = "questionnaire_submission_without_user_guard"
+    title = "Questionnaire submissions without identity"
+    source_tables = ["questionnaire_submissions", "crm_user_identity"]
+    if not database_schema_available():
+        return _db_unavailable_placeholder(check_id, title, source_tables)
+    try:
+        with get_session_factory()() as session:
+            row = (
+                session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            COUNT(*) FILTER (
+                                WHERE submission.submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND NULLIF(BTRIM(submission.unionid), '') IS NULL
+                            ) AS missing_unionid_count,
+                            COUNT(*) FILTER (
+                                WHERE submission.submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND NULLIF(BTRIM(submission.unionid), '') IS NOT NULL
+                                  AND identity.unionid IS NULL
+                            ) AS missing_identity_count,
+                            COUNT(*) FILTER (
+                                WHERE submission.submitted_at < {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(submission.unionid), '') IS NULL
+                                      OR identity.unionid IS NULL
+                                  )
+                            ) AS historical_pre_cutover_count
+                        FROM questionnaire_submissions submission
+                        LEFT JOIN crm_user_identity identity ON identity.unionid = submission.unionid
+                        """
+                    )
+                )
+                .mappings()
+                .first()
+                or {}
+            )
+    except Exception as exc:  # pragma: no cover - defensive health endpoint guard
+        return _database_probe_failure(check_id, title, exc, source_tables)
+    evidence = {
+        "missing_unionid_count": int(row.get("missing_unionid_count") or 0),
+        "missing_identity_count": int(row.get("missing_identity_count") or 0),
+        "historical_pre_cutover_count": int(row.get("historical_pre_cutover_count") or 0),
+        "cutover_at": QUESTIONNAIRE_AUTO_EXECUTE_CUTOVER_AT,
+    }
+    actionable = evidence["missing_unionid_count"] + evidence["missing_identity_count"]
+    if actionable:
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="fail",
+            severity="red",
+            summary="Post-cutover questionnaire submissions are missing canonical user identity.",
+            evidence=evidence,
+            remediation="Resolve the submitting user identity before replaying questionnaire continuations.",
+        )
+    return DataHealthCheckResult(
+        check_id=check_id,
+        title=title,
+        status="ok",
+        severity="green",
+        summary="Every post-cutover questionnaire submission is linked to a canonical user identity.",
+        evidence=evidence,
+        remediation="",
     )
 
 
 def _payment_order_without_user_guard() -> DataHealthCheckResult:
-    return _db_backed_placeholder(
-        "payment_order_without_user_guard",
-        "Payment orders without identity",
-        ["wechat_pay_orders", "alipay_pay_orders", "crm_user_identity"],
+    check_id = "payment_order_without_user_guard"
+    title = "Paid orders without identity"
+    source_tables = [
+        "wechat_pay_orders",
+        "alipay_pay_orders",
+        "wechat_shop_orders",
+        "crm_user_identity",
+    ]
+    if not database_schema_available():
+        return _db_unavailable_placeholder(check_id, title, source_tables)
+    try:
+        with get_session_factory()() as session:
+            row = (
+                session.execute(
+                    text(
+                        f"""
+                        SELECT
+                            (
+                                SELECT COUNT(*) FROM wechat_pay_orders fact
+                                WHERE (fact.status = 'paid' OR fact.trade_state = 'SUCCESS')
+                                  AND COALESCE(fact.paid_at, fact.created_at) >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(fact.unionid), '') IS NULL
+                                      OR NOT EXISTS (
+                                          SELECT 1 FROM crm_user_identity identity
+                                          WHERE identity.unionid = fact.unionid
+                                      )
+                                  )
+                            ) AS wechat_pay_missing_user_count,
+                            (
+                                SELECT COUNT(*) FROM alipay_pay_orders fact
+                                WHERE (fact.status = 'paid' OR fact.trade_status IN ('TRADE_SUCCESS', 'TRADE_FINISHED'))
+                                  AND COALESCE(fact.paid_at, fact.created_at) >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(fact.unionid), '') IS NULL
+                                      OR NOT EXISTS (
+                                          SELECT 1 FROM crm_user_identity identity
+                                          WHERE identity.unionid = fact.unionid
+                                      )
+                                  )
+                            ) AS alipay_pay_missing_user_count,
+                            (
+                                SELECT COUNT(*) FROM wechat_shop_orders fact
+                                WHERE fact.paid_at IS NOT NULL
+                                  AND COALESCE(fact.paid_at, fact.created_at) >= {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(fact.unionid), '') IS NULL
+                                      OR NOT EXISTS (
+                                          SELECT 1 FROM crm_user_identity identity
+                                          WHERE identity.unionid = fact.unionid
+                                      )
+                                  )
+                            ) AS wechat_shop_missing_user_count,
+                            (
+                                SELECT COUNT(*) FROM wechat_pay_orders fact
+                                WHERE (fact.status = 'paid' OR fact.trade_state = 'SUCCESS')
+                                  AND COALESCE(fact.paid_at, fact.created_at) < {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(fact.unionid), '') IS NULL
+                                      OR NOT EXISTS (
+                                          SELECT 1 FROM crm_user_identity identity
+                                          WHERE identity.unionid = fact.unionid
+                                      )
+                                  )
+                            ) AS historical_wechat_pay_count,
+                            (
+                                SELECT COUNT(*) FROM alipay_pay_orders fact
+                                WHERE (fact.status = 'paid' OR fact.trade_status IN ('TRADE_SUCCESS', 'TRADE_FINISHED'))
+                                  AND COALESCE(fact.paid_at, fact.created_at) < {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(fact.unionid), '') IS NULL
+                                      OR NOT EXISTS (
+                                          SELECT 1 FROM crm_user_identity identity
+                                          WHERE identity.unionid = fact.unionid
+                                      )
+                                  )
+                            ) AS historical_alipay_pay_count,
+                            (
+                                SELECT COUNT(*) FROM wechat_shop_orders fact
+                                WHERE fact.paid_at IS NOT NULL
+                                  AND COALESCE(fact.paid_at, fact.created_at) < {COMMERCE_CONTINUATION_CUTOVER_SQL}
+                                  AND (
+                                      NULLIF(BTRIM(fact.unionid), '') IS NULL
+                                      OR NOT EXISTS (
+                                          SELECT 1 FROM crm_user_identity identity
+                                          WHERE identity.unionid = fact.unionid
+                                      )
+                                  )
+                            ) AS historical_wechat_shop_count
+                        """
+                    )
+                )
+                .mappings()
+                .first()
+                or {}
+            )
+    except Exception as exc:  # pragma: no cover - defensive health endpoint guard
+        return _database_probe_failure(check_id, title, exc, source_tables)
+    evidence = {
+        key: int(row.get(key) or 0)
+        for key in (
+            "wechat_pay_missing_user_count",
+            "alipay_pay_missing_user_count",
+            "wechat_shop_missing_user_count",
+            "historical_wechat_pay_count",
+            "historical_alipay_pay_count",
+            "historical_wechat_shop_count",
+        )
+    }
+    evidence["cutover_at"] = "2026-07-13T09:46:09Z"
+    actionable = sum(
+        evidence[key]
+        for key in (
+            "wechat_pay_missing_user_count",
+            "alipay_pay_missing_user_count",
+            "wechat_shop_missing_user_count",
+        )
+    )
+    if actionable:
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="fail",
+            severity="red",
+            summary="Post-cutover paid orders are missing canonical user identity.",
+            evidence=evidence,
+            remediation="Resolve the payer identity before granting or replaying user authorization.",
+        )
+    return DataHealthCheckResult(
+        check_id=check_id,
+        title=title,
+        status="ok",
+        severity="green",
+        summary="Every post-cutover paid order is linked to a canonical user identity.",
+        evidence=evidence,
+        remediation="",
     )
 
 
 def _customer_360_freshness_guard() -> DataHealthCheckResult:
+    check_id = "customer_360_freshness_guard"
+    title = "Customer 360 freshness guard"
+    freshness_probes = [
+        "latest_identity_update",
+        "latest_order",
+        "latest_questionnaire",
+        "latest_message",
+        "latest_projection_refresh",
+    ]
+    source_tables = [
+        "crm_user_identity",
+        "wechat_pay_orders",
+        "alipay_pay_orders",
+        "wechat_shop_orders",
+        "questionnaire_submissions",
+        "archived_messages",
+        "customer_list_index_next",
+        "customer_detail_snapshot_next",
+        "customer_read_model_refresh_state",
+    ]
+    if not database_schema_available():
+        result = _db_unavailable_placeholder(check_id, title, source_tables)
+        return DataHealthCheckResult(
+            check_id=result.check_id,
+            title=result.title,
+            status=result.status,
+            severity=result.severity,
+            summary=result.summary,
+            evidence={
+                **result.evidence,
+                "freshness_probes": freshness_probes,
+            },
+            remediation=result.remediation,
+        )
+    try:
+        with get_session_factory()() as session:
+            row = (
+                session.execute(
+                    text(
+                        """
+                        WITH refresh AS (
+                            SELECT last_succeeded_at
+                            FROM customer_read_model_refresh_state
+                            WHERE singleton_id = 1
+                        )
+                        SELECT
+                            EXISTS (SELECT 1 FROM refresh) AS refresh_state_present,
+                            EXTRACT(EPOCH FROM (
+                                CURRENT_TIMESTAMP - (SELECT last_succeeded_at FROM refresh)
+                            )) / 60 AS refresh_age_minutes,
+                            EXTRACT(EPOCH FROM (
+                                (SELECT MAX(updated_at) FROM crm_user_identity)
+                                - (SELECT last_succeeded_at FROM refresh)
+                            )) / 60 AS identity_lag_minutes,
+                            EXTRACT(EPOCH FROM (
+                                GREATEST(
+                                    (SELECT MAX(COALESCE(paid_at, updated_at, created_at)) FROM wechat_pay_orders),
+                                    (SELECT MAX(COALESCE(paid_at, updated_at, created_at)) FROM alipay_pay_orders),
+                                    (SELECT MAX(COALESCE(paid_at, updated_at, created_at)) FROM wechat_shop_orders)
+                                ) - (SELECT last_succeeded_at FROM refresh)
+                            )) / 60 AS order_lag_minutes,
+                            EXTRACT(EPOCH FROM (
+                                (SELECT MAX(submitted_at) FROM questionnaire_submissions)
+                                - (SELECT last_succeeded_at FROM refresh)
+                            )) / 60 AS questionnaire_lag_minutes,
+                            EXTRACT(EPOCH FROM (
+                                (SELECT MAX(created_at) FROM archived_messages)
+                                - (SELECT last_succeeded_at FROM refresh)
+                            )) / 60 AS message_lag_minutes
+                        """
+                    )
+                )
+                .mappings()
+                .first()
+                or {}
+            )
+    except Exception as exc:  # pragma: no cover - defensive health endpoint guard
+        return _database_probe_failure(check_id, title, exc, source_tables)
+    evidence = {
+        "refresh_state_present": bool(row.get("refresh_state_present")),
+        "refresh_age_minutes": float(row.get("refresh_age_minutes") or 0),
+        "identity_lag_minutes": float(row.get("identity_lag_minutes") or 0),
+        "order_lag_minutes": float(row.get("order_lag_minutes") or 0),
+        "questionnaire_lag_minutes": float(row.get("questionnaire_lag_minutes") or 0),
+        "message_lag_minutes": float(row.get("message_lag_minutes") or 0),
+        "max_lag_minutes": PROJECTION_FRESHNESS_MAX_MINUTES,
+        "freshness_probes": freshness_probes,
+    }
+    violations = []
+    if not evidence["refresh_state_present"]:
+        violations.append("customer read model has no successful managed refresh")
+    for key in (
+        "identity_lag_minutes",
+        "order_lag_minutes",
+        "questionnaire_lag_minutes",
+        "message_lag_minutes",
+    ):
+        if evidence[key] > PROJECTION_FRESHNESS_MAX_MINUTES:
+            violations.append(f"{key}={evidence[key]:.1f} exceeds {PROJECTION_FRESHNESS_MAX_MINUTES}")
+    if violations:
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="fail",
+            severity="red",
+            summary="Customer 360 projection lags one or more canonical sources.",
+            evidence={**evidence, "violations": violations},
+            remediation="Run the managed customer read model refresh and inspect its timer/service state.",
+        )
     return DataHealthCheckResult(
-        check_id="customer_360_freshness_guard",
-        title="Customer 360 freshness guard",
-        status="not_applicable",
-        severity="gray",
-        summary="Customer 360 freshness probes are registered but no production-safe database reader is attached in this PR.",
-        evidence={
-            "freshness_probes": [
-                "latest_identity_update",
-                "latest_order",
-                "latest_questionnaire",
-                "latest_message",
-                "latest_projection_refresh",
-            ],
-            "source_tables": [
-                "crm_user_identity",
-                "wechat_pay_orders",
-                "alipay_pay_orders",
-                "wechat_shop_orders",
-                "questionnaire_submissions",
-                "archived_messages",
-                "customer_list_index_next",
-                "customer_detail_snapshot_next",
-            ],
-            "runtime_probe": "not_configured",
-        },
-        remediation="Attach a production-safe read repository that computes max freshness timestamps by unionid before turning this into a red/yellow operational check.",
+        check_id=check_id,
+        title=title,
+        status="ok",
+        severity="green",
+        summary="Customer 360 projection is within the freshness threshold for identity, order, questionnaire, and message sources.",
+        evidence=evidence,
+        remediation="",
     )
 
 

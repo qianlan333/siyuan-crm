@@ -4,10 +4,10 @@ import hashlib
 import json
 from typing import Any, Callable
 
-from aicrm_next.automation_engine.group_ops.domain import normalize_group_admin_userids
 from aicrm_next.platform_foundation.external_effects.execution_gates import explicit_wecom_execution_disabled
 from aicrm_next.shared.postgres_connection import get_db
 from aicrm_next.shared.runtime_settings import runtime_bool, runtime_setting
+from aicrm_next.shared.wecom_payload_contract import normalize_group_admin_userids
 
 from .audit import record_audit_event
 from .wecom_customer_group_client import WeComCustomerGroupClient, WeComCustomerGroupClientError

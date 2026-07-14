@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
+from tests.admin_auth_test_helpers import install_admin_action_tokens
 
 
 def test_order_identity_repair_route_is_retired_after_auth(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "order-identity-retired-test")
+    del monkeypatch
+    token = install_admin_action_tokens(
+        next_client,
+        ("POST", "/api/admin/jobs/order-identity-repair/run"),
+    )[("POST", "/api/admin/jobs/order-identity-repair/run")]
 
     response = next_client.post(
         "/api/admin/jobs/order-identity-repair/run",
-        headers={"Authorization": "Bearer order-identity-retired-test"},
+        headers={"X-Admin-Action-Token": token},
         json={"limit": 10, "max_attempts": 3, "dry_run": False},
     )
 
@@ -46,3 +51,10 @@ def test_order_identity_repair_contract_migration_drops_orphan_table() -> None:
     assert "DROP INDEX IF EXISTS idx_wechat_pay_order_identity_repair_due" in source
     assert "DROP TABLE IF EXISTS wechat_pay_order_identity_repair" in source
     assert '"wechat_pay_order_identity_repair"' not in conftest_source
+
+
+def test_historical_repair_migration_skips_fresh_schema_without_order_table() -> None:
+    source = Path("migrations/versions/0062_wechat_pay_order_identity_repair.py").read_text(encoding="utf-8")
+
+    assert 'inspect(op.get_bind()).has_table("wechat_pay_orders")' in source
+    assert "return" in source.split('has_table("wechat_pay_orders")', 1)[1].split("op.execute", 1)[0]

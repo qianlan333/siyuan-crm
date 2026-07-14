@@ -12,6 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover - direct script execution
 ensure_repo_root_on_path()
 
 from aicrm_next.commerce.order_reconciliation import WeChatPayOrderReconciliationWorker
+from aicrm_next.public_product.h5_wechat_pay import _apply_transaction
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -29,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     dry_run = not bool(args.execute)
     if args.dry_run:
         dry_run = True
-    payload = WeChatPayOrderReconciliationWorker().run_once(
+    payload = WeChatPayOrderReconciliationWorker(transaction_applier=_apply_transaction).run_once(
         limit=int(args.limit or 100),
         ttl_hours=int(args.ttl_hours or 0) or None,
         window_hours=int(args.window_hours or 24),

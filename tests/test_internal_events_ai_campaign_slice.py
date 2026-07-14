@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("composed_internal_event_registry")
+
 from fastapi.testclient import TestClient
 
 from aicrm_next.cloud_orchestrator.campaigns_read import reset_campaign_read_fixture_state

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-from time import time
 from types import SimpleNamespace
 
 import pytest
@@ -16,22 +15,16 @@ from aicrm_next.admin_auth.action_token import (
     validate_action_token_for_request,
 )
 from aicrm_next.admin_jobs.routes import ensure_admin_action_token, validate_admin_action_token
-from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE, sign_session
+from aicrm_next.platform_foundation.auth_platform.context import AuthContext
 from aicrm_next.main import create_app
+from tests.admin_auth_test_helpers import auth_context, install_admin_session
 
 
-def _session(*, username: str = "security-admin", sid: str = "session-a") -> dict:
-    return {
-        "auth_source": "break_glass",
-        "username": username,
-        "roles": ["super_admin"],
-        "sid": sid,
-        "csrf_token": f"csrf-{sid}",
-        "iat": 100,
-    }
+def _context(*, username: str = "security-admin", sid: str = "session-a") -> AuthContext:
+    return auth_context("super_admin", subject=f"admin:{username}", token_id=sid)
 
 
-def _request(session: dict, *, method: str = "POST") -> Request:
+def _request(context: AuthContext, *, method: str = "POST") -> Request:
     request = Request(
         {
             "type": "http",
@@ -46,7 +39,7 @@ def _request(session: dict, *, method: str = "POST") -> Request:
             "server": ("testserver", 443),
         }
     )
-    request.state.admin_session = session
+    request.state.auth_context = context
     request.state.route_policy = SimpleNamespace(
         capability="manage_operations",
         route_name="retry_external_effect_job",
@@ -55,9 +48,9 @@ def _request(session: dict, *, method: str = "POST") -> Request:
     return request
 
 
-def _token(session: dict, *, now: int = 1_000) -> str:
+def _token(context: AuthContext, *, now: int = 1_000) -> str:
     return issue_action_token(
-        session,
+        context,
         capability="manage_operations",
         method="POST",
         action="retry_external_effect_job",
@@ -67,12 +60,12 @@ def _token(session: dict, *, now: int = 1_000) -> str:
 
 
 def test_action_token_accepts_only_exact_bound_context() -> None:
-    session = _session()
-    token = _token(session)
+    context = _context()
+    token = _token(context)
 
     result = validate_action_token(
         token,
-        session,
+        context,
         capability="manage_operations",
         method="POST",
         action="retry_external_effect_job",
@@ -86,18 +79,18 @@ def test_action_token_accepts_only_exact_bound_context() -> None:
 
 
 @pytest.mark.parametrize(
-    ("session", "capability", "method", "action", "target", "error_suffix"),
+    ("context", "capability", "method", "action", "target", "error_suffix"),
     [
-        (_session(username="other-admin"), "manage_operations", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "sub"),
-        (_session(sid="session-b"), "manage_operations", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "sid"),
-        (_session(), "manage_group_ops", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "cap"),
-        (_session(), "manage_operations", "DELETE", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "m"),
-        (_session(), "manage_operations", "POST", "cancel_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "act"),
-        (_session(), "manage_operations", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/cancel", "tgt"),
+        (_context(username="other-admin"), "manage_operations", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "sub"),
+        (_context(sid="session-b"), "manage_operations", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "sid"),
+        (_context(), "manage_group_ops", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "cap"),
+        (_context(), "manage_operations", "DELETE", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "m"),
+        (_context(), "manage_operations", "POST", "cancel_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/retry", "act"),
+        (_context(), "manage_operations", "POST", "retry_external_effect_job", "/api/admin/external-effects/jobs/{job_id}/cancel", "tgt"),
     ],
 )
 def test_action_token_rejects_cross_context_replay(
-    session: dict,
+    context: AuthContext,
     capability: str,
     method: str,
     action: str,
@@ -105,8 +98,8 @@ def test_action_token_rejects_cross_context_replay(
     error_suffix: str,
 ) -> None:
     result = validate_action_token(
-        _token(_session()),
-        session,
+        _token(_context()),
+        context,
         capability=capability,
         method=method,
         action=action,
@@ -119,13 +112,13 @@ def test_action_token_rejects_cross_context_replay(
 
 
 def test_action_token_expires_and_cannot_be_minted_for_missing_capability() -> None:
-    viewer = {**_session(), "roles": ["viewer"]}
+    viewer = auth_context("viewer")
     with pytest.raises(PermissionError):
         _token(viewer)
 
     expired = validate_action_token(
-        _token(_session(), now=1_000),
-        _session(),
+        _token(_context(), now=1_000),
+        _context(),
         capability="manage_operations",
         method="POST",
         action="retry_external_effect_job",
@@ -137,14 +130,14 @@ def test_action_token_expires_and_cannot_be_minted_for_missing_capability() -> N
 
 
 def test_request_validation_uses_runtime_route_policy() -> None:
-    session = _session()
-    request = _request(session)
-    token = _token(session, now=1_000)
+    context = _context()
+    request = _request(context)
+    token = _token(context, now=1_000)
 
     assert validate_action_token_for_request(request, token).ok is False
 
     current_token = issue_action_token(
-        session,
+        context,
         capability="manage_operations",
         method="POST",
         action="retry_external_effect_job",
@@ -154,7 +147,7 @@ def test_request_validation_uses_runtime_route_policy() -> None:
 
 
 def test_shell_bundle_contains_independent_tokens_for_each_unsafe_route() -> None:
-    request = _request(_session(), method="GET")
+    request = _request(_context(), method="GET")
     tokens = build_admin_action_token_bundle(request)
 
     retry_key = "POST /api/admin/external-effects/jobs/{job_id}/retry"
@@ -164,24 +157,21 @@ def test_shell_bundle_contains_independent_tokens_for_each_unsafe_route() -> Non
     assert tokens[retry_key] != tokens[cancel_key]
 
 
-def test_legacy_unbound_token_is_rejected_when_route_policy_is_enforced(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_unbound_token_generator_is_empty_and_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
-    request = _request(_session())
+    request = _request(_context())
 
     error = validate_admin_action_token(ensure_admin_action_token(), request=request)
 
-    assert error == "admin_action_token 无效或与当前动作不匹配"
+    assert error == "缺少 admin_action_token"
 
 
 def test_rendered_admin_page_supplies_route_bound_token_used_by_backend(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    session = {**_session(), "iat": int(time())}
     client = TestClient(create_app(), raise_server_exceptions=False)
-    client.cookies.set(SESSION_COOKIE, sign_session(session))
-    client.cookies.set(CSRF_COOKIE, session["csrf_token"])
-    client.headers["X-CSRF-Token"] = session["csrf_token"]
+    install_admin_session(client, "super_admin")
 
     page = client.get("/admin/jobs")
     match = re.search(r'<script id="aicrmAdminActionGrants" type="application/json">(.*?)</script>', page.text, re.DOTALL)

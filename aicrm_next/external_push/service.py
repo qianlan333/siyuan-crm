@@ -9,7 +9,6 @@ from typing import Any
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_GENERIC_PUSH, WEBHOOK_ORDER_PAID_PUSH
-from aicrm_next.platform_foundation.legacy_cleanup.service import LegacyWebhookCleanupService
 from aicrm_next.shared.sensitive_data import redact_sensitive_data, redact_sensitive_text
 
 from . import repo
@@ -32,19 +31,6 @@ class ExternalPushError(ValueError):
 
 def _normalized_text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _record_legacy_marker(legacy_key: str, *, marker: str = "legacy_path_invoked", metadata: dict[str, Any] | None = None) -> None:
-    try:
-        LegacyWebhookCleanupService().record_runtime_marker(
-            legacy_key,
-            marker=marker,
-            operator="external_push.service",
-            metadata=metadata or {},
-            real_external_call_executed=False,
-        )
-    except Exception:
-        pass
 
 
 def _iso(value: Any = None) -> str:
@@ -441,10 +427,6 @@ def _is_config_expired(config: dict[str, Any]) -> bool:
 
 
 def process_transaction_paid_outbox(outbox: dict[str, Any], *, repository: Any | None = None) -> dict[str, Any]:
-    _record_legacy_marker(
-        "old_external_push_outbox_worker",
-        metadata={"event_type": EVENT_TRANSACTION_PAID, "outbox_id_present": bool((outbox or {}).get("id"))},
-    )
     repository = repository or repo.build_external_push_repository()
     payload = outbox.get("payload") if isinstance(outbox.get("payload"), dict) else {}
     order_id = int(payload.get("order_id") or outbox.get("aggregate_id") or 0)
@@ -495,7 +477,6 @@ def process_transaction_paid_outbox(outbox: dict[str, Any], *, repository: Any |
 
 
 def run_due_external_push_events(*, limit: int = 20, repository: Any | None = None) -> dict[str, Any]:
-    _record_legacy_marker("old_external_push_outbox_worker", metadata={"operation": "run_due_external_push_events", "limit": limit})
     repository = repository or repo.build_external_push_repository()
     events = repository.list_due_outbox_events(limit=limit)
     results = [process_transaction_paid_outbox(event, repository=repository) for event in events]
@@ -510,7 +491,6 @@ def run_due_external_push_events(*, limit: int = 20, repository: Any | None = No
 
 
 def run_due_external_push_retries(*, limit: int = 20, repository: Any | None = None) -> dict[str, Any]:
-    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "run_due_external_push_retries", "limit": limit})
     repository = repository or repo.build_external_push_repository()
     deliveries = repository.list_due_deliveries(limit=limit)
     results = []
@@ -521,7 +501,6 @@ def run_due_external_push_retries(*, limit: int = 20, repository: Any | None = N
 
 
 def send_webhook_delivery(delivery_id: str, *, repository: Any | None = None) -> dict[str, Any]:
-    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "send_webhook_delivery", "delivery_id_present": bool(delivery_id)})
     repository = repository or repo.build_external_push_repository()
     delivery = repository.get_delivery_by_delivery_id(delivery_id)
     if not delivery:
@@ -531,7 +510,6 @@ def send_webhook_delivery(delivery_id: str, *, repository: Any | None = None) ->
 
 
 def send_product_external_push_test(product_id: int, *, repository: Any | None = None) -> dict[str, Any]:
-    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "send_product_external_push_test", "product_id_present": bool(product_id)})
     repository = repository or repo.build_external_push_repository()
     product = repository.get_product_by_id(int(product_id))
     if not product:
@@ -569,7 +547,6 @@ def list_order_deliveries(order_id: int, *, repository: Any | None = None) -> li
 
 
 def retry_order_delivery(order_id: int, delivery_id: str, *, repository: Any | None = None) -> dict[str, Any]:
-    _record_legacy_marker("old_external_push_delivery_retry", metadata={"operation": "retry_order_delivery", "order_id_present": bool(order_id), "delivery_id_present": bool(delivery_id)})
     repository = repository or repo.build_external_push_repository()
     order = repository.get_order_by_id(int(order_id))
     if not order:

@@ -138,6 +138,7 @@ def summarize_response(
 ) -> Json:
     tag_apply = body.get("tag_apply") if isinstance(body.get("tag_apply"), dict) else {}
     expected_seen = _expected_tag_seen(body, tag_apply, expected_tag_id)
+    durable_continuation_queued = _bool(body.get("durable_continuation_queued")) or _bool(tag_apply.get("durable_continuation_queued"))
     mirror_from_response = (
         _bool(tag_apply.get("local_projection_updated"))
         or _text(tag_apply.get("contact_tags_mirror_status")) == "updated"
@@ -155,12 +156,14 @@ def summarize_response(
 
     checks = {
         "http_2xx": 200 <= http_status < 300,
-        "tag_apply_succeeded": _text(tag_apply.get("status")) == "succeeded",
-        "wecom_api_called": _bool(tag_apply.get("wecom_api_called")),
-        "real_external_call_executed": _bool(tag_apply.get("real_external_call_executed")),
-        "mark_tag_executed": _bool(tag_apply.get("mark_tag_executed")),
+        "durable_continuation_queued": durable_continuation_queued,
+        "tag_apply_queued": _text(tag_apply.get("status")) == "queued",
+        "h5_did_not_call_wecom": not _bool(tag_apply.get("wecom_api_called")),
+        "h5_did_not_execute_external_call": not _bool(tag_apply.get("real_external_call_executed")),
+        "h5_did_not_execute_mark_tag": not _bool(tag_apply.get("mark_tag_executed")),
+        "h5_did_not_plan_external_effect": _text(body.get("external_effect_job_status")) in {"", "not_planned"}
+        and body.get("external_effect_job") in (None, {}),
         "expected_tag_id_seen": expected_seen,
-        "contact_tags_mirror_written": bool(mirror_written),
     }
     if require_db_mirror:
         checks["contact_tags_db_mirror_found"] = db_found
@@ -184,6 +187,7 @@ def summarize_response(
             "requires_approval": _bool(tag_apply.get("requires_approval")),
             "execution_mode": _text(tag_apply.get("execution_mode")),
             "adapter_mode": _text(tag_apply.get("adapter_mode")),
+            "durable_continuation_queued": _bool(tag_apply.get("durable_continuation_queued")),
             "contact_tags_mirror_status": _text(tag_apply.get("contact_tags_mirror_status")),
             "local_projection_updated": _bool(tag_apply.get("local_projection_updated")),
             "request_payload": tag_apply.get("request_payload") if isinstance(tag_apply.get("request_payload"), dict) else {},
@@ -195,7 +199,7 @@ def summarize_response(
         "contact_tags_db_found": db_found,
         "contact_tags_db_rows": contact_tags_db_rows or [],
         "contact_tags_db_error": contact_tags_db_error,
-        "manual_wecom_confirmation_required": True,
+        "manual_wecom_confirmation_required": not db_found,
         "raw_body_preview": raw_body[:1200],
     }
 
@@ -230,9 +234,33 @@ def query_contact_tags_mirror(*, database_url: str, unionid: str, expected_tag_i
         return None, f"{type(exc).__name__}:{exc}"
 
 
+def wait_for_contact_tags_mirror(
+    *,
+    database_url: str,
+    unionid: str,
+    expected_tag_id: str,
+    follow_user_userid: str,
+    wait_seconds: float,
+    poll_seconds: float,
+) -> tuple[list[Json] | None, str]:
+    deadline = time.monotonic() + max(wait_seconds, 0.0)
+    while True:
+        rows, error = query_contact_tags_mirror(
+            database_url=database_url,
+            unionid=unionid,
+            expected_tag_id=expected_tag_id,
+            follow_user_userid=follow_user_userid,
+        )
+        if rows or error or rows is None or time.monotonic() >= deadline:
+            return rows, error
+        time.sleep(max(min(poll_seconds, max(deadline - time.monotonic(), 0.0)), 0.05))
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Submit a questionnaire and verify final_tags caused a real WeCom mark_tag result.",
+        description=(
+            "Submit a questionnaire, verify its durable asynchronous tag continuation, and optionally wait for the post-provider contact_tags projection."
+        ),
     )
     parser.add_argument("--base-url", default=os.getenv("AICRM_SMOKE_BASE_URL") or os.getenv("AICRM_BASE_URL") or DEFAULT_BASE_URL)
     parser.add_argument("--questionnaire-slug", required=True)
@@ -246,6 +274,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-scene", default="smoke_questionnaire_real_wecom_tag")
     parser.add_argument("--database-url", default=os.getenv("DATABASE_URL", ""))
     parser.add_argument("--require-db-mirror", action="store_true")
+    parser.add_argument("--projection-wait-seconds", type=float, default=30.0)
+    parser.add_argument("--projection-poll-seconds", type=float, default=1.0)
     parser.add_argument("--timeout-seconds", type=float, default=20.0)
     return parser
 
@@ -269,11 +299,13 @@ def main(argv: list[str] | None = None) -> int:
         idempotency_key=idempotency_key,
         timeout_seconds=args.timeout_seconds,
     )
-    contact_rows, contact_error = query_contact_tags_mirror(
+    contact_rows, contact_error = wait_for_contact_tags_mirror(
         database_url=args.database_url,
         unionid=args.unionid,
         expected_tag_id=args.expected_tag_id,
         follow_user_userid=args.follow_user_userid,
+        wait_seconds=args.projection_wait_seconds if args.require_db_mirror else 0.0,
+        poll_seconds=args.projection_poll_seconds,
     )
     summary = summarize_response(
         http_status=http_status,

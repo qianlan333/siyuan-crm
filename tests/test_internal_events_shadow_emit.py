@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("composed_internal_event_registry")
+
 from fastapi.testclient import TestClient
 
 from aicrm_next.cloud_orchestrator.campaigns_read import reset_campaign_read_fixture_state
@@ -27,7 +31,7 @@ def _client(monkeypatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_questionnaire_submit_shadow_emits_internal_event_without_changing_side_effects(monkeypatch) -> None:
+def test_questionnaire_submit_emits_durable_event_without_request_path_side_effect(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_ENABLED", "1")
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_QUESTIONNAIRE_ENABLED", "1")
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES", "questionnaire.submitted")
@@ -48,11 +52,13 @@ def test_questionnaire_submit_shadow_emits_internal_event_without_changing_side_
 
     assert response.status_code == 200
     assert body["success"] is True
-    assert "external_effect_job_id" in body
-    assert body["side_effects"]["wecom_tag"]["status"] == "failed"
-    assert body["side_effects"]["wecom_tag"]["error_code"] == "owner_userid_missing"
+    assert body["external_effect_job_id"] is None
+    assert body["external_effect_job_status"] == "not_planned"
+    assert body["side_effects"]["wecom_tag"]["status"] == "queued"
+    assert body["side_effects"]["wecom_tag"]["error_code"] == "identity_pending_unionid"
     assert body["side_effects"]["wecom_tag"]["external_effect_job_id"] is None
     assert body["side_effects"]["wecom_tag"]["wecom_api_called"] is False
+    assert body["durable_continuation_queued"] is True
     assert body["internal_event_status"] == "emitted"
     assert body["internal_event_id"] == events[0].event_id
     assert total == 1
@@ -60,14 +66,13 @@ def test_questionnaire_submit_shadow_emits_internal_event_without_changing_side_
     assert events[0].aggregate_id == body["submission_id"]
     assert events[0].idempotency_key == f"questionnaire.submitted:{body['submission_id']}"
     assert events[0].payload_summary_json == {
+        "answer_count": 2,
+        "external_push_configured": False,
+        "final_tag_count": 2,
         "questionnaire_id": 1,
         "slug": "hxc-activation-v1",
         "submission_id": body["submission_id"],
-        "external_userid_present": True,
-        "mobile_present": True,
-        "answer_count": 2,
-        "score": 13,
-        "final_tag_count": 2,
+        "unionid_present": False,
     }
     assert run_total == 6
     assert sorted(run.consumer_name for run in runs) == [

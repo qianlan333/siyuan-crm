@@ -54,7 +54,7 @@ LOCAL_FIXTURE_ROUTES = [
     "/s/hxc-activation-v1",
     "/api/h5/wechat/oauth/start?slug=hxc-activation-v1",
     "/api/h5/wechat/oauth/callback?state=hxc-activation-v1",
-    "/api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
+    "/api/h5/questionnaires/hxc-activation-v1/result",
 ]
 
 PRODUCTION_PROBE_ROUTES = [
@@ -64,7 +64,7 @@ PRODUCTION_PROBE_ROUTES = [
     "/s/hxc-activation-v1",
     "/api/h5/wechat/oauth/start?slug=hxc-activation-v1",
     "/api/h5/wechat/oauth/callback?state=hxc-activation-v1",
-    "/api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
+    "/api/h5/questionnaires/hxc-activation-v1/result",
 ]
 
 SERVER_READONLY_ROUTES = [
@@ -74,7 +74,7 @@ SERVER_READONLY_ROUTES = [
     "/s/hxc-activation-v1",
     "/api/h5/wechat/oauth/start?slug=hxc-activation-v1",
     "/api/h5/wechat/oauth/callback?state=hxc-activation-v1",
-    "/api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
+    "/api/h5/questionnaires/hxc-activation-v1/result",
 ]
 
 
@@ -102,7 +102,6 @@ def local_fixture_env():
         {
             "AICRM_NEXT_ENV": None,
             "DATABASE_URL": None,
-            "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": None,
             "AICRM_NEXT_WECHAT_OAUTH_MODE": "fake",
             "SECRET_KEY": "questionnaire-h5-oauth-readiness-local",
         }
@@ -115,12 +114,12 @@ def production_probe_env():
     with _patched_env(
         {
             "AICRM_NEXT_ENV": "production",
-            "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": "1",
             "AICRM_NEXT_WECHAT_OAUTH_MODE": "fake",
             "DATABASE_URL": "postgresql://probe:probe@127.0.0.1:1/aicrm_probe",
             "SECRET_KEY": "questionnaire-h5-oauth-readiness-production",
             "WECHAT_MP_APP_ID": "wx-questionnaire-probe",
             "WECHAT_MP_APP_SECRET": "questionnaire-probe-secret",
+            "WECHAT_SHOP_CALLBACK_TOKEN": "questionnaire-readiness-probe-token",
             "AICRM_PUBLIC_BASE_URL": "https://www.youcangogogo.com",
         }
     ):
@@ -201,21 +200,26 @@ def _oauth_source_status(payload: Any) -> str:
 def _add_shape_blockers(probes: dict[str, Any]) -> tuple[list[str], list[str]]:
     blockers: list[str] = []
     warnings: list[str] = []
-    admin_payload = probes.get("GET /api/admin/questionnaires?limit=1", {}).get("json")
-    items = _questionnaire_items(admin_payload)
-    if not isinstance(admin_payload, dict):
-        blockers.append("admin_questionnaires_api_not_json")
-    elif "items" not in admin_payload and "questionnaires" not in admin_payload:
-        blockers.append("admin_questionnaires_missing_items_or_questionnaires")
-    elif not items:
-        warnings.append("admin_questionnaires_empty_in_local_fixture_probe")
-    for item in items:
-        for key in ("slug", "title", "created_at", "updated_at"):
-            if key not in item:
-                blockers.append(f"admin_questionnaire_item_missing_{key}")
-        for key in ("created_at", "updated_at"):
-            if key in item and item[key] is not None and not isinstance(item[key], str):
-                blockers.append(f"admin_questionnaire_item_{key}_not_serialized")
+    admin_probe = probes.get("GET /api/admin/questionnaires?limit=1", {})
+    admin_status = int(admin_probe.get("status_code") or 0)
+    admin_payload = admin_probe.get("json")
+    if admin_status in {401, 403}:
+        warnings.append("admin_questionnaires_auth_protected")
+    else:
+        items = _questionnaire_items(admin_payload)
+        if not isinstance(admin_payload, dict):
+            blockers.append("admin_questionnaires_api_not_json")
+        elif "items" not in admin_payload and "questionnaires" not in admin_payload:
+            blockers.append("admin_questionnaires_missing_items_or_questionnaires")
+        elif not items:
+            warnings.append("admin_questionnaires_empty_in_local_fixture_probe")
+        for item in items:
+            for key in ("slug", "title", "created_at", "updated_at"):
+                if key not in item:
+                    blockers.append(f"admin_questionnaire_item_missing_{key}")
+            for key in ("created_at", "updated_at"):
+                if key in item and item[key] is not None and not isinstance(item[key], str):
+                    blockers.append(f"admin_questionnaire_item_{key}_not_serialized")
 
     public_payload = probes.get("GET /api/h5/questionnaires/hxc-activation-v1", {}).get("json")
     if isinstance(public_payload, dict):
@@ -228,11 +232,17 @@ def _add_shape_blockers(probes: dict[str, Any]) -> tuple[list[str], list[str]]:
     else:
         blockers.append("public_questionnaire_not_json")
 
-    result_payload = probes.get(
-        "GET /api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
-        {},
-    ).get("json")
-    if isinstance(result_payload, dict):
+    result_probe = probes.get("GET /api/h5/questionnaires/hxc-activation-v1/result", {})
+    result_payload = result_probe.get("json")
+    result_status = int(result_probe.get("status_code") or 0)
+    if (
+        result_status == 403
+        and isinstance(result_payload, dict)
+        and (result_payload.get("error_code") or result_payload.get("error"))
+        == "questionnaire_result_access_forbidden"
+    ):
+        pass
+    elif isinstance(result_payload, dict):
         if "result" not in result_payload:
             blockers.append("submission_result_missing_result")
         if "result_message" not in result_payload:
@@ -318,7 +328,7 @@ def _production_fixture_blockers(probes: dict[str, Any], *, local_probe_database
         if hits:
             blocker = f"production_fixture_or_demo_marker:{key}:{','.join(hits)}"
             if local_probe_database and key in {
-                "GET /api/h5/questionnaires/hxc-activation-v1/result/result_fixture_001_grant_7e3a9c5b2d8f4a61",
+                "GET /api/h5/questionnaires/hxc-activation-v1/result",
                 "GET /s/hxc-activation-v1",
             }:
                 warnings.append(blocker)

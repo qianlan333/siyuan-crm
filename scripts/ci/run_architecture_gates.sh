@@ -20,10 +20,15 @@ else
 fi
 
 run_fast() {
+"$PYTHON" tools/check_import_graph.py
+"$PYTHON" tools/check_runtime_module_sizes.py
+"$PYTHON" scripts/ci/check_auth_credential_boundaries.py
 "$PYTHON" tools/check_route_ownership_manifest.py
 "$PYTHON" scripts/ci/update_route_policy_manifest.py --check
 "$PYTHON" tools/check_admin_route_auth.py
 "$PYTHON" tools/check_repository_ownership.py
+"$PYTHON" tools/check_retired_runtime_references.py
+"$PYTHON" scripts/ci/check_github_action_pins.py
 }
 
 run_db() {
@@ -40,6 +45,8 @@ run_full_only() {
   "$PYTHON" tools/check_schema_change_templates.py
   "$PYTHON" scripts/ci/runtime_contract_inventory.py --check docs/architecture/runtime_contract_inventory.json
   "$PYTHON" scripts/ci/check_high_risk_contract_inventory.py
+  "$PYTHON" scripts/ci/check_unionid_identity_contract.py
+  "$PYTHON" scripts/ci/check_sidebar_questionnaire_access_contract.py
   "$PYTHON" scripts/ci/check_pii_logging.py
   "$PYTHON" scripts/ci/check_dependency_security.py
 }

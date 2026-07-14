@@ -146,17 +146,11 @@ def production_sidebar_probe_env():
     keys = {
         "AICRM_NEXT_ENV": os.environ.get("AICRM_NEXT_ENV"),
         "DATABASE_URL": os.environ.get("DATABASE_URL"),
-        "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": os.environ.get("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE"),
-        "AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE": os.environ.get("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE"),
         "SECRET_KEY": os.environ.get("SECRET_KEY"),
-        "AUTOMATION_INTERNAL_API_TOKEN": os.environ.get("AUTOMATION_INTERNAL_API_TOKEN"),
     }
     os.environ["AICRM_NEXT_ENV"] = "production"
     os.environ.setdefault("DATABASE_URL", "postgresql://sidebar:sidebar@127.0.0.1:1/aicrm_sidebar_probe")
-    os.environ.pop("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", None)
-    os.environ["AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE"] = "1"
     os.environ.setdefault("SECRET_KEY", "sidebar-profile-next-owner-readiness")
-    os.environ.setdefault("AUTOMATION_INTERNAL_API_TOKEN", "sidebar-profile-next-owner-readiness")
     try:
         yield
     finally:

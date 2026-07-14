@@ -73,7 +73,7 @@
     }
     const token = actionToken(normalizedMethod, url);
     if (token) {
-      headers["X-Admin-Action-Token"] = token;
+      setHeader(headers, "X-Admin-Action-Token", token);
     }
     return headers;
   }
@@ -156,6 +156,16 @@
   function hasHeader(headers, name) {
     const normalizedName = String(name || "").toLowerCase();
     return Object.keys(headers).some((key) => key.toLowerCase() === normalizedName);
+  }
+
+  function setHeader(headers, name, value) {
+    const normalizedName = String(name || "").toLowerCase();
+    Object.keys(headers).forEach((key) => {
+      if (key.toLowerCase() === normalizedName) {
+        delete headers[key];
+      }
+    });
+    headers[name] = value;
   }
 
   function hasBody(options) {

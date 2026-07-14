@@ -6,9 +6,6 @@ from typing import Any
 
 from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
 from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
-from aicrm_next.integration_gateway.questionnaire_adapters import (
-    QuestionnaireSubmitSideEffectGateway,
-)
 from aicrm_next.shared.repository_provider import RepositoryProviderError, blocked_production_payload
 from aicrm_next.shared.runtime import production_data_ready
 from aicrm_next.shared.runtime_settings import runtime_setting
@@ -23,6 +20,7 @@ from .public_access import (
     QuestionnaireSubmissionStatusService,
 )
 from .repo import QuestionnaireRepository, build_questionnaire_repository
+from .side_effect_composition import build_questionnaire_submit_side_effect_gateway
 
 
 def _read_meta(repo: QuestionnaireRepository) -> dict[str, Any]:
@@ -380,11 +378,11 @@ class SubmitQuestionnaireCommand:
         self,
         repo: QuestionnaireRepository | None = None,
         identity_query: ResolvePersonIdentityQuery | None = None,
-        side_effect_gateway: QuestionnaireSubmitSideEffectGateway | None = None,
+        side_effect_gateway: Any | None = None,
     ) -> None:
         self._repo = repo or build_questionnaire_repository()
         self._identity_query = identity_query or ResolvePersonIdentityQuery()
-        self._side_effect_gateway = side_effect_gateway or QuestionnaireSubmitSideEffectGateway()
+        self._side_effect_gateway = side_effect_gateway or build_questionnaire_submit_side_effect_gateway()
 
     def execute(self, slug: str, payload: QuestionnaireSubmitRequest) -> dict[str, Any]:
         item = self._repo.get_questionnaire_by_slug(slug)
@@ -453,7 +451,7 @@ class SubmitQuestionnaireCommand:
             "ok": True,
             "submission_id": submission["submission_id"],
             "result_access_token": submission["result_token"],
-            "result_url": f"/api/h5/questionnaires/{item['slug']}/result/{submission['result_token']}",
+            "result_url": f"/api/h5/questionnaires/{item['slug']}/result",
             "questionnaire_id": item["id"],
             "slug": item["slug"],
             "external_userid": submission.get("external_userid") or "",

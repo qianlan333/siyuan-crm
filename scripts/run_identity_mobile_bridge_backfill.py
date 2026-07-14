@@ -43,6 +43,13 @@ def _public_result(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _dry_run_external_userid(external_userid: str) -> dict[str, Any]:
     repo = build_identity_bridge_repository()
+    binding = repo.get_contact_binding_status(external_userid)
+    if binding.get("is_bound"):
+        return {
+            "external_userid": external_userid,
+            "status": "already_bound",
+            "binding": binding,
+        }
     candidate = repo.get_unique_mobile_candidate_from_identity_sources(external_userid)
     if not candidate:
         return {"external_userid": external_userid, "status": "skipped", "reason": "no_single_candidate"}

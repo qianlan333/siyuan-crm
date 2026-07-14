@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-from aicrm_next.shared.runtime_settings import runtime_setting
 
 CLOUD_CAMPAIGN_RUN_DUE_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due"
 CLOUD_CAMPAIGN_RUN_DUE_PREVIEW_PATH = "/api/admin/cloud-orchestrator/campaigns/run-due/preview"
@@ -36,17 +34,6 @@ _GUARD_HEADERS = {
 }
 
 
-@dataclass(frozen=True)
-class InternalRunDueGuardResult:
-    response: JSONResponse | None = None
-    status: str = "allowed"
-    reason: str = ""
-
-    @property
-    def blocked(self) -> bool:
-        return self.response is not None
-
-
 def parse_truthy(value: Any) -> bool:
     if value is True:
         return True
@@ -65,49 +52,12 @@ def is_production_runtime() -> bool:
     return not any(sentinel in database_url for sentinel in _SAFE_LOCAL_DB_SENTINELS)
 
 
-def validate_internal_timer_token(request: Request) -> InternalRunDueGuardResult:
-    expected = runtime_setting("AUTOMATION_INTERNAL_API_TOKEN")
-    if not expected:
-        return InternalRunDueGuardResult(
-            response=build_timer_token_error_response("automation_internal_token_not_configured", status_code=503),
-            status="blocked",
-            reason="automation_internal_token_not_configured",
-        )
-
-    actual = _request_token(request)
-    if not actual or actual != expected:
-        return InternalRunDueGuardResult(
-            response=build_timer_token_error_response("internal_token_required", status_code=401),
-            status="blocked",
-            reason="internal_token_required",
-        )
-    return InternalRunDueGuardResult()
-
-
 def scheduled_safe_mode_requested(payload: dict[str, Any]) -> bool:
     return parse_truthy(payload.get("scheduled_safe_mode"))
 
 
 def has_allowlist_for_path(path: str, payload: dict[str, Any]) -> bool:
     return any(_has_nonempty_value(payload.get(field)) for field in _allowlist_fields(path))
-
-
-def build_timer_token_error_response(error: str, *, status_code: int) -> JSONResponse:
-    return _json_response(
-        {
-            "ok": False,
-            "error": error,
-            "error_code": error,
-            "route_owner": "ai_crm_next",
-            "fallback_used": False,
-            "side_effect_executed": False,
-            "real_external_call_executed": False,
-            "automation_runtime_executed": False,
-            "campaign_runtime_executed": False,
-            "wecom_send_executed": False,
-        },
-        status_code=status_code,
-    )
 
 
 def build_scheduled_safe_mode_response(path: str, payload: dict[str, Any], *, idle: bool) -> JSONResponse:
@@ -179,10 +129,6 @@ def maybe_guard_internal_run_due_request(
     if request.method.upper() != "POST" or path not in INTERNAL_TIMER_PATHS:
         return None
 
-    token_result = validate_internal_timer_token(request)
-    if token_result.blocked:
-        return token_result.response
-
     payload = dict(payload or {})
     if _is_dry_run_or_preview(request, payload, path):
         return None
@@ -198,13 +144,6 @@ def maybe_guard_internal_run_due_request(
     if not has_allowlist_for_path(path, payload):
         return build_allowlist_required_response(path)
     return None
-
-
-def _request_token(request: Request) -> str:
-    auth = str(request.headers.get("authorization") or "").strip()
-    if auth.lower().startswith("bearer "):
-        return auth[7:].strip()
-    return str(request.headers.get("x-internal-api-token") or "").strip()
 
 
 def _is_dry_run_or_preview(request: Request, payload: dict[str, Any], path: str) -> bool:

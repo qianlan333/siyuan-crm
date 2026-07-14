@@ -12,22 +12,27 @@ from urllib.parse import parse_qs
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response
-from starlette.concurrency import run_in_threadpool
 
+from aicrm_next.platform_foundation.auth_platform.api import (
+    auth_client_service,
+    auth_session_service,
+    auth_webhook_verifier,
+    request_id,
+    request_ip,
+)
+from aicrm_next.platform_foundation.auth_platform.client_authentication import ClientAuthenticationError
+from aicrm_next.platform_foundation.auth_platform.context import AuthContext, PrincipalType
+from aicrm_next.platform_foundation.auth_platform.service import AuthError
 from aicrm_next.shared.route_policy import RoutePolicy, RoutePolicyIndex, match_route_policy
-from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
-from aicrm_next.shared.runtime import production_environment
-from aicrm_next.shared.signed_context import load_sidebar_owner_context_token
+from aicrm_next.shared.signed_context import SIDEBAR_VIEWER_SESSION_COOKIE, validate_sidebar_owner_context
 
-from .capabilities import session_can, viewer_only
-from .guards import admin_auth_enforcement_enabled, admin_auth_required_response, admin_page_auth_redirect, current_admin_session
-from .session_state import validate_admin_session_state
-from .service import CSRF_COOKIE, csrf_token_from_session, normalize_text, route_headers
+from .capabilities import context_can, viewer_only
+from .guards import admin_auth_required_response, admin_page_auth_redirect, current_admin_introspection, current_auth_context
+from .service import CSRF_COOKIE, SESSION_COOKIE, normalize_text, route_headers
 
 
 SIDEBAR_OWNER_TOKEN_HEADER = "x-aicrm-sidebar-owner-token"
 CSRF_HEADER = "x-csrf-token"
-ROUTE_POLICY_ENFORCEMENT_ENV = "AICRM_ROUTE_POLICY_ENFORCED"
 RATE_LIMIT_PROFILES: dict[str, tuple[int, int]] = {
     "auth_strict": (20, 60),
     "authenticated": (600, 60),
@@ -64,29 +69,12 @@ RATE_LIMITER = RouteRateLimiter()
 
 
 def route_policy_enforcement_enabled() -> bool:
-    explicit = normalize_text(os.getenv(ROUTE_POLICY_ENFORCEMENT_ENV)).lower()
-    if explicit in {"1", "true", "yes", "on"}:
-        return True
-    if explicit in {"0", "false", "no", "off"}:
-        return not _route_policy_disable_override_allowed()
-    if _pytest_auth_bypass_enabled():
-        return False
-    return production_environment()
-
-
-def _route_policy_disable_override_allowed() -> bool:
-    if normalize_text(os.getenv("PYTEST_CURRENT_TEST")):
-        return True
-    if normalize_text(os.getenv("AICRM_NEXT_ENV")).lower() == "test":
-        return True
-    return not production_environment()
-
-
-def _pytest_auth_bypass_enabled() -> bool:
     if not normalize_text(os.getenv("PYTEST_CURRENT_TEST")):
-        return False
-    admin_auth = normalize_text(os.getenv("AICRM_ADMIN_AUTH_ENFORCED")).lower()
-    return admin_auth in {"0", "false", "no", "off"}
+        return True
+    test_override = normalize_text(os.getenv("AICRM_ROUTE_POLICY_ENFORCED")).lower()
+    if not test_override:
+        test_override = normalize_text(os.getenv("AICRM_ADMIN_AUTH_ENFORCED")).lower()
+    return test_override not in {"0", "false", "no", "off"}
 
 
 async def route_policy_required_response(
@@ -100,97 +88,143 @@ async def route_policy_required_response(
         return None
     if matched.route is None:
         return admin_auth_required_response(request)
-    enforcement_enabled = route_policy_enforcement_enabled()
+    enforced = route_policy_enforcement_enabled()
     policy = matched.policy
     if policy is None:
-        if enforcement_enabled or admin_auth_enforcement_enabled():
-            return _error("route_policy_missing", status_code=403)
-        return None
+        return _error("route_policy_missing", status_code=403) if enforced else None
 
     request.state.route_policy = policy
+    request.state.route_path_params = dict(matched.path_params or {})
     _set_pii_principal(request, actor_type="anonymous", actor_id="anonymous", policy_scope=policy.access_scope)
-    if enforcement_enabled and not _rate_limit_allows(request, policy):
+    if enforced and not _rate_limit_allows(request, policy):
         return _error("route_rate_limited", status_code=429)
-
-    if policy.auth_scheme == "admin_session":
-        return await _enforce_admin_session(request, policy)
-    if policy.auth_scheme == "internal_bearer" and enforcement_enabled:
-        return _enforce_internal_bearer(request, policy)
-    if policy.auth_scheme == "scoped_bearer" and enforcement_enabled:
-        return _enforce_scoped_bearer_presence(request)
-    if policy.auth_scheme == "sidebar_signed_context" and enforcement_enabled:
-        return await _enforce_sidebar_context(request)
-    return None
-
-
-async def _enforce_admin_session(request: Request, policy: RoutePolicy) -> Response | None:
-    if not (admin_auth_enforcement_enabled() or route_policy_enforcement_enabled()):
+    if not enforced:
         return None
-    session = current_admin_session(request)
-    if session is None:
+
+    if policy.auth_scheme == "human_session":
+        if _bearer_token(request):
+            return _error("principal_type_forbidden", status_code=403)
+        return await _enforce_human_session(request, policy)
+    if policy.auth_scheme == "human_or_service":
+        if normalize_text(request.cookies.get(SESSION_COOKIE)):
+            return await _enforce_human_session(request, policy)
+        return _enforce_api_client(
+            request,
+            policy,
+            audience=policy.service_audience,
+            capability=policy.service_capability,
+        )
+    if policy.auth_scheme == "api_client_jwt":
+        return _enforce_api_client(request, policy)
+    if policy.auth_scheme == "webhook_hmac":
+        return await _enforce_webhook_hmac(request, policy)
+    if policy.auth_scheme == "sidebar_grant":
+        return await _enforce_sidebar_grant(request, policy)
+    if policy.auth_scheme == "public_result_grant":
+        return _enforce_public_result_grant(request, policy)
+    if policy.auth_scheme in {
+        "public",
+        "client_credentials",
+        "provider_oauth_state",
+        "provider_signature",
+    }:
+        return None
+    return _error("unsupported_auth_scheme", status_code=403)
+
+
+async def _enforce_human_session(request: Request, policy: RoutePolicy) -> Response | None:
+    introspection = current_admin_introspection(request)
+    context = introspection.context
+    if not introspection.active or context is None:
         if str(request.url.path).startswith(("/admin", "/setup")):
             return admin_page_auth_redirect(request)
-        return _error("admin_auth_required", status_code=401)
-    _set_pii_principal(
-        request,
-        actor_type="admin_session",
-        actor_id=normalize_text(session.get("admin_user_id") or session.get("username")) or "admin_session",
-        policy_scope=policy.access_scope,
-    )
-    session_state = await run_in_threadpool(validate_admin_session_state, session)
-    if not session_state.ok:
-        return _error(session_state.error or "admin_session_revoked", status_code=401)
-    request.state.admin_session = session
-    if policy.is_write and viewer_only(session):
+        error = introspection.error if introspection.error != "session_required" else "admin_auth_required"
+        return _error(error or "admin_auth_required", status_code=401)
+    context = context.with_request_id(request_id(request))
+    if introspection.record is not None:
+        request.state.auth_session_id = introspection.record.session_id
+    if not _principal_allowed(context, policy):
+        return _error("principal_type_forbidden", status_code=403)
+    _install_context(request, context, policy)
+    if _request_is_write(request) and viewer_only(context):
         return _error("admin_capability_required", status_code=403, capability=policy.capability)
-    if policy.capability not in {"public", "health_read"} and not session_can(session, policy.capability):
+    if policy.capability not in {"public", "health_read"} and not context_can(context, policy.capability):
         return _error("admin_capability_required", status_code=403, capability=policy.capability)
-    if policy.csrf:
-        csrf_error = await _csrf_error(request, session)
-        if csrf_error:
-            return csrf_error
+    if policy.csrf and _request_is_write(request):
+        return await _csrf_error(request, introspection)
     return None
 
 
-def _enforce_internal_bearer(request: Request, policy: RoutePolicy) -> Response | None:
+def _enforce_api_client(
+    request: Request,
+    policy: RoutePolicy,
+    *,
+    audience: str = "",
+    capability: str = "",
+) -> Response | None:
+    token = _bearer_token(request)
+    if not token:
+        return _error("access_token_required", status_code=401)
+    required_audience = normalize_text(audience) or policy.audience
+    required_capability = normalize_text(capability) or policy.capability
     try:
-        result = validate_internal_service_token(policy.token_purpose, _bearer_token(request))
-    except ValueError:
-        return _error("internal_token_purpose_invalid", status_code=503)
-    if not result.ok:
-        status_code = 503 if result.error == "internal_token_not_configured" else 401
-        return _error(result.error, status_code=status_code)
-    request.state.service_account = result.service_account
-    _set_pii_principal(request, actor_type="internal_service", actor_id=result.service_account)
+        context = auth_client_service(request).verify_access_token(
+            token,
+            audience=required_audience,
+            source_ip=request_ip(request),
+            request_id=request_id(request),
+            client_purpose=policy.client_purpose,
+        )
+    except ClientAuthenticationError as exc:
+        return _error(exc.error, status_code=exc.status_code)
+    except AuthError as exc:
+        return _error(exc.error, status_code=exc.status_code)
+    except (RuntimeError, ValueError):
+        return _error("auth_runtime_unavailable", status_code=503)
+    if not _principal_allowed(context, policy):
+        return _error("principal_type_forbidden", status_code=403)
+    if not context.permits(
+        capability=required_capability,
+        scope="write" if _request_is_write(request) else "read",
+        resource=_request_resource(request),
+    ):
+        return _error("scope_or_capability_required", status_code=403, capability=required_capability)
+    _install_context(request, context, policy)
     return None
 
 
-def _enforce_scoped_bearer_presence(request: Request) -> Response | None:
-    provided = _bearer_token(request) or normalize_text(request.query_params.get("token"))
-    if not provided:
-        return _error("scoped_token_required", status_code=401)
-    request.state.service_account = "scoped_integration"
-    _set_pii_principal(request, actor_type="scoped_service", actor_id="scoped_integration")
-    return None
-
-
-async def _enforce_sidebar_context(request: Request) -> Response | None:
-    token = (
-        normalize_text(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER))
-        or normalize_text(request.query_params.get("sidebar_owner_token"))
-        or normalize_text(request.query_params.get("owner_token"))
+async def _enforce_webhook_hmac(request: Request, policy: RoutePolicy) -> Response | None:
+    if normalize_text(request.method).upper() == "OPTIONS":
+        return None
+    try:
+        source_ip = request_ip(request)
+    except ClientAuthenticationError as exc:
+        return _error(exc.error, status_code=exc.status_code)
+    result = auth_webhook_verifier(request).verify(
+        headers=request.headers,
+        body=await request.body(),
+        capability=policy.capability,
+        source_ip=source_ip,
+        request_id=request_id(request),
     )
-    result = load_sidebar_owner_context_token(token)
-    if not result.get("ok"):
-        return _error("sidebar_context_required", status_code=401)
-    context = dict(result.get("context") or {})
-    owner_userid = normalize_text(context.get("owner_userid") or context.get("viewer_userid"))
-    if not owner_userid:
-        return _error("sidebar_context_required", status_code=401)
+    context = result.context
+    if not result.ok or context is None:
+        return _error(result.error or "invalid_webhook_signature", status_code=401)
+    if not _principal_allowed(context, policy):
+        return _error("principal_type_forbidden", status_code=403)
+    if not context.permits(capability=policy.capability, scope="webhook.write", resource=_request_resource(request)):
+        return _error("webhook_scope_or_capability_required", status_code=403, capability=policy.capability)
+    _install_context(request, context, policy)
+    return None
+
+
+async def _enforce_sidebar_grant(request: Request, policy: RoutePolicy) -> Response | None:
+    token = normalize_text(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER))
     claimed_values = [
         normalize_text(request.query_params.get(key))
         for key in ("owner_userid", "current_userid", "bind_by_userid", "viewer_userid")
     ]
+    target_external_userid = normalize_text(request.query_params.get("external_userid") or request.query_params.get("user_id"))
     content_type = normalize_text(request.headers.get("content-type")).lower()
     if content_type.startswith("application/json"):
         try:
@@ -198,68 +232,136 @@ async def _enforce_sidebar_context(request: Request) -> Response | None:
         except (UnicodeDecodeError, json.JSONDecodeError):
             body = {}
         if isinstance(body, dict):
+            target_external_userid = target_external_userid or normalize_text(body.get("external_userid") or body.get("user_id"))
             claimed_values.extend(
                 normalize_text(body.get(key))
                 for key in ("owner_userid", "current_userid", "bind_by_userid", "viewer_userid", "actor_id")
             )
+    result = validate_sidebar_owner_context(
+        token=token,
+        viewer_session_cookie=normalize_text(request.cookies.get(SIDEBAR_VIEWER_SESSION_COOKIE)),
+        external_userid=target_external_userid,
+        expected_corp_id=normalize_text(os.getenv("WECOM_CORP_ID")),
+    )
+    if not result.get("ok"):
+        status = normalize_text(result.get("status"))
+        status_code = 401 if status in {"missing", "invalid", "expired", "viewer_session_required", "viewer_session_invalid"} else 403
+        return _error("sidebar_context_required" if status_code == 401 else "sidebar_customer_scope_forbidden", status_code=status_code)
+    grant = dict(result.get("context") or {})
+    owner_userid = normalize_text(grant.get("owner_userid") or grant.get("viewer_userid"))
     if any(value and not hmac.compare_digest(value, owner_userid) for value in claimed_values):
         return _error("sidebar_owner_scope_forbidden", status_code=403)
-    request.state.sidebar_context = context
+    context = AuthContext(
+        principal_type=PrincipalType.HUMAN,
+        principal_id=f"wecom-user:{owner_userid}",
+        corp_id=normalize_text(grant.get("corp_id")),
+        capabilities=(policy.capability,),
+        scopes=("write" if _request_is_write(request) else "read",),
+        owner_scope={"owner_userid": owner_userid},
+        request_id=request_id(request),
+    )
+    request.state.sidebar_context = grant
     request.state.sidebar_owner_userid = owner_userid
-    _set_pii_principal(request, actor_type="sidebar_owner", actor_id=owner_userid, policy_scope="owner")
+    request.state.sidebar_external_userid = normalize_text(grant.get("external_userid"))
+    request.state.sidebar_capability = policy.capability
+    _install_context(request, context, policy)
     return None
 
 
-def _set_pii_principal(
-    request: Request,
-    *,
-    actor_type: str,
-    actor_id: str,
-    policy_scope: str = "",
-) -> None:
+def _enforce_public_result_grant(request: Request, policy: RoutePolicy) -> Response | None:
+    from aicrm_next.questionnaire.result_access import (
+        RESULT_GRANT_COOKIE_NAME,
+        questionnaire_result_token_from_grant,
+    )
+
+    slug = normalize_text((getattr(request.state, "route_path_params", {}) or {}).get("slug"))
+    result_access_token = questionnaire_result_token_from_grant(
+        request.cookies.get(RESULT_GRANT_COOKIE_NAME),
+        slug=slug,
+    )
+    if not result_access_token:
+        return _error("questionnaire_result_access_forbidden", status_code=403)
+    context = AuthContext(
+        principal_type=PrincipalType.PUBLIC,
+        principal_id=f"questionnaire-result:{hashlib.sha256(result_access_token.encode()).hexdigest()[:24]}",
+        capabilities=(policy.capability,),
+        scopes=("read",),
+        request_id=request_id(request),
+    )
+    if not _principal_allowed(context, policy):
+        return _error("principal_type_forbidden", status_code=403)
+    request.state.questionnaire_result_access_token = result_access_token
+    _install_context(request, context, policy)
+    return None
+
+
+def _principal_allowed(context: AuthContext, policy: RoutePolicy) -> bool:
+    return not policy.principal_types or context.principal_type.value in policy.principal_types
+
+
+def _install_context(request: Request, context: AuthContext, policy: RoutePolicy) -> None:
+    request.state.auth_context = context
+    _set_pii_principal(
+        request,
+        actor_type=context.principal_type.value,
+        actor_id=context.principal_id,
+        policy_scope=policy.access_scope,
+    )
+
+
+def _request_resource(request: Request) -> dict[str, Any]:
+    resource = dict(getattr(request.state, "route_path_params", {}) or {})
+    for key in (
+        "corp_id",
+        "external_userid",
+        "owner_userid",
+        "package_id",
+        "agent_id",
+        "questionnaire_id",
+        "job_id",
+    ):
+        value = normalize_text(request.query_params.get(key))
+        if value and key not in resource:
+            resource[key] = value
+    return resource
+
+
+def _set_pii_principal(request: Request, *, actor_type: str, actor_id: str, policy_scope: str = "") -> None:
     request.state.pii_actor_type = normalize_text(actor_type) or "anonymous"
     request.state.pii_actor_id = normalize_text(actor_id) or "anonymous"
     if policy_scope:
         request.state.pii_policy_scope = normalize_text(policy_scope)
 
 
-async def _csrf_error(request: Request, session: dict[str, Any]) -> JSONResponse | None:
-    expected = csrf_token_from_session(session)
+async def _csrf_error(request: Request, introspection) -> JSONResponse | None:
     cookie_token = normalize_text(request.cookies.get(CSRF_COOKIE))
     request_token = normalize_text(request.headers.get(CSRF_HEADER))
     if not request_token:
         content_type = normalize_text(request.headers.get("content-type")).lower()
         if content_type.startswith("application/x-www-form-urlencoded"):
-            body = (await request.body()).decode("utf-8", errors="ignore")
-            values = parse_qs(body, keep_blank_values=True).get("csrf_token") or []
+            values = parse_qs((await request.body()).decode("utf-8", errors="ignore"), keep_blank_values=True).get(
+                "csrf_token"
+            ) or []
             request_token = normalize_text(values[-1] if values else "")
         elif content_type.startswith("multipart/form-data"):
-            request_token = _multipart_form_value(
-                await request.body(),
-                content_type=content_type,
-                field_name="csrf_token",
-            )
-    if expected and cookie_token and request_token:
-        if hmac.compare_digest(expected, cookie_token) and hmac.compare_digest(expected, request_token):
-            return None
+            request_token = _multipart_form_value(await request.body(), content_type=content_type, field_name="csrf_token")
+    if auth_session_service(request).verify_csrf(introspection, cookie_token, request_token):
+        return None
     return _error("admin_csrf_required", status_code=403)
 
 
 def _multipart_form_value(body: bytes, *, content_type: str, field_name: str) -> str:
-    boundary_marker = "boundary="
-    if boundary_marker not in content_type:
+    if "boundary=" not in content_type:
         return ""
-    boundary = content_type.split(boundary_marker, 1)[1].split(";", 1)[0].strip().strip('"')
+    boundary = content_type.split("boundary=", 1)[1].split(";", 1)[0].strip().strip('"')
     if not boundary:
         return ""
-    delimiter = f"--{boundary}".encode("utf-8")
-    expected_name = f'name="{field_name}"'.encode("utf-8")
+    delimiter = f"--{boundary}".encode()
+    expected_name = f'name="{field_name}"'.encode()
     for part in body.split(delimiter):
         headers, separator, content = part.partition(b"\r\n\r\n")
-        if not separator or expected_name not in headers:
-            continue
-        value = content.split(b"\r\n", 1)[0]
-        return normalize_text(value.decode("utf-8", errors="ignore"))
+        if separator and expected_name in headers:
+            return normalize_text(content.split(b"\r\n", 1)[0].decode("utf-8", errors="ignore"))
     return ""
 
 
@@ -268,27 +370,35 @@ def _bearer_token(request: Request) -> str:
     return normalize_text(authorization[7:]) if authorization.startswith("Bearer ") else ""
 
 
+def _request_is_write(request: Request) -> bool:
+    return normalize_text(request.method).upper() not in {"GET", "HEAD", "OPTIONS", "TRACE"}
+
+
 def _rate_limit_allows(request: Request, policy: RoutePolicy) -> bool:
-    principal = _rate_limit_principal(request, policy)
-    return RATE_LIMITER.allow(profile=policy.rate_limit, principal=principal, route_key=policy.key)
+    return RATE_LIMITER.allow(
+        profile=policy.rate_limit,
+        principal=_rate_limit_principal(request, policy),
+        route_key=policy.key,
+    )
 
 
 def _rate_limit_principal(request: Request, policy: RoutePolicy) -> str:
-    if policy.auth_scheme == "admin_session":
-        session = current_admin_session(request)
-        if session:
-            subject = normalize_text(session.get("admin_user_id") or session.get("username"))
-            session_id = normalize_text(session.get("sid"))
-            if subject:
-                return f"admin:{subject}:{session_id[:16]}"
-    if policy.auth_scheme in {"internal_bearer", "scoped_bearer"}:
-        token = _bearer_token(request) or normalize_text(request.query_params.get("token"))
+    if policy.auth_scheme in {"human_session", "human_or_service"}:
+        context = current_auth_context(request)
+        if context:
+            return f"human:{context.principal_id}:{context.request_id[:16]}"
+    if policy.auth_scheme in {"api_client_jwt", "human_or_service"}:
+        token = _bearer_token(request)
         if token:
-            return f"bearer:{hashlib.sha256(token.encode('utf-8')).hexdigest()[:24]}"
-    if policy.auth_scheme == "sidebar_signed_context":
+            return f"jwt:{hashlib.sha256(token.encode()).hexdigest()[:24]}"
+    if policy.auth_scheme == "sidebar_grant":
         token = normalize_text(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER))
         if token:
-            return f"sidebar:{hashlib.sha256(token.encode('utf-8')).hexdigest()[:24]}"
+            return f"sidebar:{hashlib.sha256(token.encode()).hexdigest()[:24]}"
+    if policy.auth_scheme == "webhook_hmac":
+        client_id = normalize_text(request.headers.get("x-aicrm-client-id"))
+        if client_id:
+            return f"webhook:{hashlib.sha256(client_id.encode()).hexdigest()[:24]}"
     forwarded = normalize_text(request.headers.get("x-forwarded-for")).split(",", 1)[0].strip()
     real_ip = normalize_text(request.headers.get("x-real-ip"))
     client_host = normalize_text(getattr(request.client, "host", ""))

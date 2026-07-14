@@ -5,7 +5,7 @@ Date: 2026-06-22
 ## Goal
 
 Prepare external order APIs for controlled enablement without changing
-production env or committing secrets. The 90%+ readiness target is safe token
+production env or committing secrets. The 90%+ readiness target is safe client-credentials JWT
 behavior, stable read shape, and order/customer/channel correlation evidence.
 
 ## Diagnostic
@@ -36,17 +36,17 @@ The diagnostic must keep:
 
 - `real_external_call_executed=false`
 - `production_write_executed=false`
-- token values redacted
+- client secret and JWT values redacted
 - `deploy_or_env_modified=false`
 - no raw `Authorization` header, request token, phone number, or raw external
   user identifier in output
 
 ## Acceptance Cases
 
-- Missing server token: controlled unavailable state is expected.
-- Missing bearer token: request is rejected.
-- Wrong bearer token: request is rejected.
-- Correct bearer token: local order list/detail can be read.
+- Missing client registration or secret reference: controlled unavailable state is expected.
+- Missing JWT: request is rejected.
+- Wrong or expired JWT: request is rejected.
+- Correct `external_agent` JWT: local order list/detail can be read.
 - Unknown order: controlled not found.
 - Duplicate gray order input: no duplicate business record should be created.
 - Reconciliation: order/customer/channel/source and internal event/job state are
@@ -78,7 +78,7 @@ The `external_orders_evidence` payload must include:
 
 | Code | Meaning | Operator action |
 | --- | --- | --- |
-| `missing_internal_token_config` | `AUTOMATION_INTERNAL_API_TOKEN` is not configured. | Keep route controlled-disabled until an authorized operator configures the token outside git. |
+| `missing_internal_token_config` | Diagnostic compatibility code: registered `external_agent` client ID or secret reference is missing. | Keep route controlled-disabled; run RAUTH bootstrap/readiness outside git. |
 | `missing_request_token` | The server token exists, but the request token evidence is missing. | Collect a redacted request-token check; never paste the token itself. |
 | `invalid_request_token` | The supplied request token does not match the configured token. | Verify auth failure behavior and rotate/reissue credentials outside git if needed. |
 | `token_configured_but_not_executed` | Token readiness exists, but dry-run evidence has not linked an order. | Attach order, idempotency, customer/channel/source, event, and admin visibility evidence. |
@@ -91,7 +91,7 @@ The `external_orders_evidence` payload must include:
 
 ## Production Preconditions
 
-- `AUTOMATION_INTERNAL_API_TOKEN` configured by an authorized operator.
+- `AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID` and its secret reference are provisioned by RAUTH bootstrap; readiness returns `ok=true`.
 - Gray source approved.
 - Token never appears in logs, docs, scripts, or PR body.
 - Evidence report uses only redacted ids or internal order/job/event ids.
@@ -106,12 +106,12 @@ complete.
 
 ## Non-Goals
 
-- No token creation in git.
+- No client secret or JWT creation in git.
 - No production env edit.
 - No real external provider call from this PR.
 - No production DB write or migration execution from the diagnostic.
 
 ## Next Action
 
-Run a separate gray acceptance PR after the operator configures token and gray
+Run a separate gray acceptance PR after the operator completes client bootstrap/readiness and gray
 source credentials outside git.

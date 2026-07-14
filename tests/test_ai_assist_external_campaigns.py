@@ -147,17 +147,9 @@ def _repo_with_target(external_userid: str = "ext_1") -> FakeExternalCampaignRep
     return repo
 
 
-def test_external_campaign_token_required(monkeypatch) -> None:
-    monkeypatch.delenv("AICRM_EXTERNAL_CAMPAIGN_TOKEN", raising=False)
-    monkeypatch.delenv("AUTOMATION_INTERNAL_API_TOKEN", raising=False)
-    assert _json_response_payload(service.create_external_campaigns_response(_payload(), headers={}))["error"] == "external_campaign_token_not_configured"
-
-    monkeypatch.setenv("AICRM_EXTERNAL_CAMPAIGN_TOKEN", "secret")
-    assert _json_response_payload(service.create_external_campaigns_response(_payload(), headers={}))["error"] == "missing_internal_token"
-    assert _json_response_payload(service.create_external_campaigns_response(_payload(), headers={"Authorization": "Bearer bad"}))["error"] == "invalid_internal_token"
-
+def test_external_campaign_response_has_no_route_local_credential_validator(monkeypatch) -> None:
     monkeypatch.setattr(service, "create_external_campaigns", lambda payload: {"ok": True, "entered": True})
-    assert service.create_external_campaigns_response(_payload(), headers={"Authorization": "Bearer secret"}) == {"ok": True, "entered": True}
+    assert service.create_external_campaigns_response(_payload()) == {"ok": True, "entered": True}
 
 
 def test_external_campaign_dry_run_preview_no_write() -> None:

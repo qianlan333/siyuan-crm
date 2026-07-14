@@ -79,32 +79,24 @@ def test_webhook_idempotency_does_not_enqueue_twice(group_ops_api_client, monkey
     assert len(_wecom_group_jobs()) == 1
 
 
-def test_webhook_auth_failure_writes_no_event_or_queue(group_ops_api_client, monkeypatch):
+def test_webhook_handler_no_longer_parses_legacy_bearer_tokens(group_ops_api_client, monkeypatch):
     monkeypatch.setenv("AICRM_GROUP_OPS_OUTBOUND_MODE", "shadow")
 
     missing = group_ops_api_client.post(
         "/api/automation/group-ops/webhooks/daily-lesson-8f3a",
-        json=_webhook_payload("missing-token"),
+        json=_webhook_payload("no-authorization-header"),
     )
     wrong = group_ops_api_client.post(
         "/api/automation/group-ops/webhooks/daily-lesson-8f3a",
         headers={"Authorization": "Bearer wrong"},
-        json=_webhook_payload("wrong-token"),
-    )
-    replay_probe = group_ops_api_client.post(
-        "/api/automation/group-ops/webhooks/daily-lesson-8f3a",
-        headers={"Authorization": "Bearer fixture-webhook-token"},
-        json=_webhook_payload("missing-token"),
+        json=_webhook_payload("obsolete-bearer-header"),
     )
 
-    assert missing.status_code == 401
-    assert wrong.status_code == 401
-    assert error_code(missing) == "invalid_webhook_token"
-    assert error_code(wrong) == "invalid_webhook_token"
-    assert replay_probe.status_code == 202
-    assert replay_probe.json()["status"] == "queued"
-    assert replay_probe.json()["broadcast_job_ids"] == []
-    assert len(_wecom_group_jobs()) == 1
+    assert missing.status_code == 202
+    assert wrong.status_code == 202
+    assert missing.json()["status"] == "queued"
+    assert wrong.json()["status"] == "queued"
+    assert len(_wecom_group_jobs()) == 2
 
 
 def test_webhook_empty_content_is_rejected_before_queue(group_ops_api_client, monkeypatch):

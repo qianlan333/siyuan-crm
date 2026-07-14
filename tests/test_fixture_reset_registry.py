@@ -27,7 +27,6 @@ EXPECTED_RESET_ORDER = [
     "wecom_tag_live_mutation",
     "sidebar_jssdk_attempts",
     "external_effect",
-    "legacy_cleanup",
     "internal_event",
 ]
 

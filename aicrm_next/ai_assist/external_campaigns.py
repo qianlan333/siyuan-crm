@@ -3,14 +3,13 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime, time, timedelta
-from typing import Any, Mapping
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi.responses import JSONResponse
 
 from aicrm_next.send_targets.dto import SendTargetRequest
 from aicrm_next.send_targets.resolver import SendTargetError, SendTargetResolver
-from aicrm_next.shared.runtime_settings import runtime_setting
 
 from .external_campaigns_repo import ExternalCampaignRepository
 from .external_campaigns_repo import build_external_campaign_repository
@@ -18,7 +17,6 @@ from .external_campaigns_repo import build_external_campaign_repository
 JsonDict = dict[str, Any]
 
 _DEFAULT_TIMEZONE = "Asia/Shanghai"
-_TOKEN_KEYS = ("AICRM_EXTERNAL_CAMPAIGN_TOKEN", "AUTOMATION_INTERNAL_API_TOKEN")
 _EXTERNAL_CAMPAIGN_REQUIRED_SEND_PATH = "ai_assist_pending_review"
 _EXTERNAL_CAMPAIGN_FORBIDDEN_SEND_PATH = "direct_broadcast_job"
 
@@ -134,36 +132,6 @@ def _hash_payload(*parts: object) -> str:
     return hashlib.sha256(joined.encode("utf-8", errors="ignore")).hexdigest()[:16]
 
 
-def _configured_tokens() -> list[str]:
-    tokens: list[str] = []
-    seen: set[str] = set()
-    for key in _TOKEN_KEYS:
-        token = _text(runtime_setting(key))
-        if token and token not in seen:
-            seen.add(token)
-            tokens.append(token)
-    return tokens
-
-
-def _provided_token(headers: Mapping[str, Any]) -> str:
-    auth_header = _text(headers.get("authorization") or headers.get("Authorization"))
-    if auth_header.startswith("Bearer "):
-        return _text(auth_header[7:])
-    return _text(headers.get("x-internal-api-token") or headers.get("X-Internal-Api-Token"))
-
-
-def _auth_failure(headers: Mapping[str, Any]) -> tuple[str, int] | None:
-    expected = _configured_tokens()
-    if not expected:
-        return ("external_campaign_token_not_configured", 503)
-    provided = _provided_token(headers)
-    if not provided:
-        return ("missing_internal_token", 401)
-    if provided not in expected:
-        return ("invalid_internal_token", 401)
-    return None
-
-
 def _parse_local_datetime(value: object, *, default_timezone: str) -> datetime:
     raw = _text(value)
     if not raw:
@@ -195,12 +163,7 @@ def _first_schedule(payload: JsonDict, steps: list[JsonDict], *, timezone_name: 
 def _normalize_step_list(raw_steps: Any, payload: JsonDict, recipient: JsonDict, *, timezone_name: str) -> list[JsonDict]:
     source_steps = raw_steps if isinstance(raw_steps, list) and raw_steps else None
     if source_steps is None:
-        content = (
-            _text(recipient.get("content_text"))
-            or _text(recipient.get("message"))
-            or _text(payload.get("content_text"))
-            or _text(payload.get("message"))
-        )
+        content = _text(recipient.get("content_text")) or _text(recipient.get("message")) or _text(payload.get("content_text")) or _text(payload.get("message"))
         if not content:
             raise ExternalCampaignError("message/content_text is required")
         source_steps = [{"content_text": content}]
@@ -335,27 +298,6 @@ def _external_campaign_review_details(
     if previews is not None:
         details["previews"] = previews
     return details
-
-
-def _direct_auth_failure(
-    headers: Mapping[str, Any],
-    payload: JsonDict,
-    *,
-    allow_admin_action_token: bool,
-    request: Any | None = None,
-) -> tuple[str, int] | None:
-    failure = _auth_failure(headers)
-    if failure is None:
-        return None
-    if allow_admin_action_token:
-        from aicrm_next.admin_jobs.routes import validate_admin_action_token
-
-        token = _text(headers.get("X-Admin-Action-Token") or headers.get("x-admin-action-token") or payload.get("admin_action_token"))
-        token_error = validate_admin_action_token(token, request=request)
-        if not token_error:
-            return None
-        return ("admin_action_token_invalid", 401)
-    return failure
 
 
 def _target_id_for_recipient(recipient: JsonDict) -> tuple[str, str]:
@@ -782,7 +724,9 @@ def create_direct_wecom_private_send(payload: JsonDict, repo: ExternalCampaignRe
         if _has_material_refs(content_package):
             raise ExternalCampaignError("material_invalid", status_code=400, phase="content_validation")
         raise ExternalCampaignError("content_required", status_code=400, phase="content_validation")
-    scheduled_for = _text(payload.get("scheduled_for") or payload.get("scheduled_at") or payload.get("send_at")) or datetime.now(ZoneInfo(_DEFAULT_TIMEZONE)).isoformat()
+    scheduled_for = (
+        _text(payload.get("scheduled_for") or payload.get("scheduled_at") or payload.get("send_at")) or datetime.now(ZoneInfo(_DEFAULT_TIMEZONE)).isoformat()
+    )
     direct_payload = {
         **payload,
         "owner_userid": sender_userid,
@@ -855,11 +799,7 @@ def create_direct_wecom_private_send(payload: JsonDict, repo: ExternalCampaignRe
     }
 
 
-def create_external_campaigns_response(payload: JsonDict, headers: Mapping[str, Any]) -> JsonDict | JSONResponse:
-    failure = _auth_failure(headers)
-    if failure is not None:
-        error, status_code = failure
-        return JSONResponse({"ok": False, "error": error, "route_owner": "ai_crm_next"}, status_code=status_code)
+def create_external_campaigns_response(payload: JsonDict) -> JsonDict | JSONResponse:
     try:
         return create_external_campaigns(payload)
     except ExternalCampaignError as exc:
@@ -879,22 +819,11 @@ def create_external_campaigns_response(payload: JsonDict, headers: Mapping[str, 
 
 def create_direct_wecom_private_send_response(
     payload: JsonDict,
-    headers: Mapping[str, Any],
     *,
-    allow_admin_action_token: bool = False,
-    request: Any | None = None,
+    source: str,
 ) -> JsonDict | JSONResponse:
-    failure = _direct_auth_failure(
-        headers,
-        payload if isinstance(payload, dict) else {},
-        allow_admin_action_token=allow_admin_action_token,
-        request=request,
-    )
-    if failure is not None:
-        error, status_code = failure
-        return JSONResponse({"ok": False, "error": error, "route_owner": "ai_crm_next"}, status_code=status_code)
     try:
-        return create_direct_wecom_private_send(payload, source="admin_direct_send_api" if allow_admin_action_token else "internal_direct_send_api")
+        return create_direct_wecom_private_send(payload, source=source)
     except ExternalCampaignError as exc:
         return JSONResponse(exc.to_response(), status_code=exc.status_code)
     except Exception as exc:
@@ -924,11 +853,7 @@ def get_external_campaign_status(campaign_code: str, repo: ExternalCampaignRepos
     }
 
 
-def get_external_campaign_status_response(campaign_code: str, headers: Mapping[str, Any]) -> JsonDict | JSONResponse:
-    failure = _auth_failure(headers)
-    if failure is not None:
-        error, status_code = failure
-        return JSONResponse({"ok": False, "error": error, "route_owner": "ai_crm_next"}, status_code=status_code)
+def get_external_campaign_status_response(campaign_code: str) -> JsonDict | JSONResponse:
     try:
         return get_external_campaign_status(campaign_code)
     except ExternalCampaignError as exc:

@@ -15,6 +15,7 @@ REQUIRED_DOMAINS = {
     "refund_entitlement",
     "questionnaire",
     "group_ops",
+    "broadcast_delivery",
     "delivery",
 }
 

@@ -4,7 +4,7 @@ import os
 import re
 from dataclasses import dataclass
 from datetime import timedelta
-from typing import Any, Mapping
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
@@ -17,6 +17,7 @@ from aicrm_next.integration_gateway.lesson_card_cover_client import (
     build_lesson_card_cover_client,
 )
 from aicrm_next.platform_foundation.external_effects import WECOM_MESSAGE_GROUP_SEND
+from aicrm_next.platform_foundation.external_effects.adapters import ExternalEffectAdapterRegistry
 from aicrm_next.platform_foundation.external_effects.models import utcnow
 from aicrm_next.platform_foundation.external_effects.repo import (
     ExternalEffectRepository,
@@ -24,7 +25,6 @@ from aicrm_next.platform_foundation.external_effects.repo import (
 )
 from aicrm_next.platform_foundation.external_effects.service import ExternalEffectService
 from aicrm_next.platform_foundation.external_effects.worker import ExternalEffectWorker
-from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
 
 from .application import ReceiveTrustedGroupOpsBroadcastCommand
 from .domain import clean_text
@@ -62,17 +62,6 @@ class BroadcastImage:
 class ParsedCardPath:
     normalized_path: str
     lesson_id: str
-
-
-def internal_broadcast_token_error(headers: Mapping[str, Any]) -> tuple[str, int] | None:
-    authorization = clean_text(headers.get("authorization") or headers.get("Authorization"))
-    provided = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
-    result = validate_internal_service_token("group_broadcast", provided)
-    if result.error == "internal_token_not_configured":
-        return ("broadcast_token_not_configured", 503)
-    if not result.ok:
-        return ("internal_token_required", 401)
-    return None
 
 
 def parse_card_path(value: str) -> ParsedCardPath:
@@ -154,10 +143,12 @@ class ExecuteGroupOpsTokenBroadcastCommand:
         *,
         group_repo: GroupOpsRepository | None = None,
         external_effect_repo: ExternalEffectRepository | None = None,
+        external_effect_adapter_registry: ExternalEffectAdapterRegistry | None = None,
     ) -> None:
         self._group_repo = group_repo or build_group_ops_repository()
         self._external_effect_repo = external_effect_repo or build_external_effect_repository()
         self._external_effect_service = ExternalEffectService(self._external_effect_repo)
+        self._external_effect_adapter_registry = external_effect_adapter_registry
 
     def __call__(
         self,
@@ -225,10 +216,7 @@ class ExecuteGroupOpsTokenBroadcastCommand:
             )
             card_title = derive_card_title(text, request.card_title)
 
-        attachments: list[dict[str, Any]] = [
-            {"msgtype": "image", "image": {"media_id": media_id}}
-            for media_id in media_ids
-        ]
+        attachments: list[dict[str, Any]] = [{"msgtype": "image", "image": {"media_id": media_id}} for media_id in media_ids]
         if parsed_card:
             attachments.append(
                 {
@@ -341,6 +329,7 @@ class ExecuteGroupOpsTokenBroadcastCommand:
     ) -> dict[str, Any]:
         ExternalEffectWorker(
             self._external_effect_repo,
+            self._external_effect_adapter_registry,
             locked_by=f"group-ops-broadcast-{job_id}",
         ).dispatch_one(job_id)
         return self._job_result(
@@ -369,7 +358,7 @@ class ExecuteGroupOpsTokenBroadcastCommand:
         attempt = attempts[-1] if attempts else None
         summary = dict(attempt.response_summary_json or {}) if attempt else {}
         status = clean_text(job.status if job else "")
-        ok = status == "succeeded" and bool(summary.get("exact_target_verified"))
+        ok = status in {"succeeded", "simulated"} and bool(summary.get("exact_target_verified"))
         return {
             "ok": ok,
             "status": status or "unknown",

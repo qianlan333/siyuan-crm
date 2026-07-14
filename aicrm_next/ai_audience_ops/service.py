@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
@@ -90,7 +89,6 @@ class AudiencePackageService:
             "name": name,
             "status": status,
             "parameters": parameters,
-            "inbound_webhook_secret": _text(payload.get("inbound_webhook_secret")) or "audsec_" + secrets.token_urlsafe(32),
         }
         package = self._repo.create_package(package_payload)
         version = None
@@ -130,7 +128,11 @@ class AudiencePackageService:
             **refresh_config,
         }
         updated = self._repo.update_package_config(int(package_id), update_payload)
-        return {"ok": bool(updated), "package": _admin_package_detail(self._repo.get_package_detail(int(package_id)) or updated or {}), "error": "" if updated else "package_not_found"}
+        return {
+            "ok": bool(updated),
+            "package": _admin_package_detail(self._repo.get_package_detail(int(package_id)) or updated or {}),
+            "error": "" if updated else "package_not_found",
+        }
 
     def copy_admin_package(self, package_id: int) -> dict[str, Any]:
         source = self._repo.get_package(int(package_id))
@@ -139,11 +141,19 @@ class AudiencePackageService:
         base_key = f"{_text(source.get('package_key'))}_copy_{int(package_id)}"
         package_key = self._available_copy_key(base_key)
         copied = self._repo.copy_package(int(package_id), package_key=package_key, name=f"{_text(source.get('name')) or _text(source.get('package_key'))}副本")
-        return {"ok": bool(copied), "package": _admin_package_detail(self._repo.get_package_detail(int((copied or {}).get("id") or 0)) or copied or {}), "error": "" if copied else "package_not_found"}
+        return {
+            "ok": bool(copied),
+            "package": _admin_package_detail(self._repo.get_package_detail(int((copied or {}).get("id") or 0)) or copied or {}),
+            "error": "" if copied else "package_not_found",
+        }
 
     def pause_admin_package(self, package_id: int) -> dict[str, Any]:
         package = self._repo.update_package_status(int(package_id), "paused", reason="admin_paused")
-        return {"ok": bool(package), "package": _admin_package_detail(self._repo.get_package_detail(int(package_id)) or package or {}), "error": "" if package else "package_not_found"}
+        return {
+            "ok": bool(package),
+            "package": _admin_package_detail(self._repo.get_package_detail(int(package_id)) or package or {}),
+            "error": "" if package else "package_not_found",
+        }
 
     def activate_admin_package(self, package_id: int) -> dict[str, Any]:
         previous = self._repo.get_package(int(package_id))
@@ -162,7 +172,11 @@ class AudiencePackageService:
 
     def archive_admin_package(self, package_id: int) -> dict[str, Any]:
         package = self._repo.update_package_status(int(package_id), "archived", reason="admin_archived")
-        return {"ok": bool(package), "package": _admin_package_detail(self._repo.get_package_detail(int(package_id)) or package or {}), "error": "" if package else "package_not_found"}
+        return {
+            "ok": bool(package),
+            "package": _admin_package_detail(self._repo.get_package_detail(int(package_id)) or package or {}),
+            "error": "" if package else "package_not_found",
+        }
 
     def list_admin_members(self, package_id: int, *, limit: int = 50, offset: int = 0) -> dict[str, Any]:
         if not self._repo.get_package(int(package_id)):
@@ -188,10 +202,10 @@ class AudiencePackageService:
             "ok": True,
             "webhook": {
                 "inbound_webhook_url": inbound_webhook_url(package, request_base_url=request_base_url),
-                "inbound_secret_configured": bool(_text(package.get("inbound_webhook_secret"))),
+                "inbound_auth_mode": "aicrm_hmac_sha256",
                 "outbound_enabled": bool(subscription and _text(subscription.get("status")) == "active"),
                 "outbound_webhook_url": _text((subscription or {}).get("webhook_url")),
-                "outbound_secret_configured": bool(_text((subscription or {}).get("signing_secret"))),
+                "outbound_auth_mode": "aicrm_hmac_sha256",
                 "last_outbound_at": "",
                 "last_inbound_at": "",
             },
@@ -203,14 +217,11 @@ class AudiencePackageService:
             return {"ok": False, "error": "package_not_found"}
         webhook_url = _text(payload.get("outbound_webhook_url"))
         enabled = bool(payload.get("outbound_enabled"))
-        signing_secret = _text(payload.get("outbound_signing_secret"))
         existing = _first_webhook_subscription(self._repo.list_subscriptions(int(package_id), active_only=False, trigger_event_type="entered"))
         if existing:
             update_payload = {"status": "active" if enabled else "paused", "webhook_url": webhook_url}
-            if "outbound_signing_secret" in payload:
-                update_payload["signing_secret"] = signing_secret
             self._repo.update_subscription(int(existing["id"]), update_payload)
-        elif enabled or webhook_url or signing_secret:
+        elif enabled or webhook_url:
             self._repo.create_subscription(
                 int(package_id),
                 {
@@ -218,17 +229,10 @@ class AudiencePackageService:
                     "dispatch_mode": "per_run",
                     "target_type": "webhook",
                     "webhook_url": webhook_url,
-                    "signing_secret": signing_secret,
                     "execution_mode": "execute",
                 },
             )
         return self.get_admin_webhook(int(package_id))
-
-    def rotate_admin_inbound_secret(self, package_id: int, *, request_base_url: str = "") -> dict[str, Any]:
-        package = self._repo.rotate_inbound_secret(int(package_id), "audsec_" + secrets.token_urlsafe(32))
-        if not package:
-            return {"ok": False, "error": "package_not_found"}
-        return self.get_admin_webhook(int(package_id), request_base_url=request_base_url)
 
     def list_admin_senders(self, package_id: int) -> dict[str, Any]:
         if not self._repo.get_package(int(package_id)):
@@ -354,7 +358,9 @@ class AudiencePackageService:
             else:
                 incremental_sql = _text(payload.get("sql_text"))
         if incremental_sql or snapshot_sql:
-            version = self.create_version(int(package["id"]), PackageVersionCreateRequest(**{**payload, "incremental_sql_text": incremental_sql, "snapshot_sql_text": snapshot_sql}))["version"]
+            version = self.create_version(
+                int(package["id"]), PackageVersionCreateRequest(**{**payload, "incremental_sql_text": incremental_sql, "snapshot_sql_text": snapshot_sql})
+            )["version"]
         return {"ok": True, "package": package, "version": version}
 
     def get_package(self, package_id: int) -> dict[str, Any]:
@@ -415,7 +421,11 @@ class AudiencePackageService:
         had_current_version = int(package.get("current_version_id") or 0) > 0
         self._repo.update_version_validation(int(version["id"]), dependencies=sorted(set(dependencies)), validation_errors=[])
         self._repo.replace_dependencies(package_id, int(version["id"]), sorted(set(dependencies)))
-        published = self._repo.publish_version(package_id, int(version["id"])) if activate else self._repo.publish_version_without_activation(package_id, int(version["id"]))
+        published = (
+            self._repo.publish_version(package_id, int(version["id"]))
+            if activate
+            else self._repo.publish_version_without_activation(package_id, int(version["id"]))
+        )
         result = {"ok": True, "package": self._repo.get_package(package_id), "version": published}
         if activate and (not was_active or not had_current_version):
             result["launch_refresh"] = self._refresh_package_on_launch(package_id)

@@ -4,40 +4,42 @@ from fastapi.testclient import TestClient
 
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
 from aicrm_next.main import create_app
+from tests.admin_auth_test_helpers import access_token_headers, install_access_token
 
 
-TOKEN = "external-orders-token"
-
-
-def _client(monkeypatch, *, token_configured: bool = True) -> TestClient:
+def _client(monkeypatch, *, authorized: bool = True) -> TestClient:
     reset_commerce_fixture_state()
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("SECRET_KEY", "external-orders-api")
-    if token_configured:
-        monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", TOKEN)
-    else:
-        monkeypatch.delenv("AUTOMATION_INTERNAL_API_TOKEN", raising=False)
-    return TestClient(create_app(), raise_server_exceptions=False)
+    monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")
+    client = TestClient(create_app(), raise_server_exceptions=False)
+    token = install_access_token(
+        client,
+        audience="external_integration",
+        capabilities=("external_read",),
+        scopes=("read",),
+        client_id="pytest-external-orders",
+        purpose="external_agent",
+    )
+    if authorized:
+        client.headers.update(access_token_headers(token))
+    return client
 
 
 def _headers() -> dict[str, str]:
-    return {"Authorization": f"Bearer {TOKEN}"}
+    return {}
 
 
-def test_external_orders_requires_configured_bearer_token(monkeypatch) -> None:
-    unconfigured = _client(monkeypatch, token_configured=False).get("/api/external/orders")
-    assert unconfigured.status_code == 503
-    assert unconfigured.json()["error_code"] == "internal_token_not_configured"
-
-    client = _client(monkeypatch)
+def test_external_orders_requires_registered_client_access_token(monkeypatch) -> None:
+    client = _client(monkeypatch, authorized=False)
     missing = client.get("/api/external/orders")
     assert missing.status_code == 401
-    assert missing.json()["error_code"] == "missing_internal_token"
+    assert missing.json()["error"] == "access_token_required"
 
     invalid = client.get("/api/external/orders", headers={"Authorization": "Bearer wrong-token"})
     assert invalid.status_code == 401
-    assert invalid.json()["error_code"] == "invalid_internal_token"
+    assert invalid.json()["error"] == "invalid_access_token"
 
 
 def test_external_orders_list_returns_lightweight_contract_and_excludes_unpaid_for_paid_range(monkeypatch) -> None:
@@ -120,18 +122,18 @@ def test_external_order_detail_reuses_unified_detail_projection(monkeypatch) -> 
 
 
 def test_external_user_basic_requires_bearer_token(monkeypatch) -> None:
-    client = _client(monkeypatch)
+    client = _client(monkeypatch, authorized=False)
 
     missing = client.get("/api/external/users/resolve?unionid=unionid_001")
     assert missing.status_code == 401
-    assert missing.json()["error_code"] == "missing_internal_token"
+    assert missing.json()["error"] == "access_token_required"
 
     invalid = client.get(
         "/api/external/users/resolve?unionid=unionid_001",
         headers={"Authorization": "Bearer wrong-token"},
     )
     assert invalid.status_code == 401
-    assert invalid.json()["error_code"] == "invalid_internal_token"
+    assert invalid.json()["error"] == "invalid_access_token"
 
 
 def test_external_user_basic_requires_identity_key(monkeypatch) -> None:

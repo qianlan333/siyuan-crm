@@ -22,7 +22,7 @@ def _is_siyuan_deploy_overlay() -> bool:
     source = _workflow()
     return (
         "scripts/ensure_channel_multi_staff_schema.py" in source
-        and "sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/" in source
+        and "cd '/home/ubuntu/极简 crm'" in source
         and not (ROOT / "deploy" / "aicrm-web.service").exists()
     )
 
@@ -89,18 +89,19 @@ def test_siyuan_deploy_overlay_keeps_existing_release_boundary():
     restart_index = workflow.index("sudo systemctl restart openclaw-wecom-postgres.service")
     smoke_index = workflow.index("admin_channels_status=")
     admin_read_smoke_index = workflow.index("scripts/ops/check_admin_read_pages_smoke.py")
-    copy_external_push_index = workflow.index("sudo cp deploy/openclaw-external-push-worker.service /etc/systemd/system/")
 
     assert "workflow_run:" in workflow
     assert 'workflows: ["CI Fast"]' in workflow
     assert "github.event.workflow_run.head_branch == 'main'" in workflow
+    assert "appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2" in workflow
     assert "push:" not in workflow
     assert fetch_index < reset_index < marker_index < health_index < alembic_index < schema_guard_index < restart_index
-    assert restart_index < smoke_index < admin_read_smoke_index < copy_external_push_index
+    assert restart_index < smoke_index < admin_read_smoke_index
     assert '"$admin_channels_status" != "401"' in workflow
     assert '"$admin_channels_status" != "403"' in workflow
     assert "alembic stamp head" not in workflow
     assert "legacy_flask_app" not in workflow
+    assert "openclaw-external-push-worker" not in workflow
     assert not (ROOT / "deploy" / "aicrm-web.service").exists()
     assert not (ROOT / "deploy" / "openclaw-external-effect-worker.service").exists()
 
@@ -224,18 +225,11 @@ def test_production_deploy_installs_and_runs_internal_event_worker_timer():
     assert health_index < install_index < verify_index
 
 
-def test_external_push_worker_systemd_units_are_deployable():
-    service = (ROOT / "deploy" / "openclaw-external-push-worker.service").read_text(encoding="utf-8")
-    timer = (ROOT / "deploy" / "openclaw-external-push-worker.timer").read_text(encoding="utf-8")
-
-    assert "After=network.target openclaw-wecom-postgres.service" in service
-    assert "Requires=openclaw-wecom-postgres.service" in service
-    assert "EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env" in service
-    assert "WorkingDirectory=/home/ubuntu/极简 crm" in service
-    assert "python scripts/run_external_push_worker.py" in service
-    assert "OnCalendar=*-*-* *:*:20" in timer
-    assert "Persistent=true" in timer
-    assert "Unit=openclaw-external-push-worker.service" in timer
+def test_retired_external_push_worker_units_are_absent_from_siyuan_overlay():
+    assert not (ROOT / "deploy" / "openclaw-external-push-worker.service").exists()
+    assert not (ROOT / "deploy" / "openclaw-external-push-worker.timer").exists()
+    assert not (ROOT / "deploy" / "aicrm-next" / "openclaw-external-push-worker.service").exists()
+    assert not (ROOT / "deploy" / "aicrm-next" / "openclaw-external-push-worker.timer").exists()
 
 
 @pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
@@ -522,12 +516,10 @@ def test_due_runner_scripts_share_int_env_reader():
     assert not (ROOT / "scripts" / "run_automation_sop.py").exists()
     assert 'read_int_env("EXTERNAL_PUSH_WORKER_BATCH_SIZE", DEFAULT_BATCH_SIZE)' in external_push_worker
     assert 'read_int_env("AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE", DEFAULT_WORKER_BATCH_SIZE)' in internal_event_worker
-    assert "register_payment_succeeded_consumers()" in internal_event_worker
-    assert "register_shadow_event_consumers()" in internal_event_worker
-    assert "register_ai_audience_event_consumers()" in internal_event_worker
+    assert "build_internal_event_consumer_registry" in internal_event_worker
     assert 'read_int_env("AICRM_AI_AUDIENCE_SCHEDULER_BATCH_SIZE", 20)' in ai_audience_scheduler
     assert "--execute" in internal_event_worker
-    assert "InternalEventWorker().run_due" in internal_event_worker
+    assert "InternalEventWorker(consumer_registry=build_internal_event_consumer_registry()).run_due" in internal_event_worker
     assert "int(os.environ.get" not in external_push_worker
     assert "int(os.environ.get" not in internal_event_worker
     assert "int(os.environ.get" not in ai_audience_scheduler

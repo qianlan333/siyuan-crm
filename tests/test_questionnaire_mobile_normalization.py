@@ -21,7 +21,8 @@ def test_questionnaire_h5_submit_normalizes_mobile_identity():
 
     assert result["ok"] is True
     assert result["mobile"] == "138 0013 8000"
-    assert result["binding_status"] == "unresolved"
+    assert result["binding_status"] == "bound"
+    assert result["unionid"] == "unionid_001"
     assert result["fallback_used"] is False
     assert result["real_external_call_executed"] is False
 

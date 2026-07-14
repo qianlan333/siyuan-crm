@@ -7,6 +7,8 @@ import json
 from typing import Any
 from uuid import UUID
 
+from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import resolve_external_userid_with_dbapi, resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.shared.runtime import raw_database_url
 
 from .domain import text
@@ -166,24 +168,12 @@ def resolve_external_contact_customer_name(external_userid: str, *, corp_id: str
     if not external:
         return ""
     with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT COALESCE(NULLIF(customer_name, ''), NULLIF(remark, ''), '') AS customer_name
-            FROM crm_user_identity
-            WHERE (
-                primary_external_userid = %s
-                OR jsonb_exists(external_userids_json, %s)
-            )
-              AND COALESCE(NULLIF(customer_name, ''), NULLIF(remark, ''), '') <> ''
-            ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END,
-                     last_seen_at DESC NULLS LAST,
-                     updated_at DESC NULLS LAST
-            LIMIT 1
-            """,
-            (external, external, external),
+        resolution = resolve_identity_with_dbapi(
+            cur,
+            ResolvePersonIdentityRequest(external_userid=external),
         )
-        row = cur.fetchone()
-    return text((row or {}).get("customer_name"))
+    identity = resolution.identity if resolution.status == "resolved" else None
+    return text((identity.customer_name or identity.remark) if identity else "")
 
 
 def list_channel_qrcode_assets(channel_id: int, limit: int = 20) -> list[dict[str, Any]]:
@@ -759,7 +749,16 @@ def insert_assignment_event(
     source_payload_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _connect() as conn, conn.cursor() as cur:
-        resolved_unionid = text(unionid) or _resolve_unionid_by_external_userid(cur, external_contact_id)
+        resolution = resolve_identity_with_dbapi(
+            cur,
+            ResolvePersonIdentityRequest(
+                unionid=text(unionid) or None,
+                external_userid=text(external_contact_id) or None,
+            ),
+        )
+        canonical_unionid = resolved_unionid(resolution)
+        if not canonical_unionid:
+            raise ValueError("identity_pending_unionid")
         source_payload = dict(source_payload_json or {})
         if external_contact_id:
             source_payload.setdefault("external_contact_id", text(external_contact_id))
@@ -778,7 +777,7 @@ def insert_assignment_event(
                 text(assignee_staff_id),
                 text(strategy),
                 text(reason),
-                resolved_unionid,
+                canonical_unionid,
                 text(wecom_user_id),
                 _json(source_payload),
             ),
@@ -1137,7 +1136,15 @@ def upsert_channel_entry_effect_log(
     response_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     with _connect() as conn, conn.cursor() as cur:
-        resolved_unionid = text(unionid) or _resolve_unionid_by_external_userid(cur, external_contact_id)
+        canonical_unionid = resolved_unionid(
+            resolve_identity_with_dbapi(
+                cur,
+                ResolvePersonIdentityRequest(
+                    unionid=text(unionid) or None,
+                    external_userid=text(external_contact_id) or None,
+                ),
+            )
+        )
         source_request = dict(request_json or {})
         if external_contact_id:
             source_request.setdefault("external_contact_id", text(external_contact_id))
@@ -1165,7 +1172,7 @@ def upsert_channel_entry_effect_log(
                 event_log_id,
                 channel_id,
                 text(scene_value),
-                resolved_unionid,
+                canonical_unionid,
                 text(owner_staff_id),
                 text(effect_type),
                 text(idempotency_key),
@@ -1316,7 +1323,7 @@ def save_tag_snapshot(owner_staff_id: str, external_contact_id: str, tag_ids: li
     if not tag_ids:
         return
     with _connect() as conn, conn.cursor() as cur:
-        unionid = _resolve_unionid_by_external_userid(cur, external_contact_id)
+        unionid = resolve_external_userid_with_dbapi(cur, external_contact_id)
         if not unionid:
             _enqueue_tag_identity_resolution(cur, owner_staff_id=owner_staff_id, external_contact_id=external_contact_id, tag_ids=tag_ids, tag_names=tag_names)
             conn.commit()
@@ -1343,26 +1350,6 @@ def save_tag_snapshot(owner_staff_id: str, external_contact_id: str, tag_ids: li
                 (unionid, text(owner_staff_id), text(tag_id), text(tag_names.get(tag_id))),
             )
         conn.commit()
-
-
-def _resolve_unionid_by_external_userid(cur, external_userid: str) -> str:
-    normalized = text(external_userid)
-    if not normalized:
-        return ""
-    cur.execute(
-        """
-        SELECT unionid
-        FROM crm_user_identity
-        WHERE primary_external_userid = %s
-           OR jsonb_exists(external_userids_json, %s)
-        ORDER BY CASE WHEN primary_external_userid = %s THEN 0 ELSE 1 END,
-                 updated_at DESC
-        LIMIT 1
-        """,
-        (normalized, normalized, normalized),
-    )
-    row = cur.fetchone()
-    return text((row or {}).get("unionid"))
 
 
 def _enqueue_tag_identity_resolution(

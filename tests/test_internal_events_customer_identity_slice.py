@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
+pytestmark = pytest.mark.usefixtures("composed_internal_event_registry")
+
 from fastapi.testclient import TestClient
 
 from aicrm_next.identity_contact.application import BindMobileToExternalContactCommand
@@ -10,6 +14,7 @@ from aicrm_next.platform_foundation.internal_events import InternalEventService,
 from aicrm_next.platform_foundation.internal_events.customer_identity import CUSTOMER_PHONE_BOUND_EVENT_TYPE
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
 from aicrm_next.sidebar_write.application import reset_sidebar_write_fixture_state
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 PHONE_BOUND_CONSUMERS = [
     "automation_phone_bound_consumer",
@@ -71,10 +76,16 @@ def _sidebar_bind(
     mobile: str,
     idempotency_key: str,
 ) -> dict:
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="LiuXiao" if external_userid == "wx_ext_002" else "ZhaoYanFang",
+        external_userid=external_userid,
+    )
+    headers["Idempotency-Key"] = idempotency_key
     response = client.post(
         "/api/sidebar/bind-mobile",
         json={"external_userid": external_userid, "mobile": mobile},
-        headers={"Idempotency-Key": idempotency_key},
+        headers=headers,
     )
     assert response.status_code == 200
     return response.json()

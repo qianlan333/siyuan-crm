@@ -1,9 +1,26 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
 from aicrm_next.main import create_app
+
+
+def _canonical_identity_row(params) -> dict:
+    external_userid, unionid, openid, mobile = tuple(params)
+    return {
+        "unionid": unionid,
+        "external_userid": external_userid,
+        "openid": openid,
+        "mobile": mobile,
+        "mobile_normalized": mobile,
+        "status": "active",
+        "matched_unionid": bool(unionid),
+        "matched_external_userid": bool(external_userid),
+        "matched_openid": bool(openid),
+        "matched_mobile": bool(mobile),
+    }
 
 
 def _client(monkeypatch) -> TestClient:
@@ -34,6 +51,111 @@ def test_public_product_frontend_redirects_empty_material_and_keeps_checkout_con
     assert "showLeadQr(order" in pay.text
     assert "支付暂不可用" not in pay.text
     assert "不会创建订单" not in pay.text
+    assert "微信身份正在同步，请稍后重试。" in pay.text
+    assert "当前微信身份存在冲突，请联系客服处理。" in pay.text
+
+
+def test_payment_identity_accepts_canonical_unionid_before_openid_projection() -> None:
+    from aicrm_next.public_product.h5_wechat_pay import _resolve_payment_identity
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+    class FakeConn:
+        def execute(self, query, params=()):
+            if "FROM crm_user_identity identity" in query:
+                external_userid, unionid, openid, mobile = tuple(params)
+                if unionid == "un_canonical" and not openid:
+                    return Cursor(
+                        [
+                            {
+                                "unionid": "un_canonical",
+                                "external_userid": "ext_canonical",
+                                "openid": "",
+                                "mobile": "",
+                                "mobile_normalized": "",
+                                "status": "active",
+                                "matched_unionid": True,
+                                "matched_external_userid": False,
+                                "matched_openid": False,
+                                "matched_mobile": False,
+                            }
+                        ]
+                    )
+                return Cursor([])
+            if "FROM crm_user_identity_resolution_queue" in query:
+                return Cursor([{"pending_count": 1}])
+            raise AssertionError(query)
+
+    result = _resolve_payment_identity(
+        FakeConn(),
+        {"unionid": "un_canonical", "openid": "op_not_projected_yet"},
+        for_update=True,
+    )
+
+    assert result.status == "resolved"
+    assert result.identity is not None
+    assert result.identity.unionid == "un_canonical"
+
+
+def test_payment_identity_blocks_openid_resolved_to_another_unionid() -> None:
+    from aicrm_next.public_product.h5_wechat_pay import _resolve_payment_identity
+
+    class Cursor:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+        def fetchone(self):
+            return self.rows[0] if self.rows else None
+
+    class FakeConn:
+        def execute(self, query, params=()):
+            if "FROM crm_user_identity identity" not in query:
+                raise AssertionError(query)
+            _external_userid, unionid, openid, _mobile = tuple(params)
+            if unionid:
+                resolved_unionid = unionid
+                matched_unionid = True
+                matched_openid = False
+            else:
+                resolved_unionid = "un_other"
+                matched_unionid = False
+                matched_openid = bool(openid)
+            return Cursor(
+                [
+                    {
+                        "unionid": resolved_unionid,
+                        "external_userid": "",
+                        "openid": openid,
+                        "mobile": "",
+                        "mobile_normalized": "",
+                        "status": "active",
+                        "matched_unionid": matched_unionid,
+                        "matched_external_userid": False,
+                        "matched_openid": matched_openid,
+                        "matched_mobile": False,
+                    }
+                ]
+            )
+
+    result = _resolve_payment_identity(
+        FakeConn(),
+        {"unionid": "un_canonical", "openid": "op_other"},
+        for_update=True,
+    )
+
+    assert result.status == "conflict"
+    assert result.reason == "identity_inputs_disagree"
 
 
 def test_public_pay_landing_hides_mobile_before_oauth_for_mobile_required_product(monkeypatch) -> None:
@@ -344,6 +466,8 @@ def test_public_pay_landing_reopens_existing_paid_order(monkeypatch) -> None:
             return False
 
         def execute(self, query, params=()):
+            if "FROM crm_user_identity identity" in query:
+                return Cursor(_canonical_identity_row(params))
             if "FROM wechat_pay_orders" in query:
                 return Cursor(
                     {
@@ -420,6 +544,8 @@ def test_public_h5_create_order_returns_existing_paid_order(monkeypatch) -> None
             return False
 
         def execute(self, query, params=()):
+            if "FROM crm_user_identity identity" in query:
+                return Cursor(_canonical_identity_row(params))
             if "FROM wechat_pay_orders" in query:
                 return Cursor(
                     {
@@ -498,6 +624,8 @@ def test_public_h5_create_order_does_not_reuse_paid_order_from_mismatched_sideba
 
         def execute(self, query, params=()):
             queries.append((query, tuple(params)))
+            if "FROM crm_user_identity identity" in query:
+                return Cursor(_canonical_identity_row(params))
             if "FROM wechat_pay_orders" in query:
                 assert "un_current" in params
                 assert "ext_already_paid" not in params
@@ -584,17 +712,94 @@ def test_public_h5_create_order_does_not_reuse_paid_order_from_mismatched_sideba
     assert any("INSERT INTO wechat_pay_orders" in query for query, _ in queries)
 
 
+@pytest.mark.parametrize(
+    ("identity_status", "expected_error", "retryable"),
+    [
+        ("conflict", "identity_conflict", False),
+        ("pending", "identity_resolution_required", True),
+    ],
+)
+def test_public_h5_create_order_blocks_unresolved_payment_identity_before_order_or_wechat_call(
+    monkeypatch,
+    identity_status: str,
+    expected_error: str,
+    retryable: bool,
+) -> None:
+    from aicrm_next.identity_contact.dto import IdentityResolveResult
+    from aicrm_next.public_product import h5_wechat_pay
+    from aicrm_next.commerce.wechat_pay_client import WeChatPayClientConfig
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(h5_wechat_pay, "_connect", lambda: FakeConn())
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "_require_payment_ready",
+        lambda: WeChatPayClientConfig(
+            app_id="app",
+            mch_id="mch",
+            api_v3_key="api-v3-key",
+            private_key_path="/tmp/key.pem",
+            merchant_serial_no="serial",
+        ),
+    )
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "resolve_identity_with_dbapi",
+        lambda *_args, **_kwargs: IdentityResolveResult(status=identity_status, reason="test_identity_boundary"),
+    )
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "_insert_order",
+        lambda *_args, **_kwargs: pytest.fail("unresolved payer must not create an order"),
+    )
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "WeChatPayClient",
+        lambda *_args, **_kwargs: pytest.fail("unresolved payer must not call WeChat Pay"),
+    )
+    client = _client(monkeypatch)
+    client.cookies.set(
+        h5_wechat_pay.COOKIE_NAME,
+        h5_wechat_pay._signed_blob({"openid": "op_unresolved", "unionid": "un_unresolved"}),
+    )
+
+    response = client.post(
+        "/api/h5/wechat-pay/jsapi/orders",
+        json={"product_code": "test-product"},
+        headers={"User-Agent": "MicroMessenger"},
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "ok": False,
+        "error": expected_error,
+        "identity_status": identity_status,
+        "retryable": retryable,
+    }
+
+
 def test_public_h5_paid_order_lookup_accepts_product_code_alias() -> None:
     from aicrm_next.public_product.h5_wechat_pay import _paid_order_for_product_identity
 
     captured = {}
 
     class Cursor:
+        def __init__(self, row=None):
+            self.row = row
+
         def fetchone(self):
-            return None
+            return self.row
 
     class FakeConn:
         def execute(self, query, params=()):
+            if "FROM crm_user_identity identity" in query:
+                return Cursor(_canonical_identity_row(params))
             captured["query"] = query
             captured["params"] = tuple(params)
             return Cursor()
@@ -619,11 +824,16 @@ def test_public_h5_paid_order_lookup_prefers_payment_identity_over_sidebar_exter
     captured = {}
 
     class Cursor:
+        def __init__(self, row=None):
+            self.row = row
+
         def fetchone(self):
-            return None
+            return self.row
 
     class FakeConn:
         def execute(self, query, params=()):
+            if "FROM crm_user_identity identity" in query:
+                return Cursor(_canonical_identity_row(params))
             captured["query"] = query
             captured["params"] = tuple(params)
             return Cursor()

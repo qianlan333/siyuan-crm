@@ -10,14 +10,13 @@ from aicrm_next.integration_gateway.wechat_pay_client import (
     WeChatPayClientConfig,
     wechat_pay_client_config_from_env,
 )
-from aicrm_next.public_product.h5_wechat_pay import _apply_transaction
-
 from .order_expiration import pending_order_ttl_hours
 from .repo import connect_commerce_db
 
 
 UNPAID_TRADE_STATES = {"", "NOTPAY", "USERPAYING", "ACCEPT", "PAYERROR"}
 TERMINAL_UNPAID_STATES = {"CLOSED", "REVOKED"}
+_apply_transaction: Callable[..., dict[str, Any]] | None = None
 
 
 class WeChatPayOrderReconciliationWorker:
@@ -26,9 +25,11 @@ class WeChatPayOrderReconciliationWorker:
         *,
         client_factory: Callable[[], WeChatPayClient] | None = None,
         connection_factory: Callable[[], Any] | None = None,
+        transaction_applier: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.client_factory = client_factory or (lambda: WeChatPayClient(wechat_pay_client_config_from_env()))
         self.connection_factory = connection_factory or connect_commerce_db
+        self.transaction_applier = transaction_applier
 
     def run_once(
         self,
@@ -70,7 +71,10 @@ class WeChatPayOrderReconciliationWorker:
                         details.append({"out_trade_no": out_trade_no, "trade_state": trade_state, "action": "preview"})
                         continue
                     if trade_state == "SUCCESS":
-                        _apply_transaction(conn, transaction, source_route="wechat_pay_order_reconciliation_worker")
+                        transaction_applier = self.transaction_applier or _apply_transaction
+                        if transaction_applier is None:
+                            raise RuntimeError("payment transaction applier composition unavailable")
+                        transaction_applier(conn, transaction, source_route="wechat_pay_order_reconciliation_worker")
                         _insert_order_event(
                             conn,
                             out_trade_no=out_trade_no,

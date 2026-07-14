@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import sys
 import time
 from dataclasses import dataclass
@@ -15,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from aicrm_next.admin_shell.navigation import ADMIN_NAV_GROUPS, admin_path_for  # noqa: E402
 from scripts.script_runtime import print_json  # noqa: E402
 
 REQUIRED_OPENAPI_PATHS = (
@@ -28,7 +31,12 @@ REQUIRED_OPENAPI_PATHS = (
     "/api/admin/ai-audience/packages",
     "/api/admin/automation-agents",
     "/api/admin/user-ops/send-records",
+    "/api/admin/data-health/summary",
 )
+
+DATA_HEALTH_SUMMARY_PATH = "/api/admin/data-health/summary"
+EXPECTED_DATA_HEALTH_CHECK_COUNT = 15
+DATA_HEALTH_RESPONSE_MAX_BYTES = 65536
 
 SMOKE_PATHS = (
     "/admin/customers",
@@ -49,7 +57,14 @@ SMOKE_PATHS = (
     "/api/admin/automation-agents",
     "/api/admin/user-ops/send-records?limit=1",
 )
-DEFAULT_TIMEOUT_SECONDS = 20.0
+SIDEBAR_PATHS = tuple(
+    dict.fromkeys(
+        admin_path_for(str(item["endpoint"]))
+        for group in ADMIN_NAV_GROUPS
+        for item in group["items"]
+    )
+)
+DEFAULT_TIMEOUT_SECONDS = 45.0
 
 
 @dataclass(frozen=True)
@@ -62,23 +77,34 @@ class ProbeResult:
     body_prefix: str = ""
 
 
-def _admin_cookie_header() -> tuple[str, str]:
+def _admin_cookie_header(cookie_file: Path | None) -> tuple[str, str]:
+    if cookie_file is None:
+        return "", "admin_cookie_file_required"
     try:
-        from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(cookie_file, flags)
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("cookie file must be regular")
+            if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) & 0o077:
+                raise PermissionError("cookie file permissions are not private")
+            raw_header = os.read(fd, 4097)
+            if len(raw_header) > 4096:
+                raise ValueError("cookie file is invalid")
+            header = raw_header.decode("utf-8")
+        finally:
+            os.close(fd)
+        if "\n" in header or "\r" in header or ";" in header or "=" not in header:
+            raise ValueError("cookie file is invalid")
+        name, value = header.split("=", 1)
+        if name != "aicrm_next_admin_session" or not value.startswith("ss_"):
+            raise ValueError("cookie file is invalid")
+        return header, ""
     except Exception as exc:
-        return "", f"admin_cookie_import_failed:{exc.__class__.__name__}"
-    payload = {
-        "auth_source": "deploy_smoke",
-        "login_type": "deploy_smoke",
-        "username": "deploy-smoke",
-        "display_name": "deploy-smoke",
-        "roles": ["super_admin"],
-        "iat": int(time.time()),
-    }
-    try:
-        return f"{SESSION_COOKIE}={sign_session(payload)}", ""
-    except Exception as exc:
-        return "", f"admin_cookie_sign_failed:{exc.__class__.__name__}"
+        return "", f"admin_cookie_file_failed:{exc.__class__.__name__}"
 
 
 def _fetch(
@@ -121,13 +147,45 @@ def _admin_api_payload_error(path: str, body: str) -> str:
         return "admin_api_read_model_unavailable"
     if payload.get("source_status") == "production_unavailable":
         return "admin_api_production_unavailable"
+    if path.split("?", 1)[0] == DATA_HEALTH_SUMMARY_PATH:
+        counts = payload.get("counts")
+        checks = payload.get("checks")
+        if not isinstance(counts, dict) or not isinstance(checks, list):
+            return "data_health_summary_invalid"
+        expected_counts = {
+            "ok": EXPECTED_DATA_HEALTH_CHECK_COUNT,
+            "warn": 0,
+            "fail": 0,
+            "not_applicable": 0,
+        }
+        if (
+            payload.get("ok") is not True
+            or payload.get("overall_status") != "ok"
+            or counts != expected_counts
+            or len(checks) != EXPECTED_DATA_HEALTH_CHECK_COUNT
+            or any(not isinstance(check, dict) or check.get("status") != "ok" for check in checks)
+        ):
+            non_green_checks = [
+                f"{str(check.get('check_id') or 'unknown')}:{str(check.get('status') or 'unknown')}"
+                for check in checks
+                if isinstance(check, dict) and check.get("status") != "ok"
+            ]
+            diagnostic = ",".join(non_green_checks) or "count_mismatch"
+            return f"data_health_checks_not_all_ok:{diagnostic}"
     return ""
 
 
 def _probe(base_url: str, path: str, *, timeout: float, cookie_header: str = "") -> ProbeResult:
     started = time.monotonic()
     try:
-        status_code, _headers, body = _fetch(base_url, path, timeout=timeout, cookie_header=cookie_header)
+        max_bytes = DATA_HEALTH_RESPONSE_MAX_BYTES if path.split("?", 1)[0] == DATA_HEALTH_SUMMARY_PATH else 4096
+        status_code, _headers, body = _fetch(
+            base_url,
+            path,
+            timeout=timeout,
+            max_bytes=max_bytes,
+            cookie_header=cookie_header,
+        )
     except (URLError, TimeoutError, OSError) as exc:
         return ProbeResult(
             path=path,
@@ -171,11 +229,28 @@ def _openapi_paths(base_url: str, *, timeout: float, cookie_header: str = "") ->
     return set(paths)
 
 
-def run(base_url: str, *, timeout: float, require_admin_cookie: bool = False) -> dict[str, Any]:
-    cookie_header, cookie_error = _admin_cookie_header() if require_admin_cookie else ("", "")
+def run(
+    base_url: str,
+    *,
+    timeout: float,
+    require_admin_cookie: bool = False,
+    admin_cookie_file: Path | None = None,
+    include_all_sidebar: bool = False,
+    require_all_data_health_green: bool = False,
+) -> dict[str, Any]:
+    cookie_header, cookie_error = _admin_cookie_header(admin_cookie_file) if require_admin_cookie else ("", "")
     paths = _openapi_paths(base_url, timeout=timeout, cookie_header=cookie_header)
     missing_paths = [path for path in REQUIRED_OPENAPI_PATHS if path not in paths]
-    probes = [_probe(base_url, path, timeout=timeout, cookie_header=cookie_header) for path in SMOKE_PATHS]
+    probe_paths = tuple(
+        dict.fromkeys(
+            (
+                *SMOKE_PATHS,
+                *((DATA_HEALTH_SUMMARY_PATH,) if require_all_data_health_green else ()),
+                *(SIDEBAR_PATHS if include_all_sidebar else ()),
+            )
+        )
+    )
+    probes = [_probe(base_url, path, timeout=timeout, cookie_header=cookie_header) for path in probe_paths]
     failed_probes = [probe for probe in probes if not probe.ok]
     missing_required_cookie = require_admin_cookie and not cookie_header
     return {
@@ -183,6 +258,9 @@ def run(base_url: str, *, timeout: float, require_admin_cookie: bool = False) ->
         "admin_cookie_supplied": bool(cookie_header),
         "admin_cookie_required": require_admin_cookie,
         "admin_cookie_error": cookie_error,
+        "all_sidebar_required": include_all_sidebar,
+        "all_data_health_green_required": require_all_data_health_green,
+        "sidebar_path_count": len(SIDEBAR_PATHS) if include_all_sidebar else 0,
         "base_url": base_url.rstrip("/"),
         "openapi_path_count": len(paths),
         "missing_openapi_paths": missing_paths,
@@ -198,10 +276,32 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--require-admin-cookie",
         action="store_true",
-        help="Fail when a signed admin smoke cookie cannot be generated or protected routes reject it.",
+        help="Fail when a private admin smoke cookie file is missing or protected routes reject it.",
+    )
+    parser.add_argument(
+        "--admin-cookie-file",
+        type=Path,
+        help="Private mode-0600 file containing the temporary admin Cookie header.",
+    )
+    parser.add_argument(
+        "--include-all-sidebar",
+        action="store_true",
+        help="Probe every production admin sidebar destination in addition to the core read/API smoke set.",
+    )
+    parser.add_argument(
+        "--require-all-data-health-green",
+        action="store_true",
+        help="Fail unless the production data-health summary contains exactly fifteen green checks.",
     )
     args = parser.parse_args(argv)
-    payload = run(args.base_url, timeout=max(1.0, float(args.timeout)), require_admin_cookie=args.require_admin_cookie)
+    payload = run(
+        args.base_url,
+        timeout=max(1.0, float(args.timeout)),
+        require_admin_cookie=args.require_admin_cookie,
+        admin_cookie_file=args.admin_cookie_file,
+        include_all_sidebar=bool(args.include_all_sidebar),
+        require_all_data_health_green=bool(args.require_all_data_health_green),
+    )
     print_json(payload, indent=2, sort_keys=True)
     return 0 if payload["ok"] else 1
 

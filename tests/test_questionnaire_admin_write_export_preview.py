@@ -46,7 +46,11 @@ def test_existing_get_export_route_downloads_csv_without_storage_file(client: Te
                 "q_interest": ["ai_tools"],
                 "q_note": "希望补充运营建议",
             },
-            "identity": {"unionid": "union_export_001", "mobile": "13800138000"},
+            "identity": {
+                "unionid": "unionid_001",
+                "external_userid": "wx_ext_001",
+                "mobile": "13800138000",
+            },
         },
     )
     assert submit.status_code == 200
@@ -75,7 +79,7 @@ def test_existing_get_export_route_downloads_csv_without_storage_file(client: Te
     assert "answers" not in (reader.fieldnames or [])
     rows = list(reader)
     fixture_row = next(row for row in rows if row["submission_id"] == "sub_fixture_001")
-    submitted_row = next(row for row in rows if row["unionid"] == "union_export_001")
+    submitted_row = next(row for row in rows if row["unionid"] == "unionid_001")
     assert fixture_row["submitted_at"] == "2026-05-20 18:10:00"
     assert "T" not in fixture_row["submitted_at"]
     assert "+" not in fixture_row["submitted_at"]

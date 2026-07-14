@@ -22,10 +22,13 @@ def _function_source(source: str, name: str) -> str:
 
 def test_h5_wechat_pay_notify_after_unionid_cleanup() -> None:
     source = _read("aicrm_next/public_product/h5_wechat_pay.py")
+    payment_identity_source = _function_source(source, "_resolve_payment_identity")
     paid_order_source = _function_source(source, "_paid_order_for_product_identity")
     apply_transaction_source = _function_source(source, "_apply_transaction")
 
-    assert "_resolve_unionid_for_payment_identity" in paid_order_source
+    assert "resolve_identity_with_dbapi" in payment_identity_source
+    assert "_resolve_payment_identity" in paid_order_source
+    assert "resolved_unionid" in paid_order_source
     assert "payer_openid = %s" not in paid_order_source
     assert "unionid = %s" in paid_order_source
     assert "external_userid = %s" not in paid_order_source
@@ -86,17 +89,22 @@ def test_channel_assignment_event_writes_unionid() -> None:
     serializer_source = _function_source(source, "_serialize_assignment_event")
 
     assert "unionid, wecom_user_id, source_payload_json" in insert_source
-    assert "_resolve_unionid_by_external_userid" in insert_source
+    assert "resolve_identity_with_dbapi" in insert_source
+    assert "resolved_unionid" in insert_source
     assert "external_contact_id, wecom_user_id" not in insert_source
     assert '"unionid": text(row.get("unionid"))' in serializer_source
 
 
 def test_customer_external_userid_lookup_exact_jsonb_membership() -> None:
-    source = _read("aicrm_next/customer_read_model/repo.py")
+    source = _read("aicrm_next/customer_read_model/repo_live_source.py")
     section = _function_source(source, "_identity_by_external_userid")
+    resolver = _read("aicrm_next/identity_contact/resolver.py")
 
-    assert "jsonb_exists(external_userids_json, :external_userid)" in section
-    assert "jsonb_array_elements(external_userids_json)" in section
+    assert "SQLAlchemyIdentityResolver" in section
+    assert "identity.external_userids_json ? input.external_userid" not in resolver
+    assert "identity.external_userids_json @> jsonb_build_array(input.external_userid)" in resolver
+    assert "identity.openids_json @> jsonb_build_array(input.openid)" in resolver
+    assert "jsonb_array_elements(identity.external_userids_json)" not in resolver
     assert "CAST(external_userids_json AS TEXT) LIKE" not in section
     assert "external_userid_like" not in section
 
@@ -174,7 +182,7 @@ def test_unionid_runtime_sql_guard_blocks_removed_identity_columns() -> None:
             ],
         ),
         "customer_exact_external_lookup": (
-            _function_source(_read("aicrm_next/customer_read_model/repo.py"), "_identity_by_external_userid"),
+            _function_source(_read("aicrm_next/customer_read_model/repo_live_source.py"), "_identity_by_external_userid"),
             [
             "CAST(external_userids_json AS TEXT) LIKE",
             ],
@@ -212,15 +220,13 @@ def test_id_dev_runtime_baseline_migration_covers_exposed_missing_tables() -> No
 
 
 def test_identity_contact_resolve_reads_current_owner_column() -> None:
-    source = _read("aicrm_next/identity_contact/repo.py")
-    section = _function_source(source, "resolve")
+    source = _read("aicrm_next/identity_contact/resolver.py")
     application_source = _read("aicrm_next/identity_contact/application.py")
     binding_section = application_source.split("class GetSidebarContactBindingStatusQuery:", 1)[1].split("class BindMobileToExternalContactCommand:", 1)[0]
 
-    assert "primary_owner_userid AS follow_user_userid" in section
-    assert "identity_status AS status" in section
-    assert "primary_follow_user_userid" not in section
-    assert "                           status" not in section
+    assert "identity.primary_owner_userid AS owner_userid" in source
+    assert "identity.identity_status AS status" in source
+    assert "primary_follow_user_userid" not in source
     assert "identity_contact_fallback" in binding_section
     assert "customer_detail_error" in binding_section
 
@@ -247,11 +253,11 @@ def test_sidebar_v2_reads_orders_and_messages_via_unionid_identity() -> None:
     questionnaire_source = _function_source(source, "list_questionnaire_answers")
     messages_source = _function_source(source, "list_other_staff_messages")
 
-    assert "FROM crm_user_identity identity" in binding_source
-    assert "LEFT JOIN external_contact_bindings b" in binding_source
+    assert "_resolve_identity" in binding_source
+    assert "FROM external_contact_bindings b" in binding_source
     assert "JOIN people" not in binding_source
     assert "b.first_bound_by_userid" not in binding_source
-    assert "WHERE COALESCE(identity.unionid, '') <> ''" in bindable_source
+    assert "WITH identity_scope(unionid, mobile)" in bindable_source
     assert "WHERE COALESCE(m.unionid, '') <> ''" not in bindable_source
     assert "FROM wechat_pay_orders o" in bindable_source
     assert "JOIN identity_scope identity ON identity.unionid = o.unionid" in bindable_source

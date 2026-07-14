@@ -160,19 +160,18 @@ preflight, systemd install plus deploy-smoke, nginx cutover, worker-isolation
 canary, downstream-worker isolation canary, internal-event worker isolation
 canary, pressure-probe, public-state evidence, rollback, reapply-cutover,
 rollback-drill evidence, and final-readiness command groups. The deploy-smoke
-command runs inside `install_and_start` after 5002 and the callback worker timer
-start. During rollback drill, run `rollback` first, then
+command runs inside `install_and_start` after 5002 and the persistent callback
+worker service start. During rollback drill, run `rollback` first, then
 `reapply_cutover_after_rollback`, then capture and validate
 `/tmp/wecom-callback-rollback.json` with `rollback_drill_evidence`. Run
 `final_readiness` only after that rollback evidence has been validated.
 The nginx merge remains manual by design.
 
 The worker-isolation canary intentionally stops
-`openclaw-wecom-callback-inbox-worker.timer` and
 `openclaw-wecom-callback-inbox-worker.service`, sends one validated callback to
 the 5002 ingress, saves `/tmp/wecom-callback-worker-isolation.json`, and then
-starts the worker timer again. Passing that canary proves worker downtime affects
-queue processing only, not HTTP ACK.
+starts the persistent worker again. Passing that canary proves the ACK owns only
+the durable inbox insert and that worker downtime affects queue processing only.
 
 The downstream-worker isolation canary stops `openclaw-external-push-worker.service`
 if present, sends one validated callback, samples `/health`, sidebar, and admin

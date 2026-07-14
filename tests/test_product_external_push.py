@@ -176,10 +176,18 @@ def test_external_push_attempt_queues_external_effect_and_updates_delivery(monke
             )
             return SimpleNamespace(fetchone=lambda: {"delivery_id": params[9], "status": params[0], "attempt_count": params[1]})
 
+    connection = FakeConn()
+    real_plan_effect = external_push_admin.ExternalEffectService.plan_effect
+
+    def fixture_plan_effect(self, **kwargs):
+        assert kwargs.pop("connection") is connection
+        return real_plan_effect(self, **kwargs)
+
     monkeypatch.setattr(external_push_admin, "_jsonb", lambda value: value)
+    monkeypatch.setattr(external_push_admin.ExternalEffectService, "plan_effect", fixture_plan_effect)
 
     result = external_push_admin._attempt_delivery(
-        FakeConn(),
+        connection,
         {"delivery_id": "deliv_attempt", "event_type": "transaction.paid", "attempt_count": 0, "request_url": "https://example.com/hook"},
         config={"webhook_url": "https://example.com/hook", "secret": "secret"},
         payload={"event": "transaction.paid", "phone_number": "13800000000"},

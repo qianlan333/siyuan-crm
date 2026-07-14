@@ -23,8 +23,15 @@ def _paid_order(**overrides):
     return order
 
 
-def _install_fake_psycopg(monkeypatch):
+def _install_fake_psycopg(monkeypatch, *, locked_order: dict | None = None):
     executed: list[tuple[str, tuple]] = []
+
+    class FakeResult:
+        def __init__(self, row=None):
+            self._row = row
+
+        def fetchone(self):
+            return self._row
 
     class FakeCursor:
         def __enter__(self):
@@ -48,6 +55,14 @@ def _install_fake_psycopg(monkeypatch):
 
         def cursor(self):
             return FakeCursor()
+
+        def execute(self, sql, params=()):
+            executed.append((sql, tuple(params)))
+            if "SELECT id FROM wechat_pay_orders" in sql and "FOR UPDATE" in sql:
+                return FakeResult({"id": int((locked_order or _paid_order())["id"])})
+            if "active_refund_amount_total" in sql:
+                return FakeResult(dict(locked_order or _paid_order(), active_refund_amount_total=0))
+            return FakeResult()
 
         def commit(self):
             self.commits += 1
@@ -74,9 +89,10 @@ def _install_fake_psycopg(monkeypatch):
 
 
 def test_next_postgres_refund_queues_external_effect_without_direct_wechat_pay(monkeypatch):
-    executed, connections = _install_fake_psycopg(monkeypatch)
     order = _paid_order()
+    executed, connections = _install_fake_psycopg(monkeypatch, locked_order=order)
     calls: list[dict] = []
+    planned: list[dict] = []
 
     class FakeClient:
         def create_refund(self, payload):
@@ -91,6 +107,11 @@ def test_next_postgres_refund_queues_external_effect_without_direct_wechat_pay(m
     monkeypatch.setattr(admin_transactions, "_database_url", lambda: "postgresql://test/test")
     monkeypatch.setattr(admin_transactions, "get_wechat_admin_order", lambda order_id: order)
     monkeypatch.setattr(admin_transactions, "_create_wechat_pay_refund_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        admin_transactions.ExternalEffectService,
+        "plan_effect",
+        lambda self, **kwargs: planned.append(kwargs) or {"id": 42},
+    )
 
     result = admin_transactions.create_wechat_refund_request(
         "19",
@@ -106,9 +127,11 @@ def test_next_postgres_refund_queues_external_effect_without_direct_wechat_pay(m
     assert result["ok"] is True
     assert result["refund"]["status"] == "queued"
     assert result["refund"]["provider_refund_executed"] is False
-    assert result["refund"]["external_effect_job_id"]
+    assert result["refund"]["external_effect_job_id"] == 42
     assert result["order"] == order
     assert calls == []
+    assert planned[0]["connection"] is connections[0]
+    assert planned[0]["idempotency_key"].startswith("wechat-refund-request:")
     sql_text = "\n".join(sql for sql, _params in executed)
     assert "INSERT INTO wechat_pay_refunds" in sql_text
     assert "refund_request_queued" in sql_text
@@ -117,8 +140,9 @@ def test_next_postgres_refund_queues_external_effect_without_direct_wechat_pay(m
 
 
 def test_next_postgres_refund_does_not_call_wechat_pay_when_client_would_reject(monkeypatch):
-    executed, connections = _install_fake_psycopg(monkeypatch)
     order = _paid_order(amount_total=9900, refundable_amount_total=9900)
+    executed, connections = _install_fake_psycopg(monkeypatch, locked_order=order)
+    planned: list[dict] = []
 
     class FakeClient:
         def create_refund(self, payload):
@@ -128,6 +152,11 @@ def test_next_postgres_refund_does_not_call_wechat_pay_when_client_would_reject(
     monkeypatch.setattr(admin_transactions, "_database_url", lambda: "postgresql://test/test")
     monkeypatch.setattr(admin_transactions, "get_wechat_admin_order", lambda order_id: order)
     monkeypatch.setattr(admin_transactions, "_create_wechat_pay_refund_client", lambda: FakeClient())
+    monkeypatch.setattr(
+        admin_transactions.ExternalEffectService,
+        "plan_effect",
+        lambda self, **kwargs: planned.append(kwargs) or {"id": 43},
+    )
 
     result = admin_transactions.create_wechat_refund_request(
         "19",
@@ -142,6 +171,7 @@ def test_next_postgres_refund_does_not_call_wechat_pay_when_client_would_reject(
     assert result["ok"] is True
     assert result["refund"]["status"] == "queued"
     assert result["refund"]["provider_refund_executed"] is False
+    assert planned[0]["connection"] is connections[0]
     sql_text = "\n".join(sql for sql, _params in executed)
     assert "INSERT INTO wechat_pay_refunds" in sql_text
     assert "refund_request_queued" in sql_text
@@ -185,6 +215,15 @@ def _install_fetching_fake_psycopg(monkeypatch, refund_row: dict):
                 return dict(refund_row)
             if "RETURNING refund_status" in self.last_sql:
                 return {"refund_status": "full_refunded"}
+            if "SELECT * FROM wechat_pay_orders" in self.last_sql:
+                return {
+                    "id": refund_row["order_id"],
+                    "out_trade_no": refund_row["out_trade_no"],
+                    "product_code": "subscription_trial_month",
+                    "amount_total": refund_row["refund_amount_total"],
+                    "refunded_amount_total": refund_row["refund_amount_total"],
+                    "refund_status": "full_refunded",
+                }
             return None
 
     class FakeConnection:
@@ -240,16 +279,11 @@ def test_next_postgres_refund_result_updates_order_once(monkeypatch):
             "refund_amount_total": 6900,
         },
     )
-    service_refund_calls: list[dict] = []
-
-    class FakeApplyServicePeriodRefundCommand:
-        def __call__(self, **kwargs):
-            service_refund_calls.append(dict(kwargs))
-            return {"ok": True, "event_type": "refunded"}
-
+    outbox_calls: list[tuple[object, object]] = []
     monkeypatch.setattr(
-        "aicrm_next.service_period.application.ApplyServicePeriodRefundCommand",
-        lambda: FakeApplyServicePeriodRefundCommand(),
+        admin_transactions,
+        "enqueue_transactional_internal_event_outbox",
+        lambda conn, request: outbox_calls.append((conn, request)) or {"outbox_id": "ieo_refund_001"},
     )
 
     result = admin_transactions.apply_wechat_refund_result(
@@ -266,20 +300,15 @@ def test_next_postgres_refund_result_updates_order_once(monkeypatch):
 
     assert result["refund"]["status"] == "SUCCESS"
     assert result["order_refund_status"] == "full_refunded"
-    assert result["service_period_refund"]["event_type"] == "refunded"
+    assert result["service_period_refund"] == {
+        "queued": True,
+        "event_type": "refund.succeeded",
+        "outbox_id": "ieo_refund_001",
+        "real_external_call_executed": False,
+    }
     assert result["updated_order_amount"] is True
-    assert service_refund_calls == [
-        {
-            "out_trade_no": "WXP_REAL_REFUND",
-            "refund": {
-                "out_refund_no": "WXRTEST0001",
-                "refund_id": "503000000020260615",
-                "status": "SUCCESS",
-                "amount_total": 6900,
-                "order_refund_status": "full_refunded",
-            },
-        }
-    ]
+    assert outbox_calls[0][0] is connections[0]
+    assert outbox_calls[0][1].idempotency_key == "refund.succeeded:WXRTEST0001"
     sql_text = "\n".join(sql for sql, _params in executed)
     assert "UPDATE wechat_pay_refunds" in sql_text
     assert "UPDATE wechat_pay_orders" in sql_text
@@ -302,6 +331,13 @@ def test_next_postgres_refund_result_is_idempotent_when_already_success(monkeypa
         },
     )
 
+    outbox_calls: list[object] = []
+    monkeypatch.setattr(
+        admin_transactions,
+        "enqueue_transactional_internal_event_outbox",
+        lambda conn, request: outbox_calls.append(request) or {"outbox_id": "ieo_refund_001"},
+    )
+
     result = admin_transactions.apply_wechat_refund_result(
         {
             "out_refund_no": "WXRTEST0001",
@@ -312,6 +348,7 @@ def test_next_postgres_refund_result_is_idempotent_when_already_success(monkeypa
     )
 
     assert result["updated_order_amount"] is False
+    assert outbox_calls[0].idempotency_key == "refund.succeeded:WXRTEST0001"
     sql_text = "\n".join(sql for sql, _params in executed)
     assert "UPDATE wechat_pay_refunds" in sql_text
     assert "UPDATE wechat_pay_orders" not in sql_text

@@ -4,10 +4,8 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_jobs.routes import ensure_admin_action_token
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.internal_events import (
-    DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY,
     InMemoryInternalEventRepository,
     InternalEventConsumerRegistry,
     InternalEventConsumerResult,
@@ -15,6 +13,7 @@ from aicrm_next.platform_foundation.internal_events import (
 )
 from aicrm_next.platform_foundation.internal_events.models import InternalEvent, InternalEventConsumerRun
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
+from tests.admin_auth_test_helpers import install_admin_action_tokens
 
 
 EVENT_TYPE = "test.customer.activated"
@@ -53,6 +52,7 @@ def _emit(service: InternalEventService, *, idempotency_key: str = "event-same-k
 
 def test_internal_event_migration_contract_uses_current_head_and_required_tables() -> None:
     source = Path("migrations/versions/0043_internal_event_queue.py").read_text(encoding="utf-8")
+    r06_source = Path("migrations/versions/0099_internal_event_outbox_and_consumer_lease.py").read_text(encoding="utf-8")
 
     assert 'down_revision = "0042_legacy_webhook_deprecation_registry"' in source
     for table in [
@@ -65,6 +65,10 @@ def test_internal_event_migration_contract_uses_current_head_and_required_tables
     assert "UNIQUE (tenant_id, event_id, consumer_name)" in source
     assert "REFERENCES internal_event(event_id) ON DELETE CASCADE" in source
     assert "REFERENCES internal_event_consumer_run(id) ON DELETE CASCADE" in source
+    assert 'down_revision = "0098_admin_session_revocation"' in r06_source
+    assert "CREATE TABLE IF NOT EXISTS internal_event_outbox" in r06_source
+    assert "ADD COLUMN IF NOT EXISTS lease_token" in r06_source
+    assert "'manual_retry'" in r06_source
 
 
 def test_emit_event_is_idempotent_and_creates_multiple_consumer_runs_once() -> None:
@@ -182,22 +186,50 @@ def test_retry_consumer_run_only_allows_failed_retryable_terminal_and_blocked() 
     runs, _ = service.list_consumer_runs({"event_id": emitted["event"]["event_id"]})
     by_name = {run.consumer_name: run for run in runs}
 
-    assert service.retry_consumer_run(emitted["event"]["event_id"], "ok") is None
+    assert service.retry_consumer_run(
+        emitted["event"]["event_id"],
+        "ok",
+        actor_id="operator-1",
+        actor_type="test",
+        reason="not retryable",
+    ) is None
     InternalEventWorker(repo, registry).dispatch_one(by_name["ok"])
     InternalEventWorker(repo, registry).dispatch_one(by_name["retryable"])
     repo.mark_result(by_name["terminal"].id, status="failed_terminal", attempt_id="manual-terminal", error_code="bad_payload")
     repo.mark_result(by_name["blocked"].id, status="blocked", attempt_id="manual-blocked", error_code="missing_handler")
 
-    assert service.retry_consumer_run(emitted["event"]["event_id"], "ok") is None
+    assert service.retry_consumer_run(
+        emitted["event"]["event_id"],
+        "ok",
+        actor_id="operator-1",
+        actor_type="test",
+        reason="not retryable",
+    ) is None
     for name in ["retryable", "terminal", "blocked"]:
-        retried = service.retry_consumer_run(emitted["event"]["event_id"], name)
+        retried = service.retry_consumer_run(
+            emitted["event"]["event_id"],
+            name,
+            actor_id="operator-1",
+            actor_type="test",
+            reason=f"approved retry for {name}",
+        )
         assert retried is not None
-        assert retried.status == "pending"
+        run, audit = retried
+        assert run.status == "pending"
+        assert audit.status == "manual_retry"
 
 
 def test_diagnostics_and_admin_api_return_internal_event_metrics(next_client: TestClient, monkeypatch) -> None:
-    DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY.clear()
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "internal-event-token")
+    del monkeypatch
+    registry = next_client.app.state.internal_event_consumer_registry
+    registry.clear()
+    tokens = install_admin_action_tokens(
+        next_client,
+        ("POST", "/api/admin/internal-events/run-due/preview"),
+        ("POST", "/api/admin/internal-events/run-due"),
+        ("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/retry"),
+        ("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/skip"),
+    )
     calls: list[str] = []
 
     def handler(event: InternalEvent, run: InternalEventConsumerRun) -> InternalEventConsumerResult:
@@ -205,8 +237,8 @@ def test_diagnostics_and_admin_api_return_internal_event_metrics(next_client: Te
         return InternalEventConsumerResult(status="failed_retryable", error_code="retry_me")
 
     try:
-        DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY.register(EVENT_TYPE, "api_consumer", handler)
-        service = InternalEventService()
+        registry.register(EVENT_TYPE, "api_consumer", handler)
+        service = InternalEventService(consumer_registry=registry)
         emitted = _emit(service, idempotency_key="api-diagnostics")
 
         listed = next_client.get("/api/admin/internal-events", params={"event_type": EVENT_TYPE})
@@ -215,22 +247,28 @@ def test_diagnostics_and_admin_api_return_internal_event_metrics(next_client: Te
         unauthorized_preview = next_client.post("/api/admin/internal-events/run-due/preview", json={"batch_size": 10})
         preview = next_client.post(
             "/api/admin/internal-events/run-due/preview",
-            headers={"Authorization": "Bearer internal-event-token"},
+            headers={"X-Admin-Action-Token": tokens[("POST", "/api/admin/internal-events/run-due/preview")]},
             json={"batch_size": 10, "event_types": [EVENT_TYPE]},
         )
         run_due = next_client.post(
             "/api/admin/internal-events/run-due",
-            headers={"Authorization": "Bearer internal-event-token"},
+            headers={"X-Admin-Action-Token": tokens[("POST", "/api/admin/internal-events/run-due")]},
             json={"batch_size": 10, "dry_run": False, "event_types": [EVENT_TYPE]},
         )
         diagnostics_after = next_client.get("/api/admin/internal-events/diagnostics")
         retry = next_client.post(
             f"/api/admin/internal-events/{emitted['event']['event_id']}/consumers/api_consumer/retry",
-            json={"admin_action_token": ensure_admin_action_token()},
+            json={
+                "admin_action_token": tokens[("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/retry")],
+                "reason": "approved operator retry",
+            },
         )
         skip = next_client.post(
             f"/api/admin/internal-events/{emitted['event']['event_id']}/consumers/api_consumer/skip",
-            json={"admin_action_token": ensure_admin_action_token(), "reason": "operator decided no-op"},
+            json={
+                "admin_action_token": tokens[("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/skip")],
+                "reason": "operator decided no-op",
+            },
         )
 
         assert listed.status_code == 200
@@ -257,4 +295,4 @@ def test_diagnostics_and_admin_api_return_internal_event_metrics(next_client: Te
         assert skip.json()["consumer_run"]["status"] == "skipped"
         assert skip.json()["attempt"]["status"] == "skipped"
     finally:
-        DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY.clear()
+        registry.clear()

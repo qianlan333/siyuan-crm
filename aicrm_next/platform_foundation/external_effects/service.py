@@ -43,6 +43,7 @@ class ExternalEffectService:
         max_attempts: int = 5,
         idempotency_key: str = "",
         status: str = "queued",
+        connection: Any | None = None,
     ) -> dict[str, Any]:
         initial_status = str(status or "queued").strip() or "queued"
         if requires_approval and initial_status in {"queued", "approved"}:
@@ -82,6 +83,10 @@ class ExternalEffectService:
             idempotency_key=idempotency_key,
             status=initial_status,
         )
+        if connection is not None:
+            from .transactional import enqueue_transactional_external_effect_job
+
+            return enqueue_transactional_external_effect_job(connection, request).to_dict()
         return self._repo.create_job(request).to_dict()
 
     def get(self, job_id: int) -> ExternalEffectJob | None:
@@ -114,6 +119,9 @@ class ExternalEffectService:
     def list_attempts(self, job_id: int):
         return self._repo.list_attempts(job_id)
 
+    def list_attempts_for_jobs(self, job_ids: list[int]):
+        return self._repo.list_attempts_for_jobs(job_ids)
+
     def count_jobs(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         return self._repo.count_jobs(filters or {})
 
@@ -138,19 +146,52 @@ class ExternalEffectService:
 
     def approve(self, job_id: int) -> ExternalEffectJob | None:
         job = self._repo.get_job(job_id)
+        if job is None or job.status == "unknown_after_dispatch":
+            return None
         blocked = self._block_if_wecom_execution_disabled(job, action="approve")
         if blocked is not None:
             return blocked
         return self._repo.approve_job(job_id)
 
-    def retry(self, job_id: int) -> ExternalEffectJob | None:
+    def retry(
+        self,
+        job_id: int,
+        *,
+        actor: str = "",
+        reason: str = "",
+        confirm_duplicate_risk: bool = False,
+    ) -> ExternalEffectJob | None:
         job = self._repo.get_job(job_id)
-        if not job or job.status not in {"failed_retryable", "failed_terminal", "blocked"}:
+        if not job or job.status not in {"failed_retryable", "failed_terminal", "blocked", "unknown_after_dispatch"}:
             return None
+        if job.status == "unknown_after_dispatch":
+            if not str(actor or "").strip() or not str(reason or "").strip() or confirm_duplicate_risk is not True:
+                return None
         blocked = self._block_if_wecom_execution_disabled(job, action="retry")
         if blocked is not None:
             return blocked
-        return self._repo.enqueue_job(job_id)
+        if job.status == "unknown_after_dispatch":
+            self._repo.record_attempt(
+                job=job,
+                status="skipped",
+                adapter_mode="manual_retry_authorization",
+                request_summary={
+                    "action": "manual_retry_unknown_after_dispatch",
+                    "actor": str(actor).strip(),
+                    "reason": str(reason).strip(),
+                    "confirm_duplicate_risk": True,
+                    "prior_status": job.status,
+                },
+                response_summary={
+                    "authorized": True,
+                    "external_call_executed": False,
+                    "real_external_call_executed": False,
+                },
+            )
+        return self._repo.enqueue_job(
+            job_id,
+            allow_unknown_after_dispatch=job.status == "unknown_after_dispatch",
+        )
 
     def cancel(self, job_id: int) -> ExternalEffectJob | None:
         job = self._repo.get_job(job_id)
@@ -174,7 +215,7 @@ class ExternalEffectService:
         for job in jobs:
             attempt = self._repo.record_attempt(
                 job=job,
-                status="succeeded",
+                status="simulated",
                 adapter_mode="historical_record_only",
                 request_summary={
                     "effect_type": job.effect_type,
@@ -184,10 +225,16 @@ class ExternalEffectService:
                 },
                 response_summary={
                     "historical_record_completed": True,
+                    "simulated": True,
                     "real_external_call_executed": False,
+                    "provider_result_received": False,
                 },
             )
-            updated = self._repo.mark_succeeded(job.id, attempt_id=attempt.attempt_id)
+            updated = self._repo.mark_simulated(
+                job.id,
+                attempt_id=attempt.attempt_id,
+                result_summary=attempt.response_summary_json,
+            )
             completed.append(
                 {
                     "job": updated.to_dict() if updated else job.to_dict(),

@@ -52,7 +52,8 @@ def test_wecom_callback_ingress_runtime_only_exposes_callback_and_health_routes(
     assert "/admin/webhook-inbox" not in paths
     assert health.status_code == 200
     assert health.json()["runtime"] == "ai_crm_wecom_ingress"
-    assert health.json()["time_sensitive_inline_enabled"] is True
+    assert health.json()["durable_inbox_only"] is True
+    assert health.json()["ack_boundary"] == "signature_decrypt_and_durable_inbox_only"
     assert health.headers["X-AICRM-App"] == "ai_crm_wecom_ingress"
     assert admin.status_code == 404
 
@@ -106,6 +107,7 @@ def test_wecom_callback_ingress_nginx_template_routes_to_5002_with_short_timeout
     assert payload["callback_routes_proxy_to_5002"] is True
     assert payload["short_callback_timeouts_configured"] is True
     assert payload["callback_backpressure_configured"] is True
+    assert template.count("client_max_body_size 1m;") == 2
 
 
 def test_wecom_callback_ingress_cutover_check_rejects_emergency_quick_ack(tmp_path) -> None:

@@ -32,6 +32,7 @@ from tools.check_active_automation_run_due_guardrails import (
     _sentinel_comparison,
     production_config_modified,
 )
+from tools.auth_probe import install_probe_access_token
 
 SYSTEMD_CAMPAIGN_PAYLOAD = '{"operator":"aicrm-campaign-run-due","batch_size":200,"scheduled_safe_mode":true}'
 
@@ -40,15 +41,11 @@ SYSTEMD_CAMPAIGN_PAYLOAD = '{"operator":"aicrm-campaign-run-due","batch_size":20
 def scheduled_safe_mode_probe_env():
     keys = {
         "AICRM_NEXT_ENV": os.environ.get("AICRM_NEXT_ENV"),
-        "AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE": os.environ.get("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE"),
         "DATABASE_URL": os.environ.get("DATABASE_URL"),
-        "AUTOMATION_INTERNAL_API_TOKEN": os.environ.get("AUTOMATION_INTERNAL_API_TOKEN"),
         "SECRET_KEY": os.environ.get("SECRET_KEY"),
     }
     os.environ.setdefault("AICRM_NEXT_ENV", "production")
-    os.environ.setdefault("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
     os.environ.setdefault("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    os.environ.setdefault("AUTOMATION_INTERNAL_API_TOKEN", "probe-token")
     os.environ.setdefault("SECRET_KEY", "active-automation-scheduled-safe-mode")
     try:
         yield
@@ -130,7 +127,12 @@ def _docs_payloads_ready() -> tuple[bool, list[str]]:
 def run_check() -> dict[str, Any]:
     with scheduled_safe_mode_probe_env():
         client = _client()
-        token = os.getenv("AUTOMATION_INTERNAL_API_TOKEN", "probe-token")
+        token = install_probe_access_token(
+            client,
+            purpose="automation_worker",
+            audience="internal_worker",
+            scopes=("write",),
+        )
         headers = {"Authorization": f"Bearer {token}"}
         sentinel_before = _read_db_sentinel()
 

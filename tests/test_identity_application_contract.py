@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import pytest
+
 from aicrm_next.identity_contact.application import (
     GetSidebarContactBindingStatusQuery,
     ListExternalContactOwnerCandidatesQuery,
     ResolvePersonIdentityQuery,
+    UpsertIdentityMappingCommand,
 )
+from aicrm_next.shared.errors import ContractError
 from aicrm_next.identity_contact.dto import IdentityResolution, ResolvePersonIdentityRequest
 
 
@@ -86,3 +90,23 @@ def test_sidebar_contact_binding_status_query_is_next_owned():
     assert payload["fallback_used"] is False
     assert payload["source_status"] == "identity_contact"
     assert payload["is_bound"] is True
+
+
+def test_identity_mapping_command_rejects_corp_override_before_adapter_call(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    class Adapter:
+        def upsert_identity_mapping(self, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True}
+
+    monkeypatch.setenv("WECOM_CORP_ID", "corp-configured")
+
+    with pytest.raises(ContractError, match="corp_id_mismatch"):
+        UpsertIdentityMappingCommand(identity_adapter=Adapter())(
+            external_userid="external-r03-corp",
+            unionid="union-r03-corp",
+            corp_id="corp-request-override",
+        )
+
+    assert calls == []

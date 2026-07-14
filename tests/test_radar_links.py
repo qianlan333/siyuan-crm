@@ -84,7 +84,9 @@ def test_rejects_illegal_url_scheme(client, original_url):
     assert "http or https" in response.text
 
 
-@pytest.mark.parametrize("original_url", ["http://localhost/a", "http://127.0.0.1/a", "http://10.0.0.1/a", "http://172.16.1.2/a", "http://192.168.1.3/a", "http://[::1]/a"])
+@pytest.mark.parametrize(
+    "original_url", ["http://localhost/a", "http://127.0.0.1/a", "http://10.0.0.1/a", "http://172.16.1.2/a", "http://192.168.1.3/a", "http://[::1]/a"]
+)
 def test_rejects_localhost_and_private_ip_targets(client, original_url):
     response = client.post(
         "/api/admin/radar-links",
@@ -116,6 +118,27 @@ def test_public_radar_redirect_records_landing(client):
     assert [event["stage"] for event in events] == ["redirect", "landing"]
     assert events[1]["ip_hash"]
     assert "ip" not in events[1]
+
+
+def test_public_radar_ignores_forged_query_and_plain_identity_cookies(client):
+    link = _create_link(client, auth_required=True)
+    client.cookies.set("openid", "openid_forged_cookie")
+    client.cookies.set("unionid", "unionid_forged_cookie")
+    client.cookies.set("external_userid", "wm_forged_cookie")
+
+    response = client.get(
+        f"/r/{link['code']}?openid=openid_forged_query&unionid=unionid_forged_query&external_userid=wm_forged_query&OpenID=openid_forged_mixed_case",
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"].startswith("/api/h5/radar/oauth/start?state=")
+    events = client.get(f"/api/admin/radar-links/{link['id']}/events").json()["events"]
+    assert [event["stage"] for event in events] == ["oauth_start", "landing"]
+    assert all(event["openid_masked"] == "" for event in events)
+    assert all(event["unionid_masked"] == "" for event in events)
+    assert all(event["external_userid"] == "" for event in events)
+    assert all(not ({"openid", "unionid", "external_userid"} & {key.lower() for key in event["query_params_json"]}) for event in events)
 
 
 def test_fake_oauth_callback_with_unionid_records_authorized_click_and_redirects(client):
@@ -209,6 +232,45 @@ def test_real_radar_oauth_callback_exchanges_code_and_records_unionid(client, mo
     assert events[1]["unionid_masked"] == "unioni...real"
     assert "openid" not in events[1]
     assert "unionid" not in events[1]
+
+
+def test_real_radar_oauth_callback_ignores_direct_identity_parameters(client, monkeypatch):
+    monkeypatch.setenv("AICRM_NEXT_WECHAT_OAUTH_MODE", "production")
+    monkeypatch.setenv("AICRM_NEXT_ENABLE_REAL_WECHAT_OAUTH", "1")
+    monkeypatch.setenv("WECHAT_MP_APP_ID", "wx-radar-app")
+    monkeypatch.setenv("WECHAT_MP_APP_SECRET", "radar-secret")
+    monkeypatch.setenv("WECHAT_MP_OAUTH_SCOPE", "snsapi_base")
+
+    from aicrm_next.integration_gateway import questionnaire_adapters
+
+    class FakeOAuthClient:
+        def exchange_code(self, *, app_id: str, app_secret: str, code: str):
+            assert code == "trusted-code"
+            return {"openid": "openid_from_provider", "access_token": "provider-token"}
+
+    monkeypatch.setattr(questionnaire_adapters, "build_wechat_oauth_client", lambda: FakeOAuthClient())
+    link = _create_link(client, auth_required=True)
+    landing_response = client.get(f"/r/{link['code']}", follow_redirects=False)
+    state = _state_from_oauth_start_location(landing_response.headers["location"])
+
+    callback_response = client.get(
+        "/api/h5/radar/oauth/callback",
+        params={
+            "state": state,
+            "code": "trusted-code",
+            "openid": "openid_forged",
+            "unionid": "unionid_forged",
+            "external_userid": "wm_forged",
+        },
+        follow_redirects=False,
+    )
+
+    assert callback_response.status_code == 302
+    events = client.get(f"/api/admin/radar-links/{link['id']}/events?stage=authorized").json()["events"]
+    assert events[0]["openid_masked"] == "openid...ider"
+    assert events[0]["unionid_masked"] == ""
+    assert events[0]["external_userid"] == ""
+    assert "forged" not in str(events[0])
 
 
 def test_real_radar_oauth_requires_explicit_flag(client, monkeypatch):
@@ -310,21 +372,6 @@ def test_radar_link_new_options_and_admin_subpages_render(client):
     assert "user_agent" not in detail_response.text
     assert "openid" not in detail_response.text
 
-def test_radar_link_form_hides_internal_tracking_fields_and_type_sections(client):
-    link = _create_link(client, target_type="pdf", media_item_id="attachment_masked_001", original_url="")
-
-    response = client.get(f"/admin/radar-links/{link['id']}/edit")
-
-    assert response.status_code == 200
-    assert "来源渠道" not in response.text
-    assert "员工归属" not in response.text
-    assert "活动 ID" not in response.text
-    assert 'name="source_channel" type="hidden"' in response.text
-    assert 'name="staff_id" type="hidden"' in response.text
-    assert 'name="campaign_id" type="hidden"' in response.text
-    assert ".radar-field[hidden]" in response.text
-    assert 'data-link-config' in response.text
-    assert 'data-media-config hidden' in response.text
 
 def test_radar_link_form_hides_internal_tracking_fields_and_type_sections(client):
     link = _create_link(client, target_type="pdf", media_item_id="attachment_masked_001", original_url="")
@@ -339,8 +386,8 @@ def test_radar_link_form_hides_internal_tracking_fields_and_type_sections(client
     assert 'name="staff_id" type="hidden"' in response.text
     assert 'name="campaign_id" type="hidden"' in response.text
     assert ".radar-field[hidden]" in response.text
-    assert 'data-link-config' in response.text
-    assert 'data-media-config hidden' in response.text
+    assert "data-link-config" in response.text
+    assert "data-media-config hidden" in response.text
 
 
 def test_radar_link_share_returns_full_url_and_base64_svg_qr(client):
@@ -447,6 +494,40 @@ def test_create_image_radar_link_and_authorized_view_records_content_events(clie
     assert stats["authorized_users"] == 1
     assert stats["viewer_opens"] == 2
     assert stats["image_loaded"] == 1
+
+
+def test_signed_viewer_session_is_the_only_identity_source_for_content_events(client):
+    link = _create_link(
+        client,
+        target_type="image",
+        media_item_id="image_masked_001",
+        original_url="",
+        auth_required=True,
+    )
+    landing_response = client.get(f"/r/{link['code']}", follow_redirects=False)
+    state = _state_from_oauth_start_location(landing_response.headers["location"])
+    callback = client.get(
+        "/api/h5/radar/oauth/callback",
+        params={"state": state, "unionid": "unionid_signed_viewer"},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 302
+
+    viewer = client.get(callback.headers["location"])
+    assert viewer.status_code == 200
+    events = client.get(f"/api/admin/radar-links/{link['id']}/events?stage=viewer_open").json()["events"]
+    assert events[0]["unionid_masked"] == "unioni...ewer"
+
+    viewer_cookie = client.cookies.get("aicrm_radar_viewer")
+    # The callback cookie is scoped to the test-server domain. Adding an
+    # unscoped cookie with the same name leaves two candidates in httpx's jar,
+    # whose header order differs across Python versions. Send exactly one
+    # tampered credential so this remains an identity-boundary test.
+    client.cookies.clear()
+    client.cookies.set("aicrm_radar_viewer", f"{viewer_cookie}tampered")
+    rejected = client.get(f"/radar/view/{link['code']}")
+    assert rejected.status_code == 400
+    assert "viewer session" in rejected.text
 
 
 def test_pdf_radar_content_requires_viewer_session_and_streams_inline_pdf(client):
@@ -633,9 +714,7 @@ def test_radar_pdf_wechat_viewer_uses_page_image_without_external_cdn(client):
 
 
 def test_radar_image_manifest_and_octet_stream_upload(client):
-    png = base64.b64decode(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+b5f0AAAAASUVORK5CYII="
-    )
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+b5f0AAAAASUVORK5CYII=")
     upload = client.post(
         "/api/admin/radar-links/upload-image",
         files={"image": ("mobile.png", png, "application/octet-stream")},

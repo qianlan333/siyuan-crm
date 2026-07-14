@@ -36,20 +36,40 @@ Registered runtime data probes:
 - `payment_order_without_user_guard`
 - `customer_360_freshness_guard`
 
-The runtime probes are intentionally `not_applicable` in PR #19 until a production-safe read repository is attached. `schema_drift_guard` is also `not_applicable` when `DATABASE_URL` is absent; when a migrated database is available it compares `information_schema.columns` with the lifecycle manifest and fails on missing declared physical tables, unregistered live tables, retired physical tables, missing canonical owners, missing PII levels, or missing queue status enum metadata.
+All registered operational probes execute count-only, production-safe SQL when
+`DATABASE_URL` is configured. They report `not_applicable` only in offline
+environments without a database. `schema_drift_guard` compares
+`information_schema.columns` with the lifecycle manifest and fails on missing
+declared physical tables, unregistered live tables, retired physical tables,
+missing canonical owners, missing PII levels, or missing queue status enum
+metadata.
 
-`customer_360_freshness_guard` registers Phase 4 freshness probes for `latest_identity_update`, `latest_order`, `latest_questionnaire`, `latest_message`, and `latest_projection_refresh`. Until a read-only production repository is attached, it reports only probe metadata and table names; it must not expose raw identity values or payloads.
+Relations imported from the pre-convergence production database use the
+explicit `legacy` lifecycle. They are registered so they cannot appear as
+unmanaged drift, but unlike Next-owned physical lifecycles their absence is not
+an error. A later mutation or retirement must first assign a concrete owner and
+use a reviewed migration.
+
+`customer_360_freshness_guard` compares the latest identity, paid-order,
+questionnaire, and message source timestamps with the most recent managed
+customer read-model refresh. Evidence contains only aggregate lag minutes and
+never raw identity values or payloads.
+
+Questionnaire identity and continuation health uses the production auto-execute
+cutover (`2026-07-13 16:20:00 UTC`). Shadow-only rows before that instant stay in
+historical evidence; only submissions accepted after the worker became the runtime
+owner can fail the current continuation guard.
 
 ## Status Semantics
 
 - `ok`: check passed with current evidence.
 - `warn`: check found a non-blocking operational risk.
 - `fail`: check found a red condition that should block migration/release work.
-- `not_applicable`: check is registered but does not yet have the required production-safe data probe.
+- `not_applicable`: the runtime has no configured database, so a live probe cannot run.
 
-## Next Steps
-
-Follow-up PRs should attach read-only repositories for backlog, orphan-fact, and projection freshness checks, then add admin shell cards once the API can distinguish red/yellow/green with live data.
+The managed customer read model is rebuilt every 30 minutes by
+`openclaw-customer-read-model-refresh.timer`; its singleton refresh evidence is
+stored in `customer_read_model_refresh_state`.
 
 ## Data Quality Registry
 

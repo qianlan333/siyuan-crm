@@ -76,8 +76,8 @@ def test_next_sidebar_read_apis_return_input_errors_without_404(monkeypatch):
     status_response = client.get("/api/sidebar/contact-binding-status")
     jssdk_response = client.get("/api/sidebar/jssdk-config")
 
-    assert status_response.status_code == 400
-    assert status_response.json()["error"] == "external_userid is required"
+    assert status_response.status_code == 401
+    assert status_response.json()["detail"] == "sidebar context required"
     assert jssdk_response.status_code == 400
     assert jssdk_response.json()["error"] == "url is required"
 

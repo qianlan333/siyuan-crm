@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.encoders import jsonable_encoder
@@ -11,12 +10,7 @@ from fastapi.templating import Jinja2Templates
 from aicrm_next.admin_shell import shell_context
 
 from .application import GetQuestionnaireEditorQuery, GetQuestionnairePreflightQuery, ListQuestionnairesQuery
-from .external_push_logs import (
-    QuestionnaireExternalPushLogReadService,
-    QuestionnaireExternalPushRetryBatchCommand,
-    QuestionnaireExternalPushRetryCommand,
-    QuestionnaireExternalPushRetryService,
-)
+from .external_push_logs import QuestionnaireExternalPushLogReadService
 
 router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -104,22 +98,15 @@ def _questionnaire_editor_response(
     questionnaire = jsonable_encoder((payload or {}).get("questionnaire")) if payload else None
     if questionnaire is not None and isinstance(payload, dict):
         questionnaire["questions"] = jsonable_encoder(questionnaire.get("questions") or payload.get("questions") or [])
-    default_assessment = (
-        (questionnaire_id is None and str(request.query_params.get("mode") or "").strip() == "assessment")
-        or _is_assessment_template_asset(questionnaire)
+    default_assessment = (questionnaire_id is None and str(request.query_params.get("mode") or "").strip() == "assessment") or _is_assessment_template_asset(
+        questionnaire
     )
     new_heading = "创建测评问卷模板" if default_assessment else "新建问卷"
     edit_heading = "编辑测评问卷模板" if default_assessment else "编辑问卷"
     new_subtitle = (
-        "配置测评题目、维度分型和结果页规则，保存后可作为普通问卷的整组引用模板。"
-        if default_assessment
-        else "从空白模板开始搭建题目、标签和分数规则。"
+        "配置测评题目、维度分型和结果页规则，保存后可作为普通问卷的整组引用模板。" if default_assessment else "从空白模板开始搭建题目、标签和分数规则。"
     )
-    edit_subtitle = (
-        "维护这个测评模板的题目、维度分型和结果页规则。"
-        if default_assessment
-        else "维护当前问卷的题目、分数规则和发布设置。"
-    )
+    edit_subtitle = "维护这个测评模板的题目、维度分型和结果页规则。" if default_assessment else "维护当前问卷的题目、分数规则和发布设置。"
     return templates.TemplateResponse(
         request,
         "admin_questionnaires.html",
@@ -227,82 +214,13 @@ def _render_questionnaire_external_push_logs(request: Request) -> Response:
     return templates.TemplateResponse(request, "admin_console/questionnaire_external_push_logs.html", context)
 
 
-async def _handle_questionnaire_external_push_retry(request: Request) -> Response:
-    form = await request.form()
-    service = QuestionnaireExternalPushRetryService()
-    push_log_id = request.path_params.get("push_log_id")
-    if push_log_id:
-        result = service.retry_one(
-            QuestionnaireExternalPushRetryCommand(
-                push_log_id=int(push_log_id),
-                actor_id=str(request.headers.get("X-AICRM-Actor-Id") or "questionnaire_admin"),
-                actor_type=str(request.headers.get("X-AICRM-Actor-Type") or "user"),
-                source_route=str(request.url.path),
-                idempotency_key=str(request.headers.get("Idempotency-Key") or ""),
-            )
-        )
-    else:
-        result = service.retry_batch(
-            QuestionnaireExternalPushRetryBatchCommand(
-                push_log_ids=[int(item) for item in form.getlist("push_log_ids") if str(item).strip().isdigit()],
-                questionnaire_id=int(request.path_params["questionnaire_id"]) if request.path_params.get("questionnaire_id") else None,
-                actor_id=str(request.headers.get("X-AICRM-Actor-Id") or "questionnaire_admin"),
-                actor_type=str(request.headers.get("X-AICRM-Actor-Type") or "user"),
-                source_route=str(request.url.path),
-                idempotency_key=str(request.headers.get("Idempotency-Key") or ""),
-            )
-        )
-    if "application/json" in str(request.headers.get("accept") or "").lower():
-        return JSONResponse(result)
-    return RedirectResponse(_external_push_logs_redirect_url(request, form), status_code=303)
-
-
-def _external_push_logs_redirect_url(request: Request, form: object) -> str:
-    questionnaire_id = request.path_params.get("questionnaire_id")
-    base = (
-        f"/admin/questionnaires/{int(questionnaire_id)}/external-push-logs"
-        if questionnaire_id
-        else "/admin/questionnaires/external-push-logs"
-    )
-    query: dict[str, str] = {}
-    for key in ["questionnaire_id", "questionnaire_title", "status", "user_id", "target_url", "limit"]:
-        value = getattr(form, "get", lambda *_: "")(key)
-        if value not in (None, ""):
-            query[key] = str(value)
-    return base + (f"?{urlencode(query)}" if query else "")
-
-
-@router.api_route(
+@router.get(
     "/admin/questionnaires/external-push-logs",
-    methods=["GET"],
     name="api.admin_console_global_questionnaire_external_push_logs",
 )
-@router.api_route(
-    "/admin/questionnaires/external-push-logs/retry-batch",
-    methods=["POST"],
-    name="api.admin_console_global_questionnaire_external_push_logs_retry_batch",
-)
-@router.api_route(
-    "/admin/questionnaires/external-push-logs/{push_log_id:int}/retry",
-    methods=["POST"],
-    name="api.admin_console_global_questionnaire_external_push_logs_retry",
-)
-@router.api_route(
+@router.get(
     "/admin/questionnaires/{questionnaire_id:int}/external-push-logs",
-    methods=["GET"],
     name="api.admin_console_questionnaire_external_push_logs",
 )
-@router.api_route(
-    "/admin/questionnaires/{questionnaire_id:int}/external-push-logs/retry-batch",
-    methods=["POST"],
-    name="api.admin_console_questionnaire_external_push_logs_retry_batch",
-)
-@router.api_route(
-    "/admin/questionnaires/{questionnaire_id:int}/external-push-logs/{push_log_id:int}/retry",
-    methods=["POST"],
-    name="api.admin_console_questionnaire_external_push_logs_retry",
-)
-async def admin_questionnaire_external_push_logs(request: Request) -> Response:
-    if request.method == "POST":
-        return await _handle_questionnaire_external_push_retry(request)
+def admin_questionnaire_external_push_logs(request: Request) -> Response:
     return _render_questionnaire_external_push_logs(request)

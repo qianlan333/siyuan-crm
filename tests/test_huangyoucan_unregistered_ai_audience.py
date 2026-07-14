@@ -38,7 +38,6 @@ def test_huangyoucan_seed_sql_literal_escapes_runtime_parameter_for_alembic() ->
 @pytest.mark.usefixtures("next_pg_schema")
 def test_huangyoucan_unregistered_package_refresh_filters_registered_identities(next_client, monkeypatch) -> None:
     database_url = os.environ["DATABASE_URL"]
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", database_url)
 
     session_factory = get_session_factory()

@@ -24,8 +24,14 @@ InternalEventConsumerAttemptStatus = Literal[
     "failed_terminal",
     "blocked",
     "skipped",
+    "manual_retry",
 ]
 InternalEventConsumerType = Literal["projection", "orchestration", "external_effect_planner", "diagnostic"]
+
+AUTOMATIC_PENDING_STATUSES = frozenset({"pending", "failed_retryable"})
+AUTOMATIC_RECOVERABLE_STATUSES = frozenset({"pending", "failed_retryable", "running"})
+MANUAL_ONLY_STATUSES = frozenset({"failed_terminal", "blocked"})
+FINISHED_STATUSES = frozenset({"succeeded", "failed_terminal", "blocked", "skipped"})
 
 
 def utcnow() -> datetime:
@@ -65,6 +71,13 @@ class InternalEventCreateRequest:
     correlation_id: str = ""
     occurred_at: datetime | None = None
     tenant_id: str = DEFAULT_TENANT_ID
+
+
+@dataclass(frozen=True)
+class InternalEventConsumerSpec:
+    consumer_name: str
+    consumer_type: str = "projection"
+    max_attempts: int = 5
 
 
 @dataclass(frozen=True)
@@ -109,6 +122,7 @@ class InternalEventConsumerRun:
     next_retry_at: str = ""
     locked_at: str = ""
     locked_by: str = ""
+    lease_token: str = ""
     last_attempt_id: str = ""
     last_error_code: str = ""
     last_error_message: str = ""
@@ -119,6 +133,76 @@ class InternalEventConsumerRun:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class InternalEventOutboxRecord:
+    id: int = 0
+    tenant_id: str = DEFAULT_TENANT_ID
+    outbox_id: str = field(default_factory=lambda: "ieo_" + uuid4().hex)
+    event_type: str = ""
+    event_version: int = 1
+    aggregate_type: str = ""
+    aggregate_id: str = ""
+    subject_type: str = ""
+    subject_id: str = ""
+    idempotency_key: str = ""
+    actor_id: str = ""
+    actor_type: str = "system"
+    source_module: str = ""
+    source_route: str = ""
+    source_command_id: str = ""
+    trace_id: str = ""
+    request_id: str = ""
+    correlation_id: str = ""
+    occurred_at: str = ""
+    payload_json: dict[str, Any] = field(default_factory=dict)
+    payload_summary_json: dict[str, Any] = field(default_factory=dict)
+    status: str = "pending"
+    attempt_count: int = 0
+    max_attempts: int = 10
+    next_retry_at: str = ""
+    lease_token: str = ""
+    locked_at: str = ""
+    locked_by: str = ""
+    internal_event_id: str = ""
+    last_error_code: str = ""
+    last_error_message: str = ""
+    created_at: str = ""
+    updated_at: str = ""
+    relayed_at: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+    def to_create_request(self) -> InternalEventCreateRequest:
+        return InternalEventCreateRequest(
+            event_type=self.event_type,
+            aggregate_type=self.aggregate_type,
+            aggregate_id=self.aggregate_id,
+            payload=dict(self.payload_json or {}),
+            payload_summary=dict(self.payload_summary_json or {}),
+            context=CommandContext(
+                actor_id=self.actor_id,
+                actor_type=self.actor_type,
+                trace_id=self.trace_id,
+                request_id=self.request_id,
+                source_route=self.source_route,
+            ),
+            event_version=self.event_version,
+            subject_type=self.subject_type,
+            subject_id=self.subject_id,
+            idempotency_key=self.idempotency_key,
+            source_module=self.source_module,
+            source_command_id=self.source_command_id,
+            correlation_id=self.correlation_id,
+            occurred_at=(
+                datetime.fromisoformat(self.occurred_at.replace("Z", "+00:00"))
+                if self.occurred_at
+                else None
+            ),
+            tenant_id=self.tenant_id,
+        )
 
 
 @dataclass(frozen=True)

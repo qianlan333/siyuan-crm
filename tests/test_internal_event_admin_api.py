@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_jobs.routes import ensure_admin_action_token
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.internal_events import (
     InternalEventConsumerRegistry,
@@ -11,6 +10,7 @@ from aicrm_next.platform_foundation.internal_events import (
     reset_internal_event_fixture_state,
 )
 from aicrm_next.platform_foundation.internal_events.repository import build_internal_event_repository
+from tests.admin_auth_test_helpers import install_admin_action_tokens
 
 
 def _context(trace_id: str = "WXP_EVENT_CENTER") -> CommandContext:
@@ -139,19 +139,27 @@ def test_internal_event_admin_api_lists_filters_and_redacts_payload(next_client:
 
 def test_internal_event_admin_detail_attempts_retry_skip_and_diagnostics(next_client: TestClient, monkeypatch) -> None:
     event_id = _seed_payment_event()
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "event-center-token")
+    del monkeypatch
+    tokens = install_admin_action_tokens(
+        next_client,
+        ("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/retry"),
+        ("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/skip"),
+    )
 
     detail = next_client.get(f"/api/admin/internal-events/{event_id}")
     diagnostics = next_client.get("/api/admin/internal-events/diagnostics")
     unauthorized = next_client.post(f"/api/admin/internal-events/{event_id}/consumers/webhook_order_paid_consumer/retry", json={})
     retried = next_client.post(
         f"/api/admin/internal-events/{event_id}/consumers/webhook_order_paid_consumer/retry",
-        headers={"Authorization": "Bearer event-center-token"},
-        json={},
+        headers={"X-Admin-Action-Token": tokens[("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/retry")]},
+        json={"reason": "approved retry after timeout review"},
     )
     skipped = next_client.post(
         f"/api/admin/internal-events/{event_id}/consumers/ai_assist_notify_consumer/skip",
-        json={"admin_action_token": ensure_admin_action_token(), "reason": "manual_noop"},
+        json={
+            "admin_action_token": tokens[("POST", "/api/admin/internal-events/{event_id}/consumers/{consumer_name}/skip")],
+            "reason": "manual_noop",
+        },
     )
 
     body = detail.json()

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
-import json
 from typing import Any
 
 from aicrm_next.platform_foundation.command_bus.models import CommandContext
@@ -186,7 +184,6 @@ class AudienceOutboundService:
         headers = subscription.get("headers_json") if isinstance(subscription.get("headers_json"), dict) else {}
         return {
             "webhook_url": subscription.get("webhook_url"),
-            "signing_secret": subscription.get("signing_secret"),
             "headers": headers,
             "body": body,
         }
@@ -201,27 +198,18 @@ class AudienceOutboundService:
         idempotency_key: str,
     ) -> dict[str, Any]:
         body = list(external_userids)
-        secret = _text(subscription.get("signing_secret"))
         headers = {
             "X-AICRM-Package-Key": _text(package.get("package_key")),
             "X-AICRM-Event-Type": "audience.incremental.entered",
             "X-AICRM-Refresh-Run-Id": str(int(run_id)),
             "X-AICRM-Idempotency-Key": idempotency_key,
         }
-        if secret:
-            headers["X-AICRM-Signature"] = _signature(secret, body)
         return {
             "webhook_url": subscription.get("webhook_url"),
-            "signing_secret": secret,
             "headers": headers,
             "body": body,
             **_test_scope(package),
         }
-
-
-def _signature(secret: str, body: list[str]) -> str:
-    canonical_body = json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hmac.new(secret.encode("utf-8"), canonical_body.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def _test_scope(package: dict[str, Any]) -> dict[str, Any]:

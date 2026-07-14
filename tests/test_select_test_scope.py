@@ -45,6 +45,87 @@ def test_media_library_change_runs_small_no_pg_slice() -> None:
     assert result["needs_full_ci"] is False
 
 
+def test_every_runtime_python_change_runs_import_graph_architecture_gate() -> None:
+    result = _select("aicrm_next/media_library/variants.py")
+
+    assert result["matched_scopes"] == ["media_library"]
+    assert result["architecture_gate"] == "fast"
+    assert result["needs_full_ci"] is False
+
+
+def test_import_graph_governance_changes_force_mapped_full_ci() -> None:
+    result = _select(
+        "tools/check_import_graph.py",
+        "docs/architecture/import_graph_baseline.yml",
+        "tests/test_import_graph_guard.py",
+        "tests/test_zero_runtime_import_scc.py",
+    )
+
+    assert "import_graph_governance" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_import_graph_guard.py" in result["python_tests"]
+    assert "tests/test_zero_runtime_import_scc.py" in result["python_tests"]
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_zero_scc_runtime_composition_files_force_full_postgres_ci() -> None:
+    result = _select(
+        "aicrm_next/channel_entry_composition.py",
+        "aicrm_next/mcp_composition.py",
+        "aicrm_next/read_model_composition.py",
+        "aicrm_next/shared/admin_action_runtime.py",
+        "aicrm_next/shared/outbound_https/security.py",
+        "aicrm_next/shared/outbound_https/transport.py",
+        "aicrm_next/shared/product_code_aliases.py",
+        "aicrm_next/shared/wecom_runtime.py",
+        "scripts/run_wechat_pay_order_reconciliation_worker.py",
+        "tests/test_internal_events_ops_shadow.py",
+    )
+
+    assert "zero_scc_runtime_composition" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_zero_runtime_import_scc.py" in result["python_tests"]
+    assert "tests/test_internal_event_registry_composition.py" in result["python_tests"]
+    assert "tests/test_order_reconciliation_worker.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_admin_read_model_runtime_files_have_a_permanent_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/admin_read_model/application.py",
+        "aicrm_next/frontend_compat/admin_real_data.py",
+    )
+
+    assert "admin_read_model" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_admin_read_model_boundary.py" in result["python_tests"]
+    assert "tests/test_admin_pages_real_data_binding.py" in result["python_tests"]
+    assert result["architecture_gate"] == "fast"
+    assert result["needs_full_ci"] is False
+
+
+def test_live_runtime_readiness_replacement_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "tools/check_live_runtime_readiness.py",
+        "tools/check_next_production_runtime_gaps.py",
+        "tools/check_next_production_cutover_readiness.py",
+        "aicrm_next/admin_read_model/projections.py",
+        "tests/test_live_runtime_readiness.py",
+        "tests/test_retired_runtime_gap_timer_report.py",
+        "tests/test_retired_timer_readiness_cleanup.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "live_runtime_readiness" in result["matched_scopes"]
+    assert "tests/test_runtime_readiness.py" in result["python_tests"]
+    assert "tests/test_admin_read_model_boundary.py" in result["python_tests"]
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
 def test_h5_wechat_pay_mobile_projection_test_selects_commerce_scope() -> None:
     result = _select("tests/test_h5_wechat_pay_mobile_projection.py")
 
@@ -100,6 +181,22 @@ def test_service_period_change_selects_service_period_slice() -> None:
     assert result["needs_full_ci"] is False
 
 
+def test_huangyoucan_usage_projection_has_permanent_full_pg_scope() -> None:
+    result = _select(
+        "scripts/run_huangyoucan_usage_sync.py",
+        "tests/test_huangyoucan_usage_sync.py",
+    )
+
+    assert result["matched_scopes"][:1] == ["huangyoucan_usage_projection"]
+    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_huangyoucan_usage_sync.py" in result["python_tests"]
+    assert "tests/test_sidebar_v2_api.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
 def test_questionnaire_mobile_change_selects_questionnaire_and_commerce_slices() -> None:
     result = _select(
         "aicrm_next/questionnaire/domain.py",
@@ -124,13 +221,15 @@ def test_questionnaire_mobile_change_selects_questionnaire_and_commerce_slices()
     assert result["needs_full_ci"] is True
 
 
-def test_identity_contact_change_selects_pg_and_db_architecture_gate() -> None:
+def test_identity_contact_change_selects_access_pg_and_full_architecture_gate() -> None:
     result = _select("aicrm_next/identity_contact/application.py")
 
     assert "identity_contact" in result["matched_scopes"]
+    assert "sidebar_questionnaire_access" in result["matched_scopes"]
     assert "tests/test_identity_application_contract.py" in result["python_tests"]
     assert result["needs_postgres"] is True
-    assert result["architecture_gate"] == "db"
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
 
 
 def test_wecom_callback_ops_change_selects_identity_contact_slice() -> None:
@@ -154,23 +253,395 @@ def test_wecom_callback_ops_change_selects_identity_contact_slice() -> None:
     assert result["architecture_gate"] == "db"
 
 
+def test_identity_worker_deadlock_recovery_has_permanent_deploy_and_identity_scope() -> None:
+    result = _select("scripts/ops/recover_identity_resolution_worker_deadlock.py")
+
+    assert {"ci_deploy", "identity_contact"} <= set(result["matched_scopes"])
+    assert result["unmatched_files"] == []
+    assert "tests/test_identity_resolution_backfill_worker.py" in result["python_tests"]
+    assert "tests/test_deploy_workflow_contract.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_r05_callback_runtime_files_are_mapped_to_full_pg_ci() -> None:
+    result = _select(
+        "scripts/ops/reconcile_wecom_callback_runtime.py",
+        "scripts/run_wecom_callback_inbox_worker.py",
+        "tests/test_push_capabilities_config.py",
+        "tests/test_r05_wecom_callback_architecture.py",
+    )
+
+    assert {"identity_contact", "admin_config"} <= set(result["matched_scopes"])
+    assert result["unmatched_files"] == []
+    assert "tests/test_wecom_callback_inbox.py" in result["python_tests"]
+    assert "tests/test_push_capabilities_config.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_r06_internal_event_outbox_files_force_full_postgres_ci() -> None:
+    result = _select(
+        "aicrm_next/platform_foundation/internal_events/outbox.py",
+        "aicrm_next/platform_foundation/internal_events/reconciliation/outbox.py",
+        "aicrm_next/public_product/h5_wechat_pay.py",
+        "migrations/versions/0099_internal_event_outbox_and_consumer_lease.py",
+        "scripts/ops/reconcile_internal_event_outbox.py",
+        "tests/test_internal_event_outbox.py",
+        "tests/test_internal_event_worker_exit.py",
+    )
+
+    assert "internal_event_outbox_reliability" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_internal_event_outbox.py" in result["python_tests"]
+    assert "tests/test_internal_event_worker_exit.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_r07_external_effect_delivery_files_force_full_postgres_ci() -> None:
+    result = _select(
+        "aicrm_next/platform_foundation/external_effects/worker.py",
+        "aicrm_next/platform_foundation/external_effects/reconciliation.py",
+        "aicrm_next/background_jobs/broadcast_queue_worker.py",
+        "aicrm_next/external_push/service.py",
+        "aicrm_next/delivery_lineage/application.py",
+        "aicrm_next/integration_gateway/wecom_private_adapter.py",
+        "migrations/versions/0100_external_effect_delivery_lease.py",
+        "scripts/run_external_effect_queue_worker.py",
+        "scripts/ops/reconcile_external_effect_dispatch.py",
+        "deploy/openclaw-external-effect-worker.timer",
+        "docs/architecture/external_effect_delivery_state_machine.md",
+        "docs/runbooks/external_effect_delivery_reconciliation.md",
+        "tests/test_external_effect_delivery_lease.py",
+        "tests/test_external_effect_reconciliation.py",
+        "tests/test_broadcast_jobs_wecom_private_dispatch.py",
+    )
+
+    assert "external_effect_delivery_reliability" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_external_effect_delivery_lease.py" in result["python_tests"]
+    assert "tests/test_external_effect_reconciliation.py" in result["python_tests"]
+    assert "tests/test_broadcast_jobs_wecom_private_dispatch.py" in result["python_tests"]
+    assert "tests/test_external_push_next_native_service.py" in result["python_tests"]
+    assert "tests/test_delivery_lineage_api.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_external_effect_continuation_composition_has_a_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/external_effect_composition.py",
+        "aicrm_next/automation_agents/external_effect_continuation.py",
+        "aicrm_next/automation_agents/internal_webhook_adapter.py",
+        "aicrm_next/questionnaire/external_effect_continuation.py",
+        "aicrm_next/platform_foundation/external_effects/continuations.py",
+        "tests/test_automation_agent_internal_webhook_adapter.py",
+        "tests/test_external_effect_continuation_composition.py",
+    )
+
+    assert "external_effect_continuation_composition" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_external_effect_continuation_composition.py" in result["python_tests"]
+    assert "tests/test_external_effects_mvp.py" in result["python_tests"]
+    assert "tests/test_questionnaire_h5_final_tags_real_wecom.py" in result["python_tests"]
+    assert "tests/test_automation_agents_webhook_execution.py" in result["python_tests"]
+    assert "tests/test_automation_agent_internal_webhook_adapter.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_prod_remediation_security_and_heading_files_have_permanent_scopes() -> None:
+    result = _select(
+        "aicrm_next/automation_agents/templates/admin_console/automation_agent_list.html",
+        "aicrm_next/customer_tags/templates/admin_console/config_wecom_tags.html",
+        "aicrm_next/frontend_compat/templates/admin_console/hxc_send_config.html",
+        "aicrm_next/frontend_compat/templates/admin_console/setup_wizard.html",
+        "aicrm_next/message_archive/archive_sdk.py",
+        "aicrm_next/message_archive/sdk_subprocess.py",
+        "scripts/ops/ensure_runtime_environment.py",
+        "tests/test_admin_heading_deduplication.py",
+        "tests/test_archive_sdk_isolation.py",
+        "tests/test_runtime_browser_security.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert {"admin_config", "admin_read_pages", "security_hardening"} <= set(result["matched_scopes"])
+    assert "tests/test_admin_heading_deduplication.py" in result["python_tests"]
+    assert "tests/test_archive_sdk_isolation.py" in result["python_tests"]
+    assert "tests/test_runtime_browser_security.py" in result["python_tests"]
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_ai_audience_e2e_composition_has_a_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/ai_audience_e2e_composition.py",
+        "aicrm_next/ops_enrollment/ai_audience_e2e_gateway.py",
+        "tests/test_ai_audience_e2e_composition.py",
+    )
+
+    assert "ai_audience_e2e_composition" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_ai_audience_e2e_composition.py" in result["python_tests"]
+    assert "tests/test_ai_audience_real_e2e_runner.py" in result["python_tests"]
+    assert "tests/test_ai_audience_external_api.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_runtime_module_size_governance_has_a_permanent_full_ci_scope() -> None:
+    result = _select(
+        "tools/check_runtime_module_sizes.py",
+        "docs/architecture/runtime_module_size_baseline.yml",
+        "tests/test_runtime_module_size_guard.py",
+        "tests/test_runtime_module_split_contract.py",
+    )
+
+    assert "runtime_module_size_governance" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_runtime_module_size_guard.py" in result["python_tests"]
+    assert "tests/test_runtime_module_split_contract.py" in result["python_tests"]
+    assert "tests/test_internal_events_mvp.py" in result["python_tests"]
+    assert "tests/test_questionnaire_application_contract.py" in result["python_tests"]
+    assert "tests/test_admin_config_next.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_admin_jobs_archive_gateway_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/admin_jobs_archive_sync_gateway.py",
+        "tests/test_admin_jobs_archive_sync_gateway.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "admin_jobs_archive_sync_gateway" in result["matched_scopes"]
+    assert "tests/test_archive_sync_next.py" in result["python_tests"]
+    assert "tests/test_import_graph_guard.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_wecom_payload_contract_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/shared/wecom_payload_contract.py",
+        "tests/test_wecom_payload_contract.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "wecom_payload_contract" in result["matched_scopes"]
+    assert "tests/test_group_ops_domain.py" in result["python_tests"]
+    assert "tests/test_import_graph_guard.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_send_content_media_gateway_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/send_content_media_repository_gateway.py",
+        "tests/test_send_content_media_gateway.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "send_content_media_gateway" in result["matched_scopes"]
+    assert "tests/test_next_material_picker_api.py" in result["python_tests"]
+    assert "tests/test_import_graph_guard.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_customer_read_model_refresh_has_permanent_full_postgres_scope() -> None:
+    result = _select(
+        "aicrm_next/customer_read_model/refresh.py",
+        "scripts/run_customer_read_model_refresh.py",
+        "deploy/openclaw-customer-read-model-refresh.service",
+        "deploy/openclaw-customer-read-model-refresh.timer",
+        "migrations/versions/0108_customer_read_model_refresh_and_retired_workspace_drop.py",
+        "tests/test_customer_live_source_repository.py",
+        "tests/test_customer_read_model_refresh.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "customer_read_model_refresh" in result["matched_scopes"]
+    assert "tests/test_customer_live_source_repository.py" in result["python_tests"]
+    assert "tests/test_customer_read_model_refresh.py" in result["python_tests"]
+    assert "tests/test_database_bootstrap.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_questionnaire_auto_execute_cutover_has_permanent_full_postgres_scope() -> None:
+    result = _select(
+        "aicrm_next/shared/release_cutovers.py",
+        "migrations/versions/0109_questionnaire_continuation_auto_execute.py",
+        "deploy/openclaw-internal-event-worker.service",
+        "tests/test_questionnaire_auto_execute_cutover.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "questionnaire_radar_reliability" in result["matched_scopes"]
+    assert "tests/test_questionnaire_auto_execute_cutover.py" in result["python_tests"]
+    assert "tests/test_questionnaire_radar_reconciliation.py" in result["python_tests"]
+    assert "tests/test_database_bootstrap.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_internal_event_registry_composition_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/internal_event_composition.py",
+        "aicrm_next/platform_foundation/internal_events/consumer_registry.py",
+        "scripts/ci/runtime_contract_inventory.py",
+        "tests/test_internal_event_registry_composition.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "internal_event_registry_composition" in result["matched_scopes"]
+    assert "tests/test_internal_events_mvp.py" in result["python_tests"]
+    assert "tests/test_internal_event_worker_exit.py" in result["python_tests"]
+    assert "tests/test_runtime_contract_inventory.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_questionnaire_editor_asset_split_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/questionnaire/templates/admin_questionnaires.html",
+        "aicrm_next/questionnaire/static/admin_questionnaire_editor.css",
+        "aicrm_next/questionnaire/static/admin_questionnaire_editor.js",
+        "tests/test_questionnaire_editor_asset_split.py",
+        "tests/test_architecture_size_budgets.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "questionnaire_editor_asset_split" in result["matched_scopes"]
+    assert "tests/test_questionnaire_admin_pages_next_native.py" in result["python_tests"]
+    assert "tests/test_admin_pages_real_data_binding.py" in result["python_tests"]
+    assert "tests/test_architecture_size_budgets.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_runtime_readiness_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/platform_foundation/readiness.py",
+        "tests/test_runtime_readiness.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "runtime_readiness" in result["matched_scopes"]
+    assert "tests/test_deploy_workflow_contract.py" in result["python_tests"]
+    assert "tests/test_p1_runtime_security.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_cloud_repository_split_modules_keep_permanent_postgres_coverage() -> None:
+    result = _select(
+        "aicrm_next/cloud_orchestrator/repository_legacy.py",
+        "aicrm_next/cloud_orchestrator/repository_memory.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "cloud_plan_repository_split" in result["matched_scopes"]
+    assert "tests/test_ops_plan_broadcast_planner_consumer.py" in result["python_tests"]
+    assert result["needs_full_ci"] is True
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_r08_commerce_fulfillment_files_force_full_postgres_ci() -> None:
+    result = _select(
+        "aicrm_next/commerce/fulfillment_reconciliation.py",
+        "aicrm_next/platform_foundation/external_effects/transactional.py",
+        "aicrm_next/platform_foundation/internal_events/refund.py",
+        "aicrm_next/service_period/refund_consumer.py",
+        "migrations/versions/0101_commerce_fulfillment_invariants.py",
+        "scripts/run_external_push_worker.py",
+        "scripts/ops/reconcile_commerce_fulfillment.py",
+        "deploy/production_runtime_units.json",
+        "tests/test_r08_commerce_fulfillment_postgres.py",
+    )
+
+    assert "commerce_fulfillment_reliability" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_r08_commerce_fulfillment_postgres.py" in result["python_tests"]
+    assert "tests/test_commerce_fulfillment_reconciliation.py" in result["python_tests"]
+    assert "tests/test_internal_events_refund_slice.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_unionid_identity_cutover_changes_force_pg_full_ci_without_unmapped_files() -> None:
+    result = _select(
+        "aicrm_next/automation_agents/repository.py",
+        "aicrm_next/customer_tags/local_projection.py",
+        "aicrm_next/message_archive/application.py",
+        "scripts/ops/check_unionid_identity_cutover.py",
+        "scripts/run_identity_mobile_bridge_backfill.py",
+        "tests/test_external_questionnaire_submissions_api.py",
+        "tests/test_internal_events_shadow_emit.py",
+        "tests/test_next_hxc_broadcast_repo.py",
+        "tests/test_unionid_identity_contract_gate.py",
+        "tests/test_wecom_tag_live_mutation_callers_contract.py",
+    )
+
+    assert result["matched_scopes"][:1] == ["unionid_identity_cutover"]
+    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_identity_resolver_postgres.py" in result["python_tests"]
+    assert "tests/test_service_period_payment_consumer.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
 def test_sidebar_write_change_selects_write_command_regression() -> None:
     result = _select("aicrm_next/sidebar_write/repo.py")
 
     assert "customer_read_model_sidebar" in result["matched_scopes"]
+    assert "sidebar_questionnaire_access" in result["matched_scopes"]
     assert "tests/test_sidebar_write_commands.py" in result["python_tests"]
     assert result["needs_postgres"] is True
-    assert result["architecture_gate"] == "db"
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_db_session_runtime_audit_keeps_customer_repository_scope() -> None:
+    result = _select("tests/test_db_session_runtime_audit.py")
+
+    assert result["unmatched_files"] == []
+    assert "customer_read_model_sidebar" in result["matched_scopes"]
+    assert "tests/test_db_session_runtime_audit.py" in result["python_tests"]
 
 
 def test_signed_session_change_selects_sidebar_shared_runtime_slice() -> None:
     result = _select("aicrm_next/shared/signed_session.py")
 
+    assert "sidebar_questionnaire_access" in result["matched_scopes"]
     assert "shared_sidebar_runtime" in result["matched_scopes"]
     assert "tests/test_sidebar_jssdk_adapter.py" in result["python_tests"]
     assert "tests/test_shared_flask_config_retirement.py" in result["python_tests"]
-    assert result["needs_postgres"] is False
-    assert result["architecture_gate"] == "fast"
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
 
 
 def test_ai_assist_external_campaign_change_selects_focused_python_slice() -> None:
@@ -357,13 +828,48 @@ def test_runtime_units_change_selects_deploy_contract_tests() -> None:
     )
 
     assert "ci_deploy" in result["matched_scopes"]
+    assert "commerce_fulfillment_reliability" in result["matched_scopes"]
     assert "tests/test_architecture_size_budgets.py" in result["python_tests"]
     assert "tests/test_deploy_workflow_contract.py" in result["python_tests"]
+    assert "tests/test_identity_cutover_reconciliation_contract.py" in result["python_tests"]
     assert "tests/test_runtime_secret_readiness.py" in result["python_tests"]
     assert "tests/test_runtime_units_autostart.py" in result["python_tests"]
     assert "tests/test_retired_runtime_gap_timer_report.py" in result["python_tests"]
     assert result["unmatched_files"] == []
-    assert result["needs_postgres"] is False
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_database_baseline_and_ownership_change_selects_required_postgres_slice() -> None:
+    result = _select(
+        "migrations/baselines/0001_post_legacy.sql",
+        "scripts/ops/bootstrap_database.py",
+        "tools/check_repository_ownership.py",
+        "docs/architecture/data_table_lifecycle_manifest.yml",
+        "docs/architecture/repository_ownership.yml",
+        "tests/test_database_bootstrap.py",
+        "tests/test_repository_ownership_guard.py",
+    )
+
+    assert "migration_db" in result["matched_scopes"]
+    assert "tests/test_database_bootstrap.py" in result["python_tests"]
+    assert "tests/test_data_table_lifecycle_guard.py" in result["python_tests"]
+    assert "tests/test_repository_ownership_guard.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["unmatched_files"] == []
+    assert result["needs_full_ci"] is True
+
+
+def test_deploy_smoke_session_change_selects_admin_and_deploy_contracts() -> None:
+    result = _select("scripts/ops/create_deploy_smoke_session.py")
+
+    assert result["matched_scopes"][:2] == ["admin_read_pages", "ci_deploy"]
+    assert "next_native_full_sync" in result["matched_scopes"]
+    assert "tests/test_admin_read_pages_smoke.py" in result["python_tests"]
+    assert "tests/test_deploy_workflow_contract.py" in result["python_tests"]
+    assert result["unmatched_files"] == []
     assert result["architecture_gate"] == "full"
     assert result["needs_full_ci"] is True
 
@@ -438,6 +944,113 @@ def test_group_ops_change_selects_broadcast_contracts_and_full_regression() -> N
     assert result["needs_postgres"] is True
     assert result["architecture_gate"] == "full"
     assert result["needs_full_ci"] is True
+
+
+def test_retired_group_ops_workspace_paths_remain_mapped_to_broadcast_scope() -> None:
+    changed_paths = (
+        "aicrm_next/admin_shell/routes.py",
+        "aicrm_next/admin_shell/templates/admin_shell/p1_group_ops_workspace.html",
+        "aicrm_next/frontend_compat/static/admin_console/p1/p1_group_ops_workspace/workspace_api.js",
+        "tests/test_p1_group_ops_workspace_final_closeout.py",
+    )
+
+    for changed_path in changed_paths:
+        result = _select(changed_path)
+        assert result["unmatched_files"] == []
+        assert "broadcast_group_ops" in result["matched_scopes"]
+
+
+def test_private_auth_cutover_maps_every_runtime_caller_and_regression_file() -> None:
+    changed_paths = (
+        "aicrm_next/automation_agents/admin_pages.py",
+        "aicrm_next/automation_agents/api.py",
+        "aicrm_next/automation_agents/templates/admin_console/automation_agent_edit.html",
+        "aicrm_next/automation_agents/worker.py",
+        "aicrm_next/cloud_orchestrator/run_due.py",
+        "aicrm_next/platform_foundation/auth_platform/service.py",
+        "scripts/ai_audience_apply_package_spec.py",
+        "scripts/diagnose_business_closure_acceptance.py",
+        "scripts/diagnose_ops_plan_broadcast_blocker.py",
+        "scripts/ops/bootstrap_auth_clients.py",
+        "scripts/ops/check_auth_readiness.py",
+        "scripts/ops/manage_auth_clients.py",
+        "scripts/run_message_activity_sync.py",
+        "tests/admin_auth_test_helpers.py",
+        "tests/test_active_automation_run_due_guardrails.py",
+        "tests/test_active_automation_scheduled_safe_mode.py",
+        "tests/test_auth_client_bootstrap_readiness.py",
+        "tests/test_auth_client_ops.py",
+        "tests/test_auth_platform_client_authentication.py",
+        "tests/test_auth_platform_context.py",
+        "tests/test_auth_platform_credentials.py",
+        "tests/test_auth_platform_fastapi_protocol.py",
+        "tests/test_auth_platform_postgres_repository.py",
+        "tests/test_auth_platform_postgres_sessions.py",
+        "tests/test_auth_platform_service.py",
+        "tests/test_auth_platform_sessions.py",
+        "tests/test_auth_platform_webhook_hmac.py",
+        "tests/test_auth_platform_webhook_routes.py",
+        "tests/test_business_closure_acceptance_diagnostics.py",
+        "tests/test_cloud_orchestrator_plan_recipients.py",
+        "tests/test_cloud_orchestrator_run_due_commands.py",
+        "tests/test_cloud_orchestrator_run_due_idempotency.py",
+        "tests/test_cloud_orchestrator_run_due_no_real_side_effects.py",
+        "tests/test_cloud_orchestrator_run_due_preview.py",
+        "tests/test_external_orders_api.py",
+        "tests/test_internal_oauth_client_purpose.py",
+        "tests/test_internal_service_token_purpose.py",
+        "tests/test_next_admin_jobs_native.py",
+        "tests/test_run_message_activity_sync_script.py",
+        "tests/test_wecom_tag_read_selectors.py",
+        "tests/webhook_hmac_test_helpers.py",
+    )
+
+    result = _select(*changed_paths)
+
+    assert result["unmatched_files"] == []
+    assert "private_auth_cutover" in result["matched_scopes"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_retired_runtime_physical_cleanup_has_permanent_full_ci_scope() -> None:
+    result = _select(
+        "aicrm_next/platform_foundation/legacy_cleanup/service.py",
+        "aicrm_next/shared/retired_contracts.py",
+        "migrations/versions/0105_drop_legacy_cleanup_tables.py",
+        "docs/architecture/retired_runtime_registry.yml",
+        "tools/check_retired_runtime_references.py",
+        "tests/test_retired_runtime_contract.py",
+        "tests/test_retired_runtime_reference_scanner.py",
+        "tests/test_legacy_webhook_cleanup.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "retired_runtime_physical_cleanup" in result["matched_scopes"]
+    assert "tests/test_database_bootstrap.py" in result["python_tests"]
+    assert "tests/test_repository_ownership_guard.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
+
+
+def test_critical_read_performance_changes_force_postgres_full_ci() -> None:
+    result = _select(
+        "aicrm_next/platform_foundation/performance_contracts.py",
+        "docs/performance/critical_read_path_baselines.json",
+        "tools/check_critical_read_performance.py",
+        "migrations/versions/0106_critical_read_path_indexes.py",
+        "tests/test_critical_read_performance_runner.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "critical_read_performance" in result["matched_scopes"]
+    assert "tests/test_critical_read_performance_contracts.py" in result["python_tests"]
+    assert "tests/test_database_bootstrap.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["needs_full_ci"] is True
+    assert result["architecture_gate"] == "full"
 
 
 def test_unmapped_path_fails_instead_of_falling_back_to_full_regression() -> None:

@@ -1,17 +1,7 @@
 from __future__ import annotations
 
-from aicrm_next.customer_read_model.application import (
-    GetCustomerContextQuery,
-    GetCustomerDetailQuery,
-    ListRecentMessagesQuery,
-)
-from aicrm_next.customer_read_model.dto import (
-    CustomerContextRequest,
-    CustomerDetailRequest,
-    RecentMessagesRequest,
-)
-from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
-from aicrm_next.identity_contact.dto import ResolvePersonIdentityRequest
+from collections.abc import Callable
+
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.typing import JsonDict
 
@@ -34,10 +24,18 @@ class McpToolDispatcher:
         tool_gateway=None,
         customer_context_adapter=None,
         compatibility_gateway=None,
+        identity_resolver: Callable[[str], str] | None = None,
+        customer_detail_query: Callable[[str], JsonDict] | None = None,
+        customer_context_query: Callable[[str, int, int], JsonDict] | None = None,
+        recent_messages_query: Callable[[str, int], JsonDict] | None = None,
     ) -> None:
         self._tool_gateway = tool_gateway or build_mcp_tool_gateway()
         self._customer_context_adapter = customer_context_adapter or build_customer_context_tool_adapter()
         self._compatibility_gateway = compatibility_gateway or build_mcp_compatibility_gateway()
+        self._identity_resolver = identity_resolver
+        self._customer_detail_query = customer_detail_query
+        self._customer_context_query = customer_context_query
+        self._recent_messages_query = recent_messages_query
 
     def resolve_external_userid(self, arguments: JsonDict) -> str:
         external_userid = str(arguments.get("external_userid") or "").strip()
@@ -47,12 +45,12 @@ class McpToolDispatcher:
         if not customer_ref:
             raise ContractError("customer_ref or external_userid is required")
         if _looks_like_mobile(customer_ref):
-            identity = ResolvePersonIdentityQuery()(
-                ResolvePersonIdentityRequest(mobile=customer_ref)
-            )
-            if not identity or not identity.external_userid:
+            if self._identity_resolver is None:
+                raise ContractError("MCP identity resolver composition is unavailable")
+            external_userid = str(self._identity_resolver(customer_ref) or "").strip()
+            if not external_userid:
                 raise NotFoundError(f"customer not found for mobile: {customer_ref}")
-            return identity.external_userid
+            return external_userid
         return customer_ref
 
     def dispatch(self, name: str, arguments: JsonDict) -> JsonDict:
@@ -95,7 +93,9 @@ class McpToolDispatcher:
             customer_ref=str(arguments.get("customer_ref") or ""),
             request_id=str(arguments.get("request_id") or ""),
         )
-        detail = GetCustomerDetailQuery()(CustomerDetailRequest(external_userid=external_userid))
+        if self._customer_detail_query is None:
+            raise ContractError("MCP customer detail composition is unavailable")
+        detail = self._customer_detail_query(external_userid)
         payload: JsonDict = {
             "external_userid": external_userid,
             "customer": detail["customer"],
@@ -112,12 +112,12 @@ class McpToolDispatcher:
             external_userid=external_userid,
             request_id=str(arguments.get("request_id") or ""),
         )
-        result = GetCustomerContextQuery()(
-            CustomerContextRequest(
-                external_userid=external_userid,
-                recent_message_limit=int(arguments.get("recent_message_limit") or 20),
-                timeline_limit=int(arguments.get("timeline_limit") or 20),
-            )
+        if self._customer_context_query is None:
+            raise ContractError("MCP customer context composition is unavailable")
+        result = self._customer_context_query(
+            external_userid,
+            int(arguments.get("recent_message_limit") or 20),
+            int(arguments.get("timeline_limit") or 20),
         )
         result.setdefault("adapter_contract", {})["customer_context_tool"] = context_contract
         result["side_effect_safety"] = {**mcp_openclaw_side_effect_safety(), **dict(result.get("side_effect_safety") or {})}
@@ -129,11 +129,11 @@ class McpToolDispatcher:
             external_userid=external_userid,
             request_id=str(arguments.get("request_id") or ""),
         )
-        result = ListRecentMessagesQuery()(
-            RecentMessagesRequest(
-                external_userid=external_userid,
-                limit=int(arguments.get("limit") or arguments.get("recent_message_limit") or 20),
-            )
+        if self._recent_messages_query is None:
+            raise ContractError("MCP recent messages composition is unavailable")
+        result = self._recent_messages_query(
+            external_userid,
+            int(arguments.get("limit") or arguments.get("recent_message_limit") or 20),
         )
         result.setdefault("adapter_contract", {})["customer_context_tool"] = recent_contract
         result["side_effect_safety"] = {**mcp_openclaw_side_effect_safety(), **dict(result.get("side_effect_safety") or {})}

@@ -31,7 +31,7 @@ PR 只用于平台能力变更，包括：
 - `POST /api/external/ai-audience/spec/publish`
 - `POST /api/external/ai-audience/packages/{package_key}/archive`
 
-两条链路都使用 `AICRM_AI_AUDIENCE_SPEC_API_TOKEN`，并由服务端强制执行 `AICRM_AI_AUDIENCE_SPEC_ALLOWED_PREFIXES`、`AICRM_AI_AUDIENCE_SPEC_ALLOW_NON_VERIFY_PREFIX` 和 `AICRM_AI_AUDIENCE_SPEC_ALLOW_PUBLISH`。
+两条链路都使用注册 `external_agent` 换取的短期 JWT（`external_integration` audience、`write` scope、`external_write` capability；见 [`../auth_client_credentials.md`](../auth_client_credentials.md)），并由服务端强制执行 `AICRM_AI_AUDIENCE_SPEC_ALLOWED_PREFIXES`、`AICRM_AI_AUDIENCE_SPEC_ALLOW_NON_VERIFY_PREFIX` 和 `AICRM_AI_AUDIENCE_SPEC_ALLOW_PUBLISH`。
 
 ## Simple SQL Package
 

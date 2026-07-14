@@ -17,11 +17,17 @@ from .config import (
     diagnostics_payload,
     internal_events_enabled,
 )
-from .consumer_registry import DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY, InternalEventConsumerRegistry
-from .models import InternalEventConsumerResult, InternalEventConsumerRun, utcnow
+from .consumer_registry import InternalEventConsumerRegistry, current_internal_event_consumer_registry
+from .models import (
+    AUTOMATIC_RECOVERABLE_STATUSES,
+    MANUAL_ONLY_STATUSES,
+    InternalEventConsumerResult,
+    InternalEventConsumerRun,
+    utcnow,
+)
+from .outbox import InternalEventOutboxRelay
 from .repository import InternalEventRepository, build_internal_event_repository
 
-_EXECUTABLE_STATUSES = {"pending", "failed_retryable", "failed_terminal", "blocked"}
 _FINISHED_STATUSES = {"succeeded", "skipped"}
 _FORCE_REASON_HINTS = ("gray", "grey", "test", "loopback", "production_gray", "灰度")
 
@@ -42,6 +48,8 @@ def _single_counts(*, candidate: int = 0, processed: int = 0, status: str = "") 
         "failed_terminal_count": 0,
         "blocked_count": 0,
         "skipped_count": 0,
+        "lost_lease_count": 0,
+        "unhandled_failure_count": 0,
     }
     if status in {"succeeded", "failed_retryable", "failed_terminal", "blocked", "skipped"}:
         counts[f"{status}_count"] = 1
@@ -62,6 +70,8 @@ def _empty_counts() -> dict[str, int]:
         "failed_terminal_count": 0,
         "blocked_count": 0,
         "skipped_count": 0,
+        "lost_lease_count": 0,
+        "unhandled_failure_count": 0,
     }
 
 
@@ -80,8 +90,13 @@ class InternalEventWorker:
         locked_by: str = "",
     ):
         self._repo = repository or build_internal_event_repository()
-        self._registry = consumer_registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
+        self._registry = consumer_registry or current_internal_event_consumer_registry()
         self._locked_by = locked_by or f"internal-event-worker-{uuid4().hex[:8]}"
+        self._outbox_relay = InternalEventOutboxRelay(
+            self._repo,
+            self._registry,
+            locked_by=f"{self._locked_by}-relay",
+        )
 
     def _effective_event_types(self, event_types: list[str] | None = None) -> list[str] | None:
         configured = allowed_event_types()
@@ -203,6 +218,7 @@ class InternalEventWorker:
         return None
 
     def preview_due(self, *, batch_size: int = 10, event_types: list[str] | None = None, consumer_names: list[str] | None = None) -> dict[str, Any]:
+        outbox_relay = self._outbox_relay.preview_due(limit=batch_size)
         effective_event_types = self._effective_event_types(event_types)
         effective_event_consumers = self._effective_event_consumers(event_types=event_types, consumer_names=consumer_names)
         if effective_event_consumers is not None:
@@ -246,7 +262,10 @@ class InternalEventWorker:
                 "failed_terminal_count": 0,
                 "blocked_count": 0,
                 "skipped_count": 0,
+                "lost_lease_count": 0,
+                "unhandled_failure_count": 0,
             },
+            "outbox_relay": outbox_relay,
             "dry_run": True,
             "event_types": effective_event_types or [],
             "consumer_names": effective_consumers or [],
@@ -296,13 +315,44 @@ class InternalEventWorker:
         )
         if gated is not None:
             return gated
-        runs = self._repo.acquire_due_runs(
-            limit=batch_size,
-            locked_by=self._locked_by,
-            event_types=effective_event_types,
-            consumer_names=effective_consumers,
-            event_consumers=effective_event_consumers,
-        )
+        try:
+            outbox_relay = self._outbox_relay.relay_due(limit=batch_size)
+        except Exception as exc:
+            outbox_relay = {
+                "ok": False,
+                "error": "outbox_relay_unhandled_failure",
+                "error_class": exc.__class__.__name__,
+                "items": [],
+                "counts": {"unhandled_failure_count": 1},
+                "real_external_call_executed": False,
+            }
+        try:
+            runs = self._repo.acquire_due_runs(
+                limit=batch_size,
+                locked_by=self._locked_by,
+                event_types=effective_event_types,
+                consumer_names=effective_consumers,
+                event_consumers=effective_event_consumers,
+            )
+        except Exception as exc:
+            counts = _empty_counts()
+            counts["unhandled_failure_count"] = 1
+            return {
+                "ok": False,
+                "exit_code": 1,
+                "error": "consumer_run_acquire_failed",
+                "error_class": exc.__class__.__name__,
+                "items": [],
+                "processed": [],
+                "counts": counts,
+                "dry_run": False,
+                "event_types": effective_event_types or [],
+                "consumer_names": effective_consumers or [],
+                "event_consumers": [f"{event_type}:{consumer_name}" for event_type, consumer_name in (effective_event_consumers or [])],
+                "outbox_relay": outbox_relay,
+                "config": diagnostics_payload(),
+                "real_external_call_executed": False,
+            }
         items: list[dict[str, Any]] = []
         processed: list[dict[str, Any]] = []
         counts = {
@@ -313,14 +363,29 @@ class InternalEventWorker:
             "failed_terminal_count": 0,
             "blocked_count": 0,
             "skipped_count": 0,
+            "lost_lease_count": 0,
+            "unhandled_failure_count": 0,
         }
         for run in runs:
-            result = self.dispatch_one(run)
+            try:
+                result = self.dispatch_one(run)
+            except Exception as exc:
+                result = {
+                    "ok": False,
+                    "error": "unhandled_worker_failure",
+                    "error_class": exc.__class__.__name__,
+                    "event": {"event_id": run.event_id},
+                    "consumer_run": run.to_dict(),
+                    "real_external_call_executed": False,
+                }
+                counts["unhandled_failure_count"] += 1
             items.append(result)
             counts["processed_count"] += 1
             status = str(result.get("consumer_run", {}).get("status") or "")
             if status in {"succeeded", "failed_retryable", "failed_terminal", "blocked", "skipped"}:
                 counts[f"{status}_count"] += 1
+            if result.get("error") == "lost_lease":
+                counts["lost_lease_count"] += 1
             processed.append(
                 {
                     "event_id": str(result.get("event", {}).get("event_id") or run.event_id),
@@ -330,8 +395,20 @@ class InternalEventWorker:
                     "real_external_call_executed": False,
                 }
             )
+        failure_count = sum(
+            counts[key]
+            for key in (
+                "failed_retryable_count",
+                "failed_terminal_count",
+                "blocked_count",
+                "lost_lease_count",
+                "unhandled_failure_count",
+            )
+        )
+        ok = bool(outbox_relay.get("ok")) and failure_count == 0
         return {
-            "ok": True,
+            "ok": ok,
+            "exit_code": 0 if ok else 1,
             "items": items,
             "processed": processed,
             "counts": counts,
@@ -339,6 +416,7 @@ class InternalEventWorker:
             "event_types": effective_event_types or [],
             "consumer_names": effective_consumers or [],
             "event_consumers": [f"{event_type}:{consumer_name}" for event_type, consumer_name in (effective_event_consumers or [])],
+            "outbox_relay": outbox_relay,
             "config": diagnostics_payload(),
             "real_external_call_executed": False,
         }
@@ -407,6 +485,19 @@ class InternalEventWorker:
                 "reason": reason,
                 "real_external_call_executed": False,
             }
+        if run.status in MANUAL_ONLY_STATUSES:
+            return {
+                "ok": False,
+                "error": "manual_retry_or_skip_required",
+                "event": event.to_dict(),
+                "consumer_run": run.to_dict(),
+                "items": [],
+                "counts": _single_counts(),
+                "dry_run": bool(dry_run),
+                "force": bool(force),
+                "reason": reason,
+                "real_external_call_executed": False,
+            }
         if force and run.status in _FINISHED_STATUSES and not _force_reason_allowed(reason):
             return {
                 "ok": False,
@@ -420,7 +511,7 @@ class InternalEventWorker:
                 "reason": reason,
                 "real_external_call_executed": False,
             }
-        if run.status not in _EXECUTABLE_STATUSES and not force:
+        if run.status not in AUTOMATIC_RECOVERABLE_STATUSES and not force:
             return {
                 "ok": False,
                 "error": "consumer_run_not_executable",
@@ -484,7 +575,7 @@ class InternalEventWorker:
         item = self.dispatch_one(acquired)
         status = str(item.get("consumer_run", {}).get("status") or "")
         return {
-            "ok": True,
+            "ok": bool(item.get("ok")),
             "items": [item],
             "event": item.get("event") or event.to_dict(),
             "consumer_run": item.get("consumer_run") or acquired.to_dict(),
@@ -501,7 +592,33 @@ class InternalEventWorker:
         run = run_or_id if isinstance(run_or_id, InternalEventConsumerRun) else self._repo.get_consumer_run_by_id(int(run_or_id))
         if run is None:
             return {"ok": False, "error": "consumer_run_not_found", "real_external_call_executed": False}
-        running = self._repo.mark_running(run.id, locked_by=self._locked_by) or run
+        if not run.lease_token:
+            acquired = self._repo.acquire_consumer_run(
+                event_id=run.event_id,
+                consumer_name=run.consumer_name,
+                locked_by=self._locked_by,
+                force=False,
+            )
+            if acquired is None:
+                return {
+                    "ok": False,
+                    "error": "consumer_run_not_executable",
+                    "consumer_run": run.to_dict(),
+                    "real_external_call_executed": False,
+                }
+            run = acquired
+        running = self._repo.mark_running(
+            run.id,
+            locked_by=self._locked_by,
+            expected_lease_token=run.lease_token,
+        )
+        if running is None:
+            return {
+                "ok": False,
+                "error": "lost_lease",
+                "consumer_run": run.to_dict(),
+                "real_external_call_executed": False,
+            }
         event = self._repo.get_event(running.event_id)
         if event is None:
             return self._blocked_result(running, "internal_event_not_found", f"event {running.event_id} was not found")
@@ -528,7 +645,7 @@ class InternalEventWorker:
         status = handler_result.status
         if status == "failed_retryable" and int(running.attempt_count or 0) + 1 >= int(running.max_attempts or 5):
             status = "failed_terminal"
-        attempt = self._repo.record_attempt(
+        completed = self._repo.complete_consumer_attempt(
             run=running,
             status=status,
             request_summary=handler_result.request_summary,
@@ -537,18 +654,20 @@ class InternalEventWorker:
                 "real_external_call_executed": False,
                 "external_effect_boundary": "handler_must_enqueue_external_effect_job_for_external_calls",
             },
-            error_code=handler_result.error_code,
-            error_message=handler_result.error_message,
-        )
-        updated = self._repo.mark_result(
-            running.id,
-            status=status,
-            attempt_id=attempt.attempt_id,
             result_summary=handler_result.result_summary or handler_result.response_summary,
             error_code=handler_result.error_code,
             error_message=handler_result.error_message,
             next_retry_at=_next_retry_at(running.attempt_count, handler_result.retry_after_seconds) if status == "failed_retryable" else None,
         )
+        if completed is None:
+            return {
+                "ok": False,
+                "error": "lost_lease",
+                "event": event.to_dict(),
+                "consumer_run": running.to_dict(),
+                "real_external_call_executed": False,
+            }
+        updated, attempt = completed
         return {
             "ok": status == "succeeded",
             "event": event.to_dict(),
@@ -558,22 +677,23 @@ class InternalEventWorker:
         }
 
     def _blocked_result(self, run: InternalEventConsumerRun, error_code: str, error_message: str) -> dict[str, Any]:
-        attempt = self._repo.record_attempt(
+        completed = self._repo.complete_consumer_attempt(
             run=run,
             status="blocked",
             request_summary={"event_id": run.event_id, "consumer_name": run.consumer_name},
             response_summary={"blocked": True, "real_external_call_executed": False},
-            error_code=error_code,
-            error_message=error_message,
-        )
-        updated = self._repo.mark_result(
-            run.id,
-            status="blocked",
-            attempt_id=attempt.attempt_id,
             result_summary={"blocked": True},
             error_code=error_code,
             error_message=error_message,
         )
+        if completed is None:
+            return {
+                "ok": False,
+                "error": "lost_lease",
+                "consumer_run": run.to_dict(),
+                "real_external_call_executed": False,
+            }
+        updated, attempt = completed
         return {
             "ok": False,
             "consumer_run": updated.to_dict() if updated else run.to_dict(),

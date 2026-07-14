@@ -22,11 +22,11 @@ def test_public_product_page_redirects_empty_material_to_checkout(monkeypatch) -
     assert response.headers["location"] == "/pay/test-product"
 
 
-def test_public_product_page_redirect_preserves_query(monkeypatch) -> None:
+def test_public_product_page_redirect_preserves_noncredential_query_only(monkeypatch) -> None:
     response = _client(monkeypatch).get("/p/test-product?ctx=ctx-token&utm=qr", follow_redirects=False)
 
     assert response.status_code == 302
-    assert response.headers["location"] == "/pay/test-product?ctx=ctx-token&utm=qr"
+    assert response.headers["location"] == "/pay/test-product?utm=qr"
 
 
 def test_public_product_page_renders_when_material_exists(monkeypatch) -> None:

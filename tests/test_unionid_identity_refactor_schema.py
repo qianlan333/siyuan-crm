@@ -230,18 +230,23 @@ def test_wecom_identity_bridge_writes_new_identity_tables_not_legacy_maps() -> N
 
 
 def test_runtime_jsonb_membership_avoids_placeholder_collision() -> None:
-    source = _read("aicrm_next/channel_entry/identity_bridge_repo.py")
+    source = _read("aicrm_next/identity_contact/resolver.py")
 
     assert "external_userids_json ? ?" not in source
-    assert "jsonb_exists(external_userids_json, ?)" in source
+    assert "identity.external_userids_json ? input.external_userid" not in source
+    assert "identity.external_userids_json @> jsonb_build_array(input.external_userid)" in source
+    assert "identity.openids_json @> jsonb_build_array(input.openid)" in source
+    assert 'candidate_sql = _candidate_sql(self._placeholder, fields=fields)' in source
 
 
-def test_questionnaire_postgres_submit_blocks_formal_submission_without_unionid() -> None:
+def test_questionnaire_postgres_submit_queues_unresolved_identity_without_fake_canonical() -> None:
     source = _read("aicrm_next/questionnaire/repo.py")
+    queue_source = _read("aicrm_next/questionnaire/identity_resolution.py")
 
-    assert "INSERT INTO crm_user_identity_resolution_queue" in source
-    assert "identity_pending_unionid" in source
-    assert "_enqueue_identity_resolution" in source
+    assert "enqueue_questionnaire_identity_resolution" in source
+    assert "INSERT INTO crm_user_identity_resolution_queue" in queue_source
+    assert "identity_unresolved" in queue_source
+    assert "INSERT INTO questionnaire_submissions" in source
 
 
 def test_customer_detail_query_supports_unionid_native_lookup(monkeypatch) -> None:
@@ -434,7 +439,7 @@ def test_user_ops_legacy_runtime_tables_are_retired() -> None:
     assert "UPDATE crm_user_identity" in identity_contact_source
     assert "INSERT INTO crm_user_identity_resolution_queue" in identity_contact_source
     assert "SendTargetResolver" in external_campaign_source
-    assert "FROM crm_user_identity identity" in external_campaign_repo_source
+    assert "resolve_identity_with_dbapi" in external_campaign_repo_source
     assert "user_ops_pool_current_next" not in external_campaign_source
     assert "user_ops_pool_current_next" not in external_campaign_repo_source
     assert "identity.id" not in external_campaign_repo_source
@@ -612,7 +617,7 @@ def test_questionnaire_and_wechat_pay_facts_drop_legacy_identity_columns() -> No
 
 def test_customer_fact_read_sources_drop_legacy_identity_columns() -> None:
     cleanup_source = _read("migrations/versions/0068_unionid_customer_fact_cleanup.py")
-    customer_repo_source = _read("aicrm_next/customer_read_model/repo.py")
+    customer_repo_source = _read("aicrm_next/customer_read_model/repo_live_source.py")
     message_archive_source = _read("aicrm_next/message_archive/repo.py")
     channel_entry_repo_source = _read("aicrm_next/channel_entry/repo.py")
 

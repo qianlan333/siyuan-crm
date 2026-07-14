@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import base64
-import ctypes
 import json
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -15,44 +16,66 @@ class WeComArchiveError(RuntimeError):
     pass
 
 
-SDK_PTR = ctypes.c_void_p
-SLICE_PTR = ctypes.c_void_p
+SDK_HELPER_MODULE = "aicrm_next.message_archive.sdk_subprocess"
+SDK_RESULT_PREFIX = "AICRM_SDK_RESULT="
 
 
-def configure_sdk(lib_path: str):
-    if not Path(lib_path).exists():
-        raise FileNotFoundError(f"SDK library not found: {lib_path}")
+def _run_sdk_helper(operation: str, payload: dict[str, Any], *, timeout: int) -> dict[str, Any]:
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-m", SDK_HELPER_MODULE, operation],
+            input=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            text=True,
+            capture_output=True,
+            timeout=max(1, int(timeout)),
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise WeComArchiveError(f"isolated SDK {operation} timed out") from exc
+    except OSError as exc:
+        raise WeComArchiveError(f"isolated SDK {operation} could not start") from exc
 
-    lib = ctypes.CDLL(lib_path)
-    lib.NewSdk.argtypes = []
-    lib.NewSdk.restype = SDK_PTR
-    lib.Init.argtypes = [SDK_PTR, ctypes.c_char_p, ctypes.c_char_p]
-    lib.Init.restype = ctypes.c_int
-    lib.DestroySdk.argtypes = [SDK_PTR]
-    lib.DestroySdk.restype = None
-    lib.NewSlice.argtypes = []
-    lib.NewSlice.restype = SLICE_PTR
-    lib.FreeSlice.argtypes = [SLICE_PTR]
-    lib.GetChatData.argtypes = [
-        SDK_PTR,
-        ctypes.c_ulonglong,
-        ctypes.c_uint,
-        ctypes.c_char_p,
-        ctypes.c_char_p,
-        ctypes.c_int,
-        SLICE_PTR,
-    ]
-    lib.GetChatData.restype = ctypes.c_int
-    lib.GetContentFromSlice.argtypes = [SLICE_PTR]
-    lib.GetContentFromSlice.restype = ctypes.c_char_p
-    lib.DecryptData.argtypes = [ctypes.c_char_p, ctypes.c_char_p, SLICE_PTR]
-    lib.DecryptData.restype = ctypes.c_int
-    return lib
+    framed = [line for line in completed.stdout.splitlines() if line.startswith(SDK_RESULT_PREFIX)]
+    if not framed:
+        raise WeComArchiveError(
+            f"isolated SDK {operation} exited without a result (exit={completed.returncode})"
+        )
+    try:
+        result = json.loads(framed[-1][len(SDK_RESULT_PREFIX) :])
+    except json.JSONDecodeError as exc:
+        raise WeComArchiveError(f"isolated SDK {operation} returned an invalid result") from exc
+    if not isinstance(result, dict) or not result.get("ok"):
+        error_code = str((result or {}).get("error_code") or "sdk_helper_failed")
+        native_code = int((result or {}).get("native_code") or 0)
+        suffix = f":{native_code}" if native_code else ""
+        raise WeComArchiveError(f"isolated SDK {operation} failed: {error_code}{suffix}")
+    return result
 
 
-def get_slice_text(lib, slice_ptr: SLICE_PTR) -> str:
-    raw = lib.GetContentFromSlice(slice_ptr)
-    return raw.decode("utf-8") if raw else ""
+def fetch_chatdata_page(
+    lib_path: str,
+    corp_id: str,
+    archive_secret: str,
+    seq: int,
+    limit: int,
+    timeout: int,
+) -> dict[str, Any]:
+    result = _run_sdk_helper(
+        "fetch",
+        {
+            "lib_path": str(lib_path or ""),
+            "corp_id": str(corp_id or ""),
+            "archive_secret": str(archive_secret or ""),
+            "seq": int(seq),
+            "limit": int(limit),
+            "timeout": int(timeout),
+        },
+        timeout=max(10, int(timeout) + 15),
+    )
+    payload = result.get("payload")
+    if not isinstance(payload, dict):
+        raise WeComArchiveError("isolated SDK fetch payload is invalid")
+    return dict(payload)
 
 
 def load_private_key(private_key_path: str):
@@ -60,11 +83,10 @@ def load_private_key(private_key_path: str):
     return serialization.load_pem_private_key(key_bytes, password=None)
 
 
-def decrypt_random_key(private_key_path: str, encrypted_random_key: str, publickey_ver: int) -> str:
+def _decrypt_random_key(private_key, encrypted_random_key: str, publickey_ver: int) -> str:
     if int(publickey_ver) != 1:
         raise WeComArchiveError(f"unsupported publickey_ver: {publickey_ver}")
 
-    private_key = load_private_key(private_key_path)
     cipher_bytes = base64.b64decode(encrypted_random_key)
     paddings = [
         padding.PKCS1v15(),
@@ -80,57 +102,59 @@ def decrypt_random_key(private_key_path: str, encrypted_random_key: str, publick
         except Exception as exc:
             last_error = exc
 
-    raise WeComArchiveError(f"failed to decrypt random key: {last_error}")
+    raise WeComArchiveError(f"failed to decrypt random key: {type(last_error).__name__}")
 
 
-def fetch_chatdata_page(lib, sdk_ptr: SDK_PTR, seq: int, limit: int, timeout: int) -> dict[str, Any]:
-    chat_slice = None
-    try:
-        chat_slice = lib.NewSlice()
-        if not chat_slice:
-            raise WeComArchiveError("NewSlice for GetChatData returned null")
+def decrypt_random_key(private_key_path: str, encrypted_random_key: str, publickey_ver: int) -> str:
+    return _decrypt_random_key(load_private_key(private_key_path), encrypted_random_key, publickey_ver)
 
-        get_ret = lib.GetChatData(
-            sdk_ptr,
-            seq,
-            limit,
-            None,
-            None,
-            timeout,
-            chat_slice,
+
+def decrypt_chat_payloads(
+    lib_path: str,
+    private_key_path: str,
+    encrypted_records: list[dict[str, Any]],
+    *,
+    timeout: int = 60,
+) -> list[dict[str, Any]]:
+    if not encrypted_records:
+        return []
+    private_key = load_private_key(private_key_path)
+    items: list[dict[str, str]] = []
+    for record in encrypted_records:
+        items.append(
+            {
+                "random_key": _decrypt_random_key(
+                    private_key,
+                    str(record["encrypt_random_key"]),
+                    int(record.get("publickey_ver") or 0),
+                ),
+                "encrypt_chat_msg": str(record["encrypt_chat_msg"]),
+            }
         )
-        if get_ret != 0:
-            raise WeComArchiveError(f"GetChatData failed with code {get_ret}")
-        return json.loads(get_slice_text(lib, chat_slice) or "{}")
-    finally:
-        if chat_slice:
-            lib.FreeSlice(chat_slice)
-
-
-def decrypt_chat_payload(lib, private_key_path: str, encrypted_record: dict[str, Any]) -> dict[str, Any]:
-    random_key = decrypt_random_key(
-        private_key_path,
-        encrypted_record["encrypt_random_key"],
-        int(encrypted_record.get("publickey_ver", 0)),
+    result = _run_sdk_helper(
+        "decrypt",
+        {"lib_path": str(lib_path or ""), "items": items},
+        timeout=max(10, int(timeout) + len(items)),
     )
+    payloads = result.get("payloads")
+    if not isinstance(payloads, list) or len(payloads) != len(items) or not all(isinstance(item, dict) for item in payloads):
+        raise WeComArchiveError("isolated SDK decrypt payload is invalid")
+    return [dict(item) for item in payloads]
 
-    decrypt_slice = None
-    try:
-        decrypt_slice = lib.NewSlice()
-        if not decrypt_slice:
-            raise WeComArchiveError("NewSlice for DecryptData returned null")
 
-        decrypt_ret = lib.DecryptData(
-            random_key.encode("utf-8"),
-            encrypted_record["encrypt_chat_msg"].encode("utf-8"),
-            decrypt_slice,
-        )
-        if decrypt_ret != 0:
-            raise WeComArchiveError(f"DecryptData failed with code {decrypt_ret}")
-        return json.loads(get_slice_text(lib, decrypt_slice) or "{}")
-    finally:
-        if decrypt_slice:
-            lib.FreeSlice(decrypt_slice)
+def decrypt_chat_payload(
+    lib_path: str,
+    private_key_path: str,
+    encrypted_record: dict[str, Any],
+    *,
+    timeout: int = 60,
+) -> dict[str, Any]:
+    return decrypt_chat_payloads(
+        lib_path,
+        private_key_path,
+        [encrypted_record],
+        timeout=timeout,
+    )[0]
 
 
 def normalize_timestamp(value: Any) -> str:

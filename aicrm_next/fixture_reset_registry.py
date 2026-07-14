@@ -21,7 +21,6 @@ from .media_library.repo import reset_media_library_fixture_state
 from .ops_enrollment.application import reset_user_ops_fixture_state
 from .platform_foundation.external_effects import reset_external_effect_fixture_state
 from .platform_foundation.internal_events import reset_internal_event_fixture_state
-from .platform_foundation.legacy_cleanup import reset_legacy_cleanup_fixture_state
 from .questionnaire.admin_write import reset_questionnaire_admin_write_fixture_state
 from .questionnaire.h5_write import reset_questionnaire_h5_write_fixture_state
 from .questionnaire.repo import reset_questionnaire_fixture_state
@@ -60,7 +59,6 @@ FIXTURE_RESET_STEPS: tuple[FixtureResetStep, ...] = (
     FixtureResetStep("wecom_tag_live_mutation", reset_wecom_tag_live_mutation_fixture_state),
     FixtureResetStep("sidebar_jssdk_attempts", reset_sidebar_jssdk_attempts),
     FixtureResetStep("external_effect", reset_external_effect_fixture_state),
-    FixtureResetStep("legacy_cleanup", reset_legacy_cleanup_fixture_state),
     FixtureResetStep("internal_event", reset_internal_event_fixture_state),
 )
 

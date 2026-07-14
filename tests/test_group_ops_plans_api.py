@@ -47,11 +47,7 @@ def test_group_ops_admin_api_routes_are_registered_on_existing_contracts(monkeyp
     from aicrm_next.main import create_app
 
     app = create_app()
-    registered = {
-        (method, getattr(route, "path", ""))
-        for route in app.routes
-        for method in getattr(route, "methods", set())
-    }
+    registered = {(method, getattr(route, "path", "")) for route in app.routes for method in getattr(route, "methods", set())}
 
     expected = {
         ("GET", "/api/admin/automation-conversion/group-ops/plans"),
@@ -69,7 +65,6 @@ def test_group_ops_admin_api_routes_are_registered_on_existing_contracts(monkeyp
         ("PUT", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/nodes/{node_id}"),
         ("DELETE", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/nodes/{node_id}"),
         ("GET", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook"),
-        ("POST", "/api/admin/automation-conversion/group-ops/plans/{plan_id}/webhook/regenerate"),
         ("GET", "/api/admin/automation-conversion/group-ops/groups"),
         ("POST", "/api/admin/automation-conversion/group-ops/groups/sync"),
         ("GET", "/api/admin/common/operation-members"),
@@ -146,11 +141,9 @@ def test_group_ops_detail_api_regression_keeps_existing_business_endpoints(group
     assert unbind.status_code == 200
 
     webhook_config = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/2/webhook")
-    webhook_regenerated = group_ops_api_client.post("/api/admin/automation-conversion/group-ops/plans/2/webhook/regenerate")
     assert webhook_config.status_code == 200
     assert webhook_config.json()["method"] == "POST"
-    assert webhook_regenerated.status_code == 200
-    assert webhook_regenerated.json()["token_status"] == "generated"
+    assert webhook_config.json()["auth_mode"] == "aicrm_hmac_sha256"
 
     nodes = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/1/nodes")
     created_node = group_ops_api_client.post(
@@ -566,7 +559,7 @@ def test_webhook_config_returns_no_plaintext_token_or_examples(group_ops_api_cli
     body = response.json()
     assert body["method"] == "POST"
     assert body["webhook_url"].endswith("/api/automation/group-ops/webhooks/daily-lesson-8f3a")
-    assert body["token_status"] == "generated"
+    assert body["auth_mode"] == "aicrm_hmac_sha256"
     forbidden = {
         "token",
         "secret",
@@ -580,12 +573,11 @@ def test_webhook_config_returns_no_plaintext_token_or_examples(group_ops_api_cli
     assert not (forbidden & set(body))
 
 
-def test_webhook_regenerate_returns_plaintext_once_but_config_does_not(group_ops_api_client):
-    regenerated = group_ops_api_client.post("/api/admin/automation-conversion/group-ops/plans/2/webhook/regenerate")
+def test_webhook_shared_secret_rotation_route_is_removed(group_ops_api_client):
+    removed = group_ops_api_client.post("/api/admin/automation-conversion/group-ops/plans/2/webhook/regenerate")
     config = group_ops_api_client.get("/api/admin/automation-conversion/group-ops/plans/2/webhook")
 
-    assert regenerated.status_code == 200
-    assert regenerated.json()["token_status"] == "generated"
-    assert regenerated.json()["plaintext_token"]
+    assert removed.status_code == 404
     assert config.status_code == 200
     assert "plaintext_token" not in config.json()
+    assert "token_status" not in config.json()

@@ -35,7 +35,7 @@ Non-goals for this matrix:
 | --- | --- | --- | --- | --- |
 | Push Center / Group Ops | P0 gates protect external effects, DB access, and webhook/job route contracts; Push Center and broadcast job routes exist. | Operators can explain a send job from source to job/effect/attempt status, understand failure reason, and decide retry/cancel/manual action without DB access. | Real gray send, reconciliation, retry, cancel, and dead-letter handling are validated with approved receivers and production runbook evidence. | G1 push-center reconciliation payload; G2 group-ops gray-send acceptance. |
 | Event / Approval / Task Loop | Internal event admin routes, run-due controls, reconciliation route, and background job contract exist. | An approved plan can be traced through internal event, consumer run, generated job/effect, and Push Center visibility with duplicate-safe behavior. | Operators can replay/retry failed consumers, see linked jobs/effects, and audit who approved, triggered, retried, or skipped every step. | E1 ops-plan-to-broadcast E2E acceptance; E2 event business explanation payload. |
-| External Orders | Read-only external order APIs exist and use `AUTOMATION_INTERNAL_API_TOKEN`; local WeChat Pay / WeChat Shop reads are Next-owned. | Token readiness, auth failures, read/query shape, idempotency expectations, and order/customer/channel correlation are verified before production enablement. | Approved external systems can create/query/update gray orders, duplicate calls are idempotent, and CRM/admin pages show reconciled order status. | O1 external-orders enablement package; O2 external-orders gray acceptance. |
+| External Orders | Read-only external order APIs use registered `external_agent` client credentials and short-lived JWT; local WeChat Pay / WeChat Shop reads are Next-owned. | Client readiness, auth failures, read/query shape, idempotency expectations, and order/customer/channel correlation are verified before production enablement. | Approved external systems can create/query/update gray orders, duplicate calls are idempotent, and CRM/admin pages show reconciled order status. | O1 external-orders enablement package; O2 external-orders gray acceptance. |
 | WeCom Real Auth / Callback | Admin WeCom auth and channel-entry callback routes are Next-owned and guarded; external calls remain approval-gated through integration gateway. | Operator auth readiness, callback signature behavior, duplicate event idempotency, and event/job visibility are validated without leaking secrets or raw IDs. | Real operator login, callback, contact/group permissions, token refresh, and gray send are validated in approved production-like conditions. | W1 WeCom auth operator readiness; W2 WeCom callback gray acceptance. |
 | Core CRM Admin Operations | Channel, config, tags, broadcast jobs, Push Center, and internal event pages/routes exist; old draft PR `#974` remains unrelated and stale. | Critical admin flows show accurate save/error/status explanations and do not rely on stale assets or legacy fallback. | Admin operators can configure channels, inspect jobs/events/orders/auth state, and resolve common failure modes without engineer DB inspection. | A1 close or rebase #974; A2 channel auto-accept save/error refresh; A3 admin status language audit. |
 
@@ -210,7 +210,7 @@ or unauthorized calls.
     `/api/wechat-shop/notify`, refund notify.
 - Relevant pipelines: local order read models, payment notify internal events,
   external effect jobs for order-paid push, background job contract.
-- Current token gate: external order APIs use `AUTOMATION_INTERNAL_API_TOKEN`.
+- Current auth gate: external order APIs require an `external_agent` JWT with `external_integration` audience and `external_read` capability.
 
 ### 90%+ definition
 
@@ -230,7 +230,7 @@ or unauthorized calls.
 
 ### Production preconditions
 
-- `AUTOMATION_INTERNAL_API_TOKEN` configured by an authorized operator.
+- `external_agent` client ID/secret reference provisioned; RAUTH readiness returns `ok=true`.
 - Approved gray source credentials and data redaction policy.
 - Payment/provider callback configuration verified outside this PR.
 

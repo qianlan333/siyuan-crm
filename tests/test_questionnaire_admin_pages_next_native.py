@@ -41,19 +41,21 @@ def test_questionnaire_admin_new_page_is_readonly_shell_without_write_execution(
     assert response.status_code == 200
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert "新建问卷" in response.text
-    assert "initialQuestionnaireId: null" in response.text
+    assert '"initialQuestionnaireId": null' in response.text
+    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260713" in response.text
 
 
 def test_questionnaire_admin_editor_exposes_other_option_controls() -> None:
     response = TestClient(create_app()).get("/admin/questionnaires/new")
 
     assert response.status_code == 200
-    html = response.text
-    assert "设为其它选项" in html
-    assert "data-option-field=\"is_other\"" in html
-    assert "data-option-field=\"other_placeholder\"" in html
-    assert "data-option-field=\"other_max_length\"" in html
-    assert "validateOtherOptionsBeforeSave" in html
+    script = TestClient(create_app()).get("/static/questionnaire/admin_questionnaire_editor.js")
+    assert script.status_code == 200
+    assert "设为其它选项" in script.text
+    assert 'data-option-field="is_other"' in script.text
+    assert 'data-option-field="other_placeholder"' in script.text
+    assert 'data-option-field="other_max_length"' in script.text
+    assert "validateOtherOptionsBeforeSave" in script.text
 
 
 def test_questionnaire_admin_detail_page_uses_next_read_model_editor_payload() -> None:
@@ -63,7 +65,10 @@ def test_questionnaire_admin_detail_page_uses_next_read_model_editor_payload() -
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert "黄小璨激活问卷" in response.text
     assert "hxc-activation-v1" in response.text
-    assert "复制问卷" in response.text
+    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260713" in response.text
+    script = TestClient(create_app()).get("/static/questionnaire/admin_questionnaire_editor.js")
+    assert script.status_code == 200
+    assert "复制问卷" in script.text
 
 
 def test_questionnaire_admin_pages_are_removed_from_frontend_compat_routes() -> None:
@@ -77,19 +82,25 @@ def test_questionnaire_admin_templates_live_in_questionnaire_bundle() -> None:
 
     assert (root / "aicrm_next/questionnaire/templates/admin_console/questionnaires.html").exists()
     assert (root / "aicrm_next/questionnaire/templates/admin_questionnaires.html").exists()
+    assert (root / "aicrm_next/questionnaire/static/admin_questionnaire_editor.css").exists()
+    assert (root / "aicrm_next/questionnaire/static/admin_questionnaire_editor.js").exists()
     assert not (root / "aicrm_next/frontend_compat/templates/admin_console/questionnaires.html").exists()
     assert not (root / "aicrm_next/frontend_compat/templates/admin_questionnaires.html").exists()
 
 
 def test_questionnaire_completion_target_ui_keeps_simple_h5_and_dynamic_url_link_modes() -> None:
     root = Path(__file__).resolve().parents[1]
-    templates = [
-        root / "aicrm_next/questionnaire/templates/admin_questionnaires.html",
-        root / "aicrm_next/frontend_compat/templates/admin_console/questionnaire_detail.html",
+    bundles = [
+        [
+            root / "aicrm_next/questionnaire/templates/admin_questionnaires.html",
+            root / "aicrm_next/questionnaire/static/admin_questionnaire_editor.css",
+            root / "aicrm_next/questionnaire/static/admin_questionnaire_editor.js",
+        ],
+        [root / "aicrm_next/frontend_compat/templates/admin_console/questionnaire_detail.html"],
     ]
 
-    for template in templates:
-        text = template.read_text(encoding="utf-8")
+    for bundle in bundles:
+        text = "\n".join(path.read_text(encoding="utf-8") for path in bundle)
         assert "提交后跳转" in text
         assert "提交后动作" not in text
         assert "H5 跳转地址" in text

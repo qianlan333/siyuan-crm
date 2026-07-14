@@ -3,13 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from aicrm_next.platform_foundation.internal_events import (
-    DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY,
     InternalEvent,
     InternalEventConsumerRegistry,
     InternalEventConsumerResult,
     InternalEventConsumerRun,
     PAYMENT_SUCCEEDED_EVENT_TYPES,
     QUESTIONNAIRE_SUBMITTED_EVENT_TYPE,
+    current_internal_event_consumer_registry,
 )
 
 from .event_types import (
@@ -88,7 +88,7 @@ def outbound_effect_consumer(event: InternalEvent, run: InternalEventConsumerRun
 
 
 def register_ai_audience_event_consumers(registry: InternalEventConsumerRegistry | None = None) -> None:
-    registry = registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
+    registry = registry or current_internal_event_consumer_registry()
     registry.register(INCREMENTAL_TICK_EVENT, INCREMENTAL_REFRESH_CONSUMER, incremental_refresh_consumer, consumer_type="orchestration")
     registry.register(DAILY_TICK_EVENT, DAILY_REFRESH_CONSUMER, daily_refresh_consumer, consumer_type="orchestration")
     registry.register(SOURCE_CHANGED_EVENT, SOURCE_POKE_CONSUMER, source_poke_consumer, consumer_type="projection")

@@ -17,6 +17,7 @@ from aicrm_next.platform_foundation.external_effects import (
 )
 from aicrm_next.platform_foundation.external_effects.adapters import WebhookAdapter
 from aicrm_next.platform_foundation.external_effects.repo import InMemoryExternalEffectRepository
+from tests.webhook_hmac_test_helpers import outbound_webhook_hmac_signer
 
 
 PUBLIC_IP = "8.8.8.8"
@@ -127,7 +128,7 @@ def test_pinned_transport_connects_to_validated_ip_with_original_host_sni_and_no
     )
     response = PinnedHttpsTransport(pool_factory=pool_factory).post(
         target,
-        json_body={"ok": True},
+        body=b'{"ok":true}',
         headers={"Content-Type": "application/json", "Host": "attacker.invalid"},
         timeout=4.5,
     )
@@ -141,6 +142,7 @@ def test_pinned_transport_connects_to_validated_ip_with_original_host_sni_and_no
     assert captured["method"] == "POST"
     assert captured["path"] == "/v1/events?tenant=aicrm"
     assert captured["request_kwargs"]["headers"]["Host"] == "hooks.example.com"
+    assert captured["request_kwargs"]["body"] == b'{"ok":true}'
     assert captured["request_kwargs"]["redirect"] is False
     assert captured["request_kwargs"]["retries"] is False
     assert captured["closed"] is True
@@ -158,6 +160,7 @@ def test_webhook_adapter_blocks_dns_rebinding_before_transport_call(monkeypatch:
     adapter = WebhookAdapter(
         transport=Transport(),
         resolver=lambda _host, _port: [PUBLIC_IP, "10.0.0.9"],
+        signer=outbound_webhook_hmac_signer(),
     )
     result = adapter.dispatch(_job())
 
@@ -182,7 +185,11 @@ def test_webhook_adapter_uses_one_resolution_snapshot_and_never_resolves_inside_
             targets.append(target)
             return HttpsTransportResponse(status_code=200, text='{"ok": true}')
 
-    result = WebhookAdapter(transport=Transport(), resolver=changing_resolver).dispatch(_job())
+    result = WebhookAdapter(
+        transport=Transport(),
+        resolver=changing_resolver,
+        signer=outbound_webhook_hmac_signer(),
+    ).dispatch(_job())
 
     assert result.status == "succeeded"
     assert result.real_external_call_executed is True
@@ -207,6 +214,7 @@ def test_webhook_adapter_rejects_redirect_without_following_location(monkeypatch
     result = WebhookAdapter(
         transport=RedirectTransport(),
         resolver=lambda _host, _port: [PUBLIC_IP],
+        signer=outbound_webhook_hmac_signer(),
     ).dispatch(_job())
 
     assert calls == 1

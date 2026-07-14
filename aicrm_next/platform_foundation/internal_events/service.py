@@ -12,8 +12,8 @@ from .config import (
     allowed_event_types,
     diagnostics_payload as config_diagnostics_payload,
 )
-from .consumer_registry import DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY, InternalEventConsumerRegistry
-from .models import InternalEvent, InternalEventConsumerRun, InternalEventCreateRequest
+from .consumer_registry import InternalEventConsumerRegistry, current_internal_event_consumer_registry
+from .models import InternalEvent, InternalEventConsumerRun, InternalEventConsumerSpec, InternalEventCreateRequest
 from .repository import InternalEventRepository, build_internal_event_repository
 
 
@@ -24,7 +24,7 @@ class InternalEventService:
         consumer_registry: InternalEventConsumerRegistry | None = None,
     ):
         self._repo = repository or build_internal_event_repository()
-        self._registry = consumer_registry or DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
+        self._registry = consumer_registry or current_internal_event_consumer_registry()
 
     def emit_event(
         self,
@@ -62,22 +62,18 @@ class InternalEventService:
             occurred_at=occurred_at,
             tenant_id=tenant_id,
         )
-        event = self._repo.create_event(request)
-        runs = self.register_consumer_runs(event)
+        event, runs = self._repo.create_event_with_consumer_runs(request, self.consumer_specs_for_event_type(event_type))
         return {"event": event.to_dict(), "consumer_runs": [run.to_dict() for run in runs]}
 
-    def register_consumer_runs(self, event: InternalEvent) -> list[InternalEventConsumerRun]:
-        runs: list[InternalEventConsumerRun] = []
-        for consumer in self._registry.list_for_event_type(event.event_type):
-            runs.append(
-                self._repo.create_consumer_run(
-                    event=event,
-                    consumer_name=consumer.consumer_name,
-                    consumer_type=consumer.consumer_type,
-                    max_attempts=consumer.max_attempts,
-                )
+    def consumer_specs_for_event_type(self, event_type: str) -> list[InternalEventConsumerSpec]:
+        return [
+            InternalEventConsumerSpec(
+                consumer_name=consumer.consumer_name,
+                consumer_type=consumer.consumer_type,
+                max_attempts=consumer.max_attempts,
             )
-        return runs
+            for consumer in self._registry.list_for_event_type(event_type)
+        ]
 
     def get_event(self, event_id: str) -> InternalEvent | None:
         return self._repo.get_event(event_id)
@@ -96,15 +92,44 @@ class InternalEventService:
 
         return InternalEventReconciliationService(repository=self._repo).build_event_reconciliation(event_id)
 
-    def retry_consumer_run(self, event_id: str, consumer_name: str) -> InternalEventConsumerRun | None:
-        return self._repo.retry_consumer_run(event_id, consumer_name)
+    def retry_consumer_run(
+        self,
+        event_id: str,
+        consumer_name: str,
+        *,
+        actor_id: str,
+        actor_type: str,
+        reason: str,
+    ):
+        return self._repo.retry_consumer_run(
+            event_id,
+            consumer_name,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            reason=reason,
+        )
 
-    def skip_consumer_run(self, event_id: str, consumer_name: str, *, reason: str = ""):
-        return self._repo.skip_consumer_run(event_id, consumer_name, reason=reason)
+    def skip_consumer_run(
+        self,
+        event_id: str,
+        consumer_name: str,
+        *,
+        actor_id: str,
+        actor_type: str,
+        reason: str,
+    ):
+        return self._repo.skip_consumer_run(
+            event_id,
+            consumer_name,
+            actor_id=actor_id,
+            actor_type=actor_type,
+            reason=reason,
+        )
 
     def diagnostics(self, filters: dict[str, Any] | None = None) -> dict[str, Any]:
         base_filters = dict(filters or {})
         metrics = self._repo.queue_metrics(base_filters)
+        outbox_metrics = self._repo.outbox_metrics()
         configured_event_types = allowed_event_types()
         configured_consumers = allowed_consumers()
         configured_pairs = allowed_event_consumer_pairs()
@@ -134,6 +159,7 @@ class InternalEventService:
             **metrics,
             **config,
             "queue_metrics": metrics,
+            "outbox_metrics": outbox_metrics,
             "effective_queue_metrics": allowed_metrics,
             "blocked_by_config_count": blocked_by_config_count,
             "blocked_by_pair_allowlist_count": blocked_by_pair_allowlist_count,

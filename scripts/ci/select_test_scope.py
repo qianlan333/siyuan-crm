@@ -211,6 +211,22 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
             raise SystemExit(f"Unknown architecture_gate={candidate!r} in scope {scope.get('name')!r}")
         if ARCHITECTURE_ORDER[candidate] > ARCHITECTURE_ORDER[gate]:
             gate = candidate
+    minimum_gate_rules = manifest.get("minimum_architecture_gate_rules", [])
+    if not isinstance(minimum_gate_rules, list):
+        raise SystemExit("manifest.minimum_architecture_gate_rules must be a list")
+    for index, rule in enumerate(minimum_gate_rules):
+        if not isinstance(rule, dict):
+            raise SystemExit(f"minimum architecture gate rule {index} must be a mapping")
+        patterns = rule.get("paths", [])
+        if not isinstance(patterns, list):
+            raise SystemExit(f"minimum architecture gate rule {index}.paths must be a list")
+        candidate = str(rule.get("architecture_gate", "none"))
+        if candidate not in ARCHITECTURE_ORDER:
+            raise SystemExit(f"Unknown architecture_gate={candidate!r} in minimum gate rule {index}")
+        if not any(_matches(path, pattern) for path in changed_files for pattern in patterns):
+            continue
+        if ARCHITECTURE_ORDER[candidate] > ARCHITECTURE_ORDER[gate]:
+            gate = candidate
     if high_risk:
         gate = "full" if ARCHITECTURE_ORDER[gate] < ARCHITECTURE_ORDER["full"] else gate
 

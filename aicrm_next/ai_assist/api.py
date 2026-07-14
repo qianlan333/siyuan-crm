@@ -25,12 +25,12 @@ async def create_external_campaigns(request: Request):
             {"ok": False, "error": "invalid_json", "route_owner": "ai_crm_next"},
             status_code=400,
         )
-    return create_external_campaigns_response(payload, request.headers)
+    return create_external_campaigns_response(payload)
 
 
 @router.get("/api/ai-assist/external/campaigns/{campaign_code}")
 async def get_external_campaign(campaign_code: str, request: Request):
-    return get_external_campaign_status_response(campaign_code, request.headers)
+    return get_external_campaign_status_response(campaign_code)
 
 
 @router.post("/api/internal/direct-send/wecom-private")
@@ -44,9 +44,7 @@ async def create_internal_direct_wecom_private_send(request: Request):
         )
     return create_direct_wecom_private_send_response(
         payload,
-        request.headers,
-        allow_admin_action_token=False,
-        request=request,
+        source="internal_direct_send_api",
     )
 
 
@@ -61,7 +59,5 @@ async def create_admin_direct_wecom_private_send(request: Request):
         )
     return create_direct_wecom_private_send_response(
         payload,
-        request.headers,
-        allow_admin_action_token=True,
-        request=request,
+        source="admin_direct_send_api",
     )

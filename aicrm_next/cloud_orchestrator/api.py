@@ -62,6 +62,7 @@ from .run_due import (
     execute_cloud_campaign_run_due_command,
     normalize_batch_size,
 )
+from .review_plans import create_ai_assist_review_plan
 
 router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "frontend_compat" / "templates"
@@ -837,6 +838,20 @@ async def api_approve_cloud_plan(plan_id: str, request: Request):
         return ApproveCloudPlanCommand()(plan_id, operator=_operator_from_request(request, payload))
     except Exception as exc:
         _raise(exc)
+
+
+@router.post("/api/admin/ai-assist/review-plans")
+async def create_admin_ai_assist_review_plan(request: Request):
+    payload, token_error = await _write_context(request)
+    if token_error:
+        return JSONResponse({"ok": False, "error": token_error}, status_code=401)
+    try:
+        return create_ai_assist_review_plan(payload)
+    except ValueError as exc:
+        return JSONResponse(
+            {"ok": False, "error": str(exc) or "review_plan_create_failed", "route_owner": "ai_crm_next"},
+            status_code=400,
+        )
 
 
 @router.post("/api/admin/cloud-orchestrator/plans/{plan_id}/reject")

@@ -23,7 +23,7 @@ from aicrm_next.ai_audience_ops.event_types import (
     SOURCE_POKE_CONSUMER,
 )
 from aicrm_next.ai_audience_ops.outbound_service import AudienceOutboundService
-from aicrm_next.ai_audience_ops.repository import AudienceRepository, build_audience_repository, next_daily_refresh_at
+from aicrm_next.ai_audience_ops.repository import build_audience_repository, next_daily_refresh_at
 from aicrm_next.ai_audience_ops.scheduler import ai_audience_event_consumer_pairs, emit_due_ticks
 from aicrm_next.ai_audience_ops.service import AudiencePackageService
 from aicrm_next.ai_audience_ops.sql_catalog import ALLOWED_VIEWS, schema_catalog_payload
@@ -183,8 +183,6 @@ def test_ai_audience_scheduler_consumer_pairs_cover_source_refresh_and_outbound(
 @pytest.mark.usefixtures("next_pg_schema")
 @pytest.mark.usefixtures("next_pg_schema")
 def test_acquire_due_packages_uses_one_minute_due_window(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
-
     near_resp = next_client.post(
         "/api/ai/audience/packages",
         headers=_auth(),
@@ -259,8 +257,6 @@ def test_publish_requires_sql_for_enabled_refresh_modes() -> None:
 
 @pytest.mark.usefixtures("next_pg_schema")
 def test_publish_defaults_to_latest_version(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
-
     create_resp = next_client.post(
         "/api/ai/audience/packages",
         headers=_auth(),
@@ -292,17 +288,21 @@ def test_publish_defaults_to_latest_version(next_client, monkeypatch) -> None:
 
     session_factory = get_session_factory()
     with session_factory() as session:
-        rows = session.execute(
-            text(
-                """
+        rows = (
+            session.execute(
+                text(
+                    """
                 SELECT id, status
                 FROM ai_audience_package_version
                 WHERE package_id = :package_id
                 ORDER BY id
                 """
-            ),
-            {"package_id": package_id},
-        ).mappings().all()
+                ),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .all()
+        )
     statuses = {int(row["id"]): row["status"] for row in rows}
     assert statuses[v1_id] == "archived"
     assert statuses[v2_id] == "published"
@@ -310,8 +310,6 @@ def test_publish_defaults_to_latest_version(next_client, monkeypatch) -> None:
 
 @pytest.mark.usefixtures("next_pg_schema")
 def test_publish_can_target_specific_version(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
-
     create_resp = next_client.post(
         "/api/ai/audience/packages",
         headers=_auth(),
@@ -344,7 +342,6 @@ def test_publish_can_target_specific_version(next_client, monkeypatch) -> None:
 @pytest.mark.usefixtures("next_pg_schema")
 def test_daily_snapshot_publish_latest_version_can_exit_member(next_client, monkeypatch) -> None:
     database_url = os.environ["DATABASE_URL"]
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", database_url)
     test_user = "wm_daily_exit"
 
@@ -442,18 +439,30 @@ def test_daily_snapshot_publish_latest_version_can_exit_member(next_client, monk
     assert repeat_resp.json()["exited_count"] == 0
 
     with session_factory() as session:
-        package_row = session.execute(
-            text("SELECT current_version_id FROM ai_audience_package WHERE id = :package_id"),
-            {"package_id": package_id},
-        ).mappings().one()
-        version_rows = session.execute(
-            text("SELECT id, status FROM ai_audience_package_version WHERE package_id = :package_id ORDER BY id"),
-            {"package_id": package_id},
-        ).mappings().all()
-        member_row = session.execute(
-            text("SELECT status FROM ai_audience_member_current WHERE package_id = :package_id AND unionid = 'union_daily_exit'"),
-            {"package_id": package_id},
-        ).mappings().one()
+        package_row = (
+            session.execute(
+                text("SELECT current_version_id FROM ai_audience_package WHERE id = :package_id"),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .one()
+        )
+        version_rows = (
+            session.execute(
+                text("SELECT id, status FROM ai_audience_package_version WHERE package_id = :package_id ORDER BY id"),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .all()
+        )
+        member_row = (
+            session.execute(
+                text("SELECT status FROM ai_audience_member_current WHERE package_id = :package_id AND unionid = 'union_daily_exit'"),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .one()
+        )
     assert package_row["current_version_id"] == v2_id
     assert {int(row["id"]): row["status"] for row in version_rows} == {v1_id: "archived", v2_id: "published"}
     assert member_row["status"] == "exited"
@@ -462,7 +471,6 @@ def test_daily_snapshot_publish_latest_version_can_exit_member(next_client, monk
 @pytest.mark.usefixtures("next_pg_schema")
 def test_publish_auto_refreshes_package_on_first_launch(next_client, monkeypatch) -> None:
     database_url = os.environ["DATABASE_URL"]
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", database_url)
 
     session_factory = get_session_factory()
@@ -519,27 +527,35 @@ def test_publish_auto_refreshes_package_on_first_launch(next_client, monkeypatch
     assert body["launch_refresh"]["real_external_call_executed"] is False
 
     with session_factory() as session:
-        member_row = session.execute(
-            text(
-                """
+        member_row = (
+            session.execute(
+                text(
+                    """
                 SELECT status
                 FROM ai_audience_member_current
                 WHERE package_id = :package_id AND unionid = 'union_launch_refresh_001'
                 """
-            ),
-            {"package_id": package_id},
-        ).mappings().one()
-        run_rows = session.execute(
-            text(
-                """
+                ),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .one()
+        )
+        run_rows = (
+            session.execute(
+                text(
+                    """
                 SELECT run_type, status
                 FROM ai_audience_package_run
                 WHERE package_id = :package_id
                 ORDER BY id
                 """
-            ),
-            {"package_id": package_id},
-        ).mappings().all()
+                ),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .all()
+        )
     assert member_row["status"] == "active"
     assert [(row["run_type"], row["status"]) for row in run_rows] == [("incremental", "succeeded")]
 
@@ -547,7 +563,6 @@ def test_publish_auto_refreshes_package_on_first_launch(next_client, monkeypatch
 @pytest.mark.usefixtures("next_pg_schema")
 def test_publish_does_not_repeat_launch_refresh_for_active_package(next_client, monkeypatch) -> None:
     database_url = os.environ["DATABASE_URL"]
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", database_url)
 
     session_factory = get_session_factory()
@@ -625,27 +640,23 @@ def test_ai_audience_test_agent_webhook_disabled(next_client, monkeypatch) -> No
     assert response.json()["error"] == "test_agent_disabled"
 
 
-def test_ai_audience_test_agent_service_signs_inbound_loopback(monkeypatch) -> None:
+def test_ai_audience_test_agent_service_routes_inbound_without_shared_secrets(monkeypatch) -> None:
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_ENABLED", "1")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_PACKAGE_KEYS", "test_agent_pkg")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_ALLOWED_EXTERNAL_USERIDS", "wm_test_agent")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_SENDER_USERID", "HuangYouCan")
-    inbound_secret = "inbound-secret"
-    outbound_secret = "outbound-secret"
     inbound_calls = []
 
     class Repo:
         def get_package_by_key(self, package_key):
-            return {"id": 11, "package_key": package_key, "inbound_webhook_secret": inbound_secret}
+            return {"id": 11, "package_key": package_key}
 
         def list_subscriptions(self, package_id, active_only=True, trigger_event_type=""):
-            return [{"id": 21, "package_id": package_id, "signing_secret": outbound_secret}]
+            return [{"id": 21, "package_id": package_id}]
 
     class Inbound:
-        def handle(self, package_key, payload, *, raw_body: bytes, signature: str = ""):
-            expected = hmac.new(inbound_secret.encode("utf-8"), raw_body, hashlib.sha256).hexdigest()
-            assert signature == expected
-            inbound_calls.append({"package_key": package_key, "payload": payload})
+        def handle(self, package_key, payload, *, raw_body: bytes):
+            inbound_calls.append({"package_key": package_key, "payload": payload, "raw_body": raw_body})
             return {"ok": True, "external_effect_job_id": 7, "record_only": False, "real_external_call_executed": False}
 
     payload = {
@@ -656,16 +667,13 @@ def test_ai_audience_test_agent_service_signs_inbound_loopback(monkeypatch) -> N
     }
     service = AudienceTestAgentService(repository=Repo(), inbound_service=Inbound())
 
-    invalid_result = service.handle(payload, signature="bad-signature")
-    assert invalid_result["status_code"] == 401
-    assert inbound_calls == []
-
-    result = service.handle(payload, signature=_external_effect_signature(outbound_secret, payload))
+    result = service.handle(payload)
     assert result["ok"] is True
     assert result["external_effect_job_id"] == 7
     assert result["sender_userid"] == "HuangYouCan"
     assert inbound_calls[0]["package_key"] == "test_agent_pkg"
     callback = inbound_calls[0]["payload"]
+    assert json.loads(inbound_calls[0]["raw_body"]) == callback
     assert callback["external_event_id"] == "self_agent:test_agent_pkg:123"
     assert callback["message"]["text"] == TEST_AGENT_MESSAGE_TEXT
     assert callback["action"] == {
@@ -677,15 +685,12 @@ def test_ai_audience_test_agent_service_signs_inbound_loopback(monkeypatch) -> N
 
 @pytest.mark.usefixtures("next_pg_schema")
 @pytest.mark.usefixtures("next_pg_schema")
-def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
+def test_ai_audience_test_agent_webhook_business_guards_and_plans_private_message(next_client, monkeypatch) -> None:
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_ENABLED", "1")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_PACKAGE_KEYS", "test_agent_pkg")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_ALLOWED_EXTERNAL_USERIDS", "wm_test_agent")
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_SENDER_USERID", "HuangYouCan")
     monkeypatch.delenv("AICRM_AI_AUDIENCE_INBOUND_ACTION_EXECUTE", raising=False)
-    inbound_secret = "inbound-secret"
-    outbound_secret = "outbound-secret"
 
     create_resp = next_client.post(
         "/api/ai/audience/packages",
@@ -693,7 +698,6 @@ def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_cl
         json={
             "package_key": "test_agent_pkg",
             "name": "自测 Agent 包",
-            "inbound_webhook_secret": inbound_secret,
         },
     )
     assert create_resp.status_code == 200
@@ -705,7 +709,6 @@ def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_cl
         json={
             "trigger_event_type": "entered",
             "webhook_url": "https://www.youcangogogo.com/api/ai/audience/test-agent/webhook",
-            "signing_secret": outbound_secret,
         },
     )
     assert sub_resp.status_code == 200
@@ -766,21 +769,10 @@ def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_cl
         "payload": {"test_case": "self_agent"},
         "idempotency_key": "ai_audience_outbound:test:123",
     }
-    valid_signature = _external_effect_signature(outbound_secret, payload)
-
-    bad_signature_resp = next_client.post(
-        "/api/ai/audience/test-agent/webhook",
-        json=payload,
-        headers={"X-AICRM-External-Effect-Signature": "bad-signature"},
-    )
-    assert bad_signature_resp.status_code == 401
-    assert bad_signature_resp.json()["error"] == "invalid_signature"
-
     monkeypatch.setenv("AICRM_AI_AUDIENCE_TEST_AGENT_ALLOWED_EXTERNAL_USERIDS", "wm_other")
     forbidden_resp = next_client.post(
         "/api/ai/audience/test-agent/webhook",
         json=payload,
-        headers={"X-AICRM-External-Effect-Signature": valid_signature},
     )
     assert forbidden_resp.status_code == 403
     assert forbidden_resp.json()["error"] == "external_userid_not_allowed"
@@ -789,7 +781,6 @@ def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_cl
     response = next_client.post(
         "/api/ai/audience/test-agent/webhook",
         json=payload,
-        headers={"X-AICRM-External-Effect-Signature": valid_signature},
     )
     assert response.status_code == 200
     body = response.json()
@@ -818,7 +809,6 @@ def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_cl
     duplicate_resp = next_client.post(
         "/api/ai/audience/test-agent/webhook",
         json=payload,
-        headers={"X-AICRM-External-Effect-Signature": valid_signature},
     )
     assert duplicate_resp.status_code == 200
     assert duplicate_resp.json()["external_effect_job_id"] == body["external_effect_job_id"]
@@ -836,8 +826,6 @@ def test_ai_audience_test_agent_webhook_guards_and_plans_private_message(next_cl
 
 @pytest.mark.usefixtures("next_pg_schema")
 def test_create_outbound_subscription_deduplicates_active_target(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
-
     create_resp = next_client.post(
         "/api/ai/audience/packages",
         headers=_auth(),
@@ -853,7 +841,6 @@ def test_create_outbound_subscription_deduplicates_active_target(next_client, mo
         json={
             "trigger_event_type": "entered",
             "webhook_url": webhook_url,
-            "signing_secret": "secret-v1",
             "headers": {"X-Test": "v1"},
         },
     )
@@ -867,7 +854,6 @@ def test_create_outbound_subscription_deduplicates_active_target(next_client, mo
         json={
             "trigger_event_type": "entered",
             "webhook_url": webhook_url,
-            "signing_secret": "secret-v2",
             "headers": {"X-Test": "v2"},
             "max_attempts": 7,
         },
@@ -875,15 +861,16 @@ def test_create_outbound_subscription_deduplicates_active_target(next_client, mo
     assert second_resp.status_code == 200
     assert second_resp.json()["deduplicated"] is True
     assert second_resp.json()["subscription"]["id"] == first_id
-    assert second_resp.json()["subscription"]["signing_secret"] == "secret-v2"
+    assert "signing_secret" not in second_resp.json()["subscription"]
     assert second_resp.json()["subscription"]["headers_json"] == {"X-Test": "v2"}
     assert second_resp.json()["subscription"]["max_attempts"] == 7
 
     session_factory = get_session_factory()
     with session_factory() as session:
-        active_count = session.execute(
-            text(
-                """
+        active_count = (
+            session.execute(
+                text(
+                    """
                 SELECT COUNT(*) AS count
                 FROM ai_audience_outbound_subscription
                 WHERE package_id = :package_id
@@ -892,9 +879,12 @@ def test_create_outbound_subscription_deduplicates_active_target(next_client, mo
                   AND target_type = 'webhook'
                   AND webhook_url = :webhook_url
                 """
-            ),
-            {"package_id": package_id, "webhook_url": webhook_url},
-        ).mappings().one()["count"]
+                ),
+                {"package_id": package_id, "webhook_url": webhook_url},
+            )
+            .mappings()
+            .one()["count"]
+        )
     assert active_count == 1
 
 
@@ -948,7 +938,6 @@ def test_outbound_planner_deduplicates_historical_duplicate_subscriptions() -> N
 @pytest.mark.usefixtures("next_pg_schema")
 def test_package_refresh_uses_internal_event_and_external_effect_queue(next_client, monkeypatch) -> None:
     database_url = os.environ["DATABASE_URL"]
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", database_url)
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_ENABLED", "1")
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS", f"{RUN_REFRESHED_EVENT}:{OUTBOUND_EFFECT_CONSUMER}")
@@ -1024,22 +1013,28 @@ def test_package_refresh_uses_internal_event_and_external_effect_queue(next_clie
     run_event_id = body["run_event"]["event"]["event_id"]
 
     with session_factory() as session:
-        member_events = session.execute(
-            text(
-                """
+        member_events = (
+            session.execute(
+                text(
+                    """
                 SELECT id, internal_event_id
                 FROM ai_audience_member_event
                 WHERE package_id = :package_id
                 ORDER BY id ASC
                 """
-            ),
-            {"package_id": package_id},
-        ).mappings().all()
+                ),
+                {"package_id": package_id},
+            )
+            .mappings()
+            .all()
+        )
     assert len(member_events) == 2
     member_event = member_events[0]
     assert member_event["internal_event_id"]
 
-    worker = InternalEventWorker()
+    worker = InternalEventWorker(
+        consumer_registry=next_client.app.state.internal_event_consumer_registry,
+    )
     dry_run = worker.dispatch_one_consumer(
         run_event_id,
         OUTBOUND_EFFECT_CONSUMER,
@@ -1074,13 +1069,12 @@ def test_package_refresh_uses_internal_event_and_external_effect_queue(next_clie
     assert jobs[0]["payload_json"]["headers"]["X-AICRM-Event-Type"] == "audience.incremental.entered"
     assert jobs[0]["payload_json"]["headers"]["X-AICRM-Refresh-Run-Id"]
     assert jobs[0]["payload_json"]["headers"]["X-AICRM-Idempotency-Key"]
-    assert "X-AICRM-Signature" in jobs[0]["payload_json"]["headers"]
+    assert "X-AICRM-Signature" not in jobs[0]["payload_json"]["headers"]
     assert "package_key" not in jobs[0]["payload_json"]["body"]
 
 
 @pytest.mark.usefixtures("next_pg_schema")
 def test_source_dirty_emits_existing_internal_event_queue(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     response = next_client.post(
         "/api/ai/audience/source-dirty",
         headers=_auth(),
@@ -1099,7 +1093,6 @@ def test_source_dirty_emits_existing_internal_event_queue(next_client, monkeypat
 
 @pytest.mark.usefixtures("next_pg_schema")
 def test_inbound_webhook_requires_hmac_and_records_event(next_client, monkeypatch) -> None:
-    monkeypatch.setenv("AICRM_AI_AUDIENCE_API_TOKEN", TOKEN)
     secret = "inbound-secret"
     create_resp = next_client.post(
         "/api/ai/audience/packages",

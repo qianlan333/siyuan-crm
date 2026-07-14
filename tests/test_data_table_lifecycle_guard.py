@@ -33,6 +33,7 @@ EVENT_EFFECT_TABLES = {
     "external_push_delivery",
     "outbound_webhook_deliveries",
     "outbound_event_outbox",
+    "internal_event_outbox",
     "internal_event",
     "internal_event_consumer_run",
     "internal_event_consumer_attempt",
@@ -174,10 +175,16 @@ def test_retired_tables_have_no_next_runtime_sql_references() -> None:
 
     violations: list[str] = []
     runtime_files = sorted(NEXT_RUNTIME_ROOT.rglob("*.py"))
+    runtime_sources: list[tuple[Path, str, str]] = []
+    for path in runtime_files:
+        source = path.read_text(encoding="utf-8")
+        runtime_sources.append((path, source, source.casefold()))
     for table_name in retired_tables:
+        folded_table_name = table_name.casefold()
         patterns = _runtime_reference_patterns(table_name)
-        for path in runtime_files:
-            source = path.read_text(encoding="utf-8")
+        for path, source, folded_source in runtime_sources:
+            if folded_table_name not in folded_source:
+                continue
             for pattern in patterns:
                 if pattern.search(source):
                     violations.append(f"{path.relative_to(ROOT)} references retired table {table_name}")

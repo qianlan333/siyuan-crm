@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+from aicrm_next.platform_foundation.auth_platform.context import AuthContext
+
 
 ALL_CAPABILITIES = frozenset(
     {
@@ -35,9 +37,7 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
             "send_message",
         }
     ),
-    "questionnaire_admin": frozenset(
-        {"admin_read", "manage_customer", "manage_questionnaire", "read_customer"}
-    ),
+    "questionnaire_admin": frozenset({"admin_read", "manage_customer", "manage_questionnaire", "read_customer"}),
     "viewer": frozenset({"admin_read", "read_customer"}),
 }
 
@@ -53,13 +53,12 @@ def capabilities_for_roles(values: Iterable[Any]) -> frozenset[str]:
     return frozenset(capabilities)
 
 
-def session_roles(session: dict[str, Any] | None) -> tuple[str, ...]:
-    return normalize_roles((session or {}).get("roles") or ())
+def context_can(context: AuthContext | None, capability: str) -> bool:
+    return bool(context and str(capability or "").strip() in context.capabilities)
 
 
-def session_can(session: dict[str, Any] | None, capability: str) -> bool:
-    return str(capability or "").strip() in capabilities_for_roles(session_roles(session))
-
-
-def viewer_only(session: dict[str, Any] | None) -> bool:
-    return session_roles(session) == ("viewer",)
+def viewer_only(context: AuthContext | None) -> bool:
+    if context is None:
+        return False
+    write_capabilities = ALL_CAPABILITIES - {"admin_read", "read_customer"}
+    return not bool(set(context.capabilities) & write_capabilities)

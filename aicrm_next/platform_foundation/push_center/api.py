@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hmac
 from pathlib import Path
 from typing import Any
 
@@ -8,10 +7,9 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from aicrm_next.admin_jobs.routes import ensure_admin_action_token, validate_admin_action_token
+from aicrm_next.shared.admin_action_runtime import ensure_admin_action_token, validate_admin_action_token
 from aicrm_next.admin_shell import admin_path_for, shell_context
 from aicrm_next.platform_foundation.external_effects.service import ExternalEffectService
-from aicrm_next.shared.runtime_settings import runtime_setting
 
 from . import CAPABILITY_OWNER, ROUTE_OWNER
 from .repository import PushCenterRepository
@@ -62,29 +60,16 @@ def _json(payload: dict[str, Any], *, status_code: int = 200) -> JSONResponse:
     )
 
 
-def _internal_token_error(request: Request) -> str:
-    header = _text(request.headers.get("Authorization"))
-    if not header.lower().startswith("bearer "):
-        return "internal_token_required"
-    expected = _text(runtime_setting("AUTOMATION_INTERNAL_API_TOKEN"))
-    if not expected:
-        return "automation_internal_token_not_configured"
-    actual = header.split(" ", 1)[1].strip()
-    if not hmac.compare_digest(actual, expected):
-        return "internal_token_required"
-    return ""
-
-
 def _action_or_internal_token_error(request: Request, payload: dict[str, Any]) -> str:
-    internal_error = _internal_token_error(request)
-    if not internal_error:
-        return ""
     token = _text(request.headers.get("X-Admin-Action-Token")) or _text(payload.get("admin_action_token"))
     return validate_admin_action_token(token, request=request)
 
 
 def _page_context(request: Request, *, page_notice: str = "", page_error: str = "", action_result: dict[str, Any] | None = None) -> dict[str, Any]:
-    payload = build_jobs_payload(dict(request.query_params), repository=PushCenterRepository())
+    # The page is an asynchronous shell: its browser code loads jobs and stats
+    # from the protected JSON endpoints. Querying the projection here repeats
+    # those scans before the first byte of HTML and can make deploy smoke checks
+    # time out on production-sized data.
     selected_job_id = _int(request.query_params.get("job_id"), default=0)
     selected_job = build_job_detail_payload(selected_job_id, repository=PushCenterRepository()) if selected_job_id else None
     context = shell_context(
@@ -96,7 +81,6 @@ def _page_context(request: Request, *, page_notice: str = "", page_error: str = 
     context.update(
         {
             "breadcrumbs": [{"label": "客户管理后台", "href": "/"}, {"label": "推送中心", "href": ""}],
-            "push_center": payload,
             "selected_job": selected_job,
             "page_notice": page_notice,
             "page_error": page_error,

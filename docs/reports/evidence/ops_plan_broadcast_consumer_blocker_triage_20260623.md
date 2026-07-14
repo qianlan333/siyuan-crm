@@ -75,7 +75,7 @@ Existing internal-event routes provide the required controls:
 
 | Capability | Route | Availability | Notes |
 | --- | --- | --- | --- |
-| run-due preview | `POST /api/admin/internal-events/run-due/preview` | available | Requires `AUTOMATION_INTERNAL_API_TOKEN`; read-only preview. |
+| run-due preview | `POST /api/admin/internal-events/run-due/preview` | available | Historical evidence used the retired shared Bearer; current calls require an `automation_worker` short-lived JWT. |
 | generic run-due | `POST /api/admin/internal-events/run-due` | available | Non-dry-run requires internal events enabled, auto-execute gate, and allowlists. |
 | single-consumer preview/run | `POST /api/admin/internal-events/{event_id}/consumers/{consumer_name}/run` | available | Requires internal token or admin action token; `dry_run=true` previews without write. |
 | retry | `POST /api/admin/internal-events/{event_id}/consumers/{consumer_name}/retry` | available | Useful only after retryable failure. |

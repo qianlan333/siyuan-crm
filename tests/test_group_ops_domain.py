@@ -255,14 +255,14 @@ def test_build_node_group_message_content_with_resolved_materials():
     ]
 
 
-def test_webhook_token_hash_verification_does_not_require_plaintext_storage():
-    from aicrm_next.automation_engine.group_ops.domain import hash_webhook_token, verify_webhook_token
+def test_webhook_endpoint_key_is_non_secret_and_unique():
+    from aicrm_next.automation_engine.group_ops.domain import generate_webhook_key
 
-    token_hash = hash_webhook_token("secret-token")
+    first = generate_webhook_key("核心 功能/激活")
+    second = generate_webhook_key("核心 功能/激活")
 
-    assert token_hash != "secret-token"
-    assert verify_webhook_token(provided_token="secret-token", token_hash=token_hash) is True
-    assert verify_webhook_token(provided_token="wrong", token_hash=token_hash) is False
+    assert first.startswith("核心-功能激活-")
+    assert first != second
 
 
 def test_repository_guardrail_uses_sql_repository_in_production_mode(monkeypatch):

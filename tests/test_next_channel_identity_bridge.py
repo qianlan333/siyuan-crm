@@ -79,7 +79,7 @@ def _seed_identity_mobile_candidate(db, *, unionid: str, external_userid: str, m
 def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(app, monkeypatch, next_pg_schema):
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.process_channel_entry",
-        lambda command: {"handled": False, "reason": "channel_entry_not_under_test"},
+        lambda command, **kwargs: {"handled": False, "reason": "channel_entry_not_under_test"},
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.repo.log_external_contact_event",
@@ -133,7 +133,7 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
                        primary_openid,
                        primary_owner_userid,
                        customer_name AS name,
-                       mobile,
+                       mobile_normalized AS mobile,
                        identity_status AS status
                 FROM crm_user_identity
                 WHERE unionid = ?
@@ -148,7 +148,7 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
             "description": "wm_bridge_001",
             "real_external_call_executed": True,
         }
-        assert result["identity_sync"]["mobile_binding"]["status"] == "bound"
+        assert result["identity_sync"]["mobile_binding"]["status"] == "already_bound"
         assert result["identity_sync"]["questionnaire_backfill"]["reason"] == "questionnaire_submissions_unionid_only"
         assert adapter.profile_updates == [
             {
@@ -191,7 +191,7 @@ def test_next_external_contact_callback_keeps_entry_success_when_identity_sync_f
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.process_channel_entry",
-        lambda command: calls.append("channel_entry") or {"handled": True, "reason": "channel_entry_baseline_recorded"},
+        lambda command, **kwargs: calls.append("channel_entry") or {"handled": True, "reason": "channel_entry_baseline_recorded"},
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.repo.record_identity_sync_result",
@@ -269,7 +269,7 @@ def test_next_external_contact_callback_canonicalizes_channel_entry_after_identi
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.process_channel_entry",
-        lambda command: calls.append("runtime_entry") or {"handled": True, "mode": "channel_runtime_only", "reason": "channel_entry_runtime_recorded"},
+        lambda command, **kwargs: calls.append("runtime_entry") or {"handled": True, "mode": "channel_runtime_only", "reason": "channel_entry_runtime_recorded"},
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.resolve_channel_for_scene",
@@ -376,7 +376,7 @@ def test_next_external_contact_callback_records_runtime_entry_when_identity_pend
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.process_channel_entry",
-        lambda command: calls.append("channel_entry") or {"handled": True, "mode": "channel_runtime_only", "reason": "channel_entry_runtime_recorded"},
+        lambda command, **kwargs: calls.append("channel_entry") or {"handled": True, "mode": "channel_runtime_only", "reason": "channel_entry_runtime_recorded"},
     )
     monkeypatch.setattr(
         "aicrm_next.channel_entry.application.repo.mark_channel_entry_runtime_identity",
@@ -439,24 +439,19 @@ def test_sidebar_identity_refresh_binds_missing_identity_on_access(app, next_pg_
             db = get_db()
             identity = db.execute(
                 """
-                SELECT primary_external_userid AS external_userid, mobile, primary_owner_userid
+                SELECT primary_external_userid AS external_userid,
+                       mobile_normalized AS mobile,
+                       primary_owner_userid
                 FROM crm_user_identity
                 WHERE unionid = ?
                 """,
                 ("union_bridge_001",),
             ).fetchone()
 
-        assert result["status"] == "attempted"
-        assert result["reason"] == "mobile_not_bound"
-        assert result["sync_status"] == "success"
-        assert result["mobile_binding_status"] == "bound"
-        assert adapter.profile_updates == [
-            {
-                "userid": "owner_bridge",
-                "external_userid": "wm_bridge_001",
-                "description": "wm_bridge_001",
-            }
-        ]
+        assert result["status"] == "skipped"
+        assert result["reason"] == "identity_fresh"
+        assert result["mobile_bound"] is True
+        assert adapter.profile_updates == []
         assert dict(identity) == {
             "external_userid": "wm_bridge_001",
             "mobile": "18565883798",
@@ -499,15 +494,17 @@ def test_identity_mobile_bridge_backfill_repairs_historical_unbound_rows(app, ne
 
         identity = db.execute(
             """
-            SELECT primary_external_userid AS external_userid, mobile, primary_owner_userid
+            SELECT primary_external_userid AS external_userid,
+                   mobile_normalized AS mobile,
+                   primary_owner_userid
             FROM crm_user_identity
             WHERE unionid = ?
             """,
             ("union_bridge_history",),
         ).fetchone()
 
-    assert dry_run["summary"] == {"would_bind": 1}
-    assert executed["summary"] == {"bound": 1}
+    assert dry_run["summary"] == {"already_bound": 1}
+    assert executed["summary"] == {"already_bound": 1}
     assert executed["results"][0]["questionnaire_backfill"]["reason"] == "questionnaire_submissions_unionid_only"
     assert dict(identity) == {
         "external_userid": "wm_bridge_history",

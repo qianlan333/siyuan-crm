@@ -74,6 +74,8 @@ def test_internal_event_admin_page_smoke_and_payment_consumer_copy(next_client: 
         "/api/admin/internal-events",
         'data-action="retry"',
         'data-action="skip"',
+        "重试原因（必填）",
+        "跳过原因（必填）",
         'href="#refresh"',
         'href="#export"',
     ]:

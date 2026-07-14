@@ -4,7 +4,8 @@
 <section class="internal-events-page" data-route-owner="ai_crm_next">
   <section class="internal-events-stats" id="statsGrid" aria-label="事件统计">
     <article class="admin-card internal-events-stat"><div class="internal-events-stat-label">全部事件</div><div class="internal-events-stat-value" data-stat="total">-</div></article>
-    <article class="admin-card internal-events-stat"><div class="internal-events-stat-label">待处理消费者</div><div class="internal-events-stat-value" data-stat="due">-</div></article>
+    <article class="admin-card internal-events-stat"><div class="internal-events-stat-label">可执行业务待办</div><div class="internal-events-stat-value" data-stat="due">-</div></article>
+    <article class="admin-card internal-events-stat"><div class="internal-events-stat-label">灰度未开放（不执行）</div><div class="internal-events-stat-value" data-stat="rollout_gated">-</div></article>
     <article class="admin-card internal-events-stat"><div class="internal-events-stat-label">失败可重试</div><div class="internal-events-stat-value" data-stat="failed_retryable">-</div></article>
     <article class="admin-card internal-events-stat"><div class="internal-events-stat-label">失败不可重试</div><div class="internal-events-stat-value" data-stat="failed_terminal">-</div></article>
   </section>
@@ -166,7 +167,7 @@
 
 <style>
 .internal-events-page { --ie-line: #e5e7eb; --ie-muted: #6b7280; --ie-primary: #2563eb; --ie-success: #059669; --ie-warning: #d97706; --ie-danger: #dc2626; --ie-blocked: #7c3aed; }
-.internal-events-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.internal-events-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
 .internal-events-stat { padding: 14px; }
 .internal-events-stat-label { font-size: 12px; color: var(--ie-muted); margin-bottom: 8px; }
 .internal-events-stat-value { font-size: 22px; font-weight: 700; }
@@ -268,7 +269,7 @@
   };
   const WHY_PENDING_CATEGORY_LABELS = {
     normal_pending: "正常等待",
-    allowlist_blocked: "Allowlist 阻断",
+    allowlist_blocked: "灰度未开放",
     placeholder_not_configured: "占位未配置",
     skipped_expected: "预期跳过"
   };
@@ -559,6 +560,7 @@
     const counts = data.counts || {};
     document.querySelector('[data-stat="total"]').textContent = counts.total ?? data.total ?? 0;
     document.querySelector('[data-stat="due"]').textContent = counts.due ?? 0;
+    document.querySelector('[data-stat="rollout_gated"]').textContent = counts.rollout_gated ?? 0;
     document.querySelector('[data-stat="failed_retryable"]').textContent = counts.failed_retryable ?? 0;
     document.querySelector('[data-stat="failed_terminal"]').textContent = counts.failed_terminal ?? 0;
     document.getElementById("totalText").textContent = `共 ${data.total || 0} 条`;
@@ -571,7 +573,7 @@
     }
     tbody.innerHTML = items.map(item => {
       const summary = item.reconciliation_summary || {};
-      const unresolved = Number(summary.unresolved_consumer_count ?? item.pending_count ?? 0);
+      const unresolved = Number(summary.unresolved_consumer_count ?? item.pending_count ?? 0), rolloutGated = Number(summary.rollout_gated_consumer_count ?? 0);
       const placeholder = Number(summary.placeholder_consumer_count ?? 0);
       return `
         <tr data-event-id="${escapeHtml(item.event_id)}">
@@ -585,7 +587,7 @@
               <span class="internal-events-chip">成 ${Number(item.succeeded_count || 0)}</span>
               <span class="internal-events-chip">败 ${Number(item.failed_count || 0)}</span>
               <span class="internal-events-chip">跳 ${Number(item.skipped_count || 0)}</span>
-              <span class="internal-events-chip">未执行 ${unresolved}</span>
+              <span class="internal-events-chip">业务待办 ${unresolved}</span><span class="internal-events-chip">灰度 ${rolloutGated}</span>
               <span class="internal-events-chip placeholder">占位 ${placeholder}</span>
             </div>
           </td>
@@ -718,7 +720,8 @@
   async function mutateConsumer(eventId, consumerName, action) {
     const credential = window.prompt("请输入管理员操作口令");
     if (!credential) return;
-    const reason = action === "skip" ? window.prompt("跳过原因", "operator_skip") || "" : "";
+    const reason = window.prompt(action === "skip" ? "跳过原因（必填）" : "重试原因（必填）", action === "skip" ? "operator_skip" : "operator_retry") || "";
+    if (!reason.trim()) return;
     const actionHeader = "X-Admin-Action-" + "To" + "ken";
     const response = await fetch(`/api/admin/internal-events/${encodeURIComponent(eventId)}/consumers/${encodeURIComponent(consumerName)}/${action}`, {
       method: "POST",

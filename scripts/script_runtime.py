@@ -48,8 +48,31 @@ def read_app_port() -> str:
     return os.getenv("APP_PORT", "5000").strip() or "5000"
 
 
-def read_internal_api_token(*, purpose: str = "automation_worker") -> str:
-    ensure_repo_root_on_path()
-    from aicrm_next.shared.internal_service_tokens import internal_service_token_for_purpose
+def read_internal_api_base_url() -> str:
+    value = os.getenv("AICRM_INTERNAL_API_BASE_URL", "").strip().rstrip("/")
+    if not value.startswith("https://"):
+        raise RuntimeError("AICRM_INTERNAL_API_BASE_URL must be an HTTPS URL")
+    return value
 
-    return internal_service_token_for_purpose(purpose)
+
+def read_internal_tls_context():
+    ensure_repo_root_on_path()
+    from aicrm_next.platform_foundation.auth_platform.access_client import build_tls_ssl_context
+
+    return build_tls_ssl_context()
+
+
+def read_internal_access_token(
+    *,
+    purpose: str = "automation_worker",
+    audience: str = "internal_worker",
+    scopes: tuple[str, ...] = ("write",),
+) -> str:
+    ensure_repo_root_on_path()
+    from aicrm_next.platform_foundation.auth_platform.access_client import fetch_internal_access_token
+
+    return fetch_internal_access_token(
+        purpose=purpose,
+        audience=audience,
+        scopes=scopes,
+    ).access_token

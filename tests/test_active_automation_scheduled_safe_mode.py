@@ -10,7 +10,6 @@ def _production_client(monkeypatch):
     monkeypatch.setenv("AICRM_NEXT_ENV", "production")
     monkeypatch.setenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("DATABASE_URL", "postgresql://probe:probe@127.0.0.1:1/aicrm_probe")
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "probe-token")
     monkeypatch.setenv("SECRET_KEY", "active-automation-scheduled-safe-mode")
     return TestClient(create_app())
 

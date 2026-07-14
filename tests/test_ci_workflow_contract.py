@@ -56,14 +56,13 @@ def test_full_regression_owns_full_pytest_and_full_frontend() -> None:
     assert 'cron: "0 18 * * *"' in source
     assert "full-python-shard:" in source
     assert "fail-fast: false" in source
-    assert "max-parallel: 4" in source
-    assert source.count("shard_index:") == 4
-    assert "shard_index: 0" in source
-    assert "shard_index: 1" in source
-    assert "shard_index: 2" in source
-    assert "shard_index: 3" in source
+    assert "max-parallel: 8" in source
+    assert source.count("shard_index:") == 8
+    for shard_index in range(8):
+        assert f"shard_index: {shard_index}" in source
+        assert f"shard_label: {shard_index + 1}-of-8" in source
     assert "python scripts/ci/select_pytest_shard.py" in source
-    assert "--shard-total 4" in source
+    assert "--shard-total 8" in source
     assert "--duration-baseline docs/ci/pytest_duration_baseline.json" in source
     assert "set -o pipefail" in source
     assert "pytest_files=()" in source
@@ -73,12 +72,16 @@ def test_full_regression_owns_full_pytest_and_full_frontend() -> None:
     assert "mapfile" not in source
     assert 'python -m pytest "${pytest_files[@]}" -n auto --dist=loadfile -q' in source
     assert "--junitxml=" in source
-    assert "actions/upload-artifact@v4" in source
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in source
     assert "timeout-minutes: 25" in source
     assert "bash scripts/ci/run_architecture_gates.sh --mode full" in source
     assert "python scripts/ci/check_dependency_security.py" in source
     assert "python -m pip_audit -r requirements.lock --require-hashes --progress-spinner=off" in source
     assert "python -m pip install --require-hashes -r requirements.lock" in source
+    assert "performance-regression:" in source
+    assert "python scripts/ops/bootstrap_database.py" in source
+    assert "python tools/check_critical_read_performance.py" in source
+    assert "critical-read-performance.json" in source
     assert "npm audit --audit-level=high" in source
     assert "npm run typecheck" in source
     assert "npm run build:frontend" in source
@@ -100,20 +103,28 @@ def test_full_regression_runs_governance_once_and_ci_fast_does_not_duplicate_it(
     assert "uses: ./.github/workflows/full-regression.yml\n    with:\n      run_governance: false" in ci_fast_source
 
 
-def test_deploy_waits_for_successful_ci_fast_on_main() -> None:
+def test_siyuan_production_deploy_waits_for_successful_ci_fast_on_main() -> None:
     source = _source(DEPLOY_WORKFLOW)
 
+    assert "name: Deploy to Production" in source
     assert "workflow_run:" in source
     assert 'workflows: ["CI Fast"]' in source
     assert "types: [completed]" in source
     assert "github.event.workflow_run.conclusion == 'success'" in source
     assert "github.event.workflow_run.head_branch == 'main'" in source
     assert "push:" not in source
+    assert "schedule:" not in source
+    assert "secrets.DEPLOY_HOST" in source
+    assert "secrets.DEPLOY_USER" in source
+    assert "secrets.DEPLOY_SSH_KEY" in source
     assert "set -o pipefail" in source
-    assert (
-        "python scripts/ops/check_admin_read_pages_smoke.py --base-url http://127.0.0.1:5001 --require-admin-cookie "
-        "| tee /tmp/aicrm-admin-read-pages-smoke.json"
-    ) in source
+    assert "printf '%s\\n' \"$after_sha\" > .release-sha" in source
+    assert "python scripts/ops/check_admin_read_pages_smoke.py" in source
+    assert "tee /tmp/aicrm-admin-read-pages-smoke.json" in source
+
+
+def test_siyuan_overlay_does_not_add_upstream_manual_promotion_workflow() -> None:
+    assert not (ROOT / ".github" / "workflows" / "promote-production.yml").exists()
 
 
 def test_architecture_gate_script_has_fast_db_and_full_modes() -> None:

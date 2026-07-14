@@ -183,4 +183,5 @@ def test_consumer_run_due_diagnostics_redact_sensitive_values() -> None:
     assert "full_order_no_should_not_appear" not in dumped
     assert "iev_demo_should_be_redacted_dff3" not in dumped
     assert "required_token_or_gate" in dumped
-    assert "AUTOMATION_INTERNAL_API_TOKEN" in dumped
+    assert "OAuth automation-worker access token" in dumped
+    assert "AUTOMATION_INTERNAL_API_TOKEN" not in dumped

@@ -4,13 +4,16 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 from sqlalchemy.engine import Engine
 
+from aicrm_next.identity_contact.dto import IdentityResolution, ResolvePersonIdentityRequest
+from aicrm_next.identity_contact.resolver import SQLAlchemyIdentityResolver, classify_identity_candidates
 from aicrm_next.commerce.application import ListProductsQuery
 from aicrm_next.commerce.repo import build_commerce_repository
 from aicrm_next.customer_read_model.application import GetCustomerContextQuery, _close_repository
 from aicrm_next.customer_read_model.dto import CustomerContextRequest
+from aicrm_next.customer_read_model.errors import CustomerScopeForbiddenError
 from aicrm_next.customer_read_model.repo import CustomerReadRepository, build_customer_live_source_repository
 from aicrm_next.media_library.application import GetImageThumbnailQuery, ListMediaItemsQuery
 from aicrm_next.service_period.application import ListServicePeriodProductsQuery
@@ -19,13 +22,17 @@ from aicrm_next.service_period.domain import (
     isoformat as service_period_isoformat,
     remaining_days as service_period_remaining_days,
 )
+from aicrm_next.service_period.huangyoucan_usage import (
+    huangyoucan_usage_match_joins,
+    huangyoucan_usage_select_fields,
+    public_huangyoucan_usage_fields,
+)
 from aicrm_next.shared.db_session import get_engine
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.runtime import raw_database_url
-from aicrm_next.shared.signed_context import append_ctx_query, build_sidebar_product_context_token
+from aicrm_next.shared.signed_context import append_ctx_fragment, build_sidebar_product_context_token
 
 MODULES = ["profile", "questionnaires", "products", "orders", "periodic_orders", "materials", "other_staff_messages"]
-READONLY_OWNER_PENDING_USERID = "__aicrm_readonly_owner_pending__"
 ORDER_STATUS_LABELS = {
     "pending": "待支付",
     "paid": "已支付",
@@ -57,10 +64,6 @@ _ANSWER_PLACEHOLDER_TEXTS = {"text_value", "selected_option_texts_snapshot", "an
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
-
-
-def _is_readonly_owner_pending(owner_userid: Any, *, owner_verified: bool = False) -> bool:
-    return owner_verified and _text(owner_userid) == READONLY_OWNER_PENDING_USERID
 
 
 def _limit(value: Any, *, default: int = 50, maximum: int = 200) -> int:
@@ -182,46 +185,42 @@ class SidebarV2SqlRepository:
         self._engine = engine or get_engine(database_url=_database_url())
 
     def get_profile_fields(self, external_userid: str) -> dict[str, Any] | None:
+        identity = self._resolve_identity(external_userid=external_userid)
+        if identity is None:
+            return None
         return self._one(
             """
             SELECT
-                COALESCE(NULLIF(identity.primary_external_userid, ''), :external_userid) AS external_userid,
+                :external_userid AS external_userid,
                 profile.source,
                 profile.industry,
                 profile.industry_description,
                 profile.needs_blockers_followup,
                 profile.updated_by,
                 profile.updated_at
-            FROM crm_user_identity identity
-            JOIN sidebar_customer_profile_fields profile ON profile.unionid = identity.unionid
-            WHERE (
-                identity.primary_external_userid = :external_userid
-                OR jsonb_exists(identity.external_userids_json, :external_userid)
-            )
-              AND COALESCE(identity.unionid, '') <> ''
+            FROM sidebar_customer_profile_fields profile
+            WHERE profile.unionid = :unionid
             ORDER BY profile.updated_at DESC
             LIMIT 1
             """,
-            {"external_userid": external_userid},
+            {"external_userid": external_userid, "unionid": _text(identity.unionid)},
         )
 
     def get_workflow_title_for_customer(self, external_userid: str) -> str:
+        identity = self._resolve_identity(external_userid=external_userid)
+        if identity is None:
+            return ""
         row = self._one(
             """
             SELECT COALESCE(NULLIF(l.link_name, ''), NULLIF(c.channel_name, ''), NULLIF(l.initial_audience_code, ''), NULLIF(c.channel_code, '')) AS title
-            FROM crm_user_identity identity
-            JOIN automation_channel_contact channel_contact ON channel_contact.unionid = identity.unionid
+            FROM automation_channel_contact channel_contact
             LEFT JOIN automation_channel c ON c.id = channel_contact.channel_id
             LEFT JOIN wecom_customer_acquisition_links l ON l.automation_channel_id = c.id
-            WHERE (
-                identity.primary_external_userid = :external_userid
-                OR jsonb_exists(identity.external_userids_json, :external_userid)
-            )
-              AND COALESCE(identity.unionid, '') <> ''
+            WHERE channel_contact.unionid = :unionid
             ORDER BY channel_contact.updated_at DESC, channel_contact.id DESC, l.updated_at DESC, l.id DESC
             LIMIT 1
             """,
-            {"external_userid": external_userid},
+            {"unionid": _text(identity.unionid)},
         )
         return _text((row or {}).get("title"))
 
@@ -247,16 +246,17 @@ class SidebarV2SqlRepository:
         )
 
     def get_external_identity_snapshot(self, external_userid: str) -> dict[str, Any] | None:
-        return self._one(
-            """
-            SELECT external_userid, follow_user_userid, name, unionid, openid, status
-            FROM wecom_external_contact_identity_map
-            WHERE external_userid = :external_userid
-            ORDER BY updated_at DESC, id DESC
-            LIMIT 1
-            """,
-            {"external_userid": external_userid},
-        )
+        identity = self._resolve_identity(external_userid=external_userid)
+        if identity is None:
+            return None
+        return {
+            "external_userid": _text(identity.external_userid),
+            "follow_user_userid": _text(identity.follow_user_userid or identity.owner_userid),
+            "name": _text(identity.customer_name),
+            "unionid": _text(identity.unionid),
+            "openid": _text(identity.openid),
+            "status": "active",
+        }
 
     def get_contact_owner_userids(self, external_userid: str) -> set[str]:
         rows = self._all(
@@ -271,6 +271,7 @@ class SidebarV2SqlRepository:
                 SELECT NULLIF(follow_user_userid, '') AS owner_userid
                 FROM wecom_external_contact_identity_map
                 WHERE external_userid = :external_userid
+                  AND COALESCE(status, 'active') = 'active'
             ) owners
             WHERE COALESCE(owner_userid, '') <> ''
             """,
@@ -279,63 +280,97 @@ class SidebarV2SqlRepository:
         return {_text(row.get("owner_userid")) for row in rows if _text(row.get("owner_userid"))}
 
     def get_contact_binding_status(self, external_userid: str) -> dict[str, Any]:
+        identity = self._resolve_identity(external_userid=external_userid)
+        if identity is None:
+            return {"is_bound": False, "external_userid": external_userid}
         row = self._one(
             """
             SELECT
-                COALESCE(NULLIF(identity.primary_external_userid, ''), :external_userid) AS external_userid,
+                :external_userid AS external_userid,
                 b.person_id,
                 '' AS first_bound_by_userid,
                 b.first_owner_userid,
                 b.last_owner_userid,
                 NULL::timestamptz AS created_at,
                 b.updated_at,
-                identity.mobile,
-                identity.unionid AS third_party_user_id,
-                identity.primary_owner_userid,
-                identity.customer_name
-            FROM crm_user_identity identity
-            LEFT JOIN external_contact_bindings b
-              ON b.external_userid = identity.primary_external_userid
-            WHERE (
-                identity.primary_external_userid = :external_userid
-                OR jsonb_exists(identity.external_userids_json, :external_userid)
-            )
-              AND COALESCE(identity.unionid, '') <> ''
-            ORDER BY identity.updated_at DESC
+                :mobile AS mobile,
+                :unionid AS third_party_user_id,
+                :owner_userid AS primary_owner_userid,
+                :customer_name AS customer_name
+            FROM external_contact_bindings b
+            WHERE b.external_userid = :canonical_external_userid
+            ORDER BY b.updated_at DESC
             LIMIT 1
             """,
-            {"external_userid": external_userid},
+            {
+                "external_userid": external_userid,
+                "canonical_external_userid": _text(identity.external_userid),
+                "mobile": _text(identity.mobile),
+                "unionid": _text(identity.unionid),
+                "owner_userid": _text(identity.owner_userid),
+                "customer_name": _text(identity.customer_name),
+            },
         )
-        if not row:
-            return {"is_bound": False, "external_userid": external_userid}
+        row = row or {}
         return {
-            "is_bound": True,
-            "external_userid": _text(row.get("external_userid")),
+            "is_bound": bool(_text(identity.mobile)),
+            "external_userid": _text(identity.external_userid) or external_userid,
             "person_id": row.get("person_id"),
-            "mobile": _text(row.get("mobile")),
-            "third_party_user_id": _text(row.get("third_party_user_id")),
+            "mobile": _text(identity.mobile),
+            "third_party_user_id": _text(identity.unionid),
             "first_bound_by_userid": _text(row.get("first_bound_by_userid")),
             "first_owner_userid": _text(row.get("first_owner_userid")),
             "last_owner_userid": _text(row.get("last_owner_userid")),
-            "owner_userid": _text(row.get("last_owner_userid") or row.get("first_owner_userid") or row.get("primary_owner_userid")),
-            "customer_name": _text(row.get("customer_name")),
+            "owner_userid": _text(row.get("last_owner_userid") or row.get("first_owner_userid") or identity.owner_userid),
+            "customer_name": _text(identity.customer_name),
             "created_at": _text(row.get("created_at")),
             "updated_at": _text(row.get("updated_at")),
         }
 
+    def _resolve_identity(self, *, external_userid: str, mobile: str = "") -> IdentityResolution | None:
+        query = ResolvePersonIdentityRequest(
+            external_userid=_text(external_userid) or None,
+            mobile=_normalize_mobile(mobile) or None,
+        )
+        if self._engine.dialect.name == "sqlite":
+            columns = {column["name"] for column in inspect(self._engine).get_columns("crm_user_identity")}
+            projection = []
+            for column in (
+                "unionid",
+                "primary_external_userid",
+                "external_userids_json",
+                "primary_openid",
+                "openids_json",
+                "mobile",
+                "mobile_normalized",
+                "mobile_verified",
+                "mobile_source",
+                "primary_owner_userid",
+                "customer_name",
+                "remark",
+                "description",
+                "identity_status",
+            ):
+                projection.append(column if column in columns else f"'' AS {column}")
+            with self._engine.connect() as connection:
+                rows = connection.execute(
+                    text(f"SELECT {', '.join(projection)} FROM crm_user_identity ORDER BY unionid")
+                ).mappings().all()
+            resolution = classify_identity_candidates(query, rows)
+            return resolution.identity if resolution.status == "resolved" else None
+        with self._engine.connect() as connection:
+            resolution = SQLAlchemyIdentityResolver(connection).resolve(
+                query
+            )
+        return resolution.identity if resolution.status == "resolved" else None
+
     def get_bindable_wechat_pay_order_mobile(self, external_userid: str) -> dict[str, Any] | None:
+        identity = self._resolve_identity(external_userid=external_userid)
+        if identity is None:
+            return None
         rows = self._all(
             """
-            WITH target(external_userid) AS (VALUES (:external_userid)),
-            identity_scope AS (
-                SELECT identity.unionid, identity.mobile
-                FROM crm_user_identity identity
-                JOIN target t ON (
-                    identity.primary_external_userid = t.external_userid
-                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
-                )
-                WHERE COALESCE(identity.unionid, '') <> ''
-            ),
+            WITH identity_scope(unionid, mobile) AS (VALUES (:unionid, :mobile)),
             matching_orders AS (
                 SELECT mobile.mobile_snapshot, '' AS userid_snapshot, paid_at, created_at, o.id::text AS id
                 FROM wechat_pay_orders o
@@ -371,26 +406,20 @@ class SidebarV2SqlRepository:
             ORDER BY latest_order_at DESC, mobile_snapshot ASC
             LIMIT 2
             """,
-            {"external_userid": external_userid},
+            {"unionid": _text(identity.unionid), "mobile": _text(identity.mobile)},
         )
         return rows[0] if len(rows) == 1 else None
 
     def list_customer_wechat_pay_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = _limit(limit, default=20, maximum=100)
         candidate_limit = max(safe_limit, 20)
+        identity = self._resolve_identity(external_userid=external_userid, mobile=mobile)
+        if identity is None:
+            return []
         return self._all(
             """
-            WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
-            identity_scope AS (
-                SELECT identity.unionid, identity.primary_external_userid, identity.mobile
-                FROM crm_user_identity identity
-                JOIN target t ON (
-                    identity.primary_external_userid = t.external_userid
-                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
-                    OR (t.mobile <> '' AND identity.mobile = t.mobile)
-                    OR (t.mobile <> '' AND identity.mobile_normalized = t.mobile)
-                )
-                WHERE COALESCE(identity.unionid, '') <> ''
+            WITH identity_scope(unionid, primary_external_userid, mobile) AS (
+                VALUES (:unionid, :canonical_external_userid, :canonical_mobile)
             ),
             unionid_orders AS (
                 SELECT
@@ -448,33 +477,29 @@ class SidebarV2SqlRepository:
             ORDER BY sort_at DESC NULLS LAST, id DESC
             LIMIT :limit
             """,
-            {"external_userid": external_userid, "mobile": mobile, "limit": safe_limit, "candidate_limit": candidate_limit},
+            {
+                "unionid": _text(identity.unionid),
+                "canonical_external_userid": _text(identity.external_userid),
+                "canonical_mobile": _text(identity.mobile),
+                "limit": safe_limit,
+                "candidate_limit": candidate_limit,
+            },
         )
 
     def list_customer_service_period_orders(self, *, external_userid: str, mobile: str = "", limit: int = 20) -> list[dict[str, Any]]:
         safe_limit = _limit(limit, default=20, maximum=50)
-        normalized_mobile = _normalize_mobile(mobile)
+        identity = self._resolve_identity(external_userid=external_userid, mobile=mobile)
+        if identity is None:
+            return []
         return self._all(
-            """
-            WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
-            identity_scope AS (
-                SELECT identity.unionid, identity.primary_external_userid, identity.mobile, identity.mobile_normalized
-                FROM crm_user_identity identity
-                JOIN target t ON (
-                    identity.primary_external_userid = t.external_userid
-                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
-                    OR (t.mobile <> '' AND identity.mobile = t.mobile)
-                    OR (t.mobile <> '' AND identity.mobile_normalized = t.mobile)
-                )
-                WHERE COALESCE(identity.unionid, '') <> ''
-            )
+            f"""
+            WITH identity_scope(unionid, mobile) AS (VALUES (:unionid, :mobile))
             SELECT
                 e.id::text AS entitlement_id,
                 e.service_product_id::text AS service_product_id,
                 e.trade_product_id::text AS trade_product_id,
                 e.unionid,
                 e.external_userid_snapshot,
-                e.mobile_snapshot,
                 e.status,
                 e.start_at,
                 e.end_at,
@@ -490,51 +515,39 @@ class SidebarV2SqlRepository:
                 o.id::text AS order_id,
                 o.amount_total AS last_order_amount,
                 o.paid_at AS last_order_paid_at,
-                o.created_at AS last_order_created_at
+                o.created_at AS last_order_created_at,
+                {huangyoucan_usage_select_fields()}
             FROM service_period_entitlements e
             JOIN service_period_products sp ON sp.id = e.service_product_id
             JOIN wechat_pay_products p ON p.id = e.trade_product_id
             LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
             LEFT JOIN identity_scope identity ON identity.unionid = e.unionid
+            {huangyoucan_usage_match_joins(unionid_sql="identity.unionid", mobile_sql="identity.mobile")}
             WHERE e.tenant_id = 'aicrm'
               AND e.status IN ('active', 'expired')
-              AND (
-                  identity.unionid IS NOT NULL
-                  OR e.external_userid_snapshot = :external_userid
-                  OR (:mobile <> '' AND regexp_replace(COALESCE(e.mobile_snapshot, ''), '[^0-9]', '', 'g') = :mobile)
-              )
+              AND identity.unionid IS NOT NULL
             ORDER BY
                 CASE WHEN e.status = 'active' AND e.end_at > CURRENT_TIMESTAMP THEN 0 ELSE 1 END,
                 e.end_at DESC NULLS LAST,
                 e.id DESC
             LIMIT :limit
             """,
-            {"external_userid": external_userid, "mobile": normalized_mobile, "limit": safe_limit},
+            {"unionid": _text(identity.unionid), "mobile": _text(identity.mobile), "limit": safe_limit},
         )
 
     def get_customer_service_period_order(self, *, external_userid: str, entitlement_id: str, mobile: str = "") -> dict[str, Any] | None:
-        normalized_mobile = _normalize_mobile(mobile)
+        identity = self._resolve_identity(external_userid=external_userid, mobile=mobile)
+        if identity is None:
+            return None
         rows = self._all(
-            """
-            WITH target(external_userid, mobile) AS (VALUES (:external_userid, :mobile)),
-            identity_scope AS (
-                SELECT identity.unionid, identity.primary_external_userid, identity.mobile, identity.mobile_normalized
-                FROM crm_user_identity identity
-                JOIN target t ON (
-                    identity.primary_external_userid = t.external_userid
-                    OR jsonb_exists(identity.external_userids_json, t.external_userid)
-                    OR (t.mobile <> '' AND identity.mobile = t.mobile)
-                    OR (t.mobile <> '' AND identity.mobile_normalized = t.mobile)
-                )
-                WHERE COALESCE(identity.unionid, '') <> ''
-            )
+            f"""
+            WITH identity_scope(unionid, mobile) AS (VALUES (:unionid, :mobile))
             SELECT
                 e.id::text AS entitlement_id,
                 e.service_product_id::text AS service_product_id,
                 e.trade_product_id::text AS trade_product_id,
                 e.unionid,
                 e.external_userid_snapshot,
-                e.mobile_snapshot,
                 e.status,
                 e.start_at,
                 e.end_at,
@@ -550,28 +563,32 @@ class SidebarV2SqlRepository:
                 o.id::text AS order_id,
                 o.amount_total AS last_order_amount,
                 o.paid_at AS last_order_paid_at,
-                o.created_at AS last_order_created_at
+                o.created_at AS last_order_created_at,
+                {huangyoucan_usage_select_fields()}
             FROM service_period_entitlements e
             JOIN service_period_products sp ON sp.id = e.service_product_id
             JOIN wechat_pay_products p ON p.id = e.trade_product_id
             LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
             LEFT JOIN identity_scope identity ON identity.unionid = e.unionid
+            {huangyoucan_usage_match_joins(unionid_sql="identity.unionid", mobile_sql="identity.mobile")}
             WHERE e.tenant_id = 'aicrm'
               AND e.id::text = :entitlement_id
               AND e.status IN ('active', 'expired')
-              AND (
-                  identity.unionid IS NOT NULL
-                  OR e.external_userid_snapshot = :external_userid
-                  OR (:mobile <> '' AND regexp_replace(COALESCE(e.mobile_snapshot, ''), '[^0-9]', '', 'g') = :mobile)
-              )
+              AND identity.unionid IS NOT NULL
             LIMIT 1
             """,
-            {"external_userid": external_userid, "mobile": normalized_mobile, "entitlement_id": entitlement_id},
+            {
+                "unionid": _text(identity.unionid),
+                "mobile": _text(identity.mobile),
+                "entitlement_id": entitlement_id,
+            },
         )
         return rows[0] if rows else None
 
     def list_questionnaire_answers(self, *, external_userid: str, mobile: str = "") -> list[dict[str, Any]]:
-        normalized_mobile = _normalize_mobile(mobile)
+        identity = self._resolve_identity(external_userid=external_userid, mobile=mobile)
+        if identity is None:
+            return []
         return self._all(
             """
             SELECT
@@ -587,20 +604,16 @@ class SidebarV2SqlRepository:
             JOIN crm_user_identity identity ON identity.unionid = s.unionid
             LEFT JOIN questionnaires q ON q.id = s.questionnaire_id
             LEFT JOIN questionnaire_submission_answers a ON a.submission_id = s.id
-            WHERE (
-                identity.primary_external_userid = :external_userid
-                OR jsonb_exists(identity.external_userids_json, :external_userid)
-                OR (
-                    :mobile <> ''
-                    AND regexp_replace(COALESCE(identity.mobile, ''), '[^0-9]', '', 'g') = :mobile
-                )
-            )
+            WHERE identity.unionid = :unionid
             ORDER BY s.submitted_at DESC, s.id DESC, a.id ASC
             """,
-            {"external_userid": external_userid, "mobile": normalized_mobile},
+            {"unionid": _text(identity.unionid)},
         )
 
     def list_other_staff_messages(self, external_userid: str, *, limit: int = 200) -> list[dict[str, Any]]:
+        identity = self._resolve_identity(external_userid=external_userid)
+        if identity is None:
+            return []
         return self._all(
             """
             SELECT message.id, message.msgid, message.chat_type,
@@ -609,14 +622,11 @@ class SidebarV2SqlRepository:
                    message.msgtype, message.content, message.send_time, message.raw_payload, message.created_at
             FROM archived_messages message
             JOIN crm_user_identity identity ON identity.unionid = message.unionid
-            WHERE (
-                identity.primary_external_userid = :external_userid
-                OR jsonb_exists(identity.external_userids_json, :external_userid)
-            )
+            WHERE identity.unionid = :unionid
             ORDER BY send_time ASC, id ASC
             LIMIT :limit
             """,
-            {"external_userid": external_userid, "limit": _limit(limit, default=200, maximum=500)},
+            {"unionid": _text(identity.unionid), "limit": _limit(limit, default=200, maximum=500)},
         )
 
     def owner_names(self, userids: set[str]) -> dict[str, str]:
@@ -690,17 +700,11 @@ def _resolve_customer_payload(
         ("binding.customer_name", binding.get("customer_name")),
         ("binding.remark", binding.get("remark")),
     )
-    if _text(owner_userid) == READONLY_OWNER_PENDING_USERID:
-        resolved_owner = ""
-    else:
-        resolved_owner = (
-            _text(owner_userid)
-            or _text(customer.get("owner_userid"))
-            or _text(binding.get("owner_userid"))
-            or _text(binding.get("last_owner_userid"))
-            or _text(contacts_row.get("owner_userid"))
-            or _text(identity_row.get("follow_user_userid"))
-        )
+    resolved_owner = (
+        _text(owner_userid)
+        or _text(customer.get("owner_userid"))
+        or _text(identity_row.get("follow_user_userid"))
+    )
     mobile = (
         _customer_mobile(binding.get("mobile"))
         or _customer_mobile(customer.get("mobile"))
@@ -737,13 +741,7 @@ def _snapshot_owner_candidates(
     identity: dict[str, Any],
     binding: dict[str, Any],
 ) -> set[str]:
-    candidates = {
-        _text(contact.get("owner_userid")),
-        _text(identity.get("follow_user_userid")),
-        _text(binding.get("owner_userid")),
-        _text(binding.get("first_owner_userid")),
-        _text(binding.get("last_owner_userid")),
-    }
+    candidates = {_text(identity.get("follow_user_userid"))}
     owner_list = getattr(repo, "get_contact_owner_userids", None)
     if callable(owner_list):
         candidates.update(owner_list(external_userid))
@@ -761,8 +759,6 @@ def _assert_snapshot_owner_scope(
     identity: dict[str, Any],
     binding: dict[str, Any],
 ) -> None:
-    if _is_readonly_owner_pending(owner_userid, owner_verified=owner_verified):
-        return
     owner_candidates = _snapshot_owner_candidates(
         repo=repo,
         external_userid=external_userid,
@@ -770,10 +766,8 @@ def _assert_snapshot_owner_scope(
         identity=identity,
         binding=binding,
     )
-    if owner_candidates and _text(owner_userid) not in owner_candidates:
-        raise NotFoundError("customer not found")
-    if not owner_candidates and not owner_verified:
-        raise NotFoundError("customer not found")
+    if _text(owner_userid) not in owner_candidates:
+        raise CustomerScopeForbiddenError("customer scope forbidden")
 
 
 def verify_sidebar_identity_snapshot_owner_scope(
@@ -788,8 +782,6 @@ def verify_sidebar_identity_snapshot_owner_scope(
     if not normalized_external:
         raise ValueError("external_userid is required")
     if not normalized_owner:
-        raise ValueError("owner_userid is required")
-    if _text(normalized_owner) == READONLY_OWNER_PENDING_USERID:
         raise ValueError("owner_userid is required")
     sql_repo = repo or SidebarV2SqlRepository()
     contact = sql_repo.get_contact_snapshot(normalized_external) or {}
@@ -865,7 +857,6 @@ class SidebarWorkbenchReadModel:
         normalized_owner = _text(owner_userid)
         if not normalized_owner:
             raise ValueError("owner_userid is required")
-        readonly_owner_pending = _is_readonly_owner_pending(normalized_owner, owner_verified=owner_verified)
         try:
             context, context_diagnostics = self._context(
                 normalized_external,
@@ -885,22 +876,18 @@ class SidebarWorkbenchReadModel:
         profile = repo.get_profile_fields(normalized_external) or {}
         binding = repo.get_contact_binding_status(normalized_external)
         if not context.get("customer") and not contact and not identity and not profile and not binding.get("is_bound"):
-            if not readonly_owner_pending:
-                raise NotFoundError("customer not found")
+            raise NotFoundError("customer not found")
         if not context.get("customer") or context_diagnostics.get("context_source_status") in {"missing", "error", "live_source", "not_found"}:
-            if readonly_owner_pending:
-                context_diagnostics["context_source_status"] = "readonly_owner_pending"
-            else:
-                _assert_snapshot_owner_scope(
-                    repo=repo,
-                    external_userid=normalized_external,
-                    owner_userid=normalized_owner,
-                    owner_verified=owner_verified,
-                    contact=contact,
-                    identity=identity,
-                    binding=binding,
-                )
-            if not context.get("customer") and not readonly_owner_pending:
+            _assert_snapshot_owner_scope(
+                repo=repo,
+                external_userid=normalized_external,
+                owner_userid=normalized_owner,
+                owner_verified=owner_verified,
+                contact=contact,
+                identity=identity,
+                binding=binding,
+            )
+            if not context.get("customer"):
                 context_diagnostics["context_source_status"] = "identity_snapshot_fallback"
         customer, resolution = _resolve_customer_payload(
             context=context,
@@ -944,8 +931,6 @@ class SidebarWorkbenchReadModel:
         owner_userid: str = "",
         owner_verified: bool = False,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
-        if _is_readonly_owner_pending(owner_userid, owner_verified=owner_verified):
-            return {}, {"context_source_status": "readonly_owner_pending"}
         try:
             payload = self._context_query(
                 CustomerContextRequest(
@@ -1408,8 +1393,8 @@ class SidebarCommerceReadModel:
         product_id = _text(item.get("id"))
         public_path = f"/p/{product_code}" if product_code else ""
         checkout_path = f"/pay/{product_code}" if product_code else ""
-        product_url = append_ctx_query(public_path, context_token) if context_token else public_path
-        checkout_url = append_ctx_query(checkout_path, context_token) if context_token else checkout_path
+        product_url = append_ctx_fragment(public_path, context_token) if context_token else public_path
+        checkout_url = append_ctx_fragment(checkout_path, context_token) if context_token else checkout_path
         return {
             "id": product_code or product_id,
             "title": _text(item.get("title") or item.get("name")) or product_code or "未命名商品",
@@ -1430,7 +1415,7 @@ class SidebarCommerceReadModel:
         service_product_id = _text(item.get("id") or item.get("service_product_id"))
         link_slug = _text(item.get("link_slug"))
         public_path = f"/s/{link_slug}" if link_slug else ""
-        product_url = append_ctx_query(public_path, context_token) if context_token else public_path
+        product_url = append_ctx_fragment(public_path, context_token) if context_token else public_path
         return {
             "id": service_product_id,
             "service_product_id": service_product_id,
@@ -1491,6 +1476,7 @@ class SidebarCommerceReadModel:
             "last_order_paid_at": _format_time(row.get("last_order_paid_at") or row.get("last_order_created_at")),
             "remark": _text(row.get("remark")),
             "detail_url": f"/admin/wechat-pay/transactions/{order_id}" if order_id else "",
+            **public_huangyoucan_usage_fields(row),
         }
 
     def _order_status(self, order: dict[str, Any]) -> str:

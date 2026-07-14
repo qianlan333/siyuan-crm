@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
 from aicrm_next.sidebar_write import get_sidebar_write_audit_events, get_sidebar_write_projection_events
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
 @pytest.fixture()
@@ -16,7 +17,12 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_sidebar_write_idempotency_reuses_command_result_without_duplicate_write(client: TestClient) -> None:
-    headers = {"Idempotency-Key": "sidebar-write-idempotent-bind"}
+    headers = install_sidebar_auth(
+        client,
+        viewer_userid="LiuXiao",
+        external_userid="wx_ext_002",
+    )
+    headers["Idempotency-Key"] = "sidebar-write-idempotent-bind"
     payload = {"external_userid": "wx_ext_002", "mobile": "13800138123"}
 
     first = client.post("/api/sidebar/bind-mobile", json=payload, headers=headers)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -44,15 +45,17 @@ def test_run_message_activity_sync_uses_internal_http_helper(monkeypatch, capsys
 
     monkeypatch.setenv("APP_HOST", "automation.local")
     monkeypatch.setenv("APP_PORT", "5001")
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "runner-token")
+    monkeypatch.setenv("AICRM_INTERNAL_API_BASE_URL", "https://automation.local")
+    monkeypatch.setattr(module, "read_internal_access_token", lambda **_kwargs: "runner-oauth-access-token")
+    monkeypatch.setattr(module, "read_internal_tls_context", lambda: None)
     monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
 
     body = module.run()
 
     assert json.loads(body) == {"ok": True, "synced_count": 3}
-    assert captured["url"] == "http://automation.local:5001/api/admin/automation-conversion/message-activity-sync/run"
+    assert captured["url"] == "https://automation.local/api/admin/automation-conversion/message-activity-sync/run"
     assert captured["timeout"] == 180
-    assert captured["headers"]["authorization"] == "Bearer runner-token"
+    assert captured["headers"]["authorization"] == "Bearer runner-oauth-access-token"
     assert captured["headers"]["content-type"] == "application/json"
     assert captured["body"] == {
         "trigger_source": "scheduled",
@@ -61,17 +64,13 @@ def test_run_message_activity_sync_uses_internal_http_helper(monkeypatch, capsys
     assert json.loads(capsys.readouterr().out.strip()) == {"ok": True, "synced_count": 3}
 
 
-def test_run_message_activity_sync_omits_missing_token(monkeypatch):
+def test_run_message_activity_sync_fails_closed_without_client_credentials(monkeypatch):
     module = _load_script_module()
-    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        module,
+        "read_internal_access_token",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("internal API client configuration is incomplete")),
+    )
 
-    def fake_urlopen(request, *, timeout):
-        captured["headers"] = {key.lower(): value for key, value in request.header_items()}
-        return _FakeResponse(b'{"ok": true}')
-
-    monkeypatch.delenv("AUTOMATION_INTERNAL_API_TOKEN", raising=False)
-    monkeypatch.setattr(module.urllib.request, "urlopen", fake_urlopen)
-
-    module.run()
-
-    assert "authorization" not in captured["headers"]
+    with pytest.raises(RuntimeError, match="client configuration is incomplete"):
+        module.run()

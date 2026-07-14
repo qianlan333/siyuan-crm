@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
 from aicrm_next.sidebar_write import get_sidebar_write_side_effect_plans
+from tests.sidebar_auth_test_helpers import install_sidebar_auth
 
 
 @pytest.fixture()
@@ -18,6 +19,13 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_sidebar_write_external_effects_create_plans_only(client: TestClient) -> None:
+    client.headers.update(
+        install_sidebar_auth(
+            client,
+            viewer_userid="ZhaoYanFang",
+            external_userid="wx_ext_001",
+        )
+    )
     calls = [
         (
             "post",
@@ -68,6 +76,13 @@ def test_sidebar_write_external_effects_create_plans_only(client: TestClient) ->
 
 
 def test_sidebar_write_internal_mutations_do_not_create_side_effect_plans(client: TestClient) -> None:
+    client.headers.update(
+        install_sidebar_auth(
+            client,
+            viewer_userid="LiuXiao",
+            external_userid="wx_ext_002",
+        )
+    )
     response = client.post(
         "/api/sidebar/bind-mobile",
         json={"external_userid": "wx_ext_002", "mobile": "13800138123"},

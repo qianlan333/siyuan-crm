@@ -74,20 +74,13 @@ def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
 
 
-def _identity_from_request(request: Request) -> dict[str, str]:
-    return {
-        "openid": str(request.query_params.get("openid") or request.cookies.get("openid") or "").strip(),
-        "unionid": str(request.query_params.get("unionid") or request.cookies.get("unionid") or "").strip(),
-        "external_userid": str(request.query_params.get("external_userid") or request.cookies.get("external_userid") or "").strip(),
-    }
-
-
-def _request_meta(request: Request) -> dict[str, str]:
+def _request_meta(request: Request) -> dict[str, Any]:
+    blocked_query_keys = {"openid", "unionid", "external_userid", "code", "state"}
     return {
         "user_agent": str(request.headers.get("user-agent") or ""),
         "ip": request.client.host if request.client else "",
         "referer": str(request.headers.get("referer") or ""),
-        "query_params_json": dict(request.query_params),
+        "query_params_json": {key: value for key, value in request.query_params.items() if key.strip().lower() not in blocked_query_keys},
     }
 
 
@@ -323,7 +316,6 @@ def radar_public_redirect(request: Request, code: str):
     try:
         result = ResolveRadarLandingQuery()(
             code,
-            identity=_identity_from_request(request),
             request_meta=_request_meta(request),
             viewer_session=request.cookies.get(RADAR_VIEWER_COOKIE),
         )
@@ -513,7 +505,9 @@ def radar_content_view(request: Request, code: str):
 @router.get("/api/h5/radar-contents/{code}/image")
 def radar_content_image(request: Request, code: str):
     try:
-        result = GetRadarContentResourceQuery()(code, target_type="image", viewer_session=request.cookies.get(RADAR_VIEWER_COOKIE), request_meta=_request_meta(request))
+        result = GetRadarContentResourceQuery()(
+            code, target_type="image", viewer_session=request.cookies.get(RADAR_VIEWER_COOKIE), request_meta=_request_meta(request)
+        )
     except Exception as exc:
         _raise_http(exc)
     return Response(

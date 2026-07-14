@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from aicrm_next.internal_event_composition import register_payment_succeeded_consumers
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import WEBHOOK_ORDER_PAID_PUSH, ExternalEffectService, reset_external_effect_fixture_state
 from aicrm_next.platform_foundation.internal_events import (
@@ -7,10 +8,10 @@ from aicrm_next.platform_foundation.internal_events import (
     InternalEventConsumerRegistry,
     InternalEventConsumerResult,
     InternalEventService,
-    register_payment_succeeded_consumers,
     reset_internal_event_fixture_state,
 )
 from aicrm_next.platform_foundation.internal_events.models import InternalEvent, InternalEventConsumerRun
+from aicrm_next.platform_foundation.internal_events.config import worker_allows
 from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
 
@@ -31,6 +32,23 @@ PAYMENT_CONSUMERS = [
     "ai_assist_notify_consumer",
     "webhook_order_paid_consumer",
 ]
+
+
+def test_shared_worker_allowlist_intersects_event_type_and_pair_filters() -> None:
+    pairs = ((PAYMENT_SUCCEEDED_EVENT_TYPE, "order_projection_consumer"), (OTHER_EVENT_TYPE, "allowed_consumer"))
+
+    assert worker_allows(
+        PAYMENT_SUCCEEDED_EVENT_TYPE,
+        "order_projection_consumer",
+        configured_pairs=pairs,
+        configured_event_types=(PAYMENT_SUCCEEDED_EVENT_TYPE,),
+    ) is True
+    assert worker_allows(
+        OTHER_EVENT_TYPE,
+        "allowed_consumer",
+        configured_pairs=pairs,
+        configured_event_types=(PAYMENT_SUCCEEDED_EVENT_TYPE,),
+    ) is False
 
 
 def _context(trace_id: str) -> CommandContext:
@@ -300,6 +318,10 @@ def test_webhook_payment_consumer_skips_without_configured_external_effect(monke
     reset_internal_event_fixture_state()
     reset_external_effect_fixture_state()
     _enable_auto_execute(monkeypatch, consumers=["webhook_order_paid_consumer"])
+    monkeypatch.setattr(
+        "aicrm_next.internal_event_composition._plan_order_paid_external_push_effect_from_db",
+        lambda **kwargs: {"ok": True, "skipped": True, "reason": "external_push_config_unavailable"},
+    )
     service, repo, registry = _payment_service()
     _emit_payment(service)
 

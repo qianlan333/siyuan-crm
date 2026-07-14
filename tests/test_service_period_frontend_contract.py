@@ -176,16 +176,33 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
     assert "service-period-inline-actions" not in text
     for label in ("有效用户", "7 天内到期", "续费订单", "累计金额", "会员列表"):
         assert label in text
-    for header in ("会员", "外部联系人id", "状态", "剩余有效期", "到期日", "备注", "操作"):
+    for header in (
+        "会员",
+        "剩余有效期",
+        "正式登录",
+        "token 消耗",
+        "学习计划进度",
+        "近 7 天打开次数",
+        "最后打开时间",
+        "备注",
+        "操作",
+    ):
         assert f"<th>{header}</th>" in text
+    assert "<th>外部联系人id</th>" not in text
+    assert "<th>状态</th>" not in text
+    assert "<th>到期日</th>" not in text
     assert "<th>最近订单</th>" not in text
     assert ">备注<" in text
     assert ">查看<" not in text
     assert "/members/${encodeURIComponent(unionid)}/remark" in text
-    assert 'const dateOnly = (value) => String(value || "").slice(0, 10);' in text
-    assert "dateOnly(member.end_at)" in text
-    assert '"external_userid"' in text
-    assert '"remark"' in text
+    assert "position: sticky" in text
+    assert "service-period-data-wrap" in text
+    assert "member.external_userid || \"—\"" in text
+    assert '"外部联系人ID"' in text
+    assert '"学习计划进度"' in text
+    data_script = text[text.index("const hycMatched") :]
+    assert "member.status" not in data_script
+    assert "dateOnly(member.end_at)" not in text
     assert '"last_order_amount"' not in text
     assert '"last_order_duration_days"' not in text
     for forbidden in ("报名链接", "续费规则", "交易商品卡片", "交易商品信息", ">编辑<", "用户报名页", "用户续费页", "管理配置页", "管理详情页"):

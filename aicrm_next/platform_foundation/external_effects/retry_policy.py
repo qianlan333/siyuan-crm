@@ -51,11 +51,21 @@ def retry_delay_seconds(attempt_count: int) -> int:
     return _RETRY_DELAYS_SECONDS[index]
 
 
-def next_retry_at(attempt_count: int, *, now: datetime | None = None) -> datetime:
+def next_retry_at(
+    attempt_count: int,
+    *,
+    now: datetime | None = None,
+    retry_after_seconds: int | float | None = None,
+) -> datetime:
     current = now or datetime.now(timezone.utc)
     if current.tzinfo is None:
         current = current.replace(tzinfo=timezone.utc)
-    return current + timedelta(seconds=retry_delay_seconds(attempt_count))
+    policy_delay = retry_delay_seconds(attempt_count)
+    try:
+        provider_delay = max(0, min(float(retry_after_seconds or 0), 86400))
+    except (TypeError, ValueError):
+        provider_delay = 0
+    return current + timedelta(seconds=max(policy_delay, provider_delay))
 
 
 def status_for_failure(*, error_code: str, attempt_count: int, max_attempts: int, status_code: int | None = None) -> str:

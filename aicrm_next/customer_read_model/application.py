@@ -1,7 +1,9 @@
+# ruff: noqa: F401
 from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 from aicrm_next.shared.errors import NotFoundError
 from aicrm_next.shared.safe_logging import safe_log_exception
@@ -20,6 +22,7 @@ from .dto import (
     ListCustomersRequest,
     RecentMessagesRequest,
 )
+from .errors import CustomerScopeForbiddenError
 from .projections import detail_projection, list_item_projection
 from .repo import CustomerReadRepository, build_customer_live_source_repository, build_customer_read_model_repository
 
@@ -163,12 +166,13 @@ def _customer_identity_key(query: CustomerDetailRequest | CustomerTimelineReques
 
 
 def _customer_owner_candidates(customer: JsonDict) -> set[str]:
-    candidates = {str(customer.get(key) or "").strip() for key in ("owner_userid", "primary_owner_userid")}
-    nested_keys = ("owner_userid", "primary_owner_userid", "last_owner_userid", "first_owner_userid", "follow_user_userid")
-    for field in ("binding", "identity", "contact"):
-        value = customer.get(field)
-        if isinstance(value, dict):
-            candidates.update(str(value.get(key) or "").strip() for key in nested_keys)
+    candidates: set[str] = set()
+    identity = customer.get("identity")
+    if isinstance(identity, dict):
+        candidates.update(
+            str(identity.get(key) or "").strip()
+            for key in ("follow_user_userid", "primary_owner_userid")
+        )
     follow_users = customer.get("follow_users")
     if isinstance(follow_users, list):
         for item in follow_users:
@@ -180,9 +184,11 @@ def _customer_owner_candidates(customer: JsonDict) -> set[str]:
 def _assert_customer_owner_scope(customer: JsonDict, owner_userid: str | None, *, require_owner: bool = False, owner_verified: bool = False) -> None:
     requested_owner = str(owner_userid or "").strip()
     candidates = _customer_owner_candidates(customer)
-    if (requested_owner and requested_owner in candidates) or (requested_owner and owner_verified and not candidates) or (not requested_owner and not require_owner):
+    if requested_owner and requested_owner in candidates:
         return
-    raise NotFoundError("customer not found")
+    if not requested_owner and not require_owner:
+        return
+    raise CustomerScopeForbiddenError("customer scope forbidden")
 
 
 def _repo_get_customer_by_request(repo: CustomerReadRepository, query: CustomerDetailRequest) -> JsonDict | None:
@@ -1065,9 +1071,42 @@ def _normalized_admin_profile_tags(tags: object) -> list[str]:
 
 
 class GetCustomerContextQuery:
-    def __init__(self, repo: CustomerReadRepository | None = None, live_source_repo: CustomerReadRepository | None = None) -> None:
+    def __init__(
+        self,
+        repo: CustomerReadRepository | None = None,
+        live_source_repo: CustomerReadRepository | None = None,
+        owner_scope_verifier: Callable[[str, str], None] | None = None,
+    ) -> None:
         self._repo = repo
         self._live_source_repo = live_source_repo
+        self._owner_scope_verifier = owner_scope_verifier
+
+    def _assert_owner_scope(self, customer: JsonDict, query: CustomerContextRequest) -> None:
+        try:
+            _assert_customer_owner_scope(
+                customer,
+                query.owner_userid,
+                require_owner=query.require_owner_scope,
+                owner_verified=query.owner_verified,
+            )
+        except CustomerScopeForbiddenError:
+            # Sidebar projections and live-source fallbacks can lag the current
+            # WeCom owner relation. Only an injected verifier backed by that
+            # current relation may override the projection mismatch; callers
+            # without one remain fail-closed.
+            if self._owner_scope_verifier is None:
+                raise
+            external_userid = str(
+                customer.get("external_userid")
+                or customer.get("user_id")
+                or query.external_userid
+                or query.user_id
+                or ""
+            ).strip()
+            owner_userid = str(query.owner_userid or "").strip()
+            if not external_userid or not owner_userid:
+                raise
+            self._owner_scope_verifier(external_userid, owner_userid)
 
     def _resolve_fixture_external_userid(self, query: CustomerContextRequest, repo: CustomerReadRepository) -> str:
         external_userid = str(query.external_userid or query.user_id or "").strip()
@@ -1120,7 +1159,7 @@ class GetCustomerContextQuery:
                 if not detail.get("ok"):
                     raise RuntimeError(str(detail.get("page_error") or detail.get("error_code") or "customer detail unavailable"))
                 customer = dict(detail.get("customer") or {})
-                _assert_customer_owner_scope(customer, query.owner_userid, require_owner=query.require_owner_scope, owner_verified=query.owner_verified)
+                self._assert_owner_scope(customer, query)
                 unionid = unionid or str(customer.get("unionid") or "").strip()
                 external_userid = external_userid or str(customer.get("external_userid") or customer.get("user_id") or "").strip()
                 timeline_payload = GetCustomerTimelineQuery(repo, live_source_repo=self._live_source_repo)(
@@ -1151,7 +1190,7 @@ class GetCustomerContextQuery:
                     fallback_used=bool(detail.get("fallback_used") or timeline_payload.get("fallback_used") or messages_payload.get("fallback_used")),
                     fallback_reason=str(detail.get("fallback_reason") or timeline_payload.get("fallback_reason") or messages_payload.get("fallback_reason") or ""),
                 )
-            except NotFoundError:
+            except (NotFoundError, CustomerScopeForbiddenError):
                 raise
             except Exception as exc:
                 fallback_external_userid = str(query.external_userid or query.user_id or "")
@@ -1168,7 +1207,7 @@ class GetCustomerContextQuery:
                 CustomerDetailRequest(unionid=unionid or None, external_userid=external_userid or None)
             )
             customer = dict(detail.get("customer") or {})
-            _assert_customer_owner_scope(customer, query.owner_userid, require_owner=query.require_owner_scope, owner_verified=query.owner_verified)
+            self._assert_owner_scope(customer, query)
             unionid = unionid or str(customer.get("unionid") or "").strip()
             external_userid = external_userid or str(customer.get("external_userid") or customer.get("user_id") or "").strip()
             timeline = GetCustomerTimelineQuery(repo, live_source_repo=self._live_source_repo)(
@@ -1366,135 +1405,17 @@ class GetCustomer360ProfileQuery:
     __call__ = execute
 
 
-def _customer_360_identity(context: JsonDict, profile: JsonDict, unionid: str) -> JsonDict:
-    identity = dict(profile.get("identity") or context.get("identity") or {})
-    binding = dict(context.get("identity_binding_summary") or profile.get("binding") or {})
-    return {
-        "unionid": unionid or str(identity.get("unionid") or profile.get("unionid") or ""),
-        "person_id": identity.get("person_id") or binding.get("person_id") or profile.get("person_id"),
-        "external_userid": identity.get("external_userid") or binding.get("external_userid") or profile.get("external_userid") or "",
-        "openid": identity.get("openid") or "",
-        "mobile": identity.get("mobile") or binding.get("mobile") or profile.get("mobile") or "",
-        "binding_status": binding.get("binding_status") or dict(profile.get("binding") or {}).get("binding_status") or "",
-        "owner_userid": profile.get("owner_userid") or binding.get("owner_userid") or "",
-    }
-
-
-def _customer_360_orders_summary(profile: JsonDict) -> JsonDict:
-    summary = dict(profile.get("orders_summary") or profile.get("commerce_summary") or {})
-    return {
-        "source_status": summary.get("source_status") or "not_connected",
-        "paid_order_count": int(summary.get("paid_order_count") or summary.get("paid_count") or 0),
-        "total_paid_amount": summary.get("total_paid_amount") or summary.get("paid_amount") or 0,
-        "latest_order_at": summary.get("latest_order_at") or summary.get("last_paid_at") or "",
-    }
-
-
-def _customer_360_questionnaire_summary(profile: JsonDict) -> JsonDict:
-    answers = _customer_360_questionnaire_answers(profile)
-    latest = answers[0] if answers else {}
-    return {
-        "answer_count": len(answers),
-        "latest_submission_id": str(latest.get("submission_id") or ""),
-        "latest_submitted_at": str(latest.get("submitted_at") or ""),
-        "answers": answers[:5],
-    }
-
-
-def _customer_360_questionnaire_answers(profile: JsonDict) -> list[JsonDict]:
-    candidates = [
-        dict(profile.get("marketing_profile") or {}).get("matched_questions"),
-        dict(profile.get("sidebar_context") or {}).get("matched_questions"),
-        dict(profile.get("marketing_summary") or {}).get("matched_questions"),
-        profile.get("matched_questions"),
-    ]
-    answers: list[JsonDict] = []
-    seen: set[tuple[str, str, str]] = set()
-    for group in candidates:
-        if not isinstance(group, list):
-            continue
-        for item in group:
-            if not isinstance(item, dict):
-                continue
-            answer = {
-                "questionnaire_id": str(item.get("questionnaire_id") or item.get("form_id") or ""),
-                "questionnaire_title": str(item.get("questionnaire_title") or item.get("form_title") or item.get("title") or ""),
-                "submission_id": str(item.get("submission_id") or ""),
-                "submitted_at": str(item.get("submitted_at") or ""),
-                "question": str(item.get("question") or item.get("title") or item.get("question_text") or ""),
-                "answer": str(item.get("answer") or item.get("answer_text") or item.get("value") or ""),
-            }
-            if not answer["question"] and not answer["answer"]:
-                continue
-            key = (answer["submission_id"], answer["question"], answer["answer"])
-            if key in seen:
-                continue
-            seen.add(key)
-            answers.append(answer)
-    return answers
-
-
-def _customer_360_message_summary(profile: JsonDict, messages: list[JsonDict]) -> JsonDict:
-    latest = messages[0] if messages else {}
-    return {
-        "recent_message_count": len(messages),
-        "latest_message_at": profile.get("last_message_at") or latest.get("send_time") or latest.get("created_at") or "",
-        "last_touch_at": profile.get("last_touch_at") or "",
-    }
-
-
-def _customer_360_user_ops_status(profile: JsonDict) -> JsonDict:
-    status = dict(profile.get("class_user_status") or {})
-    marketing = dict(profile.get("marketing_summary") or {})
-    return {
-        "current_status": status.get("current_status") or marketing.get("main_stage") or "",
-        "signup_status": status.get("signup_status") or "",
-        "activation_bucket": status.get("activation_bucket") or marketing.get("sub_stage") or "",
-        "owner_userid": profile.get("owner_userid") or "",
-        "updated_at": status.get("updated_at") or profile.get("updated_at") or "",
-    }
-
-
-def _customer_360_automation_status(profile: JsonDict) -> JsonDict:
-    marketing_profile = dict(profile.get("marketing_profile") or {})
-    marketing_summary = dict(profile.get("marketing_summary") or {})
-    return {
-        "stage_key": marketing_profile.get("stage_key") or "",
-        "recommended_action": marketing_profile.get("recommended_action") or "",
-        "signals": list(marketing_profile.get("signals") or []),
-        "value_segment": marketing_summary.get("value_segment") or "",
-        "source_status": "customer_read_model_projection",
-    }
-
-
-def _customer_360_touchpoints(items: list[JsonDict]) -> list[JsonDict]:
-    touchpoints: list[JsonDict] = []
-    for item in items[:10]:
-        row = dict(item)
-        touchpoints.append(
-            {
-                "touchpoint_key": str(row.get("event_id") or row.get("source_id") or ""),
-                "touchpoint_type": str(row.get("event_type") or ""),
-                "summary": str(row.get("summary") or row.get("title") or ""),
-                "occurred_at": row.get("event_time") or row.get("created_at") or "",
-                "source_table": str(row.get("source_table") or ""),
-                "source_id": str(row.get("source_id") or ""),
-            }
-        )
-    return touchpoints
-
-
-def _customer_360_risk_flags(profile: JsonDict, identity: JsonDict, messages: list[JsonDict]) -> list[JsonDict]:
-    flags: list[JsonDict] = []
-    if not str(identity.get("unionid") or "").strip():
-        flags.append({"flag": "missing_unionid", "severity": "red", "summary": "identity projection missing unionid"})
-    if not str(identity.get("owner_userid") or profile.get("owner_userid") or "").strip():
-        flags.append({"flag": "missing_owner", "severity": "yellow", "summary": "customer has no owner_userid"})
-    if not profile.get("updated_at"):
-        flags.append({"flag": "missing_projection_refresh", "severity": "yellow", "summary": "customer projection has no updated_at"})
-    if not messages and not profile.get("last_message_at"):
-        flags.append({"flag": "no_recent_message", "severity": "info", "summary": "no recent message in read model window"})
-    return flags
+from .application_customer360_support import (
+    _customer_360_automation_status,
+    _customer_360_identity,
+    _customer_360_message_summary,
+    _customer_360_orders_summary,
+    _customer_360_questionnaire_answers,
+    _customer_360_questionnaire_summary,
+    _customer_360_risk_flags,
+    _customer_360_touchpoints,
+    _customer_360_user_ops_status,
+)
 
 
 GetCustomerChatContextQuery = GetCustomerContextQuery

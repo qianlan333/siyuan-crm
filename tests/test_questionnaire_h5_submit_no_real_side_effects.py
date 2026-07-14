@@ -18,7 +18,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     return TestClient(create_app())
 
 
-def test_h5_submit_returns_explicit_tag_failure_without_owner_userid(client: TestClient) -> None:
+def test_h5_submit_reports_only_the_durable_continuation_and_never_checks_provider_config(client: TestClient) -> None:
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
         json={"answers": {"q_activation": "activated"}, "identity": {"external_userid": "wx_ext_001"}},
@@ -27,26 +27,28 @@ def test_h5_submit_returns_explicit_tag_failure_without_owner_userid(client: Tes
     assert response.status_code == 200
     body = response.json()
     assert body["real_external_call_executed"] is False
-    assert body["tag_apply"]["status"] == "failed"
-    assert body["tag_apply"]["error_code"] == "owner_userid_missing"
+    assert body["tag_apply"]["status"] == "queued"
+    assert body["tag_apply"]["durable_continuation_queued"] is True
     assert body["tag_apply"]["wecom_api_called"] is False
     assert body["tag_apply"]["local_projection_updated"] is False
     plan = body["side_effect_plan"]
-    assert plan["adapter_mode"] == "real_mark_tag"
+    assert plan["adapter_mode"] == "durable_internal_event"
     assert plan["requires_approval"] is False
     assert plan["real_external_call_executed"] is False
     assert plan["payload"]["real_external_call_executed"] is False
     assert "wecom.tag.contact_tags_mirror.skipped" in plan["payload"]["planned_effects"]
-    assert "wecom.tag.mark_tag.failed" in plan["payload"]["planned_effects"]
+    assert "wecom.tag.mark_tag.queued" in plan["payload"]["planned_effects"]
 
     plans = get_questionnaire_h5_side_effect_plans()
     assert all(item["real_external_call_executed"] is False for item in plans)
 
 
-def test_h5_write_source_executes_real_wecom_mark_tag_without_compat_facade() -> None:
+def test_h5_write_source_only_persists_durable_continuation_without_provider_or_direct_planner() -> None:
     text = Path("aicrm_next/questionnaire/h5_write.py").read_text(encoding="utf-8")
-    assert "ProductionWeComAdapter" in text
-    assert ".mark_external_contact_tags(" in text
+    assert "ProductionWeComAdapter" not in text
+    assert ".mark_external_contact_tags(" not in text
+    assert "plan_questionnaire_external_push_effect" not in text
+    assert "enqueue_transactional_internal_event_outbox" not in text
     assert "execute_wecom_tag_mutation" not in text
     assert "PlanQuestionnaireTagSideEffectCommand" not in text
     assert "X-AICRM-Compatibility-Facade" not in text

@@ -63,9 +63,6 @@ def admin_ai_audience_package_detail_page(request: Request, package_id: int):
             "ai_audience_package_api_url": f"/api/admin/ai-audience/packages/{package_id}",
             "ai_audience_package_members_api_url": f"/api/admin/ai-audience/packages/{package_id}/members",
             "ai_audience_package_webhooks_api_url": f"/api/admin/ai-audience/packages/{package_id}/webhooks",
-            "ai_audience_package_webhooks_rotate_api_url": (
-                f"/api/admin/ai-audience/packages/{package_id}/webhooks/rotate-inbound-secret"
-            ),
             "ai_audience_package_senders_api_url": f"/api/admin/ai-audience/packages/{package_id}/senders",
         }
     )

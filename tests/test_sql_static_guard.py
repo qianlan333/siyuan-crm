@@ -134,6 +134,37 @@ CREATE TABLE IF NOT EXISTS service_period_entitlements (
     assert "service_period_entitlements declares legacy identity column mobile_snapshot" in violations[0].detail
 
 
+def test_radar_identity_event_snapshots_are_an_exact_migration_only_boundary(tmp_path: Path) -> None:
+    manifest = _write_manifest(
+        tmp_path,
+        baseline_prefix="0101",
+        extra_table="""
+  radar_click_events:
+    domain: radar
+    lifecycle: event
+    write_owner: aicrm_next.radar_links
+    replacement: none
+    drop_candidate: false
+""",
+    )
+    _write(
+        tmp_path / "migrations" / "versions" / "0102_questionnaire_radar_invariants.py",
+        '''
+def _radar_click_events():
+    op.execute("""
+    CREATE TABLE IF NOT EXISTS radar_click_events (
+        id BIGSERIAL PRIMARY KEY,
+        openid TEXT NOT NULL DEFAULT '',
+        external_userid TEXT NOT NULL DEFAULT '',
+        person_id TEXT NOT NULL DEFAULT ''
+    )
+    """)
+''',
+    )
+
+    assert check_sql_static_guard(root=tmp_path, manifest_path=manifest) == []
+
+
 def test_runtime_public_retired_table_reference_fails(tmp_path: Path) -> None:
     manifest = _write_manifest(tmp_path)
     _write(

@@ -6,7 +6,13 @@ from typing import Any
 from aicrm_next.shared.admin_read_fallback import admin_read_unavailable_payload
 
 from .models import InternalEvent, InternalEventConsumerAttempt, InternalEventConsumerRun
-from .config import consumer_metadata
+from .config import (
+    allowed_consumers,
+    allowed_event_consumer_pairs,
+    allowed_event_types,
+    consumer_metadata,
+    worker_allows,
+)
 from .legacy_path_markers import legacy_path_marker_diagnostics
 from .repository import InternalEventRepository, build_internal_event_repository
 from .service import InternalEventService
@@ -126,6 +132,8 @@ def _status_counts(runs: list[InternalEventConsumerRun]) -> dict[str, int]:
 def _reconciliation_summary(
     runs: list[InternalEventConsumerRun],
     reconciliation: dict[str, Any] | None = None,
+    *,
+    event_type: str = "",
 ) -> dict[str, Any]:
     placeholder_consumers = {
         run.consumer_name
@@ -133,19 +141,18 @@ def _reconciliation_summary(
         if consumer_metadata(run.consumer_name).get("type") == "placeholder"
     }
     placeholder_count = len(placeholder_consumers)
-    unresolved_count = len(
-        [
-            run
-            for run in runs
-            if run.consumer_name not in placeholder_consumers and run.status in {"pending", "running"}
-        ]
-    )
+    open_runs = [run for run in runs if run.consumer_name not in placeholder_consumers and run.status in {"pending", "running"}]
+    rollout_gated_count = len([run for run in open_runs if not worker_allows(event_type, run.consumer_name)])
+    unresolved_count = len(open_runs) - rollout_gated_count
     external_effects = list((reconciliation or {}).get("external_effects") or [])
     derived_status = _text((reconciliation or {}).get("derived_status"))
     return {
         "derived_status": derived_status,
         "unresolved_consumer_count": unresolved_count,
+        "actionable_consumer_count": unresolved_count,
+        "rollout_gated_consumer_count": rollout_gated_count,
         "placeholder_consumer_count": placeholder_count,
+        "not_business_backlog_count": rollout_gated_count + placeholder_count,
         "external_effect_count": len(external_effects),
         "external_effect_statuses": sorted({_text(item.get("job_status") or item.get("status")) for item in external_effects if _text(item.get("job_status") or item.get("status"))}),
     }
@@ -156,7 +163,7 @@ def event_list_item(
     runs: list[InternalEventConsumerRun],
     reconciliation: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    summary = _reconciliation_summary(runs, reconciliation)
+    summary = _reconciliation_summary(runs, reconciliation, event_type=event.event_type)
     return {
         "event_id": event.event_id,
         "event_type": event.event_type,
@@ -235,6 +242,18 @@ def build_events_payload(params: dict[str, Any] | None = None, *, repository: In
             runs, _ = repository.list_consumer_runs({"event_id": event.event_id}, limit=200)
             items.append(event_list_item(event, runs))
         metrics = repository.queue_metrics({})
+        effective_filters: dict[str, Any] = {}
+        configured_pairs = allowed_event_consumer_pairs()
+        configured_event_types = allowed_event_types()
+        configured_consumers = allowed_consumers()
+        if configured_event_types:
+            effective_filters["event_types"] = configured_event_types
+        if configured_pairs:
+            effective_filters["event_consumers"] = configured_pairs
+        else:
+            if configured_consumers:
+                effective_filters["consumer_names"] = configured_consumers
+        effective_metrics = repository.queue_metrics(effective_filters) if effective_filters else metrics
     except Exception as exc:
         return _read_unavailable_payload(filters, exc, limit=limit, offset=offset)
     return {
@@ -246,9 +265,11 @@ def build_events_payload(params: dict[str, Any] | None = None, *, repository: In
         "offset": offset,
         "counts": {
             "total": total,
-            "due": metrics.get("due_count", 0),
-            "failed_retryable": metrics.get("failed_retryable_count", 0),
-            "failed_terminal": metrics.get("failed_terminal_count", 0),
+            "due": effective_metrics.get("due_count", 0),
+            "failed_retryable": effective_metrics.get("failed_retryable_count", 0),
+            "failed_terminal": effective_metrics.get("failed_terminal_count", 0),
+            "raw_due": metrics.get("due_count", 0),
+            "rollout_gated": max(0, int(metrics.get("due_count") or 0) - int(effective_metrics.get("due_count") or 0)),
         },
         "route_owner": ROUTE_OWNER,
         "real_external_call_executed": False,
@@ -263,7 +284,7 @@ def build_event_detail_payload(event_id: str, *, service: InternalEventService |
     runs, _ = service.list_consumer_runs({"event_id": event.event_id}, limit=200)
     attempts = service.list_attempts(event_id=event.event_id)
     reconciliation = service.get_event_reconciliation(event.event_id)
-    summary = _reconciliation_summary(runs, reconciliation)
+    summary = _reconciliation_summary(runs, reconciliation, event_type=event.event_type)
     return {
         "ok": True,
         "event": event_list_item(event, runs, reconciliation),

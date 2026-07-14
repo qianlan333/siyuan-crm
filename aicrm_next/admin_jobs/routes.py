@@ -1,11 +1,6 @@
 from __future__ import annotations
 
-import base64
-import hashlib
-import hmac
 import json
-import os
-import time
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 
-from aicrm_next.shared.internal_service_tokens import validate_internal_service_token
-from aicrm_next.shared.runtime_settings import runtime_setting
+from aicrm_next.shared.admin_action_runtime import ensure_admin_action_token, validate_admin_action_token
 
 from .application import (
     approve_broadcast_job,
@@ -41,54 +35,11 @@ from .notification_settings import (
     validate_feishu_webhook,
 )
 from aicrm_next.admin_shell import admin_path_for, shell_context
-from aicrm_next.admin_auth.action_token import bound_action_tokens_required, validate_action_token_for_request
-from aicrm_next.shared.runtime import require_signing_secret
 
 router = APIRouter()
 
 _ADMIN_JOBS_TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=_ADMIN_JOBS_TEMPLATE_DIR)
-
-
-def _secret_key() -> str:
-    return require_signing_secret(
-        "AICRM_NEXT_ACTION_TOKEN_SECRET",
-        fallback_env_keys=("SECRET_KEY",),
-        local_fallback="aicrm-next-dev-action-token",
-    ).decode("utf-8")
-
-
-def _sign(value: str) -> str:
-    return hmac.new(_secret_key().encode("utf-8"), value.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def ensure_admin_action_token() -> str:
-    payload = f"{int(time.time())}:{os.urandom(8).hex()}"
-    raw = f"{payload}:{_sign(payload)}"
-    return base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ascii")
-
-
-def validate_admin_action_token(token: str, *, request: Request | None = None) -> str:
-    token = normalized_text(token)
-    if not token:
-        return "缺少 admin_action_token"
-    if request is not None:
-        result = validate_action_token_for_request(request, token)
-        if result.ok:
-            return ""
-        if bound_action_tokens_required():
-            return "admin_action_token 已过期" if result.error == "expired" else "admin_action_token 无效或与当前动作不匹配"
-    try:
-        raw = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
-        ts_text, nonce, signature = raw.split(":", 2)
-        payload = f"{ts_text}:{nonce}"
-        if not hmac.compare_digest(signature, _sign(payload)):
-            return "admin_action_token 无效"
-        if abs(time.time() - int(ts_text)) > 12 * 60 * 60:
-            return "admin_action_token 已过期"
-    except Exception:
-        return "admin_action_token 无效"
-    return ""
 
 
 def _operator_from_request(request: Request, payload: dict[str, Any] | None = None, form: Any | None = None) -> str:
@@ -98,17 +49,6 @@ def _operator_from_request(request: Request, payload: dict[str, Any] | None = No
         or normalized_text((payload or {}).get("operator") if payload else "")
         or "crm_console"
     )
-
-
-def _internal_token_error(request: Request) -> str:
-    header = normalized_text(request.headers.get("Authorization"))
-    actual = header.split(" ", 1)[1].strip() if header.lower().startswith("bearer ") else ""
-    result = validate_internal_service_token("automation_worker", actual)
-    if result.error == "internal_token_not_configured":
-        return "internal token is not configured"
-    if not result.ok:
-        return "invalid bearer token" if actual else "missing bearer token"
-    return ""
 
 
 def _jsonable(payload: Any) -> Any:
@@ -124,8 +64,6 @@ async def _request_payload(request: Request) -> dict[str, Any]:
 
 
 async def _action_token_error(request: Request, payload: dict[str, Any] | None = None) -> str:
-    if not _internal_token_error(request):
-        return ""
     token = normalized_text(request.headers.get("X-Admin-Action-Token")) or normalized_text((payload or {}).get("admin_action_token"))
     if not token:
         try:
@@ -137,16 +75,12 @@ async def _action_token_error(request: Request, payload: dict[str, Any] | None =
 
 
 async def _cron_or_action_token_error(request: Request, payload: dict[str, Any] | None = None) -> str:
-    header = normalized_text(request.headers.get("Authorization"))
-    secret = normalized_text(runtime_setting("CRON_SECRET"))
-    if secret and header.lower().startswith("bearer "):
-        actual = header.split(" ", 1)[1].strip()
-        if hmac.compare_digest(actual, secret):
-            return ""
     return await _action_token_error(request, payload)
 
 
-def _jobs_context(request: Request, *, page_notice: str = "", page_error: str = "", action_result: dict[str, Any] | None = None, args: dict[str, Any] | None = None) -> dict[str, Any]:
+def _jobs_context(
+    request: Request, *, page_notice: str = "", page_error: str = "", action_result: dict[str, Any] | None = None, args: dict[str, Any] | None = None
+) -> dict[str, Any]:
     context = shell_context(
         request=request,
         page_title="同步任务",
@@ -195,7 +129,9 @@ async def admin_jobs_action(request: Request):
             operator=_operator_from_request(request, form=form),
         )
         notice = "这里会先展示操作预览，确认后才会真正执行同步。" if result.get("preview_only") else "操作已完成，结果与审计已刷新。"
-        return templates.TemplateResponse(request, "admin_console/jobs.html", _jobs_context(request, page_notice=notice, action_result=result, args=query_overrides))
+        return templates.TemplateResponse(
+            request, "admin_console/jobs.html", _jobs_context(request, page_notice=notice, action_result=result, args=query_overrides)
+        )
     except Exception as exc:
         return templates.TemplateResponse(request, "admin_console/jobs.html", _jobs_context(request, page_error=str(exc), args=query_overrides))
 
@@ -348,9 +284,7 @@ def _with_ok(payload: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/api/admin/broadcast-jobs/notification-settings/feishu")
 async def api_admin_broadcast_jobs_feishu_notification_settings(request: Request):
-    token_error = await _action_token_error(request)
-    if token_error:
-        return JSONResponse({"ok": False, "error": token_error}, status_code=401)
+    del request
     return _with_ok(get_feishu_notification_setting())
 
 
@@ -414,6 +348,8 @@ async def api_admin_jobs_order_identity_repair_run(request: Request):
         },
         status_code=410,
     )
+
+
 @router.post("/api/admin/broadcast-jobs/{job_id}/approve")
 async def api_admin_broadcast_jobs_approve(job_id: int, request: Request):
     payload = await _request_payload(request)

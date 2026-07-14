@@ -17,7 +17,6 @@ RUNTIME_FILE_LINE_BUDGETS = {
 }
 
 INLINE_SCRIPT_LINE_BUDGETS = {
-    "aicrm_next/questionnaire/templates/admin_questionnaires.html": 4359,
     "aicrm_next/frontend_compat/templates/admin_user_ops.html": 926,
     "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html": 798,
     "aicrm_next/frontend_compat/templates/admin_console/cloud_campaigns_workspace.html": 682,
@@ -34,6 +33,8 @@ INLINE_SCRIPT_LINE_BUDGETS = {
     "aicrm_next/frontend_compat/templates/admin_console/hxc_dashboard.html": 359,
     "aicrm_next/frontend_compat/templates/admin_console/config_push_capabilities.html": 306,
 }
+
+TEMPLATE_TOTAL_LINE_LIMIT = 3000
 
 
 def test_runtime_files_over_1500_lines_do_not_grow_without_decomposition() -> None:
@@ -52,6 +53,18 @@ def test_inline_script_debt_does_not_grow_without_static_js_migration() -> None:
         count = _inline_script_line_count(Path(path).read_text(encoding="utf-8"))
         if count > budget:
             overruns.append(f"{path}: {count} > {budget}")
+
+    assert overruns == []
+
+
+def test_large_template_debt_stays_below_r13_limit() -> None:
+    overruns: list[str] = []
+    for path in sorted(Path("aicrm_next").rglob("*.html")):
+        if "templates" not in path.parts:
+            continue
+        count = len(path.read_text(encoding="utf-8").splitlines())
+        if count > TEMPLATE_TOTAL_LINE_LIMIT:
+            overruns.append(f"{path}: {count} > {TEMPLATE_TOTAL_LINE_LIMIT}")
 
     assert overruns == []
 

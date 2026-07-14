@@ -44,8 +44,10 @@ def test_run_incremental_archive_sync_uses_internal_http_helper(monkeypatch, cap
 
     monkeypatch.setenv("APP_HOST", "archive.local")
     monkeypatch.setenv("APP_PORT", "5002")
+    monkeypatch.setenv("AICRM_INTERNAL_API_BASE_URL", "https://archive.local")
     monkeypatch.setenv("WECOM_DEFAULT_OWNER_USERID", "zhangsan")
-    monkeypatch.setenv("ARCHIVE_INTERNAL_API_TOKEN", "archive-token")
+    monkeypatch.setattr(module, "read_internal_access_token", lambda **_kwargs: "archive-oauth-access-token")
+    monkeypatch.setattr(module, "read_internal_tls_context", lambda: None)
     monkeypatch.setenv("WECOM_ARCHIVE_SYNC_CURSOR", "30651")
     monkeypatch.setenv("WECOM_ARCHIVE_SYNC_LIMIT", "200")
     monkeypatch.setenv("WECOM_ARCHIVE_SYNC_MAX_PAGES", "20")
@@ -55,10 +57,10 @@ def test_run_incremental_archive_sync_uses_internal_http_helper(monkeypatch, cap
     body = module.run()
 
     assert json.loads(body) == {"ok": True, "synced_count": 5}
-    assert captured["url"] == "http://archive.local:5002/api/archive/sync"
+    assert captured["url"] == "https://archive.local/api/archive/sync"
     assert captured["timeout"] == 600
     assert captured["headers"]["content-type"] == "application/json"
-    assert captured["headers"]["authorization"] == "Bearer archive-token"
+    assert captured["headers"]["authorization"] == "Bearer archive-oauth-access-token"
     assert captured["body"] == {
         "start_time": "2000-01-01 00:00:00",
         "end_time": "2099-12-31 23:59:59",

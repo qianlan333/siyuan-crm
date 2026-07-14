@@ -32,16 +32,16 @@ from .schemas import (
     RepairChannelEntryCommand,
 )
 from .wecom_adapter import WeComAdapterBlocked, WeComApiError, get_wecom_adapter, wecom_adapter_diagnostics
-from .wecom_crypto import build_encrypted_reply, decrypt_message, parse_callback_xml, verify_signature
+from .wecom_crypto import build_encrypted_reply, decrypt_message, parse_callback_xml, validate_callback_timestamp, verify_signature
 from aicrm_next.platform_foundation.command_bus.models import CommandContext
 from aicrm_next.platform_foundation.external_effects import (
     ExternalEffectService,
     WECOM_CONTACT_TAG_MARK,
-    WECOM_MESSAGE_PRIVATE_SEND,
     WECOM_WELCOME_MESSAGE_SEND,
 )
 from aicrm_next.platform_foundation.internal_events import InternalEventService
 from aicrm_next.platform_foundation.external_effects.realtime import wake_external_effect_job
+from aicrm_next.platform_foundation.external_effects.adapters import ExternalEffectAdapterRegistry
 
 CUSTOMER_NAME_PLACEHOLDER_RE = re.compile(r"\{\{\s*客户名\s*\}\}")
 LOGGER = logging.getLogger(__name__)
@@ -71,6 +71,7 @@ def _event_key(corp_id: str, event_data: dict[str, Any]) -> str:
 
 def decrypt_callback_body(*, query: dict[str, str], body: bytes) -> tuple[dict[str, Any], str]:
     config = callback_config()
+    validate_callback_timestamp(text(query.get("timestamp")))
     xml_text = body.decode("utf-8")
     envelope = parse_callback_xml(xml_text)
     encrypted = text(envelope.get("Encrypt"))
@@ -81,6 +82,7 @@ def decrypt_callback_body(*, query: dict[str, str], body: bytes) -> tuple[dict[s
 
 def verify_callback_echostr(query: dict[str, str]) -> str:
     config = callback_config()
+    validate_callback_timestamp(text(query.get("timestamp")))
     echostr = text(query.get("echostr"))
     verify_signature(config["token"], text(query.get("timestamp")), text(query.get("nonce")), echostr, text(query.get("msg_signature")))
     return decrypt_message(echostr, config["aes_key"], config["corp_id"])
@@ -190,11 +192,18 @@ def _plan_channel_entry_effect(
     )
 
 
-def _wake_channel_entry_external_effect_job(job_id: Any, *, effect_type: str, reason: str) -> bool:
+def _wake_channel_entry_external_effect_job(
+    job_id: Any,
+    *,
+    effect_type: str,
+    reason: str,
+    adapter_registry: ExternalEffectAdapterRegistry | None = None,
+) -> bool:
     return wake_external_effect_job(
         job_id,
         reason=reason,
         effect_type=effect_type,
+        adapter_registry=adapter_registry,
     )
 
 
@@ -203,65 +212,6 @@ def _channel_entry_target(command: ProcessChannelEntryCommand) -> tuple[str, str
     if unionid:
         return "unionid", unionid, {"target_unionid": unionid}
     return "external_userid", text(command.external_contact_id), {}
-
-
-def _plan_welcome_fallback_message(
-    command: ProcessChannelEntryCommand,
-    *,
-    channel_id: int,
-    scene: str,
-    idempotency_key: str,
-    text_content: str,
-    attachments: list[dict[str, Any]],
-    welcome_effect_job_id: Any,
-) -> dict[str, Any]:
-    target_type, target_id, target_payload = _channel_entry_target(command)
-    payload: dict[str, Any] = {
-        "channel": "wecom_private",
-        "owner_userid": command.follow_user_userid,
-        "external_userids": [command.external_contact_id],
-        "source": "channel_entry_welcome_fallback",
-        "fallback_reason": "welcome_realtime_not_scheduled",
-        "source_welcome_effect_job_id": int(welcome_effect_job_id or 0),
-        "channel_id": channel_id,
-        "scene_value": scene,
-        **target_payload,
-    }
-    if text_content:
-        payload["content_text"] = text_content
-    if attachments:
-        payload["attachments"] = attachments
-    job = _plan_channel_entry_effect(
-        command,
-        effect_type=WECOM_MESSAGE_PRIVATE_SEND,
-        adapter_name="wecom_private_message",
-        operation="send",
-        target_type=target_type,
-        target_id=target_id,
-        business_type="channel_entry_welcome_fallback",
-        business_id=str(channel_id),
-        idempotency_key=f"{idempotency_key}:fallback_private_message",
-        payload=payload,
-        payload_summary={
-            "external_userid": command.external_contact_id,
-            "target_type": target_type,
-            "target_id": target_id,
-            "target_unionid": text(target_payload.get("target_unionid")),
-            "owner_userid": command.follow_user_userid,
-            "channel_id": channel_id,
-            "scene_value": scene,
-            "text_present": bool(text_content),
-            "attachment_count": len(attachments),
-            "source_welcome_effect_job_id": int(welcome_effect_job_id or 0),
-        },
-    )
-    return {
-        "queued": True,
-        "reason": "welcome_realtime_not_scheduled_fallback_private_message_queued",
-        "external_effect_job_id": job.get("id"),
-        "effect_type": WECOM_MESSAGE_PRIVATE_SEND,
-        "adapter_name": "wecom_private_message",
-    }
 
 
 def _emit_channel_entry_internal_event(
@@ -485,6 +435,7 @@ def _canonicalize_channel_entry_after_identity(
     corp_id: str,
     event_log_id: int | None,
     identity_sync: dict[str, Any],
+    persist_runtime_identity: bool = True,
 ) -> dict[str, Any]:
     unionid = text(identity_sync.get("unionid"))
     scene = extract_scene(event)
@@ -513,11 +464,15 @@ def _canonicalize_channel_entry_after_identity(
         channel_id=channel_id,
         scene=scene,
     )
-    runtime_identity = _mark_runtime_identity_from_sync(
-        event,
-        corp_id=corp_id,
-        event_log_id=event_log_id,
-        identity_sync=identity_sync,
+    runtime_identity = (
+        _mark_runtime_identity_from_sync(
+            event,
+            corp_id=corp_id,
+            event_log_id=event_log_id,
+            identity_sync=identity_sync,
+        )
+        if persist_runtime_identity
+        else {"status": "skipped", "reason": "backfill_worker_owns_runtime_identity"}
     )
     return {
         "status": "success",
@@ -528,7 +483,13 @@ def _canonicalize_channel_entry_after_identity(
     }
 
 
-def _sync_identity_best_effort(event: dict[str, Any], *, corp_id: str, event_log_id: int | None) -> dict[str, Any]:
+def _sync_identity_best_effort(
+    event: dict[str, Any],
+    *,
+    corp_id: str,
+    event_log_id: int | None,
+    persist_runtime_identity: bool = True,
+) -> dict[str, Any]:
     try:
         identity_sync = sync_external_contact_identity_for_event(event, corp_id=corp_id)
     except Exception as exc:
@@ -544,17 +505,22 @@ def _sync_identity_best_effort(event: dict[str, Any], *, corp_id: str, event_log
                 corp_id=corp_id,
                 event_log_id=event_log_id,
                 identity_sync=identity_sync,
+                persist_runtime_identity=persist_runtime_identity,
             )
             identity_sync["channel_entry_canonical"] = canonical
         except Exception as exc:
             safe_log_exception(LOGGER, "channel entry canonicalization after identity failed", exc, level=logging.WARNING)
             identity_sync["channel_entry_canonical"] = {"status": "failed", "reason": str(exc)}
     else:
-        identity_sync["runtime_identity"] = _mark_runtime_identity_from_sync(
-            event,
-            corp_id=corp_id,
-            event_log_id=event_log_id,
-            identity_sync=identity_sync,
+        identity_sync["runtime_identity"] = (
+            _mark_runtime_identity_from_sync(
+                event,
+                corp_id=corp_id,
+                event_log_id=event_log_id,
+                identity_sync=identity_sync,
+            )
+            if persist_runtime_identity
+            else {"status": "skipped", "reason": "backfill_worker_owns_runtime_identity"}
         )
     return identity_sync
 
@@ -620,7 +586,13 @@ def _render_welcome_message_template(message: Any, command: ProcessChannelEntryC
     return CUSTOMER_NAME_PLACEHOLDER_RE.sub(_resolve_welcome_customer_name(command), rendered)
 
 
-def _send_welcome(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], scene: str) -> dict[str, Any]:
+def _send_welcome(
+    command: ProcessChannelEntryCommand,
+    *,
+    channel: dict[str, Any],
+    scene: str,
+    adapter_registry: ExternalEffectAdapterRegistry | None = None,
+) -> dict[str, Any]:
     channel_id = int(channel.get("id") or 0)
     welcome_code = extract_welcome_code(command.payload_json)
     key = f"{extract_corp_id(command.payload_json)}:{command.external_contact_id}:{command.follow_user_userid}:{welcome_code}:welcome"
@@ -691,28 +663,8 @@ def _send_welcome(command: ProcessChannelEntryCommand, *, channel: dict[str, Any
         job.get("id"),
         effect_type=WECOM_WELCOME_MESSAGE_SEND,
         reason="channel_entry_welcome_message",
+        adapter_registry=adapter_registry,
     )
-    fallback_message: dict[str, Any] = {}
-    cancelled_welcome_job: dict[str, Any] | None = None
-    if not immediate_dispatch_scheduled:
-        try:
-            fallback_message = _plan_welcome_fallback_message(
-                command,
-                channel_id=channel_id,
-                scene=scene,
-                idempotency_key=key,
-                text_content=text_content,
-                attachments=attachments,
-                welcome_effect_job_id=job.get("id"),
-            )
-            cancelled = ExternalEffectService().cancel(int(job.get("id") or 0))
-            cancelled_welcome_job = cancelled.to_dict() if hasattr(cancelled, "to_dict") else (dict(cancelled) if isinstance(cancelled, dict) else None)
-        except Exception as exc:
-            fallback_message = {
-                "queued": False,
-                "reason": "welcome_fallback_queue_failed",
-                "message": str(exc),
-            }
     result = {
         "attempted": True,
         "sent": False,
@@ -721,8 +673,9 @@ def _send_welcome(command: ProcessChannelEntryCommand, *, channel: dict[str, Any
         "welcome_code": welcome_code,
         "external_effect_job_id": job.get("id"),
         "immediate_dispatch_scheduled": immediate_dispatch_scheduled,
-        "fallback_message": fallback_message,
-        "welcome_effect_cancelled_for_fallback": bool(cancelled_welcome_job),
+        "immediate_dispatch_mode": "durable_callback_worker_inline_claim",
+        "fallback_message": {},
+        "welcome_effect_cancelled_for_fallback": False,
         "real_external_call_executed": False,
         "attachments": attachments,
     }
@@ -730,7 +683,13 @@ def _send_welcome(command: ProcessChannelEntryCommand, *, channel: dict[str, Any
     return result
 
 
-def _apply_tag(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], scene: str) -> dict[str, Any]:
+def _apply_tag(
+    command: ProcessChannelEntryCommand,
+    *,
+    channel: dict[str, Any],
+    scene: str,
+    adapter_registry: ExternalEffectAdapterRegistry | None = None,
+) -> dict[str, Any]:
     channel_id = int(channel.get("id") or 0)
     tag_id = text(channel.get("entry_tag_id"))
     key = f"{extract_corp_id(command.payload_json)}:{command.external_contact_id}:{command.follow_user_userid}:{tag_id}:{channel_id}:tag"
@@ -789,6 +748,7 @@ def _apply_tag(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], 
             job.get("id"),
             effect_type=WECOM_CONTACT_TAG_MARK,
             reason="channel_entry_tag_mark",
+            adapter_registry=adapter_registry,
         ),
         "real_external_call_executed": False,
     }
@@ -796,7 +756,11 @@ def _apply_tag(command: ProcessChannelEntryCommand, *, channel: dict[str, Any], 
     return result
 
 
-def process_channel_entry(command: ProcessChannelEntryCommand) -> dict[str, Any]:
+def process_channel_entry(
+    command: ProcessChannelEntryCommand,
+    *,
+    external_effect_adapter_registry: ExternalEffectAdapterRegistry | None = None,
+) -> dict[str, Any]:
     scene = extract_scene(command.payload_json)
     corp_id = extract_corp_id(command.payload_json)
     channel, match = resolve_channel_for_scene(scene_value=scene, corp_id=corp_id, persist_alias=not command.dry_run)
@@ -882,8 +846,18 @@ def process_channel_entry(command: ProcessChannelEntryCommand) -> dict[str, Any]
             response_json=channel_contact,
         )
 
-    welcome = _send_welcome(command, channel=channel, scene=scene)
-    tag = _apply_tag(command, channel=channel, scene=scene)
+    welcome = _send_welcome(
+        command,
+        channel=channel,
+        scene=scene,
+        adapter_registry=external_effect_adapter_registry,
+    )
+    tag = _apply_tag(
+        command,
+        channel=channel,
+        scene=scene,
+        adapter_registry=external_effect_adapter_registry,
+    )
     mode = "channel_baseline_only" if has_unionid else "channel_runtime_only"
     reason = "channel_entry_baseline_recorded" if has_unionid else "channel_entry_runtime_recorded"
     return {
@@ -902,7 +876,11 @@ def process_channel_entry(command: ProcessChannelEntryCommand) -> dict[str, Any]
     }
 
 
-def process_wecom_external_contact_event(command: ProcessWeComExternalContactEventCommand) -> dict[str, Any]:
+def process_wecom_external_contact_event(
+    command: ProcessWeComExternalContactEventCommand,
+    *,
+    external_effect_adapter_registry: ExternalEffectAdapterRegistry | None = None,
+) -> dict[str, Any]:
     event = command.event_data
     logged = repo.log_external_contact_event(
         corp_id=command.corp_id,
@@ -928,7 +906,8 @@ def process_wecom_external_contact_event(command: ProcessWeComExternalContactEve
                         event_action=text(event.get("ChangeType")),
                         send_welcome_message=bool(text(event.get("WelcomeCode"))),
                         event_log_id=int(logged.get("id") or 0) or None,
-                    )
+                    ),
+                    external_effect_adapter_registry=external_effect_adapter_registry,
                 )
                 result.update({"handled": bool(entry.get("handled")), "entry_result": entry})
             else:

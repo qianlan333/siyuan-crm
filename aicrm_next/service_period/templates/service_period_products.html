@@ -5,7 +5,13 @@
 <script src="{{ url_for('static', filename='admin_console/image_upload_client.js') }}"></script>
 {% endif %}
 <style>
-  .service-period-admin { display: grid; gap: 14px; }
+  .service-period-admin {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    width: 100%;
+    min-width: 0;
+  }
   .service-period-toolbar,
   .service-period-actions {
     display: flex;
@@ -16,7 +22,21 @@
   }
   .service-period-actions { justify-content: flex-start; }
   .service-period-table { min-width: 1040px; }
-  .service-period-data-table { min-width: 820px; }
+  .service-period-data-wrap { width: 100%; max-width: 100%; min-width: 0; overflow-x: auto; }
+  .service-period-data-table { min-width: 1460px; }
+  .service-period-data-table th:first-child,
+  .service-period-data-table td:first-child {
+    position: sticky;
+    left: 0;
+    min-width: 260px;
+    background: #fff;
+    box-shadow: 8px 0 12px -12px rgba(16, 24, 40, 0.35);
+  }
+  .service-period-data-table th:first-child {
+    z-index: 3;
+    background: #f8f9fa;
+  }
+  .service-period-data-table td:first-child { z-index: 2; }
   .service-period-mono {
     font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     font-size: 13px;
@@ -747,22 +767,25 @@
       </div>
       <button class="admin-button admin-button--ghost" id="memberFilterBtn" type="button">筛选</button>
     </div>
-    <div class="admin-table-wrap" style="margin-top:14px;">
+    <div class="admin-table-wrap service-period-data-wrap" style="margin-top:14px;">
       <table class="admin-table service-period-data-table">
-        <thead><tr><th>会员</th><th>外部联系人id</th><th>状态</th><th>剩余有效期</th><th>到期日</th><th>备注</th><th>操作</th></tr></thead>
+        <thead><tr><th>会员</th><th>剩余有效期</th><th>正式登录</th><th>token 消耗</th><th>学习计划进度</th><th>近 7 天打开次数</th><th>最后打开时间</th><th>备注</th><th>操作</th></tr></thead>
         <tbody id="memberRows">
           {% for member in members %}
           <tr>
-            <td>{{ member.display_name or member.unionid }}<div class="service-period-sub">{{ member.mobile or member.unionid }}</div></td>
-            <td class="service-period-mono">{{ member.external_userid or "-" }}</td>
-            <td><span class="service-period-pill {{ 'ok' if member.status == 'active' else 'off' }}">{{ {"active":"使用中","expired":"已过期","disabled":"已停用","refunded":"已退款"}.get(member.status, member.status) }}</span></td>
+            <td>{{ member.display_name or member.unionid }}<div class="service-period-sub service-period-mono">{{ member.external_userid or "—" }}</div></td>
             <td>{{ member.remaining_days or 0 }} 天</td>
-            <td>{{ (member.end_at or "")[:10] }}</td>
-            <td>{{ member.remark or "-" }}</td>
+            {% set hyc_matched = member.huangyoucan_match_status in ["matched_unionid", "matched_mobile"] %}
+            <td>{{ ("是" if member.huangyoucan_formally_logged_in else "否") if hyc_matched else "—" }}</td>
+            <td>{{ ("有" if member.huangyoucan_has_token_usage else "无") if hyc_matched else "—" }}</td>
+            <td>{% if not hyc_matched %}—{% elif member.huangyoucan_learning_plan_progress %}{{ member.huangyoucan_learning_plan_progress.current }}/{{ member.huangyoucan_learning_plan_progress.total }}{% else %}无{% endif %}</td>
+            <td>{{ member.huangyoucan_open_count_7d if hyc_matched else "—" }}</td>
+            <td>{% if not hyc_matched %}—{% elif member.huangyoucan_last_open_at %}{{ member.huangyoucan_last_open_at[:16]|replace("T", " ") }}{% else %}无{% endif %}</td>
+            <td>{{ member.remark or "—" }}</td>
             <td><button class="admin-button admin-button--ghost" data-member-remark data-unionid="{{ member.unionid|forceescape }}" data-remark="{{ (member.remark or '')|forceescape }}" type="button">备注</button></td>
           </tr>
           {% else %}
-          <tr><td colspan="7" class="service-period-muted">暂无会员数据</td></tr>
+          <tr><td colspan="9" class="service-period-muted">暂无会员数据</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -1424,8 +1447,17 @@
   let currentMembers = [];
   const esc = (value) => String(value == null ? "" : value).replace(/[&<>'"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[c]));
   const money = (value) => (Number(value || 0) / 100).toFixed(2);
-  const statusLabel = (value) => ({active: "使用中", expired: "已过期", disabled: "已停用", refunded: "已退款"}[value] || value || "-");
-  const dateOnly = (value) => String(value || "").slice(0, 10);
+  const hycMatched = (member) => ["matched_unionid", "matched_mobile"].includes(String(member?.huangyoucan_match_status || ""));
+  const hycBoolean = (member, key, truthy, falsy) => hycMatched(member) ? (member[key] ? truthy : falsy) : "—";
+  const hycProgress = (member) => {
+    if (!hycMatched(member)) return "—";
+    const progress = member.huangyoucan_learning_plan_progress;
+    return progress ? `${Number(progress.current || 0)}/${Number(progress.total || 0)}` : "无";
+  };
+  const hycLastOpen = (member) => {
+    if (!hycMatched(member)) return "—";
+    return member.huangyoucan_last_open_at ? String(member.huangyoucan_last_open_at).replace("T", " ").slice(0, 16) : "无";
+  };
   function formatApiError(value) {
     if (!value) return "";
     if (typeof value === "string") return value;
@@ -1447,14 +1479,16 @@
   function renderMembers(items) {
     currentMembers = items || [];
     rows.innerHTML = currentMembers.map(member => `<tr>
-      <td>${esc(member.display_name || member.unionid)}<div class="service-period-sub">${esc(member.mobile || member.unionid)}</div></td>
-      <td class="service-period-mono">${esc(member.external_userid || "-")}</td>
-      <td><span class="service-period-pill ${member.status === "active" ? "ok" : "off"}">${esc(statusLabel(member.status))}</span></td>
+      <td>${esc(member.display_name || member.unionid)}<div class="service-period-sub service-period-mono">${esc(member.external_userid || "—")}</div></td>
       <td>${Number(member.remaining_days || 0)} 天</td>
-      <td>${esc(dateOnly(member.end_at))}</td>
-      <td>${esc(member.remark || "-")}</td>
+      <td>${esc(hycBoolean(member, "huangyoucan_formally_logged_in", "是", "否"))}</td>
+      <td>${esc(hycBoolean(member, "huangyoucan_has_token_usage", "有", "无"))}</td>
+      <td>${esc(hycProgress(member))}</td>
+      <td>${esc(hycMatched(member) ? Number(member.huangyoucan_open_count_7d || 0) : "—")}</td>
+      <td>${esc(hycLastOpen(member))}</td>
+      <td>${esc(member.remark || "—")}</td>
       <td><button class="admin-button admin-button--ghost" data-member-remark data-unionid="${esc(member.unionid)}" data-remark="${esc(member.remark || "")}" type="button">备注</button></td>
-    </tr>`).join("") || '<tr><td colspan="7" class="service-period-muted">暂无会员数据</td></tr>';
+    </tr>`).join("") || '<tr><td colspan="9" class="service-period-muted">暂无会员数据</td></tr>';
   }
   async function refreshData() {
     if (!serviceProductId) return;
@@ -1469,8 +1503,19 @@
     renderMembers(members.items || []);
   }
   function downloadCsv() {
-    const header = ["unionid", "display_name", "external_userid", "mobile", "status", "remaining_days", "end_at", "remark"];
-    const lines = [header.join(",")].concat(currentMembers.map(member => header.map(key => `"${String(member[key] ?? "").replace(/"/g, '""')}"`).join(",")));
+    const header = ["会员昵称", "外部联系人ID", "剩余有效期（天）", "正式登录", "token 消耗", "学习计划进度", "近 7 天打开次数", "最后打开时间", "备注"];
+    const csvValue = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+    const lines = [header.map(csvValue).join(",")].concat(currentMembers.map(member => [
+      member.display_name || member.unionid,
+      member.external_userid || "",
+      Number(member.remaining_days || 0),
+      hycBoolean(member, "huangyoucan_formally_logged_in", "是", "否"),
+      hycBoolean(member, "huangyoucan_has_token_usage", "有", "无"),
+      hycProgress(member),
+      hycMatched(member) ? Number(member.huangyoucan_open_count_7d || 0) : "—",
+      hycLastOpen(member),
+      member.remark || "",
+    ].map(csvValue).join(",")));
     const blob = new Blob([lines.join("\n")], {type: "text/csv;charset=utf-8"});
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

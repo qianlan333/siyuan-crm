@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from aicrm_next.identity_contact.application import ListExternalContactOwnerCandidatesQuery
 from aicrm_next.identity_contact.dto import BindMobileToExternalContactRequest
 from aicrm_next.platform_foundation.audit_ledger import InMemoryAuditLedger
 from aicrm_next.platform_foundation.command_bus import Command, CommandBus, CommandContext, CommandResult
@@ -33,6 +34,10 @@ class SidebarWriteNotFoundError(LookupError):
 
 
 class SidebarWriteConflictError(RuntimeError):
+    pass
+
+
+class SidebarWriteForbiddenError(PermissionError):
     pass
 
 
@@ -142,27 +147,20 @@ def _validate_command(command: SidebarWriteCommand) -> None:
         raise SidebarWriteInputError("external_userid is required")
     if not command.source_route.strip():
         raise SidebarWriteInputError("source_route is required")
+    if not command.actor_id.strip():
+        raise SidebarWriteForbiddenError("sidebar actor is required")
 
 
 def _validate_owner_scope(command: SidebarWriteCommand) -> None:
     owner_userid = str(command.payload.get("owner_userid") or "").strip()
-    if not owner_userid or production_data_ready():
-        return
-    customer = _repo.get_customer(command.external_userid)
-    if not customer:
-        return
-    candidates = {
-        str(customer.get("owner_userid") or "").strip(),
-        str(dict(customer.get("binding") or {}).get("owner_userid") or "").strip(),
-        str(dict(customer.get("identity") or {}).get("owner_userid") or "").strip(),
-    }
-    follow_users = customer.get("follow_users")
-    if isinstance(follow_users, list):
-        for item in follow_users:
-            if isinstance(item, dict):
-                candidates.add(str(item.get("userid") or item.get("user_id") or "").strip())
-    if owner_userid not in {candidate for candidate in candidates if candidate}:
-        raise SidebarWriteNotFoundError("customer not found")
+    if not owner_userid or owner_userid != str(command.actor_id or "").strip():
+        raise SidebarWriteForbiddenError("sidebar owner scope forbidden")
+    try:
+        candidates = ListExternalContactOwnerCandidatesQuery()(external_userid=command.external_userid)
+    except Exception as exc:
+        raise SidebarWriteProductionUnavailableError("sidebar owner scope unavailable") from exc
+    if owner_userid not in candidates:
+        raise SidebarWriteForbiddenError("sidebar owner scope forbidden")
 
 
 def _handle_bind_mobile(command: Command) -> dict[str, Any]:

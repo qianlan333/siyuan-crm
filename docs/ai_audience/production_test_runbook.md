@@ -1,6 +1,6 @@
 # Production Test Runbook
 
-这条路径不依赖 SSH 写权限、PG 写用户或浏览器 admin cookie。生产验证优先走 External Spec API Bearer token。
+这条路径不依赖 SSH 写权限、PG 写用户或浏览器 admin cookie。生产验证优先走 External Spec API 的短期 client-credentials JWT。
 
 ## 约束
 
@@ -14,16 +14,14 @@
 
 ## External API 创建测试包
 
-```bash
-export AICRM_AI_AUDIENCE_SPEC_API_TOKEN='...'
-```
+先按 [`../auth_client_credentials.md`](../auth_client_credentials.md) 使用注册的 `external_agent`、`audience=external_integration`、`scope=write` 换取 Token，再设置 `AICRM_AUTH_CLI_ACCESS_TOKEN="$AICRM_ACCESS_TOKEN"`。
 
 Dry-run：
 
 ```bash
 python scripts/ai_audience_apply_package_spec.py docs/ai_audience/examples/questionnaire_submitted_added_wecom.md \
   --external-api-base https://www.youcangogogo.com \
-  --external-token-from-env \
+  --oauth-access-token-from-env \
   --package-key-prefix prod_verify_ \
   --dry-run
 ```
@@ -33,7 +31,7 @@ Apply：
 ```bash
 python scripts/ai_audience_apply_package_spec.py docs/ai_audience/examples/questionnaire_submitted_added_wecom.md \
   --external-api-base https://www.youcangogogo.com \
-  --external-token-from-env \
+  --oauth-access-token-from-env \
   --package-key-prefix prod_verify_ \
   --apply \
   --confirm-production \
@@ -46,7 +44,7 @@ Archive：
 
 ```bash
 curl -sS -X POST \
-  -H "Authorization: Bearer $AICRM_AI_AUDIENCE_SPEC_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   https://www.youcangogogo.com/api/external/ai-audience/packages/prod_verify_q101_submitted_added_wecom/archive \
   -d '{"operator":"prod-test"}'
@@ -99,7 +97,7 @@ export AICRM_EXTERNAL_EFFECT_ALLOWED_OWNER_USERIDS=HuangYouCan
 RUN_ID="e2e_$(date +%Y%m%d_%H%M%S)"
 
 curl -sS -X POST \
-  -H "Authorization: Bearer $AICRM_AI_AUDIENCE_SPEC_API_TOKEN" \
+  -H "Authorization: Bearer $AICRM_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   https://www.youcangogogo.com/api/external/ai-audience/e2e/run \
   -d "{

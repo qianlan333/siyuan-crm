@@ -10,7 +10,6 @@ from aicrm_next.main import create_app
 def test_repeated_idempotency_key_returns_same_command_result(monkeypatch):
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_FORCE_PRODUCTION_DATA", raising=False)
-    monkeypatch.setenv("AUTOMATION_INTERNAL_API_TOKEN", "timer-token")
     reset_campaign_read_fixture_state()
     reset_run_due_fixture_state()
     client = TestClient(create_app(), raise_server_exceptions=False)

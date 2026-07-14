@@ -6,7 +6,6 @@ from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
-from aicrm_next.admin_auth.service import SESSION_COOKIE, sign_session
 from aicrm_next.auth_wecom.service import sign_auth_state
 from aicrm_next.integration_gateway.wecom_jssdk_adapter import (
     build_sidebar_jssdk_config,
@@ -17,6 +16,7 @@ from aicrm_next.integration_gateway.wecom_jssdk_adapter import (
 from aicrm_next.identity_contact.sidebar_jssdk import SIDEBAR_VIEWER_COOKIE
 from aicrm_next.main import create_app
 from aicrm_next.shared.signed_context import load_sidebar_owner_context_token
+from tests.sidebar_auth_test_helpers import install_sidebar_viewer_session
 
 
 def test_fake_adapter_response_matches_frontend_contract(monkeypatch) -> None:
@@ -120,7 +120,7 @@ def test_jssdk_api_get_head_and_options_are_next_owned(monkeypatch) -> None:
     assert "X-AICRM-Compatibility-Facade" not in head_response.headers
 
 
-def test_jssdk_api_issues_sidebar_owner_token_when_viewer_is_available(monkeypatch) -> None:
+def test_jssdk_api_rejects_query_claimed_viewer_without_oauth_session(monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "sidebar-owner-token")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     client = TestClient(create_app(), raise_server_exceptions=False)
@@ -129,6 +129,7 @@ def test_jssdk_api_issues_sidebar_owner_token_when_viewer_is_available(monkeypat
         "/api/sidebar/jssdk-config",
         params={
             "url": "http://127.0.0.1:5001/sidebar/bind-mobile",
+            "external_userid": "wx_ext_001",
             "viewer_userid": "ZhaoYanFang",
             "bind_by_userid": "ZhaoYanFang",
         },
@@ -136,14 +137,11 @@ def test_jssdk_api_issues_sidebar_owner_token_when_viewer_is_available(monkeypat
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["sidebar_owner_token_status"] == "issued"
-    token_result = load_sidebar_owner_context_token(payload["sidebar_owner_token"])
-    assert token_result["ok"] is True
-    assert token_result["context"]["viewer_userid"] == "ZhaoYanFang"
-    assert token_result["context"]["owner_userid"] == "ZhaoYanFang"
+    assert payload["sidebar_owner_token"] == ""
+    assert payload["sidebar_owner_token_status"] == "viewer_session_required"
 
 
-def test_jssdk_api_issues_sidebar_owner_token_from_external_identity(monkeypatch) -> None:
+def test_jssdk_api_rejects_single_owner_identity_fallback_without_oauth_session(monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "sidebar-owner-token-external")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     client = TestClient(create_app(), raise_server_exceptions=False)
@@ -158,14 +156,10 @@ def test_jssdk_api_issues_sidebar_owner_token_from_external_identity(monkeypatch
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["sidebar_owner_token_status"] == "issued_identity_owner"
+    assert payload["sidebar_owner_token_status"] == "viewer_session_required"
     assert payload["sidebar_owner_context"]["external_userid"] == "wx_ext_001"
-    assert payload["sidebar_owner_context"]["owner_userid"] == "ZhaoYanFang"
-    assert payload["sidebar_owner_context"]["source"] == "sidebar_jssdk_identity_owner_fallback"
-    token_result = load_sidebar_owner_context_token(payload["sidebar_owner_token"])
-    assert token_result["ok"] is True
-    assert token_result["context"]["viewer_userid"] == "ZhaoYanFang"
-    assert token_result["context"]["owner_userid"] == "ZhaoYanFang"
+    assert payload["sidebar_owner_context"]["source"] == "sidebar_jssdk_viewer_required"
+    assert payload["sidebar_owner_token"] == ""
 
 
 def test_jssdk_api_requires_viewer_when_external_contact_has_multiple_owners(monkeypatch) -> None:
@@ -188,7 +182,7 @@ def test_jssdk_api_requires_viewer_when_external_contact_has_multiple_owners(mon
     assert response.status_code == 200
     payload = response.json()
     assert payload["sidebar_owner_token"] == ""
-    assert payload["sidebar_owner_token_status"] == "viewer_missing_multi_owner"
+    assert payload["sidebar_owner_token_status"] == "viewer_session_required"
     assert payload["sidebar_owner_context"] == {
         "external_userid": "wx_ext_multi_owner",
         "source": "sidebar_jssdk_viewer_required",
@@ -219,7 +213,7 @@ def test_jssdk_api_exposes_sidebar_oauth_when_multi_owner_viewer_is_missing(monk
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["sidebar_owner_token_status"] == "viewer_missing_multi_owner"
+    assert payload["sidebar_owner_token_status"] == "viewer_session_required"
     assert payload["sidebar_owner_context"]["sidebar_oauth_status"] == "ready"
     assert payload["sidebar_oauth_url"].startswith("/api/sidebar/oauth/start?")
     oauth_query = parse_qs(urlparse(payload["sidebar_oauth_url"]).query)
@@ -235,6 +229,11 @@ def test_jssdk_api_issues_viewer_token_when_viewer_is_in_owner_candidates(monkey
         lambda external_userid: {"ZhaoYanFang", "HuangYouCan"},
     )
     client = TestClient(create_app(), raise_server_exceptions=False)
+    install_sidebar_viewer_session(
+        client,
+        viewer_userid="HuangYouCan",
+        external_userid="wx_ext_multi_owner",
+    )
 
     response = client.get(
         "/api/sidebar/jssdk-config",
@@ -255,7 +254,7 @@ def test_jssdk_api_issues_viewer_token_when_viewer_is_in_owner_candidates(monkey
     assert token_result["context"]["viewer_userid"] == "HuangYouCan"
 
 
-def test_jssdk_api_uses_admin_session_wecom_userid_for_multi_owner_viewer(monkeypatch) -> None:
+def test_jssdk_api_does_not_trust_admin_session_as_sidebar_oauth(monkeypatch) -> None:
     monkeypatch.setenv("SECRET_KEY", "sidebar-owner-token-admin-session")
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setattr(
@@ -263,10 +262,6 @@ def test_jssdk_api_uses_admin_session_wecom_userid_for_multi_owner_viewer(monkey
         lambda external_userid: {"ZhaoYanFang", "HuangYouCan"},
     )
     client = TestClient(create_app(), raise_server_exceptions=False)
-    client.cookies.set(
-        SESSION_COOKIE,
-        sign_session({"wecom_userid": "HuangYouCan", "username": "HuangYouCan", "iat": int(time())}),
-    )
 
     response = client.get(
         "/api/sidebar/jssdk-config",
@@ -278,12 +273,9 @@ def test_jssdk_api_uses_admin_session_wecom_userid_for_multi_owner_viewer(monkey
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["sidebar_owner_token_status"] == "issued"
-    assert payload["sidebar_owner_context"]["owner_userid"] == "HuangYouCan"
+    assert payload["sidebar_owner_token_status"] == "viewer_session_required"
     assert payload["sidebar_owner_context"]["owner_candidates_count"] == 2
-    token_result = load_sidebar_owner_context_token(payload["sidebar_owner_token"])
-    assert token_result["ok"] is True
-    assert token_result["context"]["viewer_userid"] == "HuangYouCan"
+    assert payload["sidebar_owner_token"] == ""
 
 
 def test_sidebar_oauth_callback_sets_viewer_cookie_and_unblocks_owner_token(monkeypatch) -> None:
@@ -395,13 +387,17 @@ def test_jssdk_api_does_not_issue_token_when_viewer_is_outside_owner_candidates(
         lambda external_userid: {"ZhaoYanFang", "HuangYouCan"},
     )
     client = TestClient(create_app(), raise_server_exceptions=False)
+    install_sidebar_viewer_session(
+        client,
+        viewer_userid="OtherOwner",
+        external_userid="wx_ext_multi_owner",
+    )
 
     response = client.get(
         "/api/sidebar/jssdk-config",
         params={
             "url": "http://127.0.0.1:5001/sidebar/bind-mobile",
             "external_userid": "wx_ext_multi_owner",
-            "viewer_userid": "OtherOwner",
         },
     )
 

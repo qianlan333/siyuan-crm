@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 
 from aicrm_next.shared.errors import ContractError
@@ -7,10 +8,19 @@ from aicrm_next.shared.errors import ContractError
 from .dto import BindMobileToExternalContactRequest, ResolvePersonIdentityRequest
 
 
+def resolve_single_corp_id(requested_corp_id: str | None) -> str:
+    configured = str(os.getenv("WECOM_CORP_ID") or "").strip()
+    requested = str(requested_corp_id or "").strip()
+    if configured and requested and configured != requested:
+        raise ContractError("corp_id_mismatch")
+    return configured or requested
+
+
 def normalize_identity_request(query: ResolvePersonIdentityRequest) -> ResolvePersonIdentityRequest:
+    mobile = (query.mobile or "").strip()
     return ResolvePersonIdentityRequest(
         external_userid=(query.external_userid or "").strip() or None,
-        mobile=(query.mobile or "").strip() or None,
+        mobile=normalize_mainland_mobile(mobile) if mobile else None,
         openid=(query.openid or "").strip() or None,
         unionid=(query.unionid or "").strip() or None,
     )

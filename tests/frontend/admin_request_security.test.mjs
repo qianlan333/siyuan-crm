@@ -47,12 +47,19 @@ vm.runInNewContext(source, {
 
 await window.fetch("/api/admin/external-effects/jobs/42/retry", {
   method: "POST",
-  headers: { "Content-Type": "application/json" },
+  headers: {
+    "Content-Type": "application/json",
+    "X-Admin-Action-Token": "",
+  },
   body: "{}",
 });
 
 assert.equal(captured[0].options.headers["X-CSRF-Token"], "csrf-from-cookie");
 assert.equal(captured[0].options.headers["X-Admin-Action-Token"], "bound-retry-token");
+assert.deepEqual(
+  Object.entries(captured[0].options.headers).filter(([name]) => name.toLowerCase() === "x-admin-action-token"),
+  [["X-Admin-Action-Token", "bound-retry-token"]],
+);
 assert.equal(
   window.AdminApi.actionToken("POST", "/api/admin/external-effects/jobs/99/retry"),
   "bound-retry-token",

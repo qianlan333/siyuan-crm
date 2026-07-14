@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+from aicrm_next.shared.wecom_payload_contract import normalize_miniprogram_attachment_payload
+
 
 MAX_GROUP_OPS_MESSAGE_IMAGES = 3
 MAX_GROUP_OPS_MESSAGE_ATTACHMENTS = 9
@@ -36,27 +38,6 @@ def _extract_text(payload: dict[str, Any]) -> str:
     if isinstance(text_payload, dict):
         return _normalize_str(text_payload.get("content"))
     return _normalize_str(payload.get("content"))
-
-
-def normalize_miniprogram_attachment_payload(attachment_payload: dict[str, Any]) -> dict[str, str]:
-    appid = _normalize_str(attachment_payload.get("appid")).strip()
-    page = _normalize_str(attachment_payload.get("page") or attachment_payload.get("pagepath")).strip()
-    title = _normalize_str(attachment_payload.get("title")).strip()
-    pic_media_id = _normalize_str(attachment_payload.get("pic_media_id") or attachment_payload.get("thumb_media_id")).strip()
-    if not appid:
-        raise ValueError("miniprogram attachments must include appid")
-    if not page:
-        raise ValueError("miniprogram attachments must include page")
-    if not title:
-        raise ValueError("miniprogram attachments must include title")
-    if not pic_media_id:
-        raise ValueError("miniprogram attachments must include pic_media_id")
-    return {
-        "appid": appid,
-        "page": page,
-        "title": title,
-        "pic_media_id": pic_media_id,
-    }
 
 
 def _normalize_attachment(item: Any) -> dict[str, Any]:

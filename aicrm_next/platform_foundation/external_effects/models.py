@@ -15,6 +15,8 @@ ExternalEffectStatus = Literal[
     "queued",
     "dispatching",
     "succeeded",
+    "simulated",
+    "unknown_after_dispatch",
     "failed_retryable",
     "failed_terminal",
     "blocked",
@@ -22,7 +24,15 @@ ExternalEffectStatus = Literal[
     "expired",
 ]
 ExternalEffectExecutionMode = Literal["disabled", "shadow", "plan_only", "execute", "execute_dryrun"]
-ExternalEffectAttemptStatus = Literal["succeeded", "failed_retryable", "failed_terminal", "blocked", "skipped"]
+ExternalEffectAttemptStatus = Literal[
+    "succeeded",
+    "simulated",
+    "unknown_after_dispatch",
+    "failed_retryable",
+    "failed_terminal",
+    "blocked",
+    "skipped",
+]
 
 WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH = "webhook.questionnaire_submission.push"
 WEBHOOK_ORDER_PAID_PUSH = "webhook.order_paid.push"
@@ -101,6 +111,7 @@ class ExternalEffectCreateRequest:
 @dataclass(frozen=True)
 class ExternalEffectJob:
     id: int = 0
+    created_on_plan: bool = False
     tenant_id: str = DEFAULT_TENANT_ID
     effect_type: str = ""
     adapter_name: str = ""
@@ -132,13 +143,21 @@ class ExternalEffectJob:
     next_retry_at: str = ""
     locked_at: str = ""
     locked_by: str = ""
+    lease_token: str = ""
+    lease_expires_at: str = ""
+    dispatch_started_at: str = ""
     last_attempt_id: str = ""
     last_error_code: str = ""
     last_error_message: str = ""
+    side_effect_executed: bool = False
+    provider_result_received: bool = False
+    result_summary_json: dict[str, Any] = field(default_factory=dict)
+    reconciliation_required: bool = False
     created_at: str = ""
     updated_at: str = ""
     approved_at: str = ""
     executed_at: str = ""
+    completed_at: str = ""
     cancelled_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,7 +190,7 @@ class ExternalEffectAttempt:
 class ExternalEffectTestReceipt:
     id: int = 0
     receipt_id: str = field(default_factory=lambda: "eer_" + uuid4().hex)
-    receiver_token: str = ""
+    event_id: str = ""
     job_id: int = 0
     effect_type: str = ""
     trace_id: str = ""
@@ -204,7 +223,8 @@ class ExternalEffectDispatchResult:
     error_message: str = ""
     retry_after_seconds: int | None = None
     real_external_call_executed: bool = False
+    provider_result_received: bool = False
 
     @property
     def ok(self) -> bool:
-        return self.status == "succeeded"
+        return self.status in {"succeeded", "simulated"}

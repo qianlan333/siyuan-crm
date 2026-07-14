@@ -797,7 +797,7 @@ def _deploy_smoke_payload(*, ok: bool = True) -> dict:
         "base_urls_distinct": ok,
         "web_health_ok": ok,
         "ingress_health_ok": ok,
-        "ingress_time_sensitive_inline_ready": ok,
+        "ingress_durable_ack_ready": ok,
         "admin_page_deployed": ok,
         "admin_api_deployed": ok,
         "admin_detail_route_deployed": ok,
@@ -1744,7 +1744,7 @@ def test_readiness_accepts_deploy_smoke_evidence(tmp_path) -> None:
     assert payload["ok"] is True
     assert payload["checks"]["base_urls_distinct"] is True
     assert payload["checks"]["web_health_ok"] is True
-    assert payload["checks"]["ingress_time_sensitive_inline_ready"] is True
+    assert payload["checks"]["ingress_durable_ack_ready"] is True
     assert payload["checks"]["admin_detail_route_deployed"] is True
 
 

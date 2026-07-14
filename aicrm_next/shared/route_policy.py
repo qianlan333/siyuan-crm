@@ -27,7 +27,10 @@ class RoutePolicy:
     pii_level: str
     csrf: bool
     rate_limit: str
-    token_purpose: str = "none"
+    principal_types: tuple[str, ...] = ()
+    client_purpose: str = ""
+    service_audience: str = ""
+    service_capability: str = ""
 
     @property
     def key(self) -> str:
@@ -50,7 +53,10 @@ class RoutePolicy:
             pii_level=str(entry["pii_level"]),
             csrf=bool(entry["csrf"]),
             rate_limit=str(entry["rate_limit"]),
-            token_purpose=str(entry.get("token_purpose") or "none"),
+            principal_types=tuple(str(value) for value in entry.get("principal_types") or ()),
+            client_purpose=str(entry.get("client_purpose") or ""),
+            service_audience=str(entry.get("service_audience") or ""),
+            service_capability=str(entry.get("service_capability") or ""),
         )
 
 
@@ -58,6 +64,7 @@ class RoutePolicy:
 class RoutePolicyMatch:
     policy: RoutePolicy | None
     route: APIRoute | None
+    path_params: dict[str, Any] | None = None
     builtin: bool = False
     static: bool = False
 
@@ -90,7 +97,7 @@ def match_route_policy(app: FastAPI, scope: dict[str, Any], index: RoutePolicyIn
     for route in app.routes:
         if not isinstance(route, APIRoute):
             continue
-        match, _child_scope = route.matches(scope)
+        match, child_scope = route.matches(scope)
         if match is not Match.FULL:
             continue
         policy = index.get(
@@ -98,5 +105,9 @@ def match_route_policy(app: FastAPI, scope: dict[str, Any], index: RoutePolicyIn
             methods=tuple(route.methods or ()),
             route_name=str(route.name or getattr(route.endpoint, "__name__", "")),
         )
-        return RoutePolicyMatch(policy=policy, route=route)
+        return RoutePolicyMatch(
+            policy=policy,
+            route=route,
+            path_params=dict(child_scope.get("path_params") or {}),
+        )
     return RoutePolicyMatch(policy=None, route=None)

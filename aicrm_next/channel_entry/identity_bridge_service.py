@@ -14,6 +14,14 @@ from .wecom_adapter import WeComAdapterBlocked, WeComApiError, get_wecom_adapter
 SIDEBAR_IDENTITY_REFRESH_INTERVAL_SECONDS = 60
 
 
+def _single_corp_id(requested_corp_id: str) -> tuple[str, str]:
+    configured = text(os.getenv("WECOM_CORP_ID"))
+    requested = text(requested_corp_id)
+    if configured and requested and requested != configured:
+        return "", "corp_id_mismatch"
+    return configured or requested, ""
+
+
 def _adapter_failure(exc: Exception) -> tuple[str, dict[str, Any]]:
     if isinstance(exc, WeComAdapterBlocked):
         payload: dict[str, Any] = {"reason": exc.reason}
@@ -237,6 +245,13 @@ class IdentityBridgeService:
         owner_userid = text(event.get("UserID"))
         if not external_userid:
             return {"status": "skipped", "reason": "external_userid_missing"}
+        effective_corp_id, corp_error = _single_corp_id(corp_id)
+        if corp_error:
+            return {
+                "status": "failed",
+                "reason": corp_error,
+                "real_external_call_executed": False,
+            }
 
         try:
             adapter = self._adapter_factory()
@@ -248,7 +263,6 @@ class IdentityBridgeService:
                 return {"status": "failed", "reason": "wecom_api_error", "wecom_result": dict(detail or {})}
             detail_payload = dict(detail or {})
             owner_userid = _preferred_owner_userid(owner_userid, detail_payload)
-            effective_corp_id = text(corp_id) or text(os.getenv("WECOM_CORP_ID"))
             profile_description = _sync_profile_description_with_external_userid(
                 adapter,
                 external_userid=external_userid,
@@ -277,6 +291,13 @@ class IdentityBridgeService:
         normalized_external_userid = text(external_userid)
         if not normalized_external_userid:
             return {"status": "skipped", "reason": "external_userid_missing"}
+        _, corp_error = _single_corp_id(corp_id)
+        if corp_error:
+            return {
+                "status": "failed",
+                "reason": corp_error,
+                "real_external_call_executed": False,
+            }
         state = self.identity_bridge_state(normalized_external_userid)
         reason = _refresh_reason(state, min_interval_seconds=max(0, int(min_interval_seconds)))
         if not reason:

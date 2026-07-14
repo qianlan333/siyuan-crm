@@ -106,9 +106,6 @@ def _runtime_routes_and_consumers() -> tuple[list[dict[str, Any]], dict[str, Any
         from fastapi.routing import APIRoute
 
         from aicrm_next.main import create_app
-        from aicrm_next.platform_foundation.internal_events.consumer_registry import (
-            DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY,
-        )
         from aicrm_next.router_registry import ROUTER_SPECS
 
         app = create_app()
@@ -148,10 +145,11 @@ def _runtime_routes_and_consumers() -> tuple[list[dict[str, Any]], dict[str, Any
                 )
 
         consumers: list[dict[str, Any]] = []
-        for event_type, registered in DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY.to_dict().items():
+        consumer_registry = app.state.internal_event_consumer_registry
+        for event_type, registered in consumer_registry.to_dict().items():
             for consumer in registered:
                 consumers.append(dict(consumer, event_type=event_type))
-        for alias in DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY.aliases_to_dict():
+        for alias in consumer_registry.aliases_to_dict():
             consumers.append(dict(alias, consumer_type="handler_alias", max_attempts=None))
 
     routes.sort(key=lambda item: (item["path"], item["methods"], item["name"], item["endpoint"]))

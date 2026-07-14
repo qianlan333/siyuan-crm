@@ -6,6 +6,8 @@ from fastapi.testclient import TestClient
 from aicrm_next.main import create_app
 from aicrm_next.platform_foundation.external_effects import ExternalEffectService, WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH
 from aicrm_next.platform_foundation.external_effects.repo import reset_external_effect_fixture_state
+from aicrm_next.platform_foundation.internal_events import QUESTIONNAIRE_SUBMITTED_EVENT_TYPE
+from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
 from aicrm_next.questionnaire.h5_write import reset_questionnaire_h5_write_fixture_state
 from aicrm_next.questionnaire.repo import build_questionnaire_repository
 
@@ -16,6 +18,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENV", raising=False)
     monkeypatch.delenv("AICRM_NEXT_ENABLE_LEGACY_PRODUCTION_FACADE", raising=False)
+    monkeypatch.setenv("AICRM_INTERNAL_EVENTS_ENABLED", "1")
+    monkeypatch.setenv("AICRM_INTERNAL_EVENTS_AUTO_EXECUTE", "1")
     return TestClient(create_app())
 
 
@@ -42,7 +46,10 @@ def test_h5_submit_executes_configured_questionnaire_external_push(client: TestC
 
     response = client.post(
         "/api/h5/questionnaires/hxc-activation-v1/submit",
-        json={"answers": {"phone": "13770938680"}},
+        json={
+            "answers": {"phone": "13770938680"},
+            "identity": {"external_userid": "wx_ext_001"},
+        },
     )
 
     assert response.status_code == 200
@@ -51,13 +58,26 @@ def test_h5_submit_executes_configured_questionnaire_external_push(client: TestC
     assert body["real_external_call_executed"] is False
     assert body["external_push"]["status"] == "queued"
     assert body["external_push"]["legacy_outbound_disabled"] is True
-    assert body["tag_apply"]["status"] == "failed"
-    assert body["tag_apply"]["error_code"] == "tag_ids_missing"
+    assert body["tag_apply"]["status"] == "skipped"
     assert body["tag_apply"]["wecom_api_called"] is False
-    assert body["side_effect_plan"]["adapter_mode"] == "real_mark_tag"
+    assert body["side_effect_plan"]["adapter_mode"] == "durable_internal_event"
     assert body["side_effect_plan"]["requires_approval"] is False
     assert "external_push.queued" in body["side_effect_plan"]["payload"]["planned_effects"]
-    assert body["external_effect_job_status"] == "queued"
+    assert body["external_effect_job_status"] == "not_planned"
+
+    jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH})
+    assert jobs == []
+    assert total == 0
+
+    planned = InternalEventWorker(
+        consumer_registry=client.app.state.internal_event_consumer_registry,
+    ).run_due(
+        batch_size=1,
+        dry_run=False,
+        event_types=[QUESTIONNAIRE_SUBMITTED_EVENT_TYPE],
+        consumer_names=["questionnaire_webhook_consumer"],
+    )
+    assert planned["counts"]["succeeded_count"] == 1, planned
 
     jobs, total = ExternalEffectService().list_jobs({"effect_type": WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH})
     assert total == 1

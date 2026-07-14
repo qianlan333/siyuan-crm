@@ -89,14 +89,14 @@ def test_sidebar_api_routes_stay_next_native(monkeypatch) -> None:
     client = _client(monkeypatch)
 
     cases = (
-        ("GET", "/api/sidebar/contact-binding-status", 400),
-        ("GET", "/api/sidebar/binding-status", 400),
+        ("GET", "/api/sidebar/contact-binding-status", 401),
+        ("GET", "/api/sidebar/binding-status", 401),
         ("GET", "/api/sidebar/jssdk-config", 400),
         ("GET", "/api/sidebar/customer-context", 400),
         ("GET", "/api/sidebar/v2/workbench", 400),
-        ("PUT", "/api/sidebar/v2/profile", 400),
-        ("GET", "/api/sidebar/v2/materials", 400),
-        ("POST", "/api/sidebar/v2/materials/send", 400),
+        ("PUT", "/api/sidebar/v2/profile", 403),
+        ("GET", "/api/sidebar/v2/materials", 403),
+        ("POST", "/api/sidebar/v2/materials/send", 403),
         ("GET", "/api/admin/customers/profile", 400),
     )
     for method, path, expected_status in cases:

@@ -852,13 +852,30 @@ class PostgresCommerceRepository:
                     raise ContractError("selected lead channel is missing qr_url")
             if product_id:
                 existing = conn.execute(
-                    "SELECT product_code FROM wechat_pay_products WHERE id::text = %s LIMIT 1",
+                    "SELECT product_code, amount_total FROM wechat_pay_products WHERE id::text = %s LIMIT 1 FOR UPDATE",
                     (str(product_id),),
                 ).fetchone()
                 if not existing:
                     raise NotFoundError("product not found")
                 if str(existing.get("product_code") or "") != code:
                     raise ContractError("product_code cannot be changed after create")
+                if int(params["amount_total"]) < int(existing.get("amount_total") or 0):
+                    blocking_coupon = conn.execute(
+                        """
+                        SELECT cl.id
+                        FROM commerce_coupon_product_bindings binding
+                        JOIN commerce_coupon_claims cl ON cl.coupon_id = binding.coupon_id
+                        WHERE binding.trade_product_id::text = %s
+                          AND cl.status IN ('available', 'reserved')
+                          AND cl.valid_until > CURRENT_TIMESTAMP
+                          AND cl.discount_amount_total >= %s
+                        LIMIT 1
+                        FOR UPDATE OF cl
+                        """,
+                        (str(product_id), int(params["amount_total"])),
+                    ).fetchone()
+                    if blocking_coupon:
+                        raise ContractError("商品价格不能低于或等于未过期优惠券的减免金额")
                 row = conn.execute(
                     """
                     UPDATE wechat_pay_products

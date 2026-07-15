@@ -10,6 +10,7 @@ EXPECTED_RESET_ORDER = [
     "automation",
     "group_ops",
     "commerce",
+    "commerce_coupons",
     "service_period",
     "media_library",
     "admin_jobs",

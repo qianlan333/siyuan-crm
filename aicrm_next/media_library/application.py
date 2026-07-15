@@ -56,6 +56,27 @@ def _side_effect_plan(*, operation: str, idempotency_key: str = "", reason: str 
     }
 
 
+def _upload_side_effect_plan(*, operation: str, idempotency_key: str, wecom_sync: dict[str, Any]) -> dict[str, Any]:
+    plan = _side_effect_plan(
+        operation=operation,
+        idempotency_key=idempotency_key,
+        reason="source row is durable before audited WeCom media synchronization",
+    )
+    status = str(wecom_sync.get("status") or "")
+    if status in {"succeeded", "failed_retryable", "failed_terminal", "blocked"}:
+        plan["wecom_media_upload"] = "executed" if wecom_sync.get("real_external_call_executed") else status
+        plan["real_external_call"] = "executed" if wecom_sync.get("real_external_call_executed") else "not_executed"
+        plan["audit"] = "external_effect_job"
+    return plan
+
+
+def _numeric_material_id(item: dict[str, Any]) -> int:
+    try:
+        return int(item.get("id") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _child_idempotency_key(idempotency_key: str | None, suffix: str) -> str | None:
     key = str(idempotency_key or "").strip()
     if not key:
@@ -290,14 +311,32 @@ class UploadImageCommand:
                 "ai_metadata": {},
             },
         )
+        from aicrm_next.wecom_media_jobs import sync_uploaded_material
+
+        material_id = _numeric_material_id(item)
+        wecom_sync = (
+            sync_uploaded_material(
+                material_kind="image",
+                material_id=material_id,
+                upload_kind="image",
+                actor="media_library_upload",
+                idempotency_key=str(idempotency_key or ""),
+            )
+            if material_id > 0
+            else {"status": "skipped", "reason": "non_persistent_material_id", "real_external_call_executed": False}
+        )
+        if wecom_sync.get("status") == "succeeded":
+            item = self._repo.get_item("image", str(item.get("id") or 0)) or item
         return {
             "ok": True,
             "item": item,
-            "source_status": "local_upload",
-            "side_effect_plan": _side_effect_plan(
+            "source_status": "local_upload_wecom_synced" if wecom_sync.get("status") == "succeeded" else "local_upload",
+            "wecom_sync": wecom_sync,
+            "real_external_call_executed": bool(wecom_sync.get("real_external_call_executed")),
+            "side_effect_plan": _upload_side_effect_plan(
                 operation="image_upload",
                 idempotency_key=str(idempotency_key or ""),
-                reason="multipart upload writes the media library row and local/postgres payload only; no external storage or WeCom media upload is executed",
+                wecom_sync=wecom_sync,
             ),
         }
 
@@ -329,14 +368,32 @@ class UploadAttachmentCommand:
                 "enabled": True,
             },
         )
+        from aicrm_next.wecom_media_jobs import sync_uploaded_material
+
+        material_id = _numeric_material_id(item)
+        wecom_sync = (
+            sync_uploaded_material(
+                material_kind="attachment",
+                material_id=material_id,
+                upload_kind="attachment",
+                actor="media_library_upload",
+                idempotency_key=str(idempotency_key or ""),
+            )
+            if material_id > 0
+            else {"status": "skipped", "reason": "non_persistent_material_id", "real_external_call_executed": False}
+        )
+        if wecom_sync.get("status") == "succeeded":
+            item = self._repo.get_item("attachment", str(item.get("id") or 0)) or item
         return {
             "ok": True,
             "item": item,
-            "source_status": "local_upload",
-            "side_effect_plan": _side_effect_plan(
+            "source_status": "local_upload_wecom_synced" if wecom_sync.get("status") == "succeeded" else "local_upload",
+            "wecom_sync": wecom_sync,
+            "real_external_call_executed": bool(wecom_sync.get("real_external_call_executed")),
+            "side_effect_plan": _upload_side_effect_plan(
                 operation="attachment_upload",
                 idempotency_key=str(idempotency_key or ""),
-                reason="multipart upload writes the media library row and local/postgres payload only; no external storage or WeCom media upload is executed",
+                wecom_sync=wecom_sync,
             ),
         }
 

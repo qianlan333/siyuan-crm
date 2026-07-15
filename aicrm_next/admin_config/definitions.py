@@ -270,6 +270,7 @@ APP_SETTING_DEFINITIONS = (
             ("AICRM_AUTH_MCP_CLIENT_ID", "MCP Client ID"),
             ("AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "外部 Agent Client ID"),
             ("AICRM_AUTH_CAMPAIGN_AGENT_CLIENT_ID", "Campaign Agent Client ID"),
+            ("AICRM_AUTH_OPS_REPORTER_CLIENT_ID", "运营闭环上报 Client ID"),
         )
     ),
     *(
@@ -289,6 +290,7 @@ APP_SETTING_DEFINITIONS = (
             ("AICRM_AUTH_MCP_CLIENT_ID", "MCP Client ID"),
             ("AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID", "外部 Agent Client ID"),
             ("AICRM_AUTH_CAMPAIGN_AGENT_CLIENT_ID", "Campaign Agent Client ID"),
+            ("AICRM_AUTH_OPS_REPORTER_CLIENT_ID", "运营闭环上报 Client ID"),
         )
     ),
     {

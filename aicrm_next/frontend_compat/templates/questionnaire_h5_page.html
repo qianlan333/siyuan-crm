@@ -326,6 +326,29 @@
       font-weight: 800;
       text-decoration: none;
     }
+    .lead-qr-panel[hidden] { display: none; }
+    .lead-qr-panel {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      margin-top: 16px;
+      padding: 24px 18px;
+      border: 1px solid #d6e4ff;
+      border-radius: 18px;
+      background: #f5f8ff;
+      text-align: center;
+    }
+    .lead-qr-panel img {
+      width: min(280px, 76vw);
+      aspect-ratio: 1;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fff;
+      padding: 10px;
+    }
+    .lead-qr-panel strong { font-size: 18px; }
+    .lead-qr-panel p { margin: 0; color: var(--muted); line-height: 1.6; }
     @media (max-width: 640px) {
       .page-shell { padding: 18px 14px 40px; }
       .hero-card { padding: 28px 20px; }
@@ -444,9 +467,15 @@
         <div id="weapp-launch-host"></div>
         <a id="weapp-fallback-link" class="fallback-link" href="#">无法打开？点击备用链接</a>
       </div>
+      <div id="lead-qr-panel" class="lead-qr-panel" hidden>
+        <strong id="lead-qr-title">扫码继续</strong>
+        <img id="lead-qr-image" alt="渠道二维码">
+        <p>长按识别二维码，继续后续服务</p>
+      </div>
     </section>
     {% endif %}
   </div>
+  <script src="/static/questionnaire/questionnaire_completion_action.js?v=20260714"></script>
   <script>
     const pageState = {{ page_state|tojson }};
     const slug = pageState.slug;
@@ -593,14 +622,13 @@
         window.location.href = safeFallback;
       }
 
+      const handleCompletionResponse = window.AICRMQuestionnaireCompletionAction.create({ formEl, weappLaunchPanel, submittedUrl, setState, handleCompletionTarget });
       function normalizedErrorMessage(error, fallback) {
         if (!error) return fallback;
         if (typeof error === 'string') return error;
         if (error instanceof Error && error.message) return error.message;
         return fallback;
       }
-
-
       function isOAuthRequired(result) {
         return Boolean(result && (result.error === 'oauth_required' || result.source_status === 'oauth_required'));
       }
@@ -1100,7 +1128,7 @@
           .then((response) => response.json().then((data) => ({ ok: response.ok, data })))
           .then(({ ok, data }) => {
             if (data && data.error === 'already_submitted') {
-              handleCompletionTarget(data.completion_target, data.redirect_url || submittedUrl);
+              handleCompletionResponse(data);
               return;
             }
             if (isOAuthRequired(data)) {
@@ -1211,7 +1239,7 @@
           });
           const result = await response.json();
           if (result && result.error === 'already_submitted') {
-            handleCompletionTarget(result.completion_target, result.redirect_url || submittedUrl);
+            handleCompletionResponse(result);
             return;
           }
           if (isOAuthRequired(result)) {
@@ -1221,7 +1249,7 @@
           if (!response.ok || !result.success) {
             throw new Error(result.error || '提交失败');
           }
-          handleCompletionTarget(result.completion_target, result.redirect_url || submittedUrl);
+          handleCompletionResponse(result);
         } catch (error) {
           reportClientIssue('submit_failed', error, { submitUrl });
           setState(normalizedErrorMessage(error, '提交失败，请稍后重试'), true);

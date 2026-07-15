@@ -367,6 +367,7 @@
 
   function completionTargetLabel(item) {
     const target = item.completion_target || {};
+    if (!target.enabled && item.lead_channel_id) return '展示渠道二维码';
     if (!target.enabled) return '沿用原跳转';
     if (target.target_type === 'mini_program') return '打开微信小程序';
     if (target.target_type === 'url_link') return '打开小程序 URL Link';
@@ -515,6 +516,7 @@
         <td>
           <div class="questionnaire-row-actions">
             <a class="admin-button admin-button--secondary" href="/admin/questionnaires/${item.id}">编辑</a>
+            ${item.is_assessment_template_asset ? '' : `<a class="admin-button admin-button--secondary" href="/admin/questionnaires/${item.id}/operations">运营配置</a>`}
             <button type="button" class="admin-button admin-button--ghost" data-action="duplicate">复制</button>
             <button type="button" class="admin-button admin-button--ghost" data-action="toggle">
               ${item.is_disabled ? '启用' : '停用'}

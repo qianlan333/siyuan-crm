@@ -13,6 +13,7 @@ from .admin_auth.route_policy import route_policy_required_response
 from .admin_auth.action_token import build_admin_action_token_bundle, validate_action_token_for_request
 from .admin_config.pii_audit_repository import AdminConfigPiiAuditRepository
 from .automation_engine.repo import reset_automation_fixture_state
+from .automation_engine.channel_completion import ChannelQrReadService
 from .channel_entry_composition import build_wecom_callback_inbox_worker_factory
 from .commerce.repo import reset_commerce_fixture_state
 from .external_effect_composition import (
@@ -20,6 +21,7 @@ from .external_effect_composition import (
     build_external_effect_continuation_registry,
 )
 from .internal_event_composition import build_internal_event_consumer_registry
+from .integration_gateway.channel_completion_client import configure_channel_completion_provider
 from .media_library.repo import reset_media_library_fixture_state
 from .mcp_composition import build_mcp_jsonrpc_application
 from .ops_enrollment.application import reset_user_ops_fixture_state
@@ -48,15 +50,18 @@ __all__ = [
 ]
 
 _FRONTEND_COMPAT_DIR = Path(__file__).resolve().parent / "frontend_compat"
+_OPERATION_CYCLES_DIR = Path(__file__).resolve().parent / "operation_cycles"
 _GROUP_OPS_DIR = Path(__file__).resolve().parent / "automation_engine" / "group_ops"
 _AUTOMATION_ENGINE_DIR = Path(__file__).resolve().parent / "automation_engine"
 _CUSTOMER_TAGS_DIR = Path(__file__).resolve().parent / "customer_tags"
 _QUESTIONNAIRE_DIR = Path(__file__).resolve().parent / "questionnaire"
+_NAVIGATION_TARGET_DIR = Path(__file__).resolve().parent / "navigation_target"
 logger = logging.getLogger(__name__)
 
 
 def create_app(*, pii_audit_repository: PiiAuditRepository | None = None) -> FastAPI:
     assert_required_runtime_secrets()
+    configure_channel_completion_provider(ChannelQrReadService())
     app = FastAPI(title="AI-CRM Next", version="0.1.0")
     app.state.admin_action_token_bundle_builder = build_admin_action_token_bundle
     app.state.admin_action_token_validator = validate_action_token_for_request
@@ -161,6 +166,16 @@ def create_app(*, pii_audit_repository: PiiAuditRepository | None = None) -> Fas
         "/static/questionnaire",
         StaticFiles(directory=_QUESTIONNAIRE_DIR / "static"),
         name="questionnaire_static",
+    )
+    app.mount(
+        "/static/navigation-target",
+        StaticFiles(directory=_NAVIGATION_TARGET_DIR / "static"),
+        name="navigation_target_static",
+    )
+    app.mount(
+        "/static/operation-cycles",
+        StaticFiles(directory=_OPERATION_CYCLES_DIR / "static"),
+        name="operation_cycles_static",
     )
     app.mount(
         "/static",

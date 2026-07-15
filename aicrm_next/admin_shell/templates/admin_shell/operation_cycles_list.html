@@ -1,0 +1,66 @@
+{% extends "admin_shell/operation_cycles_base.html" %}
+
+{% block content %}
+<div class="operation-cycle operation-cycle--list" data-operation-cycle-surface="strategy-list" data-readonly="true">
+  <section class="operation-cycle-task-list" aria-label="运营任务列表">
+    <header class="operation-cycle-task-list__head">
+      <h2>任务列表</h2>
+      <span>共 {{ strategy_summaries|length }} 个</span>
+    </header>
+
+    <div class="operation-cycle-task-table-wrap">
+      <table class="operation-cycle-task-table">
+        <thead>
+          <tr>
+            <th scope="col">任务名称</th>
+            <th scope="col">本周进度</th>
+            <th scope="col" class="operation-cycle-task-table__actions-heading">操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in strategy_summaries %}
+          {% set progress = item.get("weekly_progress") or {} %}
+          <tr>
+            <td>
+              <div class="operation-cycle-task-name">
+                <span class="operation-cycle-task-dot operation-cycle-task-dot--{{ item.get('status') or 'active' }}" aria-hidden="true"></span>
+                <div>
+                  <strong>{{ item.get("title") or item.get("strategy_key") }}</strong>
+                  <span>{{ item.get("cadence") or "周期未设置" }}</span>
+                </div>
+              </div>
+            </td>
+            <td>
+              <ol class="operation-cycle-progress-track" aria-label="{{ item.get('title') or item.get('strategy_key') }}本周进度">
+                {% for step in progress.get("steps") or [] %}
+                <li class="operation-cycle-progress-step operation-cycle-progress-step--{{ step.get('state') }}"{% if step.get('state') == 'active' %} aria-current="step"{% endif %}>
+                  <span class="operation-cycle-progress-step__dot" aria-hidden="true"></span>
+                  <span>{{ step.get("label") }}</span>
+                </li>
+                {% endfor %}
+              </ol>
+            </td>
+            <td>
+              <div class="operation-cycle-task-actions">
+                <button type="button" class="operation-cycle-task-button" disabled aria-disabled="true" title="任务由 Agent 外部管理，暂未开放暂停操作">暂停</button>
+                <button type="button" class="operation-cycle-task-button operation-cycle-task-button--danger" disabled aria-disabled="true" title="任务由 Agent 外部管理，暂未开放删除操作">删除</button>
+                {% if item.get("detail_href") %}
+                <a class="operation-cycle-task-button operation-cycle-task-button--primary" href="{{ item.get('detail_href') }}">明细数据</a>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr>
+            <td class="operation-cycle-task-empty" colspan="3">
+              <strong>暂无运营任务</strong>
+              <span>Agent 创建并上报任务后会显示在这里。</span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+{% endblock %}

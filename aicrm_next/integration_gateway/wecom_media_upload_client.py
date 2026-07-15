@@ -190,8 +190,8 @@ class WeComMediaUploadClient:
         token = self.get_access_token()
         try:
             response = self.http_post(
-                f"{self.api_base}/cgi-bin/media/upload_attachment",
-                params={"access_token": token, "media_type": "file", "attachment_type": 1},
+                f"{self.api_base}/cgi-bin/media/upload",
+                params={"access_token": token, "type": "file"},
                 files={"media": (_text(file_name) or "attachment.bin", file_bytes, _text(content_type) or "application/octet-stream")},
                 timeout=self.timeout,
             )

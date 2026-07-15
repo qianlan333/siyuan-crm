@@ -282,7 +282,7 @@ def test_probe_rejects_data_health_summary_with_failed_check(monkeypatch) -> Non
     assert result.error == "data_health_checks_not_all_ok:failed_check:fail"
 
 
-def test_probe_accepts_exactly_fifteen_green_data_health_checks(monkeypatch) -> None:
+def test_probe_accepts_exactly_sixteen_green_data_health_checks(monkeypatch) -> None:
     observed_max_bytes: list[int] = []
     checks = [
         {"check_id": f"check_{index}", "status": "ok"}
@@ -298,7 +298,7 @@ def test_probe_accepts_exactly_fifteen_green_data_health_checks(monkeypatch) -> 
                 {
                     "ok": True,
                     "overall_status": "ok",
-                    "counts": {"ok": 15, "warn": 0, "fail": 0, "not_applicable": 0},
+                    "counts": {"ok": 16, "warn": 0, "fail": 0, "not_applicable": 0},
                     "checks": checks,
                 }
             ),

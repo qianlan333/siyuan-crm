@@ -10,7 +10,7 @@ from aicrm_next.shared.route_ownership import collect_route_inventory
 
 
 def test_router_registry_specs_have_capability_owner_and_route_group() -> None:
-    assert len(ROUTER_SPECS) == 57
+    assert len(ROUTER_SPECS) == 62
     for spec in ROUTER_SPECS:
         assert spec.capability_owner
         assert spec.capability_owner != "unknown"
@@ -33,13 +33,15 @@ def test_router_registry_preserves_route_inventory_count_and_static_order() -> N
     inventory = collect_route_inventory(app, include_static=True)
     static_mounts = [(route.path, route.name) for route in app.routes if isinstance(route, Mount)]
 
-    assert len(inventory) == 680
-    assert sum(1 for item in inventory if item.is_static) == 5
+    assert len(inventory) == 715
+    assert sum(1 for item in inventory if item.is_static) == 7
     assert static_mounts == [
         ("/static/group-ops", "group_ops_static"),
         ("/static/automation-engine", "automation_engine_static"),
         ("/static/customer-tags", "customer_tags_static"),
         ("/static/questionnaire", "questionnaire_static"),
+        ("/static/navigation-target", "navigation_target_static"),
+        ("/static/operation-cycles", "operation_cycles_static"),
         ("/static", "static"),
     ]
     assert inventory[-1].path == "/{filename}"

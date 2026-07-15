@@ -157,7 +157,7 @@ def test_apply_transaction_runs_mobile_projection_before_canonical_internal_even
     class Conn:
         def execute(self, query, params):
             if query.startswith("SELECT * FROM wechat_pay_orders"):
-                return _Cursor({"status": "paying"})
+                return _Cursor({"status": "paying", "amount_total": 990, "currency": "CNY"})
             if query.strip().startswith("UPDATE wechat_pay_orders"):
                 return _Cursor(
                     {

@@ -65,8 +65,8 @@ def test_wecom_media_client_upload_attachment_path_and_params() -> None:
     result = client.upload_attachment("guide.pdf", b"pdf-bytes", "application/pdf")
 
     assert result["media_id"] == "media_file_001"
-    assert calls["post"][0]["url"] == "https://qyapi.example.test/cgi-bin/media/upload_attachment"
-    assert calls["post"][0]["params"] == {"access_token": "token_001", "media_type": "file", "attachment_type": 1}
+    assert calls["post"][0]["url"] == "https://qyapi.example.test/cgi-bin/media/upload"
+    assert calls["post"][0]["params"] == {"access_token": "token_001", "type": "file"}
     assert calls["post"][0]["files"]["media"] == ("guide.pdf", b"pdf-bytes", "application/pdf")
 
 

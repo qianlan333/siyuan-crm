@@ -1,0 +1,353 @@
+{
+  "artifact_status": "partial",
+  "attempts": [
+    {
+      "attempt_key": "hxc-20260713-preflight-01",
+      "blocked_reason": "prerequisites_missing",
+      "ended_at": "2026-07-13T09:00:00+08:00",
+      "parent_attempt_key": null,
+      "started_at": "2026-07-13T09:00:00+08:00",
+      "status": "blocked",
+      "summary": {
+        "note": "09:00 前置检查被阻断；原始阻断证据未随安全快照提供。"
+      }
+    },
+    {
+      "attempt_key": "hxc-20260713-recovery-02",
+      "blocked_reason": "",
+      "ended_at": null,
+      "parent_attempt_key": "hxc-20260713-preflight-01",
+      "started_at": "2026-07-13T15:34:00+08:00",
+      "status": "completed",
+      "summary": {
+        "note": "恢复后完成分层、计划与发送；发送事实来自生产只读聚合。"
+      }
+    }
+  ],
+  "data_status": "attribution_gap",
+  "delivery_status": "partial",
+  "documents": {
+    "broadcast_details": {
+      "generated_at": "2026-07-14T00:00:00+08:00",
+      "markdown": "# 2026-07-13 群发数据明细\n\n> 本页记录聚合发送事实与观察边界，不展示逐人名单，也不将观察信号包装为因果提升。\n\n## 核心漏斗\n\n| 阶段 | 人数 | 数据口径 |\n| --- | ---: | --- |\n| 候选用户 | 1,275 | campaign_input.aggregate |\n| 完成审计 | 895 | send_summary.aggregate |\n| 建议发送 | 848 | send_summary.aggregate |\n| 计划目标 | 848 | create_response.aggregate |\n| 有效发送 | 845 | broadcast_jobs.production_readonly_aggregate |\n| 可重试失败 | 3 | broadcast_jobs.production_readonly_aggregate |\n\n```chart\n{\"type\":\"funnel\",\"title\":\"本轮发送漏斗\",\"unit\":\"人\",\"labels\":[\"候选用户\",\"完成审计\",\"建议发送\",\"计划目标\",\"有效发送\"],\"series\":[{\"name\":\"人数\",\"data\":[1275,895,848,848,845]}]}\n```\n\n## 当前结论\n\n- 845 个有效发送和 3 个可重试失败已经过生产只读聚合核验。\n- 计划状态仍显示 draft，与实际发送事实存在冲突。\n- 分窗口行为数据缺失，当前不能得出激活提升结论。"
+    },
+    "execution_strategy": {
+      "generated_at": "2026-07-14T00:00:00+08:00",
+      "markdown": "# 每周一全量用户激活策略\n\n## 目标\n\n让每位可触达用户获得与当前状态匹配的下一步服务，并保留可复核结果。\n\n## 本轮执行流程\n\n```mermaid\nflowchart LR\nA[全量候选] --> B[身份与触达审计]\nB --> C[ABCD 分层判断]\nC --> D[AI 助手人审]\nD --> E[发送执行]\nE --> F[结果复盘]\n```\n\n## 执行边界\n\n- [x] 所有发送先经过 AI 助手审阅。\n- [x] CRM 只保存与展示 Agent 快照，不在本页触发发送。\n- [ ] 补齐 T+2h、24h、48h、72h 行为聚合。\n- [ ] 修复计划状态与发送事实的关联口径。\n\n## 下一轮优化\n\n先补齐归因与计划状态一致性，再扩大效果判断。"
+    }
+  },
+  "execution_stage": "postmortem",
+  "external_effects": "none",
+  "funnel": {
+    "audited_count": {
+      "data_source": "send_summary.aggregate",
+      "limitation": "",
+      "status": "observed",
+      "value": 895
+    },
+    "candidate_count": {
+      "data_source": "campaign_input.aggregate",
+      "limitation": "",
+      "status": "observed",
+      "value": 1275
+    },
+    "effective_sent_count": {
+      "data_source": "broadcast_jobs.production_readonly_aggregate",
+      "limitation": "",
+      "status": "observed",
+      "value": 845
+    },
+    "failed_count": {
+      "classification": "failed_retryable",
+      "data_source": "broadcast_jobs.production_readonly_aggregate",
+      "limitation": "该失败聚合的生产状态为 failed_retryable。",
+      "status": "observed",
+      "value": 3
+    },
+    "planned_target_count": {
+      "data_source": "create_response.aggregate",
+      "limitation": "",
+      "status": "observed",
+      "value": 848
+    },
+    "recommended_send_count": {
+      "data_source": "send_summary.aggregate",
+      "limitation": "",
+      "status": "observed",
+      "value": 848
+    }
+  },
+  "metrics": [
+    {
+      "data_quality": "production_readonly_aggregate",
+      "data_source": "broadcast_jobs.production_readonly_aggregate",
+      "denominator": 848,
+      "is_causal": false,
+      "label": "有效发送率",
+      "limitations": [
+        "这是发送完成度，不代表激活提升。"
+      ],
+      "metric_key": "effective_delivery_rate",
+      "numerator": 845,
+      "observation_window": "delivery_final",
+      "unit": "ratio",
+      "value": 0.996462,
+      "value_status": "observed"
+    },
+    {
+      "data_quality": "source_missing",
+      "data_source": "source_missing",
+      "denominator": null,
+      "is_causal": false,
+      "label": "目标行为人数",
+      "limitations": [
+        "当前没有可复核的分窗口行为聚合，不能推断激活效果。"
+      ],
+      "metric_key": "target_behavior_count_t2h",
+      "numerator": null,
+      "observation_window": "T+2h",
+      "unit": "people",
+      "value": null,
+      "value_status": "unknown"
+    },
+    {
+      "data_quality": "source_missing",
+      "data_source": "source_missing",
+      "denominator": null,
+      "is_causal": false,
+      "label": "目标行为人数",
+      "limitations": [
+        "当前没有可复核的分窗口行为聚合，不能推断激活效果。"
+      ],
+      "metric_key": "target_behavior_count_t24h",
+      "numerator": null,
+      "observation_window": "T+24h",
+      "unit": "people",
+      "value": null,
+      "value_status": "unknown"
+    },
+    {
+      "data_quality": "source_missing",
+      "data_source": "source_missing",
+      "denominator": null,
+      "is_causal": false,
+      "label": "目标行为人数",
+      "limitations": [
+        "当前没有可复核的分窗口行为聚合，不能推断激活效果。"
+      ],
+      "metric_key": "target_behavior_count_t48h",
+      "numerator": null,
+      "observation_window": "T+48h",
+      "unit": "people",
+      "value": null,
+      "value_status": "unknown"
+    },
+    {
+      "data_quality": "source_missing",
+      "data_source": "source_missing",
+      "denominator": null,
+      "is_causal": false,
+      "label": "目标行为人数",
+      "limitations": [
+        "当前没有可复核的分窗口行为聚合，不能推断激活效果。"
+      ],
+      "metric_key": "target_behavior_count_t72h",
+      "numerator": null,
+      "observation_window": "T+72h",
+      "unit": "people",
+      "value": null,
+      "value_status": "unknown"
+    }
+  ],
+  "next_iteration": {
+    "actions": [
+      "补齐发送回执与 T+2h、24h、48h、72h 行为聚合。",
+      "修复计划 draft 投影与实际发送事实不一致的问题。",
+      "下一轮继续区分观察信号与因果提升。"
+    ],
+    "applied_strategy_version": null,
+    "confirmation_note": "优化项尚未被负责人确认，也未应用到下一策略版本。",
+    "hypothesis": "若发送回执、卡片追踪与计划投影使用同一关联键，下一轮可形成可复核的分窗口漏斗。",
+    "status": "pending_confirmation",
+    "summary": "先补齐归因与计划状态一致性，再扩大效果判断。"
+  },
+  "optimization_status": "pending_confirmation",
+  "references": [
+    {
+      "data_status": "observed",
+      "evidence_hash": "f22f6b4f80a439fa724d2fd58c9ccede09114deaac3db2a3e9271f9c33db5bb9",
+      "href": "",
+      "label": "人群决策聚合",
+      "reference_key": "hxc-20260713-send-summary",
+      "reference_type": "artifact",
+      "source_id": "hxc_monday_20260713:send_summary",
+      "source_system": "codex_local_artifact"
+    },
+    {
+      "data_status": "observed",
+      "evidence_hash": "392650645f22c260fc7e71754ac18df085481e2db5167dabf2cc84939a0d14a9",
+      "href": "",
+      "label": "计划目标聚合",
+      "reference_key": "hxc-20260713-campaign-input",
+      "reference_type": "artifact",
+      "source_id": "hxc_monday_20260713:campaign_input",
+      "source_system": "codex_local_artifact"
+    },
+    {
+      "data_status": "observed",
+      "evidence_hash": "c7e3905dda56efe14d722d65dcb739d4cfd9d8caeac0925dbe4d2d78d830acb5",
+      "href": "",
+      "label": "计划创建结果聚合",
+      "reference_key": "hxc-20260713-create-response",
+      "reference_type": "artifact",
+      "source_id": "hxc_monday_20260713:create_response",
+      "source_system": "codex_local_artifact"
+    },
+    {
+      "data_status": "observed",
+      "evidence_hash": "c1ef73c6a4a4297102160f0c42d2dd7a487bfa15ecb6b74b68ea5f44c207a01b",
+      "href": "/admin/broadcast-jobs?source_type=cloud_plan",
+      "label": "发送与行为聚合",
+      "reference_key": "hxc-20260713-delivery-metrics",
+      "reference_type": "artifact",
+      "source_id": "hxc-monday-abcd-20260713-1600-final-848-weekly-cover-v1",
+      "source_system": "ai_crm_production_readonly"
+    },
+    {
+      "data_status": "unknown",
+      "evidence_hash": "",
+      "href": "/admin/cloud-orchestrator/plans/hxc-monday-abcd-20260713-1600-final-848-weekly-cover-v1",
+      "label": "2026-07-13 周一全量激活计划",
+      "reference_key": "ai-assistant-plan:hxc-monday-20260713",
+      "reference_type": "other",
+      "source_id": "hxc-monday-abcd-20260713-1600-final-848-weekly-cover-v1",
+      "source_system": "cloud_orchestrator_plan"
+    }
+  ],
+  "report_id": "hxc_monday_20260713_backfill_v1",
+  "reported_at": "2026-07-14T00:00:00+08:00",
+  "retrospective": {
+    "conclusion": "本轮已验证从分层决策到发送事实的链路；缺少可复核行为归因，不能得出激活提升结论。",
+    "data_conflicts": [
+      "生产计划 review_status 已 approved，但 run_status/status 仍为 draft；发送事实显示已有有效发送，展示以发送事实为准并保留冲突。"
+    ],
+    "generated_at": "2026-07-14T00:00:00+08:00",
+    "limitations": [
+      "分窗口行为指标为 unknown；所有结果均为 observational，is_causal=false。"
+    ],
+    "observations": [
+      "候选、审计、建议发送、计划目标和发送结果使用不同分母，页面必须分别展示。",
+      "845 个有效发送与 3 个可重试失败来自生产只读聚合，不等于用户被激活。"
+    ]
+  },
+  "review_status": "approved",
+  "run": {
+    "completed_at": null,
+    "first_sent_at": "2026-07-13T17:25:34+08:00",
+    "intended_send_at": "2026-07-13T16:00:00+08:00",
+    "label": "2026-07-13 周一全量激活",
+    "last_sent_at": "2026-07-13T19:28:25+08:00",
+    "objective": "完成本周全量用户分层、审核、发送与观察闭环。",
+    "plan_scheduled_for": "2026-07-13T16:00:00+08:00",
+    "plan_source": "cloud_broadcast_plans.production_readonly_aggregate",
+    "plan_status": "draft",
+    "plan_version": "",
+    "run_key": "hxc_monday_full_activation_20260713",
+    "started_at": "2026-07-13T09:00:00+08:00"
+  },
+  "schema_version": "operation_cycle_snapshot.v1",
+  "snapshot_revision": 1,
+  "stages": [
+    {
+      "attempt_key": "hxc-20260713-preflight-01",
+      "blocked_reason": "prerequisites_missing",
+      "ended_at": "2026-07-13T09:00:00+08:00",
+      "stage": "preflight",
+      "stage_key": "hxc-20260713-preflight-01",
+      "started_at": "2026-07-13T09:00:00+08:00",
+      "status": "blocked",
+      "summary": {
+        "note": "前置条件未满足；具体原始证据标记为 source_missing。"
+      }
+    },
+    {
+      "attempt_key": "hxc-20260713-recovery-02",
+      "blocked_reason": "",
+      "ended_at": "2026-07-13T15:34:00+08:00",
+      "stage": "decisioning",
+      "stage_key": "hxc-20260713-decisioning-02",
+      "started_at": null,
+      "status": "completed",
+      "summary": {
+        "note": "完成 895 人审计并形成 848 人建议发送版本。"
+      }
+    },
+    {
+      "attempt_key": "hxc-20260713-recovery-02",
+      "blocked_reason": "",
+      "ended_at": null,
+      "stage": "review",
+      "stage_key": "hxc-20260713-review-02",
+      "started_at": null,
+      "status": "completed",
+      "summary": {
+        "note": "生产计划聚合确认 review_status=approved；独立审批事件时间未随聚合提供。"
+      }
+    },
+    {
+      "attempt_key": "hxc-20260713-recovery-02",
+      "blocked_reason": "",
+      "ended_at": "2026-07-13T19:28:25+08:00",
+      "stage": "delivery",
+      "stage_key": "hxc-20260713-delivery-02",
+      "started_at": "2026-07-13T17:25:34+08:00",
+      "status": "completed",
+      "summary": {
+        "note": "生产只读聚合为 845 个有效发送、3 个可重试失败。"
+      }
+    },
+    {
+      "attempt_key": "hxc-20260713-recovery-02",
+      "blocked_reason": "instrumentation_missing",
+      "ended_at": null,
+      "stage": "observing",
+      "stage_key": "hxc-20260713-observing-02",
+      "started_at": null,
+      "status": "blocked",
+      "summary": {
+        "note": "缺少可复核的 T+2h、24h、48h、72h 行为聚合。"
+      }
+    },
+    {
+      "attempt_key": "hxc-20260713-recovery-02",
+      "blocked_reason": "",
+      "ended_at": "2026-07-14T00:00:00+08:00",
+      "stage": "postmortem",
+      "stage_key": "hxc-20260713-postmortem-02",
+      "started_at": null,
+      "status": "completed",
+      "summary": {
+        "note": "完成发送事实复盘；行为效果保持未知且不作因果包装。"
+      }
+    }
+  ],
+  "strategy": {
+    "cadence": "weekly_monday",
+    "definition": {
+      "audience": "全量可运营用户（按规则排除后）",
+      "decision_model": "ABCD 分层与逐人去留判断",
+      "reporting_mode": "aggregate_only",
+      "template_key": "hxc_monday_abcd_obsidian_v2_20260713"
+    },
+    "description": "按聚合证据完成分层判断、人审、发送观察与复盘的周期运营策略。",
+    "objective": "让每位可触达用户获得与当前状态匹配的下一步服务，并保留可复核结果。",
+    "status": "active",
+    "strategy_key": "hxc_monday_full_activation",
+    "timezone": "Asia/Shanghai",
+    "title": "每周一全量用户激活",
+    "version": 2,
+    "version_effective_from": "2026-07-13T00:00:00+08:00",
+    "version_label": "ABCD 分层 v2（2026-07-13）"
+  },
+  "tenant_id": "aicrm"
+}

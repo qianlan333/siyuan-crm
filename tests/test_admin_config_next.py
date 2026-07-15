@@ -733,6 +733,7 @@ def test_setup_wizard_saves_and_repeated_submit_is_noop(monkeypatch, tmp_path) -
         "MCP",
         "EXTERNAL_AGENT",
         "CAMPAIGN_AGENT",
+        "OPS_REPORTER",
     ):
         required_auth_settings[f"AICRM_AUTH_{purpose}_CLIENT_ID"] = f"pytest-{purpose.lower().replace('_', '-')}"
         required_auth_settings[f"AICRM_AUTH_{purpose}_CLIENT_SECRET_REF"] = f"secretref:file:AICRM_AUTH_{purpose}_CLIENT_SECRET:v1_test"

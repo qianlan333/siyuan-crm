@@ -1,0 +1,152 @@
+{% macro state_label(state) -%}
+  {%- set labels = {
+    "observed": "已观测",
+    "not_started": "未开始",
+    "not_due": "未到观察窗",
+    "unknown": "未知",
+    "not_applicable": "不适用",
+    "blocked": "已阻断",
+    "instrumentation_missing": "埋点缺失",
+    "partial_lower_bound": "下限值",
+    "unavailable": "暂无数据",
+    "collecting": "采集中",
+    "early": "早期信号",
+    "mature": "窗口成熟",
+    "partial": "数据不完整",
+    "attribution_gap": "归因缺口",
+    "source_missing": "来源缺失",
+    "snapshot_only": "仅有快照",
+    "available": "证据可用"
+  } -%}
+  {{- labels.get(state, state or "未知") -}}
+{%- endmacro %}
+
+{% macro status_chip(value, label="", tone="neutral") -%}
+  {%- set safe_tone = tone if tone in ["ok", "warn", "danger", "info", "neutral"] else "neutral" -%}
+  <span class="operation-cycle-status operation-cycle-status--{{ safe_tone }}">
+    {%- if label %}<span>{{ label }}</span>{% endif -%}
+    <strong>{{ value or "未知" }}</strong>
+  </span>
+{%- endmacro %}
+
+{% macro axis_strip(axes) -%}
+  <div class="operation-cycle-axes" aria-label="复合状态">
+    {% for axis in axes or [] %}
+      {{ status_chip(axis.get("label_text") or axis.get("value_label") or axis.get("value"), axis.get("label"), axis.get("tone") or "neutral") }}
+    {% else %}
+      {{ status_chip("尚未上报", "状态", "neutral") }}
+    {% endfor %}
+  </div>
+{%- endmacro %}
+
+{% macro model_axis_strip(item) -%}
+  {%- set execution_labels = {"scheduled": "待排期", "preflight": "前置检查", "decisioning": "去留判断", "dry_run": "发送预演", "review": "人审中", "delivery": "发送中", "observing": "观察中", "postmortem": "复盘中", "closed": "已闭环"} -%}
+  {%- set review_labels = {"not_created": "未创建", "pending": "待审核", "approved": "已通过", "rejected": "已拒绝", "cancelled": "已取消"} -%}
+  {%- set delivery_labels = {"not_started": "未开始", "waiting_window": "等待窗口", "dispatching": "发送中", "partial": "部分完成", "completed": "已完成", "failed": "发送失败", "cancelled": "已取消"} -%}
+  {%- set data_labels = {"unavailable": "暂无数据", "collecting": "采集中", "early": "早期信号", "mature": "窗口成熟", "partial": "数据不完整", "attribution_gap": "归因缺口"} -%}
+  {%- set optimization_labels = {"none": "尚未形成", "draft": "草案", "pending_confirmation": "待确认", "accepted": "已采纳", "rejected": "未采纳", "applied": "已应用"} -%}
+  {%- set artifact_labels = {"complete": "证据完整", "partial": "部分证据", "source_missing": "来源缺失", "snapshot_only": "仅有快照"} -%}
+  {%- set execution_tones = {"closed": "ok", "observing": "info", "postmortem": "info", "delivery": "info", "preflight": "warn"} -%}
+  {%- set review_tones = {"approved": "ok", "pending": "warn", "rejected": "danger", "cancelled": "danger"} -%}
+  {%- set delivery_tones = {"completed": "ok", "dispatching": "info", "partial": "warn", "failed": "danger", "cancelled": "danger"} -%}
+  {%- set data_tones = {"mature": "ok", "early": "info", "collecting": "info", "partial": "warn", "attribution_gap": "warn", "unavailable": "danger"} -%}
+  {%- set optimization_tones = {"applied": "ok", "accepted": "ok", "pending_confirmation": "warn", "rejected": "danger"} -%}
+  {%- set artifact_tones = {"complete": "ok", "partial": "warn", "source_missing": "danger", "snapshot_only": "info"} -%}
+  <div class="operation-cycle-axes" aria-label="复合状态">
+    {{ status_chip(execution_labels.get(item.get("execution_stage"), item.get("execution_stage") or "未知"), "执行", execution_tones.get(item.get("execution_stage"), "neutral")) }}
+    {{ status_chip(review_labels.get(item.get("review_status"), item.get("review_status") or "未知"), "人审", review_tones.get(item.get("review_status"), "neutral")) }}
+    {{ status_chip(delivery_labels.get(item.get("delivery_status"), item.get("delivery_status") or "未知"), "发送", delivery_tones.get(item.get("delivery_status"), "neutral")) }}
+    {{ status_chip(data_labels.get(item.get("data_status"), item.get("data_status") or "未知"), "数据", data_tones.get(item.get("data_status"), "neutral")) }}
+    {{ status_chip(optimization_labels.get(item.get("optimization_status"), item.get("optimization_status") or "未知"), "优化", optimization_tones.get(item.get("optimization_status"), "neutral")) }}
+    {{ status_chip(artifact_labels.get(item.get("artifact_status"), item.get("artifact_status") or "未知"), "产物", artifact_tones.get(item.get("artifact_status"), "neutral")) }}
+  </div>
+{%- endmacro %}
+
+{% macro metric_value(metric, compact=false) -%}
+  {%- set value_state = metric.get("value_state") or metric.get("value_status") or metric.get("state") or "unknown" -%}
+  {%- set unit_labels = {"people": "人", "count": "", "ratio": "%"} -%}
+  <div class="operation-cycle-metric{% if compact %} operation-cycle-metric--compact{% endif %}" data-value-state="{{ value_state }}">
+    <span class="operation-cycle-metric__label">{{ metric.get("label") or metric.get("metric_label") or metric.get("key") or "指标" }}</span>
+    {% if value_state in ["observed", "partial_lower_bound"] and metric.get("value") is not none %}
+      <strong class="operation-cycle-metric__value">
+        {% if metric.get("unit") == "ratio" %}{{ "%.1f" | format(metric.get("value") * 100) }}{% else %}{{ metric.get("value") }}{% endif %}{% if metric.get("unit") %}<small>{{ unit_labels.get(metric.get("unit"), metric.get("unit")) }}</small>{% endif %}
+      </strong>
+      {% if value_state == "partial_lower_bound" %}<span class="operation-cycle-data-note">下限</span>{% endif %}
+    {% else %}
+      <strong class="operation-cycle-metric__empty">{{ state_label(value_state) }}</strong>
+    {% endif %}
+    {% if metric.get("numerator") is not none or metric.get("denominator") is not none %}
+      <span class="operation-cycle-metric__note">口径 {{ metric.get("numerator") if metric.get("numerator") is not none else "—" }} / {{ metric.get("denominator") if metric.get("denominator") is not none else "—" }}</span>
+    {% endif %}
+    {% if metric.get("description") or metric.get("help_text") or metric.get("data_source") %}
+      <span class="operation-cycle-metric__note">{{ metric.get("description") or metric.get("help_text") or metric.get("data_source") }}</span>
+    {% endif %}
+    {% if metric.get("limitations") %}
+      <span class="operation-cycle-metric__note">{{ metric.get("limitations") | join("；") }}</span>
+    {% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro funnel(items) -%}
+  <div class="operation-cycle-funnel" aria-label="核心漏斗">
+    {% if items is mapping %}
+      {% set definitions = [
+        ("candidate_count", "候选人数"),
+        ("audited_count", "完成审计"),
+        ("recommended_send_count", "建议发送"),
+        ("planned_target_count", "计划目标"),
+        ("effective_sent_count", "有效发送"),
+        ("failed_count", "发送失败")
+      ] %}
+      {% for key, label in definitions %}
+      {% set entry = items.get(key) or {} %}
+      {% set value_state = entry.get("status") or entry.get("value_state") or "unknown" %}
+      <div class="operation-cycle-funnel__step">
+        <span class="operation-cycle-funnel__index">{{ "%02d" | format(loop.index) }}</span>
+        <div class="operation-cycle-metric operation-cycle-metric--compact" data-value-state="{{ value_state }}">
+          <span class="operation-cycle-metric__label">{{ label }}</span>
+          {% if value_state in ["observed", "partial_lower_bound"] and entry.get("value") is not none %}
+          <strong class="operation-cycle-metric__value">{{ entry.get("value") }}</strong>
+          {% if value_state == "partial_lower_bound" %}<span class="operation-cycle-data-note">下限</span>{% endif %}
+          {% else %}
+          <strong class="operation-cycle-metric__empty">{{ state_label(value_state) }}</strong>
+          {% endif %}
+          {% if entry.get("data_source") %}<span class="operation-cycle-metric__note">{{ entry.get("data_source") }}</span>{% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    {% else %}
+    {% for item in items or [] %}
+      <div class="operation-cycle-funnel__step">
+        <span class="operation-cycle-funnel__index">{{ "%02d" | format(loop.index) }}</span>
+        {{ metric_value(item, true) }}
+      </div>
+    {% else %}
+      <div class="operation-cycle-empty operation-cycle-empty--inline">
+        <strong>漏斗尚未形成</strong>
+        <span>执行快照上报后，这里会按候选、审计、建议、计划、发送和失败依次呈现。</span>
+      </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+{%- endmacro %}
+
+{% macro readonly_stamp() -%}
+  <span class="operation-cycle-readonly" title="本页面不触发审批、发送、重试或模板修改">只读映射</span>
+{%- endmacro %}
+
+{% macro evidence_link(item) -%}
+  {% if item.get("href") %}
+    <a class="operation-cycle-evidence-link" href="{{ item.get('href') }}">
+      <span>{{ item.get("label") or item.get("reference_type") or "证据" }}</span>
+      <strong>{{ item.get("display_id") or item.get("reference_key") or item.get("source_id") or "查看" }}</strong>
+      <small>{{ state_label(item.get("data_status") or "unknown") }}</small>
+    </a>
+  {% else %}
+    <span class="operation-cycle-evidence-link operation-cycle-evidence-link--missing">
+      <span>{{ item.get("label") or item.get("reference_type") or "证据" }}</span>
+      <strong>{{ item.get("display_id") or item.get("reference_key") or "来源缺失" }}</strong>
+      <small>{{ state_label(item.get("data_status") or "source_missing") }}</small>
+    </span>
+  {% endif %}
+{%- endmacro %}

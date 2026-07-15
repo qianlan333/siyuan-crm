@@ -122,6 +122,8 @@ async def route_policy_required_response(
         return await _enforce_sidebar_grant(request, policy)
     if policy.auth_scheme == "public_result_grant":
         return _enforce_public_result_grant(request, policy)
+    if policy.auth_scheme == "payment_identity_session":
+        return _enforce_payment_identity_session(request, policy)
     if policy.auth_scheme in {
         "public",
         "client_credentials",
@@ -295,6 +297,27 @@ def _enforce_public_result_grant(request: Request, policy: RoutePolicy) -> Respo
     return None
 
 
+def _enforce_payment_identity_session(request: Request, policy: RoutePolicy) -> Response | None:
+    from aicrm_next.shared.wechat_h5_session import payment_identity_from_request
+
+    identity = payment_identity_from_request(request)
+    openid = normalize_text(identity.get("openid"))
+    if not openid:
+        return _error("payment_identity_required", status_code=401)
+    context = AuthContext(
+        principal_type=PrincipalType.PUBLIC,
+        principal_id=f"wechat-payment:{hashlib.sha256(openid.encode()).hexdigest()[:24]}",
+        capabilities=(policy.capability,),
+        scopes=("write" if _request_is_write(request) else "read",),
+        request_id=request_id(request),
+    )
+    if not _principal_allowed(context, policy):
+        return _error("principal_type_forbidden", status_code=403)
+    request.state.payment_identity = identity
+    _install_context(request, context, policy)
+    return None
+
+
 def _principal_allowed(context: AuthContext, policy: RoutePolicy) -> bool:
     return not policy.principal_types or context.principal_type.value in policy.principal_types
 
@@ -395,6 +418,12 @@ def _rate_limit_principal(request: Request, policy: RoutePolicy) -> str:
         token = normalize_text(request.headers.get(SIDEBAR_OWNER_TOKEN_HEADER))
         if token:
             return f"sidebar:{hashlib.sha256(token.encode()).hexdigest()[:24]}"
+    if policy.auth_scheme == "payment_identity_session":
+        from aicrm_next.shared.wechat_h5_session import WECHAT_PAYMENT_IDENTITY_COOKIE
+
+        token = normalize_text(request.cookies.get(WECHAT_PAYMENT_IDENTITY_COOKIE))
+        if token:
+            return f"payment:{hashlib.sha256(token.encode()).hexdigest()[:24]}"
     if policy.auth_scheme == "webhook_hmac":
         client_id = normalize_text(request.headers.get("x-aicrm-client-id"))
         if client_id:

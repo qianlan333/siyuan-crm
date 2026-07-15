@@ -176,12 +176,21 @@ CHECK_DEFINITIONS: tuple[DataQualityCheckDefinition, ...] = (
         check_id="questionnaire_submission_missing_unionid",
         group="questionnaire",
         title="Submission without unionid",
-        description="Questionnaire submissions that affect CRM segmentation must resolve to a unionid.",
+        description=(
+            "Questionnaire submissions that affect CRM segmentation must resolve to a unionid; unresolved "
+            "submissions may remain only behind the durable continuation guard with no identity-dependent effect."
+        ),
         severity="red",
-        signal="count questionnaire submissions without resolved unionid",
-        threshold="fail when missing_unionid_count > 0",
-        source_tables=("questionnaire_submissions", "crm_user_identity"),
-        remediation="Resolve the submitter identity or quarantine the submission from automation.",
+        signal="count unresolved questionnaire submissions without a durable no-effect quarantine guard",
+        threshold="fail when unguarded_missing_unionid_count > 0 or missing_identity_count > 0",
+        source_tables=(
+            "questionnaire_submissions",
+            "crm_user_identity",
+            "internal_event_outbox",
+            "internal_event",
+            "external_effect_job",
+        ),
+        remediation="Resolve the submitter identity or restore the durable quarantine guard before replaying automation.",
     ),
     DataQualityCheckDefinition(
         check_id="questionnaire_submission_missing_answers",

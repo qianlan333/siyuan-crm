@@ -61,6 +61,7 @@ def _close_expired_with_conn(
             WHERE COALESCE(status, '') IN ('created', 'paying', 'pending', '')
               AND COALESCE(trade_state, '') <> 'SUCCESS'
               AND paid_at IS NULL
+              AND coupon_claim_id IS NULL
               AND created_at <= %s::timestamptz
               {order_filter}
             ORDER BY created_at ASC, id ASC

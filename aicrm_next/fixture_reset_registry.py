@@ -11,6 +11,7 @@ from .automation_engine.repo import reset_automation_fixture_state
 from .cloud_orchestrator.campaigns_read import reset_campaign_read_fixture_state
 from .cloud_orchestrator.campaigns_write import reset_campaign_write_fixture_state
 from .cloud_orchestrator.repository import reset_cloud_plan_fixture_state
+from .commerce.coupons.repo import reset_coupon_fixture_state
 from .commerce.repo import reset_commerce_fixture_state
 from .customer_tags.admin_write import reset_wecom_tag_write_fixture_state
 from .customer_tags.live_mutation import reset_wecom_tag_live_mutation_fixture_state
@@ -42,6 +43,7 @@ FIXTURE_RESET_STEPS: tuple[FixtureResetStep, ...] = (
     FixtureResetStep("automation", reset_automation_fixture_state),
     FixtureResetStep("group_ops", reset_group_ops_fixture_state),
     FixtureResetStep("commerce", reset_commerce_fixture_state),
+    FixtureResetStep("commerce_coupons", reset_coupon_fixture_state),
     FixtureResetStep("service_period", reset_service_period_fixture_state),
     FixtureResetStep("media_library", reset_media_library_fixture_state),
     FixtureResetStep("admin_jobs", reset_admin_jobs_fixture_state),

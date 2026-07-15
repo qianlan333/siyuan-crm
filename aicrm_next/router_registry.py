@@ -33,6 +33,9 @@ from .channel_entry.api import router as channel_entry_router
 from .class_user_management.api import router as class_user_management_router
 from .cloud_orchestrator.api import router as cloud_orchestrator_router
 from .commerce.api import router as commerce_router
+from .commerce.coupons.admin_api import router as coupons_admin_api_router
+from .commerce.coupons.admin_pages import router as coupons_admin_pages_router
+from .commerce.coupons.public_api import router as coupons_public_router
 from .common_operation_members import router as common_operation_members_router
 from .customer_read_model.admin_pages import router as customer_admin_pages_router
 from .customer_read_model.api import router as customer_router
@@ -53,6 +56,8 @@ from .media_library.api import router as media_library_router
 from .message_archive.api import router as message_archive_router
 from .ops_enrollment.admin_pages import router as user_ops_admin_pages_router
 from .ops_enrollment.api import router as user_ops_router
+from .operation_cycles.admin_pages import router as operation_cycles_admin_pages_router
+from .operation_cycles.api import router as operation_cycles_router
 from .owner_migration.api import router as owner_migration_router
 from .platform_foundation.api import router as platform_router
 from .platform_foundation.auth_platform.api import router as auth_platform_router
@@ -91,6 +96,8 @@ ROUTER_SPECS: tuple[RouterSpec, ...] = (
     RouterSpec("data_health", "data_health", data_health_router, "data health check APIs"),
     RouterSpec("delivery_lineage", "delivery_lineage", delivery_lineage_router, "delivery lineage read APIs"),
     RouterSpec("growth_orchestration", "growth_orchestration", growth_orchestration_router, "growth orchestration read APIs"),
+    RouterSpec("operation_cycles", "operation_cycles_admin_pages", operation_cycles_admin_pages_router, "operation cycle read-only admin pages"),
+    RouterSpec("operation_cycles", "operation_cycles", operation_cycles_router, "operation cycle report and admin read APIs"),
     RouterSpec("admin_config", "admin_config", admin_config_router, "admin config pages and APIs"),
     RouterSpec("class_user_management", "class_user_management", class_user_management_router),
     RouterSpec("platform_foundation", "common_operation_members", common_operation_members_router),
@@ -129,6 +136,9 @@ ROUTER_SPECS: tuple[RouterSpec, ...] = (
     RouterSpec("customer_tags", "customer_tags_admin_pages", customer_tags_admin_pages_router),
     RouterSpec("automation_engine", "automation", automation_router),
     RouterSpec("commerce", "commerce", commerce_router),
+    RouterSpec("commerce", "coupons_admin_pages", coupons_admin_pages_router, "fixed-amount coupon admin pages"),
+    RouterSpec("commerce", "coupons_admin_api", coupons_admin_api_router, "fixed-amount coupon admin APIs"),
+    RouterSpec("commerce", "coupons_public", coupons_public_router, "coupon claim and availability APIs"),
     RouterSpec("media_library", "media_library", media_library_router),
     RouterSpec("media_library", "media_library_admin_pages", media_library_admin_pages_router),
     RouterSpec("ai_assist", "ai_assist", ai_assist_router),

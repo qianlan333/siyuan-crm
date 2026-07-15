@@ -63,6 +63,24 @@
       font-size: 15px;
       line-height: 1.7;
     }
+    .lead-qr {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid var(--line);
+    }
+    .lead-qr img {
+      width: min(260px, 72vw);
+      aspect-ratio: 1;
+      object-fit: contain;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: #fff;
+      padding: 10px;
+    }
+    .lead-qr strong { font-size: 17px; }
   </style>
 </head>
 <body>
@@ -70,6 +88,13 @@
     <div class="eyebrow">问卷提交状态</div>
     <h1>已经提交</h1>
     <p>感谢填写</p>
+    {% if lead_qr %}
+    <section class="lead-qr" aria-label="提交后渠道二维码">
+      <strong>{{ lead_qr.channel_name or "扫码继续" }}</strong>
+      <img src="{{ lead_qr.qr_url }}" alt="{{ lead_qr.channel_name or '渠道' }}二维码" onerror="this.closest('.lead-qr').remove()">
+      <p>长按识别二维码，继续后续服务</p>
+    </section>
+    {% endif %}
   </main>
 </body>
 </html>

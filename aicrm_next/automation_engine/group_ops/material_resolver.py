@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Protocol
 
@@ -371,9 +370,15 @@ class PostgresGroupOpsMaterialResolver(_BaseGroupOpsMaterialResolver):
         uploader: Any = None,
         real_upload_enabled: bool = True,
         now: datetime | None = None,
+        lease_manager: Any = None,
     ) -> None:
         super().__init__(uploader=uploader, real_upload_enabled=real_upload_enabled, fake_media_enabled=False, now=now)
         self._media_repository = media_repository
+        if lease_manager is None and real_upload_enabled:
+            from aicrm_next.media_library.wecom_lease import WeComMediaLeaseManager
+
+            lease_manager = WeComMediaLeaseManager(media_repository, uploader=uploader, now=now)
+        self._lease_manager = lease_manager
 
     def _get_item(self, kind: str, item_id: int) -> JsonDict | None:
         return self._media_repository.get_item(kind, str(item_id), include_data=True)
@@ -387,17 +392,55 @@ class PostgresGroupOpsMaterialResolver(_BaseGroupOpsMaterialResolver):
     def _cache_attachment_media_id(self, item_id: int, media_id: str, expires_at: datetime) -> None:
         self._media_repository.cache_attachment_media_id(str(item_id), media_id, expires_at)
 
+    def _resolve_image_media_id(self, image_id: int) -> str:
+        if self._lease_manager is None:
+            return super()._resolve_image_media_id(image_id)
+        try:
+            return _text(self._lease_manager.ensure_ready("image", image_id, upload_kind="image").get("media_id"))
+        except Exception as exc:
+            raise self._error("image_library_resolve_failed", image_id, exc) from exc
 
-def _real_upload_enabled() -> bool:
-    value = _text(os.getenv("AICRM_GROUP_OPS_MATERIAL_UPLOAD_MODE")).lower()
-    return value in {"real", "production", "enabled", "1", "true", "yes", "on"}
+    def _resolve_file_attachment(self, attachment_id: int) -> dict[str, Any]:
+        if self._lease_manager is None:
+            return super()._resolve_file_attachment(attachment_id)
+        try:
+            media_id = _text(
+                self._lease_manager.ensure_ready("attachment", attachment_id, upload_kind="attachment").get("media_id")
+            )
+        except Exception as exc:
+            raise self._error("attachment_resolve_failed", attachment_id, exc) from exc
+        return {"msgtype": "file", "file": {"media_id": media_id}}
+
+    def _resolve_miniprogram_attachment(self, miniprogram_id: int) -> dict[str, Any]:
+        if self._lease_manager is None:
+            return super()._resolve_miniprogram_attachment(miniprogram_id)
+        item = self._get_item("miniprogram", miniprogram_id)
+        if not item or not _enabled(item):
+            raise self._error("miniprogram_resolve_failed", miniprogram_id, "not_found_or_disabled")
+        appid = _text(item.get("appid") or item.get("app_id"))
+        pagepath = _text(item.get("pagepath") or item.get("page_path"))
+        title = _text(item.get("title") or item.get("name"))
+        if not all((appid, pagepath, title)):
+            raise self._error("miniprogram_resolve_failed", miniprogram_id, "missing_required_fields")
+        try:
+            media_id = _text(
+                self._lease_manager.ensure_ready("miniprogram", miniprogram_id, upload_kind="image").get("media_id")
+            )
+        except Exception as exc:
+            raise self._error("miniprogram_resolve_failed", miniprogram_id, exc) from exc
+        return {
+            "msgtype": "miniprogram",
+            "miniprogram": normalize_miniprogram_attachment_payload(
+                {"appid": appid, "pagepath": pagepath, "title": title, "thumb_media_id": media_id}
+            ),
+        }
 
 
 def build_group_ops_material_resolver() -> GroupOpsMaterialResolver:
     if production_data_ready():
         return PostgresGroupOpsMaterialResolver(
             PostgresMediaLibraryRepository(raw_database_url()),
-            real_upload_enabled=_real_upload_enabled(),
+            real_upload_enabled=True,
         )
     if production_environment():
         raise GroupOpsMaterialResolveError("group_ops_material_resolver_production_data_not_ready")

@@ -14,9 +14,10 @@ from aicrm_next.common_operation_members import search_operation_members
 from aicrm_next.shared.repository_provider import RepositoryProviderError, blocked_production_payload
 from aicrm_next.shared.runtime import production_repository_required
 
+from .channel_fixture_state import FIXTURE_CHANNELS as _FIXTURE_CHANNELS
+
 router = APIRouter()
 
-_FIXTURE_CHANNELS: dict[int, dict[str, Any]] = {}
 _FIXTURE_CHANNEL_ASSIGNEES: dict[int, list[dict[str, Any]]] = {}
 _FIXTURE_ASSIGNMENT_EVENTS: list[dict[str, Any]] = []
 _FIXTURE_WE_COM_LINKS: list[dict[str, Any]] = []
@@ -485,7 +486,7 @@ def _serialize_channel(row: dict[str, Any]) -> dict[str, Any]:
     channel["historical_scene_values"] = [
         item for item in _json_text_list(channel.get("historical_scene_values")) if item != channel["scene_value"]
     ]
-    channel["qr_url"] = _text(channel.get("qr_url"))
+    channel["qr_url"] = _text(channel.get("active_qrcode_asset_url") or channel.get("qr_url"))
     channel["customer_channel"] = _text(channel.get("customer_channel"))
     channel["link_url"] = _text(channel.get("link_url"))
     channel["final_url"] = _text(channel.get("final_url"))

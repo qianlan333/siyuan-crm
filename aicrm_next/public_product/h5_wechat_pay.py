@@ -1,33 +1,53 @@
 from __future__ import annotations
 
-import base64
 from datetime import datetime, timezone
-import hashlib
 import hmac
 import json
 import logging
 import os
+import re
 import secrets
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from aicrm_next.commerce.domain import completion_redirect_projection, safe_completion_redirect_url
-from aicrm_next.navigation_target import completion_action_for_target, completion_target_projection
+from aicrm_next.navigation_target import (
+    completion_action_for_target,
+    completion_action_with_lead_qr,
+    completion_target_projection,
+)
 from aicrm_next.commerce.order_expiration import close_expired_wechat_pay_orders, pending_order_expires_at_text
 from aicrm_next.shared.product_code_aliases import product_code_filter_values
 from aicrm_next.identity_contact.dto import IdentityResolveResult, ResolvePersonIdentityRequest
 from aicrm_next.identity_contact.payment_projection import project_payment_order_mobile
+from aicrm_next.identity_contact.oauth_projection_repo import project_wechat_oauth_identity
 from aicrm_next.identity_contact.resolver import resolve_identity_with_dbapi, resolved_unionid
 from aicrm_next.integration_gateway.wechat_pay_client import WeChatPayClient, WeChatPayClientConfig, WeChatPayClientError
 from aicrm_next.integration_gateway.wechat_oauth_client import WeChatOAuthClientError, build_wechat_oauth_client
 from aicrm_next.platform_foundation.internal_events.outbox import enqueue_transactional_internal_event_outbox
 from aicrm_next.platform_foundation.internal_events.payment import PAYMENT_SUCCEEDED_EVENT_TYPE, build_payment_succeeded_event_request
-from aicrm_next.questionnaire.oauth import questionnaire_h5_identity_from_cookies
-from aicrm_next.shared.runtime import production_data_ready, runtime_setting
+from aicrm_next.shared.errors import ContractError
+from aicrm_next.shared.runtime import (
+    production_data_ready,
+    production_environment,
+    runtime_setting,
+    secure_cookie_environment,
+)
 from aicrm_next.shared.safe_logging import safe_log_exception, safe_log_fields
+from aicrm_next.shared.wechat_h5_session import (
+    WECHAT_PAYMENT_IDENTITY_COOKIE,
+    WECHAT_PAYMENT_IDENTITY_TTL_SECONDS,
+    is_wechat_browser,
+    load_signed_payment_session_payload as _load_signed_blob,
+    payment_identity_from_request,
+    payment_oauth_start_url as shared_payment_oauth_start_url,
+    payment_session_signing_available,
+    safe_local_return_url,
+    sign_payment_session_payload as _signed_blob,
+)
 
 from .repo import connect_h5_wechat_pay_db as _connect
 from aicrm_next.shared.signed_context import SIDEBAR_PRODUCT_CONTEXT_COOKIE, load_sidebar_product_context_token
@@ -35,8 +55,12 @@ from .sidebar_order_context import resolve_sidebar_order_context
 from .service import format_price, get_public_product, product_not_found_payload, route_headers
 
 
-COOKIE_NAME = "wechat_pay_h5_identity"
+COOKIE_NAME = WECHAT_PAYMENT_IDENTITY_COOKIE
+OAUTH_STATE_COOKIE_NAME = "wechat_pay_h5_oauth_state"
+OAUTH_STATE_COOKIE_PATH = "/api/h5/wechat-pay/oauth"
 STATE_TTL_SECONDS = 600
+_OAUTH_STATE_CLOCK_SKEW_SECONDS = 300
+_OAUTH_STATE_PATTERN = re.compile(r"^[a-f0-9]{48}$")
 LOGGER = logging.getLogger(__name__)
 _OAUTH_CLIENT_FACTORY = build_wechat_oauth_client
 
@@ -81,51 +105,8 @@ def _oauth_client():
     return _OAUTH_CLIENT_FACTORY()
 
 
-def _secret() -> str:
-    return (
-        _sensitive_setting("AICRM_NEXT_ACTION_TOKEN_SECRET")
-        or _sensitive_setting("SECRET_KEY")
-        or "aicrm-next-h5-wechat-pay-dev-secret"
-    )
-
-
-def _b64encode(payload: bytes) -> str:
-    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
-
-
-def _b64decode(value: str) -> bytes:
-    padding = "=" * (-len(value) % 4)
-    return base64.urlsafe_b64decode((value + padding).encode("ascii"))
-
-
-def _sign(message: str) -> str:
-    return hmac.new(_secret().encode("utf-8"), message.encode("utf-8"), hashlib.sha256).hexdigest()
-
-
-def _signed_blob(payload: dict[str, Any]) -> str:
-    encoded = _b64encode(json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8"))
-    return f"{encoded}.{_sign(encoded)}"
-
-
-def _load_signed_blob(value: str) -> dict[str, Any]:
-    try:
-        encoded, signature = value.split(".", 1)
-    except ValueError:
-        return {}
-    if not hmac.compare_digest(_sign(encoded), signature):
-        return {}
-    try:
-        payload = json.loads(_b64decode(encoded).decode("utf-8"))
-    except Exception:
-        return {}
-    return payload if isinstance(payload, dict) else {}
-
-
 def _safe_return_url(value: Any) -> str:
-    normalized = _normalized_text(value)
-    if not normalized or not normalized.startswith("/") or normalized.startswith("//") or "\\" in normalized:
-        return "/"
-    return normalized
+    return safe_local_return_url(value)
 
 
 def sidebar_product_context_status(context_token: str) -> str:
@@ -134,15 +115,35 @@ def sidebar_product_context_status(context_token: str) -> str:
 
 
 def _external_base_url(request: Request) -> str:
-    forwarded_proto = (request.headers.get("X-Forwarded-Proto") or "").split(",")[0].strip()
-    forwarded_host = (request.headers.get("X-Forwarded-Host") or "").split(",")[0].strip()
-    scheme = forwarded_proto or request.url.scheme or "http"
-    host = forwarded_host or request.headers.get("Host") or request.url.netloc
-    return f"{scheme}://{host}".rstrip("/")
+    configured = (
+        _normalized_text(runtime_setting("AICRM_PUBLIC_BASE_URL"))
+        or _normalized_text(runtime_setting("PUBLIC_BASE_URL"))
+        or _normalized_text(runtime_setting("APP_BASE_URL"))
+    )
+    candidate = configured or str(request.base_url).rstrip("/")
+    parsed = urlsplit(candidate)
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.netloc
+        or parsed.username
+        or parsed.password
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise RuntimeError("public_base_url_invalid")
+    if production_environment() and not configured:
+        raise RuntimeError("public_base_url_required")
+    if production_environment() and parsed.scheme != "https":
+        raise RuntimeError("public_base_url_https_required")
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path.rstrip('/')}"
 
 
 def _oauth_configured() -> bool:
-    return bool(_env("WECHAT_MP_APP_ID") and _sensitive_setting("WECHAT_MP_APP_SECRET") and _secret())
+    return bool(
+        _env("WECHAT_MP_APP_ID")
+        and _sensitive_setting("WECHAT_MP_APP_SECRET")
+        and payment_session_signing_available()
+    )
 
 
 def _wechat_oauth_scope() -> str:
@@ -163,32 +164,14 @@ def _wechat_oauth_authorize_url(*, app_id: str, redirect_uri: str, scope: str, s
 
 
 def _is_wechat_browser(request: Request) -> bool:
-    return "micromessenger" in (request.headers.get("User-Agent") or "").lower()
+    return is_wechat_browser(request)
 
 
 def _identity_from_request(request: Request) -> dict[str, str]:
-    for cookie_name in (COOKIE_NAME,):
-        payload = _load_signed_blob(_normalized_text(request.cookies.get(cookie_name)))
-        openid = _normalized_text(payload.get("openid"))
-        if openid:
-            return {
-                "openid": openid,
-                "unionid": _normalized_text(payload.get("unionid")),
-                "respondent_key": _normalized_text(payload.get("respondent_key")),
-                "external_userid": _normalized_text(payload.get("external_userid")),
-                "payer_name": _normalized_text(payload.get("payer_name")),
-            }
-    questionnaire_identity = questionnaire_h5_identity_from_cookies(request.cookies)
-    openid = _normalized_text(questionnaire_identity.get("openid"))
-    if openid:
-        return {
-            "openid": openid,
-            "unionid": _normalized_text(questionnaire_identity.get("unionid")),
-            "respondent_key": _normalized_text(questionnaire_identity.get("respondent_key")),
-            "external_userid": _normalized_text(questionnaire_identity.get("external_userid")),
-            "payer_name": "",
-        }
-    return {}
+    # Questionnaire identity cookies can contain caller-provided identity hints
+    # and are therefore not payer credentials.  Payment, coupon and order
+    # ownership checks accept only the dedicated expiring OAuth session.
+    return payment_identity_from_request(request)
 
 
 def h5_payment_identity_from_request(request: Request) -> dict[str, str]:
@@ -196,7 +179,7 @@ def h5_payment_identity_from_request(request: Request) -> dict[str, str]:
 
 
 def payment_oauth_start_url(return_url: str) -> str:
-    return f"/api/h5/wechat-pay/oauth/start?{urlencode({'return_url': _safe_return_url(return_url)})}"
+    return shared_payment_oauth_start_url(return_url)
 
 
 def payment_oauth_start(request: Request) -> RedirectResponse | JSONResponse:
@@ -205,26 +188,108 @@ def payment_oauth_start(request: Request) -> RedirectResponse | JSONResponse:
         return RedirectResponse(return_url, status_code=302, headers=route_headers())
     if not _oauth_configured():
         return JSONResponse({"ok": False, "error": "wechat_pay_oauth_not_configured"}, status_code=501, headers=route_headers())
+    try:
+        public_base_url = _external_base_url(request)
+    except RuntimeError:
+        return JSONResponse(
+            {"ok": False, "error": "public_base_url_not_configured"},
+            status_code=503,
+            headers=route_headers(),
+        )
     now = int(datetime.now(timezone.utc).timestamp())
-    state = _signed_blob({"return_url": return_url, "nonce": secrets.token_urlsafe(16), "iat": now, "exp": now + STATE_TTL_SECONDS})
+    nonce = secrets.token_hex(24)
+    state_cookie = _signed_blob(
+        {
+            "return_url": return_url,
+            "nonce": nonce,
+            "iat": now,
+            "exp": now + STATE_TTL_SECONDS,
+        }
+    )
     authorize_url = _wechat_oauth_authorize_url(
         app_id=_env("WECHAT_MP_APP_ID"),
-        redirect_uri=f"{_external_base_url(request)}/api/h5/wechat-pay/oauth/callback",
+        redirect_uri=f"{public_base_url}/api/h5/wechat-pay/oauth/callback",
         scope=_wechat_oauth_scope(),
-        state=state,
+        state=nonce,
     )
-    return RedirectResponse(authorize_url, status_code=302, headers=route_headers())
+    response = RedirectResponse(authorize_url, status_code=302, headers=route_headers())
+    response.set_cookie(
+        OAUTH_STATE_COOKIE_NAME,
+        state_cookie,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure_cookie_environment() or public_base_url.startswith("https://"),
+        samesite="lax",
+        path=OAUTH_STATE_COOKIE_PATH,
+    )
+    return response
+
+
+def _clear_oauth_state_cookie(response: JSONResponse | RedirectResponse, *, secure: bool) -> JSONResponse | RedirectResponse:
+    response.delete_cookie(
+        OAUTH_STATE_COOKIE_NAME,
+        path=OAUTH_STATE_COOKIE_PATH,
+        secure=secure,
+        httponly=True,
+        samesite="lax",
+    )
+    return response
 
 
 def payment_oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
-    state_payload = _load_signed_blob(_normalized_text(request.query_params.get("state")))
-    if not state_payload:
+    try:
+        public_base_url = _external_base_url(request)
+    except RuntimeError:
+        return JSONResponse(
+            {"ok": False, "error": "public_base_url_not_configured"},
+            status_code=503,
+            headers=route_headers(),
+        )
+    state_nonce = _normalized_text(request.query_params.get("state"))
+    if not _OAUTH_STATE_PATTERN.fullmatch(state_nonce):
         return JSONResponse({"ok": False, "error": "state_invalid"}, status_code=400, headers=route_headers())
-    if int(state_payload.get("exp") or 0) < int(datetime.now(timezone.utc).timestamp()):
-        return JSONResponse({"ok": False, "error": "state_expired"}, status_code=400, headers=route_headers())
+    state_cookie = _normalized_text(request.cookies.get(OAUTH_STATE_COOKIE_NAME))
+    if not state_cookie:
+        return JSONResponse({"ok": False, "error": "oauth_state_cookie_missing"}, status_code=400, headers=route_headers())
+    state_payload = _load_signed_blob(state_cookie)
+    if not state_payload:
+        return JSONResponse({"ok": False, "error": "oauth_state_cookie_invalid"}, status_code=400, headers=route_headers())
+    cookie_nonce = _normalized_text(state_payload.get("nonce"))
+    if not _OAUTH_STATE_PATTERN.fullmatch(cookie_nonce):
+        return JSONResponse({"ok": False, "error": "oauth_state_cookie_invalid"}, status_code=400, headers=route_headers())
+    if not hmac.compare_digest(state_nonce, cookie_nonce):
+        return JSONResponse({"ok": False, "error": "oauth_state_cookie_mismatch"}, status_code=400, headers=route_headers())
+    secure_cookie = secure_cookie_environment() or public_base_url.startswith("https://")
+
+    def attributed_response(response: JSONResponse | RedirectResponse) -> JSONResponse | RedirectResponse:
+        return _clear_oauth_state_cookie(response, secure=secure_cookie)
+
+    try:
+        issued_at = int(state_payload.get("iat"))
+        expires_at = int(state_payload.get("exp"))
+    except (TypeError, ValueError):
+        return attributed_response(
+            JSONResponse({"ok": False, "error": "state_invalid"}, status_code=400, headers=route_headers())
+        )
+    now = int(datetime.now(timezone.utc).timestamp())
+    if (
+        issued_at <= 0
+        or issued_at > now + _OAUTH_STATE_CLOCK_SKEW_SECONDS
+        or expires_at <= issued_at
+        or expires_at - issued_at > STATE_TTL_SECONDS
+    ):
+        return attributed_response(
+            JSONResponse({"ok": False, "error": "state_invalid"}, status_code=400, headers=route_headers())
+        )
+    if expires_at <= now:
+        return attributed_response(
+            JSONResponse({"ok": False, "error": "state_expired"}, status_code=400, headers=route_headers())
+        )
     code = _normalized_text(request.query_params.get("code"))
     if not code:
-        return JSONResponse({"ok": False, "error": "code_required"}, status_code=400, headers=route_headers())
+        return attributed_response(
+            JSONResponse({"ok": False, "error": "code_required"}, status_code=400, headers=route_headers())
+        )
     try:
         client = _oauth_client()
         oauth_payload = client.exchange_code(
@@ -233,12 +298,26 @@ def payment_oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
             code=code,
         )
     except (WeChatOAuthClientError, Exception):
-        return JSONResponse({"ok": False, "error": "wechat_oauth_failed"}, status_code=502, headers=route_headers())
+        return attributed_response(
+            JSONResponse({"ok": False, "error": "wechat_oauth_failed"}, status_code=502, headers=route_headers())
+        )
     if oauth_payload.get("errcode") not in (None, 0):
-        return JSONResponse({"ok": False, "error": oauth_payload.get("errmsg") or "wechat_oauth_failed"}, status_code=502, headers=route_headers())
+        return attributed_response(
+            JSONResponse(
+                {"ok": False, "error": oauth_payload.get("errmsg") or "wechat_oauth_failed"},
+                status_code=502,
+                headers=route_headers(),
+            )
+        )
     openid = _normalized_text(oauth_payload.get("openid"))
     if not openid:
-        return JSONResponse({"ok": False, "error": "wechat_oauth_openid_missing"}, status_code=502, headers=route_headers())
+        return attributed_response(
+            JSONResponse(
+                {"ok": False, "error": "wechat_oauth_openid_missing"},
+                status_code=502,
+                headers=route_headers(),
+            )
+        )
     unionid = _normalized_text(oauth_payload.get("unionid"))
     payer_name = ""
     access_token = _normalized_text(oauth_payload.get("access_token"))
@@ -250,26 +329,71 @@ def payment_oauth_callback(request: Request) -> RedirectResponse | JSONResponse:
                 payer_name = _normalized_text(userinfo.get("nickname"))
         except (WeChatOAuthClientError, Exception):
             payer_name = ""
+    if production_data_ready():
+        try:
+            with _connect() as conn:
+                projection = project_wechat_oauth_identity(
+                    conn,
+                    openid=openid,
+                    unionid=unionid,
+                    payer_name=payer_name,
+                    source_route="/api/h5/wechat-pay/oauth/callback",
+                )
+                if not projection.get("ok"):
+                    # Conflict projection writes only a redacted audit record;
+                    # keep that evidence while refusing to issue a session.
+                    conn.commit()
+                    return attributed_response(
+                        JSONResponse(
+                            {"ok": False, "error": projection.get("reason") or "wechat_oauth_identity_conflict"},
+                            status_code=409,
+                            headers=route_headers(),
+                        )
+                    )
+                unionid = _normalized_text(projection.get("unionid"))
+                conn.commit()
+        except Exception as exc:
+            safe_log_exception(LOGGER, "wechat_pay_oauth_identity_projection_failed", exc)
+            return attributed_response(
+                JSONResponse(
+                    {"ok": False, "error": "wechat_oauth_identity_projection_failed"},
+                    status_code=503,
+                    headers=route_headers(),
+                )
+            )
     response = RedirectResponse(_safe_return_url(state_payload.get("return_url")), status_code=302, headers=route_headers())
+    issued_at = int(datetime.now(timezone.utc).timestamp())
     response.set_cookie(
         COOKIE_NAME,
-        _signed_blob({"openid": openid, "unionid": unionid, "payer_name": payer_name, "iat": int(datetime.now(timezone.utc).timestamp())}),
-        max_age=86400 * 30,
+        _signed_blob(
+            {
+                "openid": openid,
+                "unionid": unionid,
+                "payer_name": payer_name,
+                "iat": issued_at,
+                "exp": issued_at + WECHAT_PAYMENT_IDENTITY_TTL_SECONDS,
+            }
+        ),
+        max_age=WECHAT_PAYMENT_IDENTITY_TTL_SECONDS,
         httponly=True,
-        secure=_external_base_url(request).startswith("https://"),
+        secure=secure_cookie_environment() or public_base_url.startswith("https://"),
         samesite="lax",
         path="/",
     )
-    return response
+    return attributed_response(response)
 
 
 def checkout_page_state(product: dict[str, Any], request: Request) -> dict[str, Any]:
+    from aicrm_next.commerce.coupons.application import target_ref_for_product_id
+
     identity = _identity_from_request(request)
     code = _normalized_text(product.get("product_code"))
     paid_order = _existing_paid_order_for_checkout(product, identity) if identity.get("openid") else None
     context_token = _normalized_text(request.cookies.get(SIDEBAR_PRODUCT_CONTEXT_COOKIE))
     context_result = load_sidebar_product_context_token(context_token)
     pay_path = f"/pay/{code}"
+    product_id = product.get("id")
+    coupon_target_ref = target_ref_for_product_id(product_id) if _normalized_text(product_id) else ""
     return {
         "product": {
             "product_code": code,
@@ -289,6 +413,12 @@ def checkout_page_state(product: dict[str, Any], request: Request) -> dict[str, 
         "paid_order": paid_order,
         "price_display": format_price(product),
         "context_status": _normalized_text(context_result.get("status")) or "missing",
+        "coupon_target_ref": coupon_target_ref,
+        "available_coupon_url": (
+            f"/api/h5/coupons/available?{urlencode({'target_ref': coupon_target_ref})}"
+            if coupon_target_ref
+            else ""
+        ),
     }
 
 
@@ -332,6 +462,25 @@ def _jsonb(value: Any):
     from psycopg.types.json import Jsonb
 
     return Jsonb(value, dumps=lambda data: json.dumps(data, ensure_ascii=False, default=str))
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return dict(parsed) if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _public_coupon_summary(value: Any) -> dict[str, Any]:
+    summary = _json_object(value)
+    for key in ("claim_no", "claim_id", "coupon_claim_id", "idempotency_key_hash"):
+        summary.pop(key, None)
+    return summary
 
 
 def _out_trade_no() -> str:
@@ -481,6 +630,46 @@ def _lead_qr_for_product_code(conn: Any, product_code: str) -> dict[str, Any]:
     return _resolve_lead_channel_qr(conn, channel_id=channel_id)
 
 
+def _completion_projection_blocks_lead_qr(completion: dict[str, Any]) -> bool:
+    redirect = completion.get("completion_redirect") if isinstance(completion.get("completion_redirect"), dict) else {}
+    target = completion.get("completion_target") if isinstance(completion.get("completion_target"), dict) else {}
+    return bool(redirect.get("enabled") or target.get("enabled"))
+
+
+def _lead_qr_for_product(conn: Any, product: dict[str, Any]) -> dict[str, Any]:
+    completion = _completion_redirect_from_product(product)
+    if _completion_projection_blocks_lead_qr(completion):
+        return {}
+    try:
+        channel_id = int(product.get("lead_channel_id") or 0) or None
+    except (TypeError, ValueError):
+        channel_id = None
+    if channel_id:
+        return _resolve_lead_channel_qr(conn, channel_id=channel_id)
+    return _lead_qr_for_product_code(conn, _normalized_text(product.get("product_code")))
+
+
+def resolve_product_lead_qr(product: dict[str, Any]) -> dict[str, Any]:
+    """Resolve the configured post-purchase channel QR without external calls."""
+
+    if not production_data_ready():
+        return {}
+    normalized = dict(product or {})
+    if _completion_projection_blocks_lead_qr(_completion_redirect_from_product(normalized)):
+        return {}
+    try:
+        with _connect() as conn:
+            return _lead_qr_for_product(conn, normalized)
+    except Exception as exc:
+        safe_log_exception(
+            LOGGER,
+            "public_product_lead_qr_resolution_failed",
+            exc,
+            product_code=_normalized_text(normalized.get("product_code")),
+        )
+        return {}
+
+
 def _resolve_payment_identity(
     conn: Any,
     identity: dict[str, str],
@@ -578,8 +767,54 @@ def _paid_order_payload_for_product_identity(
     if not order:
         return None
     completion_redirect = _completion_redirect_from_product(product)
-    lead_qr = {} if completion_redirect.get("completion_redirect", {}).get("enabled") else _lead_qr_for_product_code(conn, _normalized_text(product.get("product_code")))
+    lead_qr = _lead_qr_for_product(conn, product)
     return _order_payload(order, completion_redirect=completion_redirect, lead_qr=lead_qr)
+
+
+def _active_order_for_client_reference(
+    conn: Any,
+    *,
+    order_source: str,
+    client_order_ref: str,
+    canonical_unionid: str,
+    product_code: str,
+) -> dict[str, Any] | None:
+    """Serialize retries for one browser checkout and return its active order."""
+
+    reference = _normalized_text(client_order_ref)
+    if not reference:
+        return None
+    lock_key = "|".join(
+        (
+            _normalized_text(order_source) or "h5_checkout",
+            _normalized_text(canonical_unionid),
+            _normalized_text(product_code),
+            reference,
+        )
+    )
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))", (lock_key,))
+    row = conn.execute(
+        """
+        SELECT *
+        FROM wechat_pay_orders
+        WHERE order_source = %s
+          AND client_order_ref = %s
+          AND unionid = %s
+          AND product_code = %s
+          AND COALESCE(status, '') NOT IN ('failed', 'closed')
+          AND COALESCE(trade_state, '') NOT IN ('CLOSED', 'REVOKED')
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+        """,
+        (
+            _normalized_text(order_source) or "h5_checkout",
+            reference,
+            _normalized_text(canonical_unionid),
+            _normalized_text(product_code),
+        ),
+    ).fetchone()
+    return dict(row) if row else None
 
 
 def _existing_paid_order_for_checkout(product: dict[str, Any], identity: dict[str, str]) -> dict[str, Any] | None:
@@ -606,15 +841,11 @@ def _order_payload(
     completion_url = safe_completion_redirect_url(completion.get("url") or effective_completion.get("completion_redirect_url"))
     completion_enabled = bool(completion.get("enabled")) and bool(completion_url)
     completion_target = (effective_completion.get("completion_target") or effective_completion.get("completion_target_json") or {}) if isinstance(effective_completion, dict) else {}
-    target_enabled = bool(completion_target.get("enabled")) if isinstance(completion_target, dict) else False
-    completion_action = (
-        completion_action_for_target(
-            completion_target,
-            legacy_redirect_url=completion_url,
-            legacy_enabled=completion_enabled,
-        )
-        if isinstance(completion_target, dict) and completion_target
-        else ({"type": "redirect", "redirect_url": completion_url} if completion_enabled else {"type": "default", "redirect_url": ""})
+    completion_action = completion_action_with_lead_qr(
+        completion_target if isinstance(completion_target, dict) else {},
+        lead_qr=lead_qr if _is_order_effectively_paid(row) else None,
+        legacy_redirect_url=completion_url,
+        legacy_enabled=completion_enabled,
     )
     status = _normalized_text(row.get("status"))
     if _is_order_fully_refunded(row):
@@ -624,6 +855,9 @@ def _order_payload(
         "product_code": _normalized_text(row.get("product_code")),
         "product_name": _normalized_text(row.get("product_name")),
         "amount_total": int(row.get("amount_total") or 0),
+        "subtotal_amount_total": int(row.get("subtotal_amount_total") or row.get("amount_total") or 0),
+        "discount_amount_total": int(row.get("discount_amount_total") or 0),
+        "coupon_summary": _public_coupon_summary(row.get("coupon_snapshot_json")),
         "currency": _normalized_text(row.get("currency")) or "CNY",
         "status": status,
         "trade_state": _normalized_text(row.get("trade_state")),
@@ -638,8 +872,8 @@ def _order_payload(
         "completion_target": completion_target if isinstance(completion_target, dict) else {},
         "completion_action": completion_action,
     }
-    if _is_order_effectively_paid(row) and not completion_enabled and not target_enabled and lead_qr and lead_qr.get("qr_url"):
-        payload["lead_qr"] = lead_qr
+    if completion_action.get("type") == "lead_qr":
+        payload["lead_qr"] = completion_action.get("lead_qr") or lead_qr
         payload["completion_action"] = {"type": "lead_qr", "redirect_url": ""}
     return payload
 
@@ -653,17 +887,18 @@ def _insert_order(
     out_trade_no: str,
     request_meta: dict[str, Any] | None = None,
     order_source: str = "h5_checkout",
+    client_order_ref: str = "",
 ) -> dict[str, Any]:
     row = conn.execute(
         """
         INSERT INTO wechat_pay_orders (
-            out_trade_no, order_source, client_order_ref, product_code, product_name, description,
+            out_trade_no, order_source, product_code, product_name, description,
             amount_total, currency, unionid, payer_name_snapshot, status, success_url, metadata_json,
-            request_meta_json, expires_at, created_at, updated_at
+            request_meta_json, expires_at, client_order_ref, created_at, updated_at
         )
         VALUES (
-            %s, %s, '', %s, %s, %s, %s, %s, %s, %s,
-            'created', %s, %s::jsonb, %s::jsonb, %s::timestamptz, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+            %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            'created', %s, %s::jsonb, %s::jsonb, %s::timestamptz, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
         )
         RETURNING *
         """,
@@ -692,6 +927,7 @@ def _insert_order(
             ),
             _jsonb(request_meta or {}),
             _expires_at(),
+            _normalized_text(client_order_ref),
         ),
     ).fetchone()
     return dict(row or {})
@@ -705,6 +941,9 @@ def _update_payment_request(conn: Any, out_trade_no: str, *, prepay_id: str, req
             status = 'paying',
             request_payload_json = %s::jsonb,
             response_payload_json = %s::jsonb,
+            provider_unknown_at = NULL,
+            reconciliation_not_found_count = 0,
+            reconciliation_last_checked_at = NULL,
             last_error = '',
             updated_at = CURRENT_TIMESTAMP
         WHERE out_trade_no = %s
@@ -718,6 +957,39 @@ def _update_payment_request(conn: Any, out_trade_no: str, *, prepay_id: str, req
 def _mark_order_failed(conn: Any, out_trade_no: str, error_message: str) -> None:
     conn.execute(
         "UPDATE wechat_pay_orders SET status = 'failed', last_error = %s, updated_at = CURRENT_TIMESTAMP WHERE out_trade_no = %s",
+        (error_message[:500], out_trade_no),
+    )
+
+
+def _mark_order_provider_unknown(conn: Any, out_trade_no: str, error_message: str) -> None:
+    """Keep a provider-uncertain order eligible for the reconciliation worker.
+
+    A transport failure can happen after WeChat accepted the transaction.  In
+    that case releasing the coupon would allow the same claim to fund two
+    orders, so the reservation is deliberately retained until provider state is
+    queried by out_trade_no.
+    """
+
+    conn.execute(
+        """
+        UPDATE wechat_pay_orders
+        SET status = CASE WHEN status = 'paid' THEN status ELSE 'provider_unknown' END,
+            provider_unknown_at = CASE
+                WHEN status = 'provider_unknown' THEN COALESCE(provider_unknown_at, CURRENT_TIMESTAMP)
+                ELSE CURRENT_TIMESTAMP
+            END,
+            reconciliation_not_found_count = CASE
+                WHEN status = 'provider_unknown' THEN reconciliation_not_found_count
+                ELSE 0
+            END,
+            reconciliation_last_checked_at = CASE
+                WHEN status = 'provider_unknown' THEN reconciliation_last_checked_at
+                ELSE NULL
+            END,
+            last_error = %s,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE out_trade_no = %s
+        """,
         (error_message[:500], out_trade_no),
     )
 
@@ -740,12 +1012,34 @@ def _safe_project_order_mobile_to_identity(conn: Any, order: dict[str, Any], *, 
         return {"ok": False, "projected": False, "reason": "projection_error"}
 
 
+def _assert_transaction_amount(order: dict[str, Any], transaction: dict[str, Any]) -> tuple[int, str]:
+    amount = transaction.get("amount") if isinstance(transaction.get("amount"), dict) else {}
+    strict_coupon_order = bool(order.get("coupon_claim_id"))
+    raw_total = amount.get("total")
+    if raw_total is None and strict_coupon_order:
+        raise RuntimeError("wechat_pay_total_required_for_coupon_order")
+    provider_total = int(raw_total if raw_total is not None else amount.get("payer_total") or 0)
+    provider_currency = _normalized_text(amount.get("currency"))
+    order_total = int(order.get("amount_total") or 0)
+    order_currency = _normalized_text(order.get("currency")) or "CNY"
+    if provider_total != order_total:
+        raise RuntimeError("wechat_pay_order_amount_mismatch")
+    if strict_coupon_order and not provider_currency:
+        raise RuntimeError("wechat_pay_currency_required_for_coupon_order")
+    if provider_currency and provider_currency != order_currency:
+        raise RuntimeError("wechat_pay_order_currency_mismatch")
+    return provider_total, provider_currency or order_currency
+
+
 def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: str = "/api/h5/wechat-pay/notify") -> dict[str, Any]:
     trade_no = _normalized_text(transaction.get("out_trade_no"))
     trade_state = _normalized_text(transaction.get("trade_state"))
     status = "paid" if trade_state == "SUCCESS" else ("closed" if trade_state in {"CLOSED", "REVOKED"} else "paying")
     amount = transaction.get("amount") if isinstance(transaction.get("amount"), dict) else {}
-    previous = conn.execute("SELECT * FROM wechat_pay_orders WHERE out_trade_no = %s LIMIT 1", (trade_no,)).fetchone()
+    previous = conn.execute("SELECT * FROM wechat_pay_orders WHERE out_trade_no = %s LIMIT 1 FOR UPDATE", (trade_no,)).fetchone()
+    previous_payload = dict(previous or {})
+    if trade_state == "SUCCESS":
+        _assert_transaction_amount(previous_payload, transaction)
     was_paid = _normalized_text((previous or {}).get("status")) == "paid" or _normalized_text((previous or {}).get("trade_state")) == "SUCCESS"
     order = conn.execute(
         """
@@ -776,6 +1070,20 @@ def _apply_transaction(conn: Any, transaction: dict[str, Any], *, source_route: 
     ).fetchone()
     order_payload = dict(order or {})
     is_paid = _normalized_text(order_payload.get("status")) == "paid" or _normalized_text(order_payload.get("trade_state")) == "SUCCESS"
+    if is_paid and order_payload.get("coupon_claim_id"):
+        from aicrm_next.commerce.coupons.application import consume_coupon_for_paid_order
+
+        amount_total, currency = _assert_transaction_amount(order_payload, transaction)
+        consume_coupon_for_paid_order(
+            conn,
+            out_trade_no=trade_no,
+            provider_total=amount_total,
+            provider_currency=currency,
+        )
+    elif trade_state in {"CLOSED", "REVOKED"} and order_payload.get("coupon_claim_id"):
+        from aicrm_next.commerce.coupons.application import release_coupon_for_order
+
+        release_coupon_for_order(conn, out_trade_no=trade_no, reason=f"wechat_pay_{trade_state.lower()}")
     if is_paid:
         mobile_projection = _safe_project_order_mobile_to_identity(conn, order_payload, source_route=source_route)
         internal_event_outbox = _enqueue_payment_succeeded_internal_event_outbox(
@@ -809,6 +1117,14 @@ def create_jsapi_order_response(
     order_source: str = "h5_checkout",
     request_meta_extra: dict[str, Any] | None = None,
 ) -> JSONResponse:
+    from aicrm_next.commerce.coupons.application import (
+        CouponPublicApplication,
+        normalize_coupon_choice,
+        release_coupon_for_order,
+        reserve_coupon_for_order,
+        target_ref_for_product_id,
+    )
+
     if not _is_wechat_browser(request):
         return JSONResponse({"ok": False, "error": "please_open_in_wechat"}, status_code=403, headers=route_headers())
     product_code = _normalized_text(payload.get("product_code"))
@@ -859,18 +1175,22 @@ def create_jsapi_order_response(
     if request_meta_extra:
         request_meta.update(request_meta_extra)
     out_trade_no = _out_trade_no()
-    notify_url = _env("WECHAT_PAY_NOTIFY_URL") or f"{_external_base_url(request)}/api/h5/wechat-pay/notify"
-    transaction_payload = {
-        "appid": config.app_id,
-        "mchid": config.mch_id,
-        "description": _normalized_text(product.get("title"))[:127],
-        "out_trade_no": out_trade_no,
-        "notify_url": notify_url,
-        "amount": {"total": int(product.get("price_cents") or 0), "currency": product.get("currency") or "CNY"},
-        "payer": {"openid": identity["openid"]},
-        "attach": json.dumps({"product_code": product["product_code"], "client_order_ref": _normalized_text(payload.get("client_order_ref"))}, ensure_ascii=False, separators=(",", ":"))[:128],
-    }
+    client_order_ref = _normalized_text(payload.get("client_order_ref"))
     try:
+        coupon_choice = normalize_coupon_choice(payload)
+    except ContractError as exc:
+        return JSONResponse(
+            {"ok": False, "error": "coupon_choice_invalid", "message": str(exc)},
+            status_code=400,
+            headers=route_headers(),
+        )
+    notify_url = _env("WECHAT_PAY_NOTIFY_URL") or f"{_external_base_url(request)}/api/h5/wechat-pay/notify"
+    order_persisted = False
+    provider_invoked = False
+    canonical_unionid = ""
+    try:
+        # Phase 1: order creation and coupon reservation are one local
+        # transaction.  It commits before any external payment request.
         with _connect() as conn:
             identity_resolution = _resolve_payment_identity(conn, identity, for_update=True)
             canonical_unionid = resolved_unionid(identity_resolution)
@@ -899,8 +1219,54 @@ def create_jsapi_order_response(
             )
             if existing_paid_order is not None:
                 return JSONResponse({"ok": True, "already_paid": True, "order": existing_paid_order}, headers=route_headers())
-            client = WeChatPayClient(config)
-            _insert_order(
+            existing_client_order = _active_order_for_client_reference(
+                conn,
+                order_source=order_source,
+                client_order_ref=client_order_ref,
+                canonical_unionid=canonical_unionid,
+                product_code=product_code,
+            )
+            if existing_client_order is not None:
+                conn.commit()
+                completion_redirect = _completion_redirect_from_product(product)
+                if _is_order_effectively_paid(existing_client_order):
+                    return JSONResponse(
+                        {
+                            "ok": True,
+                            "already_paid": True,
+                            "order": _order_payload(
+                                existing_client_order,
+                                completion_redirect=completion_redirect,
+                            ),
+                        },
+                        headers=route_headers(),
+                    )
+                existing_prepay_id = _normalized_text(existing_client_order.get("prepay_id"))
+                if existing_prepay_id and _normalized_text(existing_client_order.get("status")) == "paying":
+                    pay_params = WeChatPayClient(config).build_jsapi_pay_params(existing_prepay_id)
+                    return JSONResponse(
+                        {
+                            "ok": True,
+                            "idempotent_replay": True,
+                            "order": _order_payload(
+                                existing_client_order,
+                                completion_redirect=completion_redirect,
+                            ),
+                            "pay_params": pay_params,
+                        },
+                        headers=route_headers(),
+                    )
+                return JSONResponse(
+                    {
+                        "ok": False,
+                        "error": "order_reconciliation_pending",
+                        "retryable": True,
+                        "out_trade_no": _normalized_text(existing_client_order.get("out_trade_no")),
+                    },
+                    status_code=409,
+                    headers=route_headers(),
+                )
+            order = _insert_order(
                 conn,
                 product=product,
                 identity=order_identity,
@@ -908,41 +1274,169 @@ def create_jsapi_order_response(
                 out_trade_no=out_trade_no,
                 request_meta=request_meta,
                 order_source=order_source,
+                client_order_ref=client_order_ref,
             )
-            response_payload = client.create_jsapi_transaction(transaction_payload)
-            prepay_id = _normalized_text(response_payload.get("prepay_id"))
-            if not prepay_id:
-                raise WeChatPayClientError("missing prepay_id from WeChat Pay")
-            order = _update_payment_request(conn, out_trade_no, prepay_id=prepay_id, request_payload=transaction_payload, response_payload=response_payload)
-            pay_params = client.build_jsapi_pay_params(prepay_id)
-            completion_redirect = _completion_redirect_from_product(product)
+            reserved = reserve_coupon_for_order(
+                conn,
+                order=order,
+                coupon_choice=coupon_choice,
+                unionid=canonical_unionid,
+                trade_product_id=product.get("id"),
+            )
+            order = dict(reserved or order)
             conn.commit()
+        order_persisted = True
+
+        transaction_payload = {
+            "appid": config.app_id,
+            "mchid": config.mch_id,
+            "description": _normalized_text(product.get("title"))[:127],
+            "out_trade_no": out_trade_no,
+            "notify_url": notify_url,
+            "amount": {
+                "total": int(order.get("amount_total") or 0),
+                "currency": _normalized_text(order.get("currency")) or "CNY",
+            },
+            "payer": {"openid": identity["openid"]},
+            "attach": json.dumps(
+                {"product_code": product["product_code"], "client_order_ref": client_order_ref},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )[:128],
+        }
+
+        # Phase 2: WeChat is called without an open database transaction.  A
+        # transport-uncertain result retains the coupon reservation.
+        client = WeChatPayClient(config)
+        provider_invoked = True
+        response_payload = client.create_jsapi_transaction(transaction_payload)
+        prepay_id = _normalized_text(response_payload.get("prepay_id"))
+        if not prepay_id:
+            raise WeChatPayClientError("missing prepay_id from WeChat Pay")
+        pay_params = client.build_jsapi_pay_params(prepay_id)
+        with _connect() as conn:
+            order = _update_payment_request(
+                conn,
+                out_trade_no,
+                prepay_id=prepay_id,
+                request_payload=transaction_payload,
+                response_payload=response_payload,
+            )
+            conn.commit()
+        completion_redirect = _completion_redirect_from_product(product)
         return JSONResponse(
             {"ok": True, "order": _order_payload(order, completion_redirect=completion_redirect), "pay_params": pay_params},
+            headers=route_headers(
+                real_external_call_executed=True,
+                payment_request_executed=True,
+                order_create_executed=True,
+            ),
+        )
+    except ContractError as exc:
+        target_ref = target_ref_for_product_id(product.get("id"))
+        latest_available: list[dict[str, Any]] = []
+        if canonical_unionid:
+            try:
+                latest_payload = CouponPublicApplication().list_available_claims(
+                    target_ref,
+                    identity={**identity, "unionid": canonical_unionid},
+                )
+                latest_available = list(latest_payload.get("items") or [])
+            except Exception:
+                latest_available = []
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "coupon_unavailable",
+                "message": str(exc),
+                "available_coupons": latest_available,
+                "available_coupon_url": (
+                    "/api/h5/coupons/available?"
+                    + urlencode({"target_ref": target_ref})
+                ),
+            },
+            status_code=409,
             headers=route_headers(),
         )
     except Exception as exc:
-        try:
-            with _connect() as conn:
-                _mark_order_failed(conn, out_trade_no, str(exc))
-                conn.commit()
-        except Exception:
-            pass
-        return JSONResponse({"ok": False, "error": str(exc) or "create_wechat_pay_order_failed"}, status_code=502, headers=route_headers())
+        definitive_provider_failure = (
+            isinstance(exc, WeChatPayClientError)
+            and exc.status_code is not None
+            and 400 <= int(exc.status_code) < 500
+            and int(exc.status_code) != 429
+        )
+        if order_persisted:
+            try:
+                with _connect() as conn:
+                    if provider_invoked and not definitive_provider_failure:
+                        _mark_order_provider_unknown(conn, out_trade_no, str(exc))
+                    else:
+                        _mark_order_failed(conn, out_trade_no, str(exc))
+                        release_coupon_for_order(conn, out_trade_no=out_trade_no, reason="payment_create_failed")
+                    conn.commit()
+            except Exception:
+                pass
+        error_code = (
+            "wechat_pay_provider_outcome_unknown"
+            if order_persisted and provider_invoked and not definitive_provider_failure
+            else "create_wechat_pay_order_failed"
+        )
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": error_code,
+                "retryable": error_code == "wechat_pay_provider_outcome_unknown",
+                "out_trade_no": out_trade_no if order_persisted else "",
+            },
+            status_code=502,
+            headers=route_headers(
+                real_external_call_executed=provider_invoked,
+                payment_request_executed=provider_invoked,
+                order_create_executed=order_persisted,
+            ),
+        )
 
 
 def order_status_response(out_trade_no: str, request: Request) -> JSONResponse:
     if not production_data_ready():
         return JSONResponse({"ok": False, "error": "production_database_required"}, status_code=503, headers=route_headers())
     trade_no = _normalized_text(out_trade_no)
+    identity = _identity_from_request(request)
+    if not identity.get("openid"):
+        return JSONResponse(
+            {
+                "ok": False,
+                "error": "payment_identity_required",
+                "oauth_start_url": payment_oauth_start_url(f"/api/h5/wechat-pay/orders/{trade_no}"),
+            },
+            status_code=401,
+            headers=route_headers(),
+        )
     with _connect() as conn:
+        identity_result = _resolve_payment_identity(conn, identity)
+        canonical_unionid = resolved_unionid(identity_result)
+        if not canonical_unionid:
+            return JSONResponse(
+                {"ok": False, "error": "payment_identity_unresolved"},
+                status_code=403,
+                headers=route_headers(),
+            )
+        locked_order = conn.execute(
+            "SELECT * FROM wechat_pay_orders WHERE out_trade_no = %s LIMIT 1 FOR UPDATE",
+            (trade_no,),
+        ).fetchone()
+        if not locked_order or _normalized_text(locked_order.get("unionid")) != canonical_unionid:
+            conn.rollback()
+            return JSONResponse({"ok": False, "error": "order_not_found"}, status_code=404, headers=route_headers())
         close_expired_wechat_pay_orders(conn=conn, out_trade_no=trade_no, limit=1)
         order = conn.execute("SELECT * FROM wechat_pay_orders WHERE out_trade_no = %s LIMIT 1", (trade_no,)).fetchone()
         if not order:
             return JSONResponse({"ok": False, "error": "order_not_found"}, status_code=404, headers=route_headers())
         conn.commit()
+        provider_refreshed = False
         if _normalized_text(request.query_params.get("refresh")).lower() in {"1", "true", "yes", "on"}:
             try:
+                provider_refreshed = True
                 transaction = WeChatPayClient(_client_config()).query_order_by_out_trade_no(trade_no)
                 order = _apply_transaction(conn, transaction, source_route=f"/api/h5/wechat-pay/orders/{trade_no}")
                 conn.commit()
@@ -955,14 +1449,18 @@ def order_status_response(out_trade_no: str, request: Request) -> JSONResponse:
                     out_trade_no=trade_no,
                     event_type="transaction.paid",
                 )
-                return JSONResponse({"ok": False, "error": str(exc) or "wechat_pay_order_refresh_failed"}, status_code=502, headers=route_headers())
+                return JSONResponse(
+                    {"ok": False, "error": "wechat_pay_order_refresh_failed"},
+                    status_code=502,
+                    headers=route_headers(real_external_call_executed=True),
+                )
         order_payload = dict(order)
         product_code = _normalized_text(order_payload.get("product_code"))
         completion_redirect = _completion_redirect_for_product_code(conn, product_code)
-        lead_qr = {} if completion_redirect.get("completion_redirect", {}).get("enabled") else _lead_qr_for_product_code(conn, product_code)
+        lead_qr = {} if _completion_projection_blocks_lead_qr(completion_redirect) else _lead_qr_for_product_code(conn, product_code)
     return JSONResponse(
         {"ok": True, "order": _order_payload(order_payload, completion_redirect=completion_redirect, lead_qr=lead_qr)},
-        headers=route_headers(),
+        headers=route_headers(real_external_call_executed=provider_refreshed),
     )
 
 

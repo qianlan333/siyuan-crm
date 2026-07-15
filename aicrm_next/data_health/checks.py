@@ -761,7 +761,13 @@ def _external_effect_approved_not_queued() -> DataHealthCheckResult:
 def _questionnaire_submission_without_user_guard() -> DataHealthCheckResult:
     check_id = "questionnaire_submission_without_user_guard"
     title = "Questionnaire submissions without identity"
-    source_tables = ["questionnaire_submissions", "crm_user_identity"]
+    source_tables = [
+        "questionnaire_submissions",
+        "crm_user_identity",
+        "internal_event_outbox",
+        "internal_event",
+        "external_effect_job",
+    ]
     if not database_schema_available():
         return _db_unavailable_placeholder(check_id, title, source_tables)
     try:
@@ -770,25 +776,103 @@ def _questionnaire_submission_without_user_guard() -> DataHealthCheckResult:
                 session.execute(
                     text(
                         f"""
+                        WITH classified_submissions AS (
+                            SELECT
+                                submission.id,
+                                submission.submitted_at,
+                                NULLIF(BTRIM(submission.unionid), '') AS submission_unionid,
+                                identity.unionid AS identity_unionid,
+                                (
+                                    EXISTS (
+                                        SELECT 1
+                                        FROM internal_event_outbox outbox
+                                        WHERE outbox.tenant_id = 'aicrm'
+                                          AND outbox.event_type = 'questionnaire.submitted'
+                                          AND (
+                                              outbox.idempotency_key = 'questionnaire.submitted:' || submission.id::text
+                                              OR (
+                                                  outbox.aggregate_type = 'questionnaire_submission'
+                                                  AND outbox.aggregate_id = submission.id::text
+                                              )
+                                          )
+                                    )
+                                    OR EXISTS (
+                                        SELECT 1
+                                        FROM internal_event event
+                                        WHERE event.tenant_id = 'aicrm'
+                                          AND event.event_type = 'questionnaire.submitted'
+                                          AND (
+                                              event.idempotency_key = 'questionnaire.submitted:' || submission.id::text
+                                              OR (
+                                                  event.aggregate_type = 'questionnaire_submission'
+                                                  AND event.aggregate_id = submission.id::text
+                                              )
+                                          )
+                                    )
+                                ) AS continuation_guard_present,
+                                EXISTS (
+                                    SELECT 1
+                                    FROM external_effect_job job
+                                    WHERE job.effect_type IN (
+                                        'webhook.questionnaire_submission.push',
+                                        'wecom.contact.tag.mark'
+                                    )
+                                      AND (
+                                          (
+                                              job.target_type = 'questionnaire_submission'
+                                              AND job.target_id = submission.id::text
+                                          )
+                                          OR (
+                                              job.business_type = 'questionnaire_submission'
+                                              AND job.business_id = submission.id::text
+                                          )
+                                      )
+                                ) AS identity_dependent_effect_present
+                            FROM questionnaire_submissions submission
+                            LEFT JOIN crm_user_identity identity ON identity.unionid = submission.unionid
+                        )
                         SELECT
                             COUNT(*) FILTER (
-                                WHERE submission.submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
-                                  AND NULLIF(BTRIM(submission.unionid), '') IS NULL
+                                WHERE submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND submission_unionid IS NULL
                             ) AS missing_unionid_count,
                             COUNT(*) FILTER (
-                                WHERE submission.submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
-                                  AND NULLIF(BTRIM(submission.unionid), '') IS NOT NULL
-                                  AND identity.unionid IS NULL
+                                WHERE submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND submission_unionid IS NULL
+                                  AND continuation_guard_present
+                                  AND NOT identity_dependent_effect_present
+                            ) AS guarded_missing_unionid_count,
+                            COUNT(*) FILTER (
+                                WHERE submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND submission_unionid IS NULL
+                                  AND (
+                                      NOT continuation_guard_present
+                                      OR identity_dependent_effect_present
+                                  )
+                            ) AS unguarded_missing_unionid_count,
+                            COUNT(*) FILTER (
+                                WHERE submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND submission_unionid IS NULL
+                                  AND NOT continuation_guard_present
+                            ) AS missing_continuation_guard_count,
+                            COUNT(*) FILTER (
+                                WHERE submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND submission_unionid IS NULL
+                                  AND identity_dependent_effect_present
+                            ) AS identity_dependent_effect_without_unionid_count,
+                            COUNT(*) FILTER (
+                                WHERE submitted_at >= {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                  AND submission_unionid IS NOT NULL
+                                  AND identity_unionid IS NULL
                             ) AS missing_identity_count,
                             COUNT(*) FILTER (
-                                WHERE submission.submitted_at < {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
+                                WHERE submitted_at < {QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL}
                                   AND (
-                                      NULLIF(BTRIM(submission.unionid), '') IS NULL
-                                      OR identity.unionid IS NULL
+                                      submission_unionid IS NULL
+                                      OR identity_unionid IS NULL
                                   )
                             ) AS historical_pre_cutover_count
-                        FROM questionnaire_submissions submission
-                        LEFT JOIN crm_user_identity identity ON identity.unionid = submission.unionid
+                        FROM classified_submissions
                         """
                     )
                 )
@@ -800,27 +884,39 @@ def _questionnaire_submission_without_user_guard() -> DataHealthCheckResult:
         return _database_probe_failure(check_id, title, exc, source_tables)
     evidence = {
         "missing_unionid_count": int(row.get("missing_unionid_count") or 0),
+        "guarded_missing_unionid_count": int(row.get("guarded_missing_unionid_count") or 0),
+        "unguarded_missing_unionid_count": int(row.get("unguarded_missing_unionid_count") or 0),
+        "missing_continuation_guard_count": int(row.get("missing_continuation_guard_count") or 0),
+        "identity_dependent_effect_without_unionid_count": int(
+            row.get("identity_dependent_effect_without_unionid_count") or 0
+        ),
         "missing_identity_count": int(row.get("missing_identity_count") or 0),
         "historical_pre_cutover_count": int(row.get("historical_pre_cutover_count") or 0),
         "cutover_at": QUESTIONNAIRE_AUTO_EXECUTE_CUTOVER_AT,
     }
-    actionable = evidence["missing_unionid_count"] + evidence["missing_identity_count"]
+    actionable = evidence["unguarded_missing_unionid_count"] + evidence["missing_identity_count"]
     if actionable:
         return DataHealthCheckResult(
             check_id=check_id,
             title=title,
             status="fail",
             severity="red",
-            summary="Post-cutover questionnaire submissions are missing canonical user identity.",
+            summary="Post-cutover questionnaire submissions are missing canonical identity without a safe continuation guard.",
             evidence=evidence,
-            remediation="Resolve the submitting user identity before replaying questionnaire continuations.",
+            remediation=(
+                "Restore the durable questionnaire continuation guard or remove identity-dependent effects; "
+                "resolve canonical identity before replaying quarantined continuations."
+            ),
         )
     return DataHealthCheckResult(
         check_id=check_id,
         title=title,
         status="ok",
         severity="green",
-        summary="Every post-cutover questionnaire submission is linked to a canonical user identity.",
+        summary=(
+            "Post-cutover questionnaire submissions either resolve canonical identity or remain quarantined "
+            "behind the durable continuation guard without identity-dependent effects."
+        ),
         evidence=evidence,
         remediation="",
     )
@@ -1087,6 +1183,79 @@ def _customer_360_freshness_guard() -> DataHealthCheckResult:
     )
 
 
+def _wecom_media_lease_health() -> DataHealthCheckResult:
+    check_id = "wecom_media_lease_health"
+    title = "WeCom temporary media lease health"
+    if not database_schema_available():
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="not_applicable",
+            severity="gray",
+            summary="DATABASE_URL is not configured, so WeCom media leases cannot be checked.",
+            evidence={"runtime_probe": "database_url_not_configured"},
+            remediation="Run this check against the migrated production database.",
+        )
+    try:
+        with get_session_factory()() as session:
+            row = (
+                session.execute(
+                    text(
+                        """
+                        SELECT
+                            COUNT(*) AS total_count,
+                            COUNT(*) FILTER (WHERE status = 'ready' AND provider_expires_at > CURRENT_TIMESTAMP) AS ready_count,
+                            COUNT(*) FILTER (WHERE status = 'ready' AND refresh_after <= CURRENT_TIMESTAMP) AS refresh_due_count,
+                            COUNT(*) FILTER (WHERE status = 'refreshing') AS refreshing_count,
+                            COUNT(*) FILTER (WHERE status = 'failed') AS failed_count,
+                            COUNT(*) FILTER (WHERE status = 'invalid_source') AS invalid_source_count,
+                            COUNT(*) FILTER (WHERE status = 'ready' AND provider_expires_at <= CURRENT_TIMESTAMP) AS expired_count,
+                            (
+                                SELECT COUNT(*) FROM (
+                                    SELECT id FROM image_library
+                                    WHERE enabled IS TRUE AND COALESCE(data_base64, '') = ''
+                                    UNION ALL
+                                    SELECT id FROM attachment_library
+                                    WHERE enabled IS TRUE AND COALESCE(data_base64, '') = ''
+                                    UNION ALL
+                                    SELECT id FROM miniprogram_library
+                                    WHERE enabled IS TRUE AND thumb_image_id IS NULL
+                                      AND COALESCE(thumb_image_base64, '') = ''
+                                ) source_gaps
+                            ) AS source_gap_count
+                        FROM wecom_media_leases
+                        WHERE tenant_id = 'aicrm'
+                        """
+                    )
+                )
+                .mappings()
+                .one()
+            )
+    except Exception as exc:  # pragma: no cover - defensive health endpoint guard
+        return _database_probe_failure(check_id, title, exc, ["wecom_media_leases"])
+    evidence = {key: int(value or 0) for key, value in dict(row).items()}
+    unhealthy = evidence["failed_count"] + evidence["invalid_source_count"] + evidence["expired_count"]
+    if unhealthy:
+        return DataHealthCheckResult(
+            check_id=check_id,
+            title=title,
+            status="warn",
+            severity="yellow",
+            summary="One or more WeCom temporary media leases require repair.",
+            evidence=evidence,
+            remediation="Run the media lease backfill/refresh worker and repair any material with an invalid durable source.",
+        )
+    return DataHealthCheckResult(
+        check_id=check_id,
+        title=title,
+        status="ok",
+        severity="green",
+        summary="WeCom temporary media leases have no failed, invalid, or expired rows.",
+        evidence=evidence,
+        remediation="",
+    )
+
+
 _CHECKS: tuple[Callable[[], DataHealthCheckResult], ...] = (
     _identity_legacy_column_guard,
     _table_lifecycle_manifest_guard,
@@ -1103,4 +1272,5 @@ _CHECKS: tuple[Callable[[], DataHealthCheckResult], ...] = (
     _questionnaire_submission_without_user_guard,
     _payment_order_without_user_guard,
     _customer_360_freshness_guard,
+    _wecom_media_lease_health,
 )

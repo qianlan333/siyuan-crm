@@ -99,7 +99,10 @@ def test_automation_ops_scheduler_dry_run_returns_structured_skips() -> None:
     result = run_automation_ops_scheduler(dry_run=True, group_ops_runner=lambda **kwargs: {"component": "group_ops_scheduler", "status": "skipped", "reason": "dry_run"})
 
     assert result["ok"] is True
-    assert result["components"] == [{"component": "group_ops_scheduler", "status": "skipped", "reason": "dry_run"}]
+    assert result["components"] == [
+        {"component": "group_ops_scheduler", "status": "skipped", "reason": "dry_run"},
+        {"component": "wecom_media_lease_refresher", "status": "skipped", "reason": "dry_run"},
+    ]
 
 
 def test_broadcast_queue_worker_fake_dispatch_success() -> None:

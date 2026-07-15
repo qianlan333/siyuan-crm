@@ -21,6 +21,12 @@
     },
     {
       "accessor": "os.getenv",
+      "file": "aicrm_next/commerce/coupons/admin_api.py",
+      "key": "AICRM_ADMIN_AUTH_ENFORCED",
+      "line": 92
+    },
+    {
+      "accessor": "os.getenv",
       "file": "scripts/ai_audience_apply_package_spec.py",
       "key": "AICRM_ADMIN_SESSION_COOKIE",
       "line": 317
@@ -125,19 +131,19 @@
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_ARCHIVE_WORKER_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_ARCHIVE_WORKER_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "os.getenv",
@@ -167,31 +173,31 @@
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_AUTOMATION_WORKER_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_CALLBACK_WORKER_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_CALLBACK_WORKER_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_CAMPAIGN_AGENT_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_CAMPAIGN_AGENT_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "os.getenv",
@@ -203,43 +209,43 @@
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_EXTERNAL_AGENT_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_GROUP_BROADCAST_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_GROUP_BROADCAST_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_IDENTITY_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_IDENTITY_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_ISSUER",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "runtime_setting",
@@ -275,13 +281,25 @@
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_MCP_CLIENT_ID",
-      "line": 32
+      "line": 33
     },
     {
       "accessor": "declared_runtime_environment_key",
       "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
       "key": "AICRM_AUTH_MCP_CLIENT_SECRET_REF",
-      "line": 32
+      "line": 33
+    },
+    {
+      "accessor": "declared_runtime_environment_key",
+      "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
+      "key": "AICRM_AUTH_OPS_REPORTER_CLIENT_ID",
+      "line": 33
+    },
+    {
+      "accessor": "declared_runtime_environment_key",
+      "file": "aicrm_next/platform_foundation/auth_platform/access_client.py",
+      "key": "AICRM_AUTH_OPS_REPORTER_CLIENT_SECRET_REF",
+      "line": 33
     },
     {
       "accessor": "runtime_setting",
@@ -389,7 +407,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/platform_foundation/external_effects/adapters.py",
       "key": "AICRM_EXTERNAL_EFFECT_WEBHOOK_TIMEOUT_SECONDS",
-      "line": 308
+      "line": 310
     },
     {
       "accessor": "declared_runtime_environment_key",
@@ -408,12 +426,6 @@
       "file": "aicrm_next/automation_engine/group_ops/broadcast.py",
       "key": "AICRM_GROUP_OPS_BROADCAST_PLAN_ID",
       "line": 261
-    },
-    {
-      "accessor": "os.getenv",
-      "file": "aicrm_next/automation_engine/group_ops/material_resolver.py",
-      "key": "AICRM_GROUP_OPS_MATERIAL_UPLOAD_MODE",
-      "line": 392
     },
     {
       "accessor": "os.getenv",
@@ -525,9 +537,21 @@
     },
     {
       "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/coupons/target_refs.py",
+      "key": "AICRM_NEXT_ACTION_TOKEN_SECRET",
+      "line": 24
+    },
+    {
+      "accessor": "runtime_setting",
       "file": "aicrm_next/questionnaire/oauth.py",
       "key": "AICRM_NEXT_ACTION_TOKEN_SECRET",
       "line": 54
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/shared/wechat_h5_session.py",
+      "key": "AICRM_NEXT_ACTION_TOKEN_SECRET",
+      "line": 27
     },
     {
       "accessor": "os.getenv",
@@ -767,7 +791,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/media_library/application.py",
       "key": "AICRM_NEXT_WECOM_MEDIA_MODE",
-      "line": 72
+      "line": 93
     },
     {
       "accessor": "declared_runtime_environment_key",
@@ -812,6 +836,18 @@
       "line": 225
     },
     {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/coupons/admin_api.py",
+      "key": "AICRM_PUBLIC_BASE_URL",
+      "line": 54
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/public_product/h5_wechat_pay.py",
+      "key": "AICRM_PUBLIC_BASE_URL",
+      "line": 119
+    },
+    {
       "accessor": "os.getenv",
       "file": "aicrm_next/questionnaire/oauth.py",
       "key": "AICRM_QUESTIONNAIRE_OAUTH_ADAPTER_MODE",
@@ -840,6 +876,12 @@
       "file": "aicrm_next/admin_auth/route_policy.py",
       "key": "AICRM_ROUTE_POLICY_ENFORCED",
       "line": 74
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "aicrm_next/commerce/coupons/admin_api.py",
+      "key": "AICRM_ROUTE_POLICY_ENFORCED",
+      "line": 91
     },
     {
       "accessor": "os.getenv",
@@ -1004,6 +1046,18 @@
       "line": 227
     },
     {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/coupons/admin_api.py",
+      "key": "APP_BASE_URL",
+      "line": 56
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/public_product/h5_wechat_pay.py",
+      "key": "APP_BASE_URL",
+      "line": 121
+    },
+    {
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "APP_ENV",
@@ -1037,7 +1091,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/background_jobs/automation_ops_scheduler.py",
       "key": "AUTOMATION_OPS_SCHEDULER_OPERATOR",
-      "line": 35
+      "line": 48
     },
     {
       "accessor": "os.getenv",
@@ -1134,6 +1188,12 @@
       "file": "aicrm_next/growth_orchestration/repository.py",
       "key": "DATABASE_URL",
       "line": 89
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "aicrm_next/operation_cycles/repository.py",
+      "key": "DATABASE_URL",
+      "line": 1112
     },
     {
       "accessor": "os.getenv",
@@ -1370,6 +1430,18 @@
       "line": 226
     },
     {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/coupons/admin_api.py",
+      "key": "PUBLIC_BASE_URL",
+      "line": 55
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/public_product/h5_wechat_pay.py",
+      "key": "PUBLIC_BASE_URL",
+      "line": 120
+    },
+    {
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_auth/guards.py",
       "key": "PYTEST_CURRENT_TEST",
@@ -1389,6 +1461,12 @@
     },
     {
       "accessor": "os.getenv",
+      "file": "aicrm_next/commerce/coupons/admin_api.py",
+      "key": "PYTEST_CURRENT_TEST",
+      "line": 90
+    },
+    {
+      "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "REDIS_URL",
       "line": 137
@@ -1398,6 +1476,12 @@
       "file": "aicrm_next/shared/release.py",
       "key": "RELEASE_SHA",
       "line": 63
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/commerce/coupons/target_refs.py",
+      "key": "SECRET_KEY",
+      "line": 25
     },
     {
       "accessor": "runtime_setting",
@@ -1428,6 +1512,12 @@
       "file": "aicrm_next/shared/runtime.py",
       "key": "SECRET_KEY",
       "line": 110
+    },
+    {
+      "accessor": "runtime_setting",
+      "file": "aicrm_next/shared/wechat_h5_session.py",
+      "key": "SECRET_KEY",
+      "line": 28
     },
     {
       "accessor": "os.getenv",
@@ -1554,6 +1644,12 @@
       "file": "aicrm_next/integration_gateway/wechat_pay_client.py",
       "key": "WECHAT_PAY_PRIVATE_KEY_PATH",
       "line": 58
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "aicrm_next/commerce/order_reconciliation.py",
+      "key": "WECHAT_PAY_RECONCILIATION_PROPAGATION_SECONDS",
+      "line": 27
     },
     {
       "accessor": "os.getenv",
@@ -1763,7 +1859,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_auth/route_policy.py",
       "key": "WECOM_CORP_ID",
-      "line": 244
+      "line": 246
     },
     {
       "accessor": "os.getenv",
@@ -1968,6 +2064,8 @@
     "AICRM_AUTH_JWT_SIGNING_KEY",
     "AICRM_AUTH_MCP_CLIENT_ID",
     "AICRM_AUTH_MCP_CLIENT_SECRET_REF",
+    "AICRM_AUTH_OPS_REPORTER_CLIENT_ID",
+    "AICRM_AUTH_OPS_REPORTER_CLIENT_SECRET_REF",
     "AICRM_AUTH_OUTBOUND_WEBHOOK_CLIENT_ID",
     "AICRM_AUTH_SESSION_HASH_PEPPER",
     "AICRM_COMPLETION_URL_LINK_API_PATH_PREFIXES",
@@ -1986,7 +2084,6 @@
     "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE",
     "AICRM_FORCE_FULL_CI",
     "AICRM_GROUP_OPS_BROADCAST_PLAN_ID",
-    "AICRM_GROUP_OPS_MATERIAL_UPLOAD_MODE",
     "AICRM_GROUP_OPS_MINIPROGRAM_APPID",
     "AICRM_GROUP_OPS_TIMEZONE",
     "AICRM_HUANGYOUCAN_DB_CONNECT_TIMEOUT_SECONDS",
@@ -2110,6 +2207,7 @@
     "WECHAT_PAY_PLATFORM_CERT_SERIAL_NO",
     "WECHAT_PAY_PLATFORM_PUBLIC_KEY_PATH",
     "WECHAT_PAY_PRIVATE_KEY_PATH",
+    "WECHAT_PAY_RECONCILIATION_PROPAGATION_SECONDS",
     "WECHAT_PAY_REFUND_NOTIFY_URL",
     "WECHAT_PAY_TIMEOUT_SECONDS",
     "WECHAT_SHOP_API_BASE",
@@ -2773,7 +2871,7 @@
     }
   ],
   "migration_heads": [
-    "0111_wechat_shop_mobile_projection"
+    "0116_questionnaire_operations_config"
   ],
   "openapi_components": {
     "schemas": {
@@ -3525,6 +3623,115 @@
         ],
         "title": "CheckoutRequest",
         "type": "object"
+      },
+      "CouponUpsertRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "claim_ends_at": {
+            "format": "date-time",
+            "title": "Claim Ends At",
+            "type": "string"
+          },
+          "claim_starts_at": {
+            "format": "date-time",
+            "title": "Claim Starts At",
+            "type": "string"
+          },
+          "discount_amount_total": {
+            "exclusiveMinimum": 0.0,
+            "title": "Discount Amount Total",
+            "type": "integer"
+          },
+          "instructions": {
+            "default": "",
+            "maxLength": 200,
+            "title": "Instructions",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 45,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "per_user_issue_limit": {
+            "default": 1,
+            "exclusiveMinimum": 0.0,
+            "title": "Per User Issue Limit",
+            "type": "integer"
+          },
+          "relative_validity_days": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relative Validity Days"
+          },
+          "target_refs": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Target Refs",
+            "type": "array"
+          },
+          "total_issue_limit": {
+            "exclusiveMinimum": 0.0,
+            "title": "Total Issue Limit",
+            "type": "integer"
+          },
+          "use_ends_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Ends At"
+          },
+          "use_starts_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Use Starts At"
+          },
+          "validity_mode": {
+            "$ref": "#/components/schemas/CouponValidityMode"
+          }
+        },
+        "required": [
+          "name",
+          "discount_amount_total",
+          "total_issue_limit",
+          "claim_starts_at",
+          "claim_ends_at",
+          "validity_mode",
+          "target_refs"
+        ],
+        "title": "CouponUpsertRequest",
+        "type": "object"
+      },
+      "CouponValidityMode": {
+        "enum": [
+          "fixed_range",
+          "relative_days"
+        ],
+        "title": "CouponValidityMode",
+        "type": "string"
       },
       "DoNotDisturbRequest": {
         "properties": {
@@ -6400,6 +6607,162 @@
       "route_group": "admin_config"
     },
     {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_pages.admin_coupons_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupons_page",
+      "operation_id": "api.admin_coupons_page:GET:/admin/coupons",
+      "path": "/admin/coupons",
+      "route_group": "coupons_admin_pages"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_pages.admin_coupon_new_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_new_page",
+      "operation_id": "api.admin_coupon_new_page:GET:/admin/coupons/new",
+      "path": "/admin/coupons/new",
+      "route_group": "coupons_admin_pages"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_pages.admin_coupon_data_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_data_page",
+      "operation_id": "api.admin_coupon_data_page:GET:/admin/coupons/{coupon_id}/data",
+      "path": "/admin/coupons/{coupon_id}/data",
+      "route_group": "coupons_admin_pages"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_pages.admin_coupon_edit_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_edit_page",
+      "operation_id": "api.admin_coupon_edit_page:GET:/admin/coupons/{coupon_id}/edit",
+      "path": "/admin/coupons/{coupon_id}/edit",
+      "route_group": "coupons_admin_pages"
+    },
+    {
       "capability_owner": "customer_read_model",
       "contract": {
         "parameters": [
@@ -6940,6 +7303,142 @@
       "route_group": "media_library_admin_pages"
     },
     {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.admin_pages.admin_operation_cycles_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_operation_cycles_page",
+      "operation_id": "api.admin_operation_cycles_page:GET:/admin/operation-cycles",
+      "path": "/admin/operation-cycles",
+      "route_group": "operation_cycles_admin_pages"
+    },
+    {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_key",
+            "required": true,
+            "schema": {
+              "title": "Strategy Key",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.admin_pages.admin_operation_cycle_strategy_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_operation_cycle_strategy_page",
+      "operation_id": "api.admin_operation_cycle_strategy_page:GET:/admin/operation-cycles/{strategy_key}",
+      "path": "/admin/operation-cycles/{strategy_key}",
+      "route_group": "operation_cycles_admin_pages"
+    },
+    {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_key",
+            "required": true,
+            "schema": {
+              "title": "Strategy Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run_key",
+            "required": true,
+            "schema": {
+              "title": "Run Key",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.admin_pages.admin_operation_cycle_run_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_operation_cycle_run_page",
+      "operation_id": "api.admin_operation_cycle_run_page:GET:/admin/operation-cycles/{strategy_key}/runs/{run_key}",
+      "path": "/admin/operation-cycles/{strategy_key}/runs/{run_key}",
+      "route_group": "operation_cycles_admin_pages"
+    },
+    {
       "capability_owner": "commerce",
       "contract": {
         "parameters": [],
@@ -7193,6 +7692,24 @@
       "name": "api.admin_console_questionnaire_external_push_logs",
       "operation_id": "api.admin_console_questionnaire_external_push_logs:GET:/admin/questionnaires/{questionnaire_id:int}/external-push-logs",
       "path": "/admin/questionnaires/{questionnaire_id:int}/external-push-logs",
+      "route_group": "questionnaire_admin_pages"
+    },
+    {
+      "capability_owner": "questionnaire",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {}
+      },
+      "endpoint": "aicrm_next.questionnaire.admin_pages.admin_questionnaire_operations",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_console_questionnaire_operations",
+      "operation_id": "api.admin_console_questionnaire_operations:GET:/admin/questionnaires/{questionnaire_id:int}/operations",
+      "path": "/admin/questionnaires/{questionnaire_id:int}/operations",
       "route_group": "questionnaire_admin_pages"
     },
     {
@@ -15899,6 +16416,673 @@
       "route_group": "admin_config"
     },
     {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 80,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 32,
+              "title": "Status",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.list_coupons",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupons",
+      "operation_id": "api.admin_coupons:GET:/api/admin/coupons",
+      "path": "/api/admin/coupons",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CouponUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.create_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api.admin_coupon_create",
+      "operation_id": "api.admin_coupon_create:POST:/api/admin/coupons",
+      "path": "/api/admin/coupons",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 80,
+              "title": "Q",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "product_type",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "pattern": "^(all|standard_product|service_period)$",
+              "title": "Product Type",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.list_coupon_product_options",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_product_options",
+      "operation_id": "api.admin_coupon_product_options:GET:/api/admin/coupons/product-options",
+      "path": "/api/admin/coupons/product-options",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.delete_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "api.admin_coupon_delete",
+      "operation_id": "api.admin_coupon_delete:DELETE:/api/admin/coupons/{coupon_id}",
+      "path": "/api/admin/coupons/{coupon_id}",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.get_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_detail",
+      "operation_id": "api.admin_coupon_detail:GET:/api/admin/coupons/{coupon_id}",
+      "path": "/api/admin/coupons/{coupon_id}",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CouponUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.update_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "api.admin_coupon_update",
+      "operation_id": "api.admin_coupon_update:PUT:/api/admin/coupons/{coupon_id}",
+      "path": "/api/admin/coupons/{coupon_id}",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.archive_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api.admin_coupon_archive",
+      "operation_id": "api.admin_coupon_archive:POST:/api/admin/coupons/{coupon_id}/archive",
+      "path": "/api/admin/coupons/{coupon_id}/archive",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.list_coupon_claims",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_claims",
+      "operation_id": "api.admin_coupon_claims:GET:/api/admin/coupons/{coupon_id}/claims",
+      "path": "/api/admin/coupons/{coupon_id}/claims",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.copy_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api.admin_coupon_copy",
+      "operation_id": "api.admin_coupon_copy:POST:/api/admin/coupons/{coupon_id}/copy",
+      "path": "/api/admin/coupons/{coupon_id}/copy",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.publish_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api.admin_coupon_publish",
+      "operation_id": "api.admin_coupon_publish:POST:/api/admin/coupons/{coupon_id}/publish",
+      "path": "/api/admin/coupons/{coupon_id}/publish",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.get_coupon_share",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_coupon_share",
+      "operation_id": "api.admin_coupon_share:GET:/api/admin/coupons/{coupon_id}/share",
+      "path": "/api/admin/coupons/{coupon_id}/share",
+      "route_group": "coupons_admin_api"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupon_id",
+            "required": true,
+            "schema": {
+              "title": "Coupon Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.admin_api.stop_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api.admin_coupon_stop",
+      "operation_id": "api.admin_coupon_stop:POST:/api/admin/coupons/{coupon_id}/stop",
+      "path": "/api/admin/coupons/{coupon_id}/stop",
+      "route_group": "coupons_admin_api"
+    },
+    {
       "capability_owner": "customer_read_model",
       "contract": {
         "parameters": [
@@ -21436,6 +22620,225 @@
       "route_group": "media_library"
     },
     {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_key",
+            "required": true,
+            "schema": {
+              "title": "Run Key",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.api.get_operation_cycle_run",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_operation_cycle_run",
+      "operation_id": "get_operation_cycle_run:GET:/api/admin/operation-cycles/runs/{run_key}",
+      "path": "/api/admin/operation-cycles/runs/{run_key}",
+      "route_group": "operation_cycles"
+    },
+    {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.api.list_operation_cycle_strategies",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_operation_cycle_strategies",
+      "operation_id": "list_operation_cycle_strategies:GET:/api/admin/operation-cycles/strategies",
+      "path": "/api/admin/operation-cycles/strategies",
+      "route_group": "operation_cycles"
+    },
+    {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_key",
+            "required": true,
+            "schema": {
+              "title": "Strategy Key",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.api.get_operation_cycle_strategy",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_operation_cycle_strategy",
+      "operation_id": "get_operation_cycle_strategy:GET:/api/admin/operation-cycles/strategies/{strategy_key}",
+      "path": "/api/admin/operation-cycles/strategies/{strategy_key}",
+      "route_group": "operation_cycles"
+    },
+    {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "strategy_key",
+            "required": true,
+            "schema": {
+              "title": "Strategy Key",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.api.list_operation_cycle_strategy_runs",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_operation_cycle_strategy_runs",
+      "operation_id": "list_operation_cycle_strategy_runs:GET:/api/admin/operation-cycles/strategies/{strategy_key}/runs",
+      "path": "/api/admin/operation-cycles/strategies/{strategy_key}/runs",
+      "route_group": "operation_cycles"
+    },
+    {
       "capability_owner": "commerce",
       "contract": {
         "parameters": [
@@ -23833,6 +25236,194 @@
       "name": "latest_submit_debug",
       "operation_id": "latest_submit_debug:GET:/api/admin/questionnaires/{questionnaire_id}/latest-submit-debug",
       "path": "/api/admin/questionnaires/{questionnaire_id}/latest-submit-debug",
+      "route_group": "questionnaire"
+    },
+    {
+      "capability_owner": "questionnaire",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "questionnaire_id",
+            "required": true,
+            "schema": {
+              "title": "Questionnaire Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.questionnaire.api.get_questionnaire_operations",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_questionnaire_operations",
+      "operation_id": "get_questionnaire_operations:GET:/api/admin/questionnaires/{questionnaire_id}/operations",
+      "path": "/api/admin/questionnaires/{questionnaire_id}/operations",
+      "route_group": "questionnaire"
+    },
+    {
+      "capability_owner": "questionnaire",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "questionnaire_id",
+            "required": true,
+            "schema": {
+              "title": "Questionnaire Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.questionnaire.api.save_questionnaire_completion_operations",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "save_questionnaire_completion_operations",
+      "operation_id": "save_questionnaire_completion_operations:PUT:/api/admin/questionnaires/{questionnaire_id}/operations/completion",
+      "path": "/api/admin/questionnaires/{questionnaire_id}/operations/completion",
+      "route_group": "questionnaire"
+    },
+    {
+      "capability_owner": "questionnaire",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "questionnaire_id",
+            "required": true,
+            "schema": {
+              "title": "Questionnaire Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.questionnaire.api.save_questionnaire_external_push_operations",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "save_questionnaire_external_push_operations",
+      "operation_id": "save_questionnaire_external_push_operations:PUT:/api/admin/questionnaires/{questionnaire_id}/operations/external-push",
+      "path": "/api/admin/questionnaires/{questionnaire_id}/operations/external-push",
+      "route_group": "questionnaire"
+    },
+    {
+      "capability_owner": "questionnaire",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "questionnaire_id",
+            "required": true,
+            "schema": {
+              "title": "Questionnaire Id",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.questionnaire.api.test_questionnaire_external_push_operations",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "test_questionnaire_external_push_operations",
+      "operation_id": "test_questionnaire_external_push_operations:POST:/api/admin/questionnaires/{questionnaire_id}/operations/external-push/test",
+      "path": "/api/admin/questionnaires/{questionnaire_id}/operations/external-push/test",
       "route_group": "questionnaire"
     },
     {
@@ -34236,6 +35827,149 @@
       "route_group": "commerce"
     },
     {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target_ref",
+            "required": true,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "title": "Target Ref",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.public_api.available_coupons",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.h5_available_coupons",
+      "operation_id": "api.h5_available_coupons:GET:/api/h5/coupons/available",
+      "path": "/api/h5/coupons/available",
+      "route_group": "coupons_public"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_slug",
+            "required": true,
+            "schema": {
+              "title": "Public Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.public_api.public_coupon_state",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.h5_coupon_state",
+      "operation_id": "api.h5_coupon_state:GET:/api/h5/coupons/{public_slug}",
+      "path": "/api/h5/coupons/{public_slug}",
+      "route_group": "coupons_public"
+    },
+    {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_slug",
+            "required": true,
+            "schema": {
+              "title": "Public Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.public_api.claim_public_coupon",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "api.h5_coupon_claim",
+      "operation_id": "api.h5_coupon_claim:POST:/api/h5/coupons/{public_slug}/claim",
+      "path": "/api/h5/coupons/{public_slug}/claim",
+      "route_group": "coupons_public"
+    },
+    {
       "capability_owner": "public_product",
       "contract": {
         "parameters": [],
@@ -36672,6 +38406,1005 @@
       "operation_id": "get_recent_messages:GET:/api/messages/{external_userid}/recent",
       "path": "/api/messages/{external_userid}/recent",
       "route_group": "customer_read_model"
+    },
+    {
+      "capability_owner": "operation_cycles",
+      "contract": {
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$defs": {
+                  "AttemptSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "attempt_key": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "title": "Attempt Key",
+                        "type": "string"
+                      },
+                      "blocked_reason": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Blocked Reason",
+                        "type": "string"
+                      },
+                      "ended_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Ended At"
+                      },
+                      "parent_attempt_key": {
+                        "anyOf": [
+                          {
+                            "maxLength": 160,
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Parent Attempt Key"
+                      },
+                      "started_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Started At"
+                      },
+                      "status": {
+                        "enum": [
+                          "running",
+                          "completed",
+                          "blocked"
+                        ],
+                        "title": "Status",
+                        "type": "string"
+                      },
+                      "summary": {
+                        "additionalProperties": true,
+                        "title": "Summary",
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "attempt_key",
+                      "status"
+                    ],
+                    "title": "AttemptSnapshot",
+                    "type": "object"
+                  },
+                  "FunnelSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "audited_count": {
+                        "$ref": "#/$defs/FunnelValue"
+                      },
+                      "candidate_count": {
+                        "$ref": "#/$defs/FunnelValue"
+                      },
+                      "effective_sent_count": {
+                        "$ref": "#/$defs/FunnelValue"
+                      },
+                      "failed_count": {
+                        "$ref": "#/$defs/FunnelValue"
+                      },
+                      "planned_target_count": {
+                        "$ref": "#/$defs/FunnelValue"
+                      },
+                      "recommended_send_count": {
+                        "$ref": "#/$defs/FunnelValue"
+                      }
+                    },
+                    "title": "FunnelSnapshot",
+                    "type": "object"
+                  },
+                  "FunnelValue": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "classification": {
+                        "default": "",
+                        "maxLength": 80,
+                        "title": "Classification",
+                        "type": "string"
+                      },
+                      "data_source": {
+                        "default": "",
+                        "maxLength": 240,
+                        "title": "Data Source",
+                        "type": "string"
+                      },
+                      "limitation": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Limitation",
+                        "type": "string"
+                      },
+                      "status": {
+                        "default": "unknown",
+                        "enum": [
+                          "observed",
+                          "not_started",
+                          "not_due",
+                          "unknown",
+                          "not_applicable",
+                          "blocked",
+                          "instrumentation_missing",
+                          "partial_lower_bound"
+                        ],
+                        "title": "Status",
+                        "type": "string"
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "minimum": 0.0,
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Value"
+                      }
+                    },
+                    "title": "FunnelValue",
+                    "type": "object"
+                  },
+                  "MarkdownDocumentSnapshot": {
+                    "additionalProperties": false,
+                    "description": "Opaque Agent-authored Markdown with only transport metadata.",
+                    "properties": {
+                      "generated_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Generated At"
+                      },
+                      "markdown": {
+                        "default": "",
+                        "maxLength": 200000,
+                        "title": "Markdown",
+                        "type": "string"
+                      }
+                    },
+                    "title": "MarkdownDocumentSnapshot",
+                    "type": "object"
+                  },
+                  "MetricSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "data_quality": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Data Quality",
+                        "type": "string"
+                      },
+                      "data_source": {
+                        "maxLength": 240,
+                        "minLength": 1,
+                        "title": "Data Source",
+                        "type": "string"
+                      },
+                      "denominator": {
+                        "anyOf": [
+                          {
+                            "minimum": 0.0,
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Denominator"
+                      },
+                      "is_causal": {
+                        "const": false,
+                        "default": false,
+                        "title": "Is Causal",
+                        "type": "boolean"
+                      },
+                      "label": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "title": "Label",
+                        "type": "string"
+                      },
+                      "limitations": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 30,
+                        "minItems": 1,
+                        "title": "Limitations",
+                        "type": "array"
+                      },
+                      "metric_key": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "title": "Metric Key",
+                        "type": "string"
+                      },
+                      "numerator": {
+                        "anyOf": [
+                          {
+                            "minimum": 0.0,
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Numerator"
+                      },
+                      "observation_window": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "title": "Observation Window",
+                        "type": "string"
+                      },
+                      "unit": {
+                        "default": "count",
+                        "maxLength": 40,
+                        "title": "Unit",
+                        "type": "string"
+                      },
+                      "value": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Value"
+                      },
+                      "value_status": {
+                        "default": "unknown",
+                        "enum": [
+                          "observed",
+                          "not_started",
+                          "not_due",
+                          "unknown",
+                          "not_applicable",
+                          "blocked",
+                          "instrumentation_missing",
+                          "partial_lower_bound"
+                        ],
+                        "title": "Value Status",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "metric_key",
+                      "label",
+                      "numerator",
+                      "denominator",
+                      "observation_window",
+                      "data_source",
+                      "data_quality",
+                      "limitations"
+                    ],
+                    "title": "MetricSnapshot",
+                    "type": "object"
+                  },
+                  "NextIterationSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "actions": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 50,
+                        "title": "Actions",
+                        "type": "array"
+                      },
+                      "applied_strategy_version": {
+                        "anyOf": [
+                          {
+                            "minimum": 1.0,
+                            "type": "integer"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Applied Strategy Version"
+                      },
+                      "confirmation_note": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Confirmation Note",
+                        "type": "string"
+                      },
+                      "hypothesis": {
+                        "default": "",
+                        "maxLength": 4000,
+                        "title": "Hypothesis",
+                        "type": "string"
+                      },
+                      "status": {
+                        "default": "none",
+                        "enum": [
+                          "none",
+                          "draft",
+                          "pending_confirmation",
+                          "accepted",
+                          "rejected",
+                          "applied"
+                        ],
+                        "title": "Status",
+                        "type": "string"
+                      },
+                      "summary": {
+                        "default": "",
+                        "maxLength": 6000,
+                        "title": "Summary",
+                        "type": "string"
+                      }
+                    },
+                    "title": "NextIterationSnapshot",
+                    "type": "object"
+                  },
+                  "OperationCycleDocumentsSnapshot": {
+                    "additionalProperties": false,
+                    "description": "The two read-only document slots exposed by the strategy detail page.",
+                    "properties": {
+                      "broadcast_details": {
+                        "$ref": "#/$defs/MarkdownDocumentSnapshot"
+                      },
+                      "execution_strategy": {
+                        "$ref": "#/$defs/MarkdownDocumentSnapshot"
+                      }
+                    },
+                    "title": "OperationCycleDocumentsSnapshot",
+                    "type": "object"
+                  },
+                  "ReferenceSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "data_status": {
+                        "default": "unknown",
+                        "enum": [
+                          "observed",
+                          "not_started",
+                          "not_due",
+                          "unknown",
+                          "not_applicable",
+                          "blocked",
+                          "instrumentation_missing",
+                          "partial_lower_bound"
+                        ],
+                        "title": "Data Status",
+                        "type": "string"
+                      },
+                      "evidence_hash": {
+                        "default": "",
+                        "maxLength": 128,
+                        "title": "Evidence Hash",
+                        "type": "string"
+                      },
+                      "href": {
+                        "default": "",
+                        "maxLength": 1000,
+                        "title": "Href",
+                        "type": "string"
+                      },
+                      "label": {
+                        "default": "",
+                        "maxLength": 240,
+                        "title": "Label",
+                        "type": "string"
+                      },
+                      "reference_key": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "title": "Reference Key",
+                        "type": "string"
+                      },
+                      "reference_type": {
+                        "enum": [
+                          "broadcast_job",
+                          "push_center",
+                          "delivery_lineage",
+                          "report",
+                          "artifact",
+                          "other"
+                        ],
+                        "title": "Reference Type",
+                        "type": "string"
+                      },
+                      "source_id": {
+                        "default": "",
+                        "maxLength": 240,
+                        "title": "Source Id",
+                        "type": "string"
+                      },
+                      "source_system": {
+                        "default": "",
+                        "maxLength": 120,
+                        "title": "Source System",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "reference_key",
+                      "reference_type"
+                    ],
+                    "title": "ReferenceSnapshot",
+                    "type": "object"
+                  },
+                  "RetrospectiveSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "conclusion": {
+                        "default": "",
+                        "maxLength": 6000,
+                        "title": "Conclusion",
+                        "type": "string"
+                      },
+                      "data_conflicts": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 50,
+                        "title": "Data Conflicts",
+                        "type": "array"
+                      },
+                      "generated_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Generated At"
+                      },
+                      "limitations": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 50,
+                        "title": "Limitations",
+                        "type": "array"
+                      },
+                      "observations": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "maxItems": 50,
+                        "title": "Observations",
+                        "type": "array"
+                      }
+                    },
+                    "title": "RetrospectiveSnapshot",
+                    "type": "object"
+                  },
+                  "RunSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "completed_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Completed At"
+                      },
+                      "first_sent_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "First Sent At"
+                      },
+                      "intended_send_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Intended Send At"
+                      },
+                      "label": {
+                        "default": "",
+                        "maxLength": 200,
+                        "title": "Label",
+                        "type": "string"
+                      },
+                      "last_sent_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Last Sent At"
+                      },
+                      "objective": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Objective",
+                        "type": "string"
+                      },
+                      "plan_scheduled_for": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Plan Scheduled For"
+                      },
+                      "plan_source": {
+                        "default": "",
+                        "maxLength": 240,
+                        "title": "Plan Source",
+                        "type": "string"
+                      },
+                      "plan_status": {
+                        "default": "",
+                        "maxLength": 80,
+                        "title": "Plan Status",
+                        "type": "string"
+                      },
+                      "plan_version": {
+                        "default": "",
+                        "maxLength": 120,
+                        "title": "Plan Version",
+                        "type": "string"
+                      },
+                      "run_key": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                        "title": "Run Key",
+                        "type": "string"
+                      },
+                      "started_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Started At"
+                      }
+                    },
+                    "required": [
+                      "run_key"
+                    ],
+                    "title": "RunSnapshot",
+                    "type": "object"
+                  },
+                  "StageSnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "attempt_key": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "title": "Attempt Key",
+                        "type": "string"
+                      },
+                      "blocked_reason": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Blocked Reason",
+                        "type": "string"
+                      },
+                      "ended_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Ended At"
+                      },
+                      "stage": {
+                        "enum": [
+                          "scheduled",
+                          "preflight",
+                          "decisioning",
+                          "dry_run",
+                          "review",
+                          "delivery",
+                          "observing",
+                          "postmortem",
+                          "closed"
+                        ],
+                        "title": "Stage",
+                        "type": "string"
+                      },
+                      "stage_key": {
+                        "maxLength": 160,
+                        "minLength": 1,
+                        "title": "Stage Key",
+                        "type": "string"
+                      },
+                      "started_at": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Started At"
+                      },
+                      "status": {
+                        "enum": [
+                          "running",
+                          "completed",
+                          "blocked"
+                        ],
+                        "title": "Status",
+                        "type": "string"
+                      },
+                      "summary": {
+                        "additionalProperties": true,
+                        "title": "Summary",
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "stage_key",
+                      "attempt_key",
+                      "stage",
+                      "status"
+                    ],
+                    "title": "StageSnapshot",
+                    "type": "object"
+                  },
+                  "StrategySnapshot": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cadence": {
+                        "default": "",
+                        "maxLength": 120,
+                        "title": "Cadence",
+                        "type": "string"
+                      },
+                      "definition": {
+                        "additionalProperties": true,
+                        "title": "Definition",
+                        "type": "object"
+                      },
+                      "description": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Description",
+                        "type": "string"
+                      },
+                      "objective": {
+                        "default": "",
+                        "maxLength": 2000,
+                        "title": "Objective",
+                        "type": "string"
+                      },
+                      "status": {
+                        "default": "active",
+                        "enum": [
+                          "active",
+                          "paused",
+                          "archived",
+                          "draft"
+                        ],
+                        "title": "Status",
+                        "type": "string"
+                      },
+                      "strategy_key": {
+                        "maxLength": 120,
+                        "minLength": 1,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$",
+                        "title": "Strategy Key",
+                        "type": "string"
+                      },
+                      "timezone": {
+                        "default": "Asia/Shanghai",
+                        "maxLength": 80,
+                        "minLength": 1,
+                        "title": "Timezone",
+                        "type": "string"
+                      },
+                      "title": {
+                        "maxLength": 200,
+                        "minLength": 1,
+                        "title": "Title",
+                        "type": "string"
+                      },
+                      "version": {
+                        "default": 1,
+                        "minimum": 1.0,
+                        "title": "Version",
+                        "type": "integer"
+                      },
+                      "version_effective_from": {
+                        "anyOf": [
+                          {
+                            "format": "date-time",
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "title": "Version Effective From"
+                      },
+                      "version_label": {
+                        "default": "",
+                        "maxLength": 120,
+                        "title": "Version Label",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "strategy_key",
+                      "title"
+                    ],
+                    "title": "StrategySnapshot",
+                    "type": "object"
+                  }
+                },
+                "additionalProperties": false,
+                "properties": {
+                  "artifact_status": {
+                    "enum": [
+                      "complete",
+                      "partial",
+                      "source_missing",
+                      "snapshot_only"
+                    ],
+                    "title": "Artifact Status",
+                    "type": "string"
+                  },
+                  "attempts": {
+                    "items": {
+                      "$ref": "#/$defs/AttemptSnapshot"
+                    },
+                    "maxItems": 100,
+                    "title": "Attempts",
+                    "type": "array"
+                  },
+                  "data_status": {
+                    "enum": [
+                      "unavailable",
+                      "collecting",
+                      "early",
+                      "mature",
+                      "partial",
+                      "attribution_gap"
+                    ],
+                    "title": "Data Status",
+                    "type": "string"
+                  },
+                  "delivery_status": {
+                    "enum": [
+                      "not_started",
+                      "waiting_window",
+                      "dispatching",
+                      "partial",
+                      "completed",
+                      "failed",
+                      "cancelled"
+                    ],
+                    "title": "Delivery Status",
+                    "type": "string"
+                  },
+                  "documents": {
+                    "$ref": "#/$defs/OperationCycleDocumentsSnapshot"
+                  },
+                  "execution_stage": {
+                    "enum": [
+                      "scheduled",
+                      "preflight",
+                      "decisioning",
+                      "dry_run",
+                      "review",
+                      "delivery",
+                      "observing",
+                      "postmortem",
+                      "closed"
+                    ],
+                    "title": "Execution Stage",
+                    "type": "string"
+                  },
+                  "external_effects": {
+                    "const": "none",
+                    "default": "none",
+                    "title": "External Effects",
+                    "type": "string"
+                  },
+                  "funnel": {
+                    "$ref": "#/$defs/FunnelSnapshot"
+                  },
+                  "metrics": {
+                    "items": {
+                      "$ref": "#/$defs/MetricSnapshot"
+                    },
+                    "maxItems": 200,
+                    "title": "Metrics",
+                    "type": "array"
+                  },
+                  "next_iteration": {
+                    "$ref": "#/$defs/NextIterationSnapshot"
+                  },
+                  "optimization_status": {
+                    "enum": [
+                      "none",
+                      "draft",
+                      "pending_confirmation",
+                      "accepted",
+                      "rejected",
+                      "applied"
+                    ],
+                    "title": "Optimization Status",
+                    "type": "string"
+                  },
+                  "references": {
+                    "items": {
+                      "$ref": "#/$defs/ReferenceSnapshot"
+                    },
+                    "maxItems": 200,
+                    "title": "References",
+                    "type": "array"
+                  },
+                  "report_id": {
+                    "maxLength": 200,
+                    "minLength": 1,
+                    "title": "Report Id",
+                    "type": "string"
+                  },
+                  "reported_at": {
+                    "anyOf": [
+                      {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Reported At"
+                  },
+                  "retrospective": {
+                    "$ref": "#/$defs/RetrospectiveSnapshot"
+                  },
+                  "review_status": {
+                    "enum": [
+                      "not_created",
+                      "pending",
+                      "approved",
+                      "rejected",
+                      "cancelled"
+                    ],
+                    "title": "Review Status",
+                    "type": "string"
+                  },
+                  "run": {
+                    "$ref": "#/$defs/RunSnapshot"
+                  },
+                  "schema_version": {
+                    "const": "operation_cycle_snapshot.v1",
+                    "default": "operation_cycle_snapshot.v1",
+                    "title": "Schema Version",
+                    "type": "string"
+                  },
+                  "snapshot_revision": {
+                    "minimum": 1.0,
+                    "title": "Snapshot Revision",
+                    "type": "integer"
+                  },
+                  "stages": {
+                    "items": {
+                      "$ref": "#/$defs/StageSnapshot"
+                    },
+                    "maxItems": 200,
+                    "title": "Stages",
+                    "type": "array"
+                  },
+                  "strategy": {
+                    "$ref": "#/$defs/StrategySnapshot"
+                  },
+                  "tenant_id": {
+                    "const": "aicrm",
+                    "default": "aicrm",
+                    "title": "Tenant Id",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "report_id",
+                  "snapshot_revision",
+                  "strategy",
+                  "run",
+                  "execution_stage",
+                  "review_status",
+                  "delivery_status",
+                  "data_status",
+                  "optimization_status",
+                  "artifact_status"
+                ],
+                "title": "OperationCycleSnapshotV1",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.operation_cycles.api.report_operation_cycle_snapshot",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "report_operation_cycle_snapshot",
+      "operation_id": "report_operation_cycle_snapshot:POST:/api/operation-cycles/reports",
+      "path": "/api/operation-cycles/reports",
+      "route_group": "operation_cycles"
     },
     {
       "capability_owner": "commerce",
@@ -39136,6 +41869,55 @@
       "route_group": "auth_wecom"
     },
     {
+      "capability_owner": "commerce",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "public_slug",
+            "required": true,
+            "schema": {
+              "title": "Public Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.commerce.coupons.public_api.public_coupon_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.public_coupon_page",
+      "operation_id": "api.public_coupon_page:GET:/c/{public_slug}",
+      "path": "/c/{public_slug}",
+      "route_group": "coupons_public"
+    },
+    {
       "capability_owner": "platform_foundation",
       "contract": {
         "parameters": [],
@@ -40129,6 +42911,7 @@
       "read_owners": [
         "aicrm_next.admin_config.repository",
         "aicrm_next.message_archive.repo",
+        "aicrm_next.platform_foundation.push_center.capability_repository",
         "aicrm_next.questionnaire.repo",
         "aicrm_next.shared.runtime_settings"
       ],
@@ -40476,6 +43259,7 @@
       "migration_source": "migrations/baselines/0001_post_legacy.sql",
       "pii_level": "internal_contact",
       "read_owners": [
+        "aicrm_next.automation_engine.channel_completion",
         "historical schema drift guard"
       ],
       "table": "automation_channel",
@@ -40548,6 +43332,7 @@
       "migration_source": "migrations/baselines/0001_post_legacy.sql",
       "pii_level": "internal_contact",
       "read_owners": [
+        "aicrm_next.automation_engine.channel_completion",
         "historical schema drift guard"
       ],
       "table": "automation_channel_qrcode_asset",
@@ -41478,6 +44263,59 @@
       "write_owner": "legacy.production_runtime"
     },
     {
+      "domain": "commerce",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0114_commerce_coupons",
+      "pii_level": "direct_contact",
+      "read_owners": [
+        "aicrm_next.commerce.coupons",
+        "aicrm_next.commerce.coupons.checker"
+      ],
+      "table": "commerce_coupon_claims",
+      "write_owner": "aicrm_next.commerce.coupons"
+    },
+    {
+      "domain": "commerce",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0114_commerce_coupons",
+      "pii_level": "none",
+      "read_owners": [
+        "aicrm_next.commerce.coupons",
+        "aicrm_next.commerce.coupons.checker"
+      ],
+      "table": "commerce_coupon_product_bindings",
+      "write_owner": "aicrm_next.commerce.coupons"
+    },
+    {
+      "domain": "commerce",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0114_commerce_coupons",
+      "pii_level": "financial",
+      "read_owners": [
+        "aicrm_next.commerce.coupons",
+        "aicrm_next.commerce.coupons.checker",
+        "aicrm_next.commerce.fulfillment_reconciliation"
+      ],
+      "table": "commerce_coupon_redemptions",
+      "write_owner": "aicrm_next.commerce.coupons"
+    },
+    {
+      "domain": "commerce",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0114_commerce_coupons",
+      "pii_level": "internal",
+      "read_owners": [
+        "aicrm_next.commerce.coupons",
+        "aicrm_next.commerce.coupons.checker"
+      ],
+      "table": "commerce_coupons",
+      "write_owner": "aicrm_next.commerce.coupons"
+    },
+    {
       "domain": "customer_tags",
       "drop_candidate": false,
       "lifecycle": "read_model",
@@ -42103,6 +44941,104 @@
       "write_owner": "aicrm_next.media_library.postgres_repo"
     },
     {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin read model",
+        "operation cycle report projection"
+      ],
+      "table": "operation_cycle_attempts",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "read_model",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin read model"
+      ],
+      "table": "operation_cycle_metrics",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "read_model",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin evidence links"
+      ],
+      "table": "operation_cycle_references",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin read model"
+      ],
+      "table": "operation_cycle_runs",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "event",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle audit",
+        "operation cycle projection rebuild"
+      ],
+      "table": "operation_cycle_snapshots",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin read model"
+      ],
+      "table": "operation_cycle_stages",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin read model"
+      ],
+      "table": "operation_cycle_strategies",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
+      "domain": "operation_cycles",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0113_operation_cycles",
+      "pii_level": "none",
+      "read_owners": [
+        "operation cycle admin read model"
+      ],
+      "table": "operation_cycle_strategy_versions",
+      "write_owner": "aicrm_next.operation_cycles"
+    },
+    {
       "domain": "outbound_webhook",
       "drop_candidate": true,
       "lifecycle": "event",
@@ -42332,10 +45268,11 @@
       "domain": "questionnaire",
       "drop_candidate": false,
       "lifecycle": "canonical",
-      "migration_source": "migrations/baselines/0001_post_legacy.sql; list index added by 0106_critical_read_path_indexes",
+      "migration_source": "migrations/baselines/0001_post_legacy.sql; list index added by 0106_critical_read_path_indexes; nullable lead channel binding added by 0116_questionnaire_operations_config",
       "pii_level": "",
       "read_owners": [
         "aicrm_next.questionnaire.api",
+        "aicrm_next.questionnaire.operations",
         "aicrm_next.questionnaire.repo"
       ],
       "table": "questionnaires",
@@ -42778,6 +45715,7 @@
       "pii_level": "internal_contact",
       "read_owners": [
         "aicrm_next.admin_read_model",
+        "aicrm_next.commerce.coupons.checker",
         "aicrm_next.commerce.fulfillment_reconciliation",
         "aicrm_next.customer_read_model",
         "aicrm_next.external_push",
@@ -42806,6 +45744,7 @@
       "migration_source": "migrations/baselines/0001_post_legacy.sql",
       "pii_level": "internal_contact",
       "read_owners": [
+        "aicrm_next.commerce.coupons",
         "aicrm_next.customer_read_model.sidebar_v2",
         "aicrm_next.external_push",
         "aicrm_next.service_period"
@@ -42980,6 +45919,20 @@
       ],
       "table": "wecom_group_chat_snapshots",
       "write_owner": "aicrm_next.automation_engine.group_ops"
+    },
+    {
+      "domain": "media_library",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0115_wecom_media_leases",
+      "pii_level": "",
+      "read_owners": [
+        "aicrm_next.automation_engine.group_ops.material_resolver",
+        "aicrm_next.data_health.checks",
+        "aicrm_next.media_library.wecom_lease"
+      ],
+      "table": "wecom_media_leases",
+      "write_owner": "aicrm_next.media_library.wecom_lease"
     }
   ]
 }

@@ -45,6 +45,9 @@ def _visible_media_mode(value: str | None) -> str:
 
 
 def _real_external_call_executed(payload: dict[str, Any]) -> bool:
+    sync = payload.get("wecom_sync") if isinstance(payload, dict) else None
+    if isinstance(sync, dict) and bool(sync.get("real_external_call_executed")):
+        return True
     adapter_result = payload.get("adapter_result") if isinstance(payload, dict) else None
     if not isinstance(adapter_result, dict):
         return False

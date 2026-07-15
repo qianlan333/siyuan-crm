@@ -22,6 +22,7 @@ def fetch_channel(channel_id: int) -> dict[str, Any] | None:
                 SELECT c.*,
                        active_asset.id AS active_qrcode_asset_id,
                        active_asset.status AS qrcode_status,
+                       active_asset.qr_url AS active_qrcode_asset_url,
                        COALESCE(contact_stats.channel_contact_count, 0) AS channel_contact_count,
                        contact_stats.latest_channel_entered_at,
                        wca.customer_channel AS wca_customer_channel,
@@ -30,7 +31,7 @@ def fetch_channel(channel_id: int) -> dict[str, Any] | None:
                        COALESCE(historical_scenes.historical_scene_values, '[]'::jsonb) AS historical_scene_values
                 FROM automation_channel c
                 LEFT JOIN LATERAL (
-                    SELECT id, status
+                    SELECT id, status, qr_url
                     FROM automation_channel_qrcode_asset qa
                     WHERE qa.channel_id = c.id
                       AND qa.status = 'active'
@@ -79,6 +80,7 @@ def list_channels(*, limit: int, status: str = "", include_archived: bool = Fals
                 SELECT c.*,
                        active_asset.id AS active_qrcode_asset_id,
                        active_asset.status AS qrcode_status,
+                       active_asset.qr_url AS active_qrcode_asset_url,
                        COALESCE(contact_stats.channel_contact_count, 0) AS channel_contact_count,
                        contact_stats.latest_channel_entered_at,
                        wca.customer_channel AS wca_customer_channel,
@@ -87,7 +89,7 @@ def list_channels(*, limit: int, status: str = "", include_archived: bool = Fals
                        COALESCE(historical_scenes.historical_scene_values, '[]'::jsonb) AS historical_scene_values
                 FROM automation_channel c
                 LEFT JOIN LATERAL (
-                    SELECT id, status
+                    SELECT id, status, qr_url
                     FROM automation_channel_qrcode_asset qa
                     WHERE qa.channel_id = c.id
                       AND qa.status = 'active'

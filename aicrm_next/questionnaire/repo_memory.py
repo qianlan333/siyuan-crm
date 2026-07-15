@@ -146,6 +146,7 @@ class InMemoryQuestionnaireRepository:
                 "created_at": now,
                 "submission_count": 0,
                 "assessment_enabled": False,
+                "lead_channel_id": None,
             }
             self._next_id += 1
             self._questionnaires.append(item)
@@ -176,6 +177,44 @@ class InMemoryQuestionnaireRepository:
             }
         )
         return deepcopy(item)
+
+    def save_completion_operations(
+        self,
+        questionnaire_id: int,
+        *,
+        lead_channel_id: int | None,
+        completion_target_json: dict[str, Any],
+        redirect_url: str,
+    ) -> dict[str, Any] | None:
+        item = self._raw_questionnaire(questionnaire_id)
+        if item is None:
+            return None
+        item["lead_channel_id"] = int(lead_channel_id or 0) or None
+        item["completion_target_json"] = deepcopy(completion_target_json)
+        item["redirect_url"] = str(redirect_url or "").strip()
+        item["updated_at"] = _now()
+        return self.get_questionnaire(questionnaire_id)
+
+    def save_external_push_operations(
+        self,
+        questionnaire_id: int,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        item = self._raw_questionnaire(questionnaire_id)
+        if item is None:
+            return None
+        normalized = deepcopy(config)
+        item["external_push_config"] = normalized
+        item["external_push_enabled"] = bool(normalized.get("enabled"))
+        item["external_push_url"] = str(normalized.get("webhook_url") or "").strip()
+        item["external_push_type"] = str(normalized.get("type") or "").strip()
+        item["external_push_expires_at_ts"] = normalized.get("expires_at_ts")
+        item["external_push_day"] = normalized.get("day")
+        item["external_push_frequency"] = normalized.get("frequency")
+        item["external_push_remark"] = str(normalized.get("remark") or "").strip()
+        item["external_push_custom_params"] = deepcopy(normalized.get("custom_params") or [])
+        item["updated_at"] = _now()
+        return self.get_questionnaire(questionnaire_id)
 
     def set_enabled(self, questionnaire_id: int, enabled: bool) -> dict[str, Any] | None:
         item = next((entry for entry in self._questionnaires if int(entry["id"]) == int(questionnaire_id)), None)

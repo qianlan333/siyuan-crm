@@ -127,6 +127,13 @@ API_CLIENT_PROFILES = (
         ),
         principal_type=PrincipalType.API_CLIENT,
     ),
+    _api_profile(
+        "ops_reporter",
+        audiences=("external_integration",),
+        scopes=("write",),
+        capabilities=("operation_cycle_report_write",),
+        principal_type=PrincipalType.API_CLIENT,
+    ),
 )
 
 

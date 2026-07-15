@@ -120,7 +120,14 @@ class _ApplyTransactionConn:
         self.queries.append(query)
         normalized = " ".join(query.split())
         if normalized.startswith("SELECT * FROM wechat_pay_orders"):
-            return _FakeCursor({"status": "paying", "trade_state": "NOTPAY"})
+            return _FakeCursor(
+                {
+                    "status": "paying",
+                    "trade_state": "NOTPAY",
+                    "amount_total": 990,
+                    "currency": "CNY",
+                }
+            )
         if "UPDATE wechat_pay_orders" in query:
             return _FakeCursor(
                 {
@@ -129,6 +136,8 @@ class _ApplyTransactionConn:
                     "status": "paid",
                     "trade_state": "SUCCESS",
                     "product_code": "subscription_trial_month",
+                    "amount_total": 990,
+                    "currency": "CNY",
                     "paid_at": "2026-06-13T10:00:00+08:00",
                 }
             )

@@ -22,6 +22,7 @@ from aicrm_next.shared.repository_provider import RepositoryProviderError
 from aicrm_next.shared.runtime import production_data_ready
 
 from .domain import normalize_mobile_answer, normalize_questionnaire, score_and_tags, validate_required_answers
+from .operations import resolve_questionnaire_completion_action
 from .repo import QuestionnaireRepository, build_questionnaire_repository
 
 
@@ -456,6 +457,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
     )
     real_external_call_executed = bool(tag_side_effect.get("real_external_call_executed"))
     questionnaire_projection = normalize_questionnaire(item)
+    completion_projection = resolve_questionnaire_completion_action(item)
     return {
         "ok": True,
         "success": True,
@@ -478,6 +480,8 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         "completion_target": questionnaire_projection["completion_target"],
         "completion_target_enabled": questionnaire_projection["completion_target_enabled"],
         "completion_target_type": questionnaire_projection["completion_target_type"],
+        "completion_action": completion_projection["completion_action"],
+        "lead_qr": completion_projection["lead_qr"],
         "write_model_status": "submitted",
         "external_push": external_push_result,
         "external_push_mode": external_push_mode,

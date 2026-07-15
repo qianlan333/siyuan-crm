@@ -239,6 +239,87 @@ class PostgresMediaLibraryRepository:
                 )
             conn.commit()
 
+    def repair_missing_miniprogram_thumb_sources(
+        self,
+        *,
+        execute: bool = False,
+        explicit_bindings: dict[int, int] | None = None,
+    ) -> dict[str, Any]:
+        bindings = {int(material_id): int(image_id) for material_id, image_id in (explicit_bindings or {}).items()}
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    WITH deterministic AS (
+                        SELECT gap.id AS material_id, MIN(source.thumb_image_id) AS image_id
+                        FROM miniprogram_library gap
+                        JOIN miniprogram_library source
+                          ON COALESCE(source.appid, '') = COALESCE(gap.appid, '')
+                         AND COALESCE(source.pagepath, '') = COALESCE(gap.pagepath, '')
+                         AND COALESCE(source.title, '') = COALESCE(gap.title, '')
+                         AND source.thumb_image_id IS NOT NULL
+                        WHERE gap.enabled IS TRUE
+                          AND gap.thumb_image_id IS NULL
+                          AND COALESCE(gap.thumb_image_base64, '') = ''
+                        GROUP BY gap.id
+                        HAVING COUNT(DISTINCT source.thumb_image_id) = 1
+                    )
+                    SELECT material_id, image_id FROM deterministic ORDER BY material_id
+                    """
+                )
+                deterministic = {int(row["material_id"]): int(row["image_id"]) for row in cur.fetchall() or []}
+                for material_id, image_id in bindings.items():
+                    cur.execute(
+                        """
+                        SELECT EXISTS (
+                            SELECT 1 FROM miniprogram_library
+                            WHERE id = %s AND enabled IS TRUE AND thumb_image_id IS NULL
+                              AND COALESCE(thumb_image_base64, '') = ''
+                        ) AS material_valid,
+                        EXISTS (
+                            SELECT 1 FROM image_library
+                            WHERE id = %s AND enabled IS TRUE AND COALESCE(data_base64, '') <> ''
+                        ) AS image_valid
+                        """,
+                        (material_id, image_id),
+                    )
+                    validation = cur.fetchone() or {}
+                    if not validation.get("material_valid") or not validation.get("image_valid"):
+                        raise ContractError(f"invalid miniprogram thumb binding {material_id}:{image_id}")
+                planned = {**deterministic, **bindings}
+                if execute and planned:
+                    cur.executemany(
+                        """
+                        UPDATE miniprogram_library
+                        SET thumb_image_id = %s, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = %s AND thumb_image_id IS NULL
+                          AND COALESCE(thumb_image_base64, '') = ''
+                        """,
+                        [(image_id, material_id) for material_id, image_id in sorted(planned.items())],
+                    )
+                cur.execute(
+                    """
+                    SELECT COUNT(*) AS unresolved_count
+                    FROM miniprogram_library
+                    WHERE enabled IS TRUE AND thumb_image_id IS NULL
+                      AND COALESCE(thumb_image_base64, '') = ''
+                    """
+                )
+                unresolved_count = int((cur.fetchone() or {}).get("unresolved_count") or 0)
+            if execute:
+                conn.commit()
+            else:
+                conn.rollback()
+        return {
+            "execute": bool(execute),
+            "deterministic_count": len(deterministic),
+            "explicit_count": len(bindings),
+            "planned_count": len(planned),
+            "updated_count": len(planned) if execute else 0,
+            "unresolved_count": unresolved_count,
+            "bindings": [{"material_id": key, "image_id": value} for key, value in sorted(planned.items())],
+        }
+
     def _list_images(self, *, limit: int, offset: int, filters: dict[str, Any]) -> dict[str, Any]:
         where: list[str] = []
         params: list[Any] = []

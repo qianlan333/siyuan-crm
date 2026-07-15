@@ -61,6 +61,13 @@ from .dto import OAuthCallbackRequest, OAuthStartRequest
 from .oauth import COOKIE_NAME, questionnaire_oauth_state_context
 from .public_access import QuestionnaireRespondentIdentityService
 from .result_access import issue_questionnaire_result_grant
+from .operations import (
+    QuestionnaireOperationsConflictError,
+    QuestionnaireOperationsInputError,
+    QuestionnaireOperationsNotFoundError,
+    QuestionnaireOperationsService,
+    QuestionnaireOperationsUnavailableError,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -119,6 +126,43 @@ def _raise_http(exc: Exception) -> None:
 def _read_response(payload: dict[str, Any]) -> dict[str, Any] | JSONResponse:
     if payload.get("source_status") == "production_unavailable":
         return JSONResponse(jsonable_encoder(payload), status_code=503)
+    return payload
+
+
+def _operations_error(exc: Exception) -> JSONResponse:
+    if isinstance(exc, QuestionnaireOperationsNotFoundError):
+        status_code = 404
+        source_status = "not_found"
+    elif isinstance(exc, QuestionnaireOperationsInputError):
+        status_code = 422
+        source_status = "input_error"
+    elif isinstance(exc, QuestionnaireOperationsConflictError):
+        status_code = 409
+        source_status = "conflict"
+    else:
+        status_code = 503
+        source_status = "production_unavailable"
+    return JSONResponse(
+        {
+            "ok": False,
+            "detail": str(exc),
+            "message": str(exc),
+            "source_status": source_status,
+            "route_owner": "ai_crm_next",
+            "fallback_used": False,
+            "real_external_call_executed": False,
+        },
+        status_code=status_code,
+    )
+
+
+async def _operations_body(request: Request) -> dict[str, Any]:
+    try:
+        payload = await request.json()
+    except Exception as exc:
+        raise QuestionnaireOperationsInputError("valid json object body is required") from exc
+    if not isinstance(payload, dict):
+        raise QuestionnaireOperationsInputError("json object body is required")
     return payload
 
 
@@ -590,6 +634,8 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
                 "completion_target": status_payload.get("completion_target"),
                 "completion_target_enabled": status_payload.get("completion_target_enabled"),
                 "completion_target_type": status_payload.get("completion_target_type"),
+                "completion_action": status_payload.get("completion_action"),
+                "lead_qr": status_payload.get("lead_qr"),
             },
         )
     except QuestionnaireH5WriteNotFoundError as exc:
@@ -796,6 +842,58 @@ async def create_questionnaire(request: Request) -> Response:
     return await _execute_admin_write(request, "questionnaire.admin.create")
 
 
+@router.get("/api/admin/questionnaires/{questionnaire_id}/operations", response_model=None)
+def get_questionnaire_operations(questionnaire_id: int) -> Response | dict[str, Any]:
+    try:
+        return QuestionnaireOperationsService().get_operations(questionnaire_id)
+    except (
+        QuestionnaireOperationsConflictError,
+        QuestionnaireOperationsInputError,
+        QuestionnaireOperationsNotFoundError,
+        QuestionnaireOperationsUnavailableError,
+    ) as exc:
+        return _operations_error(exc)
+
+
+@router.put("/api/admin/questionnaires/{questionnaire_id}/operations/completion", response_model=None)
+async def save_questionnaire_completion_operations(questionnaire_id: int, request: Request) -> Response | dict[str, Any]:
+    try:
+        return QuestionnaireOperationsService().save_completion(questionnaire_id, await _operations_body(request))
+    except (
+        QuestionnaireOperationsConflictError,
+        QuestionnaireOperationsInputError,
+        QuestionnaireOperationsNotFoundError,
+        QuestionnaireOperationsUnavailableError,
+    ) as exc:
+        return _operations_error(exc)
+
+
+@router.put("/api/admin/questionnaires/{questionnaire_id}/operations/external-push", response_model=None)
+async def save_questionnaire_external_push_operations(questionnaire_id: int, request: Request) -> Response | dict[str, Any]:
+    try:
+        return QuestionnaireOperationsService().save_external_push(questionnaire_id, await _operations_body(request))
+    except (
+        QuestionnaireOperationsConflictError,
+        QuestionnaireOperationsInputError,
+        QuestionnaireOperationsNotFoundError,
+        QuestionnaireOperationsUnavailableError,
+    ) as exc:
+        return _operations_error(exc)
+
+
+@router.post("/api/admin/questionnaires/{questionnaire_id}/operations/external-push/test", response_model=None)
+def test_questionnaire_external_push_operations(questionnaire_id: int) -> Response | dict[str, Any]:
+    try:
+        return QuestionnaireOperationsService().queue_external_push_test(questionnaire_id)
+    except (
+        QuestionnaireOperationsConflictError,
+        QuestionnaireOperationsInputError,
+        QuestionnaireOperationsNotFoundError,
+        QuestionnaireOperationsUnavailableError,
+    ) as exc:
+        return _operations_error(exc)
+
+
 @router.get("/api/admin/questionnaires/{questionnaire_id}", response_model=None)
 def get_questionnaire(questionnaire_id: int) -> Any:
     try:
@@ -933,6 +1031,8 @@ def public_get_questionnaire(request: Request, slug: str) -> Response:
                         "completion_target": submission_status.get("completion_target"),
                         "completion_target_enabled": submission_status.get("completion_target_enabled"),
                         "completion_target_type": submission_status.get("completion_target_type"),
+                        "completion_action": submission_status.get("completion_action"),
+                        "lead_qr": submission_status.get("lead_qr"),
                     },
                     status_code=409,
                 ),
@@ -1195,11 +1295,27 @@ def public_questionnaire_submitted(request: Request, slug: str):
     except Exception as exc:
         _raise_http(exc)
     questionnaire = jsonable_encoder(payload["questionnaire"])
+    identity_result = _questionnaire_identity_result_from_request(request)
+    submission_status = GetPublicQuestionnaireSubmissionStatusQuery()(
+        slug,
+        identity=dict(identity_result.get("identity") or {}),
+    )
+    completion_source = submission_status if submission_status.get("submitted") else questionnaire
     redirect_url = _completion_target_redirect_url(
         slug,
-        questionnaire.get("completion_target"),
-        fallback_url=questionnaire.get("redirect_url") or "",
+        completion_source.get("completion_target"),
+        fallback_url=completion_source.get("redirect_url") or "",
     )
     if redirect_url:
-        return RedirectResponse(redirect_url, status_code=302)
-    return templates.TemplateResponse(request, "questionnaire_h5_submitted.html", {"request": request})
+        return _with_identity_cookie(RedirectResponse(redirect_url, status_code=302), identity_result)
+    lead_qr = submission_status.get("lead_qr") if submission_status.get("submitted") else None
+    response = templates.TemplateResponse(
+        request,
+        "questionnaire_h5_submitted.html",
+        {
+            "request": request,
+            "lead_qr": lead_qr,
+            "submitted": bool(submission_status.get("submitted")),
+        },
+    )
+    return _with_identity_cookie(response, identity_result)

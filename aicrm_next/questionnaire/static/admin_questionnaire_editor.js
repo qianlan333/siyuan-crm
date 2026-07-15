@@ -769,7 +769,6 @@ function fieldLabel(fieldName) {
     name: '问卷名称',
     title: '问卷标题',
     description: '问卷说明',
-    redirect_url: '提交后跳转 H5 地址',
     slug: '分享标识',
     min_score: '最低分',
     max_score: '最高分',
@@ -1025,183 +1024,8 @@ function createRule(rule = {}, index = 0) {
   };
 }
 
-function createExternalPushCustomParam(param = {}, index = 0) {
-  return {
-    local_key: param.local_key || nextLocalKey('external-push-param'),
-    name: param.name || param.key || '',
-    value: param.value || param.detail || '',
-    sort_order: param.sort_order ?? (index + 1),
-  };
-}
-
 function normalizeAnswerDisplayMode(value) {
   return ['all_in_one', 'one_by_one'].includes(value) ? value : 'all_in_one';
-}
-
-function defaultCompletionTarget(redirectUrl = '') {
-  const h5Url = String(redirectUrl || '').trim();
-  return {
-    enabled: Boolean(h5Url),
-    target_type: 'h5',
-    open_strategy: 'h5_redirect',
-    h5_url: h5Url,
-    fallback_url: '',
-    mini_program: {
-      appid: '',
-      username: '',
-      path: '',
-      query: '',
-      env_version: 'release',
-    },
-    url_link: {
-      enabled: false,
-      url: '',
-      source_url: '',
-      response_url_key: 'url_link',
-      expire_type: 0,
-      expire_interval: 30,
-    },
-  };
-}
-
-function normalizeCompletionTarget(value, redirectUrl = '') {
-  const target = { ...defaultCompletionTarget(redirectUrl), ...(value || {}) };
-  target.mini_program = { ...defaultCompletionTarget().mini_program, ...(target.mini_program || {}) };
-  target.url_link = { ...defaultCompletionTarget().url_link, ...(target.url_link || {}) };
-  if (!['h5', 'url_link'].includes(target.target_type)) target.target_type = 'h5';
-  target.open_strategy = target.target_type === 'url_link' ? 'url_link' : 'h5_redirect';
-  target.url_link.enabled = target.target_type === 'url_link' && Boolean(target.url_link.url || target.url_link.source_url);
-  return target;
-}
-
-function completionTargetConfigHtml(initial, title = '提交后跳转') {
-  const target = normalizeCompletionTarget(initial);
-  return `
-    <section class="target-card" data-completion-target-config>
-      <div class="target-head">
-        <div>
-          <h2 class="target-title">${escapeHtml(title)}</h2>
-        </div>
-        <label class="switch">
-          <input type="checkbox" name="completion_target_enabled" data-target-enabled ${target.enabled ? 'checked' : ''}>
-          启用
-        </label>
-      </div>
-
-        <div class="target-body" data-target-body hidden>
-          <div class="field-grid">
-          <div class="field full">
-            <label>跳转类型</label>
-            <select name="completion_target_type">
-              <option value="h5" ${target.target_type === 'h5' ? 'selected' : ''}>H5 跳转地址</option>
-              <option value="url_link" ${target.target_type === 'url_link' ? 'selected' : ''}>动态 URL Link 接口</option>
-            </select>
-          </div>
-          <div class="field full" data-h5-url-fields>
-            <label>H5 跳转地址</label>
-            <input name="completion_h5_url" data-h5-url-field placeholder="https://example.com/landing 或 /internal/path" value="${escapeHtml(target.h5_url || target.fallback_url || '')}">
-            <small>提交成功后直接进入该 H5 地址。</small>
-          </div>
-          <div class="field full" data-url-link-fields>
-            <label>动态 URL Link 接口</label>
-            <input name="completion_url_link_source_url" placeholder="https://ip.lhbl.com.cn/api/wxlink?from=qianlan_pay" value="${escapeHtml(target.url_link.source_url || '')}">
-            <small>提交成功后先访问该接口，从 JSON 里取微信官方 URL Link 后再跳转。</small>
-          </div>
-          <div class="field" data-url-link-fields>
-            <label>响应字段</label>
-            <input name="completion_url_link_response_key" placeholder="url_link" value="${escapeHtml(target.url_link.response_url_key || 'url_link')}">
-          </div>
-        </div>
-        <div class="warning" data-validation-warning hidden></div>
-      </div>
-    </section>
-  `;
-}
-
-function mountCompletionTargetConfig(root, initialValue, onChange) {
-  const enabledEl = root.querySelector('[data-target-enabled]');
-  const bodyEl = root.querySelector('[data-target-body]');
-  const warningEl = root.querySelector('[data-validation-warning]');
-  const typeEl = root.querySelector('[name="completion_target_type"]');
-  const h5UrlEl = root.querySelector('[name="completion_h5_url"]');
-  const sourceUrlEl = root.querySelector('[name="completion_url_link_source_url"]');
-  const responseKeyEl = root.querySelector('[name="completion_url_link_response_key"]');
-
-  function syncVisibility() {
-    bodyEl.hidden = !enabledEl.checked;
-    const isUrlLink = typeEl && typeEl.value === 'url_link';
-    root.querySelectorAll('[data-h5-url-fields]').forEach((el) => {
-      el.hidden = isUrlLink;
-    });
-    root.querySelectorAll('[data-url-link-fields]').forEach((el) => {
-      el.hidden = !isUrlLink;
-    });
-  }
-
-  root.collectCompletionTarget = function collectCompletionTarget(options = {}) {
-    const validate = options.validate !== false;
-    const enabled = enabledEl.checked;
-    const targetType = typeEl && typeEl.value === 'url_link' ? 'url_link' : 'h5';
-    const h5Url = targetType === 'h5' ? h5UrlEl.value.trim() : '';
-    const sourceUrl = sourceUrlEl ? sourceUrlEl.value.trim() : '';
-    const responseUrlKey = responseKeyEl ? responseKeyEl.value.trim() || 'url_link' : 'url_link';
-    const payload = {
-      enabled,
-      target_type: targetType,
-      open_strategy: targetType === 'url_link' ? 'url_link' : 'h5_redirect',
-      h5_url: h5Url,
-      fallback_url: '',
-      mini_program: {
-        appid: '',
-        username: '',
-        path: '',
-        query: '',
-        env_version: 'release',
-      },
-      url_link: {
-        enabled: targetType === 'url_link' && Boolean(sourceUrl),
-        url: '',
-        source_url: sourceUrl,
-        response_url_key: responseUrlKey,
-      },
-    };
-    warningEl.hidden = true;
-    warningEl.textContent = '';
-    if (validate && enabled && targetType === 'h5' && !h5Url) {
-      warningEl.textContent = '请填写 H5 跳转地址。';
-      warningEl.hidden = false;
-      throw new Error(warningEl.textContent);
-    }
-    if (validate && enabled && targetType === 'url_link' && !sourceUrl) {
-      warningEl.textContent = '请填写动态 URL Link 接口。';
-      warningEl.hidden = false;
-      throw new Error(warningEl.textContent);
-    }
-    return payload;
-  };
-
-  function notifyChange() {
-    syncVisibility();
-    if (onChange) onChange(root.collectCompletionTarget({ validate: false }));
-  }
-
-  root.addEventListener('input', notifyChange);
-  root.addEventListener('change', notifyChange);
-  syncVisibility();
-  if (onChange) onChange(root.collectCompletionTarget({ validate: false }));
-}
-
-function activeCompletionTarget(options = {}) {
-  const root = document.querySelector('[data-completion-target-config]');
-  if (root && root.collectCompletionTarget) {
-    const target = root.collectCompletionTarget(options);
-    state.questionnaire.completion_target = target;
-    if (target.target_type === 'h5') {
-      state.questionnaire.redirect_url = target.h5_url || '';
-    }
-    return target;
-  }
-  return normalizeCompletionTarget(state.questionnaire.completion_target, state.questionnaire.redirect_url);
 }
 
 function blankQuestionnaire() {
@@ -1214,20 +1038,10 @@ function blankQuestionnaire() {
     name: defaultPreset ? defaultPreset.name : '',
     title: defaultPreset ? defaultPreset.title : '',
     description: defaultPreset ? defaultPreset.description : '',
-    redirect_url: '',
-    completion_target: defaultCompletionTarget(''),
     answer_display_mode: 'all_in_one',
     assessment_enabled: Boolean(editorConfig.defaultAssessment),
     assessment_config: defaultAssessmentConfig,
     assessment_builder: defaultAssessmentBuilder,
-    external_push_enabled: false,
-    external_push_url: '',
-    external_push_type: '',
-    external_push_expires_at_ts: '',
-    external_push_day: '',
-    external_push_frequency: '',
-    external_push_remark: '',
-    external_push_custom_params: [],
     slug: '',
     is_disabled: false,
     questions: defaultPreset
@@ -1267,22 +1081,10 @@ function hydrateQuestionnaire(source = null) {
     name: questionnaire.name || '',
     title: questionnaire.title || '',
     description: questionnaire.description || '',
-    redirect_url: questionnaire.redirect_url || '',
-    completion_target: normalizeCompletionTarget(questionnaire.completion_target, questionnaire.redirect_url || ''),
     answer_display_mode: normalizeAnswerDisplayMode(questionnaire.answer_display_mode),
     assessment_enabled: hasSource ? Boolean(questionnaire.assessment_enabled) : draft.assessment_enabled,
     assessment_config: assessmentConfig,
     assessment_builder: assessmentBuilder,
-    external_push_enabled: Boolean(questionnaire.external_push_enabled),
-    external_push_url: questionnaire.external_push_url || '',
-    external_push_type: questionnaire.external_push_type || '',
-    external_push_expires_at_ts: questionnaire.external_push_expires_at_ts ?? '',
-    external_push_day: questionnaire.external_push_day ?? '',
-    external_push_frequency: questionnaire.external_push_frequency ?? '',
-    external_push_remark: questionnaire.external_push_remark || '',
-    external_push_custom_params: (questionnaire.external_push_custom_params || []).map(
-      (param, index) => createExternalPushCustomParam(param, index),
-    ),
     slug: questionnaire.slug || '',
     is_disabled: Boolean(questionnaire.is_disabled),
     questions: hydratedQuestions,
@@ -1380,31 +1182,15 @@ function buildSerializableAssessmentConfig() {
 }
 
 function serializePayload(options = {}) {
-  const completionTarget = activeCompletionTarget({ validate: options.validateCompletion !== false });
-  const redirectUrl = completionTarget.target_type === 'h5' ? (completionTarget.h5_url || '') : state.questionnaire.redirect_url;
   return {
     name: state.questionnaire.name,
     title: state.questionnaire.title,
     description: state.questionnaire.description,
-    redirect_url: redirectUrl,
-    completion_target: completionTarget,
     answer_display_mode: normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode),
     assessment_enabled: Boolean(state.questionnaire.assessment_enabled),
     assessment_config: state.questionnaire.assessment_enabled
       ? buildSerializableAssessmentConfig()
       : buildAssessmentConfigFromBuilder(ensureAssessmentBuilder()),
-    external_push_enabled: Boolean(state.questionnaire.external_push_enabled),
-    external_push_url: state.questionnaire.external_push_url,
-    external_push_type: state.questionnaire.external_push_type || '',
-    external_push_expires_at_ts: state.questionnaire.external_push_expires_at_ts === '' ? '' : Number(state.questionnaire.external_push_expires_at_ts),
-    external_push_day: state.questionnaire.external_push_day === '' ? '' : Number(state.questionnaire.external_push_day),
-    external_push_frequency: state.questionnaire.external_push_frequency === '' ? '' : Number(state.questionnaire.external_push_frequency),
-    external_push_remark: state.questionnaire.external_push_remark,
-    external_push_custom_params: (state.questionnaire.external_push_custom_params || []).map((param, index) => ({
-      name: param.name,
-      value: param.value,
-      sort_order: Number(param.sort_order || (index + 1)),
-    })),
     slug: state.questionnaire.slug,
     is_disabled: state.questionnaire.is_disabled,
     questions: state.questionnaire.questions.map((question, index) => {
@@ -1911,33 +1697,6 @@ function renderQuestionnaireInspector() {
   inspectorSubtitleEl.textContent = '编辑当前问卷的基础信息。';
   const deleteDisabled = !state.persistedIsDisabled;
   const assessmentGroup = assessmentTemplateGroups()[0] || null;
-  const customParamsHtml = (state.questionnaire.external_push_custom_params || []).length
-    ? state.questionnaire.external_push_custom_params.map((param) => `
-        <div class="option-editor" data-custom-param-key="${escapeHtml(param.local_key)}">
-          <div class="field-grid compact">
-            <label class="field">参数名
-              <input
-                type="text"
-                data-custom-param-name="${escapeHtml(param.local_key)}"
-                value="${escapeHtml(param.name)}"
-                placeholder="例如：source_name"
-              >
-            </label>
-            <label class="field">参数值
-              <input
-                type="text"
-                data-custom-param-value="${escapeHtml(param.local_key)}"
-                value="${escapeHtml(param.value)}"
-                placeholder="例如：黄小璨激活"
-              >
-            </label>
-          </div>
-          <div class="option-editor-head" style="justify-content:flex-end;">
-            <button type="button" class="link-btn danger" data-custom-param-remove="${escapeHtml(param.local_key)}">删除参数</button>
-          </div>
-        </div>
-      `).join('')
-    : '<div class="empty-state">暂未配置自定义顶层参数</div>';
   const deleteSection = state.currentId ? `
     <section class="config-group danger-zone">
       <button
@@ -1962,7 +1721,6 @@ function renderQuestionnaireInspector() {
       <label class="field">问卷说明
         <textarea id="field-description">${escapeHtml(state.questionnaire.description)}</textarea>
       </label>
-      ${completionTargetConfigHtml(state.questionnaire.completion_target, '提交后跳转')}
       <label class="field">答题展示方式
         <select id="field-answer-display-mode">
           <option value="all_in_one" ${normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode) === 'all_in_one' ? 'selected' : ''}>整页答题</option>
@@ -1994,50 +1752,9 @@ function renderQuestionnaireInspector() {
       <div class="helper-note">
         ${assessmentGroup
           ? `已引用“${escapeHtml(assessmentGroup.name)}”，包含 ${escapeHtml(String(assessmentGroup.questions.length))} 道题。模板内部内容请到“创建测评问卷模板”里维护。`
-          : '从已创建的测评模板中选择，插入后作为一整组题管理。手机号、标签、webhook 和普通题继续复用现有问卷能力。'}
+          : '从已创建的测评模板中选择，插入后作为一整组题管理。提交后动作与外部推送请在列表的“运营配置”中维护。'}
       </div>
     </section>
-    <details class="config-group config-advanced" ${state.questionnaire.external_push_enabled ? 'open' : ''}>
-      <summary>
-        <span class="config-advanced-label">外部推送</span>
-        <span class="config-advanced-hint">提交后向指定 webhook 发送 POST</span>
-      </summary>
-      <label class="field" style="margin:12px 0;font-weight:600;">
-        <input id="field-external-push-enabled" type="checkbox" ${state.questionnaire.external_push_enabled ? 'checked' : ''}> 开启外部推送
-      </label>
-      <label class="field">推送地址
-        <input id="field-external-push-url" type="text" value="${escapeHtml(state.questionnaire.external_push_url)}" placeholder="https://hooks.example.com/...">
-      </label>
-      <div class="field-grid compact">
-        <label class="field">type
-          <select id="field-external-push-type">
-            <option value="" ${!state.questionnaire.external_push_type ? 'selected' : ''}></option>
-            <option value="subscription" ${state.questionnaire.external_push_type === 'subscription' ? 'selected' : ''}>subscription</option>
-            <option value="premium" ${state.questionnaire.external_push_type === 'premium' ? 'selected' : ''}>premium</option>
-            <option value="trial" ${state.questionnaire.external_push_type === 'trial' ? 'selected' : ''}>首月权益</option>
-          </select>
-        </label>
-        <label class="field">expires_at_ts
-          <input id="field-external-push-expires-at-ts" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_expires_at_ts ?? ''))}">
-        </label>
-      </div>
-      <div class="field-grid compact">
-        <label class="field">day
-          <input id="field-external-push-day" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_day ?? ''))}">
-        </label>
-        <label class="field">frequency
-          <input id="field-external-push-frequency" type="number" step="1" value="${escapeHtml(String(state.questionnaire.external_push_frequency ?? ''))}">
-        </label>
-      </div>
-      <label class="field">remark
-        <input id="field-external-push-remark" type="text" value="${escapeHtml(state.questionnaire.external_push_remark || '')}" placeholder="备注文本">
-      </label>
-      <div class="config-head" style="margin-top:8px;">
-        <div><h4 style="margin:0;font-size:13px;">自定义参数</h4></div>
-        <button id="add-external-push-custom-param-btn" type="button" class="btn secondary">新增</button>
-      </div>
-      ${customParamsHtml}
-    </details>
     ${deleteSection}
   `;
   inspectorBodyEl.querySelector('#field-name').addEventListener('input', (event) => {
@@ -2053,16 +1770,6 @@ function renderQuestionnaireInspector() {
     state.questionnaire.description = event.target.value;
     renderPreview();
   });
-  const completionTargetRoot = inspectorBodyEl.querySelector('[data-completion-target-config]');
-  if (completionTargetRoot) {
-    mountCompletionTargetConfig(completionTargetRoot, state.questionnaire.completion_target, (target) => {
-      state.questionnaire.completion_target = target;
-      if (target.target_type === 'h5') {
-        state.questionnaire.redirect_url = target.h5_url || '';
-      }
-      updateDraftIndicator();
-    });
-  }
   inspectorBodyEl.querySelector('#field-answer-display-mode').addEventListener('change', (event) => {
     state.questionnaire.answer_display_mode = normalizeAnswerDisplayMode(event.target.value);
     updateDraftIndicator();
@@ -2076,65 +1783,6 @@ function renderQuestionnaireInspector() {
     updateDraftIndicator();
   });
   inspectorBodyEl.querySelector('#open-assessment-config-btn').addEventListener('click', () => openAssessmentSettings());
-  inspectorBodyEl.querySelector('#field-external-push-enabled').addEventListener('change', (event) => {
-    state.questionnaire.external_push_enabled = event.target.checked;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#field-external-push-url').addEventListener('input', (event) => {
-    state.questionnaire.external_push_url = event.target.value;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#field-external-push-type').addEventListener('change', (event) => {
-    state.questionnaire.external_push_type = event.target.value;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#field-external-push-expires-at-ts').addEventListener('input', (event) => {
-    state.questionnaire.external_push_expires_at_ts = event.target.value;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#field-external-push-day').addEventListener('input', (event) => {
-    state.questionnaire.external_push_day = event.target.value;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#field-external-push-frequency').addEventListener('input', (event) => {
-    state.questionnaire.external_push_frequency = event.target.value;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#field-external-push-remark').addEventListener('input', (event) => {
-    state.questionnaire.external_push_remark = event.target.value;
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelector('#add-external-push-custom-param-btn').addEventListener('click', () => {
-    state.questionnaire.external_push_custom_params = [
-      ...(state.questionnaire.external_push_custom_params || []),
-      createExternalPushCustomParam({}, (state.questionnaire.external_push_custom_params || []).length),
-    ];
-    renderQuestionnaireInspector();
-    updateDraftIndicator();
-  });
-  inspectorBodyEl.querySelectorAll('[data-custom-param-name]').forEach((input) => {
-    input.addEventListener('input', (event) => {
-      const target = (state.questionnaire.external_push_custom_params || []).find((item) => item.local_key === input.dataset.customParamName);
-      if (target) target.name = event.target.value;
-      updateDraftIndicator();
-    });
-  });
-  inspectorBodyEl.querySelectorAll('[data-custom-param-value]').forEach((input) => {
-    input.addEventListener('input', (event) => {
-      const target = (state.questionnaire.external_push_custom_params || []).find((item) => item.local_key === input.dataset.customParamValue);
-      if (target) target.value = event.target.value;
-      updateDraftIndicator();
-    });
-  });
-  inspectorBodyEl.querySelectorAll('[data-custom-param-remove]').forEach((button) => {
-    button.addEventListener('click', () => {
-      state.questionnaire.external_push_custom_params = (state.questionnaire.external_push_custom_params || [])
-        .filter((item) => item.local_key !== button.dataset.customParamRemove)
-        .map((item, index) => ({ ...item, sort_order: index + 1 }));
-      renderQuestionnaireInspector();
-      updateDraftIndicator();
-    });
-  });
   inspectorBodyEl.querySelector('#field-slug').addEventListener('input', (event) => {
     state.questionnaire.slug = event.target.value;
     renderTopbar();
@@ -2210,7 +1858,7 @@ function renderAssessmentInspector() {
         ${group
           ? `<div class="helper-note">
               ${escapeHtml(String(groupDimensions.length))} 个维度、${escapeHtml(String((group.questions || []).length))} 道题、含结果页规则。
-              手机号、标签、webhook 和普通题继续复用当前问卷能力。
+              手机号、标签和普通题继续复用当前问卷能力；提交后动作与外部推送由“运营配置”维护。
             </div>`
           : templateListHtml}
         <div class="template-group-actions">
@@ -2227,7 +1875,7 @@ function renderAssessmentInspector() {
           </div>
         </div>
         <div class="helper-note">
-          普通问卷负责手机号、城市、来源、标签、webhook、分享和提交记录；测评模板负责题目、维度、分型和结果页说明。
+          普通问卷负责手机号、城市、来源、标签、分享和提交记录；测评模板负责题目、维度、分型和结果页说明。
         </div>
       </section>
     `;
@@ -2298,7 +1946,7 @@ function renderAssessmentInspector() {
         </div>
       </div>
       <div class="helper-note">
-        ${escapeHtml(preset.title)}：${preset.dimensions.length} 个维度，${preset.questions.length} 道单选题。${editorConfig.defaultAssessment ? '保存后可作为普通问卷的一组测评模板使用。' : '插入后在普通问卷里按整组管理，手机号、标签、webhook 和普通题继续复用现有能力。'}
+        ${escapeHtml(preset.title)}：${preset.dimensions.length} 个维度，${preset.questions.length} 道单选题。${editorConfig.defaultAssessment ? '保存后可作为普通问卷的一组测评模板使用。' : '插入后在普通问卷里按整组管理，运营能力由问卷列表的“运营配置”单独维护。'}
       </div>
       <button id="apply-assessment-preset-btn" type="button" class="btn primary" style="width:100%;margin-top:12px;">${editorConfig.defaultAssessment ? '填入小 IP 模板题目' : '添加多维测评模板到当前问卷'}</button>
     </section>
@@ -2555,7 +2203,7 @@ function renderAssessmentTemplateGroupInspector(group) {
           <p>普通问卷能力继续复用。</p>
         </div>
       </div>
-      <div class="helper-note">手机号、城市、来源渠道、标签、webhook、分享链接和提交记录都留在普通问卷里处理。如果需要改题目、分型或结果页文案，请回到测评模板页维护。</div>
+      <div class="helper-note">手机号、城市、来源渠道、标签、分享链接和提交记录都留在普通问卷里处理。如果需要改题目、分型或结果页文案，请回到测评模板页维护。</div>
     </section>
   `;
   inspectorBodyEl.querySelector('#remove-template-group-btn').addEventListener('click', () => {
@@ -3084,7 +2732,6 @@ function renderAssessmentBasicPage() {
               <label class="field" style="margin-bottom:0;font-weight:600;"><input id="v2-basic-disabled" type="checkbox" ${state.questionnaire.is_disabled ? 'checked' : ''}> 停用问卷</label>
             </label>
           </div>
-          ${completionTargetConfigHtml(state.questionnaire.completion_target, '提交后跳转')}
           <label class="field">答题展示方式
             <select id="v2-basic-answer-display-mode">
               <option value="all_in_one" ${normalizeAnswerDisplayMode(state.questionnaire.answer_display_mode) === 'all_in_one' ? 'selected' : ''}>整页答题</option>
@@ -3115,16 +2762,6 @@ function renderAssessmentBasicPage() {
     state.questionnaire.is_disabled = event.target.checked;
     updateDraftIndicator();
   });
-  const completionTargetRoot = phoneStage.querySelector('[data-completion-target-config]');
-  if (completionTargetRoot) {
-    mountCompletionTargetConfig(completionTargetRoot, state.questionnaire.completion_target, (target) => {
-      state.questionnaire.completion_target = target;
-      if (target.target_type === 'h5') {
-        state.questionnaire.redirect_url = target.h5_url || '';
-      }
-      updateDraftIndicator();
-    });
-  }
   phoneStage.querySelector('#v2-basic-answer-display-mode').addEventListener('change', (event) => {
     state.questionnaire.answer_display_mode = normalizeAnswerDisplayMode(event.target.value);
     updateDraftIndicator();

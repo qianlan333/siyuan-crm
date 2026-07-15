@@ -209,12 +209,26 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
         assert forbidden not in text
 
 
-def test_service_period_public_page_renders_none_active_and_expired_ctas(next_client) -> None:
+def test_service_period_public_page_renders_none_active_and_expired_ctas(next_client, monkeypatch) -> None:
     _reset()
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "resolve_product_lead_qr",
+        lambda _product: {
+            "channel_id": 7,
+            "channel_name": "报名后企微",
+            "qr_url": "https://example.com/service-period-lead.png",
+            "status": "active",
+        },
+        raising=False,
+    )
     _create(next_client, product_code="sp_public_none")
 
     none_page = next_client.get("/s/sp_public_none")
+    none_state = next_client.get("/api/h5/service-period-products/sp_public_none")
     assert none_page.status_code == 200
+    assert none_state.status_code == 200
+    assert none_state.json()["lead_qr"] == {}
     assert "立即报名" in none_page.text
     assert "开通后获得" not in none_page.text
     assert "测试会员设置" not in none_page.text
@@ -223,6 +237,7 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     assert 'WeixinJSBridge.invoke("getBrandWCPayRequest"' not in none_page.text
     assert "商品编码" not in none_page.text
     assert "webhook" not in none_page.text.lower()
+    assert '<div class="service-period-wecom-action" id="servicePeriodWecomAction" hidden>' in none_page.text
 
     _create(next_client, product_code="sp_public_active")
     GrantOrRenewEntitlementCommand()(
@@ -230,11 +245,21 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     )
     next_client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_active", "unionid": "union_public_active"}))
     active_page = next_client.get("/s/sp_public_active")
+    active_state = next_client.get("/api/h5/service-period-products/sp_public_active")
     assert active_page.status_code == 200
+    assert active_state.status_code == 200
+    assert active_state.json()["lead_qr"]["qr_url"] == "https://example.com/service-period-lead.png"
+    assert active_state.headers["X-AICRM-Route-Owner"] == "ai_crm_next"
     assert "立即续费" in active_page.text
     assert "使用中" not in active_page.text
     assert "当前服务仍在有效期内" not in active_page.text
     assert "续费后有效期将继续顺延" not in active_page.text
+    assert '<div class="service-period-wecom-action" id="servicePeriodWecomAction">' in active_page.text
+    assert 'id="servicePeriodAddWecomButton"' in active_page.text
+    assert "添加企微账号" in active_page.text
+    assert 'id="leadQrModal"' in active_page.text
+    assert "扫码添加企微领取后续资料" in active_page.text
+    assert "https://example.com/service-period-lead.png" in active_page.text
 
     _create(next_client, product_code="sp_public_expired")
     GrantOrRenewEntitlementCommand()(
@@ -242,9 +267,41 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     )
     next_client.cookies.set(h5_wechat_pay.COOKIE_NAME, h5_wechat_pay._signed_blob({"openid": "op_expired", "unionid": "union_public_expired"}))
     expired_page = next_client.get("/s/sp_public_expired")
+    expired_state = next_client.get("/api/h5/service-period-products/sp_public_expired")
     assert expired_page.status_code == 200
+    assert expired_state.status_code == 200
+    assert expired_state.json()["lead_qr"] == {}
     assert "重新开通" in expired_page.text
     assert "上次到期日" in expired_page.text
+    assert '<div class="service-period-wecom-action" id="servicePeriodWecomAction" hidden>' in expired_page.text
+
+
+def test_service_period_active_page_hides_wecom_entry_without_channel_qr(next_client, monkeypatch) -> None:
+    _reset()
+    monkeypatch.setattr(h5_wechat_pay, "resolve_product_lead_qr", lambda _product: {}, raising=False)
+    _create(next_client, product_code="sp_public_active_without_qr")
+    GrantOrRenewEntitlementCommand()(
+        order=_paid_order(
+            "SP_PUBLIC_ACTIVE_WITHOUT_QR",
+            product_code="sp_public_active_without_qr",
+            unionid="union_public_active_without_qr",
+            paid_at="2099-01-01T00:00:00+00:00",
+        )
+    )
+    next_client.cookies.set(
+        h5_wechat_pay.COOKIE_NAME,
+        h5_wechat_pay._signed_blob({"openid": "op_active_without_qr", "unionid": "union_public_active_without_qr"}),
+    )
+
+    page = next_client.get("/s/sp_public_active_without_qr")
+    state = next_client.get("/api/h5/service-period-products/sp_public_active_without_qr")
+
+    assert page.status_code == 200
+    assert state.status_code == 200
+    assert state.json()["lead_qr"] == {}
+    assert '<div class="service-period-wecom-action" id="servicePeriodWecomAction" hidden>' in page.text
+    assert "wecomAction.hidden = !(status === \"active\" && activeLeadQr.qr_url);" in page.text
+    assert "leadQrController.clear();" in page.text
 
 
 def test_service_period_public_page_starts_oauth_before_state_in_wechat(next_client) -> None:

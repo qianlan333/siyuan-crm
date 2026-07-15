@@ -355,6 +355,8 @@ repositories:
     table_reads:
       - automation_channel
       - automation_channel_qrcode_asset
+      - commerce_coupon_claims
+      - commerce_coupon_product_bindings
       - external_push_config
       - image_library
       - service_period_products
@@ -366,6 +368,22 @@ repositories:
       - external_push_config
       - wechat_pay_product_page_slices
       - wechat_pay_products
+  aicrm_next/commerce/coupons/repo.py:
+    capability_owner: aicrm_next.commerce.coupons
+    table_reads:
+      - commerce_coupon_claims
+      - commerce_coupon_product_bindings
+      - commerce_coupon_redemptions
+      - commerce_coupons
+      - service_period_products
+      - wechat_pay_orders
+      - wechat_pay_products
+    table_writes:
+      - commerce_coupon_claims
+      - commerce_coupon_product_bindings
+      - commerce_coupon_redemptions
+      - commerce_coupons
+      - wechat_pay_orders
   aicrm_next/customer_read_model/repo.py:
     capability_owner: aicrm_next.customer_read_model
     non_literal_table_reads:
@@ -448,6 +466,13 @@ repositories:
     capability_owner: aicrm_next.hxc_dashboard
     table_reads: []
     table_writes: []
+  aicrm_next/identity_contact/oauth_projection_repo.py:
+    capability_owner: aicrm_next.identity_contact
+    table_reads:
+      - crm_user_identity_conflicts
+    table_writes:
+      - crm_user_identity
+      - crm_user_identity_conflicts
   aicrm_next/identity_contact/repo.py:
     capability_owner: aicrm_next.identity_contact
     table_reads:
@@ -577,6 +602,11 @@ repositories:
       - internal_event_consumer_attempt
       - internal_event_consumer_run
       - internal_event_outbox
+  aicrm_next/platform_foundation/push_center/capability_repository.py:
+    capability_owner: aicrm_next.platform_foundation.push_center
+    table_reads:
+      - app_settings
+    table_writes: []
   aicrm_next/platform_foundation/push_center/repository.py:
     capability_owner: aicrm_next.platform_foundation.push_center
     table_reads: []
@@ -678,3 +708,20 @@ repositories:
       - sidebar_customer_profile_fields
     non_literal_table_reads:
       - crm_user_identity
+  aicrm_next/operation_cycles/repository.py:
+    capability_owner: aicrm_next.operation_cycles
+    table_reads:
+      - operation_cycle_references
+      - operation_cycle_runs
+      - operation_cycle_snapshots
+      - operation_cycle_strategies
+      - operation_cycle_strategy_versions
+    table_writes:
+      - operation_cycle_attempts
+      - operation_cycle_metrics
+      - operation_cycle_references
+      - operation_cycle_runs
+      - operation_cycle_snapshots
+      - operation_cycle_stages
+      - operation_cycle_strategies
+      - operation_cycle_strategy_versions

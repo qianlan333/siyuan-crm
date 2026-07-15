@@ -11,6 +11,11 @@ from aicrm_next.admin_shell import shell_context
 
 from .application import GetQuestionnaireEditorQuery, GetQuestionnairePreflightQuery, ListQuestionnairesQuery
 from .external_push_logs import QuestionnaireExternalPushLogReadService
+from .operations import (
+    QuestionnaireOperationsNotFoundError,
+    QuestionnaireOperationsService,
+    QuestionnaireOperationsUnavailableError,
+)
 
 router = APIRouter()
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
@@ -98,6 +103,24 @@ def _questionnaire_editor_response(
     questionnaire = jsonable_encoder((payload or {}).get("questionnaire")) if payload else None
     if questionnaire is not None and isinstance(payload, dict):
         questionnaire["questions"] = jsonable_encoder(questionnaire.get("questions") or payload.get("questions") or [])
+        for operation_key in (
+            "lead_channel_id",
+            "redirect_url",
+            "completion_target",
+            "completion_target_json",
+            "completion_target_enabled",
+            "completion_target_type",
+            "external_push_config",
+            "external_push_enabled",
+            "external_push_url",
+            "external_push_type",
+            "external_push_expires_at_ts",
+            "external_push_day",
+            "external_push_frequency",
+            "external_push_remark",
+            "external_push_custom_params",
+        ):
+            questionnaire.pop(operation_key, None)
     default_assessment = (questionnaire_id is None and str(request.query_params.get("mode") or "").strip() == "assessment") or _is_assessment_template_asset(
         questionnaire
     )
@@ -172,6 +195,63 @@ def admin_questionnaires_legacy_ui_alias() -> RedirectResponse:
 @router.get("/admin/questionnaires/new", name="api.admin_console_questionnaire_new")
 def admin_questionnaire_new(request: Request) -> Response:
     return _questionnaire_editor_response(request)
+
+
+@router.get(
+    "/admin/questionnaires/{questionnaire_id:int}/operations",
+    name="api.admin_console_questionnaire_operations",
+)
+def admin_questionnaire_operations(request: Request, questionnaire_id: int) -> Response:
+    try:
+        payload = QuestionnaireOperationsService().get_operations(questionnaire_id)
+    except QuestionnaireOperationsNotFoundError as exc:
+        return _placeholder_response(
+            request,
+            page_title="问卷不存在",
+            page_summary="当前没有找到这个问卷。",
+            state_title="无法打开运营配置",
+            state_body=str(exc),
+            state_items=["问卷可能已被删除", "请返回问卷管理后重试"],
+            status_code=404,
+        )
+    except QuestionnaireOperationsUnavailableError as exc:
+        return _placeholder_response(
+            request,
+            page_title="问卷运营配置不可用",
+            page_summary="当前生产数据源不可用。",
+            state_title="暂时无法读取运营配置",
+            state_body=str(exc),
+            state_items=["source_status=production_unavailable", "fallback_used=false"],
+            status_code=503,
+        )
+    if _is_assessment_template_asset(payload.get("questionnaire")):
+        return _placeholder_response(
+            request,
+            page_title="评测模板无需运营配置",
+            page_summary="评测模板资产不能直接发布。",
+            state_title="该资产不支持运营配置",
+            state_body="请在普通问卷中引用评测模板后，再配置提交后动作。",
+            state_items=["评测模板仅用于内容复用", "不会直接生成公开问卷"],
+            status_code=404,
+        )
+    context = shell_context(
+        request=request,
+        page_title="问卷运营配置",
+        page_summary="独立配置提交后动作与外部推送。",
+        active_endpoint="api.admin_questionnaires",
+    )
+    context.update(
+        {
+            "show_page_header": False,
+            "breadcrumbs": [
+                {"label": "客户管理后台", "href": "/admin"},
+                {"label": "问卷管理", "href": "/admin/questionnaires"},
+                {"label": "运营配置", "href": ""},
+            ],
+            "operations_payload": jsonable_encoder(payload),
+        }
+    )
+    return templates.TemplateResponse(request, "admin_console/questionnaire_operations.html", context)
 
 
 @router.get("/admin/questionnaires/{questionnaire_id:int}", name="api.admin_console_questionnaire_detail")

@@ -97,6 +97,7 @@ class PostgresQuestionnaireReadRepository:
             "status": "disabled" if not enabled else "published",
             "version": int(row.get("version") or 1),
             "redirect_url": _text(row.get("redirect_url")),
+            "lead_channel_id": int(row.get("lead_channel_id") or 0) or None,
             "completion_target_json": _json_dict(row.get("completion_target_json")),
             "answer_display_mode": _text(row.get("answer_display_mode") or "all_in_one"),
             "assessment_enabled": bool(row.get("assessment_enabled")),
@@ -507,13 +508,13 @@ class PostgresQuestionnaireReadRepository:
                     row = conn.execute(
                         """
                         INSERT INTO questionnaires (
-                            slug, name, title, description, is_disabled, redirect_url, completion_target_json,
+                            slug, name, title, description, is_disabled, redirect_url, completion_target_json, lead_channel_id,
                             answer_display_mode, assessment_enabled, assessment_config,
                             external_push_enabled, external_push_url, external_push_type, external_push_expires_at_ts,
                             external_push_day, external_push_frequency, external_push_remark, external_push_custom_params,
                             created_at, updated_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), NOW())
                         RETURNING id
                         """,
                         (
@@ -524,6 +525,7 @@ class PostgresQuestionnaireReadRepository:
                             normalized["is_disabled"],
                             normalized["redirect_url"],
                             _jsonb(normalized["completion_target_json"]),
+                            int(payload.get("lead_channel_id") or 0) or None,
                             normalized["answer_display_mode"],
                             normalized["assessment_enabled"],
                             _jsonb(normalized["assessment_config"]),
@@ -578,6 +580,71 @@ class PostgresQuestionnaireReadRepository:
         if not item:
             raise RepositoryProviderError("questionnaire write failed")
         return item
+
+    def save_completion_operations(
+        self,
+        questionnaire_id: int,
+        *,
+        lead_channel_id: int | None,
+        completion_target_json: dict[str, Any],
+        redirect_url: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    """
+                    UPDATE questionnaires
+                    SET lead_channel_id = %s,
+                        completion_target_json = %s,
+                        redirect_url = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING id
+                    """,
+                    (
+                        int(lead_channel_id or 0) or None,
+                        _jsonb(completion_target_json),
+                        _text(redirect_url),
+                        int(questionnaire_id),
+                    ),
+                ).fetchone()
+        return self.get_questionnaire(int(questionnaire_id)) if row else None
+
+    def save_external_push_operations(
+        self,
+        questionnaire_id: int,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            with conn.transaction():
+                row = conn.execute(
+                    """
+                    UPDATE questionnaires
+                    SET external_push_enabled = %s,
+                        external_push_url = %s,
+                        external_push_type = %s,
+                        external_push_expires_at_ts = %s,
+                        external_push_day = %s,
+                        external_push_frequency = %s,
+                        external_push_remark = %s,
+                        external_push_custom_params = %s,
+                        updated_at = NOW()
+                    WHERE id = %s
+                    RETURNING id
+                    """,
+                    (
+                        bool(config.get("enabled")),
+                        _text(config.get("webhook_url")),
+                        _text(config.get("type")),
+                        config.get("expires_at_ts"),
+                        config.get("day"),
+                        config.get("frequency"),
+                        _text(config.get("remark")),
+                        _jsonb(_json_list(config.get("custom_params"))),
+                        int(questionnaire_id),
+                    ),
+                ).fetchone()
+        return self.get_questionnaire(int(questionnaire_id)) if row else None
 
     def set_enabled(self, questionnaire_id: int, enabled: bool) -> dict[str, Any] | None:
         with self._connect() as conn:

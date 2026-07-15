@@ -297,6 +297,10 @@ def test_previously_placeholder_probes_are_live_and_green_with_zero_actionable_c
             "approved_not_runnable_count": 0,
             "approved_job_count": 4,
             "missing_unionid_count": 0,
+            "guarded_missing_unionid_count": 0,
+            "unguarded_missing_unionid_count": 0,
+            "missing_continuation_guard_count": 0,
+            "identity_dependent_effect_without_unionid_count": 0,
             "missing_identity_count": 0,
             "historical_pre_cutover_count": 48,
             "wechat_pay_missing_user_count": 0,
@@ -321,6 +325,53 @@ def test_previously_placeholder_probes_are_live_and_green_with_zero_actionable_c
 
     assert [result.status for result in results] == ["ok"] * 5
     assert all(result.status != "not_applicable" for result in results)
+
+
+def test_questionnaire_submission_guard_accepts_quarantined_missing_unionids(monkeypatch) -> None:
+    from aicrm_next.data_health import checks
+
+    _patch_health_db(
+        monkeypatch,
+        {
+            "missing_unionid_count": 3,
+            "guarded_missing_unionid_count": 3,
+            "unguarded_missing_unionid_count": 0,
+            "missing_continuation_guard_count": 0,
+            "identity_dependent_effect_without_unionid_count": 0,
+            "missing_identity_count": 0,
+            "historical_pre_cutover_count": 48,
+        },
+    )
+
+    result = checks._questionnaire_submission_without_user_guard()
+
+    assert result.status == "ok"
+    assert result.evidence["missing_unionid_count"] == 3
+    assert result.evidence["guarded_missing_unionid_count"] == 3
+    assert result.evidence["unguarded_missing_unionid_count"] == 0
+
+
+def test_questionnaire_submission_guard_rejects_unguarded_missing_unionid(monkeypatch) -> None:
+    from aicrm_next.data_health import checks
+
+    _patch_health_db(
+        monkeypatch,
+        {
+            "missing_unionid_count": 2,
+            "guarded_missing_unionid_count": 1,
+            "unguarded_missing_unionid_count": 1,
+            "missing_continuation_guard_count": 1,
+            "identity_dependent_effect_without_unionid_count": 0,
+            "missing_identity_count": 0,
+            "historical_pre_cutover_count": 48,
+        },
+    )
+
+    result = checks._questionnaire_submission_without_user_guard()
+
+    assert result.status == "fail"
+    assert result.evidence["unguarded_missing_unionid_count"] == 1
+    assert result.evidence["missing_continuation_guard_count"] == 1
 
 
 def test_external_effect_backlog_probe_accepts_small_retryable_queue(monkeypatch) -> None:

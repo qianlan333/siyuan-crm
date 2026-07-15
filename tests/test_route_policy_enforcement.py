@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 from starlette.requests import Request
 
 from aicrm_next.admin_auth import route_policy as route_policy_module
-from aicrm_next.admin_auth.route_policy import RouteRateLimiter, _csrf_error
+from aicrm_next.admin_auth.route_policy import (
+    RouteRateLimiter,
+    _csrf_error,
+    _enforce_payment_identity_session,
+)
 from aicrm_next.admin_auth.service import CSRF_COOKIE, SESSION_COOKIE
 from aicrm_next.main import create_app
+from aicrm_next.public_product import h5_wechat_pay
+from aicrm_next.shared.route_policy import RoutePolicy
+from aicrm_next.shared.wechat_h5_session import WECHAT_PAYMENT_IDENTITY_COOKIE
 from tests.admin_auth_test_helpers import access_token_headers, install_access_token, install_admin_session
 from tests.sidebar_auth_test_helpers import install_sidebar_auth, install_sidebar_viewer_session
 
@@ -69,6 +77,98 @@ def test_mcp_and_identity_resolve_require_internal_service_token(enforced_client
     )
     assert resolved.status_code == 200
     assert resolved.json()["identity"]["unionid"] == "unionid_001"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    (
+        ("post", "/api/h5/wechat-pay/jsapi/orders"),
+        ("get", "/api/h5/wechat-pay/orders/WXP_NO_IDENTITY"),
+        ("post", "/api/h5/service-period-products/demo/wechat-pay/jsapi/orders"),
+        ("get", "/api/h5/coupons/available?target_ref=opaque"),
+        ("post", "/api/h5/coupons/demo/claim"),
+    ),
+)
+def test_payment_and_coupon_self_service_routes_require_payment_identity_before_endpoint(
+    enforced_client: TestClient,
+    method: str,
+    path: str,
+) -> None:
+    response = getattr(enforced_client, method)(path)
+
+    assert response.status_code == 401
+    assert response.json()["error"] == "payment_identity_required"
+
+
+def _payment_identity_request(cookie_value: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/api/h5/coupons/available",
+            "query_string": b"",
+            "headers": [
+                (
+                    b"cookie",
+                    f"{WECHAT_PAYMENT_IDENTITY_COOKIE}={cookie_value}".encode("ascii"),
+                )
+            ],
+            "client": ("127.0.0.1", 12345),
+        }
+    )
+
+
+def _payment_identity_policy() -> RoutePolicy:
+    return RoutePolicy(
+        path="/api/h5/coupons/available",
+        methods=("GET",),
+        route_name="api.h5_available_coupons",
+        audience="public_h5",
+        auth_scheme="payment_identity_session",
+        capability="coupon_available_read",
+        access_scope="self",
+        pii_level="financial",
+        csrf=False,
+        rate_limit="public_strict",
+        principal_types=("public",),
+    )
+
+
+def test_valid_payment_identity_installs_hashed_public_principal(monkeypatch) -> None:
+    monkeypatch.setenv("AICRM_NEXT_ENV", "test")
+    token = h5_wechat_pay._signed_blob(
+        {"openid": "openid-route-policy", "unionid": "unionid-route-policy"}
+    )
+    request = _payment_identity_request(token)
+
+    assert _enforce_payment_identity_session(request, _payment_identity_policy()) is None
+    assert request.state.payment_identity["openid"] == "openid-route-policy"
+    assert request.state.auth_context.principal_id.startswith("wechat-payment:")
+    assert "openid-route-policy" not in request.state.auth_context.principal_id
+    assert request.state.pii_actor_id == request.state.auth_context.principal_id
+
+
+@pytest.mark.parametrize("tamper", [False, True])
+def test_expired_or_tampered_payment_identity_is_rejected(monkeypatch, tamper: bool) -> None:
+    monkeypatch.setenv("AICRM_NEXT_ENV", "test")
+    now = int(datetime.now(timezone.utc).timestamp())
+    token = h5_wechat_pay._signed_blob(
+        {
+            "openid": "openid-invalid-route-policy",
+            "iat": now - (60 if tamper else 600),
+            "exp": now + 3600 if tamper else now - 1,
+        }
+    )
+    if tamper:
+        token = token[:-1] + ("0" if token[-1] != "0" else "1")
+
+    response = _enforce_payment_identity_session(
+        _payment_identity_request(token),
+        _payment_identity_policy(),
+    )
+
+    assert response is not None
+    assert response.status_code == 401
 
 
 def test_mcp_accepts_its_scoped_service_token_without_granting_identity_access(

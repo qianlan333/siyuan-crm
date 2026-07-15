@@ -517,12 +517,14 @@ tables:
     read_owners:
       - aicrm_next.admin_config.repository
       - aicrm_next.message_archive.repo
+      - aicrm_next.platform_foundation.push_center.capability_repository
       - aicrm_next.questionnaire.repo
       - aicrm_next.shared.runtime_settings
     replacement: ""
     drop_candidate: false
     runtime_entrypoints:
       - admin config app settings
+      - push capability runtime eligibility projection
       - runtime settings fallback
       - external effects configuration
     migration_source: 0084_id_dev_p1_baseline_tables
@@ -531,7 +533,7 @@ tables:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_repository_ownership_guard.py
       - tests/test_unionid_identity_refactor_schema.py::test_id_dev_p1_baseline_tables_exist_in_fresh_schema
-    notes: Runtime app configuration table. Secret values are masked at API/UI boundaries.
+    notes: Runtime app configuration table. Push consumers read capability gates through the platform push-center boundary; secret values are masked at API/UI boundaries.
 
   mcp_tool_settings:
     domain: admin_config
@@ -1454,6 +1456,27 @@ tables:
       - tests/test_material_library_table_boundary.py
     notes: Canonical attachment material table used by media library and send-content picker.
 
+  wecom_media_leases:
+    domain: media_library
+    lifecycle: canonical
+    write_owner: aicrm_next.media_library.wecom_lease
+    read_owners:
+      - aicrm_next.media_library.wecom_lease
+      - aicrm_next.automation_engine.group_ops.material_resolver
+      - aicrm_next.data_health.checks
+    replacement: none; canonical lifecycle state for temporary WeCom media ids
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - media library upload synchronization
+      - external effect media refresh worker
+      - final-dispatch material resolution
+    migration_source: 0115_wecom_media_leases
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_wecom_media_lease.py
+    notes: Stores per-corp and per-upload-kind temporary media leases; source bytes remain in canonical media library tables.
+
   questionnaires:
     domain: questionnaire
     lifecycle: canonical
@@ -1461,17 +1484,20 @@ tables:
     read_owners:
       - aicrm_next.questionnaire.repo
       - aicrm_next.questionnaire.api
+      - aicrm_next.questionnaire.operations
     replacement: none; canonical questionnaire definition table
     drop_candidate: false
     drop_after: ""
     runtime_entrypoints:
       - questionnaire admin API
+      - questionnaire operations admin API
       - questionnaire H5 read/submit
-    migration_source: migrations/baselines/0001_post_legacy.sql; list index added by 0106_critical_read_path_indexes
+      - questionnaire completion action resolution
+    migration_source: migrations/baselines/0001_post_legacy.sql; list index added by 0106_critical_read_path_indexes; nullable lead channel binding added by 0116_questionnaire_operations_config
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_repository_ownership_guard.py
-    notes: Canonical questionnaire metadata table; fresh schemas must include it for admin and H5 flows.
+    notes: Canonical questionnaire metadata and operations configuration table; lead_channel_id is nullable, indexed, and uses ON DELETE SET NULL without historical backfill.
 
   questionnaire_questions:
     domain: questionnaire
@@ -2391,17 +2417,19 @@ tables:
       - aicrm_next.channel_entry
     read_owners:
       - historical schema drift guard
+      - aicrm_next.automation_engine.channel_completion
     replacement: none; active production schema table registered during schema drift closeout
     drop_candidate: false
     drop_after: ""
     runtime_entrypoints:
       - existing production runtime
+      - questionnaire completion channel validation and QR projection
     migration_source: migrations/baselines/0001_post_legacy.sql
     pii_level: internal_contact
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_data_health_checks.py::test_schema_drift_guard_reports_manifest_and_live_schema_mismatches
-    notes: Registered from the formal production public schema so schema_drift_guard can fail closed on future unmanaged table changes.
+    notes: Canonical channel metadata; questionnaire reads it only through the channel application-layer completion projection.
 
   automation_channel_assignee:
     domain: channel_entry
@@ -2475,17 +2503,19 @@ tables:
       - aicrm_next.channel_entry
     read_owners:
       - historical schema drift guard
+      - aicrm_next.automation_engine.channel_completion
     replacement: none; active production schema table registered during schema drift closeout
     drop_candidate: false
     drop_after: ""
     runtime_entrypoints:
       - existing production runtime
+      - questionnaire completion QR asset projection
     migration_source: migrations/baselines/0001_post_legacy.sql
     pii_level: internal_contact
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_data_health_checks.py::test_schema_drift_guard_reports_manifest_and_live_schema_mismatches
-    notes: Registered from the formal production public schema so schema_drift_guard can fail closed on future unmanaged table changes.
+    notes: Canonical channel QR asset table; questionnaire stores only channel ID and resolves the active QR asset at response time.
 
   automation_channel_scene_alias:
     domain: channel_entry
@@ -3373,6 +3403,92 @@ tables:
       - tests/test_data_health_checks.py::test_schema_drift_guard_reports_manifest_and_live_schema_mismatches
     notes: Registered from the formal production public schema so schema_drift_guard can fail closed on future unmanaged table changes.
 
+  commerce_coupons:
+    domain: commerce
+    lifecycle: canonical
+    write_owner: aicrm_next.commerce.coupons
+    read_owners:
+      - aicrm_next.commerce.coupons
+      - aicrm_next.commerce.coupons.checker
+    replacement: none; canonical fixed-amount coupon campaign definition
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.commerce.coupons.admin_api
+      - aicrm_next.commerce.coupons.public_api
+    migration_source: 0114_commerce_coupons
+    pii_level: internal
+    guard_tests:
+      - tests/test_commerce_coupon_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+    notes: Stores coupon rules and aggregate issuance count; first successful claim freezes financial and eligibility fields in application/domain validation.
+
+  commerce_coupon_product_bindings:
+    domain: commerce
+    lifecycle: canonical
+    write_owner: aicrm_next.commerce.coupons
+    read_owners:
+      - aicrm_next.commerce.coupons
+      - aicrm_next.commerce.coupons.checker
+    replacement: none; canonical coupon to unified trade product binding
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.commerce.coupons.admin_api
+      - aicrm_next.commerce.coupons.public_api
+      - aicrm_next.public_product.h5_wechat_pay
+      - aicrm_next.service_period.api
+    migration_source: 0114_commerce_coupons
+    pii_level: none
+    guard_tests:
+      - tests/test_commerce_coupon_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+    notes: Both ordinary and service-period products bind through wechat_pay_products; no second service-period coupon engine exists.
+
+  commerce_coupon_claims:
+    domain: commerce
+    lifecycle: canonical
+    write_owner: aicrm_next.commerce.coupons
+    read_owners:
+      - aicrm_next.commerce.coupons
+      - aicrm_next.commerce.coupons.checker
+    replacement: none; canonical user coupon instance with immutable amount and validity snapshots
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.commerce.coupons.public_api
+      - aicrm_next.public_product.h5_wechat_pay
+      - aicrm_next.service_period.api
+      - aicrm_next.commerce.coupons.checker
+    migration_source: 0114_commerce_coupons
+    pii_level: direct_contact
+    guard_tests:
+      - tests/test_commerce_coupon_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+    notes: Unionid-keyed claim instance. Admin projections must expose only masked identity values.
+
+  commerce_coupon_redemptions:
+    domain: commerce
+    lifecycle: canonical
+    write_owner: aicrm_next.commerce.coupons
+    read_owners:
+      - aicrm_next.commerce.coupons
+      - aicrm_next.commerce.coupons.checker
+      - aicrm_next.commerce.fulfillment_reconciliation
+    replacement: none; canonical coupon reservation consumption and release ledger
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.public_product.h5_wechat_pay
+      - aicrm_next.commerce.order_reconciliation
+      - aicrm_next.commerce.coupons.checker
+    migration_source: 0114_commerce_coupons
+    pii_level: financial
+    guard_tests:
+      - tests/test_commerce_coupon_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+    notes: A claim and order can have at most one active reservation; released rows remain as reconciliation audit evidence.
+
   wechat_pay_order_events:
     domain: commerce
     lifecycle: audit
@@ -3522,8 +3638,12 @@ tables:
     domain: commerce
     lifecycle: canonical
     write_owner: aicrm_next.commerce.wechat_pay_service
+    write_owners:
+      - aicrm_next.commerce.coupons
+      - aicrm_next.commerce.wechat_pay_service
     read_owners:
       - aicrm_next.admin_read_model
+      - aicrm_next.commerce.coupons.checker
       - aicrm_next.customer_read_model
       - aicrm_next.external_push
       - aicrm_next.platform_foundation.internal_events
@@ -3539,7 +3659,7 @@ tables:
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_data_health_checks.py::test_schema_drift_guard_reports_manifest_and_live_schema_mismatches
-    notes: Registered from the formal production public schema so schema_drift_guard can fail closed on future unmanaged table changes.
+    notes: Registered from the formal production public schema so schema_drift_guard can fail closed on future unmanaged table changes. The coupon owner may only write additive coupon claim and immutable amount snapshot fields inside the payment order transaction.
 
   wechat_pay_product_page_slices:
     domain: commerce
@@ -3564,6 +3684,7 @@ tables:
     lifecycle: canonical
     write_owner: aicrm_next.commerce.wechat_pay_service
     read_owners:
+      - aicrm_next.commerce.coupons
       - aicrm_next.external_push
       - aicrm_next.service_period
       - aicrm_next.customer_read_model.sidebar_v2
@@ -3996,3 +4117,150 @@ tables:
   wechat_shop_tokens:
     <<: *legacy_production_table_defaults
     domain: legacy_commerce
+
+  operation_cycle_attempts:
+    domain: operation_cycles
+    lifecycle: canonical
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle report projection
+      - operation cycle admin read model
+    replacement: none; canonical execution-attempt lineage
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle run detail
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_metrics:
+    domain: operation_cycles
+    lifecycle: read_model
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle admin read model
+    replacement: none; canonical aggregate observation metrics
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle run detail
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_references:
+    domain: operation_cycles
+    lifecycle: read_model
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle admin evidence links
+    replacement: none; canonical hashed evidence references without attachments
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle run detail
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_runs:
+    domain: operation_cycles
+    lifecycle: canonical
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle admin read model
+    replacement: none; canonical latest run projection with independent status axes
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle strategy and run reads
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_snapshots:
+    domain: operation_cycles
+    lifecycle: event
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle projection rebuild
+      - operation cycle audit
+    replacement: none; immutable versioned aggregate snapshot ledger
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle snapshot receipt read
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_operation_cycles_repository.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_stages:
+    domain: operation_cycles
+    lifecycle: canonical
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle admin read model
+    replacement: none; canonical per-attempt stage projection
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle run detail
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_strategies:
+    domain: operation_cycles
+    lifecycle: canonical
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle admin read model
+    replacement: none; canonical operation strategy registry
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle strategy reads
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py
+
+  operation_cycle_strategy_versions:
+    domain: operation_cycles
+    lifecycle: canonical
+    write_owner: aicrm_next.operation_cycles
+    read_owners:
+      - operation cycle admin read model
+    replacement: none; canonical versioned strategy definition
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - operation cycle snapshot ingestion
+      - operation cycle strategy detail
+    migration_source: 0113_operation_cycles
+    pii_level: none
+    guard_tests:
+      - tests/test_operation_cycles_migration.py
+      - tests/test_data_table_lifecycle_guard.py

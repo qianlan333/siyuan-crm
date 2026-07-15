@@ -318,6 +318,9 @@ def test_h5_order_status_closes_expired_pending_order_before_return(monkeypatch)
         def commit(self):
             calls.append({"commit": True})
 
+        def rollback(self):
+            calls.append({"rollback": True})
+
         def execute(self, query, params=()):
             if "SELECT * FROM wechat_pay_orders" in query:
                 return Cursor(
@@ -328,6 +331,12 @@ def test_h5_order_status_closes_expired_pending_order_before_return(monkeypatch)
                         "product_name": "课程商品样例",
                         "amount_total": 9900,
                         "currency": "CNY",
+                        "unionid": "union-expired-owner",
+                        "coupon_snapshot_json": {
+                            "claim_no": "CLM_INTERNAL_SECRET",
+                            "coupon_name": "测试券",
+                            "discount_amount_total": 100,
+                        },
                         "status": "closed",
                         "trade_state": "CLOSED",
                         "refund_status": "",
@@ -346,13 +355,96 @@ def test_h5_order_status_closes_expired_pending_order_before_return(monkeypatch)
     monkeypatch.setattr(h5_wechat_pay, "production_data_ready", lambda: True)
     monkeypatch.setattr(h5_wechat_pay, "_connect", lambda: FakeConn())
     monkeypatch.setattr(h5_wechat_pay, "close_expired_wechat_pay_orders", fake_close)
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "_identity_from_request",
+        lambda _request: {"openid": "openid-expired-owner", "unionid": "union-expired-owner"},
+    )
+    monkeypatch.setattr(h5_wechat_pay, "_resolve_payment_identity", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(h5_wechat_pay, "resolved_unionid", lambda _result: "union-expired-owner")
 
-    response = h5_wechat_pay.order_status_response("WXP_EXPIRED", type("Request", (), {"query_params": {}})())
+    response = h5_wechat_pay.order_status_response(
+        "WXP_EXPIRED",
+        type("Request", (), {"query_params": {}, "cookies": {}})(),
+    )
     payload = response.body.decode("utf-8")
 
     assert calls[0] == {"out_trade_no": "WXP_EXPIRED", "limit": 1}
     assert any(call.get("commit") for call in calls)
     assert '"status":"closed"' in payload
+    assert "CLM_INTERNAL_SECRET" not in payload
+    assert '"coupon_name":"测试券"' in payload
+
+
+def test_h5_order_status_requires_signed_payment_identity_before_db_access(monkeypatch) -> None:
+    from aicrm_next.public_product import h5_wechat_pay
+
+    monkeypatch.setattr(h5_wechat_pay, "production_data_ready", lambda: True)
+    monkeypatch.setattr(h5_wechat_pay, "_identity_from_request", lambda _request: {})
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "_connect",
+        lambda: (_ for _ in ()).throw(AssertionError("database must not be queried anonymously")),
+    )
+
+    response = h5_wechat_pay.order_status_response(
+        "WXP_PRIVATE_ORDER",
+        type("Request", (), {"query_params": {}, "cookies": {}})(),
+    )
+
+    assert response.status_code == 401
+    assert b"payment_identity_required" in response.body
+
+
+def test_h5_order_status_hides_orders_owned_by_another_unionid(monkeypatch) -> None:
+    from aicrm_next.public_product import h5_wechat_pay
+
+    calls: list[str] = []
+
+    class Cursor:
+        def fetchone(self):
+            return {
+                "id": 9,
+                "out_trade_no": "WXP_OTHER_OWNER",
+                "unionid": "union-other-owner",
+            }
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def execute(self, _query, _params=()):
+            return Cursor()
+
+        def rollback(self):
+            calls.append("rollback")
+
+    monkeypatch.setattr(h5_wechat_pay, "production_data_ready", lambda: True)
+    monkeypatch.setattr(h5_wechat_pay, "_connect", lambda: FakeConn())
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "_identity_from_request",
+        lambda _request: {"openid": "openid-requester", "unionid": "union-requester"},
+    )
+    monkeypatch.setattr(h5_wechat_pay, "_resolve_payment_identity", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(h5_wechat_pay, "resolved_unionid", lambda _result: "union-requester")
+    monkeypatch.setattr(
+        h5_wechat_pay,
+        "close_expired_wechat_pay_orders",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("foreign order must not be mutated")),
+    )
+
+    response = h5_wechat_pay.order_status_response(
+        "WXP_OTHER_OWNER",
+        type("Request", (), {"query_params": {"refresh": "1"}, "cookies": {}})(),
+    )
+
+    assert response.status_code == 404
+    assert b"order_not_found" in response.body
+    assert calls == ["rollback"]
 
 
 def test_legacy_h5_wechat_pay_paths_are_retired_under_next(next_client):

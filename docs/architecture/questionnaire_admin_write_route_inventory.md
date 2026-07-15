@@ -1,8 +1,8 @@
 # Questionnaire Admin Write Route Inventory
 
-Date: 2026-06-02
+Date: 2026-07-14
 
-Scope: backend questionnaire admin write replacement only. Public H5 submit, OAuth/auth, real WeCom tag mutation, external push execution, payment/storage/OpenClaw/automation runtime, and any real external side effect are out of scope.
+Scope: backend questionnaire admin writes, including dimension-scoped operations configuration and controlled synthetic test-push planning. Public H5 submit, OAuth/auth, real WeCom tag mutation, External Effect worker execution, payment/storage/OpenClaw/automation runtime, and any request-time real external side effect are out of scope.
 
 ## Existing Routes Read From Code
 
@@ -23,6 +23,9 @@ Scope: backend questionnaire admin write replacement only. Public H5 submit, OAu
 | `/api/admin/questionnaires/{questionnaire_id}/duplicate` | `POST` | `questionnaire.admin.duplicate` | Creates a disabled local copy in the write model. |
 | `/api/admin/questionnaires/{questionnaire_id}/publish` | `POST` | `questionnaire.admin.publish` | Enables the questionnaire and creates a guarded public projection SideEffectPlan only. |
 | `/api/admin/questionnaires/{questionnaire_id}/export/preview` | `POST` | `questionnaire.admin.export_preview` | Returns masked sample rows and a guarded export SideEffectPlan only. |
+| `/api/admin/questionnaires/{questionnaire_id}/operations/completion` | `PUT` | operations completion service | Saves only the completion dimension. `lead_qr` stores a validated channel ID; `redirect` stores a normalized H5 or dynamic URL Link target. Modes are mutually exclusive. |
+| `/api/admin/questionnaires/{questionnaire_id}/operations/external-push` | `PUT` | operations external-push service | Saves only the external-push dimension using the existing questionnaire webhook schema and URL validation. |
+| `/api/admin/questionnaires/{questionnaire_id}/operations/external-push/test` | `POST` | operations synthetic test planner | Generates a unique synthetic correlation ID and queues the existing questionnaire webhook External Effect. No real user data is included and the API never dispatches the webhook. |
 
 ## Command Contract
 
@@ -42,6 +45,10 @@ When production data is ready, create/update/duplicate/publish/enable/disable/de
 
 The active Next handler owns the route surface in both production and fixture/local mode. No production fallback remains for admin persistence commands; duplicate/publish/export preview/export download remain guarded Next commands with `legacy rollback removed`.
 
+Operations writes use repository methods scoped to one configuration dimension, so completion and external-push saves cannot overwrite each other. Content updates preserve omitted operations fields, while duplicate creates a disabled copy with channel, redirect, and webhook settings reset. Channel validity is rechecked server-side through the channel application boundary. Invalid fields return `422`, missing resources return `404`, disabled/read-only test capability returns `409`, and unavailable production sources return `503`.
+
+The test-push route calls `ExternalEffectService.plan_effect` with `WEBHOOK_QUESTIONNAIRE_SUBMISSION_PUSH` and synthetic questionnaire data only. It does not call the worker or provider transport, and a rejected capability check creates no queue record.
+
 ## Deletion Closeout
 
 Admin write routes are tracked as `runtime_owner=next_command`, `legacy_fallback_allowed=false`, `delete_status=deletion_locked`, and `replacement_status=locked`. Responses must include `source_status=next_command`, `fallback_used=false`, and no `X-AICRM-Compatibility-Facade`.
@@ -54,4 +61,4 @@ No production_compat admin write wildcard is registered; fallback stays inside t
 | --- | --- |
 | `/api/h5/questionnaires*` | Out of scope; no deletion lock added by this group. |
 | `/api/h5/wechat/oauth*` | Out of scope; no deletion lock added by this group. |
-| WeCom tags / external push / automation runtime / storage real execution | Blocked behind SideEffectPlan only; no real external call executes. |
+| WeCom tags / External Effect worker / automation runtime / storage real execution | Blocked behind the existing asynchronous boundary; no real external call executes in an admin request. |

@@ -55,6 +55,14 @@ questionnaire, and message source timestamps with the most recent managed
 customer read-model refresh. Evidence contains only aggregate lag minutes and
 never raw identity values or payloads.
 
+`questionnaire_submission_without_user_guard` treats a missing `unionid` as a
+release blocker only when the submission is outside the durable
+`questionnaire.submitted` outbox/event lineage or when an identity-dependent
+Webhook/tag External Effect already exists. A submission that remains inside
+that durable lineage with no such effect is an explicit quarantine state: it is
+reported in aggregate evidence but does not block a release. A non-empty
+`unionid` that is absent from `crm_user_identity` remains a red condition.
+
 Questionnaire identity and continuation health uses the production auto-execute
 cutover (`2026-07-13 16:20:00 UTC`). Shadow-only rows before that instant stay in
 historical evidence; only submissions accepted after the worker became the runtime

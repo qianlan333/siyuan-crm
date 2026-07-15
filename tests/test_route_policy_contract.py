@@ -30,9 +30,10 @@ def test_route_policy_inventory_covers_every_runtime_business_route() -> None:
     index = RoutePolicyIndex.from_manifest(MANIFEST)
     inventory = collect_route_inventory(app)
 
-    # The AI Assistant review-plan command adds one protected business route;
-    # static mounts are counted separately by the router-registry contract.
-    assert len(index) == len(inventory) == 675
+    # Operation Cycles contributes eight routes, Coupon V1 contributes twenty,
+    # and questionnaire operations contributes five; static mounts are counted
+    # separately by the router-registry contract.
+    assert len(index) == len(inventory) == 708
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in FASTAPI_BUILTIN_ROUTE_PATHS:
             continue
@@ -95,6 +96,27 @@ def test_known_unsafe_routes_have_explicit_deny_by_default_policies() -> None:
             "requires_auth": True,
         },
     )
+    for path, method, capability in (
+        ("/api/h5/wechat-pay/jsapi/orders", "POST", "payment_order_create"),
+        ("/api/h5/wechat-pay/orders/{out_trade_no}", "GET", "payment_order_read"),
+        (
+            "/api/h5/service-period-products/{link_slug}/wechat-pay/jsapi/orders",
+            "POST",
+            "payment_order_create",
+        ),
+        ("/api/h5/coupons/available", "GET", "coupon_available_read"),
+        ("/api/h5/coupons/{public_slug}/claim", "POST", "coupon_claim"),
+    ):
+        _assert_policy(
+            path,
+            method,
+            {
+                "auth_scheme": "payment_identity_session",
+                "capability": capability,
+                "access_scope": "self",
+                "requires_auth": True,
+            },
+        )
 
 
 def test_human_session_writes_always_require_csrf() -> None:

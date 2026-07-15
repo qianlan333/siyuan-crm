@@ -299,7 +299,7 @@ def _string_list(value: Any) -> list[str]:
     return result
 
 
-def _external_push_config(payload: dict[str, Any]) -> dict[str, Any]:
+def normalize_external_push_config(payload: dict[str, Any]) -> dict[str, Any]:
     config = dict(payload.get("external_push_config") or {})
     root_to_config = {
         "external_push_enabled": "enabled",
@@ -401,7 +401,7 @@ def _normalize_upsert_payload(payload: dict[str, Any]) -> dict[str, Any]:
     answer_display_mode = _normalized_text(raw.get("answer_display_mode") or "all_in_one")
     if answer_display_mode not in QUESTIONNAIRE_ANSWER_DISPLAY_MODES:
         raise QuestionnaireAdminWriteInputError("answer_display_mode must be all_in_one or one_by_one")
-    external_config = _external_push_config(raw)
+    external_config = normalize_external_push_config(raw)
     is_disabled = _normalized_bool(raw.get("is_disabled")) if "is_disabled" in raw else not _normalized_bool(raw.get("enabled", True))
     assessment_config = raw.get("assessment_config")
     if assessment_config is None:
@@ -467,8 +467,26 @@ def _handle_update(command: Command) -> dict[str, Any]:
     existing = admin_repo.get_questionnaire(questionnaire_id)
     if not existing:
         raise NotFoundError("questionnaire not found")
+    requested_payload = dict(command.payload.get("payload") or {})
+    completion_keys = {"completion_target", "completion_target_json", "redirect_url"}
+    if not completion_keys.intersection(requested_payload):
+        requested_payload["completion_target"] = dict(existing.get("completion_target_json") or existing.get("completion_target") or {})
+        requested_payload["redirect_url"] = str(existing.get("redirect_url") or "")
+    external_keys = {
+        "external_push_config",
+        "external_push_enabled",
+        "external_push_url",
+        "external_push_type",
+        "external_push_expires_at_ts",
+        "external_push_day",
+        "external_push_frequency",
+        "external_push_remark",
+        "external_push_custom_params",
+    }
+    if not external_keys.intersection(requested_payload):
+        requested_payload["external_push_config"] = dict(existing.get("external_push_config") or {})
     payload = QuestionnaireLifecyclePolicy().validate_upsert(
-        dict(command.payload.get("payload") or {}),
+        requested_payload,
         existing_has_questions=bool(existing.get("questions")),
     )
     if not str(payload.get("title") or "").strip():
@@ -494,6 +512,40 @@ def _handle_duplicate(command: Command) -> dict[str, Any]:
     payload["title"] = str(requested.get("title") or f"{source.get('title') or source.get('name')} Copy").strip()
     payload["slug"] = str(requested.get("slug") or f"{source.get('slug')}-copy-{command.command_id[:6]}").strip()
     payload["enabled"] = False
+    payload["is_disabled"] = True
+    payload["lead_channel_id"] = None
+    payload["redirect_url"] = ""
+    payload["completion_target"] = {
+        "enabled": False,
+        "target_type": "h5",
+        "open_strategy": "h5_redirect",
+        "h5_url": "",
+        "fallback_url": "",
+        "mini_program": {"appid": "", "username": "", "path": "", "query": "", "env_version": "release"},
+        "url_link": {"enabled": False, "url": "", "source_url": "", "response_url_key": "url_link", "expire_type": 0, "expire_interval": 30},
+    }
+    payload["completion_target_json"] = dict(payload["completion_target"])
+    payload["external_push_config"] = {
+        "enabled": False,
+        "webhook_url": "",
+        "type": "",
+        "expires_at_ts": None,
+        "day": None,
+        "frequency": None,
+        "remark": "",
+        "custom_params": [],
+    }
+    for key, value in {
+        "external_push_enabled": False,
+        "external_push_url": "",
+        "external_push_type": "",
+        "external_push_expires_at_ts": None,
+        "external_push_day": None,
+        "external_push_frequency": None,
+        "external_push_remark": "",
+        "external_push_custom_params": [],
+    }.items():
+        payload[key] = value
     item = _repo().save_questionnaire(payload)
     response = admin_detail_projection(item)
     response.update(

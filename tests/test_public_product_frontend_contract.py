@@ -448,6 +448,70 @@ def test_public_h5_order_payload_hides_lead_qr_before_paid_or_when_redirecting()
     assert "lead_qr" not in redirecting
 
 
+def test_public_lead_qr_resolver_reuses_configured_channel_asset(monkeypatch) -> None:
+    from aicrm_next.public_product import h5_wechat_pay
+
+    queries: list[tuple[str, tuple]] = []
+
+    class Cursor:
+        def fetchone(self):
+            return {
+                "channel_id": 7,
+                "channel_name": "报名后企微",
+                "qr_url": "https://example.com/current-channel.png",
+                "status": "active",
+            }
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, query, params=()):
+            queries.append((query, params))
+            return Cursor()
+
+    monkeypatch.setattr(h5_wechat_pay, "production_data_ready", lambda: True)
+    monkeypatch.setattr(h5_wechat_pay, "_connect", lambda: FakeConn())
+
+    lead_qr = h5_wechat_pay.resolve_product_lead_qr(
+        {
+            "product_code": "sp_public_lead_qr",
+            "lead_channel_id": 7,
+            "completion_redirect_enabled": False,
+            "completion_target": {},
+        }
+    )
+
+    assert lead_qr == {
+        "channel_id": 7,
+        "channel_name": "报名后企微",
+        "qr_url": "https://example.com/current-channel.png",
+        "status": "active",
+    }
+    assert len(queries) == 1
+    assert "FROM automation_channel c" in queries[0][0]
+    assert queries[0][1] == (7,)
+
+
+def test_public_lead_qr_resolver_skips_redirect_products(monkeypatch) -> None:
+    from aicrm_next.public_product import h5_wechat_pay
+
+    monkeypatch.setattr(h5_wechat_pay, "production_data_ready", lambda: True)
+    monkeypatch.setattr(h5_wechat_pay, "_connect", lambda: (_ for _ in ()).throw(AssertionError("database should not be read")))
+
+    assert h5_wechat_pay.resolve_product_lead_qr(
+        {
+            "product_code": "sp_redirect",
+            "lead_channel_id": 7,
+            "completion_redirect_enabled": True,
+            "completion_redirect_url": "/welcome",
+        }
+    ) == {}
+
+
 def test_public_pay_landing_reopens_existing_paid_order(monkeypatch) -> None:
     from aicrm_next.public_product import h5_wechat_pay
 

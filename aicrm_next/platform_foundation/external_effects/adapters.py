@@ -33,6 +33,7 @@ from .models import (
     WEBHOOK_GENERIC_PUSH,
     WECOM_CONTACT_TAG_MARK,
     WECOM_CONTACT_TAG_UNMARK,
+    WECOM_MEDIA_UPLOAD,
     WECOM_MESSAGE_GROUP_SEND,
     WECOM_MESSAGE_PRIVATE_SEND,
     WECOM_WELCOME_MESSAGE_SEND,
@@ -59,6 +60,7 @@ WECOM_EFFECT_TYPES = (
     WECOM_MESSAGE_PRIVATE_SEND,
     WECOM_MESSAGE_GROUP_SEND,
     WECOM_PROFILE_UPDATE,
+    WECOM_MEDIA_UPLOAD,
 )
 
 
@@ -712,8 +714,9 @@ class WeComGroupMessageExternalEffectAdapter:
 
 
 class WeComWelcomeMessageAdapter:
-    def __init__(self, adapter_factory=None) -> None:
+    def __init__(self, adapter_factory=None, material_resolver=None) -> None:
         self._adapter_factory = adapter_factory
+        self._material_resolver = material_resolver
 
     def dispatch(self, job: ExternalEffectJob) -> ExternalEffectDispatchResult:
         payload = dict(job.payload_json or {})
@@ -735,8 +738,8 @@ class WeComWelcomeMessageAdapter:
                 real_external_call_executed=False,
             )
 
-        wecom_payload = self._wecom_payload(payload)
         try:
+            wecom_payload = self._wecom_payload(payload)
             adapter = self._build_adapter()
             result = adapter.send_welcome_msg(wecom_payload)
         except Exception as exc:
@@ -795,8 +798,14 @@ class WeComWelcomeMessageAdapter:
         result: dict[str, Any] = {"welcome_code": str(payload.get("welcome_code") or "").strip()}
         if isinstance(payload.get("text"), dict):
             result["text"] = dict(payload.get("text") or {})
-        if isinstance(payload.get("attachments"), list) and payload.get("attachments"):
-            result["attachments"] = list(payload.get("attachments") or [])
+        attachments = list(payload.get("attachments") or []) if isinstance(payload.get("attachments"), list) else []
+        if attachments:
+            unresolved = any(isinstance(item, dict) and item.get("material_id") not in (None, "") for item in attachments)
+            if unresolved:
+                if self._material_resolver is None:
+                    raise RuntimeError("wecom_welcome_material_adapter_composition_missing")
+                attachments = list(self._material_resolver(attachments) or [])
+            result["attachments"] = attachments
         return result
 
     def _build_adapter(self):

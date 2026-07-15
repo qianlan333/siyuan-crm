@@ -38,6 +38,7 @@ HIGH_RISK_ALIAS_CONSUMERS = (
 
 CANONICAL_WRITE_OWNERS = {
     Path("aicrm_next/channel_entry/identity_bridge_repo.py"),
+    Path("aicrm_next/identity_contact/oauth_projection_repo.py"),
     Path("aicrm_next/identity_contact/payment_projection.py"),
     Path("aicrm_next/identity_contact/repo.py"),
     Path("aicrm_next/public_product/h5_wechat_pay.py"),
@@ -163,9 +164,13 @@ def check() -> list[str]:
             errors.append(f"payment identity fail-closed boundary missing token: {token}")
     resolver_position = payment_create_source.find("_resolve_payment_identity(conn, identity, for_update=True)")
     insert_position = payment_create_source.find("_insert_order(")
-    wechat_position = payment_create_source.find("client = WeChatPayClient(config)")
-    if min(resolver_position, insert_position, wechat_position) < 0 or not (resolver_position < wechat_position < insert_position):
-        errors.append("payment identity resolution must happen before order insert and WeChat Pay call")
+    provider_call_position = payment_create_source.find("client.create_jsapi_transaction(transaction_payload)")
+    if min(resolver_position, insert_position, provider_call_position) < 0 or not (
+        resolver_position < insert_position < provider_call_position
+    ):
+        errors.append(
+            "payment identity resolution must happen before order insert, and the local order must exist before WeChat Pay call"
+        )
 
     bridge_service = _read(Path("aicrm_next/channel_entry/identity_bridge_service.py"))
     if "corp_id_mismatch" not in bridge_service or "_single_corp_id" not in bridge_service:

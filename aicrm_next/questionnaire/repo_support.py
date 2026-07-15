@@ -38,6 +38,19 @@ class QuestionnaireRepository(Protocol):
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]: ...
     def save_questionnaire(self, payload: dict[str, Any], questionnaire_id: int | None = None) -> dict[str, Any]: ...
+    def save_completion_operations(
+        self,
+        questionnaire_id: int,
+        *,
+        lead_channel_id: int | None,
+        completion_target_json: dict[str, Any],
+        redirect_url: str,
+    ) -> dict[str, Any] | None: ...
+    def save_external_push_operations(
+        self,
+        questionnaire_id: int,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None: ...
     def set_enabled(self, questionnaire_id: int, enabled: bool) -> dict[str, Any] | None: ...
     def delete_questionnaire(self, questionnaire_id: int) -> bool: ...
     def create_submission(

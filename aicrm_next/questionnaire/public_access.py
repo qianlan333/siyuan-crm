@@ -12,6 +12,7 @@ from .oauth import (
     questionnaire_h5_identity_from_cookies,
     resolve_adapter_mode,
 )
+from .operations import resolve_questionnaire_completion_action
 from .repo import QuestionnaireRepository, build_questionnaire_repository
 
 
@@ -135,6 +136,11 @@ class QuestionnaireSubmissionStatusService:
         normalized_slug = _text(item.get("slug")) or _text(slug)
         redirect_url = _text(item.get("redirect_url"))
         questionnaire = normalize_questionnaire(item)
+        completion_projection = (
+            resolve_questionnaire_completion_action(item)
+            if submission
+            else {"completion_action": {"type": "default", "redirect_url": ""}, "lead_qr": None}
+        )
         return {
             "ok": True,
             "submitted": bool(submission),
@@ -146,6 +152,8 @@ class QuestionnaireSubmissionStatusService:
             "completion_target": questionnaire["completion_target"],
             "completion_target_enabled": questionnaire["completion_target_enabled"],
             "completion_target_type": questionnaire["completion_target_type"],
+            "completion_action": completion_projection["completion_action"],
+            "lead_qr": completion_projection["lead_qr"],
             "submitted_url": f"/s/{normalized_slug}/submitted",
             **_read_meta(self._repo),
         }

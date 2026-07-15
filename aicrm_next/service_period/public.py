@@ -4,7 +4,14 @@ from html import escape
 import json
 from typing import Any
 
-from aicrm_next.public_product.service import _render_detail_media, render_pay_landing, route_headers
+from aicrm_next.public_product.service import (
+    _render_detail_media,
+    lead_qr_modal_controller_script,
+    lead_qr_modal_styles,
+    render_lead_qr_modal,
+    render_pay_landing,
+    route_headers,
+)
 from aicrm_next.shared.signed_context import product_context_fragment_bootstrap_script
 
 
@@ -25,6 +32,8 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
     price_yuan = escape(_price_yuan(product))
     entitlement = state.get("entitlement") if isinstance(state.get("entitlement"), dict) else {}
     status = str(entitlement.get("status") or "none")
+    lead_qr = state.get("lead_qr") if isinstance(state.get("lead_qr"), dict) else {}
+    show_wecom_action = status == "active" and bool(str(lead_qr.get("qr_url") or "").strip())
     cta_text = escape(str(state.get("cta_text") or ("立即报名" if status == "none" else "")) or "立即报名")
     unavailable = state.get("available") is False or status == "unavailable"
     if unavailable:
@@ -63,6 +72,7 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
         "ok": state.get("ok"),
         "available": state.get("available"),
         "entitlement": entitlement,
+        "lead_qr": lead_qr if show_wecom_action else {},
         "cta_text": state.get("cta_text"),
         "checkout_url": state.get("checkout_url"),
     }
@@ -70,6 +80,7 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
     media = _render_detail_media(product)
     tag_hidden = " hidden" if not tag_text else ""
     hero_text_hidden = " hidden" if not hero_text else ""
+    wecom_action_hidden = "" if show_wecom_action else " hidden"
     return f"""<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -161,6 +172,28 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
       color: #8f959e;
       font-size: 13px;
     }}
+    .service-period-wecom-action {{
+      display: flex;
+      justify-content: flex-end;
+      margin: -2px 14px 12px;
+    }}
+    .service-period-wecom-action[hidden] {{ display: none; }}
+    .service-period-wecom-button {{
+      min-height: 30px;
+      padding: 5px 11px;
+      border: 1px solid #b9cdfc;
+      border-radius: 999px;
+      background: #f6f9ff;
+      color: #285fcf;
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1;
+      cursor: pointer;
+    }}
+    .service-period-wecom-button:active {{
+      background: #eaf1ff;
+      transform: translateY(1px);
+    }}
     .service-period-bar {{
       position: fixed;
       left: 50%;
@@ -215,6 +248,7 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
       object-fit: cover;
       background: #fff;
     }}
+    {lead_qr_modal_styles()}
   </style>
 </head>
 <body>
@@ -227,6 +261,9 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
     <section class="service-period-card" id="servicePeriodStateCard">
 {card_html}
     </section>
+    <div class="service-period-wecom-action" id="servicePeriodWecomAction"{wecom_action_hidden}>
+      <button class="service-period-wecom-button" id="servicePeriodAddWecomButton" type="button">添加企微账号</button>
+    </div>
     {media}
   </main>
   <nav class="service-period-bar" aria-label="服务期商品操作">
@@ -236,6 +273,8 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
     </div>
     <button class="service-period-button" id="servicePeriodPayButton" type="button">{cta_text}</button>
   </nav>
+  {render_lead_qr_modal()}
+  {lead_qr_modal_controller_script()}
   <script>
     (function () {{
       const initialState = {state_json};
@@ -246,6 +285,14 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
       const heroText = document.getElementById("servicePeriodHeroText");
       const barMeta = document.getElementById("servicePeriodBarMeta");
       const button = document.getElementById("servicePeriodPayButton");
+      const wecomAction = document.getElementById("servicePeriodWecomAction");
+      const addWecomButton = document.getElementById("servicePeriodAddWecomButton");
+      const leadQrController = window.createLeadQrModalController ? window.createLeadQrModalController({{
+        modal: document.getElementById("leadQrModal"),
+        image: document.getElementById("leadQrImage"),
+        closeButton: document.getElementById("closeQrButton")
+      }}) : null;
+      let activeLeadQr = {{}};
       function esc(value) {{
         return String(value == null ? "" : value).replace(/[&<>'"]/g, function (c) {{
           return {{"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}}[c];
@@ -261,6 +308,16 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
         tag.hidden = !hasTag;
         heroText.textContent = description || "";
         heroText.hidden = !hasDescription;
+      }}
+      function syncWecomAction(state, status) {{
+        const leadQr = state && state.lead_qr && state.lead_qr.qr_url ? state.lead_qr : {{}};
+        activeLeadQr = status === "active" ? leadQr : {{}};
+        if (wecomAction) {{
+          wecomAction.hidden = !(status === "active" && activeLeadQr.qr_url);
+        }}
+        if (!activeLeadQr.qr_url && leadQrController) {{
+          leadQrController.clear();
+        }}
       }}
       function renderNone() {{
         setHeroDecor("", "");
@@ -294,6 +351,7 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
         if (!state || state.ok === false) return;
         const entitlement = state.entitlement || {{status: "none"}};
         const status = entitlement.status || "none";
+        syncWecomAction(state, status);
         button.textContent = state.cta_text || button.textContent || "立即报名";
         if (state.available === false || status === "unavailable") {{
           renderUnavailable();
@@ -310,6 +368,11 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
           if (!state.checkout_url) return;
           window.location.href = state.checkout_url;
         }};
+      }}
+      if (addWecomButton) {{
+        addWecomButton.addEventListener("click", function () {{
+          if (activeLeadQr.qr_url && leadQrController) leadQrController.open(activeLeadQr.qr_url);
+        }});
       }}
       applyState(initialState);
       fetch(window.location.pathname.replace(/^\\/s\\//, "/api/h5/service-period-products/"))

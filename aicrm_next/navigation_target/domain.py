@@ -224,3 +224,34 @@ def completion_action_for_target(target: dict[str, Any], *, legacy_redirect_url:
         return {"type": "redirect", "redirect_url": url} if url else {"type": "default", "redirect_url": ""}
     url = safe_completion_url(normalized.get("h5_url"))
     return {"type": "redirect", "redirect_url": url} if url else {"type": "default", "redirect_url": ""}
+
+
+def completion_action_with_lead_qr(
+    target: dict[str, Any],
+    *,
+    lead_qr: dict[str, Any] | None = None,
+    legacy_redirect_url: Any = "",
+    legacy_enabled: Any | None = None,
+) -> dict[str, Any]:
+    """Project one completion action while preserving legacy redirect precedence."""
+
+    direct_action = completion_action_for_target(
+        target,
+        legacy_redirect_url=legacy_redirect_url,
+        legacy_enabled=legacy_enabled,
+    )
+    if direct_action.get("type") != "default":
+        return direct_action
+    qr = dict(lead_qr or {})
+    qr_url = safe_completion_url(qr.get("qr_url"))
+    if qr_url:
+        return {
+            "type": "lead_qr",
+            "lead_qr": {
+                "channel_id": int(qr.get("channel_id") or 0),
+                "channel_name": _text(qr.get("channel_name")),
+                "qr_url": qr_url,
+            },
+            "redirect_url": "",
+        }
+    return direct_action

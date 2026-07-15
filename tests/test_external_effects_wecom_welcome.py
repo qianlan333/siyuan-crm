@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from aicrm_next.external_effect_composition import build_external_effect_adapter_registry
+from aicrm_next.external_effect_composition import (
+    _resolve_production_wecom_welcome_materials,
+    build_external_effect_adapter_registry,
+)
 from aicrm_next.platform_foundation.command_bus import CommandContext
 from aicrm_next.platform_foundation.external_effects import (
     ExternalEffectService,
@@ -36,8 +39,22 @@ def _context(trace_id: str = "trace-wecom-welcome") -> CommandContext:
     )
 
 
-def _plan_welcome_job(*, repo=None, key: str = "welcome-key", execution_mode: str = "execute") -> dict:
+def _plan_welcome_job(
+    *,
+    repo=None,
+    key: str = "welcome-key",
+    execution_mode: str = "execute",
+    attachments: list[dict] | None = None,
+) -> dict:
     service = ExternalEffectService(repo)
+    payload = {
+        "welcome_code": "welcome-code",
+        "external_userid": "wm_welcome_target",
+        "follow_user_userid": "HuangYouCan",
+        "text": {"content": "欢迎加入"},
+    }
+    if attachments:
+        payload["attachments"] = attachments
     return service.plan_effect(
         effect_type=WECOM_WELCOME_MESSAGE_SEND,
         adapter_name="wecom_welcome_message",
@@ -49,12 +66,7 @@ def _plan_welcome_job(*, repo=None, key: str = "welcome-key", execution_mode: st
         source_module="channel_entry.application",
         source_event_id="evt-1",
         idempotency_key=key,
-        payload={
-            "welcome_code": "welcome-code",
-            "external_userid": "wm_welcome_target",
-            "follow_user_userid": "HuangYouCan",
-            "text": {"content": "欢迎加入"},
-        },
+        payload=payload,
         payload_summary={
             "welcome_code_present": True,
             "external_userid": "wm_welcome_target",
@@ -140,6 +152,84 @@ def test_wecom_welcome_executes_through_external_effect_worker(monkeypatch) -> N
     assert fake.payloads == [{"welcome_code": "welcome-code", "text": {"content": "欢迎加入"}}]
     assert result["attempt"]["request_summary_json"]["welcome_code_present"] is True
     assert "welcome-code" not in str(result["attempt"]["request_summary_json"])
+
+
+def test_wecom_welcome_resolves_library_materials_before_provider_call(monkeypatch) -> None:
+    reset_external_effect_fixture_state()
+    monkeypatch.setenv("AICRM_WECOM_EXECUTION_MODE", "execute")
+    monkeypatch.setenv("AICRM_WECOM_ENABLED_EFFECT_TYPES", WECOM_WELCOME_MESSAGE_SEND)
+    monkeypatch.setattr("aicrm_next.platform_foundation.external_effects.worker._capability_gate_error", lambda job: "")
+    repo = build_external_effect_repository()
+    job = _plan_welcome_job(
+        repo=repo,
+        key="welcome-material-resolve",
+        attachments=[{"msgtype": "image", "material_id": 110}],
+    )
+    fake = _FakeWelcomeAdapter()
+    resolver_calls: list[list[dict]] = []
+
+    def resolve_materials(attachments: list[dict]) -> list[dict]:
+        resolver_calls.append(attachments)
+        return [{"msgtype": "image", "image": {"media_id": "resolved-image-media"}}]
+
+    result = ExternalEffectWorker(
+        repo,
+        adapter_registry=_registry(
+            WeComWelcomeMessageAdapter(
+                adapter_factory=lambda: fake,
+                material_resolver=resolve_materials,
+            )
+        ),
+    ).dispatch_one(job["id"])
+
+    assert result["job"]["status"] == "succeeded"
+    assert resolver_calls == [[{"msgtype": "image", "material_id": 110}]]
+    assert fake.payloads[0]["attachments"] == [
+        {"msgtype": "image", "image": {"media_id": "resolved-image-media"}}
+    ]
+
+
+def test_production_welcome_material_translation_uses_wecom_welcome_shapes() -> None:
+    class Resolver:
+        def resolve_content_package_materials(self, package: dict) -> tuple[list[dict], list[str]]:
+            if package.get("image_library_ids"):
+                return [], ["image-media"]
+            if package.get("attachment_library_ids"):
+                return [{"msgtype": "file", "file": {"media_id": "file-media"}}], []
+            return [
+                {
+                    "msgtype": "miniprogram",
+                    "miniprogram": {
+                        "appid": "wx-app",
+                        "page": "pages/index",
+                        "title": "欢迎卡片",
+                        "pic_media_id": "mini-media",
+                    },
+                }
+            ], []
+
+    resolved = _resolve_production_wecom_welcome_materials(
+        [
+            {"msgtype": "image", "material_id": 110},
+            {"msgtype": "file", "material_id": 120},
+            {"msgtype": "miniprogram", "material_id": 130},
+        ],
+        resolver=Resolver(),
+    )
+
+    assert resolved == [
+        {"msgtype": "image", "image": {"media_id": "image-media"}},
+        {"msgtype": "file", "file": {"media_id": "file-media"}},
+        {
+            "msgtype": "miniprogram",
+            "miniprogram": {
+                "appid": "wx-app",
+                "page": "pages/index",
+                "title": "欢迎卡片",
+                "pic_media_id": "mini-media",
+            },
+        },
+    ]
 
 
 def test_channel_entry_welcome_fallback_private_message_preserves_exact_target(monkeypatch) -> None:

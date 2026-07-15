@@ -41,6 +41,7 @@ def test_machine_purposes_use_distinct_client_ids_and_secret_references() -> Non
         "mcp",
         "external_agent",
         "campaign_agent",
+        "ops_reporter",
     }
     assert len(set(INTERNAL_CLIENT_ID_KEYS.values())) == len(INTERNAL_CLIENT_ID_KEYS)
     assert len(set(INTERNAL_CLIENT_SECRET_REFERENCE_KEYS.values())) == len(INTERNAL_CLIENT_SECRET_REFERENCE_KEYS)
@@ -106,6 +107,11 @@ def test_machine_routes_use_signed_jwt_with_exact_purpose_and_capability() -> No
             "internal_worker",
             "runtime_route_read",
             "automation_worker",
+        ),
+        ("/api/operation-cycles/reports", "report_operation_cycle_snapshot"): (
+            "external_integration",
+            "operation_cycle_report_write",
+            "ops_reporter",
         ),
         ("/mcp", "mcp_metadata"): ("external_integration", "mcp_read", "mcp"),
         ("/mcp", "mcp_rpc"): ("external_integration", "mcp_execute", "mcp"),

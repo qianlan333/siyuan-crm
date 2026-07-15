@@ -80,6 +80,7 @@ def test_zero_scc_runtime_composition_files_force_full_postgres_ci() -> None:
         "aicrm_next/shared/product_code_aliases.py",
         "aicrm_next/shared/wecom_runtime.py",
         "scripts/run_wechat_pay_order_reconciliation_worker.py",
+        "tests/test_order_reconciliation_worker.py",
         "tests/test_internal_events_ops_shadow.py",
     )
 
@@ -107,6 +108,29 @@ def test_admin_read_model_runtime_files_have_a_permanent_ci_scope() -> None:
     assert result["needs_full_ci"] is False
 
 
+def test_operation_cycles_changes_select_full_postgres_scope() -> None:
+    result = _select(
+        "aicrm_next/operation_cycles/api.py",
+        "aicrm_next/admin_shell/templates/admin_shell/operation_cycles_run.html",
+        "fixtures/operation_cycles/hxc_monday_20260713_snapshot.json",
+        "migrations/versions/0113_operation_cycles.py",
+        "scripts/build_hxc_monday_operation_cycle_snapshot.py",
+        "tests/test_operation_cycles_repository.py",
+    )
+
+    assert result["unmatched_files"] == []
+    assert "operation_cycles" in result["matched_scopes"]
+    assert "tests/test_operation_cycles_api.py" in result["python_tests"]
+    assert "tests/test_operation_cycles_frontend_contract.py" in result["python_tests"]
+    assert "tests/test_operation_cycles_migration.py" in result["python_tests"]
+    assert "tests/test_operation_cycles_repository.py" in result["python_tests"]
+    assert "tests/test_admin_read_pages_smoke.py" in result["python_tests"]
+    assert "tests/test_internal_oauth_client_purpose.py" in result["python_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
 def test_live_runtime_readiness_replacement_has_permanent_full_ci_scope() -> None:
     result = _select(
         "tools/check_live_runtime_readiness.py",
@@ -114,7 +138,6 @@ def test_live_runtime_readiness_replacement_has_permanent_full_ci_scope() -> Non
         "tools/check_next_production_cutover_readiness.py",
         "aicrm_next/admin_read_model/projections.py",
         "tests/test_live_runtime_readiness.py",
-        "tests/test_retired_runtime_gap_timer_report.py",
         "tests/test_retired_timer_readiness_cleanup.py",
     )
 
@@ -840,7 +863,6 @@ def test_runtime_units_change_selects_deploy_contract_tests() -> None:
         "tests/test_architecture_size_budgets.py",
         "tests/test_runtime_secret_readiness.py",
         "tests/test_runtime_units_autostart.py",
-        "tests/test_retired_runtime_gap_timer_report.py",
     )
 
     assert "ci_deploy" in result["matched_scopes"]
@@ -850,7 +872,6 @@ def test_runtime_units_change_selects_deploy_contract_tests() -> None:
     assert "tests/test_identity_cutover_reconciliation_contract.py" in result["python_tests"]
     assert "tests/test_runtime_secret_readiness.py" in result["python_tests"]
     assert "tests/test_runtime_units_autostart.py" in result["python_tests"]
-    assert "tests/test_retired_runtime_gap_timer_report.py" in result["python_tests"]
     assert result["unmatched_files"] == []
     assert result["needs_postgres"] is True
     assert result["architecture_gate"] == "full"

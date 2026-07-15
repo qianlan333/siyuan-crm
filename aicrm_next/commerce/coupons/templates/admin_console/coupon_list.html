@@ -1,0 +1,210 @@
+{% extends "admin_shell/base.html" %}
+
+{% block head_extra %}
+{% include "admin_console/_coupon_styles.html" %}
+{% endblock %}
+
+{% block content %}
+{% set status_labels = {"draft":"草稿", "scheduled":"待开始", "active":"领取中", "published":"已发布", "sold_out":"已领完", "ended":"已结束", "stopped":"已停止", "archived":"已归档"} %}
+<div class="coupon-admin" data-coupon-list>
+  <section class="admin-card">
+    <div class="coupon-toolbar">
+      <div class="coupon-toast" id="couponListToast">共 {{ coupon_total }} 张优惠券</div>
+      <div class="coupon-inline">
+        <label class="coupon-field" style="min-width:220px;">
+          <span class="sr-only">搜索优惠券</span>
+          <input class="coupon-search" id="couponListSearch" type="search" maxlength="80" placeholder="搜索优惠券名称">
+        </label>
+        <label class="coupon-field" style="min-width:140px;">
+          <span class="sr-only">状态筛选</span>
+          <select id="couponListStatus">
+            <option value="">全部状态</option>
+            <option value="draft">草稿</option>
+            <option value="scheduled">待开始</option>
+            <option value="active">领取中</option>
+            <option value="sold_out">已领完</option>
+            <option value="ended">已结束</option>
+            <option value="stopped">已停止</option>
+            <option value="archived">已归档</option>
+          </select>
+        </label>
+        <button class="admin-button admin-button--ghost" id="couponListFilter" type="button">查询</button>
+      </div>
+    </div>
+    <div class="admin-table-wrap" style="margin-top:14px;">
+      <table class="admin-table coupon-table">
+        <thead>
+          <tr>
+            <th>优惠券名称</th>
+            <th>减免金额</th>
+            <th>适用商品</th>
+            <th>领取时间（北京时间）</th>
+            <th>发行 / 使用</th>
+            <th>状态</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="couponListRows">
+          {% for coupon in coupons %}
+          {% set view_status = coupon.view_status or coupon.derived_status or coupon.display_state or coupon.status or "draft" %}
+          {% set product_types = namespace(standard=false, period=false) %}
+          {% for product in coupon.products or [] %}
+            {% if product.product_type == "standard_product" %}{% set product_types.standard = true %}{% endif %}
+            {% if product.product_type == "service_period" %}{% set product_types.period = true %}{% endif %}
+          {% endfor %}
+          <tr data-coupon-row data-name="{{ coupon.name|lower }}" data-status="{{ view_status }}">
+            <td>
+              <div class="coupon-identity">
+                <strong>{{ coupon.name }}</strong>
+                <span>无门槛固定减免券</span>
+              </div>
+            </td>
+            <td><span class="coupon-amount">¥{{ "%.2f"|format((coupon.discount_amount_total or 0) / 100) }}</span></td>
+            <td>
+              <div class="coupon-type-list">
+                <strong>{{ coupon.product_count or coupon.target_count or 0 }} 个商品</strong>
+                <span class="coupon-muted">
+                  {% if (coupon.has_standard_product or product_types.standard) and (coupon.has_service_period or product_types.period) %}普通商品、周期商品
+                  {% elif coupon.has_service_period or product_types.period %}周期商品
+                  {% elif coupon.has_standard_product or product_types.standard %}普通商品
+                  {% else %}{{ coupon.product_type_summary or "—" }}{% endif %}
+                </span>
+              </div>
+            </td>
+            <td>
+              <div class="coupon-type-list">
+                <span>{{ coupon.claim_starts_at_display or coupon.claim_starts_at or "—" }}</span>
+                <span class="coupon-muted">至 {{ coupon.claim_ends_at_display or coupon.claim_ends_at or "—" }}</span>
+              </div>
+            </td>
+            <td>{{ coupon.issued_count or 0 }} / {{ coupon.total_issue_limit or 0 }} · 已用 {{ coupon.used_count or coupon.consumed_count or 0 }}</td>
+            <td><span class="coupon-status {{ view_status }}">{{ status_labels.get(view_status, view_status) }}</span></td>
+            <td>
+              <div class="coupon-actions">
+                {% if view_status != "archived" %}<a class="admin-button admin-button--ghost" href="/admin/coupons/{{ coupon.id }}/edit">编辑</a>{% endif %}
+                {% if view_status != "draft" %}<a class="admin-button admin-button--ghost" href="/admin/coupons/{{ coupon.id }}/data">数据</a>{% endif %}
+                {% if view_status not in ["draft", "archived"] %}<button class="admin-button admin-button--ghost" data-coupon-action="share" data-coupon-id="{{ coupon.id }}" type="button">分享</button>{% endif %}
+                <button class="admin-button admin-button--ghost" data-coupon-action="copy" data-coupon-id="{{ coupon.id }}" type="button">复制</button>
+                {% if view_status == "draft" %}
+                <button class="admin-button admin-button--primary" data-coupon-action="publish" data-coupon-id="{{ coupon.id }}" type="button">发布</button>
+                <button class="admin-button admin-button--danger" data-coupon-action="delete" data-coupon-id="{{ coupon.id }}" type="button">删除</button>
+                {% elif view_status in ["scheduled", "active", "published", "sold_out"] %}
+                <button class="admin-button admin-button--danger" data-coupon-action="stop" data-coupon-id="{{ coupon.id }}" type="button">停止</button>
+                {% elif view_status in ["stopped", "ended"] %}
+                <button class="admin-button admin-button--ghost" data-coupon-action="archive" data-coupon-id="{{ coupon.id }}" type="button">归档</button>
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="7"><div class="coupon-empty">还没有优惠券，点击右上角“新建优惠券”开始配置。</div></td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<div class="coupon-dialog" id="couponShareDialog" role="dialog" aria-modal="true" aria-labelledby="couponShareTitle" hidden>
+  <section class="coupon-dialog-panel coupon-share-panel">
+    <header class="coupon-dialog-head">
+      <h2 id="couponShareTitle">分享优惠券</h2>
+      <button class="admin-button admin-button--ghost" data-close-share type="button" aria-label="关闭分享弹窗">关闭</button>
+    </header>
+    <div class="coupon-dialog-body coupon-share-body">
+      <img class="coupon-share-qr" id="couponShareQr" alt="优惠券领取二维码">
+      <div class="coupon-share-row">
+        <input class="coupon-search" id="couponShareUrl" readonly aria-label="优惠券领取链接">
+        <button class="admin-button admin-button--primary" id="couponCopyShareUrl" type="button">复制链接</button>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    "use strict";
+    const api = window.AdminApi && window.AdminApi.requestJson;
+    const toast = document.getElementById("couponListToast");
+    const shareDialog = document.getElementById("couponShareDialog");
+    const shareUrl = document.getElementById("couponShareUrl");
+    const shareQr = document.getElementById("couponShareQr");
+
+    function notify(message, isError) {
+      toast.textContent = message;
+      toast.classList.toggle("is-error", Boolean(isError));
+    }
+
+    function filterRows() {
+      const query = document.getElementById("couponListSearch").value.trim().toLowerCase();
+      const status = document.getElementById("couponListStatus").value;
+      document.querySelectorAll("[data-coupon-row]").forEach((row) => {
+        row.hidden = Boolean((query && !row.dataset.name.includes(query)) || (status && row.dataset.status !== status));
+      });
+    }
+
+    async function mutate(couponId, action) {
+      if (!api) throw new Error("管理端请求组件未加载");
+      const messages = {
+        publish: "确定发布这张优惠券吗？发布后可以通过链接和二维码领取。",
+        stop: "确定停止领取吗？已领取且有效的优惠券仍可使用。",
+        archive: "确定归档这张优惠券吗？",
+        delete: "确定删除这张草稿优惠券吗？",
+      };
+      if (messages[action] && !window.confirm(messages[action])) return;
+      notify("正在处理…", false);
+      const method = action === "delete" ? "DELETE" : "POST";
+      const suffix = action === "delete" ? "" : `/${action}`;
+      const payload = await api(`/api/admin/coupons/${encodeURIComponent(couponId)}${suffix}`, { method });
+      if (action === "copy") {
+        const copied = payload.coupon || payload.item || {};
+        window.location.href = `/admin/coupons/${encodeURIComponent(copied.id)}/edit`;
+        return;
+      }
+      window.location.reload();
+    }
+
+    async function openShare(couponId) {
+      if (!api) throw new Error("管理端请求组件未加载");
+      notify("正在生成分享信息…", false);
+      const payload = await api(`/api/admin/coupons/${encodeURIComponent(couponId)}/share`);
+      const share = payload.share || payload;
+      shareUrl.value = String(share.url || share.share_url || "");
+      shareQr.src = String(share.qr_data_url || share.qr_code_data_url || "");
+      shareDialog.hidden = false;
+      notify("分享信息已生成", false);
+    }
+
+    document.getElementById("couponListFilter").addEventListener("click", filterRows);
+    document.getElementById("couponListSearch").addEventListener("input", filterRows);
+    document.getElementById("couponListStatus").addEventListener("change", filterRows);
+    document.addEventListener("click", async (event) => {
+      const button = event.target.closest("[data-coupon-action]");
+      if (!button) return;
+      button.disabled = true;
+      try {
+        if (button.dataset.couponAction === "share") await openShare(button.dataset.couponId);
+        else await mutate(button.dataset.couponId, button.dataset.couponAction);
+      } catch (error) {
+        notify(error.message || "操作失败，请重试。", true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    document.querySelector("[data-close-share]").addEventListener("click", () => { shareDialog.hidden = true; });
+    shareDialog.addEventListener("click", (event) => { if (event.target === shareDialog) shareDialog.hidden = true; });
+    document.getElementById("couponCopyShareUrl").addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(shareUrl.value);
+        notify("领取链接已复制", false);
+      } catch (_error) {
+        shareUrl.select();
+        document.execCommand("copy");
+        notify("领取链接已复制", false);
+      }
+    });
+  });
+</script>
+{% endblock %}

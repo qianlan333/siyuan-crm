@@ -196,7 +196,6 @@
         "tools/check_next_production_cutover_readiness.py",
         "aicrm_next/admin_read_model/projections.py",
         "tests/test_live_runtime_readiness.py",
-        "tests/test_retired_runtime_gap_timer_report.py",
         "tests/test_retired_timer_readiness_cleanup.py"
       ],
       "python_tests": [
@@ -259,6 +258,7 @@
         "aicrm_next/shared/product_code_aliases.py",
         "aicrm_next/shared/wecom_runtime.py",
         "scripts/run_wechat_pay_order_reconciliation_worker.py",
+        "tests/test_order_reconciliation_worker.py",
         "tests/test_internal_events_ai_campaign_slice.py",
         "tests/test_internal_events_customer_tags_slice.py",
         "tests/test_internal_events_ops_plan_slice.py",
@@ -475,6 +475,35 @@
       "architecture_gate": "fast"
     },
     {
+      "name": "commerce_coupons",
+      "paths": [
+        "aicrm_next/commerce/coupons/**",
+        "aicrm_next/identity_contact/oauth_projection_repo.py",
+        "aicrm_next/admin_shell/navigation.py",
+        "aicrm_next/shared/capability_flags.py",
+        "aicrm_next/shared/wechat_h5_session.py",
+        "migrations/versions/0114_commerce_coupons.py",
+        "scripts/run_coupon_consistency_check.py",
+        "tests/frontend/coupon_inline_scripts_syntax.test.mjs",
+        "tests/test_commerce_coupon_*.py",
+        "tests/test_coupon_*.py",
+        "tests/test_wechat_oauth_coupon_identity_postgres.py"
+      ],
+      "python_tests": [
+        "tests/test_commerce_coupon_domain.py",
+        "tests/test_commerce_coupon_application.py",
+        "tests/test_commerce_coupon_migration.py",
+        "tests/test_commerce_coupon_concurrency_postgres.py",
+        "tests/test_coupon_admin_frontend_contract.py",
+        "tests/test_coupon_architecture_governance.py",
+        "tests/test_coupon_direct_entry.py",
+        "tests/test_coupon_v1_checkout_contract.py",
+        "tests/test_wechat_oauth_coupon_identity_postgres.py"
+      ],
+      "needs_postgres": true,
+      "architecture_gate": "full"
+    },
+    {
       "name": "mobile_validation",
       "paths": [
         "aicrm_next/shared/mobile.py"
@@ -556,6 +585,36 @@
       ],
       "needs_postgres": false,
       "architecture_gate": "none"
+    },
+    {
+      "name": "wecom_media_lease",
+      "paths": [
+        "aicrm_next/media_library/application.py",
+        "aicrm_next/media_library/postgres_repo.py",
+        "aicrm_next/media_library/wecom_lease.py",
+        "aicrm_next/integration_gateway/wecom_media_upload_client.py",
+        "aicrm_next/wecom_media_jobs.py",
+        "migrations/versions/0115_wecom_media_leases.py",
+        "scripts/backfill_wecom_media_leases.py",
+        "tests/test_automation_ops_scheduler.py",
+        "tests/test_wecom_media_lease.py",
+        "tests/test_wecom_media_upload_client.py"
+      ],
+      "python_tests": [
+        "tests/test_media_library_no_real_external_calls.py",
+        "tests/test_wecom_media_lease.py",
+        "tests/test_wecom_media_upload_client.py",
+        "tests/test_automation_ops_scheduler.py",
+        "tests/test_group_ops_material_resolver.py",
+        "tests/test_external_effects_wecom_welcome.py",
+        "tests/test_broadcast_jobs_wecom_private_dispatch.py",
+        "tests/test_data_health_checks.py",
+        "tests/test_database_bootstrap.py",
+        "tests/test_runtime_contract_inventory.py"
+      ],
+      "needs_postgres": true,
+      "needs_full_ci": true,
+      "architecture_gate": "full"
     },
     {
       "name": "ai_audience_ops",
@@ -1031,6 +1090,18 @@
       "paths": [
         "aicrm_next/questionnaire/**",
         "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html",
+        "aicrm_next/frontend_compat/templates/questionnaire_h5_submitted.html",
+        "aicrm_next/automation_engine/channel_completion.py",
+        "aicrm_next/automation_engine/channel_fixture_state.py",
+        "aicrm_next/automation_engine/channels_api.py",
+        "aicrm_next/automation_engine/channels_repo.py",
+        "aicrm_next/integration_gateway/channel_completion_client.py",
+        "aicrm_next/navigation_target/__init__.py",
+        "aicrm_next/navigation_target/domain.py",
+        "aicrm_next/navigation_target/static/completion_target_config.js",
+        "aicrm_next/platform_foundation/push_center/capability_repository.py",
+        "aicrm_next/platform_foundation/push_center/capability_status.py",
+        "migrations/versions/0116_questionnaire_operations_config.py",
         "tests/test_questionnaire_*.py",
         "tests/test_internal_events_questionnaire_slice.py"
       ],
@@ -1046,11 +1117,17 @@
         "tests/test_questionnaire_oauth_state_security.py",
         "tests/test_questionnaire_admin_write_no_real_side_effects.py",
         "tests/test_questionnaire_admin_read_no_real_side_effects.py",
+        "tests/test_questionnaire_admin_pages_next_native.py",
+        "tests/test_questionnaire_operations_config.py",
+        "tests/test_questionnaire_operations_migration.py",
+        "tests/test_navigation_target_url_link_resolver.py",
+        "tests/test_public_product_frontend_contract.py",
         "tests/test_internal_events_questionnaire_slice.py",
         "tests/test_questionnaire_auto_execute_cutover.py"
       ],
       "needs_postgres": true,
-      "architecture_gate": "db"
+      "needs_full_ci": true,
+      "architecture_gate": "full"
     },
     {
       "name": "admin_config",
@@ -1136,6 +1213,40 @@
       ],
       "needs_postgres": false,
       "architecture_gate": "none"
+    },
+    {
+      "name": "operation_cycles",
+      "paths": [
+        "aicrm_next/operation_cycles/**",
+        "aicrm_next/admin_shell/templates/admin_shell/operation_cycles_*.html",
+        "fixtures/operation_cycles/**",
+        "migrations/versions/0113_operation_cycles.py",
+        "scripts/build_hxc_monday_operation_cycle_snapshot.py",
+        "tests/test_operation_cycles_*.py"
+      ],
+      "python_tests": [
+        "tests/test_operation_cycles_api.py",
+        "tests/test_operation_cycles_domain.py",
+        "tests/test_operation_cycles_frontend_contract.py",
+        "tests/test_operation_cycles_hxc_backfill.py",
+        "tests/test_operation_cycles_markdown.py",
+        "tests/test_operation_cycles_migration.py",
+        "tests/test_operation_cycles_repository.py",
+        "tests/test_admin_read_pages_smoke.py",
+        "tests/test_admin_shell_native.py",
+        "tests/test_database_bootstrap.py",
+        "tests/test_internal_oauth_client_purpose.py",
+        "tests/test_route_policy_contract.py",
+        "tests/test_router_registry_contract.py",
+        "tests/test_runtime_contract_inventory.py",
+        "tests/test_import_graph_guard.py",
+        "tests/test_data_table_lifecycle_guard.py",
+        "tests/test_repository_ownership_guard.py",
+        "tests/test_select_test_scope.py"
+      ],
+      "needs_postgres": true,
+      "needs_full_ci": true,
+      "architecture_gate": "full"
     },
     {
       "name": "admin_read_pages",
@@ -1535,7 +1646,6 @@
         "tests/test_production_public_release_route.py",
         "tests/test_external_orders_blocker_diagnostics.py",
         "tests/test_external_orders_consumer_run_due_diagnostics.py",
-        "tests/test_retired_runtime_gap_timer_report.py",
         "tests/test_runtime_secret_readiness.py",
         "tests/test_runtime_units_autostart.py",
         "tests/test_select_test_scope.py",
@@ -1565,7 +1675,6 @@
         "tests/test_production_public_release_route.py",
         "tests/test_external_orders_blocker_diagnostics.py",
         "tests/test_external_orders_consumer_run_due_diagnostics.py",
-        "tests/test_retired_runtime_gap_timer_report.py",
         "tests/test_runtime_secret_readiness.py",
         "tests/test_runtime_units_autostart.py",
         "tests/test_select_test_scope.py",

@@ -93,7 +93,7 @@ def _pii_level(entry: dict[str, Any]) -> str:
     owner = str(entry["capability_owner"])
     if any(marker in path for marker in ("message", "archive", "questionnaire", "identity", "customer", "user", "sidebar")):
         return "sensitive"
-    if any(marker in path for marker in ("order", "payment", "refund", "wechat-pay", "alipay", "service-period")):
+    if any(marker in path for marker in ("order", "payment", "refund", "wechat-pay", "alipay", "service-period", "coupon")):
         return "financial"
     if owner in {"customer_tags", "owner_migration", "ops_enrollment"}:
         return "customer"
@@ -209,6 +209,24 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
             client_purpose="group_broadcast",
         )
 
+    payment_identity_routes = {
+        "/api/h5/wechat-pay/jsapi/orders": "payment_order_create",
+        "/api/h5/wechat-pay/orders/{out_trade_no}": "payment_order_read",
+        "/api/h5/service-period-products/{link_slug}/wechat-pay/jsapi/orders": "payment_order_create",
+        "/api/h5/coupons/available": "coupon_available_read",
+        "/api/h5/coupons/{public_slug}/claim": "coupon_claim",
+    }
+    if path in payment_identity_routes:
+        return _policy(
+            "public_h5",
+            "payment_identity_session",
+            payment_identity_routes[path],
+            "self",
+            _pii_level(entry),
+            False,
+            "public_strict",
+        )
+
     if path.startswith("/api/automation/group-ops/") and "/webhooks/" not in path:
         return _policy(
             "admin",
@@ -252,6 +270,7 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
 
     public_prefixes = (
         "/api/h5",
+        "/c",
         "/s",
         "/p",
         "/pay",
@@ -323,6 +342,18 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
             False,
             "internal",
             client_purpose="identity",
+        )
+
+    if path == "/api/operation-cycles/reports":
+        return _policy(
+            "external_integration",
+            "api_client_jwt",
+            "operation_cycle_report_write",
+            "service",
+            "internal",
+            False,
+            "integration",
+            client_purpose="ops_reporter",
         )
 
     if path.startswith(("/api/customers", "/api/users", "/api/messages")):
@@ -424,6 +455,7 @@ def _policy(
         "client_credentials": ["api_client", "service"],
         "human_or_service": ["human", "service"],
         "human_session": ["human"],
+        "payment_identity_session": ["public"],
         "provider_oauth_state": ["provider_callback"],
         "provider_signature": ["provider_callback"],
         "public": ["public"],

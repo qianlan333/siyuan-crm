@@ -21,13 +21,18 @@ PUBLIC_PRODUCT_ROUTES = (
 PAYMENT_ACTION_SEGMENTS = {"checkout", "payment", "pay", "order", "orders", "jsapi", "notify", "return"}
 
 
-def route_headers() -> dict[str, str]:
+def route_headers(
+    *,
+    real_external_call_executed: bool = False,
+    payment_request_executed: bool = False,
+    order_create_executed: bool = False,
+) -> dict[str, str]:
     return {
         "X-AICRM-Route-Owner": "ai_crm_next",
         "X-AICRM-Fallback-Used": "false",
-        "X-AICRM-Real-External-Call-Executed": "false",
-        "X-AICRM-Payment-Request-Executed": "false",
-        "X-AICRM-Order-Create-Executed": "false",
+        "X-AICRM-Real-External-Call-Executed": str(bool(real_external_call_executed)).lower(),
+        "X-AICRM-Payment-Request-Executed": str(bool(payment_request_executed)).lower(),
+        "X-AICRM-Order-Create-Executed": str(bool(order_create_executed)).lower(),
     }
 
 
@@ -200,6 +205,85 @@ def render_product_page(product: dict[str, Any], *, context_status: str = "") ->
 </html>"""
 
 
+def render_lead_qr_modal() -> str:
+    return """
+  <div class="qr-modal" id="leadQrModal" aria-hidden="true">
+    <div class="qr-panel" role="dialog" aria-modal="true" aria-labelledby="leadQrModalTitle">
+      <div class="modal-title" id="leadQrModalTitle">报名成功</div>
+      <div class="modal-desc">扫码添加企微领取后续资料</div>
+      <img class="qr-img" id="leadQrImage" alt="报名后企微渠道二维码">
+      <button class="close-button" id="closeQrButton" type="button">关闭</button>
+    </div>
+  </div>"""
+
+
+def lead_qr_modal_styles() -> str:
+    return """
+    .qr-modal {
+      position: fixed; inset: 0; background: rgba(16, 32, 58, .48); backdrop-filter: blur(4px);
+      z-index: 40; display: none; align-items: center; justify-content: center; padding: 22px;
+    }
+    .qr-modal.show { display: flex; }
+    .qr-panel {
+      width: min(100%, 360px); border-radius: 8px; background: #fff; padding: 26px 22px;
+      text-align: center; box-shadow: 0 20px 60px rgba(16, 32, 58, .25);
+    }
+    .qr-img {
+      width: min(258px, 100%); aspect-ratio: 1; margin: 18px auto; border-radius: 8px;
+      border: 1px solid #dae4f3; padding: 12px; object-fit: contain; display: block; background: #fff;
+    }
+    .modal-title { color: var(--text, #10203a); font-size: 24px; font-weight: 950; }
+    .modal-desc { color: var(--muted, #687891); font-size: 15px; }
+    .close-button {
+      width: 100%; height: 42px; border: 0; border-radius: 8px; background: var(--blue, #2f6df6); color: #fff;
+      font: inherit; font-weight: 900; margin-top: 14px; cursor: pointer;
+    }
+    """
+
+
+def lead_qr_modal_controller_script() -> str:
+    return """<script>
+    (function () {
+      window.createLeadQrModalController = function (options) {
+        const modal = options && options.modal;
+        const image = options && options.image;
+        const closeButton = options && options.closeButton;
+
+        function close() {
+          if (!modal) return;
+          modal.classList.remove("show");
+          modal.setAttribute("aria-hidden", "true");
+        }
+
+        function clear() {
+          close();
+          if (image) image.removeAttribute("src");
+        }
+
+        function open(source) {
+          const normalizedSource = String(source || "").trim();
+          if (!normalizedSource || !modal || !image) return;
+          image.src = normalizedSource;
+          modal.classList.add("show");
+          modal.setAttribute("aria-hidden", "false");
+        }
+
+        if (closeButton) closeButton.addEventListener("click", close);
+        if (modal) {
+          modal.addEventListener("click", function (event) {
+            if (event.target === modal) close();
+          });
+        }
+        document.addEventListener("keydown", function (event) {
+          if (event.key === "Escape" && modal && modal.getAttribute("aria-hidden") === "false") close();
+        });
+
+        return { open: open, close: close, clear: clear };
+      };
+    })();
+  </script>"""
+
+
 def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> str:
     title = escape(str(product.get("title") or "支付入口"))
     state_json = json.dumps(page_state, ensure_ascii=False).replace("</", "<\\/")
@@ -254,8 +338,21 @@ def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> s
         <span class="pay-value">{title}</span>
       </div>
       <div class="pay-row">
-        <span class="pay-label">支付金额</span>
+        <span class="pay-label">商品原价</span>
         <span class="pay-value">¥{_price_amount(product)}</span>
+      </div>
+      <div class="coupon-block" id="couponBlock" hidden>
+        <div class="coupon-head"><strong>优惠券</strong><span class="coupon-count" id="couponCount"></span></div>
+        <select class="coupon-select" id="couponSelect" aria-label="选择优惠券"></select>
+        <div class="coupon-hint" id="couponHint"></div>
+      </div>
+      <div class="pay-row discount-row" id="discountRow" hidden>
+        <span class="pay-label">优惠金额</span>
+        <span class="pay-value discount-value" id="discountAmount">-¥0.00</span>
+      </div>
+      <div class="pay-row">
+        <span class="pay-label">支付金额</span>
+        <span class="pay-value" id="finalAmount">¥{_price_amount(product)}</span>
       </div>
       {require_mobile_html}
       <div id="payState" class="state-line">{state_message}</div>
@@ -276,14 +373,8 @@ def render_pay_landing(product: dict[str, Any], page_state: dict[str, Any]) -> s
     </section>
   </main>
 
-  <div class="qr-modal" id="leadQrModal" aria-hidden="true">
-    <div class="qr-panel">
-      <div class="modal-title">报名成功</div>
-      <div class="modal-desc">扫码添加企微领取后续资料</div>
-      <img class="qr-img" id="leadQrImage" alt="">
-      <button class="close-button" id="closeQrButton" type="button">关闭</button>
-    </div>
-  </div>
+  {render_lead_qr_modal()}
+  {lead_qr_modal_controller_script()}
   {_pay_page_script(state_json)}
   {product_context_fragment_bootstrap_script()}
 </body>
@@ -454,6 +545,14 @@ def _pay_page_styles() -> str:
     .pay-mobile label { display: block; margin-bottom: 7px; }
     .pay-mobile input { width: 100%; height: 48px; border: 1px solid var(--line); border-radius: 8px; padding: 0 13px; outline: none; font: inherit; }
     .pay-mobile input:focus { border-color: #9bb8ff; box-shadow: 0 0 0 3px rgba(47, 109, 246, .12); }
+    .coupon-block { margin-top: 14px; padding: 14px; border: 1px solid #dce7ff; border-radius: 8px; background: #f7faff; }
+    .coupon-block[hidden], .discount-row[hidden] { display: none; }
+    .coupon-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+    .coupon-head strong { font-size: 14px; }
+    .coupon-count { color: var(--blue); font-size: 12px; font-weight: 800; }
+    .coupon-select { width: 100%; min-height: 42px; border: 1px solid #cbd9f8; border-radius: 8px; background: #fff; color: var(--text); padding: 0 10px; font: inherit; }
+    .coupon-hint { min-height: 18px; margin-top: 7px; color: var(--muted); font-size: 12px; }
+    .discount-value { color: #e5484d; }
     .state-line { min-height: 22px; margin-top: 14px; color: var(--muted); font-size: 13px; line-height: 1.6; }
     .state-line.error { color: var(--red); }
     .state-line.success { color: var(--green); }
@@ -483,25 +582,7 @@ def _pay_page_styles() -> str:
     .weapp-launch-title { color: var(--text); font-size: 15px; font-weight: 900; }
     .weapp-launch-desc { color: var(--muted); font-size: 13px; line-height: 1.6; }
     .fallback-link { display: inline-flex; color: #3370ff; font-size: 14px; font-weight: 800; text-decoration: none; }
-    .qr-modal {
-      position: fixed; inset: 0; background: rgba(16, 32, 58, .48); backdrop-filter: blur(4px);
-      z-index: 40; display: none; align-items: center; justify-content: center; padding: 22px;
-    }
-    .qr-modal.show { display: flex; }
-    .qr-panel {
-      width: min(100%, 360px); border-radius: 8px; background: #fff; padding: 26px 22px;
-      text-align: center; box-shadow: 0 20px 60px rgba(16, 32, 58, .25);
-    }
-    .qr-img {
-      width: min(258px, 100%); aspect-ratio: 1; margin: 18px auto; border-radius: 8px;
-      border: 1px solid #dae4f3; padding: 12px; object-fit: contain; display: block; background: #fff;
-    }
-    .modal-title { font-size: 24px; font-weight: 950; }
-    .modal-desc { color: var(--muted); font-size: 15px; }
-    .close-button {
-      width: 100%; height: 42px; border: 0; border-radius: 8px; background: var(--blue); color: #fff;
-      font: inherit; font-weight: 900; margin-top: 14px; cursor: pointer;
-    }
+    """ + lead_qr_modal_styles() + """
   </style>"""
 
 
@@ -513,19 +594,110 @@ def _pay_page_script(state_json: str) -> str:
       const stateLine = document.getElementById("payState");
       const mobileInput = document.getElementById("mobileInput");
       const mobileError = document.getElementById("mobileError");
+      const couponBlock = document.getElementById("couponBlock");
+      const couponSelect = document.getElementById("couponSelect");
+      const couponCount = document.getElementById("couponCount");
+      const couponHint = document.getElementById("couponHint");
+      const discountRow = document.getElementById("discountRow");
+      const discountAmount = document.getElementById("discountAmount");
+      const finalAmount = document.getElementById("finalAmount");
       const checkoutCard = document.getElementById("checkoutCard");
       const successBox = document.getElementById("successBox");
       const successDesc = document.getElementById("successDesc");
-      const leadQrModal = document.getElementById("leadQrModal");
-      const leadQrImage = document.getElementById("leadQrImage");
       const showLeadQrButton = document.getElementById("showLeadQrButton");
-      const closeQrButton = document.getElementById("closeQrButton");
+      const leadQrController = window.createLeadQrModalController ? window.createLeadQrModalController({{
+        modal: document.getElementById("leadQrModal"),
+        image: document.getElementById("leadQrImage"),
+        closeButton: document.getElementById("closeQrButton")
+      }}) : null;
       const weappLaunchPanel = document.getElementById("weappLaunchPanel");
       const weappLaunchHost = document.getElementById("weappLaunchHost");
       const weappLaunchDesc = document.getElementById("weappLaunchDesc");
       const weappFallbackLink = document.getElementById("weappFallbackLink");
       let activeOrderNo = "";
       let paidOrder = state.paid_order || null;
+      let availableCoupons = [];
+      let couponLoadFailed = false;
+      const clientOrderStorageKey = `aicrm-checkout-ref:${{state.create_order_url}}:${{state.product.product_code}}`;
+      let storedClientOrderRef = "";
+      try {{ storedClientOrderRef = sessionStorage.getItem(clientOrderStorageKey) || ""; }} catch (_error) {{}}
+      const clientOrderRef = storedClientOrderRef || ((globalThis.crypto && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : `checkout-${{Date.now()}}-${{Math.random().toString(16).slice(2)}}`);
+      try {{ sessionStorage.setItem(clientOrderStorageKey, clientOrderRef); }} catch (_error) {{}}
+
+      function clearCompletedClientOrderRef() {{
+        try {{
+          if (sessionStorage.getItem(clientOrderStorageKey) === clientOrderRef) {{
+            sessionStorage.removeItem(clientOrderStorageKey);
+          }}
+        }} catch (_error) {{}}
+      }}
+
+      function money(cents) {{
+        return `¥${{(Number(cents || 0) / 100).toFixed(2)}}`;
+      }}
+
+      function selectedCoupon() {{
+        if (!couponSelect || !availableCoupons.length) return null;
+        const value = String(couponSelect.value || "auto");
+        if (value === "none") return null;
+        if (value === "auto") return availableCoupons[0] || null;
+        return availableCoupons.find((item) => String(item.claim_no || "") === value) || null;
+      }}
+
+      function couponChoice() {{
+        if (!couponSelect || !availableCoupons.length) return {{ mode: "none" }};
+        const value = String(couponSelect.value || "auto");
+        if (value === "none") return {{ mode: "none" }};
+        if (value === "auto") return {{ mode: "auto" }};
+        return {{ mode: "claim", claim_no: value }};
+      }}
+
+      function renderCouponAmount() {{
+        const coupon = selectedCoupon();
+        const subtotal = Number((state.product && state.product.amount_total) || 0);
+        const discount = coupon ? Number(coupon.discount_amount_total || 0) : 0;
+        if (discountRow) discountRow.hidden = discount <= 0;
+        if (discountAmount) discountAmount.textContent = `-${{money(discount)}}`;
+        if (finalAmount) finalAmount.textContent = money(Math.max(0, subtotal - discount));
+        if (couponHint) couponHint.textContent = coupon
+          ? `${{coupon.name || "优惠券"}}，本单预计减免 ${{money(discount)}}`
+          : "本单不使用优惠券";
+      }}
+
+      async function loadCoupons() {{
+        if (!state.identity_ready || !state.available_coupon_url || paidOrder) return;
+        try {{
+          const response = await fetch(state.available_coupon_url, {{ credentials: "same-origin" }});
+          const payload = await response.json();
+          if (!response.ok || payload.ok === false) throw new Error(payload.error || "优惠券加载失败");
+          availableCoupons = Array.isArray(payload.items) ? payload.items : [];
+          if (!availableCoupons.length || !couponBlock || !couponSelect) return;
+          couponBlock.hidden = false;
+          if (couponCount) couponCount.textContent = `${{availableCoupons.length}} 张可用`;
+          couponSelect.innerHTML = "";
+          const autoOption = document.createElement("option");
+          autoOption.value = "auto";
+          autoOption.textContent = "自动选择最优惠";
+          couponSelect.appendChild(autoOption);
+          availableCoupons.forEach((item) => {{
+            const option = document.createElement("option");
+            option.value = String(item.claim_no || "");
+            option.textContent = `${{item.name || "优惠券"}}（减 ${{money(item.discount_amount_total)}}）`;
+            couponSelect.appendChild(option);
+          }});
+          const noneOption = document.createElement("option");
+          noneOption.value = "none";
+          noneOption.textContent = "不使用优惠券";
+          couponSelect.appendChild(noneOption);
+          couponSelect.addEventListener("change", renderCouponAmount);
+          renderCouponAmount();
+        }} catch (error) {{
+          couponLoadFailed = true;
+          if (couponHint) couponHint.textContent = error && error.message ? error.message : "优惠券加载失败";
+        }}
+      }}
 
       function setState(message, type) {{
         if (!stateLine) return;
@@ -594,7 +766,9 @@ def _pay_page_script(state_json: str) -> str:
       async function createOrder() {{
         const body = {{
           product_code: state.product.product_code,
-          order_source: "product_checkout"
+          order_source: "product_checkout",
+          client_order_ref: clientOrderRef,
+          coupon_choice: couponChoice()
         }};
         if (state.require_mobile) {{
           const mobile = validateMobile();
@@ -615,7 +789,11 @@ def _pay_page_script(state_json: str) -> str:
           }}
           const friendlyErrors = {{
             identity_resolution_required: "微信身份正在同步，请稍后重试。",
-            identity_conflict: "当前微信身份存在冲突，请联系客服处理。"
+            identity_conflict: "当前微信身份存在冲突，请联系客服处理。",
+            coupon_unavailable: "所选优惠券状态已变化，请刷新后重新选择。",
+            coupon_amount_invalid: "商品价格已变化，当前优惠券无法使用。",
+            order_reconciliation_pending: "订单状态正在与微信确认，请勿重复下单，稍后刷新查看。",
+            wechat_pay_provider_outcome_unknown: "微信支付订单状态确认中，请勿重复下单，稍后刷新查看。"
           }};
           throw new Error(friendlyErrors[payload.error] || payload.error || "下单失败");
         }}
@@ -759,10 +937,8 @@ def _pay_page_script(state_json: str) -> str:
 
       function showLeadQr(order) {{
         const leadQr = leadQrFromOrder(order);
-        if (!leadQr.qr_url || !leadQrModal || !leadQrImage) return;
-        leadQrImage.src = leadQr.qr_url;
-        leadQrModal.classList.add("show");
-        leadQrModal.setAttribute("aria-hidden", "false");
+        if (!leadQr.qr_url || !leadQrController) return;
+        leadQrController.open(leadQr.qr_url);
       }}
 
       function syncLeadQrButton(order) {{
@@ -773,6 +949,7 @@ def _pay_page_script(state_json: str) -> str:
       function showPaid(order, options) {{
         const autoShowQr = !options || options.autoShowQr !== false;
         paidOrder = order || paidOrder || {{}};
+        clearCompletedClientOrderRef();
         const completionAction = completionActionFromOrder(paidOrder);
         if (completionAction.type === "url_link") {{
           const resolverUrl = dynamicUrlLinkResolverUrl(completionAction.navigation_target, completionAction.fallback_url);
@@ -787,7 +964,7 @@ def _pay_page_script(state_json: str) -> str:
           if (checkoutCard) checkoutCard.style.display = "none";
           if (successBox) successBox.classList.add("show");
           if (successDesc) {{
-            successDesc.textContent = "已购买 " + state.product.name + "，支付金额 ¥" + (Number(state.product.amount_total || 0) / 100).toFixed(2) + "。";
+            successDesc.textContent = "已购买 " + state.product.name + "，支付金额 ¥" + (Number((paidOrder && paidOrder.amount_total) || state.product.amount_total || 0) / 100).toFixed(2) + "。";
           }}
           openMiniProgram(completionAction);
           return;
@@ -806,7 +983,7 @@ def _pay_page_script(state_json: str) -> str:
         if (checkoutCard) checkoutCard.style.display = "none";
         if (successBox) successBox.classList.add("show");
         if (successDesc) {{
-          successDesc.textContent = "已购买 " + state.product.name + "，支付金额 ¥" + (Number(state.product.amount_total || 0) / 100).toFixed(2) + "。";
+          successDesc.textContent = "已购买 " + state.product.name + "，支付金额 ¥" + (Number((paidOrder && paidOrder.amount_total) || state.product.amount_total || 0) / 100).toFixed(2) + "。";
         }}
         syncLeadQrButton(paidOrder);
         if (autoShowQr) showLeadQr(paidOrder);
@@ -815,6 +992,7 @@ def _pay_page_script(state_json: str) -> str:
       if (state.paid_order) {{
         showPaid(state.paid_order, {{ autoShowQr: false }});
       }}
+      const couponLoadPromise = loadCoupons();
 
       if (payButton) {{
         payButton.addEventListener("click", async function () {{
@@ -822,6 +1000,8 @@ def _pay_page_script(state_json: str) -> str:
           payButton.disabled = true;
           setState("正在创建订单...");
           try {{
+            await couponLoadPromise;
+            if (couponLoadFailed) throw new Error("优惠券状态加载失败，请刷新后重试");
             const payload = await createOrder();
             if (!payload) {{
               payButton.disabled = false;
@@ -859,13 +1039,6 @@ def _pay_page_script(state_json: str) -> str:
       if (mobileInput) {{
         mobileInput.addEventListener("input", function () {{
           if (mobileError) mobileError.textContent = "";
-        }});
-      }}
-      if (closeQrButton) {{
-        closeQrButton.addEventListener("click", function () {{
-          if (!leadQrModal) return;
-          leadQrModal.classList.remove("show");
-          leadQrModal.setAttribute("aria-hidden", "true");
         }});
       }}
       if (showLeadQrButton) {{

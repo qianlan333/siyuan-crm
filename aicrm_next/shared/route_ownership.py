@@ -38,6 +38,7 @@ ALLOWED_AUTH_SCHEMES = {
     "client_credentials",
     "human_or_service",
     "human_session",
+    "payment_identity_session",
     "provider_oauth_state",
     "provider_signature",
     "public",

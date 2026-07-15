@@ -20,6 +20,7 @@ from .platform_foundation.external_effects.adapters import (
     WeComWelcomeMessageAdapter,
     WebhookAdapter,
 )
+from .wecom_media_jobs import WeComMediaUploadAdapter
 from .platform_foundation.external_effects.continuations import ExternalEffectContinuationRegistry
 from .questionnaire.external_effect_continuation import QUESTIONNAIRE_CONTACT_TAGS_CONTINUATION
 
@@ -52,7 +53,11 @@ def build_external_effect_adapter_registry() -> ExternalEffectAdapterRegistry:
             "wecom_group_message": WeComGroupMessageExternalEffectAdapter(
                 adapter_factory=wecom_group_adapter.build_wecom_group_message_adapter,
             ),
-            "wecom_welcome_message": WeComWelcomeMessageAdapter(adapter_factory=provider_factory),
+            "wecom_welcome_message": WeComWelcomeMessageAdapter(
+                adapter_factory=provider_factory,
+                material_resolver=_resolve_production_wecom_welcome_materials,
+            ),
+            "wecom_media_upload": WeComMediaUploadAdapter(),
             "wecom_tag": WeComContactTagAdapter(adapter_factory=provider_factory),
             "wecom_profile": WeComProfileUpdateAdapter(adapter_factory=provider_factory),
         }
@@ -64,6 +69,71 @@ def _build_production_wecom_adapter():
     if missing:
         raise RuntimeError("missing_wecom_config:" + ",".join(missing))
     return wecom_channel_entry_client.ProductionWeComAdapter()
+
+
+def _resolve_production_wecom_welcome_materials(attachments, *, resolver=None):
+    if resolver is None:
+        from .automation_engine.group_ops.material_resolver import PostgresGroupOpsMaterialResolver
+        from .media_library.postgres_repo import PostgresMediaLibraryRepository
+        from .shared.runtime import raw_database_url
+
+        resolver = PostgresGroupOpsMaterialResolver(
+            PostgresMediaLibraryRepository(raw_database_url()),
+            real_upload_enabled=True,
+        )
+
+    resolved = []
+    for item in list(attachments or []):
+        if not isinstance(item, dict):
+            raise ValueError("welcome attachments entries must be objects")
+        material_id = item.get("material_id")
+        if material_id in (None, ""):
+            resolved.append(dict(item))
+            continue
+        try:
+            material_id = int(material_id)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("welcome attachment material_id must be a positive integer") from exc
+        if material_id <= 0:
+            raise ValueError("welcome attachment material_id must be a positive integer")
+
+        msgtype = str(item.get("msgtype") or "").strip().lower()
+        package = {
+            "image_library_ids": [material_id] if msgtype == "image" else [],
+            "attachment_library_ids": [material_id] if msgtype == "file" else [],
+            "miniprogram_library_ids": [material_id] if msgtype == "miniprogram" else [],
+        }
+        if msgtype not in {"image", "file", "miniprogram"}:
+            raise ValueError(f"unsupported welcome attachment msgtype: {msgtype or 'missing'}")
+        nested_attachments, image_media_ids = resolver.resolve_content_package_materials(package)
+        if msgtype == "image":
+            media_id = str((image_media_ids or [""])[0] or "").strip()
+            if not media_id:
+                raise ValueError("welcome image material resolved without media_id")
+            resolved.append({"msgtype": "image", "image": {"media_id": media_id}})
+            continue
+
+        nested = dict((nested_attachments or [{}])[0] or {})
+        nested_payload = nested.get(msgtype) if isinstance(nested.get(msgtype), dict) else {}
+        if msgtype == "file":
+            media_id = str(nested_payload.get("media_id") or "").strip()
+            if not media_id:
+                raise ValueError("welcome file material resolved without media_id")
+            resolved.append({"msgtype": "file", "file": {"media_id": media_id}})
+            continue
+        required = ("appid", "page", "title", "pic_media_id")
+        if any(not str(nested_payload.get(field) or "").strip() for field in required):
+            raise ValueError("welcome miniprogram material resolved with incomplete payload")
+        resolved.append(
+            {
+                "msgtype": "miniprogram",
+                "miniprogram": {
+                    field: str(nested_payload.get(field) or "").strip()
+                    for field in required
+                },
+            }
+        )
+    return resolved
 
 
 def _build_wechat_pay_client():

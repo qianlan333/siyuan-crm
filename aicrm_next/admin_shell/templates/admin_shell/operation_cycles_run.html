@@ -1,0 +1,291 @@
+{% extends "admin_shell/operation_cycles_base.html" %}
+{% import "admin_shell/operation_cycles_macros.html" as cycles %}
+
+{% block content %}
+{% set task = run.get("task_definition") or run %}
+{% set plan = run.get("plan") or run.get("review") or run %}
+{% set delivery = run.get("delivery") or {} %}
+{% set run_funnel = run.get("funnel") or {} %}
+{% set retro = retrospective or {} %}
+{% set iteration = next_iteration or {} %}
+<div class="operation-cycle operation-cycle--run" data-operation-cycle-surface="run-detail" data-readonly="true">
+  <section class="operation-cycle-run-hero">
+    <div>
+      <span class="operation-cycle-kicker">RUN DOSSIER · 单次运行档案</span>
+      <h2>{{ run.get("label") or run.get("title") or run.get("run_key") }}</h2>
+      <p>{{ task.get("objective") or strategy.get("objective") or "本次任务目标尚未记录。" }}</p>
+    </div>
+    <div class="operation-cycle-run-hero__meta">
+      <span>{{ strategy.get("title") or strategy.get("strategy_key") }}</span>
+      <strong>{{ run.get("run_key") }}</strong>
+      <small>快照修订 {{ run.get("snapshot_revision") if run.get("snapshot_revision") is not none else "未知" }}</small>
+    </div>
+    {{ cycles.readonly_stamp() }}
+    {% if run.get("status_axes") %}{{ cycles.axis_strip(run.get("status_axes")) }}{% else %}{{ cycles.model_axis_strip(run) }}{% endif %}
+  </section>
+
+  <nav class="operation-cycle-step-index" aria-label="运行档案章节">
+    <a href="#cycle-step-1"><span>01</span>任务</a>
+    <a href="#cycle-step-2"><span>02</span>尝试</a>
+    <a href="#cycle-step-3"><span>03</span>人群</a>
+    <a href="#cycle-step-4"><span>04</span>人审</a>
+    <a href="#cycle-step-5"><span>05</span>发送</a>
+    <a href="#cycle-step-6"><span>06</span>结果</a>
+    <a href="#cycle-step-7"><span>07</span>复盘</a>
+    <a href="#cycle-step-8"><span>08</span>优化</a>
+  </nav>
+
+  <section class="operation-cycle-step" id="cycle-step-1">
+    <header class="operation-cycle-step__head">
+      <span>01</span>
+      <div><small>TASK DEFINITION</small><h2>任务目标与时间</h2></div>
+    </header>
+    <div class="operation-cycle-step__body operation-cycle-step__body--facts">
+      <div class="operation-cycle-definition">
+        <span>目标</span><strong>{{ task.get("objective") or "未记录" }}</strong>
+      </div>
+      <div class="operation-cycle-definition">
+        <span>目标人群</span><strong>{{ task.get("audience_summary") or task.get("audience_label") or "未记录" }}</strong>
+      </div>
+      <div class="operation-cycle-time-grid">
+        <dl><dt>意图发送时间</dt><dd>{{ run.get("intended_send_at") or "未记录" }}</dd></dl>
+        <dl><dt>计划排期时间</dt><dd>{{ run.get("plan_scheduled_for") or "未记录" }}</dd></dl>
+        <dl><dt>首次实际发送</dt><dd>{{ run.get("first_sent_at") or cycles.state_label("not_started") }}</dd></dl>
+        <dl><dt>最后实际发送</dt><dd>{{ run.get("last_sent_at") or cycles.state_label("not_started") }}</dd></dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-2">
+    <header class="operation-cycle-step__head">
+      <span>02</span>
+      <div><small>ATTEMPTS &amp; PREFLIGHT</small><h2>前置检查与执行尝试</h2></div>
+    </header>
+    <div class="operation-cycle-step__body">
+      {% if attempts %}
+      <ol class="operation-cycle-attempts">
+        {% for attempt in attempts %}
+        <li class="operation-cycle-attempt operation-cycle-attempt--{{ attempt.get('status') or 'unknown' }}">
+          <div class="operation-cycle-attempt__rail"><i></i><span>{{ "%02d" | format(loop.index) }}</span></div>
+          <div class="operation-cycle-attempt__content">
+            <div class="operation-cycle-attempt__title">
+              <div>
+                <strong>{{ attempt.get("label") or attempt.get("attempt_key") or "执行尝试" }}</strong>
+                {% if attempt.get("parent_attempt_key") %}<small>恢复自 {{ attempt.get("parent_attempt_key") }}</small>{% endif %}
+              </div>
+              {{ cycles.status_chip(attempt.get("status_label") or attempt.get("status") or "未知", "", attempt.get("tone") or "neutral") }}
+            </div>
+            <p>{{ attempt.get("summary") or attempt.get("blocked_reason") or "本次尝试未记录补充说明。" }}</p>
+            <div class="operation-cycle-attempt__meta">
+              <span>开始 {{ attempt.get("started_at") or "未知" }}</span>
+              <span>结束 {{ attempt.get("finished_at") or "未知" }}</span>
+            </div>
+            {% set attempt_stages = attempt.get("stages") or [] %}
+            {% if attempt_stages %}
+            <div class="operation-cycle-stage-strip">
+              {% for stage in attempt_stages %}
+              <span data-stage-status="{{ stage.get('status') or 'unknown' }}">
+                <i></i>{{ stage.get("label") or stage.get("stage_key") }}
+              </span>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+      {% else %}
+      <div class="operation-cycle-empty operation-cycle-empty--inline">
+        <strong>没有执行尝试记录</strong>
+        <span>这表示快照尚未提供尝试链路，不代表前置检查已经通过。</span>
+      </div>
+      {% endif %}
+
+      {% if stages %}
+      <div class="operation-cycle-stage-register">
+        {% for stage in stages %}
+        <div>
+          <span>{{ "%02d" | format(loop.index) }}</span>
+          <strong>{{ stage.get("label") or stage.get("stage_key") }}</strong>
+          {{ cycles.status_chip(stage.get("status_label") or stage.get("status") or "未知", "", stage.get("tone") or "neutral") }}
+          <small>{{ stage.get("summary") or stage.get("completed_at") or "暂无阶段说明" }}</small>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-3">
+    <header class="operation-cycle-step__head">
+      <span>03</span>
+      <div><small>AUDIENCE DECISION</small><h2>人群分层与去留判断</h2></div>
+    </header>
+    <div class="operation-cycle-step__body">
+      {{ cycles.funnel(run.get("funnel") or (funnel if funnel is defined else [])) }}
+      {% if run.get("audience_note") %}<p class="operation-cycle-callout">{{ run.get("audience_note") }}</p>{% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-4">
+    <header class="operation-cycle-step__head">
+      <span>04</span>
+      <div><small>HUMAN REVIEW</small><h2>人审与计划版本</h2></div>
+    </header>
+    <div class="operation-cycle-step__body operation-cycle-review-grid">
+      <dl><dt>人审状态</dt><dd>{{ cycles.status_chip(plan.get("review_status_label") or plan.get("review_status") or run.get("review_status") or run.get("approval_status") or "未知", "", plan.get("review_tone") or ("ok" if run.get("review_status") == "approved" else "warn" if run.get("review_status") == "pending" else "danger" if run.get("review_status") in ["rejected", "cancelled"] else "neutral")) }}</dd></dl>
+      <dl><dt>计划版本</dt><dd>{{ plan.get("version_label") or plan.get("plan_version") or ("v" ~ strategy.get("current_version") if strategy.get("current_version") else "未记录") }}</dd></dl>
+      <dl><dt>计划状态</dt><dd>{{ plan.get("status_label") or plan.get("plan_status") or plan.get("status") or "未记录" }}{% if plan.get("plan_source") %}<small>{{ plan.get("plan_source") }}</small>{% endif %}</dd></dl>
+      {% set planned_entry = run_funnel.get("planned_target_count") or {} %}
+      <dl><dt>目标人数</dt><dd>{% if plan.get("target_count") is not none %}{{ plan.get("target_count") }}{% elif planned_entry.get("status") in ["observed", "partial_lower_bound"] and planned_entry.get("value") is not none %}{{ planned_entry.get("value") }}{% else %}{{ cycles.state_label(plan.get("target_count_state") or planned_entry.get("status") or "unknown") }}{% endif %}</dd></dl>
+      {% if plan.get("conflict_notice") or run.get("fact_conflict_notice") or run.get("fact_conflict") %}
+      <div class="operation-cycle-risk-note">
+        <span>事实待核对</span>
+        <strong>{{ plan.get("conflict_notice") or run.get("fact_conflict_notice") or ("计划元数据与实际发送事实存在冲突" if run.get("fact_conflict") else "") }}</strong>
+        <p>计划元数据与发送事实同时保留，页面不会静默覆盖任一来源。</p>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-5">
+    <header class="operation-cycle-step__head">
+      <span>05</span>
+      <div><small>DELIVERY FACT</small><h2>实际发送事实</h2></div>
+    </header>
+    <div class="operation-cycle-step__body">
+      {% set sent_entry = run_funnel.get("effective_sent_count") or {} %}
+      {% set failed_entry = run_funnel.get("failed_count") or {} %}
+      <div class="operation-cycle-delivery-facts">
+        {{ cycles.metric_value({"label": "有效发送", "value": delivery.get("effective_sent_count") if delivery.get("effective_sent_count") is not none else sent_entry.get("value"), "value_state": delivery.get("effective_sent_state") or sent_entry.get("status") or "unknown", "description": delivery.get("source_label") or sent_entry.get("data_source") or "发送事实"}) }}
+        {{ cycles.metric_value({"label": "发送失败", "value": delivery.get("failed_count") if delivery.get("failed_count") is not none else failed_entry.get("value"), "value_state": delivery.get("failed_state") or failed_entry.get("status") or "unknown", "description": failed_entry.get("limitation")}) }}
+        {{ cycles.metric_value({"label": "可重试失败", "value": delivery.get("retryable_failed_count"), "value_state": delivery.get("retryable_failed_state") or "unknown"}) }}
+        {{ cycles.metric_value({"label": "发送完成率", "value": delivery.get("completion_rate"), "unit": delivery.get("completion_rate_unit") or "%", "value_state": delivery.get("completion_rate_state") or "unknown"}) }}
+      </div>
+      <div class="operation-cycle-delivery-register">
+        <div><span>发送状态</span><strong>{{ delivery.get("status_label") or delivery.get("status") or run.get("delivery_status") or "未知" }}</strong></div>
+        <div><span>事实来源</span><strong>{{ delivery.get("source_label") or delivery.get("source") or "来源未声明" }}</strong></div>
+        <div><span>首条发送</span><strong>{{ run.get("first_sent_at") or "未记录" }}</strong></div>
+        <div><span>末条发送</span><strong>{{ run.get("last_sent_at") or "未记录" }}</strong></div>
+      </div>
+      {% if delivery.get("failure_summary") %}<p class="operation-cycle-callout operation-cycle-callout--risk">{{ delivery.get("failure_summary") }}</p>{% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-6">
+    <header class="operation-cycle-step__head">
+      <span>06</span>
+      <div><small>OBSERVATION WINDOWS</small><h2>分窗口结果</h2></div>
+    </header>
+    <div class="operation-cycle-step__body">
+      {% if observation_windows %}
+      <div class="operation-cycle-windows">
+        {% for window in observation_windows %}
+        <article class="operation-cycle-window" data-window-state="{{ window.get('value_state') or window.get('status') or 'unknown' }}">
+          <header>
+            <div><span>{{ "%02d" | format(loop.index) }}</span><strong>{{ window.get("label") or window.get("window_label") or "观察窗口" }}</strong></div>
+            {{ cycles.status_chip(window.get("status_label") or cycles.state_label(window.get("value_state") or window.get("status") or "unknown"), "", window.get("tone") or "neutral") }}
+          </header>
+          <div class="operation-cycle-window__metrics">
+            {% for metric in window.get("metrics") or [] %}
+              {{ cycles.metric_value(metric, true) }}
+            {% else %}
+            <div class="operation-cycle-empty operation-cycle-empty--inline">
+              <strong>本窗口暂无指标</strong><span>{{ cycles.state_label(window.get("value_state") or "unknown") }}</span>
+            </div>
+            {% endfor %}
+          </div>
+          <dl class="operation-cycle-window__definition">
+            <div><dt>观察范围</dt><dd>{{ window.get("window_start") or "—" }} → {{ window.get("window_end") or "—" }}</dd></div>
+            <div><dt>数据质量</dt><dd>{{ window.get("data_quality_label") or window.get("data_quality") or "未知" }}</dd></div>
+            <div><dt>口径限制</dt><dd>{{ window.get("limitation") or "未补充限制说明" }}</dd></div>
+          </dl>
+          <p class="operation-cycle-noncausal">观察信号 · 不作为因果提升结论</p>
+        </article>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="operation-cycle-empty operation-cycle-empty--inline">
+        <strong>观察窗口尚未上报</strong>
+        <span>系统不会用空白推断零结果，也不会把早期信号包装成因果提升。</span>
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-7">
+    <header class="operation-cycle-step__head">
+      <span>07</span>
+      <div><small>POSTMORTEM</small><h2>结果复盘与限制</h2></div>
+    </header>
+    <div class="operation-cycle-step__body operation-cycle-retrospective">
+      <div class="operation-cycle-retrospective__statement">
+        <span>复盘结论</span>
+        <strong>{{ retro.get("summary") or retro.get("conclusion") or "复盘尚未形成" }}</strong>
+        <p>{{ retro.get("detail") or "待观察窗口成熟并核对数据口径后补充。" }}</p>
+      </div>
+      <div class="operation-cycle-retrospective__lists">
+        <div>
+          <h3>已确认发现</h3>
+          <ul>
+            {% for finding in retro.get("findings") or retro.get("key_findings") or [] %}<li>{{ finding }}</li>{% else %}<li>暂无已确认发现</li>{% endfor %}
+          </ul>
+        </div>
+        <div>
+          <h3>限制与缺口</h3>
+          <ul>
+            {% for limitation in retro.get("limitations") or [] %}<li>{{ limitation }}</li>{% else %}<li>暂无已记录限制</li>{% endfor %}
+          </ul>
+        </div>
+      </div>
+      {% if retro.get("data_conflicts") %}
+      <div class="operation-cycle-callout operation-cycle-callout--risk">
+        <strong>事实冲突</strong>
+        {% for conflict in retro.get("data_conflicts") %}<span>{{ conflict }}</span>{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-step" id="cycle-step-8">
+    <header class="operation-cycle-step__head">
+      <span>08</span>
+      <div><small>NEXT ITERATION</small><h2>下一轮优化</h2></div>
+    </header>
+    <div class="operation-cycle-step__body operation-cycle-next">
+      <div class="operation-cycle-next__status">
+        {{ cycles.status_chip(iteration.get("status_label") or iteration.get("status") or "尚未形成", "优化状态", iteration.get("tone") or "neutral") }}
+        <strong>{{ iteration.get("summary") or "等待复盘结论" }}</strong>
+        <p>{{ iteration.get("rationale") or "优化建议被确认后，才会进入下一策略版本。" }}</p>
+      </div>
+      <dl class="operation-cycle-next__facts">
+        <div><dt>确认时间</dt><dd>{{ iteration.get("confirmed_at") or cycles.state_label("not_started") }}</dd></div>
+        <div><dt>应用版本</dt><dd>{{ iteration.get("applied_version") or cycles.state_label("not_started") }}</dd></div>
+        <div><dt>确认说明</dt><dd>{{ iteration.get("validation_plan") or iteration.get("confirmation_note") or "未记录" }}</dd></div>
+      </dl>
+      {% if iteration.get("changes") %}
+      <ol class="operation-cycle-change-list">
+        {% for change in iteration.get("changes") %}<li><span>{{ "%02d" | format(loop.index) }}</span><p>{{ change }}</p></li>{% endfor %}
+      </ol>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="operation-cycle-evidence">
+    <div class="operation-cycle-section-head">
+      <div><span class="operation-cycle-kicker">EVIDENCE INDEX · 证据索引</span><h2>关联只读事实</h2></div>
+      <span class="operation-cycle-count">{{ references|length }} 条</span>
+    </div>
+    {% if references %}
+    <div class="operation-cycle-evidence-grid">
+      {% for item in references %}{{ cycles.evidence_link(item) }}{% endfor %}
+    </div>
+    {% else %}
+    <div class="operation-cycle-empty operation-cycle-empty--inline">
+      <strong>没有可跳转的证据引用</strong>
+      <span>结构化快照仍会保留，但当前没有可关联的发送任务、投递链路或只读记录。</span>
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

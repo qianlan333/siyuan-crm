@@ -102,6 +102,10 @@ class UpsertProductCommand:
         self._product_write_gateway = product_write_gateway or build_product_write_gateway()
 
     def __call__(self, payload: ProductUpsertRequest, product_id: str | None = None) -> dict[str, Any]:
+        if product_id:
+            from aicrm_next.commerce.coupons.application import assert_product_price_allows_coupons
+
+            assert_product_price_allows_coupons(product_id=product_id, new_price=int(payload.price_cents))
         completion_fields = normalize_product_completion_target(payload.model_dump())
         product_payload = {
             **payload.model_dump(),

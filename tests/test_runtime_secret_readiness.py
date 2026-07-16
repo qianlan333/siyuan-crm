@@ -201,6 +201,30 @@ def test_run_fails_closed_when_health_contract_is_not_ready(
     assert payload["error_code"] == expected_error
 
 
+def test_run_allows_non_shop_deployment_to_omit_callback_token(monkeypatch) -> None:
+    def fetch(url: str, *, timeout: float) -> readiness.HttpResponse:
+        response = _healthy_fetch(url, timeout=timeout)
+        if urlsplit(url).path != "/health":
+            return response
+        payload = json.loads(response.body)
+        payload["wechat_shop_callback_token_present"] = False
+        return _response(200, headers=response.headers, body=json.dumps(payload))
+
+    monkeypatch.setattr(readiness, "_fetch", fetch)
+
+    payload = readiness.run(
+        base_url="http://127.0.0.1:5001",
+        expected_sha=EXPECTED_SHA,
+        expected_callback_url=EXPECTED_CALLBACK_URL,
+        timeout=1.0,
+        require_wechat_shop_callback_token=False,
+    )
+
+    assert payload["ok"] is True
+    assert payload["health"]["wechat_shop_callback_token_present"] is False
+    assert payload["health"]["error_code"] == ""
+
+
 @pytest.mark.parametrize(
     ("qr_location", "oauth_location", "external_header", "expected_error"),
     [

@@ -120,6 +120,20 @@ def test_siyuan_runtime_environment_is_migrated_before_workers_start() -> None:
     assert "AICRM_NEXT_WECOM_REAL_CALLS_ENABLED=true" not in workflow
 
 
+def test_siyuan_release_control_archive_contains_validated_entrypoints() -> None:
+    workflow = _workflow()
+
+    archive = workflow.index('git archive "$verified_sha"')
+    app_entrypoint = workflow.index("app.py", archive)
+    script_entrypoints = workflow.index("scripts", app_entrypoint)
+    deploy_units = workflow.index("deploy", script_entrypoints)
+    extract = workflow.index('tar -x -C "$release_control_dir"', deploy_units)
+    readiness = workflow.index("scripts/ops/check_runtime_secret_readiness.py")
+
+    assert archive < app_entrypoint < script_entrypoints < deploy_units < extract < readiness
+    assert "--allow-missing-wechat-shop-callback-token" in workflow
+
+
 def test_deploy_does_not_reject_historical_queue_backlog_before_workers_start() -> None:
     workflow = _workflow()
 

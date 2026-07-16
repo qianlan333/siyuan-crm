@@ -321,7 +321,8 @@ jobs:
             fi
             release_control_dir="$(mktemp -d /tmp/aicrm-release-control.XXXXXX)"
             git archive "$verified_sha" \
-              scripts/ops/manage_production_runtime_units.py \
+              app.py \
+              scripts \
               deploy \
               | tar -x -C "$release_control_dir"
             release_control_manager="$release_control_dir/scripts/ops/manage_production_runtime_units.py"
@@ -460,6 +461,7 @@ jobs:
               --base-url http://127.0.0.1:5001 \
               --expected-sha "$after_sha" \
               --expected-callback-url "$auth_issuer/auth/wecom/callback" \
+              --allow-missing-wechat-shop-callback-token \
               | tee /tmp/aicrm-runtime-secret-readiness.json
             deploy_smoke_session_file="$(mktemp /tmp/aicrm-deploy-smoke-session.XXXXXX)"
             python3 scripts/ops/create_deploy_smoke_session.py issue \

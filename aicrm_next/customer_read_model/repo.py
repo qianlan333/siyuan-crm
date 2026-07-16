@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Protocol
@@ -511,6 +512,16 @@ def _coerce_datetime(value: object) -> datetime:
         # ``datetime.fromisoformat`` requires an explicit minute component.
         if len(normalized) >= 3 and normalized[-3] in {"+", "-"} and normalized[-2:].isdigit():
             normalized += ":00"
+        # Python versions before 3.11 accept only 3 or 6 fractional digits in
+        # ISO datetimes, while PostgreSQL may emit any precision up to 6.
+        fractional = re.fullmatch(
+            r"(?P<prefix>.+:\d{2})\.(?P<fraction>\d+)(?P<offset>Z|[+-]\d{2}:\d{2})?",
+            normalized,
+        )
+        if fractional:
+            fraction = (fractional.group("fraction") + "000000")[:6]
+            offset = fractional.group("offset") or ""
+            normalized = f"{fractional.group('prefix')}.{fraction}{offset}"
         return datetime.fromisoformat(normalized)
     return datetime.now(timezone.utc)
 

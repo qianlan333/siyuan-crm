@@ -161,7 +161,10 @@ def test_customer_read_model_refresh_refuses_duplicate_or_empty_unionid() -> Non
 
 
 def test_customer_read_model_accepts_postgres_whole_hour_timezone_offset() -> None:
-    value = _coerce_datetime("2026-07-16 18:02:25.720198+08")
+    whole_hour = _coerce_datetime("2026-07-16 18:02:25.720198+08")
+    variable_fraction = _coerce_datetime("2026-07-16 18:01:43.6157+08:00")
 
-    assert value.utcoffset() == timedelta(hours=8)
-    assert value.isoformat() == "2026-07-16T18:02:25.720198+08:00"
+    assert whole_hour.utcoffset() == timedelta(hours=8)
+    assert whole_hour.isoformat() == "2026-07-16T18:02:25.720198+08:00"
+    assert variable_fraction.utcoffset() == timedelta(hours=8)
+    assert variable_fraction.isoformat() == "2026-07-16T18:01:43.615700+08:00"

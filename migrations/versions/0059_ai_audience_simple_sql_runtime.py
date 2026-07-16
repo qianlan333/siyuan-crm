@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-from migrations.audience_read import ensure_audience_read_schema
-
 
 revision = "0059_ai_audience_simple_sql_runtime"
 down_revision = "0058_merge_webhook_inbox_and_huangyoucan_audience"
@@ -18,7 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    audience_read_available = ensure_audience_read_schema()
+    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
     op.execute(
         """
         ALTER TABLE ai_audience_package_version
@@ -31,8 +29,7 @@ def upgrade() -> None:
         ADD COLUMN IF NOT EXISTS simple_compiled_sql_text TEXT NOT NULL DEFAULT ''
         """
     )
-    if audience_read_available:
-        _create_registration_status_view()
+    _create_registration_status_view()
 
 
 def downgrade() -> None:

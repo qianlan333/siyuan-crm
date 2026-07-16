@@ -349,6 +349,9 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
             "public_strict" if write else "public_standard",
         )
 
+    if path == "/{filename}" and entry.get("route_name") == "wechat_domain_verification_file":
+        return _policy("external_integration", "public", "domain_verification_read", "public", "none", False, "public_standard")
+
     if path in {"/health", "/api/system/health"}:
         return _policy("external_integration", "public", "health_read", "public", "none", False, "health")
 
@@ -466,17 +469,6 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
 
     if owner == "auth_wecom" or path.startswith("/auth/wecom"):
         return _policy("admin", "provider_oauth_state", "public", "public", "none", False, "auth_strict")
-
-    if path == "/{filename}" and entry.get("route_name") == "wechat_domain_verification_file":
-        return _policy(
-            "external_integration",
-            "public",
-            "public",
-            "public",
-            "none",
-            False,
-            "public_strict",
-        )
 
     raise ValueError(f"unclassified route policy: {','.join(sorted(_methods(entry)))} {path} {entry.get('route_name')}")
 

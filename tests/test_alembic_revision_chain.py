@@ -66,6 +66,22 @@ def test_all_alembic_down_revisions_exist() -> None:
     assert missing == {}
 
 
+def test_required_physical_schema_repair_is_the_single_head() -> None:
+    revisions = _migration_revisions()
+    referenced = {parent for item in revisions.values() for parent in _parents(item["down_revision"])}
+    heads = set(revisions) - referenced
+    repair = VERSIONS / "0123_required_physical_schema_repair.py"
+    source = repair.read_text(encoding="utf-8")
+
+    assert heads == {"0123_required_physical_schema_repair"}
+    assert revisions["0123_required_physical_schema_repair"]["down_revision"] == "0122_internal_event_fanout_manifest"
+    assert "0018_hxc_dashboard_broadcast_tasks" in source
+    assert "0023_group_ops_webhook_rules" in source
+    assert "0028_owner_migration_excel_sessions" in source
+    assert "def downgrade()" in source
+    assert "return None" in source
+
+
 def test_alembic_revision_storage_supports_deployed_revision_ids() -> None:
     revisions = _migration_revisions()
     old_hxc_revision = "0012_hxc_dashboard_v6_" + "growth_columns"
@@ -120,7 +136,7 @@ def test_miniprogram_reset_migration_preserves_broadcast_job_claim_token_not_nul
     assert "claim_token TEXT NOT NULL DEFAULT ''" in (
         VERSIONS / "0012_broadcast_job_leases.py"
     ).read_text(encoding="utf-8")
-    assert "claim_token = ''" in source or "siyuan-safe placeholder" in source
+    assert "claim_token = ''" in source
     assert "claim_token = NULL" not in source
 
 

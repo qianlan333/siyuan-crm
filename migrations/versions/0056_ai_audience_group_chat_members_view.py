@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-from migrations.audience_read import ensure_audience_read_schema
-
 
 revision = "0056_ai_audience_group_chat_members_view"
 down_revision = "0055_automation_agent_webhook_token_and_send_url"
@@ -18,8 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    if not ensure_audience_read_schema():
-        return
+    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
     _create_empty_view()
     op.execute(
         """

@@ -2,6 +2,11 @@
 from __future__ import annotations
 
 from aicrm_next.service_period_grid_ports import SERVICE_PERIOD_GRID_COLLABORATOR_ROLE
+from aicrm_next.shared.wecom_runtime import (
+    WECOM_ENABLED_EFFECT_TYPES_KEY,
+    WECOM_EXECUTION_MODE_KEY,
+    load_wecom_execution_config,
+)
 
 from .application_support import (
     ADMIN_ASSIGNABLE_ROLE_OPTIONS,
@@ -282,7 +287,10 @@ class AdminConfigReadService:
 
     def _capability_enabled(self, capability: PushCapability, *, default: bool = False) -> bool:
         value, _source = self._setting_value_source(capability.setting_key)
-        return _capability_enabled_from_value(value, default=default)
+        if _text(value):
+            return _capability_enabled_from_value(value, default=default)
+        gate_consistent, _problem = self._capability_gate_consistent(capability, configured_enabled=True)
+        return gate_consistent
 
     def _capability_gate_consistent(self, capability: PushCapability, *, configured_enabled: bool) -> tuple[bool, str]:
         if not configured_enabled:
@@ -290,15 +298,18 @@ class AdminConfigReadService:
         allowed_types = {
             item.strip() for item in _text(self._setting_value_source("AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES")[0]).replace("\n", ",").split(",") if item.strip()
         }
-        missing_types = [effect_type for effect_type in capability.effect_types if effect_type not in allowed_types]
+        wecom_effect_types = {effect_type for effect_type in capability.effect_types if effect_type.startswith("wecom.")}
+        missing_types = [effect_type for effect_type in capability.effect_types if effect_type not in wecom_effect_types and effect_type not in allowed_types]
         if missing_types:
             return False, "effect_type_allowlist_missing"
         if _capability_requires_webhook_gate(capability) and not self._capability_enabled_from_setting("AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE"):
             return False, "webhook_execute_disabled"
-        if any(effect_type.startswith("wecom.") for effect_type in capability.effect_types) and not self._capability_enabled_from_setting(
-            "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE"
-        ):
-            return False, "wecom_execute_disabled"
+        if wecom_effect_types:
+            wecom_config = load_wecom_execution_config()
+            if not wecom_config.real_calls_enabled:
+                return False, "wecom_execute_disabled"
+            if not wecom_effect_types.issubset(set(wecom_config.enabled_effect_types)):
+                return False, "wecom_effect_type_allowlist_missing"
         if capability.adapter_family == "payment" and not self._capability_enabled_from_setting("AICRM_EXTERNAL_EFFECT_PAYMENT_EXECUTE"):
             return False, "payment_execute_disabled"
         if "feishu.webhook.notify" in set(capability.effect_types) and not self._capability_enabled_from_setting("AICRM_EXTERNAL_EFFECT_FEISHU_EXECUTE"):
@@ -316,10 +327,21 @@ class AdminConfigReadService:
     def _last_problem_for_section(self, section: str, repository: PushCenterRepository) -> dict[str, str]:
         jobs, _total = repository.list_jobs({"section": section}, limit=50, offset=0)
         for job in jobs:
-            if _text(job.last_error_code) or job.status in {"blocked", "failed_retryable", "failed_terminal", "unknown_after_dispatch"}:
+            raw = (
+                job
+                if isinstance(job, dict)
+                else {
+                    "status": getattr(job, "status", ""),
+                    "last_error_code": getattr(job, "last_error_code", ""),
+                    "last_error_message": getattr(job, "last_error_message", ""),
+                }
+            )
+            last_error_code = _text(raw.get("last_error_code"))
+            status = _text(raw.get("status"))
+            if last_error_code or status in {"blocked", "failed_retryable", "failed_terminal", "unknown_after_dispatch"}:
                 return {
-                    "last_error_code": _text(job.last_error_code),
-                    "last_error_message": _text(job.last_error_message),
+                    "last_error_code": last_error_code,
+                    "last_error_message": _text(raw.get("last_error_message")),
                 }
         return {"last_error_code": "", "last_error_message": ""}
 
@@ -783,8 +805,7 @@ class AdminConfigWriteCommand:
         for capability in visible_push_capabilities(main_only=False):
             if not capability.toggleable or not capability.supports_real_execution:
                 continue
-            value, _source = read_service._setting_value_source(capability.setting_key)
-            if _capability_enabled_from_value(value, default=False):
+            if read_service._capability_enabled(capability, default=False):
                 enabled.append(capability)
         return enabled
 
@@ -792,6 +813,15 @@ class AdminConfigWriteCommand:
         read_service = AdminConfigReadService(self.repo)
         enabled_capabilities = self._enabled_capabilities_for_derivation(read_service)
         effect_types = _effect_type_union_for_enabled_capabilities(read_service)
+        explicitly_disabled_wecom_types: set[str] = set()
+        for capability in visible_push_capabilities(main_only=False):
+            value, _source = read_service._setting_value_source(capability.setting_key)
+            if not _text(value) or _capability_enabled_from_value(value, default=False):
+                continue
+            explicitly_disabled_wecom_types.update(effect_type for effect_type in capability.effect_types if effect_type.startswith("wecom."))
+        for effect_type in load_wecom_execution_config().enabled_effect_types:
+            if effect_type not in explicitly_disabled_wecom_types and effect_type not in effect_types:
+                effect_types.append(effect_type)
         gates = _derived_gate_payload(effect_types, enabled_capabilities)
         self._upsert_setting_with_audit(
             key="AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES",
@@ -802,6 +832,18 @@ class AdminConfigWriteCommand:
         self._upsert_setting_with_audit(
             key="AICRM_EXTERNAL_EFFECT_WEBHOOK_EXECUTE",
             value=_normalize_boolean_text(gates["webhook_execute"]),
+            operator=operator,
+            target_type=TARGET_PUSH_CAPABILITY,
+        )
+        self._upsert_setting_with_audit(
+            key=WECOM_EXECUTION_MODE_KEY,
+            value="execute" if gates["wecom_execute"] else "disabled",
+            operator=operator,
+            target_type=TARGET_PUSH_CAPABILITY,
+        )
+        self._upsert_setting_with_audit(
+            key=WECOM_ENABLED_EFFECT_TYPES_KEY,
+            value=",".join(effect_type for effect_type in effect_types if effect_type.startswith("wecom.")),
             operator=operator,
             target_type=TARGET_PUSH_CAPABILITY,
         )

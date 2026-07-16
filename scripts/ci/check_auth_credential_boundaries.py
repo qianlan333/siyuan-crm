@@ -43,10 +43,6 @@ def _active_contract_files() -> list[Path]:
             relative = path.relative_to(ROOT)
             if relative.parts[:2] in {("docs", "archive"), ("docs", "plans")}:
                 continue
-            if relative.parts[:2] == ("docs", "reports") and "siyuan" in relative.name.lower():
-                continue
-            if relative == Path("docs/siyuan_aicrm_next_migration.md"):
-                continue
             if path in {INVENTORY, ROOT / "docs/architecture/runtime_contract_inventory.json"}:
                 continue
             result.append(path)

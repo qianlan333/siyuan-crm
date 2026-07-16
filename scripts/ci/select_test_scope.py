@@ -88,21 +88,33 @@ def _exclusive_scope_override_matches(
     return None
 
 
-def _git_diff_names(*args: str) -> list[str]:
+def _git_diff_changes(*args: str) -> tuple[list[str], list[str]]:
     completed = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", *args],
+        ["git", "diff", "--name-status", "--no-renames", *args],
         cwd=ROOT,
         text=True,
         check=True,
         capture_output=True,
     )
-    return [_normalize_path(line) for line in completed.stdout.splitlines() if line.strip()]
+    changed_files: list[str] = []
+    deleted_files: list[str] = []
+    for line in completed.stdout.splitlines():
+        if not line.strip():
+            continue
+        status, separator, raw_path = line.partition("\t")
+        if not separator or not raw_path.strip():
+            raise SystemExit(f"Unable to parse git diff status line: {line!r}")
+        path = _normalize_path(raw_path)
+        changed_files.append(path)
+        if status == "D":
+            deleted_files.append(path)
+    return _unique(changed_files), _unique(deleted_files)
 
 
-def _changed_files_from_event() -> list[str]:
+def _changed_files_from_event() -> tuple[list[str], list[str]]:
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not event_path:
-        return _git_diff_names("HEAD^", "HEAD")
+        return _git_diff_changes("HEAD^", "HEAD")
 
     payload = json.loads(Path(event_path).read_text(encoding="utf-8"))
     event_name = os.environ.get("GITHUB_EVENT_NAME", "")
@@ -110,16 +122,16 @@ def _changed_files_from_event() -> list[str]:
     if event_name == "pull_request" and "pull_request" in payload:
         base_sha = payload["pull_request"]["base"]["sha"]
         head_sha = payload["pull_request"]["head"]["sha"]
-        return _git_diff_names(f"{base_sha}...{head_sha}")
+        return _git_diff_changes(f"{base_sha}...{head_sha}")
 
     if event_name == "push":
         before = payload.get("before")
         after = payload.get("after") or "HEAD"
         if before and set(before) != {"0"}:
-            return _git_diff_names(before, after)
-        return _git_diff_names("HEAD^", after)
+            return _git_diff_changes(before, after)
+        return _git_diff_changes("HEAD^", after)
 
-    return []
+    return [], []
 
 
 def _full_ci_requested() -> bool:
@@ -147,12 +159,22 @@ def _full_ci_requested() -> bool:
     return "full-ci" in label_names or "[full-ci]" in body or "[full-ci]" in title
 
 
-def _select(manifest: dict, changed_files: list[str]) -> dict:
+def _select(
+    manifest: dict,
+    changed_files: list[str],
+    *,
+    deleted_files: Iterable[str] = (),
+) -> dict:
     scopes = manifest.get("scopes", [])
     if not isinstance(scopes, list):
         raise SystemExit("manifest.scopes must be a list")
 
     changed_files = _unique(_normalize_path(path) for path in changed_files if path.strip())
+    deleted_file_set = {
+        _normalize_path(path)
+        for path in deleted_files
+        if path.strip()
+    }
     high_risk_paths = manifest.get("high_risk_paths", [])
     frontend_build_paths = manifest.get("frontend_build_paths", [])
     scopes_by_name = {str(scope.get("name")): scope for scope in scopes}
@@ -160,6 +182,7 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
     matched_scopes: list[dict] = []
     matched_scope_names: set[str] = set()
     unmatched: list[str] = []
+    unmapped_deleted: list[str] = []
 
     for path in changed_files:
         override_matches = _exclusive_scope_override_matches(manifest, scopes_by_name, path)
@@ -172,7 +195,10 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
         else:
             path_matches = override_matches
         if not path_matches:
-            unmatched.append(path)
+            if path in deleted_file_set:
+                unmapped_deleted.append(path)
+            else:
+                unmatched.append(path)
             continue
         for scope in path_matches:
             name = str(scope.get("name"))
@@ -229,17 +255,20 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
             gate = candidate
     if high_risk:
         gate = "full" if ARCHITECTURE_ORDER[gate] < ARCHITECTURE_ORDER["full"] else gate
+    if unmapped_deleted:
+        gate = "full"
 
     force_full = _full_ci_requested()
     return {
         "changed_files": changed_files,
         "matched_scopes": [str(scope.get("name")) for scope in matched_scopes],
         "unmatched_files": unmatched,
+        "unmapped_deleted_files": unmapped_deleted,
         "python_tests": python_tests,
         "frontend_tests": frontend_tests,
         "needs_postgres": needs_postgres,
         "needs_frontend_build": needs_frontend_build,
-        "needs_full_ci": high_risk or scope_forces_full or force_full,
+        "needs_full_ci": high_risk or scope_forces_full or force_full or bool(unmapped_deleted),
         "force_full": force_full,
         "architecture_gate": gate,
     }
@@ -248,6 +277,7 @@ def _select(manifest: dict, changed_files: list[str]) -> dict:
 def _write_github_output(path: str, result: dict) -> None:
     outputs = {
         "changed_files": " ".join(result["changed_files"]),
+        "unmapped_deleted_files": " ".join(result["unmapped_deleted_files"]),
         "scopes": ",".join(result["matched_scopes"]),
         "python_tests": " ".join(result["python_tests"]),
         "frontend_tests": " ".join(result["frontend_tests"]),
@@ -266,23 +296,27 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
     parser.add_argument("--changed-file", action="append", default=[])
+    parser.add_argument("--deleted-file", action="append", default=[])
     parser.add_argument("--changed-files-from", type=Path)
     parser.add_argument("--github-output")
     parser.add_argument("--json", action="store_true", help="Print selected scope as JSON for tests and debugging.")
     args = parser.parse_args(argv)
 
     changed_files = [_normalize_path(path) for path in args.changed_file]
+    deleted_files = [_normalize_path(path) for path in args.deleted_file]
     if args.changed_files_from:
         changed_files.extend(
             _normalize_path(line)
             for line in args.changed_files_from.read_text(encoding="utf-8").splitlines()
             if line.strip()
         )
-    if not changed_files:
-        changed_files = _changed_files_from_event()
+    explicit_paths = bool(changed_files or deleted_files or args.changed_files_from)
+    changed_files.extend(deleted_files)
+    if not explicit_paths:
+        changed_files, deleted_files = _changed_files_from_event()
 
     manifest = _load_manifest(args.manifest)
-    result = _select(manifest, changed_files)
+    result = _select(manifest, changed_files, deleted_files=deleted_files)
 
     if args.github_output:
         _write_github_output(args.github_output, result)

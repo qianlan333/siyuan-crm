@@ -78,6 +78,29 @@ def test_action_token_accepts_only_exact_bound_context() -> None:
     assert result.claims["act"] == "retry_external_effect_job"
 
 
+def test_action_token_rejects_noncanonical_signature_alias() -> None:
+    context = _context()
+    token = _token(context)
+    base64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    signature_tail_index = base64_alphabet.index(token[-1])
+    assert signature_tail_index % 4 == 0
+    signature_alias = base64_alphabet[signature_tail_index + 1]
+    tampered = f"{token[:-1]}{signature_alias}"
+
+    result = validate_action_token(
+        tampered,
+        context,
+        capability="manage_operations",
+        method="POST",
+        action="retry_external_effect_job",
+        target="/api/admin/external-effects/jobs/{job_id}/retry",
+        now=1_001,
+    )
+
+    assert result.ok is False
+    assert result.error == "invalid"
+
+
 @pytest.mark.parametrize(
     ("context", "capability", "method", "action", "target", "error_suffix"),
     [

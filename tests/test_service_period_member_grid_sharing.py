@@ -345,8 +345,12 @@ def test_external_share_token_is_tamper_proof_revocable_and_rotates_on_reopen(mo
     repo.delete_member_view(product["id"], deleted_view["id"], expected_version=deleted_view["version"])
     with pytest.raises(NotFoundError):
         public.query(token, view_id=deleted_view["id"], cursor="", limit=100)
+    base64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+    signature_tail_index = base64_alphabet.index(token[-1])
+    assert signature_tail_index % 4 == 0
+    signature_alias = base64_alphabet[signature_tail_index + 1]
     with pytest.raises(MemberGridShareUnauthorizedError):
-        public.bootstrap(f"{token[:-1]}x")
+        public.bootstrap(f"{token[:-1]}{signature_alias}")
 
     disabled = service.set_external_share(
         product["id"],

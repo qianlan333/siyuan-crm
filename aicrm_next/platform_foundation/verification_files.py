@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import PlainTextResponse
 
+
 router = APIRouter()
 
 _ROOT = Path(__file__).resolve().parents[2]
+_VERIFICATION_DIR_ENV = "AICRM_DOMAIN_VERIFICATION_DIR"
 _VERIFY_FILE_RE = re.compile(r"^(?:WW|MP)_verify_[A-Za-z0-9_-]+\.txt$")
 
 
@@ -16,7 +19,8 @@ _VERIFY_FILE_RE = re.compile(r"^(?:WW|MP)_verify_[A-Za-z0-9_-]+\.txt$")
 def wechat_domain_verification_file(filename: str) -> PlainTextResponse:
     if not _VERIFY_FILE_RE.fullmatch(filename):
         raise HTTPException(status_code=404, detail="Not Found")
-    path = _ROOT / filename
+    verification_root = Path(os.getenv(_VERIFICATION_DIR_ENV) or _ROOT)
+    path = verification_root / filename
     if not path.is_file():
         raise HTTPException(status_code=404, detail="Not Found")
     return PlainTextResponse(

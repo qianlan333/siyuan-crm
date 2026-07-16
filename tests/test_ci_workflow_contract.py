@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CI_FAST_WORKFLOW = ROOT / ".github" / "workflows" / "ci-fast.yml"
 FULL_REGRESSION_WORKFLOW = ROOT / ".github" / "workflows" / "full-regression.yml"
 DEPLOY_WORKFLOW = ROOT / ".github" / "workflows" / "deploy.yml"
+PROMOTE_PRODUCTION_WORKFLOW = ROOT / ".github" / "workflows" / "promote-production.yml"
 LEGACY_CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 
 
@@ -103,10 +104,10 @@ def test_full_regression_runs_governance_once_and_ci_fast_does_not_duplicate_it(
     assert "uses: ./.github/workflows/full-regression.yml\n    with:\n      run_governance: false" in ci_fast_source
 
 
-def test_siyuan_production_deploy_waits_for_successful_ci_fast_on_main() -> None:
+def test_test_deploy_waits_for_successful_ci_fast_on_main() -> None:
     source = _source(DEPLOY_WORKFLOW)
 
-    assert "name: Deploy to Production" in source
+    assert "name: Deploy" in source
     assert "workflow_run:" in source
     assert 'workflows: ["CI Fast"]' in source
     assert "types: [completed]" in source
@@ -114,17 +115,54 @@ def test_siyuan_production_deploy_waits_for_successful_ci_fast_on_main() -> None
     assert "github.event.workflow_run.head_branch == 'main'" in source
     assert "push:" not in source
     assert "schedule:" not in source
-    assert "secrets.DEPLOY_HOST" in source
-    assert "secrets.DEPLOY_USER" in source
-    assert "secrets.DEPLOY_SSH_KEY" in source
+    assert "TEST_DEPLOY_HOST" in source
+    assert "TEST_DEPLOY_USER" in source
+    assert "TEST_DEPLOY_SSH_KEY" in source
+    assert "env.DEPLOY_TARGET == 'production' && secrets.DEPLOY_HOST || secrets.TEST_DEPLOY_HOST" in source
+    assert "env.DEPLOY_TARGET == 'production' && secrets.DEPLOY_USER || secrets.TEST_DEPLOY_USER" in source
+    assert "env.DEPLOY_TARGET == 'production' && secrets.DEPLOY_SSH_KEY || secrets.TEST_DEPLOY_SSH_KEY" in source
+    assert "environment: ${{ inputs.target_environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'test' }}" in source
+    assert "PUBLIC_HEALTH_URL: ${{ vars.PUBLIC_HEALTH_URL }}" in source
+    assert 'if [ "$deploy_target" = "production" ]; then' in source
     assert "set -o pipefail" in source
-    assert "printf '%s\\n' \"$after_sha\" > .release-sha" in source
-    assert "python scripts/ops/check_admin_read_pages_smoke.py" in source
+    session_issue_index = source.index("python3 scripts/ops/create_deploy_smoke_session.py issue")
+    admin_smoke_index = source.index("python scripts/ops/check_admin_read_pages_smoke.py", session_issue_index)
+    session_revoke_index = source.index(
+        "python3 scripts/ops/create_deploy_smoke_session.py revoke",
+        admin_smoke_index,
+    )
+    assert session_issue_index < admin_smoke_index < session_revoke_index
+    assert '--admin-cookie-file "$deploy_smoke_session_file"' in source
+    assert 'admin_smoke_sidebar_args=(--include-all-sidebar --require-all-data-health-green)' in source
     assert "tee /tmp/aicrm-admin-read-pages-smoke.json" in source
 
 
-def test_siyuan_overlay_does_not_add_upstream_manual_promotion_workflow() -> None:
-    assert not (ROOT / ".github" / "workflows" / "promote-production.yml").exists()
+def test_production_promotion_is_manual_test_verified_and_environment_approved() -> None:
+    source = _source(PROMOTE_PRODUCTION_WORKFLOW)
+    deploy_source = _source(DEPLOY_WORKFLOW)
+
+    assert "name: Promote to Production (Manual)" in source
+    assert "workflow_dispatch:" in source
+    assert "release_sha:" in source
+    assert "confirmation:" in source
+    assert "workflow_run:" not in source
+    assert "push:" not in source
+    assert "schedule:" not in source
+    assert "target_environment: production" in source
+    assert "uses: ./.github/workflows/deploy.yml" in source
+    assert "needs: validate" in source
+    assert "secrets: inherit" in source
+    assert "environment: ${{ inputs.target_environment || vars.DEFAULT_DEPLOY_ENVIRONMENT || 'test' }}" in deploy_source
+    assert "DEPLOY 150.158.82.186" in source
+    assert "https://id-dev.youcangogogo.com/health" in source
+    assert "test release sha does not match requested production release" in source
+    assert "git merge-base --is-ancestor" in source
+    assert "secrets.DEPLOY_HOST" in deploy_source
+    assert "github.event_name == 'workflow_call'" not in deploy_source
+    assert "inputs.target_environment == 'production'" in deploy_source
+    assert "inputs.release_sha != ''" in deploy_source
+    assert "scripts/ops/ensure_production_public_release_route.py --execute" in deploy_source
+    assert '--public-health-url "${{ env.PUBLIC_HEALTH_URL }}"' in deploy_source
 
 
 def test_architecture_gate_script_has_fast_db_and_full_modes() -> None:

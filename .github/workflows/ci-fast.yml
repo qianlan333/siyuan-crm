@@ -89,7 +89,7 @@ jobs:
     needs: select
     if: needs.select.outputs.needs_full_ci != 'true' && needs.select.outputs.python_tests != '' && needs.select.outputs.needs_postgres == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 18
+    timeout-minutes: 12
     services:
       postgres:
         image: postgres:16

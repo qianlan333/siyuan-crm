@@ -214,7 +214,8 @@
       "name": "runtime_readiness",
       "paths": [
         "aicrm_next/platform_foundation/readiness.py",
-        "tests/test_runtime_readiness.py"
+        "tests/test_runtime_readiness.py",
+        "tests/test_p1_runtime_security.py"
       ],
       "python_tests": [
         "tests/test_runtime_readiness.py",
@@ -728,12 +729,14 @@
         "aicrm_next/main.py",
         "aicrm_next/customer_read_model/**",
         "aicrm_next/sidebar_write/**",
+        "aicrm_next/frontend_compat/templates/admin_console/customers.html",
         "aicrm_next/frontend_compat/templates/sidebar_customer_workbench.html",
         "aicrm_next/frontend_compat/static/sidebar_workbench/**",
         "tests/test_sidebar_*.py",
         "tests/test_customer_*read_model*.py",
         "tests/test_db_session_runtime_audit.py",
         "tests/test_next_sidebar_workbench_routes.py",
+        "tests/test_customer_detail_admin_page_native.py",
         "tests/frontend/sidebar_progressive_loading.test.mjs"
       ],
       "python_tests": [
@@ -742,7 +745,8 @@
         "tests/test_customer_read_model_request_scope.py",
         "tests/test_db_session_runtime_audit.py",
         "tests/test_sidebar_workbench_frontend.py",
-        "tests/test_sidebar_jssdk_frontend_contract.py"
+        "tests/test_sidebar_jssdk_frontend_contract.py",
+        "tests/test_customer_detail_admin_page_native.py"
       ],
       "frontend_tests": [
         "tests/frontend/sidebar_progressive_loading.test.mjs"
@@ -1661,6 +1665,7 @@
     {
       "name": "import_graph_governance",
       "paths": [
+        "aicrm_next/automation_agents/__init__.py",
         "tools/check_import_graph.py",
         "docs/architecture/import_graph_baseline.yml",
         "tests/test_import_graph_guard.py",
@@ -1736,6 +1741,7 @@
         "tests/test_next_api_docs_page.py",
         "tests/test_router_registry_contract.py",
         "tests/test_runtime_contract_inventory.py",
+        "tests/test_wechat_domain_verification_files.py",
         "tests/test_high_risk_contract_inventory.py",
         "tests/test_dependency_security_contract.py",
         "requirements-dev.txt",
@@ -1766,6 +1772,7 @@
         "tests/test_next_api_docs_page.py",
         "tests/test_router_registry_contract.py",
         "tests/test_runtime_contract_inventory.py",
+        "tests/test_wechat_domain_verification_files.py",
         "tests/test_high_risk_contract_inventory.py",
         "tests/test_dependency_security_contract.py"
       ],
@@ -1786,52 +1793,6 @@
         "tests/test_shared_flask_config_retirement.py",
         "tests/test_sidebar_jssdk_adapter.py",
         "tests/test_sidebar_v2_api.py"
-      ],
-      "needs_postgres": false,
-      "architecture_gate": "fast"
-    },
-    {
-      "name": "next_native_full_sync",
-      "paths": [
-        ".gitignore",
-        "CLAUDE.md",
-        "Makefile",
-        "aicrm_next/admin_config/**",
-        "aicrm_next/admin_jobs/**",
-        "aicrm_next/admin_read_model/**",
-        "aicrm_next/admin_shell/**",
-        "aicrm_next/automation_agents/**",
-        "aicrm_next/automation_engine/**",
-        "aicrm_next/class_user_management/**",
-        "aicrm_next/cloud_orchestrator/**",
-        "aicrm_next/common_operation_members.py",
-        "aicrm_next/customer_tags/**",
-        "aicrm_next/delivery_lineage/**",
-        "aicrm_next/fixture_reset_registry.py",
-        "aicrm_next/frontend_compat/**",
-        "aicrm_next/growth_orchestration/**",
-        "aicrm_next/main.py",
-        "aicrm_next/message_archive/**",
-        "aicrm_next/navigation_target/**",
-        "aicrm_next/owner_migration/**",
-        "aicrm_next/questionnaire/**",
-        "aicrm_next/router_registry.py",
-        "aicrm_next/send_content/**",
-        "aicrm_next/send_targets/**",
-        "aicrm_next/shared/**",
-        "experiments/**",
-        "scripts/**",
-        "skills/**",
-        "tests/**"
-      ],
-      "python_tests": [
-        "tests/test_startup_entrypoint_next_only.py",
-        "tests/test_router_registry_contract.py",
-        "tests/test_admin_shell_native.py",
-        "tests/test_admin_config_next.py",
-        "tests/test_automation_agents_admin_api.py",
-        "tests/test_questionnaire_application_contract.py",
-        "tests/test_send_content_next_native.py"
       ],
       "needs_postgres": false,
       "architecture_gate": "fast"

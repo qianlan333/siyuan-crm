@@ -1,30 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
-
 from scripts.ops import check_wecom_callback_objective_coverage as coverage
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _is_siyuan_deploy_overlay() -> bool:
-    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return (
-        "scripts/ensure_channel_multi_staff_schema.py" in workflow
-        and not (ROOT / "deploy" / "production_runtime_units.json").exists()
-    )
-
-
-pytestmark = pytest.mark.skipif(
-    _is_siyuan_deploy_overlay(),
-    reason=(
-        "siyuan-crm keeps its existing production deploy/systemd overlay; "
-        "AI-CRM WeCom callback objective coverage deploy assets are not part of this sync PR"
-    ),
-)
 
 
 def test_objective_coverage_local_contract_is_ready_without_production_completion() -> None:

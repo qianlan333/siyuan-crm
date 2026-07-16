@@ -11,10 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = ROOT / "scripts" / "ci" / "select_test_scope.py"
 
 
-def _select(*changed_files: str, inherit_ci_event: bool = False) -> dict:
+def _select(
+    *changed_files: str,
+    inherit_ci_event: bool = False,
+    deleted_files: tuple[str, ...] = (),
+) -> dict:
     command = [sys.executable, str(SELECTOR), "--json"]
     for changed_file in changed_files:
         command.extend(["--changed-file", changed_file])
+    for deleted_file in deleted_files:
+        command.extend(["--deleted-file", deleted_file])
     env = os.environ.copy()
     env.pop("AICRM_FORCE_FULL_CI", None)
     if not inherit_ci_event:
@@ -53,8 +59,29 @@ def test_every_runtime_python_change_runs_import_graph_architecture_gate() -> No
     assert result["needs_full_ci"] is False
 
 
+def test_unmapped_deleted_path_forces_full_ci_without_blocking_retirement() -> None:
+    retired_path = "aicrm_next/retired_context/api.py"
+    result = _select(deleted_files=(retired_path,))
+
+    assert result["changed_files"] == [retired_path]
+    assert result["unmatched_files"] == []
+    assert result["unmapped_deleted_files"] == [retired_path]
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_runtime_security_contract_has_a_permanent_scope() -> None:
+    result = _select("tests/test_p1_runtime_security.py")
+
+    assert "runtime_readiness" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_p1_runtime_security.py" in result["python_tests"]
+    assert result["needs_full_ci"] is True
+
+
 def test_import_graph_governance_changes_force_mapped_full_ci() -> None:
     result = _select(
+        "aicrm_next/automation_agents/__init__.py",
         "tools/check_import_graph.py",
         "docs/architecture/import_graph_baseline.yml",
         "tests/test_import_graph_guard.py",
@@ -164,7 +191,7 @@ def test_live_runtime_readiness_replacement_has_permanent_full_ci_scope() -> Non
 def test_h5_wechat_pay_mobile_projection_test_selects_commerce_scope() -> None:
     result = _select("tests/test_h5_wechat_pay_mobile_projection.py")
 
-    assert result["matched_scopes"][:1] == ["commerce"]
+    assert result["matched_scopes"] == ["commerce"]
     assert "tests/test_h5_wechat_pay_mobile_projection.py" in result["python_tests"]
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "fast"
@@ -177,8 +204,7 @@ def test_wechat_shop_mobile_projection_tests_select_commerce_scope() -> None:
         "tests/test_wechat_shop_mobile_projection_migration.py",
     )
 
-    assert {"commerce", "migration_db"} <= set(result["matched_scopes"])
-    assert set(result["matched_scopes"]) <= {"commerce", "migration_db", "next_native_full_sync"}
+    assert result["matched_scopes"] == ["commerce", "migration_db"]
     assert "tests/test_wechat_shop_mobile_projection.py" in result["python_tests"]
     assert "tests/test_wechat_shop_mobile_projection_migration.py" in result["python_tests"]
     assert result["unmatched_files"] == []
@@ -190,8 +216,7 @@ def test_wechat_shop_mobile_projection_tests_select_commerce_scope() -> None:
 def test_public_pay_landing_test_selects_commerce_scope() -> None:
     result = _select("tests/test_public_pay_landing.py")
 
-    assert result["matched_scopes"][:1] == ["commerce"]
-    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["commerce"]
     assert "tests/test_public_pay_landing.py" in result["python_tests"]
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "fast"
@@ -205,7 +230,7 @@ def test_commerce_admin_order_tests_select_commerce_scope() -> None:
         "tests/test_commerce_admin_transaction_detail.py",
     )
 
-    assert result["matched_scopes"][:1] == ["commerce"]
+    assert result["matched_scopes"] == ["commerce"]
     assert "tests/test_admin_p0_commerce_api.py" in result["python_tests"]
     assert "tests/test_commerce_admin_transaction_detail.py" in result["python_tests"]
     assert result["needs_postgres"] is False
@@ -220,8 +245,7 @@ def test_service_period_change_selects_service_period_slice() -> None:
         "tests/test_service_period_frontend_contract.py",
     )
 
-    assert result["matched_scopes"][:1] == ["service_period"]
-    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["service_period"]
     assert "tests/test_service_period_application.py" in result["python_tests"]
     assert "tests/test_service_period_h5_payment.py" in result["python_tests"]
     assert "tests/test_service_period_frontend_contract.py" in result["python_tests"]
@@ -240,8 +264,7 @@ def test_huangyoucan_usage_projection_has_permanent_full_pg_scope() -> None:
         "tests/test_huangyoucan_usage_sync.py",
     )
 
-    assert result["matched_scopes"][:1] == ["huangyoucan_usage_projection"]
-    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["huangyoucan_usage_projection"]
     assert result["unmatched_files"] == []
     assert "tests/test_huangyoucan_usage_sync.py" in result["python_tests"]
     assert "tests/test_sidebar_v2_api.py" in result["python_tests"]
@@ -295,8 +318,7 @@ def test_wecom_callback_ops_change_selects_identity_contact_slice() -> None:
         "tests/test_wecom_callback_permanent_fix_readiness.py",
     )
 
-    assert "identity_contact" in result["matched_scopes"]
-    assert set(result["matched_scopes"]) <= {"identity_contact", "next_native_full_sync"}
+    assert result["matched_scopes"] == ["identity_contact"]
     assert "tests/test_wecom_callback_inbox.py" in result["python_tests"]
     assert "tests/test_wecom_callback_deploy_smoke.py" in result["python_tests"]
     assert "tests/test_wecom_callback_ingress_runtime.py" in result["python_tests"]
@@ -342,6 +364,7 @@ def test_r06_internal_event_outbox_files_force_full_postgres_ci() -> None:
         "aicrm_next/public_product/h5_wechat_pay.py",
         "migrations/versions/0099_internal_event_outbox_and_consumer_lease.py",
         "migrations/versions/0122_internal_event_fanout_manifest.py",
+        "migrations/versions/0123_required_physical_schema_repair.py",
         "scripts/ops/reconcile_internal_event_outbox.py",
         "tests/test_internal_event_outbox.py",
         "tests/test_internal_event_worker_exit.py",
@@ -657,8 +680,7 @@ def test_unionid_identity_cutover_changes_force_pg_full_ci_without_unmapped_file
         "tests/test_wecom_tag_live_mutation_callers_contract.py",
     )
 
-    assert result["matched_scopes"][:1] == ["unionid_identity_cutover"]
-    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["unionid_identity_cutover"]
     assert result["unmatched_files"] == []
     assert "tests/test_identity_resolver_postgres.py" in result["python_tests"]
     assert "tests/test_service_period_payment_consumer.py" in result["python_tests"]
@@ -689,8 +711,10 @@ def test_db_session_runtime_audit_keeps_customer_repository_scope() -> None:
 def test_signed_session_change_selects_sidebar_shared_runtime_slice() -> None:
     result = _select("aicrm_next/shared/signed_session.py")
 
-    assert "sidebar_questionnaire_access" in result["matched_scopes"]
-    assert "shared_sidebar_runtime" in result["matched_scopes"]
+    assert result["matched_scopes"] == [
+        "sidebar_questionnaire_access",
+        "shared_sidebar_runtime",
+    ]
     assert "tests/test_sidebar_jssdk_adapter.py" in result["python_tests"]
     assert "tests/test_shared_flask_config_retirement.py" in result["python_tests"]
     assert result["needs_postgres"] is True
@@ -735,7 +759,7 @@ def test_admin_read_override_selects_focused_slice_without_pg() -> None:
         "aicrm_next/ops_enrollment/api.py",
     )
 
-    assert "admin_read_pages" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["admin_read_pages"]
     assert "tests/test_ai_audience_admin_pages.py" in result["python_tests"]
     assert "tests/test_group_ops_plans_api.py" in result["python_tests"]
     assert "tests/test_user_ops_api.py" in result["python_tests"]
@@ -750,7 +774,7 @@ def test_admin_read_override_selects_focused_slice_without_pg() -> None:
 def test_admin_read_smoke_test_file_selects_admin_read_scope() -> None:
     result = _select("tests/test_admin_read_pages_smoke.py")
 
-    assert "admin_read_pages" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["admin_read_pages"]
     assert "tests/test_admin_read_pages_smoke.py" in result["python_tests"]
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "fast"
@@ -764,8 +788,7 @@ def test_admin_config_page_change_selects_config_scope() -> None:
         "tests/test_admin_config_next.py",
     )
 
-    assert "admin_config" in result["matched_scopes"]
-    assert set(result["matched_scopes"]) <= {"admin_config", "next_native_full_sync"}
+    assert result["matched_scopes"] == ["admin_config"]
     assert "tests/test_admin_config_next.py" in result["python_tests"]
     assert "tests/test_operation_member_picker_frontend.py" in result["python_tests"]
     assert "tests/test_admin_auth_login_pages.py" in result["python_tests"]
@@ -781,8 +804,7 @@ def test_operation_member_picker_static_assets_select_admin_config_scope() -> No
         "tests/test_operation_member_picker_frontend.py",
     )
 
-    assert "admin_config" in result["matched_scopes"]
-    assert set(result["matched_scopes"]) <= {"admin_config", "next_native_full_sync"}
+    assert result["matched_scopes"] == ["admin_config"]
     assert "tests/test_operation_member_picker_frontend.py" in result["python_tests"]
     assert result["needs_postgres"] is False
     assert result["architecture_gate"] == "fast"
@@ -825,8 +847,7 @@ def test_wecom_tag_catalog_write_change_selects_real_tag_crud_slice() -> None:
         "tests/test_wecom_tag_write_no_real_side_effects.py",
     )
 
-    assert result["matched_scopes"][0] == "wecom_tag_catalog_write"
-    assert "docs_only" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["wecom_tag_catalog_write", "docs_only"]
     assert "tests/test_wecom_tag_write_no_real_side_effects.py" in result["python_tests"]
     assert "tests/test_wecom_tag_next_sync.py" in result["python_tests"]
     assert "tests/test_wecom_tag_write_commands.py" in result["python_tests"]
@@ -927,8 +948,7 @@ def test_database_baseline_and_ownership_change_selects_required_postgres_slice(
 def test_deploy_smoke_session_change_selects_admin_and_deploy_contracts() -> None:
     result = _select("scripts/ops/create_deploy_smoke_session.py")
 
-    assert result["matched_scopes"][:2] == ["admin_read_pages", "ci_deploy"]
-    assert "next_native_full_sync" in result["matched_scopes"]
+    assert result["matched_scopes"] == ["admin_read_pages", "ci_deploy"]
     assert "tests/test_admin_read_pages_smoke.py" in result["python_tests"]
     assert "tests/test_deploy_workflow_contract.py" in result["python_tests"]
     assert result["unmatched_files"] == []

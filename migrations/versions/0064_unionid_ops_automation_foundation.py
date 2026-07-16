@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-from migrations.audience_read import ensure_audience_read_schema
-
 
 revision = "0064_unionid_ops_automation_foundation"
 down_revision = "0063_unionid_business_table_foundation"
@@ -270,8 +268,7 @@ def _drop_legacy_channel_identity_columns() -> None:
 
 
 def _recreate_ai_audience_identity_views() -> None:
-    if not ensure_audience_read_schema():
-        return
+    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
     op.execute(
         """
         CREATE OR REPLACE VIEW audience_read.identity_universe_v1 AS

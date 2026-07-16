@@ -201,14 +201,14 @@ def test_run_fails_closed_when_health_contract_is_not_ready(
     assert payload["error_code"] == expected_error
 
 
-def test_run_allows_non_shop_deployment_to_omit_callback_token(monkeypatch) -> None:
+def test_run_allows_missing_wechat_shop_callback_token_only_when_explicit(monkeypatch) -> None:
     def fetch(url: str, *, timeout: float) -> readiness.HttpResponse:
         response = _healthy_fetch(url, timeout=timeout)
         if urlsplit(url).path != "/health":
             return response
         payload = json.loads(response.body)
         payload["wechat_shop_callback_token_present"] = False
-        return _response(200, headers=response.headers, body=json.dumps(payload))
+        return _response(200, headers=dict(response.headers), body=json.dumps(payload))
 
     monkeypatch.setattr(readiness, "_fetch", fetch)
 
@@ -217,12 +217,40 @@ def test_run_allows_non_shop_deployment_to_omit_callback_token(monkeypatch) -> N
         expected_sha=EXPECTED_SHA,
         expected_callback_url=EXPECTED_CALLBACK_URL,
         timeout=1.0,
-        require_wechat_shop_callback_token=False,
+        allow_missing_wechat_shop_callback_token=True,
     )
 
     assert payload["ok"] is True
+    assert payload["error_code"] == ""
+    assert payload["health"]["ok"] is True
     assert payload["health"]["wechat_shop_callback_token_present"] is False
-    assert payload["health"]["error_code"] == ""
+
+
+def test_main_accepts_allow_missing_wechat_shop_callback_token_flag(monkeypatch, capsys) -> None:
+    def fetch(url: str, *, timeout: float) -> readiness.HttpResponse:
+        response = _healthy_fetch(url, timeout=timeout)
+        if urlsplit(url).path != "/health":
+            return response
+        payload = json.loads(response.body)
+        payload["wechat_shop_callback_token_present"] = False
+        return _response(200, headers=dict(response.headers), body=json.dumps(payload))
+
+    monkeypatch.setattr(readiness, "_fetch", fetch)
+
+    exit_code = readiness.main(
+        [
+            "--base-url",
+            "http://127.0.0.1:5001",
+            "--expected-sha",
+            EXPECTED_SHA,
+            "--expected-callback-url",
+            EXPECTED_CALLBACK_URL,
+            "--allow-missing-wechat-shop-callback-token",
+        ]
+    )
+
+    assert exit_code == 0
+    assert json.loads(capsys.readouterr().out)["ok"] is True
 
 
 @pytest.mark.parametrize(

@@ -350,10 +350,6 @@ def test_postgres_member_api_projection_keeps_legacy_fields_and_adds_usage(
     assert datetime.fromisoformat(member["huangyoucan_last_open_at"]).astimezone(timezone.utc) == datetime(2026, 7, 13, 0, 30, tzinfo=timezone.utc)
 
 
-@pytest.mark.skipif(
-    not (ROOT / "deploy" / "aicrm-huangyoucan-usage-sync.timer").exists(),
-    reason="siyuan-crm keeps its existing production deploy/systemd overlay",
-)
 def test_systemd_timer_and_service_keep_readonly_enablement_prerequisites() -> None:
     timer = (ROOT / "deploy" / "aicrm-huangyoucan-usage-sync.timer").read_text(encoding="utf-8")
     service = (ROOT / "deploy" / "aicrm-huangyoucan-usage-sync.service").read_text(encoding="utf-8")

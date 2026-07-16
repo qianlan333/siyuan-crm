@@ -208,10 +208,7 @@ def test_callback_worker_does_not_retry_typed_terminal_provider_error() -> None:
 def test_runtime_has_no_callback_inline_or_process_local_executor_boundary() -> None:
     callback_source = (ROOT / "aicrm_next/channel_entry/inbox.py").read_text(encoding="utf-8")
     realtime_source = (ROOT / "aicrm_next/platform_foundation/external_effects/realtime.py").read_text(encoding="utf-8")
-    service_path = ROOT / "deploy/openclaw-wecom-callback-inbox-worker.service"
-    if not service_path.exists():
-        pytest.skip("siyuan deployment overlay does not install the upstream callback inbox worker unit")
-    service = service_path.read_text(encoding="utf-8")
+    service = (ROOT / "deploy/openclaw-wecom-callback-inbox-worker.service").read_text(encoding="utf-8")
 
     assert "process_time_sensitive" not in callback_source
     assert "ingress-inline" not in callback_source
@@ -320,8 +317,6 @@ def test_typed_wecom_config_fails_closed_on_legacy_conflict(monkeypatch) -> None
 
 
 def test_callback_reconciliation_is_count_only_and_reports_static_boundaries(monkeypatch) -> None:
-    if not (ROOT / "deploy/production_runtime_units.json").exists():
-        pytest.skip("siyuan deployment overlay does not use the upstream production runtime manifest")
     monkeypatch.setattr(
         reconciliation,
         "read_count_only_inbox_state",

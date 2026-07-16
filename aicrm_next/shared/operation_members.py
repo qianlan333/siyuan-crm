@@ -5,7 +5,14 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-ALLOWED_OPERATION_MEMBER_SCOPES = {"group_ops", "automation", "channel_code", "ai_assistant", "common"}
+ALLOWED_OPERATION_MEMBER_SCOPES = {
+    "group_ops",
+    "automation",
+    "channel_code",
+    "ai_assistant",
+    "common",
+    "wecom_directory",
+}
 
 
 def clean_text(value: Any) -> str:

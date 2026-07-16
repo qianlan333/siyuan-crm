@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw WeChat Pay Order Reconciliation Worker every 10 minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/10:45
+Persistent=true
+Unit=openclaw-wechat-pay-order-reconciliation-worker.service
+
+[Install]
+WantedBy=timers.target

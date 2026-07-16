@@ -3,6 +3,11 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from aicrm_next.platform_foundation.auth_platform.context import AuthContext
+from aicrm_next.service_period_grid_ports import (
+    SERVICE_PERIOD_GRID_ACCESS,
+    SERVICE_PERIOD_GRID_COLLABORATOR_ROLE,
+    SERVICE_PERIOD_GRID_MANAGE_SHARE,
+)
 
 
 ALL_CAPABILITIES = frozenset(
@@ -20,12 +25,14 @@ ALL_CAPABILITIES = frozenset(
         "read_customer",
         "refund",
         "send_message",
+        SERVICE_PERIOD_GRID_ACCESS,
+        SERVICE_PERIOD_GRID_MANAGE_SHARE,
     }
 )
 
 ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
     "super_admin": ALL_CAPABILITIES,
-    "config_admin": frozenset({"admin_read", "manage_admin", "manage_config"}),
+    "config_admin": frozenset({"admin_read", "manage_admin", "manage_config", SERVICE_PERIOD_GRID_ACCESS}),
     "automation_admin": frozenset(
         {
             "admin_read",
@@ -35,10 +42,14 @@ ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
             "manage_group_ops",
             "read_customer",
             "send_message",
+            SERVICE_PERIOD_GRID_ACCESS,
         }
     ),
-    "questionnaire_admin": frozenset({"admin_read", "manage_customer", "manage_questionnaire", "read_customer"}),
-    "viewer": frozenset({"admin_read", "read_customer"}),
+    "questionnaire_admin": frozenset(
+        {"admin_read", "manage_customer", "manage_questionnaire", "read_customer", SERVICE_PERIOD_GRID_ACCESS}
+    ),
+    "viewer": frozenset({"admin_read", "read_customer", SERVICE_PERIOD_GRID_ACCESS}),
+    SERVICE_PERIOD_GRID_COLLABORATOR_ROLE: frozenset({SERVICE_PERIOD_GRID_ACCESS}),
 }
 
 
@@ -60,5 +71,5 @@ def context_can(context: AuthContext | None, capability: str) -> bool:
 def viewer_only(context: AuthContext | None) -> bool:
     if context is None:
         return False
-    write_capabilities = ALL_CAPABILITIES - {"admin_read", "read_customer"}
+    write_capabilities = ALL_CAPABILITIES - {"admin_read", "read_customer", SERVICE_PERIOD_GRID_ACCESS}
     return not bool(set(context.capabilities) & write_capabilities)

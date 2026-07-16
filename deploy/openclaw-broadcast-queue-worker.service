@@ -8,4 +8,5 @@ Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu/极简 crm
 EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+Environment=AICRM_GROUP_OPS_MATERIAL_UPLOAD_MODE=real
 ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_broadcast_queue_worker.py'

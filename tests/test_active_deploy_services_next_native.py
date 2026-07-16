@@ -5,14 +5,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
-
 
 ROOT = Path(__file__).resolve().parents[1]
-SIYUAN_DEPLOY_OVERLAY_REASON = (
-    "siyuan-crm keeps its existing production deploy/systemd overlay; "
-    "AI-CRM active deploy service unit contract is not part of this sync PR"
-)
 ACTIVE_SCRIPTS = {
     "automation_ops_scheduler": Path("scripts/run_automation_ops_scheduler.py"),
     "broadcast_queue_worker": Path("scripts/run_broadcast_queue_worker.py"),
@@ -26,14 +20,6 @@ SERVICE_COMMANDS = {
     "deploy/openclaw-external-contact-full-sync.service": "python scripts/run_external_contact_sync.py --full",
     "deploy/openclaw-external-effect-worker.service": "python scripts/run_external_effect_queue_worker.py --execute",
 }
-
-
-def _is_siyuan_deploy_overlay() -> bool:
-    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return (
-        "scripts/ensure_channel_multi_staff_schema.py" in workflow
-        and not (ROOT / "deploy" / "production_runtime_units.json").exists()
-    )
 
 
 def _run_cli(args: list[str]) -> dict:
@@ -58,7 +44,6 @@ def test_active_deploy_scripts_exist_and_do_not_import_legacy() -> None:
         assert "app_context" not in source
 
 
-@pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_deploy_services_keep_existing_execstart_contracts() -> None:
     for rel_service, command in SERVICE_COMMANDS.items():
         service = (ROOT / rel_service).read_text(encoding="utf-8")

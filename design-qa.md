@@ -1,38 +1,32 @@
-# Design QA · 运营闭环周维度导航
+# 周期商品多维表分享 Design QA
 
-- source visual truth path: `/var/folders/dq/56xlfzsx05zc7vqhbl7lgv6c0000gn/T/codex-clipboard-9cb0c143-60eb-4d64-83aa-ecacf32a47d6.png`
-- implementation screenshot path: `/tmp/operation-cycle-weekly-implementation.png`
-- full-view comparison evidence: `/tmp/operation-cycle-weekly-full-comparison.png`
-- focused comparison evidence: `/tmp/operation-cycle-weekly-focused-comparison.png`
-- viewport: `2048 × 1365`
-- state: “本周发送数据”选中；周一聚合样例已加载
+## 验收范围
 
-## Findings
+- 参考图：用户提供的飞书分享弹层截图。
+- 管理端：超级管理员分享弹层、协作者权限切换、外部分享开关与复制链接。
+- 外部端：公开只读壳层、视图切换、网格滚动、失效链接状态。
+- 尺寸：1920、1440、1024、390 像素宽度。
 
-没有可执行的 P0、P1 或 P2 差异。
+## 同屏比较
 
-- Fonts and typography: 沿用 Admin Shell 的苹方／微软雅黑栈、字重与字号；新增四项与原三项导航层级一致，没有异常换行。
-- Spacing and layout rhythm: 保留原 220px 左栏、48px 行高、6px 间距和原内容卡结构；只增加第四行。2048、900、390 三个宽度均无水平溢出。
-- Colors and visual tokens: 继续使用原选中态蓝色、浅蓝底、灰色序号和白色内容面，不引入新颜色或视觉语言。
-- Image quality and asset fidelity: 目标界面没有图片、图标或装饰资产，本次也未新增替代资产。
-- Copy and content: 左侧顺序与文案为“本周发送数据 / 本周复盘明细 / 下周执行策略 / 历史发送记录”，前三项显示对应 Markdown，第四项保留原 AI 助手历史入口。
+- 将参考图与 1004 × 766 的实现截图并排检查。
+- 弹层宽度、遮罩、标题层级、蓝色主动作、邀请输入框和区块分隔与参考保持一致。
+- 业务要求只有“邀请协作者”和“外部分享”两区，因此实现高度小于参考图；未复制参考图中不属于本需求的密码、渠道快捷入口等能力。
 
-## Interaction and responsive checks
+## 功能与状态
 
-- 四个导航链接均完成真实点击与路由切换。
-- 三个 Markdown 入口均返回对应 `data-operation-cycle-markdown` 类型。
-- 历史发送记录保留 `data-operation-cycle-plan-history` 容器。
-- 本周发送数据和本周复盘明细页面无浏览器 console error。
-- 2048px：左侧四行垂直导航；页面 `scrollWidth` 等于 viewport width。
-- 900px：四项单行网格；页面无水平溢出。
-- 390px：四项恢复单列；主内容、进度条和导航均在视口内。
+- 超级管理员可见分享按钮；可查看、可编辑协作者不显示分享管理入口。
+- 协作者展示真实目录身份、权限下拉和移除动作，移动窄屏下动作区自动换行。
+- 外部分享开启、关闭、重新开启均已验证；旧代次链接显示失效状态。
+- 外部页面不展示 CRM 导航、配置按钮或可编辑单元格，仅保留保存视图切换、滚动加载和分组折叠。
+- 1024 与 390 宽度下仅网格内部横向滚动，页面本身无横向溢出；390 宽度下隐藏完整后台侧栏，为数据工作区保留可用空间。
 
-## Comparison history
+## 修正记录
 
-- Initial pass: 未发现 P0/P1/P2 问题，因此没有触发修订循环。
-
-## Follow-up polish
-
-无阻塞项。本次严格限制在导航文案、顺序与第三个 Markdown 槽位，不调整页面其他视觉。
+- 将分享弹层宽度调整为 860 像素，使其与参考图比例一致。
+- 移除弹层打开时的异常焦点描边，并保留键盘可见焦点。
+- 补齐本地开源图标，替换文本符号。
+- 修复周期商品标题已带“数据”时重复显示“数据数据”。
+- 修复窄屏 Admin Shell 将完整侧栏堆叠在数据工作区上方的问题。
 
 final result: passed

@@ -1,6 +1,8 @@
 # ruff: noqa: F401
 from __future__ import annotations
 
+from aicrm_next.service_period_grid_ports import SERVICE_PERIOD_GRID_COLLABORATOR_ROLE
+
 from .application_support import (
     ADMIN_ASSIGNABLE_ROLE_OPTIONS,
     ADMIN_LEVEL_LABELS,
@@ -1056,12 +1058,24 @@ class LoginAccessSaveCommand:
         raw_roles = payload.get("role_codes") or []
         if isinstance(raw_roles, str):
             raw_roles = [raw_roles]
-        roles = [_text(role) for role in raw_roles if _text(role) in ROLE_LABELS and _text(role) != "super_admin"]
+        roles = [
+            _text(role)
+            for role in raw_roles
+            if _text(role) in ROLE_LABELS
+            and _text(role) not in {"super_admin", SERVICE_PERIOD_GRID_COLLABORATOR_ROLE}
+        ]
+        before = self.repo.get_admin_user(int(payload.get("id") or 0)) if _text(payload.get("id")) else self.repo.get_admin_user_by_wecom_userid(wecom_userid)
+        preserved_system_role = bool(
+            before
+            and SERVICE_PERIOD_GRID_COLLABORATOR_ROLE
+            in self.repo.admin_user_role_codes(int(before.get("id") or 0))
+        )
         if admin_level == "super_admin":
             roles = ["super_admin"]
-        elif not roles:
+        elif not roles and not preserved_system_role:
             roles = ["viewer"]
-        before = self.repo.get_admin_user(int(payload.get("id") or 0)) if _text(payload.get("id")) else self.repo.get_admin_user_by_wecom_userid(wecom_userid)
+        if admin_level != "super_admin" and preserved_system_role:
+            roles.append(SERVICE_PERIOD_GRID_COLLABORATOR_ROLE)
         user_payload = {
             "id": int(payload.get("id") or 0),
             "wecom_userid": wecom_userid,

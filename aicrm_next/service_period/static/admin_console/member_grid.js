@@ -4,12 +4,18 @@
   const root = document.getElementById("spMemberGrid");
   if (!root) return;
 
+  if (String(root.dataset.mode || "internal") === "internal") {
+    document.body.classList.add("sp-grid-admin-shell");
+  }
+
   const GridState = window.ServicePeriodMemberGridState;
   const AdminApi = window.AdminApi;
-  if (!GridState || !AdminApi || typeof AdminApi.requestJson !== "function") return;
+  const publicMode = String(root.dataset.mode || "internal") === "public";
+  if (!GridState || (!publicMode && (!AdminApi || typeof AdminApi.requestJson !== "function"))) return;
 
-  const serviceProductId = String(root.dataset.serviceProductId || "");
-  const apiBase = `/api/admin/service-period-products/${encodeURIComponent(serviceProductId)}`;
+  let serviceProductId = String(root.dataset.serviceProductId || "");
+  let apiBase = serviceProductId ? `/api/admin/service-period-products/${encodeURIComponent(serviceProductId)}` : "";
+  const shareToken = publicMode ? String(window.location.hash || "").replace(/^#/, "").trim() : "";
   const $ = (id) => document.getElementById(id);
   const elements = {
     viewTabs: $("spViewTabs"),
@@ -68,6 +74,7 @@
     canManageViews: false,
     editableFields: new Set(),
     toastTimer: 0,
+    access: null,
   };
 
   const operatorLabels = new Map();
@@ -89,7 +96,7 @@
   }
 
   function escapeHtml(value) {
-    if (typeof AdminApi.escapeHtml === "function") return AdminApi.escapeHtml(String(value ?? ""));
+    if (AdminApi && typeof AdminApi.escapeHtml === "function") return AdminApi.escapeHtml(String(value ?? ""));
     return String(value ?? "")
       .replaceAll("&", "&amp;")
       .replaceAll("<", "&lt;")
@@ -128,12 +135,42 @@
     elements.gridState.hidden = false;
   }
 
-  function permissionProbe(method, path) {
-    return Boolean(AdminApi.actionToken(method, path));
+  async function request(path, options) {
+    if (!publicMode) return AdminApi.requestJson(path, options || {});
+    const settings = options || {};
+    const method = String(settings.method || "GET").toUpperCase();
+    const response = await window.fetch(path, {
+      method,
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-AICRM-Grid-Share-Token": shareToken,
+      },
+      body: method === "GET" ? undefined : JSON.stringify(settings.body || {}),
+      credentials: "omit",
+      cache: "no-store",
+      referrerPolicy: "no-referrer",
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const error = new Error(errorMessage({payload}, "共享数据加载失败"));
+      error.status = response.status;
+      error.payload = payload;
+      throw error;
+    }
+    return payload;
   }
 
-  async function request(path, options) {
-    return AdminApi.requestJson(path, options || {});
+  function fieldIconUrl(icon) {
+    const names = {
+      text: "bars-3-bottom-left",
+      number: "hashtag",
+      person: "user",
+      check: "check-circle",
+      progress: "chart-bar",
+      datetime: "calendar-days",
+    };
+    return `/static/service-period/icons/${names[String(icon || "")] || "bars-3-bottom-left"}.svg`;
   }
 
   function renderHeader() {
@@ -141,7 +178,7 @@
     state.fields.forEach((field) => {
       cells.push(
         `<th scope="col" class="sp-col-${escapeHtml(field.id)}">` +
-          `<span class="sp-field-head"><span class="sp-field-icon sp-field-icon--${escapeHtml(field.icon)}" aria-hidden="true"></span>` +
+          `<span class="sp-field-head"><img class="sp-field-icon" src="${fieldIconUrl(field.icon)}" alt="">` +
           `<span>${escapeHtml(field.label)}</span></span></th>`,
       );
     });
@@ -153,12 +190,13 @@
       const active = String(view.id) === String(state.activeViewId);
       return `<button class="sp-view-tab${active ? " is-active" : ""}" type="button" role="tab" ` +
         `aria-selected="${active ? "true" : "false"}" data-view-id="${escapeHtml(view.id)}" title="${escapeHtml(view.name)}">` +
+        `<img class="sp-view-tab__icon" src="/static/service-period/icons/table-cells.svg" alt="">` +
         `<span class="sp-view-tab__name">${escapeHtml(view.name)}</span>` +
         `${active && isDirty() ? '<span class="sp-view-tab__dirty" aria-label="有未保存修改"></span>' : ""}` +
         `</button>`;
     }).join("");
-    elements.addView.hidden = !state.canManageViews;
-    elements.viewMenuButton.hidden = !state.canManageViews || !activeView();
+    if (elements.addView) elements.addView.hidden = publicMode || !state.canManageViews;
+    if (elements.viewMenuButton) elements.viewMenuButton.hidden = publicMode || !state.canManageViews || !activeView();
     const selected = elements.viewTabs.querySelector(".is-active");
     if (selected) selected.scrollIntoView({block: "nearest", inline: "nearest"});
   }
@@ -171,6 +209,7 @@
   }
 
   function renderToolbar() {
+    if (publicMode) return;
     const conditions = state.draftConfig.filter.conditions || [];
     setCount(elements.filterButton, elements.filterCount, conditions.length);
     setCount(elements.groupButton, elements.groupCount, state.draftConfig.groups.length);
@@ -250,7 +289,7 @@
       `<td colspan="${state.fields.length + 1}">` +
       `<button class="sp-group-toggle" type="button" aria-expanded="${expanded ? "true" : "false"}" ` +
       `style="padding-left:${14 + level * 22}px">` +
-      `<span class="sp-group-toggle__chevron" aria-hidden="true">⌄</span>` +
+      `<img class="sp-group-toggle__chevron" src="/static/service-period/icons/chevron-down.svg" alt="">` +
       `<span>${escapeHtml(item.label || "空值")}</span>` +
       `<span class="sp-group-toggle__count">${Number(item.count || 0)} 条</span>` +
       `</button></td></tr>`;
@@ -318,15 +357,17 @@
       state.total = null;
       elements.gridScroll.scrollTop = 0;
       renderRows();
-      setGridState("正在读取真实会员数据…", "loading");
+      setGridState(publicMode ? "正在读取共享数据…" : "正在读取真实会员数据…", "loading");
     }
     state.loading = true;
     elements.gridShell.setAttribute("aria-busy", "true");
     if (!reset) setGridState("正在加载更多数据…", "loading");
     try {
-      const payload = await request(`${apiBase}/member-grid/query`, {
+      const payload = await request(publicMode ? "/api/public/service-period-member-grid/query" : `${apiBase}/member-grid/query`, {
         method: "POST",
-        body: {config: state.draftConfig, cursor, limit: 100},
+        body: publicMode
+          ? {view_id: state.activeViewId, cursor, limit: 100}
+          : {config: state.draftConfig, cursor, limit: 100},
       });
       if (sequence !== state.querySequence) return;
       const pageRows = Array.isArray(payload.rows) ? payload.rows : [];
@@ -340,7 +381,8 @@
       );
     } catch (error) {
       if (sequence !== state.querySequence) return;
-      setGridState(errorMessage(error, "会员数据加载失败"), "error");
+      const fallback = Number(error && error.status) === 410 ? "分享链接已关闭或已更新" : "会员数据加载失败";
+      setGridState(errorMessage(error, fallback), "error");
       if (!reset) toast(errorMessage(error, "更多数据加载失败"), "error");
     } finally {
       if (sequence === state.querySequence) {
@@ -650,7 +692,7 @@
   function renderFilterPanel() {
     const conditions = state.draftConfig.filter.conditions || [];
     elements.configPanel.innerHTML = `
-      <div class="sp-panel-head"><strong>筛选条件</strong><button class="sp-icon-button" type="button" data-close-panel aria-label="关闭">×</button></div>
+      <div class="sp-panel-head"><strong>筛选条件</strong><button class="sp-icon-button" type="button" data-close-panel aria-label="关闭"><img src="/static/service-period/icons/x-mark.svg" alt=""></button></div>
       <p class="sp-panel-copy">最多 20 条条件。修改后立即查询当前草稿，保存视图后才会共享给其他管理员。</p>
       <div class="sp-panel-list">${conditions.map((condition, index) => {
         const field = state.fieldMap.get(condition.field) || state.fields[0];
@@ -661,10 +703,10 @@
             `<option value="${escapeHtml(item.id)}"${item.id === operator.id ? " selected" : ""}>${escapeHtml(item.label)}</option>`,
           ).join("")}</select>` +
           `${renderValueControl(condition, field, operator, index)}` +
-          `<button class="sp-icon-button sp-row-remove" type="button" data-remove-filter="${index}" aria-label="删除条件">×</button></div>`;
+          `<button class="sp-icon-button sp-row-remove" type="button" data-remove-filter="${index}" aria-label="删除条件"><img src="/static/service-period/icons/x-mark.svg" alt=""></button></div>`;
       }).join("") || '<p class="sp-panel-copy">尚未添加筛选条件。</p>'}</div>
       <div class="sp-panel-footer">
-        <button class="sp-panel-add" type="button" data-add-filter${conditions.length >= 20 ? " disabled" : ""}>＋ 添加条件</button>
+        <button class="sp-panel-add" type="button" data-add-filter${conditions.length >= 20 ? " disabled" : ""}><img src="/static/service-period/icons/plus.svg" alt="">添加条件</button>
         <label class="sp-panel-logic">满足
           <select class="sp-select" data-filter-logic><option value="and"${state.draftConfig.filter.logic === "and" ? " selected" : ""}>全部条件</option><option value="or"${state.draftConfig.filter.logic === "or" ? " selected" : ""}>任一条件</option></select>
         </label>
@@ -676,7 +718,7 @@
     const items = state.draftConfig[kind];
     const maximum = isGroup ? 2 : 8;
     elements.configPanel.innerHTML = `
-      <div class="sp-panel-head"><strong>${isGroup ? "分组" : "排序"}</strong><button class="sp-icon-button" type="button" data-close-panel aria-label="关闭">×</button></div>
+      <div class="sp-panel-head"><strong>${isGroup ? "分组" : "排序"}</strong><button class="sp-icon-button" type="button" data-close-panel aria-label="关闭"><img src="/static/service-period/icons/x-mark.svg" alt=""></button></div>
       <p class="sp-panel-copy">${isGroup ? "最多两层分组；组折叠状态仅保存在当前浏览器会话。" : "最多八个唯一排序字段；分组字段会自动优先排序。"}</p>
       <div class="sp-panel-list">${items.map((item, index) =>
         `<div class="sp-order-row"><span class="sp-order-index">${index + 1}</span>` +
@@ -684,9 +726,9 @@
         `<select class="sp-select" data-order-direction data-kind="${kind}" data-index="${index}">` +
         `<option value="asc"${item.direction === "asc" ? " selected" : ""}>升序</option>` +
         `<option value="desc"${item.direction === "desc" ? " selected" : ""}>降序</option></select>` +
-        `<button class="sp-icon-button sp-row-remove" type="button" data-remove-order data-kind="${kind}" data-index="${index}" aria-label="删除">×</button></div>`,
+        `<button class="sp-icon-button sp-row-remove" type="button" data-remove-order data-kind="${kind}" data-index="${index}" aria-label="删除"><img src="/static/service-period/icons/x-mark.svg" alt=""></button></div>`,
       ).join("") || `<p class="sp-panel-copy">尚未添加${isGroup ? "分组" : "排序"}字段。</p>`}</div>
-      <div class="sp-panel-footer"><button class="sp-panel-add" type="button" data-add-order data-kind="${kind}"${items.length >= maximum ? " disabled" : ""}>＋ 添加${isGroup ? "分组" : "排序"}</button><span class="sp-panel-copy">${items.length}/${maximum}</span></div>`;
+      <div class="sp-panel-footer"><button class="sp-panel-add" type="button" data-add-order data-kind="${kind}"${items.length >= maximum ? " disabled" : ""}><img src="/static/service-period/icons/plus.svg" alt="">添加${isGroup ? "分组" : "排序"}</button><span class="sp-panel-copy">${items.length}/${maximum}</span></div>`;
   }
 
   function openConfigPanel(kind, anchor) {
@@ -813,6 +855,23 @@
   }
 
   function installEvents() {
+    if (publicMode) {
+      elements.viewTabs.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-view-id]");
+        if (!button || String(button.dataset.viewId) === String(state.activeViewId)) return;
+        selectViewDirect(button.dataset.viewId);
+      });
+      elements.gridBody.addEventListener("click", (event) => {
+        const group = event.target.closest("[data-group-key]");
+        if (!group) return;
+        const key = group.dataset.groupKey;
+        if (state.collapsed.has(key)) state.collapsed.delete(key);
+        else state.collapsed.add(key);
+        saveCollapsedState();
+        renderRows();
+      });
+      return;
+    }
     elements.viewTabs.addEventListener("click", (event) => {
       const button = event.target.closest("[data-view-id]");
       if (!button || String(button.dataset.viewId) === String(state.activeViewId)) return;
@@ -996,23 +1055,40 @@
   }
 
   async function initialize() {
-    if (!serviceProductId) {
+    if (!publicMode && !serviceProductId) {
       setGridState("周期商品不存在", "error");
       return;
     }
-    state.canManageViews = permissionProbe("POST", `${apiBase}/member-views`);
-    state.editableFields = new Set(
-      ["remark", "alliance"].filter((fieldId) =>
-        permissionProbe("PUT", `${apiBase}/members/permission-probe/${fieldId}`),
-      ),
-    );
     installEvents();
     installInfiniteScroll();
     try {
-      const [schemaPayload, viewsPayload] = await Promise.all([
-        request(`${apiBase}/member-grid/schema`),
-        request(`${apiBase}/member-views`),
-      ]);
+      let schemaPayload;
+      let viewsPayload;
+      if (publicMode) {
+        const bootstrap = await request("/api/public/service-period-member-grid/bootstrap");
+        serviceProductId = String(bootstrap.service_product_id || "");
+        root.dataset.serviceProductId = serviceProductId;
+        schemaPayload = {schema: bootstrap.schema || {}};
+        viewsPayload = {items: bootstrap.views || []};
+        const title = document.getElementById("spPublicProductTitle");
+        if (title) title.textContent = String((bootstrap.product || {}).title || "周期商品数据");
+        document.title = `${String((bootstrap.product || {}).title || "周期商品数据")} · 只读分享`;
+        state.access = {can_edit: false, can_manage_share: false};
+      } else {
+        const [accessPayload, internalSchemaPayload, internalViewsPayload] = await Promise.all([
+          request(`${apiBase}/member-grid/access`),
+          request(`${apiBase}/member-grid/schema`),
+          request(`${apiBase}/member-views`),
+        ]);
+        state.access = accessPayload.access || {};
+        schemaPayload = internalSchemaPayload;
+        viewsPayload = internalViewsPayload;
+        state.canManageViews = Boolean(state.access.can_manage_views);
+        state.editableFields = new Set(state.access.can_edit_cells ? ["remark", "alliance"] : []);
+        if (window.ServicePeriodMemberGridShare && typeof window.ServicePeriodMemberGridShare.initialize === "function") {
+          window.ServicePeriodMemberGridShare.initialize(state.access, toast);
+        }
+      }
       state.schema = schemaPayload.schema || {};
       state.fields = Array.isArray(state.schema.fields) ? state.schema.fields : [];
       state.fieldMap = new Map(state.fields.map((field) => [field.id, field]));
@@ -1031,8 +1107,14 @@
       selectViewDirect(selected.id);
     } catch (error) {
       elements.gridShell.setAttribute("aria-busy", "false");
-      setGridState(errorMessage(error, "数据工作区初始化失败"), "error");
-      elements.resultSummary.textContent = "加载失败";
+      const status = Number(error && error.status);
+      const fallback = publicMode && status === 410
+        ? "分享链接已关闭或已更新"
+        : publicMode && status === 401
+          ? "分享链接无效"
+          : "数据工作区初始化失败";
+      setGridState(errorMessage(error, fallback), "error");
+      elements.resultSummary.textContent = publicMode ? "无法访问共享数据" : "加载失败";
     }
   }
 

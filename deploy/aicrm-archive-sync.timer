@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AI-CRM Next WeCom archive sync every five minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/5:00
+Persistent=true
+Unit=aicrm-archive-sync.service
+
+[Install]
+WantedBy=timers.target

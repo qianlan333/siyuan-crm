@@ -3593,7 +3593,47 @@ tables:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_service_period_schema.py
       - tests/test_service_period_member_grid.py
-    notes: Stores versioned filter, sort, and grouping configuration shared by administrators. Configuration is validated against the code-owned eight-field registry and never stores member values or remark text.
+    notes: Stores versioned filter, sort, and grouping configuration shared by administrators. Configuration is validated against the code-owned ten-field registry and never stores member values, alliance, or remark text.
+
+  service_period_member_collaborators:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    read_owners:
+      - aicrm_next.service_period
+    replacement: none; resource ACL for service-period member-grid workspaces
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.service_period.api
+      - aicrm_next.service_period.member_grid_sharing
+    migration_source: 0121_service_period_member_grid_sharing
+    pii_level: internal_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_service_period_schema.py
+      - tests/test_service_period_member_grid_sharing.py
+    notes: Stores product-scoped read/edit collaborator grants and optimistic-lock versions; super admins remain implicit.
+
+  service_period_member_shares:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    read_owners:
+      - aicrm_next.service_period
+    replacement: none; revocable signed public share state for member-grid workspaces
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.service_period.api
+      - aicrm_next.service_period.member_grid_sharing
+    migration_source: 0121_service_period_member_grid_sharing
+    pii_level: internal_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_service_period_schema.py
+      - tests/test_service_period_member_grid_sharing.py
+    notes: Stores only enabled state, random public id, generation, and audit metadata; signed share tokens are never persisted.
 
   service_period_entitlements:
     domain: service_period

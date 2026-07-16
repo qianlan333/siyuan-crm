@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw External Effect Queue Worker every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+Persistent=true
+Unit=openclaw-external-effect-worker.service
+
+[Install]
+WantedBy=timers.target

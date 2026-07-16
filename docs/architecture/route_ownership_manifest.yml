@@ -9279,9 +9279,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: admin_read
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: false
   rate_limit: authenticated
   principal_types:
@@ -10086,6 +10086,26 @@ routes:
   rate_limit: authenticated
   principal_types:
   - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/access
+  methods:
+  - GET
+  route_name: service_period_member_grid_access
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
 - path: /api/admin/service-period-products/{service_product_id}/member-grid/schema
   methods:
   - GET
@@ -10099,9 +10119,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: admin_read
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: false
   rate_limit: authenticated
   principal_types:
@@ -10119,9 +10139,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: admin_read
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: false
   rate_limit: authenticated
   principal_types:
@@ -10139,9 +10159,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: manage_commerce
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: true
   rate_limit: authenticated
   principal_types:
@@ -10159,9 +10179,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: manage_commerce
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: true
   rate_limit: authenticated
   principal_types:
@@ -10179,9 +10199,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: manage_commerce
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: true
   rate_limit: authenticated
   principal_types:
@@ -10199,9 +10219,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: admin_read
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: true
   rate_limit: authenticated
   principal_types:
@@ -10219,9 +10239,9 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: manage_commerce
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: true
   rate_limit: authenticated
   principal_types:
@@ -10239,13 +10259,173 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: manage_commerce
-  access_scope: global
-  pii_level: financial
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
   csrf: true
   rate_limit: authenticated
   principal_types:
   - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/share-settings
+  methods:
+  - GET
+  route_name: get_service_period_member_grid_share_settings
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/collaborators
+  methods:
+  - POST
+  route_name: create_service_period_member_grid_collaborator
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}
+  methods:
+  - PUT
+  route_name: update_service_period_member_grid_collaborator
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}
+  methods:
+  - DELETE
+  route_name: delete_service_period_member_grid_collaborator
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/external-share
+  methods:
+  - PUT
+  route_name: update_service_period_member_grid_external_share
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: service_period_grid_access
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /shared/service-period-member-grid
+  methods:
+  - GET
+  route_name: api.public_service_period_member_grid_page
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: h5
+  external_effects: none
+  data_source: static
+  requires_auth: false
+  rollback: previous_release
+  audience: public_h5
+  auth_scheme: public
+  capability: public
+  access_scope: public
+  pii_level: none
+  csrf: false
+  rate_limit: public_standard
+  principal_types:
+  - public
+- path: /api/public/service-period-member-grid/bootstrap
+  methods:
+  - GET
+  route_name: public_service_period_member_grid_bootstrap
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: false
+  rollback: previous_release
+  audience: public_h5
+  auth_scheme: public
+  capability: public
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: false
+  rate_limit: public_strict
+  principal_types:
+  - public
+- path: /api/public/service-period-member-grid/query
+  methods:
+  - POST
+  route_name: public_service_period_member_grid_query
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: false
+  rollback: previous_release
+  audience: public_h5
+  auth_scheme: public
+  capability: public
+  access_scope: single_resource
+  pii_level: sensitive
+  csrf: false
+  rate_limit: public_strict
+  principal_types:
+  - public
 - path: /api/products/{page_slug}
   methods:
   - GET

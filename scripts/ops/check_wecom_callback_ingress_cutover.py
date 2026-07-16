@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -55,6 +56,17 @@ def _read_global_nginx_config(path: str) -> str:
     config_path = Path(path)
     if not str(config_path).startswith("/etc/nginx/"):
         return ""
+    try:
+        effective = subprocess.run(
+            ["/usr/sbin/nginx", "-T"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        effective = None
+    if effective is not None and effective.returncode == 0:
+        return effective.stdout + "\n" + effective.stderr
     global_config = Path("/etc/nginx/nginx.conf")
     if not global_config.exists() or global_config == config_path:
         return ""

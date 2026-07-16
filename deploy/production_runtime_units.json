@@ -1,0 +1,135 @@
+{
+  "schema_version": 2,
+  "timer_service_drain_timeout_seconds": 600,
+  "primary_web": {
+    "service": "openclaw-wecom-postgres.service"
+  },
+  "active_services": [
+    {
+      "service": "openclaw-wecom-callback-ingress.service",
+      "health_url": "http://127.0.0.1:5002/health"
+    },
+    {
+      "service": "openclaw-wecom-callback-inbox-worker.service",
+      "stop_for_migration": true
+    }
+  ],
+  "active_autostart": [
+    {
+      "timer": "aicrm-wechat-shop-order-sync.timer",
+      "service": "aicrm-wechat-shop-order-sync.service",
+      "kick_after_timer_restart": true
+    },
+    {
+      "timer": "openclaw-ai-audience-scheduler.timer",
+      "service": "openclaw-ai-audience-scheduler.service",
+      "kick_after_timer_restart": true
+    },
+    {
+      "timer": "openclaw-broadcast-queue-worker.timer",
+      "service": "openclaw-broadcast-queue-worker.service",
+      "kick_after_timer_restart": true
+    },
+    {
+      "timer": "openclaw-internal-event-worker.timer",
+      "service": "openclaw-internal-event-worker.service",
+      "kick_after_timer_restart": true
+    },
+    {
+      "timer": "openclaw-external-effect-worker.timer",
+      "service": "openclaw-external-effect-worker.service"
+    },
+    {
+      "timer": "openclaw-wechat-pay-order-reconciliation-worker.timer",
+      "service": "openclaw-wechat-pay-order-reconciliation-worker.service"
+    },
+    {
+      "timer": "openclaw-identity-resolution-worker.timer",
+      "service": "openclaw-identity-resolution-worker.service"
+    },
+    {
+      "timer": "openclaw-customer-read-model-refresh.timer",
+      "service": "openclaw-customer-read-model-refresh.service",
+      "kick_after_timer_restart": true,
+      "kick_failure_fatal": true
+    },
+    {
+      "timer": "openclaw-automation-ops-scheduler.timer",
+      "service": "openclaw-automation-ops-scheduler.service"
+    }
+  ],
+  "approval_required": [
+    {
+      "timer": "aicrm-huangyoucan-usage-sync.timer",
+      "service": "aicrm-huangyoucan-usage-sync.service"
+    },
+    {
+      "timer": "aicrm-archive-sync.timer",
+      "service": "aicrm-archive-sync.service"
+    },
+    {
+      "timer": "openclaw-broadcast-hourly-feishu-report.timer",
+      "service": "openclaw-broadcast-hourly-feishu-report.service"
+    },
+    {
+      "timer": "openclaw-external-contact-full-sync.timer",
+      "service": "openclaw-external-contact-full-sync.service"
+    },
+    {
+      "timer": "openclaw-external-contact-sync.timer",
+      "service": "openclaw-external-contact-sync.service"
+    }
+  ],
+  "retired_forbidden": [
+    "aicrm-web.service",
+    "openclaw-wecom-callback-inbox-worker.timer",
+    "openclaw-external-push-worker.timer",
+    "openclaw-external-push-worker.service",
+    "aicrm-reply-monitor-run-due.timer",
+    "aicrm-reply-monitor-run-due.service",
+    "aicrm-reply-monitor-capture.timer",
+    "aicrm-reply-monitor-capture.service",
+    "aicrm-automation-jobs-run-due.timer",
+    "aicrm-automation-jobs-run-due.service",
+    "aicrm-campaign-run-due.timer",
+    "aicrm-campaign-run-due.service",
+    "openclaw-automation-conversion-due-runner.service"
+  ],
+  "retired_unit_files": [
+    "aicrm-web.service",
+    "openclaw-wecom-callback-inbox-worker.timer",
+    "openclaw-external-push-worker.timer",
+    "openclaw-external-push-worker.service",
+    "aicrm-reply-monitor-run-due.timer",
+    "aicrm-reply-monitor-run-due.service",
+    "aicrm-reply-monitor-capture.timer",
+    "aicrm-reply-monitor-capture.service",
+    "aicrm-automation-jobs-run-due.timer",
+    "aicrm-automation-jobs-run-due.service",
+    "aicrm-campaign-run-due.timer",
+    "aicrm-campaign-run-due.service",
+    "openclaw-automation-conversion-due-runner.service"
+  ],
+  "retired_dropins": [
+    {
+      "unit": "openclaw-wecom-postgres.service",
+      "dropin": "10-aicrm-callback-hotfix-runtime.conf"
+    },
+    {
+      "unit": "openclaw-wecom-callback-ingress.service",
+      "dropin": "10-aicrm-callback-hotfix-runtime.conf"
+    },
+    {
+      "unit": "openclaw-wecom-callback-inbox-worker.service",
+      "dropin": "10-aicrm-callback-hotfix-runtime.conf"
+    },
+    {
+      "unit": "openclaw-internal-event-worker.service",
+      "dropin": "p0-2-payment-shadow.conf"
+    },
+    {
+      "unit": "openclaw-internal-event-worker.service",
+      "dropin": "zz-service-period-payment-consumer.conf"
+    }
+  ]
+}

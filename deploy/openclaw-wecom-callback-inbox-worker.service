@@ -1,0 +1,21 @@
+[Unit]
+Description=OpenClaw WeCom Callback Inbox Worker - process queued callback ingress
+After=network.target openclaw-wecom-postgres.service
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+Environment=AICRM_WECOM_CALLBACK_INBOX_WORKER_EXECUTE=1
+Environment=AICRM_WECOM_CALLBACK_INBOX_WORKER_BATCH_SIZE=20
+Environment=AICRM_WECOM_CALLBACK_INBOX_WORKER_MAX_EXECUTE_BATCH_SIZE=20
+Environment=AICRM_WECOM_CALLBACK_INBOX_WORKER_POLL_INTERVAL_SECONDS=0.25
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && exec python scripts/run_wecom_callback_inbox_worker.py --execute --loop --limit ${AICRM_WECOM_CALLBACK_INBOX_WORKER_BATCH_SIZE:-20} --poll-interval ${AICRM_WECOM_CALLBACK_INBOX_WORKER_POLL_INTERVAL_SECONDS:-0.25}'
+Restart=always
+RestartSec=1
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

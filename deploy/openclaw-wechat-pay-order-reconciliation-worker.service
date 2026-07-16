@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenClaw WeChat Pay Order Reconciliation Worker - repair unpaid local orders from WeChat state
+After=network.target openclaw-wecom-postgres.service
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_wechat_pay_order_reconciliation_worker.py --execute'

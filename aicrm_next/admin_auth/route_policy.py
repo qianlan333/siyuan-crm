@@ -148,7 +148,11 @@ async def _enforce_human_session(request: Request, policy: RoutePolicy) -> Respo
     if not _principal_allowed(context, policy):
         return _error("principal_type_forbidden", status_code=403)
     _install_context(request, context, policy)
-    if _request_is_write(request) and viewer_only(context) and policy.capability != "admin_read":
+    if (
+        _request_is_write(request)
+        and viewer_only(context)
+        and policy.capability not in {"admin_read", "service_period_grid_access"}
+    ):
         return _error("admin_capability_required", status_code=403, capability=policy.capability)
     if policy.capability not in {"public", "health_read"} and not context_can(context, policy.capability):
         return _error("admin_capability_required", status_code=403, capability=policy.capability)

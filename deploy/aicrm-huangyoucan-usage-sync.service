@@ -1,0 +1,14 @@
+[Unit]
+Description=AI-CRM HuangYouCan readonly usage snapshot sync
+After=network-online.target openclaw-wecom-postgres.service
+Wants=network-online.target
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+EnvironmentFile=/home/ubuntu/.aicrm-huangyoucan-readonly.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python -m scripts.run_huangyoucan_usage_sync --operator huangyoucan_usage_timer'

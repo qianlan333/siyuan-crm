@@ -33,9 +33,10 @@ def test_route_policy_inventory_covers_every_runtime_business_route() -> None:
     # Operation Cycles contributes eight routes, Coupon V1 contributes twenty,
     # questionnaire operations contributes five, direct group selection and
     # invitation bindings add six, the service-period member grid adds seven,
-    # and siyuan keeps one verification-file route; static mounts are counted
-    # separately by the router-registry contract.
-    assert len(index) == len(inventory) == 729
+    # table ACL plus external sharing adds nine, and siyuan keeps one
+    # verification-file route; static mounts are counted separately by the
+    # router-registry contract.
+    assert len(index) == len(inventory) == 738
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in FASTAPI_BUILTIN_ROUTE_PATHS:
             continue

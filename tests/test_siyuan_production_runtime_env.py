@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import subprocess
+import sys
 
 from aicrm_next.platform_foundation.external_effects.adapters import WECOM_EFFECT_TYPES
 from scripts.ops.ensure_siyuan_production_runtime_env import (
     ensure_siyuan_production_runtime_env,
     siyuan_production_runtime_values,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_siyuan_runtime_values_enable_supported_wecom_effects_only() -> None:
@@ -50,3 +55,20 @@ def test_siyuan_runtime_env_migration_is_idempotent_and_preserves_secrets(tmp_pa
     assert "AICRM_NEXT_WECOM_REAL_CALLS_ENABLED" not in first_body
     assert "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE" not in first_body
     assert "AICRM_EXTERNAL_EFFECT_ALLOWED_TYPES" not in first_body
+
+
+def test_siyuan_runtime_env_script_can_run_by_file_path_outside_repo(tmp_path: Path) -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts" / "ops" / "ensure_siyuan_production_runtime_env.py"),
+            "--help",
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--environment-file" in result.stdout

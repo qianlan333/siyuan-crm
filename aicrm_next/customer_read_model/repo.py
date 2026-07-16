@@ -506,7 +506,12 @@ def _coerce_datetime(value: object) -> datetime:
     if isinstance(value, datetime):
         return value
     if value:
-        return datetime.fromisoformat(str(value))
+        normalized = str(value).strip()
+        # PostgreSQL may render whole-hour UTC offsets as ``+08``/``-05``.
+        # ``datetime.fromisoformat`` requires an explicit minute component.
+        if len(normalized) >= 3 and normalized[-3] in {"+", "-"} and normalized[-2:].isdigit():
+            normalized += ":00"
+        return datetime.fromisoformat(normalized)
     return datetime.now(timezone.utc)
 
 

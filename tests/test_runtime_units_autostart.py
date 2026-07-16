@@ -372,7 +372,10 @@ def test_runtime_units_stop_and_verify_dry_runs_are_manifest_driven(capsys) -> N
         assert f"sudo systemctl is-active {unit}" in verify_output
         assert f"sudo systemctl is-failed {unit}" in verify_output
     assert "sudo test '!' -e /etc/systemd/system/openclaw-wecom-callback-ingress.service.d/10-aicrm-callback-hotfix-runtime.conf" in verify_output
-    assert "approval_required_timers=aicrm-huangyoucan-usage-sync.timer,aicrm-archive-sync.timer" in verify_output
+    expected_approval_timers = ",".join(
+        item["timer"] for item in _manifest()["approval_required"]
+    )
+    assert f"approval_required_timers={expected_approval_timers}" in verify_output
 
 
 def test_runtime_units_verify_requires_primary_active_and_enabled_approval_timer_active() -> None:

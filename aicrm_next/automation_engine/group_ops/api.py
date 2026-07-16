@@ -48,6 +48,7 @@ from .application import (
     UpdateGroupOpsNodeCommand,
     UpdateGroupOpsPlanCommand,
 )
+from .picker_application import ListGroupChatPickerQuery, SyncGroupChatPickerCommand
 from .broadcast import (
     BroadcastImage,
     ExecuteGroupOpsTokenBroadcastCommand,
@@ -63,6 +64,7 @@ from .dto import (
     GroupOpsBindGroupRequest,
     GroupOpsExecutionsRequest,
     GroupOpsGroupSyncRequest,
+    GroupChatPickerSyncRequest,
     GroupOpsGroupsRequest,
     GroupOpsMemberImportRequest,
     GroupOpsMembersRequest,
@@ -92,8 +94,6 @@ def _plan_id(value: int | str) -> int:
 
 def _error_code_for(exc: Exception) -> str:
     message = str(exc)
-    if "owner_userid must match" in message or "owner_userid/admin_userids must match" in message:
-        return "group_owner_mismatch"
     if "content, images, or attachments is required" in message or "content.text or content.attachments" in message:
         return "content_required"
     if "content is required" in message:
@@ -396,6 +396,22 @@ def list_group_ops_groups(
 def preview_group_ops_groups_sync(payload: GroupOpsGroupSyncRequest) -> JSONResponse:
     try:
         return _json_result(PreviewGroupOpsGroupsSyncCommand()(payload))
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.get("/api/admin/automation-conversion/group-ops/group-picker")
+def list_group_chat_picker(owner_userid: str = "", keyword: str = "", limit: int = 200) -> JSONResponse:
+    try:
+        return _json_result(ListGroupChatPickerQuery()(owner_userid=owner_userid, keyword=keyword, limit=limit))
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.post("/api/admin/automation-conversion/group-ops/group-picker/sync")
+def sync_group_chat_picker(payload: GroupChatPickerSyncRequest) -> JSONResponse:
+    try:
+        return _json_result(SyncGroupChatPickerCommand()(payload))
     except Exception as exc:
         _raise_http(exc)
 

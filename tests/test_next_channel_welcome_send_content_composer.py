@@ -88,12 +88,14 @@ const contentPackage = adapter.welcomeFieldsToContentPackage({{
   welcome_image_library_ids: [12, "12", 34],
   welcome_miniprogram_library_ids: ["56"],
   welcome_attachment_library_ids: "78, 78, 90"
+  ,welcome_group_invite_library_ids: [91]
 }});
 const fields = adapter.contentPackageToWelcomeFields({{
   content_text: "  新欢迎语  ",
   image_library_ids: ["101", 102],
   miniprogram_library_ids: [201],
   attachment_library_ids: ["301", "301", 302]
+  ,group_invite_library_ids: [401]
 }});
 const empty = adapter.welcomeFieldsToContentPackage({{}});
 console.log(JSON.stringify({{ contentPackage, fields, empty }}));
@@ -106,18 +108,21 @@ console.log(JSON.stringify({{ contentPackage, fields, empty }}));
         "image_library_ids": [12, 34],
         "miniprogram_library_ids": [56],
         "attachment_library_ids": [78, 90],
+        "group_invite_library_ids": [91],
     }
     assert payload["fields"] == {
         "welcome_message": "新欢迎语",
         "welcome_image_library_ids": [101, 102],
         "welcome_miniprogram_library_ids": [201],
         "welcome_attachment_library_ids": [301, 302],
+        "welcome_group_invite_library_ids": [401],
     }
     assert payload["empty"] == {
         "content_text": "",
         "image_library_ids": [],
         "miniprogram_library_ids": [],
         "attachment_library_ids": [],
+        "group_invite_library_ids": [],
     }
 
 

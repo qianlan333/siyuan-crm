@@ -302,6 +302,7 @@ def _content_package_has_body(content_package: dict[str, Any]) -> bool:
         or list(content_package.get("image_library_ids") or [])
         or list(content_package.get("miniprogram_library_ids") or [])
         or list(content_package.get("attachment_library_ids") or [])
+        or list(content_package.get("group_invite_library_ids") or [])
     )
 
 
@@ -407,12 +408,6 @@ def assert_run_due_guard(
         raise ContractError("run-due allowlist does not include this plan or node")
     if int(max_outbound_tasks or 0) < 1:
         raise ContractError("max_outbound_tasks is required")
-
-
-def assert_group_owned_by_plan(*, group: dict[str, Any], plan: dict[str, Any]) -> None:
-    plan_owner = clean_text(plan.get("owner_userid"))
-    if not group_manageable_by_userid(group, plan_owner):
-        raise ContractError("group owner_userid/admin_userids must match plan owner_userid")
 
 
 def binding_stats(groups: list[dict[str, Any]]) -> dict[str, int]:

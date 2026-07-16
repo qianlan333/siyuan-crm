@@ -33,8 +33,8 @@ def test_router_registry_preserves_route_inventory_count_and_static_order() -> N
     inventory = collect_route_inventory(app, include_static=True)
     static_mounts = [(route.path, route.name) for route in app.routes if isinstance(route, Mount)]
 
-    assert len(inventory) == 715
-    assert sum(1 for item in inventory if item.is_static) == 7
+    assert len(inventory) == 737
+    assert sum(1 for item in inventory if item.is_static) == 8
     assert static_mounts == [
         ("/static/group-ops", "group_ops_static"),
         ("/static/automation-engine", "automation_engine_static"),
@@ -42,6 +42,7 @@ def test_router_registry_preserves_route_inventory_count_and_static_order() -> N
         ("/static/questionnaire", "questionnaire_static"),
         ("/static/navigation-target", "navigation_target_static"),
         ("/static/operation-cycles", "operation_cycles_static"),
+        ("/static/service-period", "service_period_static"),
         ("/static", "static"),
     ]
     assert inventory[-1].path == "/{filename}"

@@ -60,15 +60,6 @@ class SendTargetResolver:
 
         warnings: list[JsonDict] = []
         owner_userid = _text(row.get("owner_userid") or row.get("primary_owner_userid"))
-        if owner_userid and owner_userid != sender_userid:
-            warning = {
-                "code": "owner_mismatch_warning",
-                "owner_userid": owner_userid,
-                "sender_userid": sender_userid,
-            }
-            if request.strict_owner_match:
-                raise SendTargetError("owner_mismatch", status_code=409, details=warning)
-            warnings.append(warning)
 
         dnd_reasons = self.repo.fetch_do_not_disturb_reasons(unionid)
         if dnd_reasons and not request.bypass_dnd:

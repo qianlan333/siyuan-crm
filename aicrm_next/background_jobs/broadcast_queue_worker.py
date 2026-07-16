@@ -700,7 +700,7 @@ def _merge_content_package(target: dict[str, Any], source: Any) -> None:
         nested = _json_dict(source_dict.get(nested_key))
         if nested:
             _merge_content_package(target, nested)
-    for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids"):
+    for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "group_invite_library_ids"):
         values = _json_list(source_dict.get(key))
         if values:
             existing = list(target.get(key) or [])
@@ -708,6 +708,28 @@ def _merge_content_package(target: dict[str, Any], source: Any) -> None:
                 if value not in existing:
                     existing.append(value)
             target[key] = existing
+    field_by_media_kind = {
+        "image": "image_library_ids",
+        "miniprogram": "miniprogram_library_ids",
+        "file": "attachment_library_ids",
+        "attachment": "attachment_library_ids",
+        "link": "group_invite_library_ids",
+        "group_invite": "group_invite_library_ids",
+    }
+    for media_ref in _json_list(source_dict.get("media_refs")):
+        if not isinstance(media_ref, dict):
+            continue
+        field = field_by_media_kind.get(_text(media_ref.get("kind")).lower())
+        try:
+            library_id = int(media_ref.get("library_id") or 0)
+        except (TypeError, ValueError):
+            library_id = 0
+        if not field or library_id <= 0:
+            continue
+        existing = list(target.get(field) or [])
+        if library_id not in existing:
+            existing.append(library_id)
+        target[field] = existing
 
 
 def _extract_private_content_package(payload: dict[str, Any]) -> dict[str, Any]:
@@ -720,7 +742,7 @@ def _extract_private_content_package(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _resolve_private_attachments(content_package: dict[str, Any]) -> list[dict[str, Any]]:
-    if not any(_json_list(content_package.get(key)) for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids")):
+    if not any(_json_list(content_package.get(key)) for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "group_invite_library_ids")):
         return []
     from aicrm_next.automation_engine.group_ops.integration_gateway import resolve_group_ops_content_package_materials
 

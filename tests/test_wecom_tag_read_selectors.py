@@ -152,7 +152,7 @@ def test_frontend_entry_pages_expose_tag_api_urls_without_legacy_facade(monkeypa
 
     assert 'data-api-tags="/api/admin/wecom/tags"' in wecom_page.text
     assert 'data-api-groups="/api/admin/wecom/tag-groups"' in wecom_page.text
-    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260713" in questionnaire_new.text
+    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260715-operations-only" in questionnaire_new.text
     questionnaire_script = client.get("/static/questionnaire/admin_questionnaire_editor.js")
     assert questionnaire_script.status_code == 200
     assert "fetchJson('/api/admin/wecom/tags')" in questionnaire_script.text

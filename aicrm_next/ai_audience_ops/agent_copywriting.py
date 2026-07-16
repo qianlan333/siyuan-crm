@@ -39,7 +39,7 @@ def _hash_text(value: str) -> str:
 
 
 def _content_has_body(content: dict[str, Any]) -> bool:
-    return bool(_text(content.get("content_text") or content.get("text")) or content.get("image_library_ids") or content.get("miniprogram_library_ids") or content.get("attachment_library_ids") or content.get("attachments"))
+    return bool(_text(content.get("content_text") or content.get("text")) or content.get("image_library_ids") or content.get("miniprogram_library_ids") or content.get("attachment_library_ids") or content.get("group_invite_library_ids") or content.get("attachments"))
 
 
 def _fallback_content(value: Any) -> dict[str, Any]:

@@ -278,6 +278,23 @@ def test_group_ops_sync_imports_admin_groups_from_local_group_chat_cache(tmp_pat
         def list_group_chats(self, *, owner_userid: str, limit: int = 100, cursor: str = "") -> dict:
             return {"ok": True, "mode": "production", "groups": [], "next_cursor": "", "warnings": []}
 
+        def get_group_chat(self, *, chat_id: str, owner_userid: str = "", need_name: int = 1) -> dict:
+            assert chat_id == "wrOgDDD001"
+            assert owner_userid == "admin_002"
+            return {
+                "ok": True,
+                "group": {
+                    "chat_id": chat_id,
+                    "group_name": "管理员可管群（企微实时名称）",
+                    "owner_userid": "owner_004",
+                    "owner_name": "群主",
+                    "admin_userids": ["admin_002"],
+                    "internal_member_count": 1,
+                    "external_member_count": 2,
+                    "status": "active",
+                },
+            }
+
     db_url = _create_group_ops_sqlite_db(tmp_path / "group_ops_admin_sync.db")
     repo = PostgresGroupOpsRepository(create_engine(db_url, future=True))
 
@@ -289,10 +306,16 @@ def test_group_ops_sync_imports_admin_groups_from_local_group_chat_cache(tmp_pat
     assert result["ok"] is True
     assert result["synced_count"] == 1
     assert result["items"][0]["chat_id"] == "wrOgDDD001"
+    assert result["items"][0]["group_name"] == "管理员可管群（企微实时名称）"
     assert result["items"][0]["admin_userids"] == ["admin_002"]
-    assert result["warnings"] == ["included_admin_groups_from_local_cache=1"]
+    assert result["warnings"] == [
+        "included_admin_groups_from_local_cache=1",
+        "included_admin_groups_from_refreshed_candidates=1",
+        "refreshed_admin_group_candidates=1",
+    ]
     assert total == 1
     assert groups[0]["chat_id"] == "wrOgDDD001"
+    assert groups[0]["group_name"] == "管理员可管群（企微实时名称）"
 
 
 def test_group_ops_api_uses_sql_repository_in_production_data_mode(monkeypatch, tmp_path: Path) -> None:

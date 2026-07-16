@@ -33,6 +33,26 @@ class RadarLinksRepository(Protocol):
         start_at: str = "",
         end_at: str = "",
     ) -> tuple[list[dict[str, Any]], int]: ...
+    def list_external_clicks(
+        self,
+        *,
+        mobile: str = "",
+        unionid: str = "",
+        radar_id: int | None = None,
+        radar_code: str = "",
+        clicked_from: datetime | None = None,
+        clicked_to: datetime | None = None,
+        before_event_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int, bool]: ...
+    def list_external_link_mappings(
+        self,
+        *,
+        radar_id: int | None = None,
+        radar_code: str = "",
+        before_link_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int, bool]: ...
     def stats(self, link_id: int) -> dict[str, Any] | None: ...
     def set_pdf_processing_status(
         self,
@@ -67,6 +87,12 @@ class InMemoryRadarLinksRepository:
         self._next_id = 1
         self._next_event_id = 1
         self._next_pdf_asset_id = 1
+        self._external_identities = [
+            {"unionid": "unionid_001", "mobile": "13800138000", "openids": ["openid_001"], "external_userids": ["wx_ext_001"]},
+            {"unionid": "unionid_002", "mobile": "", "openids": ["openid_002"], "external_userids": ["wx_ext_002"]},
+            {"unionid": "unionid_conflict_a", "mobile": "13900139001", "openids": ["openid_conflict"], "external_userids": []},
+            {"unionid": "unionid_conflict_b", "mobile": "13900139002", "openids": ["openid_conflict"], "external_userids": []},
+        ]
 
     def _new_code(self) -> str:
         while True:
@@ -181,6 +207,110 @@ class InMemoryRadarLinksRepository:
         if end_filter:
             rows = [item for item in rows if str(item.get("created_at") or "") <= end_filter]
         return rows[offset : offset + limit], len(rows)
+
+    def _external_identity(self, event: dict[str, Any]) -> dict[str, str]:
+        raw_unionid = str(event.get("unionid") or "").strip()
+        raw_openid = str(event.get("openid") or "").strip()
+        raw_external_userid = str(event.get("external_userid") or "").strip()
+        matched_by = "unionid" if raw_unionid else ("openid" if raw_openid else ("external_userid" if raw_external_userid else ""))
+        if matched_by == "unionid":
+            candidates = [item for item in self._external_identities if item["unionid"] == raw_unionid]
+        elif matched_by == "openid":
+            candidates = [item for item in self._external_identities if raw_openid in item["openids"]]
+        elif matched_by == "external_userid":
+            candidates = [item for item in self._external_identities if raw_external_userid in item["external_userids"]]
+        else:
+            candidates = []
+        if len(candidates) > 1:
+            return {"mobile": "", "unionid": "", "identity_status": "conflict", "identity_matched_by": ""}
+        if len(candidates) == 1:
+            candidate = candidates[0]
+            resolved_unionid = str(candidate.get("unionid") or raw_unionid)
+            resolved_mobile = str(candidate.get("mobile") or "")
+            return {
+                "mobile": resolved_mobile,
+                "unionid": resolved_unionid,
+                "identity_status": "complete" if resolved_mobile and resolved_unionid else "mobile_missing",
+                "identity_matched_by": matched_by,
+            }
+        if raw_unionid:
+            return {"mobile": "", "unionid": raw_unionid, "identity_status": "mobile_missing", "identity_matched_by": "unionid"}
+        return {"mobile": "", "unionid": "", "identity_status": "unresolved", "identity_matched_by": ""}
+
+    def list_external_clicks(
+        self,
+        *,
+        mobile: str = "",
+        unionid: str = "",
+        radar_id: int | None = None,
+        radar_code: str = "",
+        clicked_from: datetime | None = None,
+        clicked_to: datetime | None = None,
+        before_event_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        links = {int(item["id"]): item for item in self._links}
+        rows: list[dict[str, Any]] = []
+        for event in self._events:
+            stage = str(event.get("stage") or "")
+            has_identity = bool(str(event.get("unionid") or event.get("openid") or event.get("external_userid") or "").strip())
+            if stage not in {"authorized", "authorized_click"} and not (stage == "landing" and has_identity):
+                continue
+            link_id = int(event.get("link_id") or 0)
+            link = links.get(link_id)
+            if not link:
+                continue
+            created_at = _datetime_value(event.get("created_at"))
+            identity = self._external_identity(event)
+            projected = {
+                "event_id": int(event.get("event_id") or event.get("id") or 0),
+                **identity,
+                "radar_id": link_id,
+                "radar_code": str(link.get("code") or event.get("code") or ""),
+                "clicked_at": str(event.get("created_at") or ""),
+            }
+            if mobile and projected["mobile"] != str(mobile).strip():
+                continue
+            if unionid and projected["unionid"] != str(unionid).strip():
+                continue
+            if radar_id is not None and projected["radar_id"] != int(radar_id):
+                continue
+            if radar_code and projected["radar_code"] != str(radar_code).strip():
+                continue
+            if clicked_from is not None and (created_at is None or created_at < clicked_from):
+                continue
+            if clicked_to is not None and (created_at is None or created_at > clicked_to):
+                continue
+            rows.append(projected)
+        rows.sort(key=lambda item: int(item["event_id"]), reverse=True)
+        total = len(rows)
+        if before_event_id is not None:
+            rows = [item for item in rows if int(item["event_id"]) < int(before_event_id)]
+        page = rows[: max(1, min(int(limit or 100), 500)) + 1]
+        has_more = len(page) > limit
+        return deepcopy(page[:limit]), total, has_more
+
+    def list_external_link_mappings(
+        self,
+        *,
+        radar_id: int | None = None,
+        radar_code: str = "",
+        before_link_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        rows = [
+            {"radar_id": int(item["id"]), "radar_code": str(item.get("code") or ""), "title": str(item.get("title") or "")}
+            for item in self._links
+            if (radar_id is None or int(item["id"]) == int(radar_id))
+            and (not radar_code or str(item.get("code") or "") == str(radar_code).strip())
+        ]
+        rows.sort(key=lambda item: int(item["radar_id"]), reverse=True)
+        total = len(rows)
+        if before_link_id is not None:
+            rows = [item for item in rows if int(item["radar_id"]) < int(before_link_id)]
+        page = rows[: max(1, min(int(limit or 100), 500)) + 1]
+        has_more = len(page) > limit
+        return deepcopy(page[:limit]), total, has_more
 
     def stats(self, link_id: int) -> dict[str, Any] | None:
         if not self.get_link(link_id):
@@ -536,6 +666,203 @@ class PostgresRadarLinksRepository:
             ).fetchall()
         return [dict(row) for row in rows], total
 
+    @staticmethod
+    def _external_click_query_sql() -> str:
+        return """
+            WITH logical_events AS (
+                SELECT event.id AS event_id, event.link_id, event.code, event.created_at,
+                       event.unionid, event.openid, event.external_userid,
+                       link.id AS radar_id, link.code AS radar_code
+                FROM radar_click_events event
+                JOIN radar_links link ON link.id = event.link_id AND link.deleted_at IS NULL
+                WHERE (
+                        event.stage IN ('authorized', 'authorized_click')
+                        OR (
+                            event.stage = 'landing'
+                            AND COALESCE(NULLIF(event.unionid, ''), NULLIF(event.openid, ''), NULLIF(event.external_userid, '')) IS NOT NULL
+                        )
+                      )
+                  AND (%(radar_id)s IS NULL OR link.id = %(radar_id)s)
+                  AND (%(radar_code)s = '' OR link.code = %(radar_code)s)
+                  AND (%(clicked_from)s IS NULL OR event.created_at >= %(clicked_from)s)
+                  AND (%(clicked_to)s IS NULL OR event.created_at <= %(clicked_to)s)
+            ), projected AS (
+                SELECT event.event_id,
+                       CASE WHEN resolution.active_candidate_count = 1 THEN resolution.mobile ELSE '' END AS mobile,
+                       CASE
+                           WHEN resolution.candidate_count > 1
+                                OR (resolution.candidate_count = 1 AND resolution.active_candidate_count <> 1) THEN ''
+                           WHEN resolution.active_candidate_count = 1 THEN resolution.resolved_unionid
+                           ELSE event.unionid
+                       END AS unionid,
+                       event.radar_id,
+                       event.radar_code,
+                       event.created_at AS clicked_at,
+                       CASE
+                           WHEN resolution.candidate_count > 1
+                                OR (resolution.candidate_count = 1 AND resolution.active_candidate_count <> 1) THEN 'conflict'
+                           WHEN COALESCE(NULLIF(resolution.resolved_unionid, ''), NULLIF(event.unionid, '')) IS NOT NULL
+                                AND COALESCE(resolution.mobile, '') <> '' THEN 'complete'
+                           WHEN COALESCE(NULLIF(resolution.resolved_unionid, ''), NULLIF(event.unionid, '')) IS NOT NULL THEN 'mobile_missing'
+                           ELSE 'unresolved'
+                       END AS identity_status,
+                       CASE
+                           WHEN resolution.active_candidate_count = 1 THEN resolution.matched_by
+                           WHEN resolution.candidate_count = 0 AND event.unionid <> '' THEN 'unionid'
+                           ELSE ''
+                       END AS identity_matched_by
+                FROM logical_events event
+                LEFT JOIN LATERAL (
+                    SELECT COUNT(*)::integer AS candidate_count,
+                           COUNT(*) FILTER (
+                               WHERE COALESCE(identity.identity_status, 'active') = 'active'
+                           )::integer AS active_candidate_count,
+                           CASE
+                               WHEN COUNT(*) = 1 AND COUNT(*) FILTER (
+                                   WHERE COALESCE(identity.identity_status, 'active') = 'active'
+                               ) = 1 THEN MIN(identity.unionid)
+                               ELSE ''
+                           END AS resolved_unionid,
+                           CASE
+                               WHEN COUNT(*) = 1 AND COUNT(*) FILTER (
+                                   WHERE COALESCE(identity.identity_status, 'active') = 'active'
+                               ) = 1 THEN MIN(identity.mobile)
+                               ELSE ''
+                           END AS mobile,
+                           CASE
+                               WHEN COUNT(*) <> 1 OR COUNT(*) FILTER (
+                                   WHERE COALESCE(identity.identity_status, 'active') = 'active'
+                               ) <> 1 THEN ''
+                               WHEN event.unionid <> '' THEN 'unionid'
+                               WHEN event.openid <> '' THEN 'openid'
+                               WHEN event.external_userid <> '' THEN 'external_userid'
+                               ELSE ''
+                           END AS matched_by
+                    FROM crm_user_identity identity
+                    WHERE (
+                            (event.unionid <> '' AND identity.unionid = event.unionid)
+                            OR (
+                                event.unionid = '' AND event.openid <> '' AND (
+                                    identity.primary_openid = event.openid
+                                    OR identity.openids_json @> jsonb_build_array(event.openid)
+                                    OR identity.openids_json @> jsonb_build_array(jsonb_build_object('openid', event.openid))
+                                )
+                            )
+                            OR (
+                                event.unionid = '' AND event.openid = '' AND event.external_userid <> '' AND (
+                                    identity.primary_external_userid = event.external_userid
+                                    OR identity.external_userids_json @> jsonb_build_array(event.external_userid)
+                                    OR identity.external_userids_json @> jsonb_build_array(jsonb_build_object('external_userid', event.external_userid))
+                                )
+                            )
+                          )
+                ) resolution ON TRUE
+            ), filtered AS (
+                SELECT *
+                FROM projected
+                WHERE (%(mobile)s = '' OR mobile = %(mobile)s)
+                  AND (%(unionid)s = '' OR unionid = %(unionid)s)
+            ), total AS (
+                SELECT COUNT(*)::integer AS total
+                FROM filtered
+            ), page AS (
+                SELECT event_id, mobile, unionid, radar_id, radar_code, clicked_at,
+                       identity_status, identity_matched_by
+                FROM filtered
+                WHERE (%(before_event_id)s IS NULL OR event_id < %(before_event_id)s)
+                ORDER BY event_id DESC
+                LIMIT %(limit)s
+            )
+            SELECT page.event_id, page.mobile, page.unionid, page.radar_id, page.radar_code,
+                   page.clicked_at, page.identity_status, page.identity_matched_by, total.total
+            FROM total
+            LEFT JOIN page ON TRUE
+            ORDER BY page.event_id DESC NULLS LAST
+        """
+
+    def list_external_clicks(
+        self,
+        *,
+        mobile: str = "",
+        unionid: str = "",
+        radar_id: int | None = None,
+        radar_code: str = "",
+        clicked_from: datetime | None = None,
+        clicked_to: datetime | None = None,
+        before_event_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        safe_limit = max(1, min(int(limit or 100), 500))
+        params = {
+            "mobile": str(mobile or "").strip(),
+            "unionid": str(unionid or "").strip(),
+            "radar_id": int(radar_id) if radar_id is not None else None,
+            "radar_code": str(radar_code or "").strip(),
+            "clicked_from": clicked_from,
+            "clicked_to": clicked_to,
+            "before_event_id": int(before_event_id) if before_event_id is not None else None,
+            "limit": safe_limit + 1,
+        }
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(self._external_click_query_sql(), params).fetchall()
+        except RepositoryProviderError:
+            raise
+        except Exception as exc:
+            raise RepositoryProviderError(f"external radar click read unavailable: {exc}") from exc
+        total = int((rows[0] if rows else {}).get("total") or 0)
+        items = [
+            {key: value for key, value in dict(row).items() if key != "total"}
+            for row in rows
+            if row.get("event_id") is not None
+        ]
+        has_more = len(items) > safe_limit
+        return items[:safe_limit], total, has_more
+
+    def list_external_link_mappings(
+        self,
+        *,
+        radar_id: int | None = None,
+        radar_code: str = "",
+        before_link_id: int | None = None,
+        limit: int = 100,
+    ) -> tuple[list[dict[str, Any]], int, bool]:
+        safe_limit = max(1, min(int(limit or 100), 500))
+        conditions = ["deleted_at IS NULL"]
+        params: list[Any] = []
+        if radar_id is not None:
+            conditions.append("id = %s")
+            params.append(int(radar_id))
+        if radar_code:
+            conditions.append("code = %s")
+            params.append(str(radar_code).strip())
+        where_sql = " AND ".join(conditions)
+        try:
+            with self._connect() as conn:
+                total = int((conn.execute(f"SELECT COUNT(*) AS total FROM radar_links WHERE {where_sql}", tuple(params)).fetchone() or {}).get("total") or 0)
+                cursor_conditions = list(conditions)
+                cursor_params = list(params)
+                if before_link_id is not None:
+                    cursor_conditions.append("id < %s")
+                    cursor_params.append(int(before_link_id))
+                rows = conn.execute(
+                    f"""
+                    SELECT id AS radar_id, code AS radar_code, title
+                    FROM radar_links
+                    WHERE {' AND '.join(cursor_conditions)}
+                    ORDER BY id DESC
+                    LIMIT %s
+                    """,
+                    tuple(cursor_params + [safe_limit + 1]),
+                ).fetchall()
+        except RepositoryProviderError:
+            raise
+        except Exception as exc:
+            raise RepositoryProviderError(f"external radar link read unavailable: {exc}") from exc
+        items = [dict(row) for row in rows]
+        has_more = len(items) > safe_limit
+        return items[:safe_limit], total, has_more
+
     def stats(self, link_id: int) -> dict[str, Any] | None:
         if not self.get_link(link_id):
             return None
@@ -688,3 +1015,16 @@ def build_radar_links_repository() -> RadarLinksRepository:
 
 def reset_radar_links_fixture_state() -> None:
     _DEFAULT_REPO.reset()
+
+
+def _datetime_value(value: Any) -> datetime | None:
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)

@@ -12,7 +12,7 @@ BOUNDARY_DOC = ROOT / "docs" / "architecture" / "material_library_table_boundary
 SEND_CONTENT_CONTRACT = ROOT / "docs" / "contracts" / "send_content_package_contract.md"
 ROUTE_INVENTORY = ROOT / "docs" / "architecture" / "media_library_route_inventory.md"
 
-CORE_TABLES = {"image_library", "miniprogram_library", "attachment_library"}
+CORE_TABLES = {"image_library", "miniprogram_library", "attachment_library", "group_invite_library"}
 
 
 def _tables() -> dict[str, dict[str, Any]]:
@@ -50,12 +50,13 @@ def test_material_boundary_docs_name_shared_id_contracts() -> None:
         "image_library_ids",
         "miniprogram_library_ids",
         "attachment_library_ids",
+        "group_invite_library_ids",
         "PostgresSendContentRepository",
         "material_assets",
         "real external storage",
     ):
         assert phrase in boundary
 
-    for phrase in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids"):
+    for phrase in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "group_invite_library_ids"):
         assert phrase in send_content
     assert "/api/admin/material-picker/items" in inventory

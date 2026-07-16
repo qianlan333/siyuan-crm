@@ -131,6 +131,18 @@ def test_operation_cycles_changes_select_full_postgres_scope() -> None:
     assert result["needs_full_ci"] is True
 
 
+def test_root_design_qa_artifact_is_mapped_to_docs_only_scope() -> None:
+    result = _select("design-qa.md")
+
+    assert result["unmatched_files"] == []
+    assert result["matched_scopes"] == ["docs_only"]
+    assert result["python_tests"] == []
+    assert result["frontend_tests"] == []
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "none"
+    assert result["needs_full_ci"] is False
+
+
 def test_live_runtime_readiness_replacement_has_permanent_full_ci_scope() -> None:
     result = _select(
         "tools/check_live_runtime_readiness.py",
@@ -213,11 +225,13 @@ def test_service_period_change_selects_service_period_slice() -> None:
     assert "tests/test_service_period_application.py" in result["python_tests"]
     assert "tests/test_service_period_h5_payment.py" in result["python_tests"]
     assert "tests/test_service_period_frontend_contract.py" in result["python_tests"]
+    assert "tests/test_service_period_member_grid.py" in result["python_tests"]
     assert "tests/test_service_period_schema.py" in result["python_tests"]
     assert "tests/test_router_registry_contract.py" in result["python_tests"]
-    assert result["needs_postgres"] is False
-    assert result["architecture_gate"] == "fast"
-    assert result["needs_full_ci"] is False
+    assert "tests/frontend/service_period_member_grid.test.mjs" in result["frontend_tests"]
+    assert result["needs_postgres"] is True
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
 
 
 def test_huangyoucan_usage_projection_has_permanent_full_pg_scope() -> None:
@@ -686,6 +700,16 @@ def test_signed_session_change_selects_sidebar_shared_runtime_slice() -> None:
 def test_ai_assist_external_campaign_change_selects_focused_python_slice() -> None:
     result = _select("aicrm_next/ai_assist/external_campaigns.py")
 
+    assert "ai_assist_external_campaigns" in result["matched_scopes"]
+    assert "tests/test_ai_assist_external_campaigns.py" in result["python_tests"]
+    assert result["needs_postgres"] is False
+    assert result["architecture_gate"] == "fast"
+
+
+def test_shared_send_target_change_selects_ai_assist_campaign_slice() -> None:
+    result = _select("aicrm_next/send_targets/resolver.py")
+
+    assert result["unmatched_files"] == []
     assert "ai_assist_external_campaigns" in result["matched_scopes"]
     assert "tests/test_ai_assist_external_campaigns.py" in result["python_tests"]
     assert result["needs_postgres"] is False

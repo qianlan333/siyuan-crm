@@ -11,7 +11,6 @@ from aicrm_next.shared.repository_provider import RepositoryProviderError, block
 
 from . import CAPABILITY_OWNER
 from .domain import (
-    assert_group_owned_by_plan,
     assert_run_due_guard,
     build_node_group_message_content,
     binding_stats,
@@ -279,6 +278,12 @@ class EnableGroupOpsPlanCommand:
         if repo is None:
             return _production_unavailable()
         _plan_or_404(repo, plan_id)
+        from aicrm_next.send_content.application import assert_group_invite_bindings_ready
+
+        for node in repo.list_nodes(int(plan_id)):
+            if clean_text(node.get("status") or "active") != "active":
+                continue
+            assert_group_invite_bindings_ready(node.get("content_package_json") or {}, channel="group_ops")
         plan = repo.update_plan(int(plan_id), {"status": "active", "operator": operator})
         return _response({"item": plan, **plan_public_payload(repo, plan)}, repo=repo)
 
@@ -329,11 +334,10 @@ class AddGroupOpsPlanGroupCommand:
         repo = _repo_or_block(self._repo)
         if repo is None:
             return _production_unavailable()
-        plan = _plan_or_404(repo, plan_id)
+        _plan_or_404(repo, plan_id)
         group = repo.get_group_asset(request.chat_id)
         if not group:
             raise NotFoundError("group chat snapshot not found")
-        assert_group_owned_by_plan(group=group, plan=plan)
         item = repo.bind_group(int(plan_id), group)
         groups = repo.list_bound_groups(int(plan_id))
         return _response({"item": item, "summary": binding_stats(groups)}, status_code=201, repo=repo)
@@ -525,9 +529,7 @@ def _refresh_admin_candidate_groups(
             warnings.append(f"skipped_admin_candidate_refresh={chat_id}: invalid group detail")
             continue
         group = normalized[0]
-        if clean_text(group.get("owner_userid")) == owner_userid:
-            continue
-        if group_manageable_by_userid(group, owner_userid):
+        if clean_text(group.get("owner_userid")) == owner_userid or group_manageable_by_userid(group, owner_userid):
             refreshed_groups.append(group)
             known_chat_ids.add(chat_id)
     return refreshed_groups, attempted_count, skipped_count, warnings
@@ -546,21 +548,44 @@ class PreviewGroupOpsOwnerGroupsSyncCommand:
         if not owner:
             raise ContractError("owner_userid is required")
         adapter = self._sync_adapter or _group_sync_adapter()
-        result = adapter.list_group_chats(owner_userid=owner, limit=clamp_limit(request.limit, default=100), cursor=request.cursor)
-        if not result.get("ok"):
-            return _group_sync_blocked_response(owner_userid=owner, result=result, repo=repo)
         sync_limit = clamp_limit(request.limit, default=100)
-        groups = normalize_group_snapshots(list(result.get("groups") or []))
+        cursor = clean_text(request.cursor)
+        visited_cursors: set[str] = set()
+        groups: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        skipped_count = 0
+        adapter_mode = ""
+        for _page_number in range(100):
+            if cursor in visited_cursors:
+                warnings.append("stopped_repeated_wecom_cursor")
+                break
+            visited_cursors.add(cursor)
+            result = adapter.list_group_chats(owner_userid=owner, limit=sync_limit, cursor=cursor)
+            if not result.get("ok"):
+                return _group_sync_blocked_response(owner_userid=owner, result=result, repo=repo)
+            adapter_mode = adapter_mode or clean_text(result.get("mode"))
+            groups = _merge_group_sync_items(groups, normalize_group_snapshots(list(result.get("groups") or [])))
+            warnings.extend([clean_text(item) for item in list(result.get("warnings") or []) if clean_text(item)])
+            skipped_count += int(result.get("skipped_count") or 0)
+            next_cursor = clean_text(result.get("next_cursor"))
+            if not next_cursor:
+                cursor = ""
+                break
+            cursor = next_cursor
+        else:
+            warnings.append("stopped_after_max_wecom_pages=100")
         extra_groups = normalize_group_snapshots(repo.list_admin_group_assets(owner))
         refreshed_groups, refreshed_attempted_count, refreshed_skipped_count, refresh_warnings = _refresh_admin_candidate_groups(
             repo=repo,
             adapter=adapter,
             owner_userid=owner,
-            known_groups=[*groups, *extra_groups],
+            known_groups=groups,
             limit=sync_limit,
         )
-        groups = _merge_group_sync_items(groups, [*extra_groups, *refreshed_groups])
-        warnings = [clean_text(item) for item in list(result.get("warnings") or []) if clean_text(item)]
+        # Local admin cache is only a fallback. Current WeCom list/detail data
+        # must win when the same chat_id exists in both sources, otherwise a
+        # stale cached name or owner makes a live group disappear from search.
+        groups = _merge_group_sync_items(extra_groups, [*groups, *refreshed_groups])
         if extra_groups:
             warnings.append(f"included_admin_groups_from_local_cache={len(extra_groups)}")
         if refreshed_groups:
@@ -573,14 +598,14 @@ class PreviewGroupOpsOwnerGroupsSyncCommand:
                 "owner_userid": owner,
                 "status": "preview",
                 "sync_status": "preview",
-                "adapter_mode": clean_text(result.get("mode")),
+                "adapter_mode": adapter_mode,
                 "items": groups,
                 "total": len(groups),
                 "synced_count": 0,
                 "new_count": 0,
                 "updated_count": 0,
-                "skipped_count": int(result.get("skipped_count") or 0) + refreshed_skipped_count,
-                "next_cursor": clean_text(result.get("next_cursor")),
+                "skipped_count": skipped_count + refreshed_skipped_count,
+                "next_cursor": cursor,
                 "warnings": warnings,
                 "side_effect_safety": group_ops_side_effect_safety(),
             },
@@ -614,6 +639,18 @@ class SyncGroupOpsOwnerGroupsCommand(PreviewGroupOpsOwnerGroupsSyncCommand):
                 new_count += 1
             elif action == "updated":
                 updated_count += 1
+        inactive_chat_ids: list[str] = []
+        if not clean_text(request.cursor) and not clean_text(preview.get("next_cursor")):
+            inactive_chat_ids = repo.mark_owner_group_assets_inactive_except(
+                clean_text(preview.get("owner_userid") or request.owner_userid),
+                [clean_text(group.get("chat_id")) for group in groups],
+            )
+            from aicrm_next.media_library.repo import build_media_library_repository
+
+            build_media_library_repository().reconcile_group_invite_bindings(
+                [clean_text(group.get("chat_id")) for group in groups],
+                inactive_chat_ids,
+            )
         return _response(
             {
                 "owner_userid": clean_text(preview.get("owner_userid") or request.owner_userid),
@@ -625,6 +662,7 @@ class SyncGroupOpsOwnerGroupsCommand(PreviewGroupOpsOwnerGroupsSyncCommand):
                 "synced_count": len(saved_items),
                 "new_count": new_count,
                 "updated_count": updated_count,
+                "inactive_count": len(inactive_chat_ids),
                 "skipped_count": skipped_count,
                 "next_cursor": clean_text(preview.get("next_cursor")),
                 "warnings": warnings,

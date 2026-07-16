@@ -75,10 +75,7 @@ def _weekly_progress(item: dict[str, Any], *, now: datetime) -> dict[str, Any]:
     week_start = local_now.date() - timedelta(days=local_now.weekday())
     week_end = week_start + timedelta(days=6)
     latest_run_at = _parse_datetime(item.get("latest_run_at"))
-    has_current_week_run = bool(
-        latest_run_at
-        and week_start <= latest_run_at.astimezone(business_tz).date() <= week_end
-    )
+    has_current_week_run = bool(latest_run_at and week_start <= latest_run_at.astimezone(business_tz).date() <= week_end)
     states = {key: "pending" for key, _label in _WEEKLY_PROGRESS_STEPS}
 
     if has_current_week_run:
@@ -118,10 +115,7 @@ def _weekly_progress(item: dict[str, Any], *, now: datetime) -> dict[str, Any]:
 
     return {
         "has_current_week_run": has_current_week_run,
-        "steps": [
-            {"key": key, "label": label, "state": states[key]}
-            for key, label in _WEEKLY_PROGRESS_STEPS
-        ],
+        "steps": [{"key": key, "label": label, "state": states[key]} for key, label in _WEEKLY_PROGRESS_STEPS],
     }
 
 
@@ -139,11 +133,7 @@ def _strategy_summaries(payload: dict[str, Any], *, now: datetime | None = None)
 
 
 def _run_summaries(payload: dict[str, Any], strategy_key: str) -> list[dict[str, Any]]:
-    return [
-        {**item, "detail_href": _detail_href(strategy_key, item.get("run_key"))}
-        for item in _plain(payload.get("items") or [])
-        if isinstance(item, dict)
-    ]
+    return [{**item, "detail_href": _detail_href(strategy_key, item.get("run_key"))} for item in _plain(payload.get("items") or []) if isinstance(item, dict)]
 
 
 def _run_view(run: dict[str, Any]) -> dict[str, Any]:
@@ -320,9 +310,10 @@ def admin_operation_cycle_strategy_page(request: Request, strategy_key: str):
     strategy = payload.get("strategy") or {}
     section = str(request.query_params.get("section") or "broadcast_details").strip()
     allowed_sections = {
-        "broadcast_details": "群发数据明细",
-        "execution_strategy": "执行策略文档",
-        "history": "历史群发记录",
+        "broadcast_details": "本周发送数据",
+        "retrospective_details": "本周复盘明细",
+        "execution_strategy": "下周执行策略",
+        "history": "历史发送记录",
     }
     if section not in allowed_sections:
         section = "broadcast_details"
@@ -359,9 +350,7 @@ def admin_operation_cycle_strategy_page(request: Request, strategy_key: str):
             "active_label": allowed_sections[section],
             "active_document": active_document,
             "rendered_document": render_markdown(str(active_document.get("markdown") or "")),
-            "assistant_plans": [
-                item for item in payload.get("assistant_plans") or [] if isinstance(item, dict)
-            ],
+            "assistant_plans": [item for item in payload.get("assistant_plans") or [] if isinstance(item, dict)],
         }
     )
     return templates.TemplateResponse(request, "admin_shell/operation_cycles_strategy.html", context)

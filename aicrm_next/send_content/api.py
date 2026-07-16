@@ -73,7 +73,7 @@ def list_material_picker_items(
         )
         return _json_result(ListMaterialPickerItemsQuery()(request))
     except ValidationError:
-        return _error("素材类型必须是 image、miniprogram 或 attachment", status_code=400)
+        return _error("素材类型必须是 image、miniprogram、attachment 或 group_invite", status_code=400)
     except ContractError as exc:
         return _error(str(exc), status_code=400)
     except RepositoryProviderError as exc:

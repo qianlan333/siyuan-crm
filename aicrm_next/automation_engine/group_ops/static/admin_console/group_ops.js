@@ -121,6 +121,7 @@
     if (contentPackage.image_library_ids.length) labels.push("图片");
     if (contentPackage.miniprogram_library_ids.length) labels.push("小程序");
     if (contentPackage.attachment_library_ids.length) labels.push("附件");
+    if (contentPackage.group_invite_library_ids.length) labels.push("群邀请");
     legacyAttachmentsForNode((node || {}).attachments).forEach((item) => {
       const msgtype = String((item && item.msgtype) || "").toLowerCase();
       if (msgtype === "image" && labels.indexOf("图片") === -1) labels.push("图片");
@@ -153,6 +154,7 @@
       image_library_ids: normalizeIdList(data.image_library_ids),
       miniprogram_library_ids: normalizeIdList(data.miniprogram_library_ids),
       attachment_library_ids: normalizeIdList(data.attachment_library_ids),
+      group_invite_library_ids: normalizeIdList(data.group_invite_library_ids),
     };
   }
 
@@ -161,7 +163,8 @@
     return !normalized.content_text
       && !normalized.image_library_ids.length
       && !normalized.miniprogram_library_ids.length
-      && !normalized.attachment_library_ids.length;
+      && !normalized.attachment_library_ids.length
+      && !normalized.group_invite_library_ids.length;
   }
 
   function addUniqueId(target, value) {
@@ -176,9 +179,11 @@
       const image = item && item.image && typeof item.image === "object" ? item.image : {};
       const mini = item && item.miniprogram && typeof item.miniprogram === "object" ? item.miniprogram : {};
       const file = item && item.file && typeof item.file === "object" ? item.file : {};
+      const link = item && item.link && typeof item.link === "object" ? item.link : {};
       if (msgtype === "image") addUniqueId(merged.image_library_ids, image.library_id || item.library_id);
       if (msgtype === "miniprogram") addUniqueId(merged.miniprogram_library_ids, mini.library_id || item.library_id);
-      if (msgtype && !["image", "miniprogram"].includes(msgtype)) {
+      if (msgtype === "link") addUniqueId(merged.group_invite_library_ids, link.library_id || item.library_id);
+      if (msgtype && !["image", "miniprogram", "link"].includes(msgtype)) {
         addUniqueId(merged.attachment_library_ids, file.library_id || item.library_id);
       }
     });
@@ -223,6 +228,7 @@
       imageCount: normalized.image_library_ids.length,
       miniprogramCount: normalized.miniprogram_library_ids.length,
       attachmentCount: normalized.attachment_library_ids.length,
+      groupInviteCount: normalized.group_invite_library_ids.length,
     };
   }
 
@@ -918,7 +924,7 @@
     const summary = contentPackageSummary(contentPackage);
     target.innerHTML =
       `<strong>话术：</strong><span>${escapeHtml(summary.text)}</span>` +
-      `<strong>素材：</strong><span>图片 ${summary.imageCount} / 小程序 ${summary.miniprogramCount} / 附件 ${summary.attachmentCount}</span>`;
+      `<strong>内容：</strong><span>图片 ${summary.imageCount} / 小程序 ${summary.miniprogramCount} / 附件 ${summary.attachmentCount} / 客户群 ${summary.groupInviteCount}</span>`;
   }
 
   function renderLegacyAttachmentNotice(node) {
@@ -946,6 +952,7 @@
         image: 3,
         miniprogram: 1,
         attachment: 9,
+        group_invite: 1,
       },
       onConfirm(contentPackage) {
         const normalized = normalizeContentPackage(contentPackage);
@@ -1003,7 +1010,7 @@
               <aside class="group-ops__content-box">
                 <div class="group-ops__content-summary" data-node-content-summary>
                   <strong>话术摘要</strong><span>${escapeHtml(currentContentSummary.text)}</span>
-                  <strong>素材数量</strong><span>图片 ${currentContentSummary.imageCount} / 小程序 ${currentContentSummary.miniprogramCount} / 附件 ${currentContentSummary.attachmentCount}</span>
+                  <strong>内容数量</strong><span>图片 ${currentContentSummary.imageCount} / 小程序 ${currentContentSummary.miniprogramCount} / 附件 ${currentContentSummary.attachmentCount} / 客户群 ${currentContentSummary.groupInviteCount}</span>
                 </div>
                 <button class="group-ops__button" type="button" data-action="configure-node-content">配置话术和素材</button>
                 ${renderLegacyAttachmentNotice(current)}

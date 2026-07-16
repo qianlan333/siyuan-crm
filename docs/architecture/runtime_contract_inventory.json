@@ -677,7 +677,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/media_library/api.py",
       "key": "AICRM_NEXT_MEDIA_STORAGE_MODE",
-      "line": 35
+      "line": 46
     },
     {
       "accessor": "os.getenv",
@@ -785,7 +785,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/media_library/api.py",
       "key": "AICRM_NEXT_WECOM_MEDIA_MODE",
-      "line": 36
+      "line": 47
     },
     {
       "accessor": "os.getenv",
@@ -1097,7 +1097,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/background_jobs/broadcast_queue_worker.py",
       "key": "BROADCAST_QUEUE_LEASE_SECONDS",
-      "line": 998
+      "line": 1020
     },
     {
       "accessor": "os.getenv",
@@ -1157,13 +1157,13 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/cloud_orchestrator/campaigns_read.py",
       "key": "DATABASE_URL",
-      "line": 175
+      "line": 177
     },
     {
       "accessor": "os.getenv",
       "file": "aicrm_next/cloud_orchestrator/repository.py",
       "key": "DATABASE_URL",
-      "line": 346
+      "line": 348
     },
     {
       "accessor": "os.getenv",
@@ -1499,13 +1499,13 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/radar_links/api.py",
       "key": "SECRET_KEY",
-      "line": 104
+      "line": 185
     },
     {
       "accessor": "runtime_setting",
       "file": "aicrm_next/radar_links/application.py",
       "key": "SECRET_KEY",
-      "line": 40
+      "line": 41
     },
     {
       "accessor": "runtime_setting",
@@ -1965,6 +1965,12 @@
     },
     {
       "accessor": "os.getenv",
+      "file": "aicrm_next/automation_engine/group_ops/picker_application.py",
+      "key": "WECOM_DEFAULT_OWNER_USERID",
+      "line": 17
+    },
+    {
+      "accessor": "os.getenv",
       "file": "scripts/run_incremental_archive_sync.py",
       "key": "WECOM_DEFAULT_OWNER_USERID",
       "line": 29
@@ -2015,13 +2021,13 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WORKER_RELEASE_SHA",
-      "line": 969
+      "line": 976
     },
     {
       "accessor": "os.getenv",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WORKER_RELEASE_SHA",
-      "line": 1187
+      "line": 1194
     },
     {
       "accessor": "os.getenv",
@@ -2709,6 +2715,13 @@
       "max_attempts": 5
     },
     {
+      "consumer_name": "product_paid_wecom_tag_consumer",
+      "consumer_type": "external_effect_planner",
+      "event_type": "payment.succeeded",
+      "handler_registered": true,
+      "max_attempts": 5
+    },
+    {
       "consumer_name": "service_period_entitlement_consumer",
       "consumer_type": "projection",
       "event_type": "payment.succeeded",
@@ -2753,6 +2766,13 @@
     {
       "consumer_name": "order_projection_consumer",
       "consumer_type": "projection",
+      "event_type": "payment_succeeded",
+      "handler_registered": true,
+      "max_attempts": 5
+    },
+    {
+      "consumer_name": "product_paid_wecom_tag_consumer",
+      "consumer_type": "external_effect_planner",
       "event_type": "payment_succeeded",
       "handler_registered": true,
       "max_attempts": 5
@@ -2856,6 +2876,13 @@
       "max_attempts": 5
     },
     {
+      "consumer_name": "product_paid_wecom_tag_consumer",
+      "consumer_type": "external_effect_planner",
+      "event_type": "transaction.paid",
+      "handler_registered": true,
+      "max_attempts": 5
+    },
+    {
       "consumer_name": "service_period_entitlement_consumer",
       "consumer_type": "projection",
       "event_type": "transaction.paid",
@@ -2871,7 +2898,7 @@
     }
   ],
   "migration_heads": [
-    "0116_questionnaire_operations_config"
+    "0120_service_period_member_views"
   ],
   "openapi_components": {
     "schemas": {
@@ -3794,6 +3821,246 @@
           }
         },
         "title": "ExportPreviewRequest",
+        "type": "object"
+      },
+      "GroupChatPickerSyncRequest": {
+        "properties": {
+          "keyword": {
+            "default": "",
+            "title": "Keyword",
+            "type": "string"
+          },
+          "limit": {
+            "default": 200,
+            "title": "Limit",
+            "type": "integer"
+          },
+          "operator": {
+            "default": "system",
+            "title": "Operator",
+            "type": "string"
+          },
+          "owner_userid": {
+            "default": "",
+            "title": "Owner Userid",
+            "type": "string"
+          }
+        },
+        "title": "GroupChatPickerSyncRequest",
+        "type": "object"
+      },
+      "GroupInviteBindingEnsureRequest": {
+        "properties": {
+          "chat_id": {
+            "title": "Chat Id",
+            "type": "string"
+          },
+          "group_name": {
+            "default": "",
+            "title": "Group Name",
+            "type": "string"
+          },
+          "member_count": {
+            "default": 0,
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "owner_name": {
+            "default": "",
+            "title": "Owner Name",
+            "type": "string"
+          },
+          "owner_userid": {
+            "default": "",
+            "title": "Owner Userid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "chat_id"
+        ],
+        "title": "GroupInviteBindingEnsureRequest",
+        "type": "object"
+      },
+      "GroupInviteBindingUpdateRequest": {
+        "properties": {
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "join_url": {
+            "title": "Join Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "join_url"
+        ],
+        "title": "GroupInviteBindingUpdateRequest",
+        "type": "object"
+      },
+      "GroupInviteUpsertRequest": {
+        "properties": {
+          "auto_create_room": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Create Room"
+          },
+          "binding_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Binding Status"
+          },
+          "chat_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id"
+          },
+          "chat_id_list": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Id List"
+          },
+          "config_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Id"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "join_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Join Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pic_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pic Url"
+          },
+          "room_base_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Base Id"
+          },
+          "room_base_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Room Base Name"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "title": "GroupInviteUpsertRequest",
         "type": "object"
       },
       "GroupOpsBindGroupRequest": {
@@ -7034,6 +7301,33 @@
       "operation_id": "api.admin_delivery_lineage_page:GET:/admin/delivery-lineage",
       "path": "/admin/delivery-lineage",
       "route_group": "admin_shell"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.admin_pages.admin_group_invite_library",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.admin_group_invite_library_workspace",
+      "operation_id": "api.admin_group_invite_library_workspace:GET:/admin/group-invite-library",
+      "path": "/admin/group-invite-library",
+      "route_group": "media_library_admin_pages"
     },
     {
       "capability_owner": "admin_shell",
@@ -11430,6 +11724,120 @@
       "name": "create_audience_rule_version",
       "operation_id": "create_audience_rule_version:POST:/api/admin/automation-conversion/group-ops/audience-rules/{rule_key}/versions",
       "path": "/api/admin/automation-conversion/group-ops/audience-rules/{rule_key}/versions",
+      "route_group": "unregistered"
+    },
+    {
+      "capability_owner": "unregistered",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "owner_userid",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Owner Userid",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "keyword",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Keyword",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.automation_engine.group_ops.api.list_group_chat_picker",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_group_chat_picker",
+      "operation_id": "list_group_chat_picker:GET:/api/admin/automation-conversion/group-ops/group-picker",
+      "path": "/api/admin/automation-conversion/group-ops/group-picker",
+      "route_group": "unregistered"
+    },
+    {
+      "capability_owner": "unregistered",
+      "contract": {
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupChatPickerSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.automation_engine.group_ops.api.sync_group_chat_picker",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "sync_group_chat_picker",
+      "operation_id": "sync_group_chat_picker:POST:/api/admin/automation-conversion/group-ops/group-picker/sync",
+      "path": "/api/admin/automation-conversion/group-ops/group-picker/sync",
       "route_group": "unregistered"
     },
     {
@@ -19471,6 +19879,533 @@
       "operation_id": "external_effect_troubleshooting_summary:GET:/api/admin/external-effects/troubleshooting/summary",
       "path": "/api/admin/external-effects/troubleshooting/summary",
       "route_group": "external_effects"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Group Invite Bindings Api Admin Group Invite Bindings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.list_group_invite_bindings",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_group_invite_bindings",
+      "operation_id": "list_group_invite_bindings:GET:/api/admin/group-invite-bindings",
+      "path": "/api/admin/group-invite-bindings",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupInviteBindingEnsureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Ensure Group Invite Binding Api Admin Group Invite Bindings Ensure Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.ensure_group_invite_binding",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "ensure_group_invite_binding",
+      "operation_id": "ensure_group_invite_binding:POST:/api/admin/group-invite-bindings/ensure",
+      "path": "/api/admin/group-invite-bindings/ensure",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Group Invite Binding Api Admin Group Invite Bindings  Item Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.get_group_invite_binding",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_group_invite_binding",
+      "operation_id": "get_group_invite_binding:GET:/api/admin/group-invite-bindings/{item_id}",
+      "path": "/api/admin/group-invite-bindings/{item_id}",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupInviteBindingUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Group Invite Binding Api Admin Group Invite Bindings  Item Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.update_group_invite_binding",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_group_invite_binding",
+      "operation_id": "update_group_invite_binding:PUT:/api/admin/group-invite-bindings/{item_id}",
+      "path": "/api/admin/group-invite-bindings/{item_id}",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "title": "Offset",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "enabled_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Enabled Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "Q",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Group Invites Api Admin Group Invite Library Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.list_group_invites",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_group_invites",
+      "operation_id": "list_group_invites:GET:/api/admin/group-invite-library",
+      "path": "/api/admin/group-invite-library",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupInviteUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Create Group Invite Api Admin Group Invite Library Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.create_group_invite",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_group_invite",
+      "operation_id": "create_group_invite:POST:/api/admin/group-invite-library",
+      "path": "/api/admin/group-invite-library",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Group Invite Api Admin Group Invite Library  Item Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.delete_group_invite",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_group_invite",
+      "operation_id": "delete_group_invite:DELETE:/api/admin/group-invite-library/{item_id}",
+      "path": "/api/admin/group-invite-library/{item_id}",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Group Invite Api Admin Group Invite Library  Item Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.get_group_invite",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_group_invite",
+      "operation_id": "get_group_invite:GET:/api/admin/group-invite-library/{item_id}",
+      "path": "/api/admin/group-invite-library/{item_id}",
+      "route_group": "media_library"
+    },
+    {
+      "capability_owner": "media_library",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupInviteUpsertRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Group Invite Api Admin Group Invite Library  Item Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.media_library.api.update_group_invite",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_group_invite",
+      "operation_id": "update_group_invite:PUT:/api/admin/group-invite-library/{item_id}",
+      "path": "/api/admin/group-invite-library/{item_id}",
+      "route_group": "media_library"
     },
     {
       "capability_owner": "growth_orchestration",
@@ -27525,6 +28460,326 @@
               "title": "Service Product Id",
               "type": "string"
             }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Query Service Period Member Grid Api Admin Service Period Products  Service Product Id  Member Grid Query Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.query_service_period_member_grid",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "query_service_period_member_grid",
+      "operation_id": "query_service_period_member_grid:POST:/api/admin/service-period-products/{service_product_id}/member-grid/query",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/query",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Service Period Member Grid Schema Api Admin Service Period Products  Service Product Id  Member Grid Schema Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.service_period_member_grid_schema",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "service_period_member_grid_schema",
+      "operation_id": "service_period_member_grid_schema:GET:/api/admin/service-period-products/{service_product_id}/member-grid/schema",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/schema",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response List Service Period Member Views Api Admin Service Period Products  Service Product Id  Member Views Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.list_service_period_member_views",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_service_period_member_views",
+      "operation_id": "list_service_period_member_views:GET:/api/admin/service-period-products/{service_product_id}/member-views",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-views",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.create_service_period_member_view",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_service_period_member_view",
+      "operation_id": "create_service_period_member_view:POST:/api/admin/service-period-products/{service_product_id}/member-views",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-views",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "title": "View Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Service Period Member View Api Admin Service Period Products  Service Product Id  Member Views  View Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.delete_service_period_member_view",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_service_period_member_view",
+      "operation_id": "delete_service_period_member_view:DELETE:/api/admin/service-period-products/{service_product_id}/member-views/{view_id}",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-views/{view_id}",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "view_id",
+            "required": true,
+            "schema": {
+              "title": "View Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Service Period Member View Api Admin Service Period Products  Service Product Id  Member Views  View Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.update_service_period_member_view",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_service_period_member_view",
+      "operation_id": "update_service_period_member_view:PUT:/api/admin/service-period-products/{service_product_id}/member-views/{view_id}",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-views/{view_id}",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
           },
           {
             "in": "query",
@@ -27601,6 +28856,66 @@
       "name": "service_period_product_members",
       "operation_id": "service_period_product_members:GET:/api/admin/service-period-products/{service_product_id}/members",
       "path": "/api/admin/service-period-products/{service_product_id}/members",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "unionid",
+            "required": true,
+            "schema": {
+              "title": "Unionid",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Service Period Member Alliance Api Admin Service Period Products  Service Product Id  Members  Unionid  Alliance Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.update_service_period_member_alliance",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_service_period_member_alliance",
+      "operation_id": "update_service_period_member_alliance:PUT:/api/admin/service-period-products/{service_product_id}/members/{unionid}/alliance",
+      "path": "/api/admin/service-period-products/{service_product_id}/members/{unionid}/alliance",
       "route_group": "service_period"
     },
     {
@@ -35627,6 +36942,286 @@
       "route_group": "questionnaire"
     },
     {
+      "capability_owner": "radar_links",
+      "contract": {
+        "parameters": [
+          {
+            "description": "手机号",
+            "in": "query",
+            "name": "mobile",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "手机号",
+              "title": "Mobile"
+            }
+          },
+          {
+            "description": "微信 unionid",
+            "in": "query",
+            "name": "unionid",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "微信 unionid",
+              "title": "Unionid"
+            }
+          },
+          {
+            "description": "雷达数字 ID",
+            "in": "query",
+            "name": "radar_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "雷达数字 ID",
+              "title": "Radar Id"
+            }
+          },
+          {
+            "description": "雷达代码",
+            "in": "query",
+            "name": "radar_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "雷达代码",
+              "title": "Radar Code"
+            }
+          },
+          {
+            "description": "点击开始秒级 Unix 时间戳",
+            "in": "query",
+            "name": "clicked_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "点击开始秒级 Unix 时间戳",
+              "title": "Clicked From"
+            }
+          },
+          {
+            "description": "点击结束秒级 Unix 时间戳",
+            "in": "query",
+            "name": "clicked_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "点击结束秒级 Unix 时间戳",
+              "title": "Clicked To"
+            }
+          },
+          {
+            "description": "分页条数，最大 500",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": "100",
+              "description": "分页条数，最大 500",
+              "title": "Limit",
+              "type": "string"
+            }
+          },
+          {
+            "description": "下一页游标",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "下一页游标",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.radar_links.api.list_external_radar_clicks",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_external_radar_clicks",
+      "operation_id": "list_external_radar_clicks:GET:/api/external/radar-clicks",
+      "path": "/api/external/radar-clicks",
+      "route_group": "radar_links"
+    },
+    {
+      "capability_owner": "radar_links",
+      "contract": {
+        "parameters": [
+          {
+            "description": "雷达数字 ID",
+            "in": "query",
+            "name": "radar_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "雷达数字 ID",
+              "title": "Radar Id"
+            }
+          },
+          {
+            "description": "雷达代码",
+            "in": "query",
+            "name": "radar_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "雷达代码",
+              "title": "Radar Code"
+            }
+          },
+          {
+            "description": "分页条数，最大 500",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": "100",
+              "description": "分页条数，最大 500",
+              "title": "Limit",
+              "type": "string"
+            }
+          },
+          {
+            "description": "下一页游标",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "下一页游标",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.radar_links.api.list_external_radar_link_mappings",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "list_external_radar_link_mappings",
+      "operation_id": "list_external_radar_link_mappings:GET:/api/external/radar-links",
+      "path": "/api/external/radar-links",
+      "route_group": "radar_links"
+    },
+    {
       "capability_owner": "unregistered",
       "contract": {
         "parameters": [
@@ -38770,12 +40365,15 @@
                   },
                   "OperationCycleDocumentsSnapshot": {
                     "additionalProperties": false,
-                    "description": "The two read-only document slots exposed by the strategy detail page.",
+                    "description": "The three read-only weekly document slots exposed by the strategy detail page.",
                     "properties": {
                       "broadcast_details": {
                         "$ref": "#/$defs/MarkdownDocumentSnapshot"
                       },
                       "execution_strategy": {
+                        "$ref": "#/$defs/MarkdownDocumentSnapshot"
+                      },
+                      "retrospective_details": {
                         "$ref": "#/$defs/MarkdownDocumentSnapshot"
                       }
                     },
@@ -44379,6 +45977,7 @@
         "aicrm_next.identity_contact",
         "aicrm_next.message_archive",
         "aicrm_next.questionnaire",
+        "aicrm_next.radar_links",
         "aicrm_next.sidebar_write"
       ],
       "table": "crm_user_identity",
@@ -44643,6 +46242,22 @@
       ],
       "table": "group_chats",
       "write_owner": "aicrm_next.automation_engine.group_ops"
+    },
+    {
+      "domain": "media_library",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0117_group_invite_cards, 0119_group_invite_bindings",
+      "pii_level": "",
+      "read_owners": [
+        "aicrm_next.automation_engine.group_ops.material_resolver",
+        "aicrm_next.channel_entry.application",
+        "aicrm_next.media_library.postgres_repo",
+        "aicrm_next.send_content.postgres_repo",
+        "campaign/group-ops SendContentPackage consumers"
+      ],
+      "table": "group_invite_library",
+      "write_owner": "aicrm_next.media_library.postgres_repo"
     },
     {
       "domain": "group_ops",
@@ -45282,9 +46897,10 @@
       "domain": "radar",
       "drop_candidate": false,
       "lifecycle": "event",
-      "migration_source": "0102_questionnaire_radar_invariants",
+      "migration_source": "0102_questionnaire_radar_invariants; external-feed index 0118_external_radar_read_api",
       "pii_level": "direct_contact",
       "read_owners": [
+        "external radar logical-click read model",
         "radar admin event list, export, and aggregate statistics"
       ],
       "table": "radar_click_events",
@@ -45413,6 +47029,18 @@
         "aicrm_next.service_period"
       ],
       "table": "service_period_huangyoucan_usage_sync_runs",
+      "write_owner": "aicrm_next.service_period"
+    },
+    {
+      "domain": "service_period",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0120_service_period_member_views",
+      "pii_level": "internal_contact",
+      "read_owners": [
+        "aicrm_next.service_period"
+      ],
+      "table": "service_period_member_views",
       "write_owner": "aicrm_next.service_period"
     },
     {

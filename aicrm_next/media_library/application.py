@@ -8,7 +8,7 @@ from aicrm_next.integration_gateway.media_adapters import build_cloud_storage_ad
 from aicrm_next.shared.errors import ContractError
 from aicrm_next.shared import runtime
 
-from .dto import AttachmentUpsertRequest, ImageFromBase64Request, ImageFromUrlRequest, ImageUpsertRequest, MiniprogramUpsertRequest
+from .dto import AttachmentUpsertRequest, GroupInviteBindingEnsureRequest, GroupInviteBindingUpdateRequest, GroupInviteUpsertRequest, ImageFromBase64Request, ImageFromUrlRequest, ImageUpsertRequest, MiniprogramUpsertRequest
 from .repo import MediaLibraryRepository, build_media_library_repository, normalize_tags
 
 
@@ -126,6 +126,26 @@ class GetMediaItemQuery:
         return {"ok": True, "item": item}
 
 
+class EnsureGroupInviteBindingCommand:
+    def __init__(self, repo: MediaLibraryRepository | None = None) -> None:
+        self._repo = repo or build_media_library_repository()
+
+    def __call__(self, payload: GroupInviteBindingEnsureRequest | dict[str, Any]) -> dict[str, Any]:
+        data = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
+        item = self._repo.ensure_group_invite_binding(data)
+        return {"ok": True, "item": item, "binding_id": item.get("id"), "binding_status": item.get("binding_status") or "pending"}
+
+
+class UpdateGroupInviteBindingCommand:
+    def __init__(self, repo: MediaLibraryRepository | None = None) -> None:
+        self._repo = repo or build_media_library_repository()
+
+    def __call__(self, item_id: str, payload: GroupInviteBindingUpdateRequest | dict[str, Any]) -> dict[str, Any]:
+        data = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
+        item = self._repo.save_item("group_invite", {**data, "binding_status": "ready"}, item_id)
+        return {"ok": True, "item": item, "binding_id": item.get("id"), "binding_status": item.get("binding_status") or "ready"}
+
+
 class GetImageVariantQuery:
     def __init__(self, repo: MediaLibraryRepository | None = None) -> None:
         self._repo = repo or build_media_library_repository()
@@ -159,7 +179,7 @@ class UpsertMediaItemCommand:
 
     def __call__(
         self,
-        payload: dict[str, Any] | ImageUpsertRequest | AttachmentUpsertRequest | MiniprogramUpsertRequest,
+        payload: dict[str, Any] | ImageUpsertRequest | AttachmentUpsertRequest | MiniprogramUpsertRequest | GroupInviteUpsertRequest,
         item_id: str | None = None,
         *,
         idempotency_key: str | None = None,

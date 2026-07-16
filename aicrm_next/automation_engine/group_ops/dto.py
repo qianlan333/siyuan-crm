@@ -96,6 +96,13 @@ class GroupOpsGroupSyncRequest(BaseModel):
     operator: str = "system"
 
 
+class GroupChatPickerSyncRequest(BaseModel):
+    owner_userid: str = ""
+    keyword: str = ""
+    limit: int = 200
+    operator: str = "system"
+
+
 class GroupOpsRunDueRequest(BaseModel):
     operator: str = ""
     allow_plan_ids: list[int] = Field(default_factory=list)

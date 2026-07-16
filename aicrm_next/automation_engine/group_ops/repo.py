@@ -44,6 +44,7 @@ class GroupOpsRepository(Protocol):
     def get_group_asset(self, chat_id: str) -> dict[str, Any] | None: ...
     def upsert_group_asset(self, snapshot: dict[str, Any]) -> tuple[dict[str, Any], str]: ...
     def upsert_group_snapshots(self, groups: list[dict[str, Any]]) -> int: ...
+    def mark_owner_group_assets_inactive_except(self, owner_userid: str, active_chat_ids: list[str]) -> list[str]: ...
     def list_admin_group_assets(self, owner_userid: str) -> list[dict[str, Any]]: ...
     def list_admin_candidate_group_assets(self, owner_userid: str, *, limit: int = 100) -> list[dict[str, Any]]: ...
     def list_owners(self) -> list[dict[str, Any]]: ...
@@ -215,6 +216,7 @@ class InMemoryGroupOpsRepository:
                         "image_library_ids": [],
                         "miniprogram_library_ids": [],
                         "attachment_library_ids": [],
+                        "group_invite_library_ids": [],
                     },
                     "attachments": [],
                     "sort_order": 10,
@@ -443,6 +445,8 @@ class InMemoryGroupOpsRepository:
         bind_status = clean_text(filters.get("bind_status")).lower()
         rows = []
         for group in self._groups.values():
+            if clean_text(group.get("status")) != "active":
+                continue
             if keyword and keyword not in f"{group.get('group_name')} {group.get('chat_id')}".lower():
                 continue
             if owner_userid and not group_manageable_by_userid(group, owner_userid):
@@ -502,6 +506,20 @@ class InMemoryGroupOpsRepository:
             "status": clean_text(snapshot.get("status") or "active"),
         }
         return deepcopy(self._groups[chat_id]), action
+
+    def mark_owner_group_assets_inactive_except(self, owner_userid: str, active_chat_ids: list[str]) -> list[str]:
+        owner = clean_text(owner_userid)
+        active = {clean_text(chat_id) for chat_id in active_chat_ids if clean_text(chat_id)}
+        changed: list[str] = []
+        for group in self._groups.values():
+            if clean_text(group.get("owner_userid")) != owner or clean_text(group.get("status")) != "active":
+                continue
+            if clean_text(group.get("chat_id")) in active:
+                continue
+            group["status"] = "inactive"
+            group["synced_at"] = utc_now_iso()
+            changed.append(clean_text(group.get("chat_id")))
+        return changed
 
     def list_admin_group_assets(self, owner_userid: str) -> list[dict[str, Any]]:
         owner = clean_text(owner_userid)

@@ -14,6 +14,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE_DIR = ROOT / "aicrm_next" / "admin_shell" / "templates" / "admin_shell"
 STYLESHEET = ROOT / "aicrm_next" / "operation_cycles" / "static" / "operation_cycles.css"
 DETAIL_SCRIPT = ROOT / "aicrm_next" / "operation_cycles" / "static" / "operation_cycles_detail.js"
+AGENT_GUIDE = ROOT / "docs" / "operation_cycles" / "agent_usage_guide.md"
+AGENT_ENTRY = ROOT / "AGENTS.md"
 
 
 def _funnel() -> dict:
@@ -107,168 +109,176 @@ def _client(monkeypatch) -> TestClient:
     monkeypatch.setattr(
         admin_pages,
         "get_strategy",
-        lambda key: {
-            "ok": True,
-            "strategy": strategy,
-            "versions": [
-                {
-                    "version": 2,
-                    "label": "v2 · 归因补强",
-                    "objective": "补齐结果证据",
-                    "definition": {},
-                    "effective_from": "2026-07-13T00:00:00+08:00",
-                }
-            ],
-            "trend": [run],
-            "sources": [
-                {
-                    "reference_key": "broadcast-job:20260713",
-                    "reference_type": "broadcast_job",
-                    "label": "本轮发送聚合",
-                    "source_system": "broadcast_jobs",
-                    "source_id": "safe-plan-key",
-                    "href": "/admin/broadcast-jobs?source_type=cloud_plan",
-                    "evidence_hash": "a" * 64,
-                    "data_status": "observed",
-                }
-            ],
-            "documents": {
-                "broadcast_details": {
-                    "markdown": (
-                        "# 本周群发结果\n\n"
-                        "| 指标 | 数值 |\n| --- | ---: |\n| 有效发送 | 845 |\n\n"
-                        "```chart\n"
-                        '{"type":"funnel","title":"发送漏斗","unit":"人","labels":["候选","审计","发送"],'
-                        '"series":[{"name":"人数","data":[1275,895,845]}]}\n'
-                        "```"
-                    ),
-                    "generated_at": "2026-07-14T09:00:00+08:00",
+        lambda key: (
+            {
+                "ok": True,
+                "strategy": strategy,
+                "versions": [
+                    {
+                        "version": 2,
+                        "label": "v2 · 归因补强",
+                        "objective": "补齐结果证据",
+                        "definition": {},
+                        "effective_from": "2026-07-13T00:00:00+08:00",
+                    }
+                ],
+                "trend": [run],
+                "sources": [
+                    {
+                        "reference_key": "broadcast-job:20260713",
+                        "reference_type": "broadcast_job",
+                        "label": "本轮发送聚合",
+                        "source_system": "broadcast_jobs",
+                        "source_id": "safe-plan-key",
+                        "href": "/admin/broadcast-jobs?source_type=cloud_plan",
+                        "evidence_hash": "a" * 64,
+                        "data_status": "observed",
+                    }
+                ],
+                "documents": {
+                    "broadcast_details": {
+                        "markdown": (
+                            "# 本周群发结果\n\n"
+                            "| 指标 | 数值 |\n| --- | ---: |\n| 有效发送 | 845 |\n\n"
+                            "```chart\n"
+                            '{"type":"funnel","title":"发送漏斗","unit":"人","labels":["候选","审计","发送"],'
+                            '"series":[{"name":"人数","data":[1275,895,845]}]}\n'
+                            "```"
+                        ),
+                        "generated_at": "2026-07-14T09:00:00+08:00",
+                    },
+                    "retrospective_details": {
+                        "markdown": ("# 本周复盘明细\n\n## 结论\n\n发送事实可核验，行为归因仍需补齐。\n\n- 已完成：发送结果核验\n- 待解决：分窗口行为数据"),
+                        "generated_at": "2026-07-14T09:05:00+08:00",
+                    },
+                    "execution_strategy": {
+                        "markdown": "# 下周执行策略\n\n- [x] 完成人群审计\n- [ ] 确认下一轮优化",
+                        "generated_at": "2026-07-14T09:10:00+08:00",
+                    },
                 },
-                "execution_strategy": {
-                    "markdown": "# 本周执行策略\n\n- [x] 完成人群审计\n- [ ] 确认下一轮优化",
-                    "generated_at": "2026-07-14T09:10:00+08:00",
-                },
-            },
-            "assistant_plans": [
-                {
-                    "reference_key": "ai-assistant-plan:monday-20260713",
-                    "reference_type": "other",
-                    "label": "2026-07-13 周一激活计划",
-                    "source_system": "cloud_orchestrator_plan",
-                    "source_id": "hxc-monday-20260713-plan",
-                    "href": "/admin/cloud-orchestrator/plans/hxc-monday-20260713-plan",
-                    "evidence_hash": "",
-                    "data_status": "unknown",
-                }
-            ],
-        }
-        if key == strategy["strategy_key"]
-        else None,
+                "assistant_plans": [
+                    {
+                        "reference_key": "ai-assistant-plan:monday-20260713",
+                        "reference_type": "other",
+                        "label": "2026-07-13 周一激活计划",
+                        "source_system": "cloud_orchestrator_plan",
+                        "source_id": "hxc-monday-20260713-plan",
+                        "href": "/admin/cloud-orchestrator/plans/hxc-monday-20260713-plan",
+                        "evidence_hash": "",
+                        "data_status": "unknown",
+                    }
+                ],
+            }
+            if key == strategy["strategy_key"]
+            else None
+        ),
     )
     monkeypatch.setattr(
         admin_pages,
         "get_run",
-        lambda key: {
-            "ok": True,
-            "run": run,
-            "attempts": [
-                {
-                    "attempt_key": "attempt_blocked_0900",
-                    "parent_attempt_key": None,
-                    "status": "blocked",
-                    "started_at": "2026-07-13T09:00:00+08:00",
-                    "ended_at": "2026-07-13T09:05:00+08:00",
-                    "blocked_reason": "正式模板和只读证据未齐备。",
-                    "summary": {},
+        lambda key: (
+            {
+                "ok": True,
+                "run": run,
+                "attempts": [
+                    {
+                        "attempt_key": "attempt_blocked_0900",
+                        "parent_attempt_key": None,
+                        "status": "blocked",
+                        "started_at": "2026-07-13T09:00:00+08:00",
+                        "ended_at": "2026-07-13T09:05:00+08:00",
+                        "blocked_reason": "正式模板和只读证据未齐备。",
+                        "summary": {},
+                    },
+                    {
+                        "attempt_key": "attempt_recovered_1130",
+                        "parent_attempt_key": "attempt_blocked_0900",
+                        "status": "completed",
+                        "started_at": "2026-07-13T11:30:00+08:00",
+                        "ended_at": "2026-07-13T22:00:00+08:00",
+                        "blocked_reason": "",
+                        "summary": {"summary": "恢复后完成发送与早期复盘。"},
+                    },
+                ],
+                "stages": [
+                    {
+                        "stage_key": "delivery",
+                        "attempt_key": "attempt_recovered_1130",
+                        "stage": "delivery",
+                        "status": "completed",
+                        "started_at": "2026-07-13T12:00:00+08:00",
+                        "ended_at": "2026-07-13T12:11:00+08:00",
+                        "blocked_reason": "",
+                        "summary": {"summary": "发送事实已核验。"},
+                    }
+                ],
+                "metrics": [
+                    {
+                        "metric_key": "active_message_count_24h",
+                        "label": "主动消息",
+                        "numerator": 14,
+                        "denominator": 845,
+                        "value": 14,
+                        "unit": "人",
+                        "observation_window": "T+24h",
+                        "data_source": "message event aggregate",
+                        "data_quality": "partial",
+                        "limitations": ["只能作为下限观察"],
+                        "is_causal": False,
+                        "value_status": "partial_lower_bound",
+                    },
+                    {
+                        "metric_key": "target_behavior_72h",
+                        "label": "目标行为",
+                        "numerator": None,
+                        "denominator": None,
+                        "value": None,
+                        "unit": "人",
+                        "observation_window": "T+72h",
+                        "data_source": "tracking aggregate",
+                        "data_quality": "instrumentation_missing",
+                        "limitations": ["埋点缺失"],
+                        "is_causal": False,
+                        "value_status": "instrumentation_missing",
+                    },
+                ],
+                "retrospective": {
+                    "conclusion": "第一轮从决策推进到可核验发送事实。",
+                    "observations": ["实际发送分母已核验"],
+                    "limitations": ["行为归因仍不完整"],
+                    "data_conflicts": ["计划状态与发送事实冲突"],
                 },
-                {
-                    "attempt_key": "attempt_recovered_1130",
-                    "parent_attempt_key": "attempt_blocked_0900",
-                    "status": "completed",
-                    "started_at": "2026-07-13T11:30:00+08:00",
-                    "ended_at": "2026-07-13T22:00:00+08:00",
-                    "blocked_reason": "",
-                    "summary": {"summary": "恢复后完成发送与早期复盘。"},
+                "next_iteration": {
+                    "summary": "先补齐追踪，再验证内容差异。",
+                    "hypothesis": "更完整的追踪可以缩小归因缺口。",
+                    "actions": ["补齐行为追踪", "统一计划与发送状态"],
+                    "status": "pending_confirmation",
+                    "confirmation_note": "",
+                    "applied_strategy_version": None,
                 },
-            ],
-            "stages": [
-                {
-                    "stage_key": "delivery",
-                    "attempt_key": "attempt_recovered_1130",
-                    "stage": "delivery",
-                    "status": "completed",
-                    "started_at": "2026-07-13T12:00:00+08:00",
-                    "ended_at": "2026-07-13T12:11:00+08:00",
-                    "blocked_reason": "",
-                    "summary": {"summary": "发送事实已核验。"},
-                }
-            ],
-            "metrics": [
-                {
-                    "metric_key": "active_message_count_24h",
-                    "label": "主动消息",
-                    "numerator": 14,
-                    "denominator": 845,
-                    "value": 14,
-                    "unit": "人",
-                    "observation_window": "T+24h",
-                    "data_source": "message event aggregate",
-                    "data_quality": "partial",
-                    "limitations": ["只能作为下限观察"],
-                    "is_causal": False,
-                    "value_status": "partial_lower_bound",
+                "references": [
+                    {
+                        "reference_key": "broadcast_job:20260713",
+                        "reference_type": "broadcast_job",
+                        "label": "Broadcast Jobs",
+                        "source_system": "aicrm",
+                        "source_id": "batch-20260713",
+                        "href": "/admin/broadcast-jobs?batch=20260713",
+                        "evidence_hash": "sha256:safe-aggregate",
+                        "data_status": "available",
+                    }
+                ],
+                "snapshot": {
+                    "report_id": "report-20260713",
+                    "snapshot_revision": 3,
+                    "snapshot_hash": "sha256:safe-snapshot",
+                    "schema_version": "operation_cycle_snapshot.v1",
+                    "reporter_id": "ops-reporter",
                 },
-                {
-                    "metric_key": "target_behavior_72h",
-                    "label": "目标行为",
-                    "numerator": None,
-                    "denominator": None,
-                    "value": None,
-                    "unit": "人",
-                    "observation_window": "T+72h",
-                    "data_source": "tracking aggregate",
-                    "data_quality": "instrumentation_missing",
-                    "limitations": ["埋点缺失"],
-                    "is_causal": False,
-                    "value_status": "instrumentation_missing",
-                },
-            ],
-            "retrospective": {
-                "conclusion": "第一轮从决策推进到可核验发送事实。",
-                "observations": ["实际发送分母已核验"],
-                "limitations": ["行为归因仍不完整"],
-                "data_conflicts": ["计划状态与发送事实冲突"],
-            },
-            "next_iteration": {
-                "summary": "先补齐追踪，再验证内容差异。",
-                "hypothesis": "更完整的追踪可以缩小归因缺口。",
-                "actions": ["补齐行为追踪", "统一计划与发送状态"],
-                "status": "pending_confirmation",
-                "confirmation_note": "",
-                "applied_strategy_version": None,
-            },
-            "references": [
-                {
-                    "reference_key": "broadcast_job:20260713",
-                    "reference_type": "broadcast_job",
-                    "label": "Broadcast Jobs",
-                    "source_system": "aicrm",
-                    "source_id": "batch-20260713",
-                    "href": "/admin/broadcast-jobs?batch=20260713",
-                    "evidence_hash": "sha256:safe-aggregate",
-                    "data_status": "available",
-                }
-            ],
-            "snapshot": {
-                "report_id": "report-20260713",
-                "snapshot_revision": 3,
-                "snapshot_hash": "sha256:safe-snapshot",
-                "schema_version": "operation_cycle_snapshot.v1",
-                "reporter_id": "ops-reporter",
-            },
-        }
-        if key == run["run_key"]
-        else None,
+            }
+            if key == run["run_key"]
+            else None
+        ),
     )
     return TestClient(create_app(), raise_server_exceptions=False)
 
@@ -296,9 +306,29 @@ def test_operation_cycle_templates_are_readonly_and_use_three_level_ia() -> None
         assert "<form" not in source
         assert 'method="post"' not in source.lower()
     assert sources["operation_cycles_list.html"].count("<button") == 2
-    assert sources["operation_cycles_list.html"].count("disabled aria-disabled=\"true\"") == 2
+    assert sources["operation_cycles_list.html"].count('disabled aria-disabled="true"') == 2
     assert "<button" not in sources["operation_cycles_strategy.html"]
     assert "<button" not in sources["operation_cycles_run.html"]
+
+
+def test_operation_cycle_agent_guide_is_discoverable_and_covers_the_report_contract() -> None:
+    guide = AGENT_GUIDE.read_text(encoding="utf-8")
+    entry = AGENT_ENTRY.read_text(encoding="utf-8")
+
+    assert "docs/operation_cycles/agent_usage_guide.md" in entry
+    for document_key in ("broadcast_details", "retrospective_details", "execution_strategy"):
+        assert f"`{document_key}`" in guide
+    for required_contract in (
+        "POST /api/operation-cycles/reports",
+        "operation_cycle_snapshot.v1",
+        "operation_cycle_report_write",
+        "external_effects",
+        "Idempotency-Key",
+        "历史发送记录",
+        "cloud_orchestrator_plan",
+        "is_causal=false",
+    ):
+        assert required_contract in guide
 
 
 def test_operation_cycle_pages_render_dense_readonly_evidence(monkeypatch) -> None:
@@ -313,7 +343,7 @@ def test_operation_cycle_pages_render_dense_readonly_evidence(monkeypatch) -> No
     assert listing.status_code == strategy.status_code == run.status_code == 200
     assert stylesheet.status_code == detail_script.status_code == 200
     assert ".operation-cycle-step" in stylesheet.text
-    assert "/static/operation-cycles/operation_cycles.css?v=20260714-v4" in listing.text
+    assert "/static/operation-cycles/operation_cycles.css?v=20260715-v1" in listing.text
     assert "每周一全量用户激活" in listing.text
     assert "任务列表" in listing.text
     assert "本周进度" in listing.text
@@ -332,25 +362,33 @@ def test_operation_cycle_pages_render_dense_readonly_evidence(monkeypatch) -> No
 
     assert "已循环轮次" in strategy.text
     assert "本次循环进度" in strategy.text
-    assert "群发数据明细" in strategy.text
+    assert "本周发送数据" in strategy.text
+    assert "本周复盘明细" in strategy.text
+    assert "下周执行策略" in strategy.text
+    assert "历史发送记录" in strategy.text
     assert "本周群发结果" in strategy.text
     assert "有效发送" in strategy.text
-    assert 'data-operation-cycle-chart=' in strategy.text
+    assert "data-operation-cycle-chart=" in strategy.text
     assert "状态与核心漏斗" not in strategy.text
     assert "历次运行对照" not in strategy.text
     assert "版本记录" not in strategy.text
     assert 'href="/admin/operation-cycles/monday_activation?section=execution_strategy"' in strategy.text.replace("&amp;", "&")
 
+    retrospective = client.get("/admin/operation-cycles/monday_activation?section=retrospective_details")
+    assert retrospective.status_code == 200
+    assert "发送事实可核验" in retrospective.text
+    assert 'data-operation-cycle-markdown="retrospective_details"' in retrospective.text
+
     execution_strategy = client.get("/admin/operation-cycles/monday_activation?section=execution_strategy")
     assert execution_strategy.status_code == 200
-    assert "本周执行策略" in execution_strategy.text
+    assert "下周执行策略" in execution_strategy.text
     assert 'type="checkbox" disabled' in execution_strategy.text
 
     history = client.get("/admin/operation-cycles/monday_activation?section=history")
     assert history.status_code == 200
-    assert "历史群发记录" in history.text
+    assert "历史发送记录" in history.text
     assert "hxc-monday-20260713-plan" in history.text
-    assert 'data-operation-cycle-plan-history' in history.text
+    assert "data-operation-cycle-plan-history" in history.text
     assert "/api/admin/cloud-orchestrator/plans/" in detail_script.text
 
     for label in ("任务目标与时间", "前置检查与执行尝试", "人群分层与去留判断", "人审与计划版本", "实际发送事实", "分窗口结果", "结果复盘与限制", "下一轮优化"):
@@ -424,7 +462,7 @@ def test_operation_cycle_styles_are_namespaced_and_responsive() -> None:
     assert "@media (prefers-reduced-motion: reduce)" in operation_cycle_css
     assert "--operation-cycle-amber" in operation_cycle_css
     base = (TEMPLATE_DIR / "operation_cycles_base.html").read_text(encoding="utf-8")
-    assert "/static/operation-cycles/operation_cycles.css?v=20260714-v4" in base
+    assert "/static/operation-cycles/operation_cycles.css?v=20260715-v1" in base
 
 
 def test_operation_cycle_templates_do_not_name_sensitive_identity_fields() -> None:

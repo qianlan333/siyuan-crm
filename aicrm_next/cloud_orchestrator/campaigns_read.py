@@ -141,6 +141,7 @@ def _step_payload_view(payload: dict[str, Any]) -> dict[str, Any]:
             "image_library_ids": payload.get("image_library_ids") or [],
             "miniprogram_library_ids": payload.get("miniprogram_library_ids") or [],
             "attachment_library_ids": payload.get("attachment_library_ids") or [],
+            "group_invite_library_ids": payload.get("group_invite_library_ids") or [],
         }
     if content_package and isinstance(content_package, dict):
         content_payload.update({key: value for key, value in content_package.items() if value not in (None, "")})
@@ -158,6 +159,7 @@ def _step_payload_view(payload: dict[str, Any]) -> dict[str, Any]:
         "image_library_ids": content_payload.get("image_library_ids") or [],
         "miniprogram_library_ids": content_payload.get("miniprogram_library_ids") or [],
         "attachment_library_ids": content_payload.get("attachment_library_ids") or [],
+        "group_invite_library_ids": content_payload.get("group_invite_library_ids") or [],
     }
 
 

@@ -500,7 +500,8 @@ def _serialize_channel(row: dict[str, Any]) -> dict[str, Any]:
     channel["welcome_image_library_ids"] = _json_list(channel.get("welcome_image_library_ids"))
     channel["welcome_miniprogram_library_ids"] = _json_list(channel.get("welcome_miniprogram_library_ids"))
     channel["welcome_attachment_library_ids"] = _json_list(channel.get("welcome_attachment_library_ids"))
-    channel["welcome_attachment_count"] = len(channel["welcome_image_library_ids"]) + len(channel["welcome_miniprogram_library_ids"]) + len(channel["welcome_attachment_library_ids"])
+    channel["welcome_group_invite_library_ids"] = _json_list(channel.get("welcome_group_invite_library_ids"))
+    channel["welcome_attachment_count"] = len(channel["welcome_image_library_ids"]) + len(channel["welcome_miniprogram_library_ids"]) + len(channel["welcome_attachment_library_ids"]) + len(channel["welcome_group_invite_library_ids"])
     channel["welcome_message_configured"] = bool(channel["welcome_message"])
     channel["auto_accept_friend"] = bool(channel.get("auto_accept_friend", False))
     channel["entry_tag_id"] = _text(channel.get("entry_tag_id"))
@@ -541,6 +542,7 @@ def _default_channel() -> dict[str, Any]:
         "welcome_image_library_ids": [],
         "welcome_miniprogram_library_ids": [],
         "welcome_attachment_library_ids": [],
+        "welcome_group_invite_library_ids": [],
         "auto_accept_friend": False,
     }
 
@@ -618,6 +620,7 @@ def _coerce_channel_payload(payload: dict[str, Any], *, existing: dict[str, Any]
         "welcome_image_library_ids": _json_list(_payload_value(payload, existing, "welcome_image_library_ids", partial=partial)),
         "welcome_miniprogram_library_ids": _json_list(_payload_value(payload, existing, "welcome_miniprogram_library_ids", partial=partial)),
         "welcome_attachment_library_ids": _json_list(_payload_value(payload, existing, "welcome_attachment_library_ids", partial=partial)),
+        "welcome_group_invite_library_ids": _json_list(_payload_value(payload, existing, "welcome_group_invite_library_ids", partial=partial)),
         "auto_accept_friend": auto_accept_friend,
         "entry_tag_id": _text(_payload_value(payload, existing, "entry_tag_id", partial=partial)),
         "entry_tag_name": _text(_payload_value(payload, existing, "entry_tag_name", partial=partial)),

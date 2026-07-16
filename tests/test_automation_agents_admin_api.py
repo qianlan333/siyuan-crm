@@ -46,7 +46,7 @@ def test_admin_automation_agent_crud_copy_pause_archive_contract(next_client, ne
     assert agent["send_webhook_url"].endswith("/api/ai/audience/packages/prod_channel_9p9_questionnaire_activation_hyc/webhook")
     assert agent["automation_type"] == "agent"
     assert agent["automation_type_label"] == "agent"
-    assert agent["fixed_material_summary"] == {"image_count": 0, "miniprogram_count": 0, "attachment_count": 0}
+    assert agent["fixed_material_summary"] == {"image_count": 0, "miniprogram_count": 0, "attachment_count": 0, "group_invite_count": 0}
 
     listed = next_client.get("/api/admin/automation-agents", cookies=_admin_cookies(next_client))
     assert listed.status_code == 200

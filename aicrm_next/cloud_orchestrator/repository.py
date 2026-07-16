@@ -216,6 +216,7 @@ def _content_payload_for_package(content_package: dict[str, Any]) -> dict[str, A
         "image_library_ids": list(content_package.get("image_library_ids") or []),
         "miniprogram_library_ids": list(content_package.get("miniprogram_library_ids") or []),
         "attachment_library_ids": list(content_package.get("attachment_library_ids") or []),
+        "group_invite_library_ids": list(content_package.get("group_invite_library_ids") or []),
     }
     return {
         "content_package": package,
@@ -223,6 +224,7 @@ def _content_payload_for_package(content_package: dict[str, Any]) -> dict[str, A
         "image_media_ids": [],
         "miniprogram_library_ids": package["miniprogram_library_ids"],
         "attachment_library_ids": package["attachment_library_ids"],
+        "group_invite_library_ids": package["group_invite_library_ids"],
     }
 
 

@@ -111,8 +111,20 @@ def _readonly_meta() -> JsonDict:
 
 def _media_refs_from_batch_request(request: BatchSendRequest) -> list[JsonDict]:
     refs: list[JsonDict] = []
-    refs.extend({"kind": "image", "index": index} for index, _ in enumerate(request.images))
-    refs.extend({"kind": "attachment", "index": index} for index, _ in enumerate(request.attachments))
+    for index, image in enumerate(request.images):
+        item = image if isinstance(image, dict) else {}
+        refs.append({"kind": "image", "index": index, "library_id": item.get("library_id")})
+    for index, attachment in enumerate(request.attachments):
+        item = attachment if isinstance(attachment, dict) else {}
+        msgtype = str(item.get("msgtype") or "").strip().lower()
+        payload = item.get(msgtype) if isinstance(item.get(msgtype), dict) else {}
+        refs.append(
+            {
+                "kind": msgtype or "attachment",
+                "index": index,
+                "library_id": payload.get("library_id") or item.get("library_id"),
+            }
+        )
     return refs
 
 

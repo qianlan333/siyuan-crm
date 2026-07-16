@@ -1456,6 +1456,32 @@ tables:
       - tests/test_material_library_table_boundary.py
     notes: Canonical attachment material table used by media library and send-content picker.
 
+  group_invite_library:
+    domain: media_library
+    lifecycle: canonical
+    write_owner: aicrm_next.media_library.postgres_repo
+    read_owners:
+      - aicrm_next.media_library.postgres_repo
+      - aicrm_next.send_content.postgres_repo
+      - aicrm_next.automation_engine.group_ops.material_resolver
+      - aicrm_next.channel_entry.application
+      - campaign/group-ops SendContentPackage consumers
+    replacement: none; canonical reusable WeCom group invite link card table
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - group invite library admin API
+      - material picker
+      - SendContentPackage group invite resolution
+      - private/group broadcast material resolution
+      - channel welcome material resolution
+    migration_source: 0117_group_invite_cards, 0119_group_invite_bindings
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_material_library_table_boundary.py
+      - tests/test_group_invite_library.py
+    notes: Canonical WeCom gm join-link binding keyed by chat_id; supports pending, ready and invalid lifecycle states, resolves to msgtype link, and never requires media_id.
+
   wecom_media_leases:
     domain: media_library
     lifecycle: canonical
@@ -2807,6 +2833,7 @@ tables:
       - aicrm_next.identity_contact
       - aicrm_next.message_archive
       - aicrm_next.questionnaire
+      - aicrm_next.radar_links
       - aicrm_next.sidebar_write
     replacement: none; active production schema table registered during schema drift closeout
     drop_candidate: false
@@ -2818,7 +2845,7 @@ tables:
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_data_health_checks.py::test_schema_drift_guard_reports_manifest_and_live_schema_mismatches
-    notes: Unionid is the only canonical business identity. Channel entry, public payment projection, and sidebar are bounded ingress adapters; every alias lookup uses aicrm_next.identity_contact.resolver and every write targets a resolved active unionid.
+    notes: Unionid is the only canonical business identity. Channel entry, public payment projection, and sidebar are bounded ingress adapters; every mutation alias lookup uses aicrm_next.identity_contact.resolver and every write targets a resolved active unionid. Declared cross-context read projections must fail closed instead of selecting an arbitrary identity when an alias has multiple candidates.
 
   crm_user_identity_conflicts:
     domain: identity_contact
@@ -3255,13 +3282,14 @@ tables:
     write_owner: aicrm_next.radar_links
     read_owners:
       - radar admin event list, export, and aggregate statistics
+      - external radar logical-click read model
     replacement: none; append-only Radar access event ledger
     drop_candidate: false
     drop_after: ""
     runtime_entrypoints:
       - Radar landing and trusted OAuth callback
       - signed Radar viewer-session content events
-    migration_source: 0102_questionnaire_radar_invariants
+    migration_source: 0102_questionnaire_radar_invariants; external-feed index 0118_external_radar_read_api
     pii_level: direct_contact
     retention_policy: retained with the owning radar link and deleted by the link foreign-key cascade
     guard_tests:
@@ -3546,6 +3574,26 @@ tables:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_service_period_schema.py
     notes: Stores duration/link/membership snapshot for service period products while trade fields remain in wechat_pay_products.
+
+  service_period_member_views:
+    domain: service_period
+    lifecycle: canonical
+    write_owner: aicrm_next.service_period
+    read_owners:
+      - aicrm_next.service_period
+    replacement: none; shared saved member-grid views for each service period product
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - aicrm_next.service_period.api
+      - aicrm_next.service_period.application
+    migration_source: 0120_service_period_member_views
+    pii_level: internal_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_service_period_schema.py
+      - tests/test_service_period_member_grid.py
+    notes: Stores versioned filter, sort, and grouping configuration shared by administrators. Configuration is validated against the code-owned eight-field registry and never stores member values or remark text.
 
   service_period_entitlements:
     domain: service_period

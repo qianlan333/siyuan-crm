@@ -95,12 +95,16 @@ def test_committed_fixture_is_safe_and_preserves_the_known_aggregate_funnel() ->
     assert payload["funnel"]["failed_count"]["data_source"] == "broadcast_jobs.production_readonly_aggregate"
     assert payload["funnel"]["failed_count"]["classification"] == "failed_retryable"
     assert all(metric["is_causal"] is False for metric in payload["metrics"])
-    assert all(
-        metric["value_status"] == "unknown"
-        for metric in payload["metrics"]
-        if metric["observation_window"] in {"T+2h", "T+24h", "T+48h", "T+72h"}
-    )
+    assert all(metric["value_status"] == "unknown" for metric in payload["metrics"] if metric["observation_window"] in {"T+2h", "T+24h", "T+48h", "T+72h"})
     assert any("draft" in conflict for conflict in payload["retrospective"]["data_conflicts"])
+    assert set(payload["documents"]) == {
+        "broadcast_details",
+        "retrospective_details",
+        "execution_strategy",
+    }
+    assert payload["documents"]["broadcast_details"]["markdown"].startswith("# 2026-07-13 本周发送数据")
+    assert payload["documents"]["retrospective_details"]["markdown"].startswith("# 2026-07-13 本周复盘明细")
+    assert payload["documents"]["execution_strategy"]["markdown"].startswith("# 2026-07-20 下周执行策略")
     delivery_reference = next(item for item in payload["references"] if item["reference_key"].endswith("delivery-metrics"))
     assert delivery_reference["data_status"] == "observed"
     assert delivery_reference["source_system"] == "ai_crm_production_readonly"

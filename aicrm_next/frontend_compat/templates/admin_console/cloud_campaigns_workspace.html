@@ -1,10 +1,12 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=send-content-preview-ux-20260527">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=send-content-preview-ux-20260527">
-<script defer src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=send-content-preview-ux-20260527"></script>
-<script defer src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=send-content-preview-ux-20260527"></script>
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/group_chat_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=group-chat-selector-20260715">
+<script defer src="{{ url_for('static', filename='admin_console/group_chat_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script defer src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script defer src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=group-chat-selector-20260715"></script>
 {% endblock %}
 
 {% block content %}
@@ -284,7 +286,7 @@
       content_text: String(data.content_text || '').trim(),
       image_library_ids: normalizeIdList(data.image_library_ids),
       miniprogram_library_ids: normalizeIdList(data.miniprogram_library_ids),
-      attachment_library_ids: normalizeIdList(data.attachment_library_ids),
+      attachment_library_ids: normalizeIdList(data.attachment_library_ids), group_invite_library_ids: normalizeIdList(data.group_invite_library_ids),
     };
   }
 
@@ -296,7 +298,7 @@
       content_text: current.content_text || contentPackage.content_text || payload.content_text || '',
       image_library_ids: current.image_library_ids || contentPackage.image_library_ids || payload.image_library_ids || [],
       miniprogram_library_ids: current.miniprogram_library_ids || contentPackage.miniprogram_library_ids || payload.miniprogram_library_ids || [],
-      attachment_library_ids: current.attachment_library_ids || contentPackage.attachment_library_ids || payload.attachment_library_ids || [],
+      attachment_library_ids: current.attachment_library_ids || contentPackage.attachment_library_ids || payload.attachment_library_ids || [], group_invite_library_ids: current.group_invite_library_ids || contentPackage.group_invite_library_ids || payload.group_invite_library_ids || [],
     });
   }
 
@@ -309,7 +311,7 @@
       image_library_ids: normalized.image_library_ids,
       image_media_ids: [],
       miniprogram_library_ids: normalized.miniprogram_library_ids,
-      attachment_library_ids: normalized.attachment_library_ids,
+      attachment_library_ids: normalized.attachment_library_ids, group_invite_library_ids: normalized.group_invite_library_ids,
     };
   }
 
@@ -321,6 +323,7 @@
       imageCount: normalized.image_library_ids.length,
       miniprogramCount: normalized.miniprogram_library_ids.length,
       attachmentCount: normalized.attachment_library_ids.length,
+      groupInviteCount: normalized.group_invite_library_ids.length,
     };
   }
 
@@ -329,7 +332,7 @@
     return `
       <div class="cloud-camp-step-content-summary" data-step-content-summary>
         <strong>话术：</strong><span>${escapeHtml(summary.text)}</span>
-        <strong>素材：</strong><span>图片 ${summary.imageCount} / 小程序 ${summary.miniprogramCount} / 附件 ${summary.attachmentCount}</span>
+        <strong>内容：</strong><span>图片 ${summary.imageCount} / 小程序 ${summary.miniprogramCount} / 附件 ${summary.attachmentCount} / 客户群 ${summary.groupInviteCount}</span>
       </div>
     `;
   }
@@ -357,6 +360,7 @@
         image: 3,
         miniprogram: 1,
         attachment: 9,
+        group_invite: 1,
       },
       onConfirm(contentPackage) {
         updateStepContentState(rowEl, contentPackage);
@@ -556,7 +560,7 @@
                 ${editBtns}
               </div>
               <div class="step-text">${escapeHtml(contentSummary.text)}</div>
-              <div class="step-materials">图片 ${contentSummary.imageCount} / 小程序 ${contentSummary.miniprogramCount} / 附件 ${contentSummary.attachmentCount}</div>
+              <div class="step-materials">图片 ${contentSummary.imageCount} / 小程序 ${contentSummary.miniprogramCount} / 附件 ${contentSummary.attachmentCount} / 客户群 ${contentSummary.groupInviteCount}</div>
             </div>
           `;
         }

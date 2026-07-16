@@ -47,7 +47,7 @@
         {% endif %}
       </header>
 
-      {% if active_section in ["broadcast_details", "execution_strategy"] %}
+      {% if active_section != "history" %}
         {% if active_document.get("markdown") %}
         <div class="operation-cycle-markdown" data-operation-cycle-markdown="{{ active_section }}">
           {{ rendered_document }}

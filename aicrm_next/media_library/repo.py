@@ -17,6 +17,7 @@ from .variants import (
     make_thumbnail_bytes,
     variant_bytes,
 )
+from .dto import normalize_group_invite_join_url, normalize_http_url
 
 
 MEDIA_LIBRARY_BACKEND_ENV = "AICRM_MEDIA_LIBRARY_REPO_BACKEND"
@@ -36,6 +37,8 @@ class MediaLibraryRepository(Protocol):
     def get_image_thumbnail(self, image_id: str, size: int) -> dict[str, Any] | None: ...
     def save_item(self, kind: str, payload: dict[str, Any], item_id: str | None = None) -> dict[str, Any]: ...
     def delete_item(self, kind: str, item_id: str, *, force: bool = False) -> dict[str, Any]: ...
+    def ensure_group_invite_binding(self, payload: dict[str, Any]) -> dict[str, Any]: ...
+    def reconcile_group_invite_bindings(self, active_chat_ids: list[str], inactive_chat_ids: list[str]) -> int: ...
 
 
 def normalize_tags(value: Any) -> list[str]:
@@ -125,6 +128,28 @@ def _seed() -> dict[str, list[dict[str, Any]]]:
                 "thumb_image_base64": "",
                 "description": "脱敏小程序素材 fixture",
                 "tags": ["fixture"],
+                "enabled": True,
+                "created_at": ts,
+                "updated_at": ts,
+                "deleted": False,
+            }
+        ],
+        "group_invite": [
+            {
+                "id": "group_invite_masked_001",
+                "name": "体验群邀请",
+                "title": "点击加入体验群",
+                "description": "点击卡片进入客户群",
+                "pic_url": "",
+                "join_url": "https://work.weixin.qq.com/gm/fixture0000000000000000000000000",
+                "config_id": "fixture_join_way",
+                "state": "fixture",
+                "chat_id_list": ["wr_fixture_group"],
+                "chat_id": "wr_fixture_group",
+                "binding_status": "ready",
+                "auto_create_room": True,
+                "room_base_name": "体验群",
+                "room_base_id": 1,
                 "enabled": True,
                 "created_at": ts,
                 "updated_at": ts,
@@ -291,11 +316,69 @@ class InMemoryMediaLibraryRepository:
             fields = ["name", "title", "appid", "pagepath", "page_path"]
         elif kind == "attachment":
             fields = ["name", "file_name", "mime_type"]
+        elif kind == "group_invite":
+            fields = ["name", "title", "description", "join_url", "config_id", "state", "room_base_name"]
         else:
             fields = ["name", "file_name", "description", "category"]
         text = " ".join(str(item.get(field) or "") for field in fields)
         text += " " + " ".join(normalize_tags(item.get("tags")))
         return text.lower()
+
+    def ensure_group_invite_binding(self, payload: dict[str, Any]) -> dict[str, Any]:
+        chat_id = str(payload.get("chat_id") or "").strip()
+        if not chat_id:
+            raise ContractError("chat_id 不能为空")
+        for item in self._data["group_invite"]:
+            item_chat_id = str(item.get("chat_id") or ((item.get("chat_id_list") or [""])[0])).strip()
+            if item_chat_id == chat_id and not item.get("deleted"):
+                group_name = str(payload.get("group_name") or "").strip()
+                if group_name:
+                    item["name"] = group_name
+                    item["title"] = f"加入「{group_name}」"
+                    item["room_base_name"] = group_name
+                item["updated_at"] = now_iso()
+                return deepcopy(item)
+        group_name = str(payload.get("group_name") or chat_id).strip()
+        numeric_ids = [int(item.get("id")) for item in self._data["group_invite"] if str(item.get("id") or "").isdigit()]
+        item = {
+            "id": max(numeric_ids or [0]) + 1,
+            "name": group_name,
+            "title": f"加入「{group_name}」",
+            "description": "点击卡片直接加入群聊",
+            "pic_url": "",
+            "join_url": "",
+            "config_id": "",
+            "state": "",
+            "chat_id_list": [chat_id],
+            "chat_id": chat_id,
+            "binding_status": "pending",
+            "auto_create_room": False,
+            "room_base_name": group_name,
+            "room_base_id": None,
+            "enabled": True,
+            "created_at": now_iso(),
+            "updated_at": now_iso(),
+            "deleted": False,
+        }
+        self._data["group_invite"].append(item)
+        return deepcopy(item)
+
+    def reconcile_group_invite_bindings(self, active_chat_ids: list[str], inactive_chat_ids: list[str]) -> int:
+        active = {str(value or "").strip() for value in active_chat_ids if str(value or "").strip()}
+        inactive = {str(value or "").strip() for value in inactive_chat_ids if str(value or "").strip()}
+        changed = 0
+        for item in self._data["group_invite"]:
+            chat_id = str(item.get("chat_id") or ((item.get("chat_id_list") or [""])[0])).strip()
+            if chat_id in inactive and item.get("binding_status") != "invalid":
+                item["binding_status"] = "invalid"
+                item["updated_at"] = now_iso()
+                changed += 1
+            elif chat_id in active and item.get("binding_status") == "invalid":
+                item["binding_status"] = "ready" if str(item.get("join_url") or "").strip() else "pending"
+                item["enabled"] = True
+                item["updated_at"] = now_iso()
+                changed += 1
+        return changed
 
     def _assert_image_exists(self, image_id: Any) -> None:
         if not any(str(item.get("id")) == str(image_id) and not item.get("deleted") for item in self._data["image"]):
@@ -345,6 +428,31 @@ class InMemoryMediaLibraryRepository:
                 "tags": normalize_tags(data.get("tags")),
                 "enabled": bool(data.get("enabled", True)),
             }
+        if kind == "group_invite":
+            title = str(data.get("title") or data.get("name") or "").strip()
+            join_url = normalize_group_invite_join_url(data.get("join_url"))
+            if not title or not join_url:
+                raise ContractError("群邀请卡片缺少必填字段：title, join_url")
+            pic_url = normalize_http_url(data.get("pic_url"), field_name="卡片封面链接")
+            description = str(data.get("description") or "").strip()
+            if len(title.encode("utf-8")) > 128 or len(description.encode("utf-8")) > 512:
+                raise ContractError("群邀请卡片标题或描述超过企微长度限制")
+            return {
+                "name": str(data.get("name") or title).strip(),
+                "title": title,
+                "description": description,
+                "pic_url": pic_url,
+                "join_url": join_url,
+                "config_id": str(data.get("config_id") or "").strip(),
+                "state": str(data.get("state") or "").strip(),
+                "chat_id_list": [str(item).strip() for item in list(data.get("chat_id_list") or []) if str(item).strip()],
+                "auto_create_room": bool(data.get("auto_create_room", True)),
+                "room_base_name": str(data.get("room_base_name") or "").strip(),
+                "room_base_id": int(data["room_base_id"]) if data.get("room_base_id") not in (None, "") else None,
+                "enabled": bool(data.get("enabled", True)),
+                "chat_id": str(data.get("chat_id") or ((data.get("chat_id_list") or [""])[0])).strip(),
+                "binding_status": str(data.get("binding_status") or ("ready" if join_url else "pending")).strip().lower(),
+            }
         return {
             "name": str(data.get("name") or data.get("file_name") or "附件素材"),
             "file_name": str(data.get("file_name") or "attachment.bin"),
@@ -386,6 +494,28 @@ class InMemoryMediaLibraryRepository:
                 out["thumb_media_id"] = str(data.get("thumb_media_id") or "")
             if "enabled" in data:
                 out["enabled"] = bool(data.get("enabled"))
+            return out
+        if kind == "group_invite":
+            for key in ["name", "title", "description", "config_id", "state", "room_base_name", "chat_id", "binding_status"]:
+                if key in data:
+                    out[key] = str(data.get(key) or "").strip()
+            if "join_url" in data:
+                out["join_url"] = normalize_group_invite_join_url(data.get("join_url"))
+                out["binding_status"] = "ready" if out["join_url"] else "pending"
+            if "pic_url" in data:
+                out["pic_url"] = normalize_http_url(data.get("pic_url"), field_name="卡片封面链接")
+            if "chat_id_list" in data:
+                out["chat_id_list"] = [str(item).strip() for item in list(data.get("chat_id_list") or []) if str(item).strip()]
+            if "auto_create_room" in data:
+                out["auto_create_room"] = bool(data.get("auto_create_room"))
+            if "room_base_id" in data:
+                out["room_base_id"] = int(data["room_base_id"]) if data.get("room_base_id") not in (None, "") else None
+            if "enabled" in data:
+                out["enabled"] = bool(data.get("enabled"))
+            if "title" in data and not out.get("title"):
+                raise ContractError("群邀请卡片标题不能为空")
+            if "join_url" in data and not out.get("join_url"):
+                raise ContractError("群邀请链接不能为空")
             return out
         if "name" in data:
             out["name"] = str(data.get("name") or "")

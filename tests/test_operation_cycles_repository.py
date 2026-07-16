@@ -82,7 +82,8 @@ def test_newer_revision_updates_projection_and_read_models() -> None:
     updated.data_status = "mature"
     updated.next_iteration.summary = "下一轮采用新埋点"
     updated.documents.broadcast_details.markdown = "# 本轮数据\n\n有效发送 845。"
-    updated.documents.execution_strategy.markdown = "# 执行策略\n\n先审计，再发送。"
+    updated.documents.retrospective_details.markdown = "# 本轮复盘\n\n发送事实可核验，行为归因待补齐。"
+    updated.documents.execution_strategy.markdown = "# 下周执行策略\n\n先补归因，再验证差异。"
     updated.references.append(
         ReferenceSnapshot(
             reference_key="ai-assistant-plan:monday-20260713",
@@ -108,12 +109,13 @@ def test_newer_revision_updates_projection_and_read_models() -> None:
     assert strategy is not None and strategy["strategy"]["run_count"] == 1
     assert strategy["sources"][0]["reference_key"] == "broadcast-summary"
     assert strategy["documents"]["broadcast_details"]["markdown"].startswith("# 本轮数据")
+    assert strategy["documents"]["retrospective_details"]["markdown"].startswith("# 本轮复盘")
     assert strategy["assistant_plans"][0]["source_id"] == "hxc-monday-20260713-plan"
     assert runs["items"][0]["snapshot_revision"] == 2
     assert run is not None and run["run"]["execution_stage"] == "postmortem"
     assert run["run"]["plan_version"] == "review-v2"
     assert run["run"]["fact_conflict"] is True
-    assert run["documents"]["execution_strategy"]["markdown"].startswith("# 执行策略")
+    assert run["documents"]["execution_strategy"]["markdown"].startswith("# 下周执行策略")
 
 
 def test_strategy_version_and_run_strategy_version_are_immutable() -> None:

@@ -1,7 +1,8 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/admin_console/material_picker.css">
+<link rel="stylesheet" href="/static/admin_console/group_chat_picker.css?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="/static/admin_console/material_picker.css?v=group-chat-direct-select-20260715">
 <style>
   .radar-form-page { display: grid; gap: 16px; max-width: 980px; }
   .radar-panel { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; overflow: hidden; }
@@ -101,7 +102,8 @@
 {% endblock %}
 
 {% block scripts_extra %}
-<script src="/static/admin_console/material_picker.js"></script>
+<script src="/static/admin_console/group_chat_picker.js?v=group-chat-direct-select-20260715"></script>
+<script src="/static/admin_console/material_picker.js?v=group-chat-direct-select-20260715"></script>
 <script>
 (() => {
   const mode = "{{ radar_form_mode }}";

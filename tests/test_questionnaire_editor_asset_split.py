@@ -23,7 +23,7 @@ def test_questionnaire_editor_template_is_thin_and_assets_are_jinja_free() -> No
     assert len(template.splitlines()) < 3000
     assert "<style>" not in template
     assert '<script id="questionnaire-editor-config" type="application/json">' in template
-    assert '<script src="/static/questionnaire/admin_questionnaire_editor.js?v=20260713"></script>' in template
+    assert '<script src="/static/questionnaire/admin_questionnaire_editor.js?v=20260715-operations-only"></script>' in template
     assert '<link rel="stylesheet" href="/static/questionnaire/admin_questionnaire_editor.css?v=20260713">' in template
     assert "{{" not in stylesheet and "{%" not in stylesheet
     assert "{{" not in script and "{%" not in script

@@ -455,6 +455,7 @@ console.log(JSON.stringify({{ fromOld, fromEmptyPackage, fromLegacyIds, fromPack
         "image_library_ids": [],
         "miniprogram_library_ids": [],
         "attachment_library_ids": [],
+        "group_invite_library_ids": [],
     }
     assert payload["fromEmptyPackage"]["content_text"] == "老话术"
     assert payload["fromLegacyIds"] == {
@@ -462,12 +463,14 @@ console.log(JSON.stringify({{ fromOld, fromEmptyPackage, fromLegacyIds, fromPack
         "image_library_ids": [12],
         "miniprogram_library_ids": [34],
         "attachment_library_ids": [56],
+        "group_invite_library_ids": [],
     }
     assert payload["fromPackage"] == {
         "content_text": "新话术",
         "image_library_ids": [12, 34],
         "miniprogram_library_ids": [56],
         "attachment_library_ids": [78, 90],
+        "group_invite_library_ids": [],
     }
     assert payload["toNode"] == {
         "text_content": "保存话术",
@@ -476,6 +479,7 @@ console.log(JSON.stringify({{ fromOld, fromEmptyPackage, fromLegacyIds, fromPack
             "image_library_ids": [101, 102],
             "miniprogram_library_ids": [201],
             "attachment_library_ids": [301, 302],
+            "group_invite_library_ids": [],
         },
     }
     assert payload["empty"] == {
@@ -483,6 +487,7 @@ console.log(JSON.stringify({{ fromOld, fromEmptyPackage, fromLegacyIds, fromPack
         "image_library_ids": [],
         "miniprogram_library_ids": [],
         "attachment_library_ids": [],
+        "group_invite_library_ids": [],
     }
 
 

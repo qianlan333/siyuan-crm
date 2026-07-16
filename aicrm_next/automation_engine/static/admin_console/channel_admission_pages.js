@@ -16,6 +16,7 @@
       image_library_ids: normalizeIdList(data.welcome_image_library_ids),
       miniprogram_library_ids: normalizeIdList(data.welcome_miniprogram_library_ids),
       attachment_library_ids: normalizeIdList(data.welcome_attachment_library_ids),
+      group_invite_library_ids: normalizeIdList(data.welcome_group_invite_library_ids),
     };
   }
 
@@ -26,6 +27,7 @@
       welcome_image_library_ids: normalizeIdList(data.image_library_ids),
       welcome_miniprogram_library_ids: normalizeIdList(data.miniprogram_library_ids),
       welcome_attachment_library_ids: normalizeIdList(data.attachment_library_ids),
+      welcome_group_invite_library_ids: normalizeIdList(data.group_invite_library_ids),
     };
   }
 
@@ -334,10 +336,11 @@
     const miniprogramIds = intList(root.querySelector("[data-miniprogram-ids]")?.value);
     const imageIds = intList(root.querySelector("[data-image-ids]")?.value);
     const attachmentIds = intList(root.querySelector("[data-attachment-ids]")?.value);
+    const groupInviteIds = intList(root.querySelector("[data-group-invite-ids]")?.value);
     const entryTagId = root.querySelector("[data-entry-tag-id]")?.value || "";
     const entryTagName = root.querySelector("[data-entry-tag-name]")?.value || "";
     const entryTagGroupName = root.querySelector("[data-entry-tag-group-name]")?.value || "";
-    if (miniprogramIds.length + imageIds.length + attachmentIds.length > 9) {
+    if (miniprogramIds.length + imageIds.length + attachmentIds.length + groupInviteIds.length > 9) {
       throw new Error("欢迎语素材最多选择 9 个");
     }
     const assignment = assignmentPayload();
@@ -354,6 +357,7 @@
       welcome_image_library_ids: imageIds,
       welcome_miniprogram_library_ids: miniprogramIds,
       welcome_attachment_library_ids: attachmentIds,
+      welcome_group_invite_library_ids: groupInviteIds,
       auto_accept_friend: !isLink && !!form.querySelector('[name="auto_accept_friend"]')?.checked,
       entry_tag_id: entryTagId,
       entry_tag_name: entryTagName,
@@ -723,6 +727,7 @@
     const miniInput = root.querySelector("[data-miniprogram-ids]");
     const imageInput = root.querySelector("[data-image-ids]");
     const attachmentInput = root.querySelector("[data-attachment-ids]");
+    const groupInviteInput = root.querySelector("[data-group-invite-ids]");
     const summary = root.querySelector("[data-welcome-content-summary]");
     const materialSummary = root.querySelector("[data-welcome-material-summary]");
     if (!root.querySelector("[data-open-welcome-composer]")) return;
@@ -732,6 +737,7 @@
       welcome_image_library_ids: intList(imageInput?.value),
       welcome_miniprogram_library_ids: intList(miniInput?.value),
       welcome_attachment_library_ids: intList(attachmentInput?.value),
+      welcome_group_invite_library_ids: intList(groupInviteInput?.value),
     });
 
     const renderSummary = () => {
@@ -743,13 +749,15 @@
         materialSummary.innerHTML =
           '<span class="pill">图片 ' + contentPackage.image_library_ids.length + '</span>' +
           '<span class="pill">小程序 ' + contentPackage.miniprogram_library_ids.length + '</span>' +
-          '<span class="pill">附件 ' + contentPackage.attachment_library_ids.length + '</span>';
+          '<span class="pill">附件 ' + contentPackage.attachment_library_ids.length + '</span>' +
+          '<span class="pill">客户群 ' + contentPackage.group_invite_library_ids.length + '</span>';
       } else if (summary) {
         summary.innerHTML =
           '<strong>话术：</strong><span>' + escapeHtml(textSummary) + '</span>' +
           '<strong>素材：</strong><span>图片 ' + contentPackage.image_library_ids.length +
           ' / 小程序 ' + contentPackage.miniprogram_library_ids.length +
-          ' / 附件 ' + contentPackage.attachment_library_ids.length + '</span>';
+          ' / 附件 ' + contentPackage.attachment_library_ids.length +
+          ' / 客户群 ' + contentPackage.group_invite_library_ids.length + '</span>';
       }
     };
 
@@ -769,6 +777,7 @@
           image: 3,
           miniprogram: 1,
           attachment: 9,
+          group_invite: 1,
         },
         onConfirm(contentPackage) {
           const fields = contentPackageToWelcomeFields(contentPackage);
@@ -776,6 +785,7 @@
           setIds(imageInput, fields.welcome_image_library_ids);
           setIds(miniInput, fields.welcome_miniprogram_library_ids);
           setIds(attachmentInput, fields.welcome_attachment_library_ids);
+          setIds(groupInviteInput, fields.welcome_group_invite_library_ids);
           renderSummary();
           toast("欢迎语和素材已更新");
         },

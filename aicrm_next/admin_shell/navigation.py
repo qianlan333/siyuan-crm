@@ -87,6 +87,10 @@ ADMIN_ROUTE_REGISTRY: dict[str, AdminRoute] = {
         "api.admin_attachment_library_workspace",
         "/admin/attachment-library",
     ),
+    "api.admin_group_invite_library_workspace": AdminRoute(
+        "api.admin_group_invite_library_workspace",
+        "/admin/group-invite-library",
+    ),
     "api.admin_config": AdminRoute("api.admin_config", "/admin/config"),
     "api.admin_config_app_settings": AdminRoute("api.admin_config_app_settings", "/admin/config/app-settings"),
     "api.admin_api_docs": AdminRoute("api.admin_api_docs", "/admin/api-docs"),
@@ -186,6 +190,7 @@ ADMIN_NAV_GROUPS: list[dict[str, Any]] = [
     {
         "title": "配置及后台",
         "items": [
+            {"key": "group_invite_library", "label": "群邀请托管", "endpoint": "api.admin_group_invite_library_workspace"},
             {"key": "jobs", "label": "同步任务配置 / 同步任务", "endpoint": "api.admin_jobs"},
             {"key": "push_center", "label": "推送中心", "endpoint": "api.admin_push_center_page"},
             {"key": "internal_events", "label": "事件中心", "endpoint": "api.admin_internal_events_page"},

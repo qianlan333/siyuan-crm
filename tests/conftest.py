@@ -204,6 +204,7 @@ _TABLES_TO_TRUNCATE = [
     "commerce_coupons",
     "service_period_huangyoucan_usage_sync_runs",
     "service_period_huangyoucan_usage_snapshot",
+    "service_period_member_views",
     "service_period_events",
     "service_period_entitlements",
     "service_period_products",

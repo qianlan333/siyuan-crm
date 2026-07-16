@@ -1133,7 +1133,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/customer_read_model/repo.py",
       "key": "CUSTOMER_READ_MODEL_REPO_BACKEND",
-      "line": 585
+      "line": 596
     },
     {
       "accessor": "os.getenv",

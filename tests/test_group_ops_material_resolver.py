@@ -89,6 +89,16 @@ def _items() -> dict[str, dict[int, dict]]:
                 "media_id_expires_at": FUTURE,
             },
         },
+        "group_invite": {
+            78: {
+                "id": 78,
+                "enabled": True,
+                "title": "点击加入体验群",
+                "description": "进群领取资料",
+                "join_url": "https://work.weixin.qq.com/gm/0123456789abcdef0123456789abcdef",
+                "pic_url": "https://example.com/group-cover.png",
+            },
+        },
     }
 
 
@@ -142,6 +152,29 @@ def test_group_ops_material_resolver_miniprogram_materializes_attachment() -> No
     ]
     assert "pagepath" not in attachments[0]["miniprogram"]
     assert "thumb_media_id" not in attachments[0]["miniprogram"]
+
+
+def test_group_ops_material_resolver_group_invite_materializes_link_without_upload() -> None:
+    uploader = RecordingUploader()
+
+    attachments, image_media_ids = _resolver(_items(), uploader=uploader).resolve_content_package_materials(
+        {"group_invite_library_ids": [78]}
+    )
+
+    assert image_media_ids == []
+    assert uploader.image_calls == []
+    assert uploader.attachment_calls == []
+    assert attachments == [
+        {
+            "msgtype": "link",
+            "link": {
+                "title": "点击加入体验群",
+                "url": "https://work.weixin.qq.com/gm/0123456789abcdef0123456789abcdef",
+                "desc": "进群领取资料",
+                "picurl": "https://example.com/group-cover.png",
+            },
+        }
+    ]
 
 
 def test_group_ops_material_resolver_miniprogram_expired_media_uploads_and_caches() -> None:

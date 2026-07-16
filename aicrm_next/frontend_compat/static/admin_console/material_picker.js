@@ -3,6 +3,7 @@
     image: "图片",
     miniprogram: "小程序",
     attachment: "PDF/附件",
+    group_invite: "客户群",
   };
 
   function escapeHtml(value) {
@@ -24,6 +25,7 @@
       subtitle: String(raw.subtitle || ""),
       thumbnail_url: String(raw.thumbnail_url || ""),
       enabled: raw.enabled !== false,
+      selectable: raw.selectable !== false && raw.enabled !== false,
       mime_type: String(raw.mime_type || metadata.mime_type || ""),
       file_name: String(raw.file_name || metadata.file_name || raw.title || ""),
       file_size: Number(raw.file_size || metadata.file_size || 0),
@@ -47,6 +49,11 @@
     options = options || {};
     const type = String(options.type || "image");
     if (!TYPE_LABELS[type]) throw new Error("未知素材类型");
+    if (type === "group_invite") {
+      if (!window.AICRMGroupChatPicker) throw new Error("群聊选择器未加载");
+      window.AICRMGroupChatPicker.open(options);
+      return;
+    }
     const selectedIds = new Set((options.selectedIds || []).map((id) => Number(id)));
     const limit = Number(options.limit || 1);
     const allowedMimeTypes = new Set((options.allowedMimeTypes || []).map((value) => String(value || "").trim()).filter(Boolean));
@@ -64,7 +71,7 @@
         <header class="aicrm-material-picker__head">
           <div>
             <h3>${escapeHtml(options.title || `选择${TYPE_LABELS[type]}`)}</h3>
-            <p>最多 ${limit} 个，已选项会高亮显示。</p>
+            <p>${type === "group_invite" ? `选择一个已配置邀请链接的客户群。<a href="/admin/group-invite-library" target="_blank" rel="noopener">管理群邀请设置</a>` : `最多 ${limit} 个，已选项会高亮显示。`}</p>
           </div>
           <button class="aicrm-material-picker__button" type="button" data-picker-close>取消</button>
         </header>
@@ -73,7 +80,7 @@
           <button class="aicrm-material-picker__button is-primary" type="button" data-picker-refresh>搜索</button>
         </div>
         <div class="aicrm-material-picker__body">
-          <div class="aicrm-material-picker__empty" data-picker-empty>正在加载素材...</div>
+          <div class="aicrm-material-picker__empty" data-picker-empty>正在加载${escapeHtml(TYPE_LABELS[type])}...</div>
           <div class="aicrm-material-picker__grid" data-picker-grid></div>
         </div>
       </div>
@@ -94,7 +101,7 @@
     function render() {
       if (!items.length) {
         empty.hidden = false;
-        empty.textContent = "没有可选素材";
+        empty.textContent = type === "group_invite" ? "没有已同步的客户群" : "没有可选素材";
         grid.innerHTML = "";
         return;
       }
@@ -104,7 +111,8 @@
         const thumb = item.thumbnail_url
           ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="">`
           : `<span>${escapeHtml(TYPE_LABELS[item.type] || "素材")}</span>`;
-        return `<button class="aicrm-material-picker__item${selected ? " is-selected" : ""}" type="button" data-picker-id="${item.library_id}">
+        const disabled = !item.selectable || !item.library_id;
+        return `<button class="aicrm-material-picker__item${selected ? " is-selected" : ""}${disabled ? " is-disabled" : ""}" type="button" ${disabled ? "disabled" : `data-picker-id="${item.library_id}"`}>
           <span class="aicrm-material-picker__thumb">${thumb}</span>
           <span class="aicrm-material-picker__title">${escapeHtml(item.title || `${TYPE_LABELS[type]} ${item.library_id}`)}</span>
           <span class="aicrm-material-picker__subtitle">${escapeHtml(item.subtitle || "")}</span>
@@ -114,7 +122,7 @@
 
     async function load() {
       empty.hidden = false;
-      empty.textContent = "正在加载素材...";
+      empty.textContent = `正在加载${TYPE_LABELS[type]}...`;
       grid.innerHTML = "";
       try {
         items = await fetchItems(type, query);

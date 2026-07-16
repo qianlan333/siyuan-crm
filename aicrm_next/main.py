@@ -56,6 +56,7 @@ _AUTOMATION_ENGINE_DIR = Path(__file__).resolve().parent / "automation_engine"
 _CUSTOMER_TAGS_DIR = Path(__file__).resolve().parent / "customer_tags"
 _QUESTIONNAIRE_DIR = Path(__file__).resolve().parent / "questionnaire"
 _NAVIGATION_TARGET_DIR = Path(__file__).resolve().parent / "navigation_target"
+_SERVICE_PERIOD_DIR = Path(__file__).resolve().parent / "service_period"
 logger = logging.getLogger(__name__)
 
 
@@ -176,6 +177,11 @@ def create_app(*, pii_audit_repository: PiiAuditRepository | None = None) -> Fas
         "/static/operation-cycles",
         StaticFiles(directory=_OPERATION_CYCLES_DIR / "static"),
         name="operation_cycles_static",
+    )
+    app.mount(
+        "/static/service-period",
+        StaticFiles(directory=_SERVICE_PERIOD_DIR / "static"),
+        name="service_period_static",
     )
     app.mount(
         "/static",

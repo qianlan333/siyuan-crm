@@ -1,0 +1,125 @@
+{% extends "admin_console/base.html" %}
+
+{% block head_extra %}
+<link rel="stylesheet" href="/static/service-period/admin_console/member_grid.css?v=20260716-extra-columns-1">
+{% endblock %}
+
+{% block content %}
+<section
+  class="sp-grid-page"
+  id="spMemberGrid"
+  data-service-product-id="{{ service_product_id | e }}"
+  aria-label="周期商品会员数据表"
+>
+  <div class="sp-viewbar">
+    <div class="sp-viewbar__scroll" id="spViewTabs" role="tablist" aria-label="数据视图"></div>
+    <button class="sp-viewbar__add" id="spAddView" type="button" hidden>
+      <span aria-hidden="true">＋</span><span>新建视图</span>
+    </button>
+    <button class="sp-icon-button sp-viewbar__menu" id="spViewMenuButton" type="button" aria-label="当前视图菜单" aria-haspopup="menu" aria-expanded="false">
+      <span aria-hidden="true">•••</span>
+    </button>
+  </div>
+
+  <div class="sp-grid-toolbar" role="toolbar" aria-label="视图配置">
+    <div class="sp-grid-toolbar__config">
+      <button class="sp-tool-button" id="spFilterButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6.3 7.2v5.4l-3.4 1.8v-7.2L4 5Z"/></svg>
+        <span>筛选</span><span class="sp-tool-button__count" id="spFilterCount" hidden></span>
+      </button>
+      <button class="sp-tool-button" id="spGroupButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="5" rx="1"/><rect x="4" y="14" width="16" height="5" rx="1"/></svg>
+        <span>分组</span><span class="sp-tool-button__count" id="spGroupCount" hidden></span>
+      </button>
+      <button class="sp-tool-button" id="spSortButton" type="button" aria-haspopup="dialog" aria-expanded="false">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 4v15m0 0-3-3m3 3 3-3M16 20V5m0 0-3 3m3-3 3 3"/></svg>
+        <span>排序</span><span class="sp-tool-button__count" id="spSortCount" hidden></span>
+      </button>
+    </div>
+    <div class="sp-grid-toolbar__actions">
+      <span class="sp-draft-status" id="spDraftStatus" aria-live="polite">正在加载视图…</span>
+      <button class="sp-secondary-button" id="spSaveAsView" type="button" hidden>另存为</button>
+      <button class="sp-primary-button" id="spSaveView" type="button" hidden disabled>保存视图</button>
+    </div>
+  </div>
+
+  <div class="sp-config-panel" id="spConfigPanel" role="dialog" aria-modal="false" hidden></div>
+  <div class="sp-config-panel sp-view-menu" id="spViewMenu" role="menu" hidden></div>
+
+  <div class="sp-grid-meta">
+    <span id="spResultSummary">加载数据中…</span>
+    <span class="sp-grid-meta__readonly" id="spReadonlyNotice" hidden>只读模式：可临时筛选、排序和分组</span>
+  </div>
+
+  <div class="sp-grid-shell" id="spGridShell" aria-busy="true">
+    <div class="sp-grid-scroll" id="spGridScroll" tabindex="0">
+      <table class="sp-member-table" aria-label="周期商品会员数据">
+        <thead id="spGridHead"></thead>
+        <tbody id="spGridBody"></tbody>
+      </table>
+      <div class="sp-grid-sentinel" id="spGridSentinel" aria-hidden="true"></div>
+    </div>
+    <div class="sp-grid-state" id="spGridState">
+      <span class="sp-spinner" aria-hidden="true"></span><span>正在读取真实会员数据…</span>
+    </div>
+  </div>
+
+  <div class="sp-toast" id="spGridToast" role="status" aria-live="polite" hidden></div>
+</section>
+
+<dialog class="sp-dialog" id="spNameDialog">
+  <form method="dialog" class="sp-dialog__surface" id="spNameDialogForm">
+    <header>
+      <h2 id="spNameDialogTitle">新建视图</h2>
+      <button class="sp-icon-button" value="cancel" aria-label="关闭" type="submit" formnovalidate>×</button>
+    </header>
+    <label class="sp-field-label" for="spViewNameInput">视图名称</label>
+    <input class="sp-text-input" id="spViewNameInput" name="name" maxlength="60" autocomplete="off" required>
+    <p class="sp-dialog__hint" id="spNameDialogHint"></p>
+    <footer>
+      <button class="sp-secondary-button" value="cancel" type="submit" formnovalidate>取消</button>
+      <button class="sp-primary-button" id="spNameDialogSubmit" value="default" type="submit">确认</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="sp-dialog" id="spUnsavedDialog">
+  <form method="dialog" class="sp-dialog__surface">
+    <header><h2>当前视图有未保存的修改</h2></header>
+    <p class="sp-dialog__copy">筛选、排序或分组只保存在当前草稿中。你可以先保存，再继续切换或离开。</p>
+    <footer class="sp-dialog__footer--three">
+      <button class="sp-secondary-button" value="cancel">取消</button>
+      <button class="sp-secondary-button sp-button--danger-text" value="discard">放弃修改</button>
+      <button class="sp-primary-button" value="save">保存并继续</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="sp-dialog" id="spConfirmDialog">
+  <form method="dialog" class="sp-dialog__surface">
+    <header><h2 id="spConfirmTitle">确认操作</h2></header>
+    <p class="sp-dialog__copy" id="spConfirmCopy"></p>
+    <footer>
+      <button class="sp-secondary-button" value="cancel">取消</button>
+      <button class="sp-danger-button" value="confirm">确认删除</button>
+    </footer>
+  </form>
+</dialog>
+
+<dialog class="sp-dialog" id="spConflictDialog">
+  <form method="dialog" class="sp-dialog__surface">
+    <header><h2>视图已被其他管理员更新</h2></header>
+    <p class="sp-dialog__copy">为避免覆盖他人的修改，请加载共享视图的最新版本，或把当前草稿另存为新视图。</p>
+    <footer class="sp-dialog__footer--three">
+      <button class="sp-secondary-button" value="cancel">取消</button>
+      <button class="sp-secondary-button" value="save-as">另存为新视图</button>
+      <button class="sp-primary-button" value="reload">加载最新版</button>
+    </footer>
+  </form>
+</dialog>
+{% endblock %}
+
+{% block scripts_extra %}
+<script defer src="/static/service-period/admin_console/member_grid_state.js?v=20260716-extra-columns-1"></script>
+<script defer src="/static/service-period/admin_console/member_grid.js?v=20260716-extra-columns-1"></script>
+{% endblock %}

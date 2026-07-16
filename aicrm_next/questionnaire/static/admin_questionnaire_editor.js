@@ -1524,23 +1524,14 @@ function renderEditorSecondaryActions() {
     });
     return;
   }
-  editorSecondaryActionsEl.innerHTML = `
-    <button id="editor-global-external-push-logs-btn" type="button" class="btn ghost">外推总览</button>
-    ${state.currentId ? `
+  editorSecondaryActionsEl.innerHTML = state.currentId ? `
       <button id="editor-share-btn" type="button" class="btn ghost">分享</button>
       <button id="editor-duplicate-btn" type="button" class="btn ghost">复制问卷</button>
       <button id="editor-export-btn" type="button" class="btn ghost">下载数据</button>
-      <button id="editor-external-push-logs-btn" type="button" class="btn ghost">外推记录</button>
-    ` : ''}
-  `;
-  const globalExternalPushLogsBtn = document.getElementById('editor-global-external-push-logs-btn');
+    ` : '';
   const shareBtn = document.getElementById('editor-share-btn');
   const duplicateBtn = document.getElementById('editor-duplicate-btn');
   const exportBtn = document.getElementById('editor-export-btn');
-  const externalPushLogsBtn = document.getElementById('editor-external-push-logs-btn');
-  globalExternalPushLogsBtn?.addEventListener('click', () => {
-    window.location.assign('/admin/questionnaires/external-push-logs');
-  });
   shareBtn?.addEventListener('click', () => {
     copyText(buildPublicUrl(), '分享链接已复制');
   });
@@ -1549,9 +1540,6 @@ function renderEditorSecondaryActions() {
   });
   exportBtn?.addEventListener('click', () => {
     downloadQuestionnaireData(state.currentId).catch((error) => showToast(error.message || '下载失败，请稍后重试', true));
-  });
-  externalPushLogsBtn?.addEventListener('click', () => {
-    window.location.assign(`/admin/questionnaires/${state.currentId}/external-push-logs`);
   });
 }
 

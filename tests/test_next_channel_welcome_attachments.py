@@ -28,7 +28,7 @@ def _base(monkeypatch, channel):
 
 
 def test_welcome_supports_text_image_file_miniprogram(monkeypatch):
-    channel = {"id": 10, "scene_value": "scene-a", "status": "active", "owner_staff_id": "sales", "welcome_message": "hello", "entry_tag_id": "", "welcome_image_library_ids": [1], "welcome_attachment_library_ids": [2], "welcome_miniprogram_library_ids": [3]}
+    channel = {"id": 10, "scene_value": "scene-a", "status": "active", "owner_staff_id": "sales", "welcome_message": "hello", "entry_tag_id": "", "welcome_image_library_ids": [1], "welcome_attachment_library_ids": [2], "welcome_miniprogram_library_ids": [3], "welcome_group_invite_library_ids": [4]}
     sent, effects, previous = _base(monkeypatch, channel)
     try:
         result = process_channel_entry(ProcessChannelEntryCommand(unionid="union-wm", external_contact_id="wm", payload_json={"State": "scene-a", "WelcomeCode": "wc"}, send_welcome_message=True))
@@ -38,7 +38,7 @@ def test_welcome_supports_text_image_file_miniprogram(monkeypatch):
     assert result["welcome_message"]["queued"] is True
     assert sent == []
     welcome_effect = next(row for row in effects if row["effect_type"] == "welcome_message")
-    assert [item["msgtype"] for item in welcome_effect["request_json"]["attachments"]] == ["image", "file", "miniprogram"]
+    assert [item["msgtype"] for item in welcome_effect["request_json"]["attachments"]] == ["image", "file", "miniprogram", "link"]
 
 
 def test_welcome_renders_customer_name_placeholder_from_identity_name(monkeypatch):

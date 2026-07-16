@@ -25,6 +25,7 @@ def test_empty_fields_normalize_to_empty_package() -> None:
         "image_library_ids": [],
         "miniprogram_library_ids": [],
         "attachment_library_ids": [],
+        "group_invite_library_ids": [],
     }
 
 
@@ -52,6 +53,11 @@ def test_attachment_ids_allow_at_most_nine_without_truncating() -> None:
         _normalize({"attachment_library_ids": list(range(1, 11))})
 
 
+def test_group_invite_ids_allow_at_most_one_without_truncating() -> None:
+    with pytest.raises(ContractError, match="最多允许 1 个"):
+        _normalize({"group_invite_library_ids": [1, 2]})
+
+
 def test_text_disabled_forces_content_text_empty() -> None:
     assert _normalize({"content_text": "  必须忽略  "}, text_enabled=False)["content_text"] == ""
 
@@ -67,5 +73,5 @@ def test_require_body_false_allows_empty_package() -> None:
         "image_library_ids": [],
         "miniprogram_library_ids": [],
         "attachment_library_ids": [],
+        "group_invite_library_ids": [],
     }
-

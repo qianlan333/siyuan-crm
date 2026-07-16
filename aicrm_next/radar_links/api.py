@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import csv
+from datetime import datetime, timezone
 import html
 import io
+import json
 from typing import Any
 
-from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse, Response
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.pii_audit import set_pii_audit_result_count
@@ -31,6 +36,8 @@ from .application import (
     GetRadarLinkStatsQuery,
     GetRadarViewerPageQuery,
     InitiateRadarPdfUploadCommand,
+    ListExternalRadarClicksQuery,
+    ListExternalRadarLinkMappingsQuery,
     ListRadarLinkEventsQuery,
     ListRadarLinksQuery,
     ProcessRadarPdfPreviewCommand,
@@ -47,6 +54,8 @@ from .dto import RadarLinkCreateRequest, RadarLinkUpdateRequest
 
 router = APIRouter()
 RADAR_VIEWER_COOKIE = "aicrm_radar_viewer"
+EXTERNAL_RADAR_CLICK_SOURCE = "external_radar_clicks"
+EXTERNAL_RADAR_LINK_SOURCE = "external_radar_links"
 
 
 def _raise_http(exc: Exception) -> None:
@@ -72,6 +81,78 @@ def _raise_http(exc: Exception) -> None:
 
 def _base_url(request: Request) -> str:
     return str(request.base_url).rstrip("/")
+
+
+def _external_error(*, error_code: str, message: str, status_code: int, source_status: str) -> JSONResponse:
+    return JSONResponse(
+        {
+            "ok": False,
+            "error_code": error_code,
+            "message": message,
+            "route_owner": "ai_crm_next",
+            "source_status": source_status,
+            "fallback_used": False,
+        },
+        status_code=status_code,
+    )
+
+
+def _external_integer(
+    value: str | None,
+    name: str,
+    *,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int | None:
+    token = str(value or "").strip()
+    if not token:
+        return None
+    try:
+        parsed = int(token)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be greater than or equal to {minimum}")
+    if maximum is not None and parsed > maximum:
+        raise ValueError(f"{name} must be less than or equal to {maximum}")
+    return parsed
+
+
+def _external_timestamp(value: str | None, name: str) -> datetime | None:
+    parsed = _external_integer(value, name, minimum=0)
+    if parsed is None:
+        return None
+    if parsed > 9_999_999_999:
+        raise ValueError(f"{name} must be a Unix timestamp in seconds, not milliseconds")
+    return datetime.fromtimestamp(parsed, tz=timezone.utc)
+
+
+def _decode_external_cursor(cursor: str | None, key: str) -> int | None:
+    token = str(cursor or "").strip()
+    if not token:
+        return None
+    try:
+        padded = token + "=" * (-len(token) % 4)
+        payload = json.loads(base64.urlsafe_b64decode(padded.encode("ascii")).decode("utf-8"))
+        if not isinstance(payload, dict) or set(payload) != {key}:
+            raise ValueError("cursor payload is invalid")
+        value = int(payload[key])
+        if value <= 0:
+            raise ValueError("cursor value is invalid")
+        return value
+    except (ValueError, TypeError, UnicodeDecodeError, json.JSONDecodeError, binascii.Error) as exc:
+        raise ValueError("cursor is invalid") from exc
+
+
+def _encode_external_cursor(key: str, value: int | None) -> str:
+    if value is None:
+        return ""
+    payload = json.dumps({key: int(value)}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _external_filters(**values: Any) -> dict[str, Any]:
+    return {key: value for key, value in values.items() if value not in {None, ""}}
 
 
 def _request_meta(request: Request) -> dict[str, Any]:
@@ -145,6 +226,89 @@ def _radar_oauth_error_response(exc: Exception, *, state: str | None = None) -> 
 </body>
 </html>"""
     return HTMLResponse(body, status_code=status_code)
+
+
+@router.get("/api/external/radar-clicks")
+def list_external_radar_clicks(
+    request: Request,
+    mobile: str | None = Query(None, description="手机号"),
+    unionid: str | None = Query(None, description="微信 unionid"),
+    radar_id: str | None = Query(None, description="雷达数字 ID"),
+    radar_code: str | None = Query(None, description="雷达代码"),
+    clicked_from: str | None = Query(None, description="点击开始秒级 Unix 时间戳"),
+    clicked_to: str | None = Query(None, description="点击结束秒级 Unix 时间戳"),
+    limit: str = Query("100", description="分页条数，最大 500"),
+    cursor: str | None = Query(None, description="下一页游标"),
+) -> JSONResponse:
+    try:
+        start_at = _external_timestamp(clicked_from, "clicked_from")
+        end_at = _external_timestamp(clicked_to, "clicked_to")
+        parsed_radar_id = _external_integer(radar_id, "radar_id", minimum=1)
+        parsed_limit = _external_integer(limit, "limit", minimum=1, maximum=500)
+        if start_at is not None and end_at is not None and start_at > end_at:
+            raise ValueError("clicked_from must be earlier than or equal to clicked_to")
+        payload = ListExternalRadarClicksQuery()(
+            mobile=str(mobile or "").strip(),
+            unionid=str(unionid or "").strip(),
+            radar_id=parsed_radar_id,
+            radar_code=str(radar_code or "").strip(),
+            clicked_from=start_at,
+            clicked_to=end_at,
+            before_event_id=_decode_external_cursor(cursor, "event_id"),
+            limit=int(parsed_limit or 100),
+        )
+    except ValueError as exc:
+        return _external_error(error_code="invalid_request", message=str(exc), status_code=400, source_status=EXTERNAL_RADAR_CLICK_SOURCE)
+    except RepositoryProviderError as exc:
+        return _external_error(
+            error_code="production_unavailable",
+            message=str(exc),
+            status_code=503,
+            source_status="production_unavailable",
+        )
+    next_before_event_id = payload.pop("next_before_event_id", None)
+    payload["next_cursor"] = _encode_external_cursor("event_id", next_before_event_id)
+    payload["filters"] = _external_filters(
+        mobile=str(mobile or "").strip(),
+        unionid=str(unionid or "").strip(),
+        radar_id=parsed_radar_id,
+        radar_code=str(radar_code or "").strip(),
+        clicked_from=_external_integer(clicked_from, "clicked_from", minimum=0),
+        clicked_to=_external_integer(clicked_to, "clicked_to", minimum=0),
+    )
+    set_pii_audit_result_count(request, len(payload["items"]))
+    return JSONResponse(jsonable_encoder(payload), headers={"Cache-Control": "no-store, max-age=0"})
+
+
+@router.get("/api/external/radar-links")
+def list_external_radar_link_mappings(
+    radar_id: str | None = Query(None, description="雷达数字 ID"),
+    radar_code: str | None = Query(None, description="雷达代码"),
+    limit: str = Query("100", description="分页条数，最大 500"),
+    cursor: str | None = Query(None, description="下一页游标"),
+) -> JSONResponse:
+    try:
+        parsed_radar_id = _external_integer(radar_id, "radar_id", minimum=1)
+        parsed_limit = _external_integer(limit, "limit", minimum=1, maximum=500)
+        payload = ListExternalRadarLinkMappingsQuery()(
+            radar_id=parsed_radar_id,
+            radar_code=str(radar_code or "").strip(),
+            before_link_id=_decode_external_cursor(cursor, "radar_id"),
+            limit=int(parsed_limit or 100),
+        )
+    except ValueError as exc:
+        return _external_error(error_code="invalid_request", message=str(exc), status_code=400, source_status=EXTERNAL_RADAR_LINK_SOURCE)
+    except RepositoryProviderError as exc:
+        return _external_error(
+            error_code="production_unavailable",
+            message=str(exc),
+            status_code=503,
+            source_status="production_unavailable",
+        )
+    next_before_link_id = payload.pop("next_before_link_id", None)
+    payload["next_cursor"] = _encode_external_cursor("radar_id", next_before_link_id)
+    payload["filters"] = _external_filters(radar_id=parsed_radar_id, radar_code=str(radar_code or "").strip())
+    return JSONResponse(jsonable_encoder(payload))
 
 
 @router.get("/api/admin/radar-links")

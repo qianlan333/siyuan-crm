@@ -6550,6 +6550,48 @@ routes:
   rate_limit: authenticated
   principal_types:
   - human
+- path: /api/external/radar-clicks
+  methods:
+  - GET
+  route_name: list_external_radar_clicks
+  capability_owner: radar_links
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: external_integration
+  auth_scheme: api_client_jwt
+  capability: external_read
+  access_scope: service
+  pii_level: sensitive
+  csrf: false
+  rate_limit: integration
+  principal_types:
+  - api_client
+  - service
+- path: /api/external/radar-links
+  methods:
+  - GET
+  route_name: list_external_radar_link_mappings
+  capability_owner: radar_links
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: external_integration
+  auth_scheme: api_client_jwt
+  capability: external_read
+  access_scope: service
+  pii_level: none
+  csrf: false
+  rate_limit: integration
+  principal_types:
+  - api_client
+  - service
 - path: /api/admin/radar-links
   methods:
   - GET
@@ -8279,6 +8321,46 @@ routes:
   rate_limit: authenticated
   principal_types:
   - human
+- path: /api/admin/automation-conversion/group-ops/group-picker
+  methods:
+  - GET
+  route_name: list_group_chat_picker
+  capability_owner: automation_engine
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: internal
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/automation-conversion/group-ops/group-picker/sync
+  methods:
+  - POST
+  route_name: sync_group_chat_picker
+  capability_owner: automation_engine
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_group_ops
+  access_scope: global
+  pii_level: internal
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
 - path: /api/admin/automation-conversion/group-ops/groups/sync/preview
   methods:
   - POST
@@ -10004,10 +10086,150 @@ routes:
   rate_limit: authenticated
   principal_types:
   - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/schema
+  methods:
+  - GET
+  route_name: service_period_member_grid_schema
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: financial
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-views
+  methods:
+  - GET
+  route_name: list_service_period_member_views
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: financial
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-views
+  methods:
+  - POST
+  route_name: create_service_period_member_view
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_commerce
+  access_scope: global
+  pii_level: financial
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-views/{view_id}
+  methods:
+  - PUT
+  route_name: update_service_period_member_view
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_commerce
+  access_scope: global
+  pii_level: financial
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-views/{view_id}
+  methods:
+  - DELETE
+  route_name: delete_service_period_member_view
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_commerce
+  access_scope: global
+  pii_level: financial
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/member-grid/query
+  methods:
+  - POST
+  route_name: query_service_period_member_grid
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: financial
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
 - path: /api/admin/service-period-products/{service_product_id}/members/{unionid}/remark
   methods:
   - PUT
   route_name: update_service_period_member_remark
+  capability_owner: service_period
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_commerce
+  access_scope: global
+  pii_level: financial
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/service-period-products/{service_product_id}/members/{unionid}/alliance
+  methods:
+  - PUT
+  route_name: update_service_period_member_alliance
   capability_owner: service_period
   runtime_owner: ai_crm_next
   layer: api
@@ -11616,6 +11838,186 @@ routes:
   rate_limit: authenticated
   principal_types:
   - human
+- path: /api/admin/group-invite-bindings
+  methods:
+  - GET
+  route_name: list_group_invite_bindings
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: internal
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-bindings/ensure
+  methods:
+  - POST
+  route_name: ensure_group_invite_binding
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_content
+  access_scope: global
+  pii_level: internal
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-bindings/{item_id}
+  methods:
+  - GET
+  route_name: get_group_invite_binding
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: internal
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-bindings/{item_id}
+  methods:
+  - PUT
+  route_name: update_group_invite_binding
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_content
+  access_scope: global
+  pii_level: internal
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-library
+  methods:
+  - GET
+  route_name: list_group_invites
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: internal
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-library
+  methods:
+  - POST
+  route_name: create_group_invite
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_content
+  access_scope: global
+  pii_level: internal
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-library/{item_id}
+  methods:
+  - GET
+  route_name: get_group_invite
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: internal
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-library/{item_id}
+  methods:
+  - PUT
+  route_name: update_group_invite
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_content
+  access_scope: global
+  pii_level: internal
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /api/admin/group-invite-library/{item_id}
+  methods:
+  - DELETE
+  route_name: delete_group_invite
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: api
+  external_effects: none
+  data_source: command
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: manage_content
+  access_scope: global
+  pii_level: internal
+  csrf: true
+  rate_limit: authenticated
+  principal_types:
+  - human
 - path: /admin/image-library
   methods:
   - GET
@@ -11660,6 +12062,26 @@ routes:
   methods:
   - GET
   route_name: api.admin_attachment_library_workspace
+  capability_owner: media_library
+  runtime_owner: ai_crm_next
+  layer: admin_page
+  external_effects: none
+  data_source: read_model
+  requires_auth: true
+  rollback: previous_release
+  audience: admin
+  auth_scheme: human_session
+  capability: admin_read
+  access_scope: global
+  pii_level: internal
+  csrf: false
+  rate_limit: authenticated
+  principal_types:
+  - human
+- path: /admin/group-invite-library
+  methods:
+  - GET
+  route_name: api.admin_group_invite_library_workspace
   capability_owner: media_library
   runtime_owner: ai_crm_next
   layer: admin_page

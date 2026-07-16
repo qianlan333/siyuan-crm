@@ -42,7 +42,7 @@ def test_questionnaire_admin_new_page_is_readonly_shell_without_write_execution(
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert "新建问卷" in response.text
     assert '"initialQuestionnaireId": null' in response.text
-    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260713" in response.text
+    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260715-operations-only" in response.text
 
 
 def test_questionnaire_admin_editor_exposes_other_option_controls() -> None:
@@ -65,7 +65,7 @@ def test_questionnaire_admin_detail_page_uses_next_read_model_editor_payload() -
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert "黄小璨激活问卷" in response.text
     assert "hxc-activation-v1" in response.text
-    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260713" in response.text
+    assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260715-operations-only" in response.text
     script = TestClient(create_app()).get("/static/questionnaire/admin_questionnaire_editor.js")
     assert script.status_code == 200
     assert "复制问卷" in script.text
@@ -120,6 +120,9 @@ def test_questionnaire_operations_page_owns_completion_and_external_push_ui() ->
     assert "completion_target" not in editor_script
     assert "external_push" not in editor_script
     assert "field-external-push" not in editor_script
+    assert "editor-global-external-push-logs-btn" not in editor_script
+    assert "editor-external-push-logs-btn" not in editor_script
+    assert "/admin/questionnaires/external-push-logs" not in editor_script
 
     product_template = (root / "aicrm_next/commerce/templates/wechat_products.html").read_text(encoding="utf-8")
     assert "/static/navigation-target/completion_target_config.js" in product_template

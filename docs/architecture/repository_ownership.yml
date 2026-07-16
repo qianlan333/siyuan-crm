@@ -490,15 +490,19 @@ repositories:
     capability_owner: aicrm_next.media_library
     table_reads:
       - campaign_steps
+      - group_invite_library
       - image_library
       - image_library_variants
       - miniprogram_library
     table_writes:
       - attachment_library
       - campaign_steps
+      - group_invite_library
       - image_library
       - image_library_variants
       - miniprogram_library
+    non_literal_table_reads:
+      - group_invite_library
   aicrm_next/media_library/repo.py:
     capability_owner: aicrm_next.media_library
     table_reads: []
@@ -657,6 +661,7 @@ repositories:
   aicrm_next/radar_links/repo.py:
     capability_owner: aicrm_next.radar_links
     table_reads:
+      - crm_user_identity
       - radar_click_events
       - radar_links
       - radar_pdf_preview_assets
@@ -678,6 +683,18 @@ repositories:
     capability_owner: aicrm_next.send_content
     table_reads: []
     table_writes: []
+  aicrm_next/service_period/member_grid_repo.py:
+    capability_owner: aicrm_next.service_period
+    table_reads:
+      - crm_user_identity
+      - service_period_entitlements
+      - service_period_events
+      - service_period_member_views
+      - wechat_pay_orders
+      - wecom_external_contact_follow_users
+      - wecom_external_contact_identity_map
+    table_writes:
+      - service_period_member_views
   aicrm_next/service_period/repo.py:
     capability_owner: aicrm_next.service_period
     table_reads:

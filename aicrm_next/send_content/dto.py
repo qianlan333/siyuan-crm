@@ -11,6 +11,7 @@ class SendContentPackage(BaseModel):
     image_library_ids: list[Any] = Field(default_factory=list)
     miniprogram_library_ids: list[Any] = Field(default_factory=list)
     attachment_library_ids: list[Any] = Field(default_factory=list)
+    group_invite_library_ids: list[Any] = Field(default_factory=list)
 
 
 class SendContentValidateRequest(BaseModel):
@@ -33,7 +34,7 @@ class MaterialAssetsValidateRequest(BaseModel):
 
 
 class MaterialPickerListRequest(BaseModel):
-    type: Literal["image", "miniprogram", "attachment"]
+    type: Literal["image", "miniprogram", "attachment", "group_invite"]
     q: str = ""
     enabled_only: bool = True
     limit: int = 50

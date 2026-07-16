@@ -2,8 +2,9 @@
 
 {% block head_extra %}
 <link rel="stylesheet" href="https://unpkg.com/tabulator-tables@6.3.0/dist/css/tabulator_simple.min.css">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=send-content-preview-ux-20260527">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=send-content-preview-ux-20260527">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/group_chat_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=group-chat-selector-20260715">
 <style>
   /* —— stat 卡片 (4 漏斗) —— */
   .hxc-stats {
@@ -191,8 +192,9 @@
 {% block scripts_extra %}
 <script src="https://unpkg.com/tabulator-tables@6.3.0/dist/js/tabulator.min.js"></script>
 <script src="https://oss.sheetjs.com/sheetjs/xlsx.full.min.js"></script>
-<script src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=send-content-preview-ux-20260527"></script>
-<script src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=send-content-preview-ux-20260527"></script>
+<script src="{{ url_for('static', filename='admin_console/group_chat_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=group-chat-selector-20260715"></script>
 <script id="hxc-dashboard-data" type="application/json">{{ dashboard_rows | tojson }}</script>
 <script id="hxc-send-config-data" type="application/json">{{ send_configs | tojson }}</script>
 <script>
@@ -512,6 +514,7 @@
         image_library_ids: [],
         miniprogram_library_ids: [],
         attachment_library_ids: [],
+        group_invite_library_ids: [],
       },
       onConfirm(contentPackage) {
         const payload = {

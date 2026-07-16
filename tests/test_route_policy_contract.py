@@ -31,9 +31,11 @@ def test_route_policy_inventory_covers_every_runtime_business_route() -> None:
     inventory = collect_route_inventory(app)
 
     # Operation Cycles contributes eight routes, Coupon V1 contributes twenty,
-    # and questionnaire operations contributes five; static mounts are counted
+    # questionnaire operations contributes five, direct group selection and
+    # invitation bindings add six, the service-period member grid adds seven,
+    # and siyuan keeps one verification-file route; static mounts are counted
     # separately by the router-registry contract.
-    assert len(index) == len(inventory) == 708
+    assert len(index) == len(inventory) == 729
     for route in app.routes:
         if not isinstance(route, APIRoute) or route.path in FASTAPI_BUILTIN_ROUTE_PATHS:
             continue
@@ -51,6 +53,33 @@ def test_route_policy_inventory_uses_all_required_audiences() -> None:
         "internal_worker",
         "external_integration",
     }
+
+
+def test_external_radar_routes_use_existing_read_client_and_explicit_pii_levels() -> None:
+    _assert_policy(
+        "/api/external/radar-clicks",
+        "GET",
+        {
+            "audience": "external_integration",
+            "auth_scheme": "api_client_jwt",
+            "capability": "external_read",
+            "access_scope": "service",
+            "pii_level": "sensitive",
+            "rate_limit": "integration",
+        },
+    )
+    _assert_policy(
+        "/api/external/radar-links",
+        "GET",
+        {
+            "audience": "external_integration",
+            "auth_scheme": "api_client_jwt",
+            "capability": "external_read",
+            "access_scope": "service",
+            "pii_level": "none",
+            "rate_limit": "integration",
+        },
+    )
 
 
 def test_known_unsafe_routes_have_explicit_deny_by_default_policies() -> None:

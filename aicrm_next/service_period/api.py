@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from time import perf_counter
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -13,26 +14,34 @@ from fastapi.templating import Jinja2Templates
 from aicrm_next.admin_shell import shell_context
 from aicrm_next.public_product import h5_wechat_pay
 from aicrm_next.shared.errors import ContractError, NotFoundError
-from aicrm_next.shared.safe_logging import safe_log_exception
+from aicrm_next.shared.safe_logging import safe_log_exception, safe_log_fields
 from aicrm_next.shared.share_qr import svg_qr_data_url
 from aicrm_next.shared.sync_request import read_request_json
 
 from .application import (
     CopyServicePeriodProductCommand,
+    CreateServicePeriodMemberViewCommand,
     CreateServicePeriodProductCommand,
+    DeleteServicePeriodMemberViewCommand,
     DeleteServicePeriodProductCommand,
     GetPublicServicePeriodProductQuery,
     GetServicePeriodProductBySlugQuery,
+    GetServicePeriodMemberGridSchemaQuery,
     GetServicePeriodProductQuery,
     GetServicePeriodProductStatsQuery,
     GetServicePeriodPublicStateQuery,
+    ListServicePeriodMemberViewsQuery,
     ListServicePeriodMembersQuery,
     ListServicePeriodProductsQuery,
+    QueryServicePeriodMemberGridQuery,
     SetServicePeriodProductEnabledCommand,
+    UpdateServicePeriodMemberAllianceCommand,
+    UpdateServicePeriodMemberViewCommand,
     UpdateServicePeriodMemberRemarkCommand,
     UpdateServicePeriodProductCommand,
 )
 from .dto import ServicePeriodProductCreateRequest, ServicePeriodProductUpdateRequest
+from .member_grid import MemberViewConflictError
 from .public import render_service_period_pay_page, render_service_period_public_page
 
 
@@ -142,6 +151,8 @@ def _service_period_checkout_state(product: dict, request: Request, public_state
 def _raise_http(exc: Exception) -> None:
     if isinstance(exc, NotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, MemberViewConflictError):
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, ContractError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     safe_log_exception(LOGGER, "service period api unexpected error", exc)
@@ -156,6 +167,11 @@ def _payload(data: dict) -> dict:
         "fallback_used": False,
         "real_external_call_executed": False,
     }
+
+
+def _actor(request: Request) -> str:
+    context = getattr(request.state, "auth_context", None)
+    return str(getattr(context, "principal_id", "") or "system")
 
 
 def _admin_context(request: Request, *, page_title: str, page_summary: str, page_mode: str, product: dict | None = None) -> dict:
@@ -245,25 +261,21 @@ def admin_service_period_product_edit_page(request: Request, service_product_id:
 def admin_service_period_product_data_page(request: Request, service_product_id: str):
     try:
         product = GetServicePeriodProductQuery()(service_product_id)["product"]
-        stats = GetServicePeriodProductStatsQuery()(service_product_id)
-        members = ListServicePeriodMembersQuery()(service_product_id, limit=100, offset=0)
         status_code = 200
         page_error = ""
     except Exception as exc:
         product = {}
-        stats = {}
-        members = {"items": []}
         status_code = 404
         page_error = str(exc)
     context = _admin_context(
         request,
         page_title=f"{product.get('title') or product.get('name') or '周期商品'}数据",
-        page_summary="查看有效用户、到期用户和续费订单。",
+        page_summary="按视图筛选、排序和分组周期商品会员数据。",
         page_mode="data",
         product=product,
     )
-    context.update({"stats": stats, "members": members.get("items") or [], "page_error": page_error})
-    return templates.TemplateResponse(request, "service_period_products.html", context, status_code=status_code)
+    context.update({"page_error": page_error})
+    return templates.TemplateResponse(request, "service_period_member_grid.html", context, status_code=status_code)
 
 
 @router.get("/api/admin/service-period-products")
@@ -380,12 +392,161 @@ def service_period_product_members(
         _raise_http(exc)
 
 
+@router.get("/api/admin/service-period-products/{service_product_id}/member-grid/schema")
+def service_period_member_grid_schema(service_product_id: str) -> dict:
+    try:
+        return _payload(GetServicePeriodMemberGridSchemaQuery()(service_product_id))
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.get("/api/admin/service-period-products/{service_product_id}/member-views")
+def list_service_period_member_views(service_product_id: str) -> dict:
+    try:
+        return _payload(ListServicePeriodMemberViewsQuery()(service_product_id))
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.post("/api/admin/service-period-products/{service_product_id}/member-views")
+def create_service_period_member_view(service_product_id: str, request: Request) -> JSONResponse:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        result = _payload(
+            CreateServicePeriodMemberViewCommand()(
+                service_product_id,
+                name=str(payload.get("name") or ""),
+                config=payload.get("config") if isinstance(payload.get("config"), dict) else None,
+                actor=_actor(request),
+            )
+        )
+        LOGGER.info(
+            "service_period_member_view_created",
+            extra=safe_log_fields(
+                service_product_id=service_product_id,
+                view_id=(result.get("view") or {}).get("id"),
+            ),
+        )
+    except Exception as exc:
+        _raise_http(exc)
+    return JSONResponse(jsonable_encoder(result), status_code=201)
+
+
+@router.put("/api/admin/service-period-products/{service_product_id}/member-views/{view_id}")
+def update_service_period_member_view(service_product_id: str, view_id: str, request: Request) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        config = payload.get("config")
+        if not isinstance(config, dict):
+            raise ContractError("视图配置不能为空")
+        try:
+            expected_version = int(payload.get("version") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ContractError("视图版本无效") from exc
+        if expected_version < 1:
+            raise ContractError("视图版本无效")
+        result = _payload(
+            UpdateServicePeriodMemberViewCommand()(
+                service_product_id,
+                view_id,
+                name=str(payload.get("name") or ""),
+                config=config,
+                expected_version=expected_version,
+                actor=_actor(request),
+            )
+        )
+        LOGGER.info(
+            "service_period_member_view_updated",
+            extra=safe_log_fields(service_product_id=service_product_id, view_id=view_id),
+        )
+        return result
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.delete("/api/admin/service-period-products/{service_product_id}/member-views/{view_id}")
+def delete_service_period_member_view(service_product_id: str, view_id: str, request: Request) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        try:
+            expected_version = int(payload.get("version") or 0)
+        except (TypeError, ValueError) as exc:
+            raise ContractError("视图版本无效") from exc
+        if expected_version < 1:
+            raise ContractError("视图版本无效")
+        result = _payload(
+            DeleteServicePeriodMemberViewCommand()(
+                service_product_id,
+                view_id,
+                expected_version=expected_version,
+            )
+        )
+        LOGGER.info(
+            "service_period_member_view_deleted",
+            extra=safe_log_fields(service_product_id=service_product_id, view_id=view_id),
+        )
+        return result
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.post("/api/admin/service-period-products/{service_product_id}/member-grid/query")
+def query_service_period_member_grid(service_product_id: str, request: Request) -> dict:
+    started_at = perf_counter()
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        config = payload.get("config")
+        if config is not None and not isinstance(config, dict):
+            raise ContractError("视图配置格式错误")
+        result = _payload(
+            QueryServicePeriodMemberGridQuery()(
+                service_product_id,
+                config=config,
+                limit=int(payload.get("limit") or 100),
+                cursor=str(payload.get("cursor") or ""),
+            )
+        )
+        LOGGER.info(
+            "service_period_member_grid_queried",
+            extra=safe_log_fields(
+                service_product_id=service_product_id,
+                duration_ms=round((perf_counter() - started_at) * 1000, 2),
+                row_count=len(result.get("rows") or []),
+            ),
+        )
+        return result
+    except (TypeError, ValueError):
+        _raise_http(ContractError("分页参数无效"))
+    except Exception as exc:
+        _raise_http(exc)
+
+
 @router.put("/api/admin/service-period-products/{service_product_id}/members/{unionid}/remark")
 def update_service_period_member_remark(service_product_id: str, unionid: str, request: Request) -> dict:
     try:
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         return _payload(UpdateServicePeriodMemberRemarkCommand()(service_product_id, unionid, remark=str(payload.get("remark") or "")))
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.put("/api/admin/service-period-products/{service_product_id}/members/{unionid}/alliance")
+def update_service_period_member_alliance(service_product_id: str, unionid: str, request: Request) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        return _payload(
+            UpdateServicePeriodMemberAllianceCommand()(
+                service_product_id,
+                unionid,
+                alliance=str(payload.get("alliance") or ""),
+            )
+        )
     except Exception as exc:
         _raise_http(exc)
 

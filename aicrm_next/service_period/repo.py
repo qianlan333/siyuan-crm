@@ -28,16 +28,20 @@ from .domain import (
     validate_duration_days,
 )
 from .huangyoucan_usage import huangyoucan_usage_match_joins, huangyoucan_usage_select_fields, public_huangyoucan_usage_fields
-
+from .member_admin_fields import InMemoryMemberAdminFieldsMixin, PostgresMemberAdminFieldsMixin
+from .member_grid_repo import (
+    InMemoryMemberGridRepositoryMixin,
+    MemberGridRepositoryProtocol,
+    PostgresMemberGridRepositoryMixin,
+    effective_renewal_count_from_events,
+)
 
 LOGGER = logging.getLogger(__name__)
-
 
 def _jsonb(value: Any) -> Any:
     from psycopg.types.json import Jsonb
 
     return Jsonb(value if isinstance(value, (dict, list)) else {}, dumps=lambda data: json.dumps(data, ensure_ascii=False, default=str))
-
 
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -50,10 +54,8 @@ def _json_object(value: Any) -> dict[str, Any]:
         return parsed if isinstance(parsed, dict) else {}
     return {}
 
-
 def _paid_order(order: dict[str, Any]) -> bool:
     return text(order.get("status")).lower() == "paid" or text(order.get("trade_state")).upper() == "SUCCESS"
-
 
 def _order_identity(order: dict[str, Any]) -> dict[str, str]:
     metadata = _json_object(order.get("metadata_json"))
@@ -65,7 +67,6 @@ def _order_identity(order: dict[str, Any]) -> dict[str, str]:
         "payer_name": text(order.get("payer_name_snapshot") or identity.get("payer_name")),
         "openid": text(identity.get("openid") or order.get("openid")),
     }
-
 
 def _resolve_paid_order_unionid(conn: Any, identity: dict[str, str]) -> str:
     canonical_unionid = text(identity.get("unionid"))
@@ -111,7 +112,7 @@ def _compact_trade_product_payload(product: dict[str, Any], *, product_id: Any |
     }
 
 
-class ServicePeriodRepository(Protocol):
+class ServicePeriodRepository(MemberGridRepositoryProtocol, Protocol):
     def list_products(self, *, limit: int, offset: int) -> dict[str, Any]: ...
     def create_service_product(self, *, trade_product: dict[str, Any], duration_days: int, membership_config_id: str, membership_config_name: str, link_slug: str, metadata_json: dict[str, Any] | None = None) -> dict[str, Any]: ...
     def get_product(self, service_product_id: str) -> dict[str, Any] | None: ...
@@ -124,20 +125,23 @@ class ServicePeriodRepository(Protocol):
     def stats(self, service_product_id: str) -> dict[str, Any]: ...
     def members(self, service_product_id: str, *, status: str | None, limit: int, offset: int) -> dict[str, Any]: ...
     def update_member_remark(self, service_product_id: str, unionid: str, remark: str) -> dict[str, Any]: ...
+    def update_member_alliance(self, service_product_id: str, unionid: str, alliance: str) -> dict[str, Any]: ...
     def entitlement_for_unionid(self, service_product_id: str, unionid: str) -> dict[str, Any] | None: ...
     def grant_or_renew_from_paid_order(self, *, order: dict[str, Any], transaction: dict[str, Any] | None = None) -> dict[str, Any]: ...
     def apply_refund_from_order(self, *, out_trade_no: str, refund: dict[str, Any] | None = None) -> dict[str, Any]: ...
     def expire_due_entitlements(self, *, now: datetime | None = None) -> dict[str, Any]: ...
 
 
-class InMemoryServicePeriodRepository:
+class InMemoryServicePeriodRepository(InMemoryMemberAdminFieldsMixin, InMemoryMemberGridRepositoryMixin):
     def __init__(self) -> None:
         self._products: list[dict[str, Any]] = []
         self._entitlements: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
+        self._member_views: list[dict[str, Any]] = []
         self._next_product_id = 1
         self._next_entitlement_id = 1
         self._next_event_id = 1
+        self._next_member_view_id = 1
 
     def list_products(self, *, limit: int, offset: int) -> dict[str, Any]:
         rows = [self._serialize_product(row, include_trade_product=False) for row in self._products if not row.get("deleted")]
@@ -176,6 +180,7 @@ class InMemoryServicePeriodRepository:
         }
         self._next_product_id += 1
         self._products.append(row)
+        self._append_default_member_view(text(row["id"]), actor="system")
         return self._serialize_product(row)
 
     def get_product(self, service_product_id: str) -> dict[str, Any] | None:
@@ -245,6 +250,7 @@ class InMemoryServicePeriodRepository:
         if self.has_entitlements(service_product_id):
             raise ContractError("已有服务期凭证的周期商品不能硬删除，请先下架")
         self._products = [item for item in self._products if item is not row]
+        self._delete_member_views(service_product_id)
         return {"ok": True, "deleted": True, "service_product_id": service_product_id, "trade_product_id": text(row.get("trade_product_id"))}
 
     def has_entitlements(self, service_product_id: str) -> bool:
@@ -286,16 +292,6 @@ class InMemoryServicePeriodRepository:
         items = [self._member_payload(row, now=now) for row in rows]
         items.sort(key=lambda item: text(item.get("end_at")), reverse=True)
         return {"ok": True, "items": items[offset : offset + limit], "total": len(items), "limit": limit, "offset": offset}
-
-    def update_member_remark(self, service_product_id: str, unionid: str, remark: str) -> dict[str, Any]:
-        row = self._find_entitlement(text(service_product_id), text(unionid))
-        if not row:
-            raise NotFoundError("service period member not found")
-        metadata = deepcopy(row.get("metadata_json") or {})
-        metadata["admin_remark"] = text(remark)
-        row["metadata_json"] = metadata
-        row["updated_at"] = utcnow().isoformat()
-        return {"ok": True, "member": self._member_payload(row, now=utcnow())}
 
     def entitlement_for_unionid(self, service_product_id: str, unionid: str) -> dict[str, Any] | None:
         normalized = text(unionid)
@@ -604,12 +600,18 @@ class InMemoryServicePeriodRepository:
             "end_at": isoformat(row.get("end_at")),
             "last_order_amount": int(last_order.get("amount_total") or 0),
             "last_order_duration_days": int((self._find_product(row.get("service_product_id")) or {}).get("duration_days") or 0),
+            "renewal_count": effective_renewal_count_from_events(
+                self._events,
+                service_product_id=text(row.get("service_product_id")),
+                unionid=text(row.get("unionid")),
+            ),
             "remark": text(metadata.get("admin_remark") or metadata.get("remark")),
+            "alliance": text(metadata.get("admin_alliance")),
             **public_huangyoucan_usage_fields({}),
         }
 
 
-class PostgresServicePeriodRepository:
+class PostgresServicePeriodRepository(PostgresMemberAdminFieldsMixin, PostgresMemberGridRepositoryMixin):
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
 
@@ -680,6 +682,7 @@ class PostgresServicePeriodRepository:
                     _jsonb(metadata_json or {}),
                 ),
             ).fetchone()
+            self._insert_default_member_view(conn, row["id"], actor="system")
             conn.commit()
         return self.get_product(text(row.get("id"))) or {}
 
@@ -954,89 +957,6 @@ class PostgresServicePeriodRepository:
             for row in rows
         ]
         return {"ok": True, "items": items, "total": int(total_row.get("total") or 0), "limit": limit, "offset": offset}
-
-    def update_member_remark(self, service_product_id: str, unionid: str, remark: str) -> dict[str, Any]:
-        with self._connect() as conn:
-            conn.execute(
-                """
-                UPDATE service_period_entitlements
-                SET metadata_json = jsonb_set(COALESCE(metadata_json, '{}'::jsonb), '{admin_remark}', to_jsonb(%s::text), true),
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE tenant_id = 'aicrm'
-                  AND service_product_id::text = %s
-                  AND unionid = %s
-                RETURNING *
-                """,
-                (text(remark), text(service_product_id), text(unionid)),
-            )
-            row = conn.execute(
-                """
-                SELECT
-                    e.*,
-                    p.duration_days AS last_order_duration_days,
-                    o.amount_total AS last_order_amount,
-                    COALESCE(
-                        NULLIF(c.remark, ''),
-                        NULLIF(wfu.remark, ''),
-                        NULLIF(NULLIF(c.customer_name, ''), '问卷提交用户'),
-                        NULLIF(NULLIF(c.profile_json->>'name', ''), '问卷提交用户'),
-                        NULLIF(wim.name, ''),
-                        NULLIF(c.customer_name, ''),
-                        NULLIF(e.metadata_json->>'payer_name', ''),
-                        NULLIF(o.payer_name_snapshot, '')
-                    ) AS display_name,
-                    COALESCE(
-                        NULLIF(e.external_userid_snapshot, ''),
-                        NULLIF(c.primary_external_userid, ''),
-                        NULLIF(wim.external_userid, '')
-                    ) AS external_userid,
-                    COALESCE(NULLIF(c.mobile, ''), NULLIF(c.mobile_normalized, '')) AS mobile,
-                    COALESCE(NULLIF(e.metadata_json->>'admin_remark', ''), NULLIF(e.metadata_json->>'remark', '')) AS remark
-                FROM service_period_entitlements e
-                JOIN service_period_products p ON p.id = e.service_product_id
-                LEFT JOIN wechat_pay_orders o ON o.id = e.last_order_id
-                LEFT JOIN crm_user_identity c ON c.unionid = e.unionid
-                LEFT JOIN LATERAL (
-                    SELECT im.external_userid, im.name
-                    FROM wecom_external_contact_identity_map im
-                    WHERE im.unionid = e.unionid
-                    ORDER BY im.updated_at DESC NULLS LAST, im.id DESC
-                    LIMIT 1
-                ) wim ON TRUE
-                LEFT JOIN LATERAL (
-                    SELECT fu.remark
-                    FROM wecom_external_contact_follow_users fu
-                    WHERE fu.external_userid = COALESCE(NULLIF(e.external_userid_snapshot, ''), NULLIF(c.primary_external_userid, ''), NULLIF(wim.external_userid, ''))
-                      AND COALESCE(fu.relation_status, 'active') = 'active'
-                    ORDER BY fu.is_primary DESC NULLS LAST, fu.updated_at DESC NULLS LAST, fu.id DESC
-                    LIMIT 1
-                ) wfu ON TRUE
-                WHERE e.tenant_id = 'aicrm'
-                  AND e.service_product_id::text = %s
-                  AND e.unionid = %s
-                LIMIT 1
-                """,
-                (text(service_product_id), text(unionid)),
-            ).fetchone()
-            conn.commit()
-        if not row:
-            raise NotFoundError("service period member not found")
-        now = utcnow()
-        return {
-            "ok": True,
-            "member": {
-                "unionid": text(row.get("unionid")),
-                "display_name": text(row.get("display_name")),
-                "external_userid": text(row.get("external_userid")),
-                "mobile": text(row.get("mobile")),
-                "status": entitlement_status(row.get("end_at"), row.get("status"), now=now),
-                "remaining_days": remaining_days(row.get("end_at"), now=now),
-                "end_at": isoformat(row.get("end_at")),
-                "last_order_amount": int(row.get("last_order_amount") or 0),
-                "last_order_duration_days": int(row.get("last_order_duration_days") or 0),
-                "remark": text(row.get("remark")),
-            },
-        }
 
     def entitlement_for_unionid(self, service_product_id: str, unionid: str) -> dict[str, Any] | None:
         if not text(unionid):

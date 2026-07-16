@@ -8,6 +8,7 @@ from typing import Any, Protocol
 from aicrm_next.automation_engine.group_ops.message_content import normalize_miniprogram_attachment_payload
 from aicrm_next.integration_gateway.wecom_media_upload_client import build_wecom_media_upload_client
 from aicrm_next.media_library.postgres_repo import PostgresMediaLibraryRepository
+from aicrm_next.media_library.dto import normalize_group_invite_join_url, normalize_http_url
 from aicrm_next.send_content.repo import InMemorySendContentRepository
 from aicrm_next.shared.errors import ContractError
 from aicrm_next.shared.runtime import production_data_ready, production_environment, raw_database_url
@@ -143,6 +144,9 @@ class _BaseGroupOpsMaterialResolver:
 
         for attachment_id in _int_ids(package.get("attachment_library_ids"), limit=9):
             attachments.append(self._resolve_file_attachment(attachment_id))
+
+        for group_invite_id in _int_ids(package.get("group_invite_library_ids"), limit=1):
+            attachments.append(self._resolve_group_invite_attachment(group_invite_id))
 
         return attachments, image_media_ids
 
@@ -293,6 +297,32 @@ class _BaseGroupOpsMaterialResolver:
 
         return {"msgtype": "file", "file": {"media_id": media_id}}
 
+    def _resolve_group_invite_attachment(self, group_invite_id: int) -> dict[str, Any]:
+        item = self._get_item("group_invite", group_invite_id)
+        if not item:
+            raise self._error("group_invite_not_ready", group_invite_id, "not_found")
+        if not _enabled(item):
+            raise self._error("group_invite_not_ready", group_invite_id, "disabled")
+        binding_status = _text(item.get("binding_status") or ("ready" if item.get("join_url") else "pending"))
+        if binding_status != "ready":
+            raise self._error("group_invite_not_ready", group_invite_id, binding_status or "pending")
+        title = _text(item.get("title") or item.get("name"))
+        if not title:
+            raise self._error("group_invite_not_ready", group_invite_id, "missing_title")
+        try:
+            join_url = normalize_group_invite_join_url(item.get("join_url"))
+            pic_url = normalize_http_url(item.get("pic_url"), field_name="卡片封面链接") if _text(item.get("pic_url")) else ""
+        except ValueError as exc:
+            raise self._error("group_invite_not_ready", group_invite_id, exc) from exc
+        if not join_url:
+            raise self._error("group_invite_not_ready", group_invite_id, "missing_join_url")
+        link: dict[str, Any] = {"title": title, "url": join_url}
+        if _text(item.get("description")):
+            link["desc"] = _text(item.get("description"))
+        if pic_url:
+            link["picurl"] = pic_url
+        return {"msgtype": "link", "link": link}
+
     def _upload_file_attachment(self, attachment_id: int, item: JsonDict, now: datetime) -> str:
         payload = _decode_base64(item.get("data_base64"))
         if not payload:
@@ -332,11 +362,13 @@ class InMemoryGroupOpsMaterialResolver(_BaseGroupOpsMaterialResolver):
 
     def _default_items(self) -> dict[str, dict[int, JsonDict]]:
         repository = InMemorySendContentRepository()
-        result: dict[str, dict[int, JsonDict]] = {"image": {}, "miniprogram": {}, "attachment": {}}
+        result: dict[str, dict[int, JsonDict]] = {"image": {}, "miniprogram": {}, "attachment": {}, "group_invite": {}}
         for kind in result:
-            materials = repository.get_materials_by_ids(kind, [12, 34, 56])
+            materials = repository.get_materials_by_ids(kind, [12, 34, 56, 78])
             for item in materials:
-                result[kind][int(item.get("id") or 0)] = dict(item)
+                normalized = dict(item.get("metadata") or {})
+                normalized.update(item)
+                result[kind][int(item.get("library_id") or item.get("id") or 0)] = normalized
         return result
 
     def _get_item(self, kind: str, item_id: int) -> JsonDict | None:

@@ -207,6 +207,7 @@ def find_qrcode_asset_by_scene(corp_id: str, scene_value: str) -> dict[str, Any]
                c.welcome_image_library_ids,
                c.welcome_miniprogram_library_ids,
                c.welcome_attachment_library_ids,
+               c.welcome_group_invite_library_ids,
                c.entry_tag_id,
                c.entry_tag_name,
                c.entry_tag_group_name

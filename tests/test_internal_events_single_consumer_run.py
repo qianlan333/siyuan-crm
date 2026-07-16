@@ -27,6 +27,7 @@ PAYMENT_CONSUMERS = {
     "customer_business_summary_consumer",
     "dnd_policy_consumer",
     "ai_assist_notify_consumer",
+    "product_paid_wecom_tag_consumer",
 }
 
 
@@ -192,7 +193,7 @@ def _emit_payment(monkeypatch, *, out_trade_no: str = "WXP_SINGLE_CONSUMER"):
     assert InternalEventOutboxRelay().relay_due(limit=10)["ok"] is True
     event = InternalEventService().list_events({"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE})[0][0]
     runs, total = InternalEventService().list_consumer_runs({"event_id": event.event_id})
-    assert total == 7
+    assert total == len(PAYMENT_CONSUMERS)
     assert {run.consumer_name for run in runs} == PAYMENT_CONSUMERS
     return event
 
@@ -271,12 +272,7 @@ def test_single_consumer_execute_only_updates_specified_consumer(monkeypatch) ->
     assert result["counts"]["succeeded_count"] == 1
     assert statuses["order_projection_consumer"] == "succeeded"
     assert {name: status for name, status in statuses.items() if name != "order_projection_consumer"} == {
-        "service_period_entitlement_consumer": "pending",
-        "webhook_order_paid_consumer": "pending",
-        "ai_audience_source_poke_consumer": "pending",
-        "customer_business_summary_consumer": "pending",
-        "dnd_policy_consumer": "pending",
-        "ai_assist_notify_consumer": "pending",
+        name: "pending" for name in PAYMENT_CONSUMERS - {"order_projection_consumer"}
     }
     assert len(attempts) == 1
     assert attempts[0].consumer_name == "order_projection_consumer"

@@ -12,7 +12,7 @@ from aicrm_next.shared.runtime import production_data_ready, production_environm
 SEND_CONTENT_BACKEND_ENV = "AICRM_SEND_CONTENT_REPO_BACKEND"
 SEND_CONTENT_DATABASE_URL_ENV = "AICRM_SEND_CONTENT_DATABASE_URL"
 SEND_CONTENT_SQL_BACKENDS = {"sql", "postgres", "postgresql", "psycopg"}
-MATERIAL_TYPES = {"image", "miniprogram", "attachment"}
+MATERIAL_TYPES = {"image", "miniprogram", "attachment", "group_invite"}
 
 
 class SendContentRepository(Protocol):
@@ -104,6 +104,24 @@ def _fixture_items() -> dict[str, list[dict[str, Any]]]:
                 },
             }
         ],
+        "group_invite": [
+            {
+                "type": "group_invite",
+                "library_id": 78,
+                "title": "加入 AI 同行群",
+                "subtitle": "点击卡片直接加入群聊",
+                "thumbnail_url": "https://example.com/group-invite.png",
+                "enabled": True,
+                "metadata": {
+                    "description": "进群领取资料",
+                    "join_url": "https://work.weixin.qq.com/gm/0123456789abcdef0123456789abcdef",
+                    "pic_url": "https://example.com/group-invite.png",
+                    "config_id": "fixture-group-invite",
+                    "state": "fixture",
+                    "binding_status": "ready",
+                },
+            }
+        ],
     }
 
 
@@ -112,6 +130,8 @@ class InMemorySendContentRepository:
 
     def __init__(self, data: dict[str, list[dict[str, Any]]] | None = None) -> None:
         self._data = deepcopy(data if data is not None else _fixture_items())
+        for material_type in MATERIAL_TYPES:
+            self._data.setdefault(material_type, [])
 
     def list_materials(
         self,
@@ -161,7 +181,7 @@ class InMemorySendContentRepository:
 
 def _assert_material_type(material_type: str) -> None:
     if material_type not in MATERIAL_TYPES:
-        raise ContractError("素材类型必须是 image、miniprogram 或 attachment")
+        raise ContractError("素材类型必须是 image、miniprogram、attachment 或 group_invite")
 
 
 def _fixture_usage_items() -> list[dict[str, Any]]:
@@ -215,6 +235,16 @@ def _fixture_usage_items() -> list[dict[str, Any]]:
             title="群运营附件节点",
             status="active",
             field_path="content_package_json.attachment_library_ids",
+        ),
+        _usage_item(
+            material_type="group_invite",
+            source_id=78,
+            consumer_type="channel_welcome_config",
+            source_table="automation_channel",
+            source_record_id="fixture-channel-group-invite",
+            title="渠道入群欢迎语",
+            status="active",
+            field_path="welcome_group_invite_library_ids",
         ),
     ]
 

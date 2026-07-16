@@ -108,7 +108,7 @@ def _bool_value(value: object, *, default: bool = False) -> bool:
 def _has_content_package_materials(value: object) -> bool:
     if not isinstance(value, dict):
         return False
-    for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids"):
+    for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "group_invite_library_ids"):
         items = value.get(key)
         if isinstance(items, list) and any(_text(item) for item in items):
             return True
@@ -368,6 +368,7 @@ def _material_package_from_ids(items: Any) -> JsonDict:
             "image": "image_library_ids",
             "miniprogram": "miniprogram_library_ids",
             "attachment": "attachment_library_ids",
+            "group_invite": "group_invite_library_ids",
         }.get(prefix)
         if key and _text(value):
             package.setdefault(key, []).append(value)
@@ -398,7 +399,7 @@ def _content_package_from_sources(*sources: JsonDict) -> JsonDict:
         nested = source.get("content_package") if isinstance(source.get("content_package"), dict) else {}
         _merge_package(package, nested)
         _merge_package(package, _material_package_from_ids(nested.get("material_asset_ids")))
-        for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "attachments"):
+        for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "group_invite_library_ids", "attachments"):
             value = source.get(key)
             if isinstance(value, list):
                 _merge_package(package, {key: value})

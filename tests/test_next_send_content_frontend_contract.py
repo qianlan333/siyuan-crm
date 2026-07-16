@@ -10,13 +10,17 @@ AUTOMATION_STATIC = ROOT / "aicrm_next" / "automation_engine" / "static" / "admi
 AUTOMATION_TEMPLATES = ROOT / "aicrm_next" / "automation_engine" / "templates" / "admin_console"
 RETIRED_OPERATION_TEMPLATE = AUTOMATION_TEMPLATES / "_automation_operation_orchestration_panel.html"
 HXC_TEMPLATE = ROOT / "aicrm_next" / "frontend_compat" / "templates" / "admin_console" / "hxc_dashboard.html"
+AI_AUDIENCE_TEMPLATE = ROOT / "aicrm_next" / "ai_audience_ops" / "templates" / "admin_console" / "ai_audience_package_list.html"
+AUTOMATION_AGENT_TEMPLATE = ROOT / "aicrm_next" / "automation_agents" / "templates" / "admin_console" / "automation_agent_edit.html"
 CHANNEL_FORM_TEMPLATE = AUTOMATION_TEMPLATES / "channel_code_form.html"
 GROUP_OPS_TEMPLATE = ROOT / "aicrm_next" / "automation_engine" / "group_ops" / "templates" / "admin_console" / "group_ops.html"
 CLOUD_CAMPAIGNS_TEMPLATE = ROOT / "aicrm_next" / "frontend_compat" / "templates" / "admin_console" / "cloud_campaigns_workspace.html"
+CLOUD_PLAN_TEMPLATE = ROOT / "aicrm_next" / "frontend_compat" / "templates" / "admin_console" / "cloud_plan_review.html"
 RETIRED_OPERATION_JS = AUTOMATION_STATIC / "automation_operation_orchestration_panel.js"
 RETIRED_AGENT_TEMPLATE_JS = STATIC / "automation_agent_config_templates.js"
 MATERIAL_PICKER_CSS = STATIC / "material_picker.css"
-SEND_CONTENT_ASSET_VERSION = "send-content-preview-ux-20260527"
+SEND_CONTENT_ASSET_VERSION = "group-chat-selector-20260715"
+GROUP_CHAT_ASSET_VERSION = "group-chat-direct-select-20260715"
 
 
 def _read(path: Path) -> str:
@@ -46,9 +50,11 @@ def test_material_picker_hidden_empty_state_overrides_grid_display() -> None:
 
 def test_standard_send_content_assets_are_cache_busted_on_migrated_surfaces() -> None:
     templates = [
+        AI_AUDIENCE_TEMPLATE,
         CHANNEL_FORM_TEMPLATE,
         GROUP_OPS_TEMPLATE,
         CLOUD_CAMPAIGNS_TEMPLATE,
+        CLOUD_PLAN_TEMPLATE,
         HXC_TEMPLATE,
     ]
 
@@ -58,7 +64,14 @@ def test_standard_send_content_assets_are_cache_busted_on_migrated_surfaces() ->
         assert "send_content_composer.css') }}?v=" in source
         assert "material_picker.js') }}?v=" in source
         assert "send_content_composer.js') }}?v=" in source
-    assert SEND_CONTENT_ASSET_VERSION in _read(CHANNEL_FORM_TEMPLATE)
+        assert source.count(f"?v={GROUP_CHAT_ASSET_VERSION}") >= 4
+
+    automation_agent_source = _read(AUTOMATION_AGENT_TEMPLATE)
+    assert automation_agent_source.count(f"?v={GROUP_CHAT_ASSET_VERSION}") >= 4
+    assert f"channel_admission_pages.js?v={SEND_CONTENT_ASSET_VERSION}" in _read(CHANNEL_FORM_TEMPLATE)
+    assert f"group_ops.js?v={SEND_CONTENT_ASSET_VERSION}" in _read(GROUP_OPS_TEMPLATE)
+    assert "cloud_plan_review.js') }}?v=" + SEND_CONTENT_ASSET_VERSION in _read(CLOUD_PLAN_TEMPLATE)
+    assert "user_ops_batch_send_modal.js') }}?v=" + SEND_CONTENT_ASSET_VERSION in _read(AI_AUDIENCE_TEMPLATE)
 
 
 def test_send_content_composer_excludes_non_standard_controls() -> None:
@@ -120,7 +133,7 @@ def test_material_selection_only_uses_material_picker_contract() -> None:
     picker = _read(STATIC / "material_picker.js")
 
     assert "AICRMMaterialPicker.open" in composer
-    assert "素材选择器未加载，请刷新页面后重试" in composer
+    assert "内容选择器未加载，请刷新页面后重试" in composer
     assert "/api/admin/material-picker/items" in picker
     for source in [composer, picker]:
         assert "/api/admin/image-library" not in source

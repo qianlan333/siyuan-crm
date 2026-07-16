@@ -531,6 +531,7 @@ def _welcome_attachments(channel: dict[str, Any]) -> tuple[list[dict[str, Any]],
         ("welcome_image_library_ids", "image"),
         ("welcome_attachment_library_ids", "file"),
         ("welcome_miniprogram_library_ids", "miniprogram"),
+        ("welcome_group_invite_library_ids", "link"),
     ):
         raw = channel.get(key) or []
         if isinstance(raw, str):
@@ -548,6 +549,12 @@ def _welcome_attachments(channel: dict[str, Any]) -> tuple[list[dict[str, Any]],
                     if any(not text(item.get(field)) for field in required):
                         return attachments, "material_resolve_failed"
                     attachment.update({field: text(item.get(field)) for field in required})
+                elif msgtype == "link":
+                    title = text(item.get("title") or item.get("name"))
+                    url = text(item.get("url") or item.get("join_url"))
+                    if not title or not url:
+                        return attachments, "material_resolve_failed"
+                    attachment["link"] = {"title": title, "url": url}
                 else:
                     media_id = text(item.get("media_id") or item.get("material_id") or item.get("pic_media_id"))
                     if not media_id:

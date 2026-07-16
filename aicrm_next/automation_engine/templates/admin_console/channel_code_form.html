@@ -1,9 +1,10 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/automation-engine/admin_console/channel_admission_pages.css?v=channel-detail-clean-demo-v2-20260626">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=send-content-preview-ux-20260527">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=send-content-preview-ux-20260527">
+<link rel="stylesheet" href="/static/automation-engine/admin_console/channel_admission_pages.css?v=group-chat-selector-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/group_chat_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=group-chat-selector-20260715">
 <link rel="stylesheet" href="{{ url_for('static', filename='admin_console/wecom_tag_picker.css') }}?v=unified-tag-picker-20260608">
 {% endblock %}
 
@@ -228,6 +229,7 @@
               <span class="pill gray">图片 0</span>
               <span class="pill gray">小程序 0</span>
               <span class="pill gray">附件 0</span>
+              <span class="pill gray">客户群 0</span>
             </div>
           </div>
         </div>
@@ -235,6 +237,7 @@
         <input type="hidden" name="welcome_image_library_ids" data-image-ids value="{{ (channel.welcome_image_library_ids or []) | join(',') }}">
         <input type="hidden" name="welcome_miniprogram_library_ids" data-miniprogram-ids value="{{ (channel.welcome_miniprogram_library_ids or []) | join(',') }}">
         <input type="hidden" name="welcome_attachment_library_ids" data-attachment-ids value="{{ (channel.welcome_attachment_library_ids or []) | join(',') }}">
+        <input type="hidden" name="welcome_group_invite_library_ids" data-group-invite-ids value="{{ (channel.welcome_group_invite_library_ids or []) | join(',') }}">
       </section>
 
       <section class="panel" data-channel-panel-content="tag">
@@ -264,8 +267,9 @@
 {% endblock %}
 
 {% block scripts_extra %}
-<script defer src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=send-content-preview-ux-20260527"></script>
-<script defer src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=send-content-preview-ux-20260527"></script>
+<script defer src="{{ url_for('static', filename='admin_console/group_chat_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script defer src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script defer src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=group-chat-selector-20260715"></script>
 <script defer src="{{ url_for('static', filename='admin_console/wecom_tag_picker.js') }}?v=unified-tag-picker-20260608"></script>
-<script defer src="/static/automation-engine/admin_console/channel_admission_pages.js?v=channel-detail-clean-demo-v2-20260626"></script>
+<script defer src="/static/automation-engine/admin_console/channel_admission_pages.js?v=group-chat-selector-20260715"></script>
 {% endblock %}

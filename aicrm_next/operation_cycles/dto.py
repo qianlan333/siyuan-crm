@@ -215,9 +215,10 @@ class MarkdownDocumentSnapshot(OperationCycleModel):
 
 
 class OperationCycleDocumentsSnapshot(OperationCycleModel):
-    """The two read-only document slots exposed by the strategy detail page."""
+    """The three read-only weekly document slots exposed by the strategy detail page."""
 
     broadcast_details: MarkdownDocumentSnapshot = Field(default_factory=MarkdownDocumentSnapshot)
+    retrospective_details: MarkdownDocumentSnapshot = Field(default_factory=MarkdownDocumentSnapshot)
     execution_strategy: MarkdownDocumentSnapshot = Field(default_factory=MarkdownDocumentSnapshot)
 
 

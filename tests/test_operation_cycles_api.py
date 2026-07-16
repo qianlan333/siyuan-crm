@@ -113,6 +113,7 @@ def test_ops_reporter_can_submit_aggregate_snapshot_without_external_effect(monk
     assert captured["reporter_id"] == "api_client:pytest-ops-reporter"
     assert captured["client_id"] == "pytest-ops-reporter"
     assert captured["snapshot"].external_effects == "none"
+    assert captured["snapshot"].documents.retrospective_details.markdown.startswith("# 2026-07-13 本周复盘明细")
 
 
 def test_wrong_machine_purpose_and_admin_session_cannot_report(monkeypatch) -> None:
@@ -246,6 +247,4 @@ def test_operation_cycle_admin_surface_exposes_no_write_routes(monkeypatch) -> N
     assert all(methods <= {"get"} for methods in methods_by_path.values())
     report_operation = openapi["paths"]["/api/operation-cycles/reports"]["post"]
     assert report_operation["requestBody"]["required"] is True
-    assert report_operation["requestBody"]["content"]["application/json"]["schema"]["title"] == (
-        "OperationCycleSnapshotV1"
-    )
+    assert report_operation["requestBody"]["content"]["application/json"]["schema"]["title"] == ("OperationCycleSnapshotV1")

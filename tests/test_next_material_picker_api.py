@@ -25,6 +25,7 @@ def test_validate_returns_route_owner_and_normalized_package(client) -> None:
                 "image_library_ids": [12, "12", 13],
                 "miniprogram_library_ids": [34],
                 "attachment_library_ids": [56],
+                "group_invite_library_ids": [78],
             }
         },
     )
@@ -38,6 +39,7 @@ def test_validate_returns_route_owner_and_normalized_package(client) -> None:
             "image_library_ids": [12, 13],
             "miniprogram_library_ids": [34],
             "attachment_library_ids": [56],
+            "group_invite_library_ids": [78],
         },
     }
 
@@ -74,6 +76,7 @@ def test_preview_is_local_only_and_does_not_create_tasks(client, monkeypatch) ->
                 "image_library_ids": [12],
                 "miniprogram_library_ids": [34],
                 "attachment_library_ids": [56],
+                "group_invite_library_ids": [78],
             }
         },
     )
@@ -87,6 +90,7 @@ def test_preview_is_local_only_and_does_not_create_tasks(client, monkeypatch) ->
         "image_count": 1,
         "miniprogram_count": 1,
         "attachment_count": 1,
+        "group_invite_count": 1,
     }
     assert all("media_id" not in item for item in body["preview"]["materials"])
     retired_after = client.get("/api/admin/automation-conversion/tasks")
@@ -126,6 +130,16 @@ def test_material_picker_attachment_shape(client) -> None:
     assert item["metadata"]["mime_type"] == "application/pdf"
 
 
+def test_material_picker_group_invite_shape(client) -> None:
+    response = client.get("/api/admin/material-picker/items?type=group_invite")
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["type"] == "group_invite"
+    assert item["metadata"]["join_url"].startswith("https://work.weixin.qq.com/gm/")
+    assert item["title"]
+
+
 def test_material_picker_unknown_type_returns_400_json(client) -> None:
     response = client.get("/api/admin/material-picker/items?type=unknown")
 
@@ -144,8 +158,8 @@ def test_material_assets_read_model_unifies_library_sources(client) -> None:
     assert body["ok"] is True
     assert body["read_model"] == "material_assets"
     assets = body["assets"]
-    assert {item["asset_type"] for item in assets} == {"image", "miniprogram", "attachment"}
-    assert {item["source_table"] for item in assets} == {"image_library", "miniprogram_library", "attachment_library"}
+    assert {item["asset_type"] for item in assets} == {"image", "miniprogram", "attachment", "group_invite"}
+    assert {item["source_table"] for item in assets} == {"image_library", "miniprogram_library", "attachment_library", "group_invite_library"}
     assert all(item["material_asset_id"] == f"{item['asset_type']}:{item['source_id']}" for item in assets)
     assert all("data_base64" not in item for item in assets)
     assert {"next_cursor", "has_more", "sort_key", "source_cursor"} <= set(body)
@@ -183,7 +197,7 @@ def test_material_assets_all_type_fetches_enough_rows_before_unified_slice(clien
     assert body["offset"] == 3
     assert body["limit"] == 1
     assert [item["material_asset_id"] for item in body["assets"]] == ["attachment:56"]
-    assert body["total"] == 4
+    assert body["total"] == 5
 
 
 def test_material_assets_all_type_deep_offset_stays_inside_large_source(client, monkeypatch) -> None:
@@ -237,8 +251,14 @@ def test_material_assets_cursor_moves_to_next_source_after_current_source(client
     assert second_page.status_code == 200
     second_body = second_page.json()
     assert [item["material_asset_id"] for item in second_body["assets"]] == ["miniprogram:34", "attachment:56"]
-    assert second_body["has_more"] is False
-    assert second_body["next_cursor"] == ""
+    assert second_body["has_more"] is True
+    assert second_body["next_cursor"]
+
+    third_page = client.get(f"/api/admin/material-assets?type=all&limit=2&cursor={second_body['next_cursor']}")
+    assert third_page.status_code == 200
+    third_body = third_page.json()
+    assert [item["material_asset_id"] for item in third_body["assets"]] == ["group_invite:78"]
+    assert third_body["has_more"] is False
 
 
 def test_material_assets_rejects_invalid_cursor(client) -> None:
@@ -384,6 +404,7 @@ class _LargeMaterialAssetsRepository:
             "image": [_picker_item("image", item_id) for item_id in range(1, 102)],
             "miniprogram": [_picker_item("miniprogram", 201)],
             "attachment": [_picker_item("attachment", 301)],
+            "group_invite": [],
         }
 
     def list_materials(
@@ -431,6 +452,7 @@ class _InvalidValidationRepository:
                 }
             ],
             "attachment": [],
+            "group_invite": [],
         }[material_type]
         by_id = {int(item["library_id"]): item for item in rows}
         return [by_id[item_id] for item_id in ids if item_id in by_id]

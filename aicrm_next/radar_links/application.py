@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+from datetime import datetime
 from io import BytesIO
 import hashlib
 import secrets
@@ -236,6 +237,82 @@ class ListRadarLinkEventsQuery:
             "limit": limit,
             "offset": offset,
             "pagination": {"limit": limit, "offset": offset, "has_more": offset + limit < int(total or 0)},
+        }
+
+    __call__ = execute
+
+
+class ListExternalRadarClicksQuery:
+    def __init__(self, repo: RadarLinksRepository | None = None) -> None:
+        self._repo = repo or build_radar_links_repository()
+
+    def execute(
+        self,
+        *,
+        mobile: str = "",
+        unionid: str = "",
+        radar_id: int | None = None,
+        radar_code: str = "",
+        clicked_from: datetime | None = None,
+        clicked_to: datetime | None = None,
+        before_event_id: int | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit or 100), 500))
+        items, total, has_more = self._repo.list_external_clicks(
+            mobile=mobile,
+            unionid=unionid,
+            radar_id=radar_id,
+            radar_code=radar_code,
+            clicked_from=clicked_from,
+            clicked_to=clicked_to,
+            before_event_id=before_event_id,
+            limit=safe_limit,
+        )
+        return {
+            "ok": True,
+            "items": items,
+            "total": int(total or 0),
+            "limit": safe_limit,
+            "has_more": bool(has_more),
+            "next_before_event_id": int(items[-1]["event_id"]) if has_more and items else None,
+            "route_owner": "ai_crm_next",
+            "source_status": "external_radar_clicks",
+            "fallback_used": False,
+        }
+
+    __call__ = execute
+
+
+class ListExternalRadarLinkMappingsQuery:
+    def __init__(self, repo: RadarLinksRepository | None = None) -> None:
+        self._repo = repo or build_radar_links_repository()
+
+    def execute(
+        self,
+        *,
+        radar_id: int | None = None,
+        radar_code: str = "",
+        before_link_id: int | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        safe_limit = max(1, min(int(limit or 100), 500))
+        items, total, has_more = self._repo.list_external_link_mappings(
+            radar_id=radar_id,
+            radar_code=radar_code,
+            before_link_id=before_link_id,
+            limit=safe_limit,
+        )
+        return {
+            "ok": True,
+            "items": items,
+            "total": int(total or 0),
+            "limit": safe_limit,
+            "has_more": bool(has_more),
+            "next_before_link_id": int(items[-1]["radar_id"]) if has_more and items else None,
+            "route_owner": "ai_crm_next",
+            "source_status": "external_radar_links",
+            "fallback_used": False,
         }
 
     __call__ = execute

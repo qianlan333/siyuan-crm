@@ -184,8 +184,9 @@ def test_questionnaire_editor_uses_next_native_admin_pages(monkeypatch):
     assert script.status_code == 200
     assert "X-AICRM-Compatibility-Facade" not in response.headers
     assert "侧边栏核心画像映射" in script.text
-    assert "/admin/questionnaires/external-push-logs" in script.text
-    assert "/admin/questionnaires/${state.currentId}/external-push-logs" in script.text
+    assert "editor-global-external-push-logs-btn" not in script.text
+    assert "editor-external-push-logs-btn" not in script.text
+    assert "/admin/questionnaires/external-push-logs" not in script.text
 
 
 def test_questionnaire_external_push_log_routes_use_next_native_handlers(monkeypatch):

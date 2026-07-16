@@ -142,6 +142,7 @@ def save_channel(data: dict[str, Any], *, channel_id: int | None = None) -> int:
         "welcome_image_library_ids",
         "welcome_miniprogram_library_ids",
         "welcome_attachment_library_ids",
+        "welcome_group_invite_library_ids",
         "auto_accept_friend",
         "entry_tag_id",
         "entry_tag_name",

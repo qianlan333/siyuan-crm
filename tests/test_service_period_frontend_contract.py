@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from aicrm_next.commerce.repo import reset_commerce_fixture_state
 from aicrm_next.public_product import h5_wechat_pay
@@ -166,17 +167,25 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
     text = response.text
 
     assert "前端周期服务数据" in text
-    assert "查看有效用户、到期用户和续费订单。" in text
-    assert "导出数据" in text
-    product_card = text[
-        text.index('class="admin-card service-period-product-card"') : text.index('class="service-period-stats-grid"')
-    ]
-    assert 'href="/admin/service-period-products">返回列表</a>' in product_card
-    assert 'id="exportMembersBtn"' in product_card
-    assert "service-period-inline-actions" not in text
-    for label in ("有效用户", "7 天内到期", "续费订单", "累计金额", "会员列表"):
-        assert label in text
-    for header in (
+    assert "按视图筛选、排序和分组周期商品会员数据。" in text
+    assert 'id="spMemberGrid"' in text
+    assert 'id="spViewTabs"' in text
+    assert 'id="spAddView"' in text
+    assert 'id="spFilterButton"' in text
+    assert 'id="spGroupButton"' in text
+    assert 'id="spSortButton"' in text
+    assert 'id="spSaveView"' in text
+    assert 'id="spSaveAsView"' in text
+    assert 'id="spGridScroll"' in text
+    assert 'id="spUnsavedDialog"' in text
+    assert 'id="spConflictDialog"' in text
+    assert "/static/service-period/admin_console/member_grid.css" in text
+    assert "/static/service-period/admin_console/member_grid.js" in text
+
+    schema = next_client.get(f"/api/admin/service-period-products/{product['id']}/member-grid/schema")
+    assert schema.status_code == 200
+    fields = schema.json()["schema"]["fields"]
+    assert [field["label"] for field in fields] == [
         "会员",
         "剩余有效期",
         "正式登录",
@@ -184,28 +193,71 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
         "学习计划进度",
         "近 7 天打开次数",
         "最后打开时间",
+        "续费次数",
         "备注",
-        "操作",
+        "联盟",
+    ]
+    assert [field["id"] for field in fields] == [
+        "member",
+        "remaining_days",
+        "formally_logged_in",
+        "token_usage",
+        "learning_plan_progress",
+        "open_count_7d",
+        "last_open_at",
+        "renewal_count",
+        "remark",
+        "alliance",
+    ]
+    assert [field["id"] for field in fields if field["editable"]] == ["remark", "alliance"]
+
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "aicrm_next/service_period/static/admin_console/member_grid.js"
+    ).read_text(encoding="utf-8")
+    assert "/member-grid/query" in script
+    assert "/member-views" in script
+    assert "/members/${encodeURIComponent(row.unionid)}/${encodeURIComponent(fieldId)}" in script
+    assert '["remark", "alliance"]' in script
+    assert 'editableTextCell("remark")' in script
+    assert 'editableTextCell("alliance")' in script
+    assert "sp-col-renewal_count" in script
+    assert "IntersectionObserver" in script
+    assert "beforeunload" in script
+    assert 'event.key === "Enter" && !event.shiftKey' in script
+    assert 'event.key === "Escape"' in script
+    assert "window.sessionStorage" in script
+
+    stylesheet = (
+        Path(__file__).resolve().parents[1]
+        / "aicrm_next/service_period/static/admin_console/member_grid.css"
+    ).read_text(encoding="utf-8")
+    assert "max-height: 780px" not in stylesheet
+    assert "height: calc(100vh - 286px)" in stylesheet
+    assert ".sp-member-table .sp-col-renewal_count" in stylesheet
+    assert ".sp-member-table .sp-col-alliance" in stylesheet
+
+    for forbidden in (
+        "导出数据",
+        "有效用户",
+        "7 天内到期",
+        "续费订单",
+        "累计金额",
+        "会员列表",
+        "添加记录",
+        "字段配置",
+        "填色",
+        "行高",
+        "操作</th>",
+        "报名链接",
+        "续费规则",
+        "交易商品卡片",
+        "交易商品信息",
+        "用户报名页",
+        "用户续费页",
+        "管理配置页",
+        "管理详情页",
     ):
-        assert f"<th>{header}</th>" in text
-    assert "<th>外部联系人id</th>" not in text
-    assert "<th>状态</th>" not in text
-    assert "<th>到期日</th>" not in text
-    assert "<th>最近订单</th>" not in text
-    assert ">备注<" in text
-    assert ">查看<" not in text
-    assert "/members/${encodeURIComponent(unionid)}/remark" in text
-    assert "position: sticky" in text
-    assert "service-period-data-wrap" in text
-    assert "member.external_userid || \"—\"" in text
-    assert '"外部联系人ID"' in text
-    assert '"学习计划进度"' in text
-    data_script = text[text.index("const hycMatched") :]
-    assert "member.status" not in data_script
-    assert "dateOnly(member.end_at)" not in text
-    assert '"last_order_amount"' not in text
-    assert '"last_order_duration_days"' not in text
-    for forbidden in ("报名链接", "续费规则", "交易商品卡片", "交易商品信息", ">编辑<", "用户报名页", "用户续费页", "管理配置页", "管理详情页"):
         assert forbidden not in text
 
 

@@ -6,6 +6,7 @@
     image_library_ids: [],
     miniprogram_library_ids: [],
     attachment_library_ids: [],
+    group_invite_library_ids: [],
   };
 
   let state = {
@@ -33,6 +34,7 @@
       image_library_ids: normalizeIds(source.image_library_ids),
       miniprogram_library_ids: normalizeIds(source.miniprogram_library_ids),
       attachment_library_ids: normalizeIds(source.attachment_library_ids),
+      group_invite_library_ids: normalizeIds(source.group_invite_library_ids),
     };
   }
 
@@ -42,6 +44,7 @@
       || contentPackage.image_library_ids.length
       || contentPackage.miniprogram_library_ids.length
       || contentPackage.attachment_library_ids.length
+      || contentPackage.group_invite_library_ids.length
     );
   }
 
@@ -58,6 +61,10 @@
       ...contentPackage.attachment_library_ids.map((id) => ({
         msgtype: "file",
         file: { library_id: id },
+      })),
+      ...contentPackage.group_invite_library_ids.map((id) => ({
+        msgtype: "link",
+        link: { library_id: id },
       })),
     ];
   }
@@ -130,6 +137,7 @@
         image: 3,
         miniprogram: 1,
         attachment: 9,
+        group_invite: 1,
       },
       onConfirm(contentPackage) {
         previewAndExecute(normalizeContentPackage(contentPackage)).catch((error) => {

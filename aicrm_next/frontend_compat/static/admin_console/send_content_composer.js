@@ -3,13 +3,15 @@
     image: "image_library_ids",
     miniprogram: "miniprogram_library_ids",
     attachment: "attachment_library_ids",
+    group_invite: "group_invite_library_ids",
   };
   const TYPE_LABELS = {
     image: "图片",
     miniprogram: "小程序",
     attachment: "PDF/附件",
+    group_invite: "客户群",
   };
-  const DEFAULT_LIMITS = { image: 3, miniprogram: 1, attachment: 9 };
+  const DEFAULT_LIMITS = { image: 3, miniprogram: 1, attachment: 9, group_invite: 1 };
 
   function escapeHtml(value) {
     return String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -37,13 +39,15 @@
       image_library_ids: normalizeIds(source.image_library_ids),
       miniprogram_library_ids: normalizeIds(source.miniprogram_library_ids),
       attachment_library_ids: normalizeIds(source.attachment_library_ids),
+      group_invite_library_ids: normalizeIds(source.group_invite_library_ids),
     };
   }
 
   function countMaterials(value) {
     return normalizeIds(value.image_library_ids).length
       + normalizeIds(value.miniprogram_library_ids).length
-      + normalizeIds(value.attachment_library_ids).length;
+      + normalizeIds(value.attachment_library_ids).length
+      + normalizeIds(value.group_invite_library_ids).length;
   }
 
   async function previewPackage(contentPackage, textEnabled) {
@@ -111,15 +115,16 @@
                 <div class="aicrm-send-composer__agent-note">Agent 将为每个客户生成个性化话术</div>
               `}
               <div>
-                <div class="aicrm-send-composer__section-title">素材</div>
+                <div class="aicrm-send-composer__section-title">素材与进群</div>
                 <div class="aicrm-send-composer__material-actions">
                   <button class="aicrm-send-composer__button is-soft" type="button" data-add-material="image">+图片</button>
                   <button class="aicrm-send-composer__button is-soft" type="button" data-add-material="miniprogram">+小程序</button>
                   <button class="aicrm-send-composer__button is-soft" type="button" data-add-material="attachment">+附件</button>
+                  <button class="aicrm-send-composer__button is-soft" type="button" data-add-material="group_invite">+选择群聊</button>
                 </div>
               </div>
               <div>
-                <div class="aicrm-send-composer__section-title">已选素材列表</div>
+                <div class="aicrm-send-composer__section-title">已选内容</div>
                 <div class="aicrm-send-composer__selected" data-selected-list></div>
               </div>
             </div>
@@ -177,7 +182,7 @@
       const thumb = item.thumbnail_url
         ? `<img src="${escapeHtml(item.thumbnail_url)}" alt="${escapeHtml(title)}">`
         : `<span>${escapeHtml(TYPE_LABELS[type] || "素材")}</span>`;
-      if (type === "image" || type === "miniprogram") {
+      if (type === "image" || type === "miniprogram" || type === "group_invite") {
         return `<article class="aicrm-send-composer__preview-material is-${escapeHtml(type)}">
           <div class="aicrm-send-composer__preview-thumb">${thumb}</div>
           <div class="aicrm-send-composer__preview-meta">
@@ -205,8 +210,8 @@
           </div>`);
         });
       });
-      selectedList.innerHTML = rows.length ? rows.join("") : `<div class="aicrm-send-composer__empty">还没有选择素材</div>`;
-      summary.textContent = `已选 ${state.value.image_library_ids.length} 图片 / ${state.value.miniprogram_library_ids.length} 小程序 / ${state.value.attachment_library_ids.length} PDF/附件`;
+      selectedList.innerHTML = rows.length ? rows.join("") : `<div class="aicrm-send-composer__empty">还没有选择内容</div>`;
+      summary.textContent = `已选 ${state.value.image_library_ids.length} 图片 / ${state.value.miniprogram_library_ids.length} 小程序 / ${state.value.attachment_library_ids.length} PDF/附件 / ${state.value.group_invite_library_ids.length} 客户群`;
     }
 
     async function renderPreview() {
@@ -293,7 +298,7 @@
           return;
         }
         if (!window.AICRMMaterialPicker || typeof window.AICRMMaterialPicker.open !== "function") {
-          error.textContent = "素材选择器未加载，请刷新页面后重试";
+          error.textContent = "内容选择器未加载，请刷新页面后重试";
           return;
         }
         window.AICRMMaterialPicker.open({

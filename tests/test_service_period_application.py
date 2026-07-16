@@ -15,6 +15,7 @@ from aicrm_next.service_period.application import (
     ExpireDueEntitlementsCommand,
     GetServicePeriodPublicStateQuery,
     GrantOrRenewEntitlementCommand,
+    UpdateServicePeriodMemberAllianceCommand,
     UpdateServicePeriodMemberRemarkCommand,
 )
 from aicrm_next.service_period.dto import ServicePeriodProductCreateRequest
@@ -439,16 +440,19 @@ def test_service_period_refund_rolls_back_first_order_and_renewal_idempotently()
     assert first_refund["entitlement"]["status"] == "refunded"
 
 
-def test_member_remark_command_rejects_unknown_entitlement() -> None:
+@pytest.mark.parametrize(
+    ("command_type", "field_name", "value"),
+    (
+        (UpdateServicePeriodMemberRemarkCommand, "remark", "备注"),
+        (UpdateServicePeriodMemberAllianceCommand, "alliance", "联盟"),
+    ),
+)
+def test_member_editable_text_commands_reject_unknown_entitlement(command_type, field_name: str, value: str) -> None:
     _reset()
     product = CreateServicePeriodProductCommand()(ServicePeriodProductCreateRequest(**_payload(product_code="sp_member_missing")))["product"]
 
-    try:
-        UpdateServicePeriodMemberRemarkCommand()(product["id"], "missing_unionid", remark="备注")
-    except Exception as exc:
-        assert "service period member not found" in str(exc)
-    else:
-        raise AssertionError("missing service period member should not be editable")
+    with pytest.raises(Exception, match="service period member not found"):
+        command_type()(product["id"], "missing_unionid", **{field_name: value})
 
 
 def test_expired_reactivation_missing_unionid_and_due_expiry() -> None:

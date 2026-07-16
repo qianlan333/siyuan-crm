@@ -85,6 +85,17 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, .12);
 }
 
+.aicrm-material-picker__item.is-disabled {
+  cursor: not-allowed;
+  opacity: .58;
+  background: #f8fafc;
+}
+
+.aicrm-material-picker__head a {
+  color: #2c5cdb;
+  font-weight: 600;
+}
+
 .aicrm-material-picker__thumb {
   width: 100%;
   aspect-ratio: 16 / 9;

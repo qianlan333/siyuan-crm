@@ -483,6 +483,38 @@ class PostgresGroupOpsRepository(GroupOpsPostgresMappingMixin):
         except SQLAlchemyError as exc:
             raise RepositoryProviderError(f"group ops repository unavailable: {exc}") from exc
 
+    def mark_owner_group_assets_inactive_except(self, owner_userid: str, active_chat_ids: list[str]) -> list[str]:
+        owner = clean_text(owner_userid)
+        active = {clean_text(chat_id) for chat_id in active_chat_ids if clean_text(chat_id)}
+        try:
+            with self._engine.begin() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT chat_id
+                        FROM wecom_group_chat_snapshots
+                        WHERE owner_userid = :owner_userid
+                          AND status = 'active'
+                        """
+                    ),
+                    {"owner_userid": owner},
+                ).fetchall()
+                inactive = [clean_text(row.chat_id) for row in rows if clean_text(row.chat_id) and clean_text(row.chat_id) not in active]
+                for chat_id in inactive:
+                    conn.execute(
+                        text(
+                            """
+                            UPDATE wecom_group_chat_snapshots
+                            SET status = 'inactive', synced_at = CURRENT_TIMESTAMP
+                            WHERE chat_id = :chat_id AND status = 'active'
+                            """
+                        ),
+                        {"chat_id": chat_id},
+                    )
+                return inactive
+        except SQLAlchemyError as exc:
+            raise RepositoryProviderError(f"group ops repository unavailable: {exc}") from exc
+
     def list_admin_group_assets(self, owner_userid: str) -> list[dict[str, Any]]:
         owner = clean_text(owner_userid)
         if not owner:

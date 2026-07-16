@@ -194,10 +194,11 @@ class GroupOpsPostgresMappingMixin:
                 "image_library_ids": [],
                 "miniprogram_library_ids": [],
                 "attachment_library_ids": [],
+                "group_invite_library_ids": [],
             },
         )
         if isinstance(content_package, dict):
-            has_material_ids = any(content_package.get(key) for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids"))
+            has_material_ids = any(content_package.get(key) for key in ("image_library_ids", "miniprogram_library_ids", "attachment_library_ids", "group_invite_library_ids"))
             if text_content and not clean_text(content_package.get("content_text")) and not has_material_ids:
                 content_package = {**content_package, "content_text": text_content}
         else:
@@ -206,6 +207,7 @@ class GroupOpsPostgresMappingMixin:
                 "image_library_ids": [],
                 "miniprogram_library_ids": [],
                 "attachment_library_ids": [],
+                "group_invite_library_ids": [],
             }
         return {
             "id": _int(row.get("id")),

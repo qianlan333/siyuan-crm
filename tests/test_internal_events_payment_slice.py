@@ -215,6 +215,7 @@ def test_payment_success_emits_payment_succeeded_and_duplicate_notify_is_idempot
         "customer_business_summary_consumer",
         "dnd_policy_consumer",
         "order_projection_consumer",
+        "product_paid_wecom_tag_consumer",
         "service_period_entitlement_consumer",
         "webhook_order_paid_consumer",
     }.issubset(consumer_names)
@@ -224,6 +225,7 @@ def test_payment_success_emits_payment_succeeded_and_duplicate_notify_is_idempot
         "customer_business_summary_consumer",
         "dnd_policy_consumer",
         "order_projection_consumer",
+        "product_paid_wecom_tag_consumer",
         "service_period_entitlement_consumer",
         "webhook_order_paid_consumer",
     }

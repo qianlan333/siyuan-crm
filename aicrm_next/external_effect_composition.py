@@ -102,8 +102,9 @@ def _resolve_production_wecom_welcome_materials(attachments, *, resolver=None):
             "image_library_ids": [material_id] if msgtype == "image" else [],
             "attachment_library_ids": [material_id] if msgtype == "file" else [],
             "miniprogram_library_ids": [material_id] if msgtype == "miniprogram" else [],
+            "group_invite_library_ids": [material_id] if msgtype == "link" else [],
         }
-        if msgtype not in {"image", "file", "miniprogram"}:
+        if msgtype not in {"image", "file", "miniprogram", "link"}:
             raise ValueError(f"unsupported welcome attachment msgtype: {msgtype or 'missing'}")
         nested_attachments, image_media_ids = resolver.resolve_content_package_materials(package)
         if msgtype == "image":
@@ -120,6 +121,18 @@ def _resolve_production_wecom_welcome_materials(attachments, *, resolver=None):
             if not media_id:
                 raise ValueError("welcome file material resolved without media_id")
             resolved.append({"msgtype": "file", "file": {"media_id": media_id}})
+            continue
+        if msgtype == "link":
+            title = str(nested_payload.get("title") or "").strip()
+            url = str(nested_payload.get("url") or "").strip()
+            if not title or not url:
+                raise ValueError("welcome link material resolved with incomplete payload")
+            link = {"title": title, "url": url}
+            for field in ("desc", "picurl"):
+                value = str(nested_payload.get(field) or "").strip()
+                if value:
+                    link[field] = value
+            resolved.append({"msgtype": "link", "link": link})
             continue
         required = ("appid", "page", "title", "pic_media_id")
         if any(not str(nested_payload.get(field) or "").strip() for field in required):

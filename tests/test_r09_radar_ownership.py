@@ -23,6 +23,11 @@ def test_radar_click_events_has_one_declared_write_owner_and_explicit_pii_lifecy
     assert "foreign-key cascade" in lifecycle["retention_policy"]
     assert writers == ["aicrm_next/radar_links/repo.py"]
 
+    identity_lifecycle = _yaml("docs/architecture/data_table_lifecycle_manifest.yml")["tables"]["crm_user_identity"]
+    radar_repository = repositories["aicrm_next/radar_links/repo.py"]
+    assert "aicrm_next.radar_links" in identity_lifecycle["read_owners"]
+    assert "crm_user_identity" in radar_repository["table_reads"]
+
 
 def test_radar_click_events_has_an_alembic_create_and_upgrade_path() -> None:
     migration = (ROOT / "migrations/versions/0102_questionnaire_radar_invariants.py").read_text(encoding="utf-8")
@@ -33,6 +38,11 @@ def test_radar_click_events_has_an_alembic_create_and_upgrade_path() -> None:
     assert "ix_radar_click_events_link_created" in migration
     assert "ix_radar_click_events_unionid_created" in migration
     assert 'if not _has_table("radar_links")' in migration
+
+    external_feed_migration = (ROOT / "migrations/versions/0118_external_radar_read_api.py").read_text(encoding="utf-8")
+    assert "ix_radar_click_events_external_feed" in external_feed_migration
+    assert "stage IN ('authorized', 'authorized_click')" in external_feed_migration
+    assert "stage = 'landing'" in external_feed_migration
 
 
 def test_radar_public_source_does_not_read_plain_identity_query_or_cookies() -> None:

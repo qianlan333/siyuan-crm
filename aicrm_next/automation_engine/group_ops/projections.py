@@ -23,6 +23,8 @@ def plan_list_item(plan: dict[str, Any], *, groups: list[dict[str, Any]], owner_
 
 
 def group_asset_item(group: dict[str, Any], *, plan_name: str = "", bind_status: str = "unbound") -> dict[str, Any]:
+    internal_member_count = int(group.get("internal_member_count") or 0)
+    external_member_count = int(group.get("external_member_count") or 0)
     return {
         "chat_id": clean_text(group.get("chat_id")),
         "group_name": clean_text(group.get("group_name")),
@@ -31,6 +33,11 @@ def group_asset_item(group: dict[str, Any], *, plan_name: str = "", bind_status:
         "admin_userids": normalize_group_admin_userids(group.get("admin_userids")),
         "plan_name": plan_name,
         "bind_status": bind_status,
+        "internal_member_count": internal_member_count,
+        "external_member_count": external_member_count,
+        "member_count": internal_member_count + external_member_count,
+        "synced_at": clean_text(group.get("synced_at")),
+        "status": clean_text(group.get("status") or "active"),
     }
 
 

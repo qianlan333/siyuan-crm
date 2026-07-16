@@ -26,6 +26,7 @@ PAYMENT_SUCCEEDED_EVENT_TYPES = (
 PAYMENT_SUCCEEDED_CORE_CONSUMERS = (
     "order_projection_consumer",
     "service_period_entitlement_consumer",
+    "product_paid_wecom_tag_consumer",
     "webhook_order_paid_consumer",
     "customer_business_summary_consumer",
     "dnd_policy_consumer",
@@ -356,6 +357,7 @@ def register_payment_succeeded_consumers(
     *,
     payment_identity_projector: PaymentIdentityProjector | None = None,
     service_period_consumer: InternalEventConsumerHandler | None = None,
+    product_paid_tag_consumer: InternalEventConsumerHandler | None = None,
     webhook_order_paid_handler: InternalEventConsumerHandler | None = None,
 ) -> None:
     registry = registry or current_internal_event_consumer_registry()
@@ -377,6 +379,13 @@ def register_payment_succeeded_consumers(
                 "service_period_entitlement_consumer",
                 service_period_consumer,
                 consumer_type="projection",
+            )
+        if product_paid_tag_consumer is not None:
+            registry.register(
+                event_type,
+                "product_paid_wecom_tag_consumer",
+                product_paid_tag_consumer,
+                consumer_type="external_effect_planner",
             )
         registry.register(
             event_type,

@@ -173,6 +173,7 @@
       image_library_ids: normalizeIdList(data.image_library_ids),
       miniprogram_library_ids: normalizeIdList(data.miniprogram_library_ids),
       attachment_library_ids: normalizeIdList(data.attachment_library_ids),
+      group_invite_library_ids: normalizeIdList(data.group_invite_library_ids),
     };
   }
 
@@ -185,6 +186,7 @@
       image_library_ids: contentPackage.image_library_ids || payload.image_library_ids || [],
       miniprogram_library_ids: contentPackage.miniprogram_library_ids || payload.miniprogram_library_ids || [],
       attachment_library_ids: contentPackage.attachment_library_ids || payload.attachment_library_ids || [],
+      group_invite_library_ids: contentPackage.group_invite_library_ids || payload.group_invite_library_ids || [],
     });
   }
 
@@ -198,6 +200,7 @@
         image_media_ids: [],
         miniprogram_library_ids: normalized.miniprogram_library_ids,
         attachment_library_ids: normalized.attachment_library_ids,
+        group_invite_library_ids: normalized.group_invite_library_ids,
       },
       attachments: [],
     };
@@ -211,6 +214,7 @@
       imageCount: normalized.image_library_ids.length,
       miniprogramCount: normalized.miniprogram_library_ids.length,
       attachmentCount: normalized.attachment_library_ids.length,
+      groupInviteCount: normalized.group_invite_library_ids.length,
     };
   }
 
@@ -219,8 +223,8 @@
     return `
       <div class="cloud-plan-task-content-summary" data-task-content-summary>
         <strong>话术摘要：</strong><span>${escapeHtml(summary.text)}</span>
-        <strong>素材数量：</strong><span>图片 ${summary.imageCount} / 小程序 ${summary.miniprogramCount} / 附件 ${summary.attachmentCount}</span>
-        <strong>素材明细：</strong><span data-task-material-detail>${summary.imageCount + summary.miniprogramCount + summary.attachmentCount ? "素材信息加载中" : "无素材"}</span>
+        <strong>内容数量：</strong><span>图片 ${summary.imageCount} / 小程序 ${summary.miniprogramCount} / 附件 ${summary.attachmentCount} / 客户群 ${summary.groupInviteCount}</span>
+        <strong>素材明细：</strong><span data-task-material-detail>${summary.imageCount + summary.miniprogramCount + summary.attachmentCount + summary.groupInviteCount ? "素材信息加载中" : "无素材"}</span>
       </div>
     `;
   }
@@ -565,6 +569,7 @@
       normalized.image_library_ids.forEach((id) => fallback.push(`图片 #${id}`));
       normalized.miniprogram_library_ids.forEach((id) => fallback.push(`小程序 #${id}`));
       normalized.attachment_library_ids.forEach((id) => fallback.push(`附件 #${id}`));
+      normalized.group_invite_library_ids.forEach((id) => fallback.push(`群邀请 #${id}`));
       return fallback.join(" / ") || "无素材";
     }
     return materials.map((item) => {
@@ -586,7 +591,7 @@
       if (!task || !detailNode) return;
       const contentPackage = taskToContentPackage(task);
       const summary = taskContentSummary(contentPackage);
-      if (summary.imageCount + summary.miniprogramCount + summary.attachmentCount <= 0) {
+      if (summary.imageCount + summary.miniprogramCount + summary.attachmentCount + summary.groupInviteCount <= 0) {
         detailNode.textContent = "无素材";
         return;
       }
@@ -629,7 +634,7 @@
       title: "配置单人话术内容",
       textEnabled: true,
       value: taskToContentPackage(task),
-      limits: { image: 3, miniprogram: 1, attachment: 9 },
+      limits: { image: 3, miniprogram: 1, attachment: 9, group_invite: 1 },
       async onConfirm(contentPackage) {
         const restore = setButtonLoading(button, "保存中");
         try {

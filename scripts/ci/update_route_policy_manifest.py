@@ -11,6 +11,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MANIFEST = ROOT / "docs" / "architecture" / "route_ownership_manifest.yml"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
+_READ_ONLY_UNSAFE_PATHS = {
+    "/api/admin/service-period-products/{service_product_id}/member-grid/query",
+}
 
 _HYBRID_ADMIN_EXACT_PATHS = {
     "/api/admin/cloud-orchestrator/campaigns/run-due",
@@ -50,6 +53,8 @@ def _methods(entry: dict[str, Any]) -> set[str]:
 
 
 def _is_write(entry: dict[str, Any]) -> bool:
+    if str(entry.get("path") or "") in _READ_ONLY_UNSAFE_PATHS:
+        return False
     return bool(_methods(entry) - SAFE_METHODS)
 
 
@@ -91,6 +96,8 @@ def _admin_capability(entry: dict[str, Any]) -> str:
 def _pii_level(entry: dict[str, Any]) -> str:
     path = str(entry["path"]).lower()
     owner = str(entry["capability_owner"])
+    if path == "/api/external/radar-clicks":
+        return "sensitive"
     if any(marker in path for marker in ("message", "archive", "questionnaire", "identity", "customer", "user", "sidebar")):
         return "sensitive"
     if any(marker in path for marker in ("order", "payment", "refund", "wechat-pay", "alipay", "service-period", "coupon")):
@@ -157,6 +164,7 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
     path = str(entry["path"])
     owner = str(entry["capability_owner"])
     write = _is_write(entry)
+    unsafe_method = bool(_methods(entry) - SAFE_METHODS)
 
     if path in {"/login", "/logout"}:
         return _policy("admin", "public", "public", "public", _pii_level(entry), False, "auth_strict")
@@ -179,7 +187,7 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
             _admin_capability(entry),
             "global",
             _pii_level(entry),
-            write,
+            unsafe_method,
             "authenticated",
             service_audience="internal_worker",
             service_capability=_machine_capability(path),
@@ -193,7 +201,7 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
             _admin_capability(entry),
             "global",
             _pii_level(entry),
-            write,
+            unsafe_method,
             "authenticated",
         )
 

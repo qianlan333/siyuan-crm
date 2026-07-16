@@ -381,7 +381,7 @@ def test_external_campaign_target_identity_not_found() -> None:
     assert status_code == 404
 
 
-def test_external_campaign_owner_mismatch_is_warning_by_default() -> None:
+def test_external_campaign_owner_mismatch_does_not_prevalidate() -> None:
     repo = _repo_with_target()
     repo.identity_by_external["ext_1"]["owner_userid"] = "owner_2"
     repo.identity_by_external["ext_1"]["primary_owner_userid"] = "owner_2"
@@ -390,25 +390,19 @@ def test_external_campaign_owner_mismatch_is_warning_by_default() -> None:
     result = service.create_external_campaigns(_payload(dry_run=True), repo=repo)
 
     assert result["ok"] is True
-    assert result["previews"][0]["warnings"][0]["code"] == "owner_mismatch_warning"
+    assert result["previews"][0]["warnings"] == []
     assert repo.write_calls == []
 
 
-def test_external_campaign_strict_owner_match_can_still_fail() -> None:
+def test_external_campaign_ignores_legacy_strict_owner_match_flag() -> None:
     repo = _repo_with_target()
     repo.identity_by_external["ext_1"]["owner_userid"] = "owner_2"
     repo.identity_by_external["ext_1"]["primary_owner_userid"] = "owner_2"
 
-    try:
-        service.create_external_campaigns(_payload(strict_owner_match=True), repo=repo)
-    except service.ExternalCampaignError as exc:
-        payload = exc.to_response()
-        status_code = exc.status_code
-    else:  # pragma: no cover
-        raise AssertionError("expected ExternalCampaignError")
+    result = service.create_external_campaigns(_payload(strict_owner_match=True, dry_run=True), repo=repo)
 
-    assert payload["error"] == "owner_mismatch"
-    assert status_code == 409
+    assert result["ok"] is True
+    assert result["previews"][0]["warnings"] == []
 
 
 def test_external_campaign_automation_member_backfill_is_retired() -> None:

@@ -1,8 +1,9 @@
 {% extends "admin_console/base.html" %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=cloud-plan-message-editor-20260601">
-<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=cloud-plan-message-editor-20260601">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/group_chat_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/material_picker.css') }}?v=group-chat-direct-select-20260715">
+<link rel="stylesheet" href="{{ url_for('static', filename='admin_console/send_content_composer.css') }}?v=group-chat-selector-20260715">
 <style>
   .cloud-plan-page {
     --plan-ink: #172033;
@@ -839,8 +840,9 @@
 {% endblock %}
 
 {% block scripts_extra %}
-<script src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=cloud-plan-message-editor-20260601"></script>
-<script src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=cloud-plan-message-editor-20260601"></script>
-<script src="{{ url_for('static', filename='admin_console/cloud_plan_review.js') }}?v=20260712-admin-api-security"></script>
+<script src="{{ url_for('static', filename='admin_console/group_chat_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script src="{{ url_for('static', filename='admin_console/material_picker.js') }}?v=group-chat-direct-select-20260715"></script>
+<script src="{{ url_for('static', filename='admin_console/send_content_composer.js') }}?v=group-chat-selector-20260715"></script>
+<script src="{{ url_for('static', filename='admin_console/cloud_plan_review.js') }}?v=group-chat-selector-20260715"></script>
 <script type="module" src="{{ url_for('static', filename='admin_console/p1/ops_plan/ops_plan_overview.js') }}?v=p1-ops-plan-status-20260623"></script>
 {% endblock %}

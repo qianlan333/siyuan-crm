@@ -131,12 +131,14 @@ console.log(JSON.stringify({{ fromLegacy, fromContentPackage, toPayload }}));
         "image_library_ids": [12, 34],
         "miniprogram_library_ids": [56],
         "attachment_library_ids": [78, 90],
+        "group_invite_library_ids": [],
     }
     assert payload["fromContentPackage"] == {
         "content_text": "标准内容包",
         "image_library_ids": [101],
         "miniprogram_library_ids": [201],
         "attachment_library_ids": [301],
+        "group_invite_library_ids": [],
     }
     assert payload["toPayload"] == {
         "content_text": "保存内容",
@@ -145,15 +147,18 @@ console.log(JSON.stringify({{ fromLegacy, fromContentPackage, toPayload }}));
             "image_library_ids": [1, 2],
             "miniprogram_library_ids": [3],
             "attachment_library_ids": [4, 5],
+            "group_invite_library_ids": [],
         },
         "content_package": {
             "content_text": "保存内容",
             "image_library_ids": [1, 2],
             "miniprogram_library_ids": [3],
             "attachment_library_ids": [4, 5],
+            "group_invite_library_ids": [],
         },
         "image_library_ids": [1, 2],
         "image_media_ids": [],
         "miniprogram_library_ids": [3],
         "attachment_library_ids": [4, 5],
+        "group_invite_library_ids": [],
     }

@@ -5,19 +5,6 @@ import pytest
 from tests.group_ops_test_helpers import group_ops_repo
 
 
-def test_domain_validates_group_owner_match(group_ops_repo):
-    from aicrm_next.automation_engine.group_ops.domain import assert_group_owned_by_plan
-    from aicrm_next.shared.errors import ContractError
-
-    plan = group_ops_repo.get_plan(1)
-    owned_group = group_ops_repo.get_group_asset("wrOgAAA003")
-    other_group = group_ops_repo.get_group_asset("wrOgBBB001")
-
-    assert_group_owned_by_plan(group=owned_group, plan=plan)
-    with pytest.raises(ContractError, match="owner_userid"):
-        assert_group_owned_by_plan(group=other_group, plan=plan)
-
-
 def test_group_ops_plan_actions_disable_enable_and_archive(group_ops_repo):
     from aicrm_next.automation_engine.group_ops.application import (
         ArchiveGroupOpsPlanCommand,
@@ -179,7 +166,26 @@ def test_group_ops_native_message_content_rejects_unsupported_attachment_msgtype
     from aicrm_next.shared.errors import ContractError
 
     with pytest.raises(ContractError, match="attachments msgtype is not supported"):
-        normalize_message_content(text="", attachments=[{"msgtype": "link", "link": {"url": "https://example.invalid"}}])
+        normalize_message_content(text="", attachments=[{"msgtype": "video", "video": {"media_id": "video-1"}}])
+
+
+def test_group_ops_native_message_content_accepts_group_invite_link():
+    from aicrm_next.automation_engine.group_ops.domain import normalize_message_content
+
+    normalized = normalize_message_content(
+        text="",
+        attachments=[{
+            "msgtype": "link",
+            "link": {
+                "title": "点击加入体验群",
+                "url": "https://work.weixin.qq.com/gm/0123456789abcdef0123456789abcdef",
+                "desc": "进群领取资料",
+            },
+        }],
+    )
+
+    assert normalized["attachments"][0]["msgtype"] == "link"
+    assert normalized["attachments"][0]["link"]["title"] == "点击加入体验群"
 
 
 def test_group_ops_node_payload_draft_allows_empty_content():

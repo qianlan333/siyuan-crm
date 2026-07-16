@@ -8,6 +8,7 @@ from typing import Any
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.safe_logging import safe_log_exception
 
+from .dto import normalize_group_invite_join_url, normalize_http_url
 from .repo import connect_media_library_db, normalize_tags
 from .variants import (
     THUMBNAIL_SIZE_TO_VARIANT,
@@ -91,6 +92,8 @@ class PostgresMediaLibraryRepository:
             return self._list_images(limit=limit, offset=offset, filters=filters)
         if kind == "miniprogram":
             return self._list_miniprograms(limit=limit, offset=offset, filters=filters)
+        if kind == "group_invite":
+            return self._list_group_invites(limit=limit, offset=offset, filters=filters)
         return self._list_attachments(limit=limit, offset=offset, filters=filters)
 
     def list_facets(self, kind: str) -> dict[str, list[str]]:
@@ -179,6 +182,8 @@ class PostgresMediaLibraryRepository:
             return self._save_image(payload, item_id)
         if kind == "miniprogram":
             return self._save_miniprogram(payload, item_id)
+        if kind == "group_invite":
+            return self._save_group_invite(payload, item_id)
         return self._save_attachment(payload, item_id)
 
     def delete_item(self, kind: str, item_id: str, *, force: bool = False) -> dict[str, Any]:
@@ -374,6 +379,26 @@ class PostgresMediaLibraryRepository:
             params.extend([like, like, like, like])
         return self._select_list("attachment", "attachment_library", where, params, "updated_at DESC, id DESC", limit=limit, offset=offset)
 
+    def _list_group_invites(self, *, limit: int, offset: int, filters: dict[str, Any]) -> dict[str, Any]:
+        where: list[str] = []
+        params: list[Any] = []
+        if filters.get("enabled_only") is not False:
+            where.append("enabled")
+        q = str(filters.get("q") or "").strip()
+        if q:
+            where.append("(name ILIKE %s OR title ILIKE %s OR description ILIKE %s OR join_url ILIKE %s OR config_id ILIKE %s)")
+            like = f"%{q}%"
+            params.extend([like, like, like, like, like])
+        return self._select_list(
+            "group_invite",
+            "group_invite_library",
+            where,
+            params,
+            "updated_at DESC, id DESC",
+            limit=limit,
+            offset=offset,
+        )
+
     def _select_list(self, kind: str, table: str, where: list[str], params: list[Any], order_by: str, *, limit: int, offset: int) -> dict[str, Any]:
         where_sql = (" WHERE " + " AND ".join(where)) if where else ""
         with self._connect() as conn:
@@ -463,6 +488,27 @@ class PostgresMediaLibraryRepository:
                 ("thumb_media_id", "''"),
                 ("thumb_media_id_expires_at", "NULL::timestamp"),
                 ("thumb_image_url", "''"),
+                ("enabled", "TRUE"),
+                ("created_at", "NULL::timestamp"),
+                ("updated_at", "NULL::timestamp"),
+            ]
+            return ", ".join(column(name, fallback) for name, fallback in fields)
+        if kind == "group_invite":
+            fields = [
+                ("id", "NULL::integer"),
+                ("name", "''"),
+                ("title", "''"),
+                ("description", "''"),
+                ("pic_url", "''"),
+                ("join_url", "''"),
+                ("config_id", "''"),
+                ("state", "''"),
+                ("chat_id_list", "'[]'::jsonb"),
+                ("chat_id", "''"),
+                ("binding_status", "'ready'"),
+                ("auto_create_room", "TRUE"),
+                ("room_base_name", "''"),
+                ("room_base_id", "NULL::integer"),
                 ("enabled", "TRUE"),
                 ("created_at", "NULL::timestamp"),
                 ("updated_at", "NULL::timestamp"),
@@ -771,6 +817,143 @@ class PostgresMediaLibraryRepository:
             raise NotFoundError("attachment item not found")
         return self.get_item("attachment", str(row["id"])) or {}
 
+    def _save_group_invite(self, payload: dict[str, Any], item_id: str | None) -> dict[str, Any]:
+        if item_id and "join_url" in payload:
+            payload = {**payload, "binding_status": "ready"}
+        title = str(payload.get("title") or payload.get("name") or "").strip()
+        description = str(payload.get("description") or "").strip()
+        join_url = normalize_group_invite_join_url(payload.get("join_url")) if "join_url" in payload or not item_id else ""
+        pic_url = normalize_http_url(payload.get("pic_url"), field_name="卡片封面链接") if "pic_url" in payload else ""
+        if not item_id and (not title or not join_url):
+            raise ContractError("群邀请卡片缺少必填字段：title, join_url")
+        if len(title.encode("utf-8")) > 128 or len(description.encode("utf-8")) > 512:
+            raise ContractError("群邀请卡片标题或描述超过企微长度限制")
+        data = {
+            "name": str(payload.get("name") or title).strip()[:200],
+            "title": title,
+            "description": description,
+            "pic_url": pic_url,
+            "join_url": join_url,
+            "config_id": str(payload.get("config_id") or "").strip()[:255],
+            "state": str(payload.get("state") or "").strip()[:255],
+            "chat_id_list": [str(value).strip() for value in list(payload.get("chat_id_list") or []) if str(value).strip()],
+            "chat_id": str(payload.get("chat_id") or ((payload.get("chat_id_list") or [""])[0])).strip(),
+            "binding_status": str(payload.get("binding_status") or ("ready" if join_url else "pending")).strip().lower(),
+            "auto_create_room": _bool(payload.get("auto_create_room", True)),
+            "room_base_name": str(payload.get("room_base_name") or "").strip()[:200],
+            "room_base_id": _coerce_optional_int(payload.get("room_base_id"), "room_base_id"),
+            "enabled": _bool(payload.get("enabled", True)),
+        }
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if item_id:
+                    sets: list[str] = []
+                    params: list[Any] = []
+                    for key in [
+                        "name", "title", "description", "pic_url", "join_url", "config_id", "state",
+                        "chat_id_list", "chat_id", "binding_status", "auto_create_room", "room_base_name", "room_base_id", "enabled",
+                    ]:
+                        if key not in payload:
+                            continue
+                        if key == "title" and not data[key]:
+                            raise ContractError("群邀请卡片标题不能为空")
+                        if key == "join_url" and not data[key]:
+                            raise ContractError("群邀请链接不能为空")
+                        if key == "join_url":
+                            data["binding_status"] = "ready"
+                        sets.append("chat_id_list = %s::jsonb" if key == "chat_id_list" else f"{key} = %s")
+                        params.append(json.dumps(data[key], ensure_ascii=False) if key == "chat_id_list" else data[key])
+                    if not sets:
+                        return self.get_item("group_invite", item_id) or {}
+                    params.append(int(item_id))
+                    cur.execute(
+                        f"UPDATE group_invite_library SET {', '.join(sets)}, updated_at = CURRENT_TIMESTAMP WHERE id = %s RETURNING id",
+                        tuple(params),
+                    )
+                    row = cur.fetchone()
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO group_invite_library
+                            (name, title, description, pic_url, join_url, config_id, state,
+                             chat_id_list, chat_id, binding_status, auto_create_room, room_base_name, room_base_id, enabled)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s)
+                        RETURNING id
+                        """,
+                        (
+                            data["name"], data["title"], data["description"], data["pic_url"], data["join_url"],
+                            data["config_id"], data["state"], json.dumps(data["chat_id_list"], ensure_ascii=False),
+                            data["chat_id"], data["binding_status"], data["auto_create_room"], data["room_base_name"], data["room_base_id"], data["enabled"],
+                        ),
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+        if not row:
+            raise NotFoundError("group_invite item not found")
+        return self.get_item("group_invite", str(row["id"])) or {}
+
+    def ensure_group_invite_binding(self, payload: dict[str, Any]) -> dict[str, Any]:
+        chat_id = str(payload.get("chat_id") or "").strip()
+        if not chat_id:
+            raise ContractError("chat_id 不能为空")
+        group_name = str(payload.get("group_name") or chat_id).strip()
+        title = f"加入「{group_name}」"
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO group_invite_library
+                        (name, title, description, join_url, chat_id_list, chat_id,
+                         binding_status, auto_create_room, room_base_name, enabled)
+                    VALUES (%s, %s, %s, '', %s::jsonb, %s, 'pending', FALSE, %s, TRUE)
+                    ON CONFLICT (chat_id) WHERE chat_id <> ''
+                    DO UPDATE SET
+                        name = EXCLUDED.name,
+                        title = EXCLUDED.title,
+                        room_base_name = EXCLUDED.room_base_name,
+                        chat_id_list = EXCLUDED.chat_id_list,
+                        updated_at = CURRENT_TIMESTAMP
+                    RETURNING id
+                    """,
+                    (group_name, title, "点击卡片直接加入群聊", json.dumps([chat_id], ensure_ascii=False), chat_id, group_name),
+                )
+                row = cur.fetchone()
+            conn.commit()
+        if not row:
+            raise ContractError("群邀请绑定创建失败")
+        return self.get_item("group_invite", str(row["id"])) or {}
+
+    def reconcile_group_invite_bindings(self, active_chat_ids: list[str], inactive_chat_ids: list[str]) -> int:
+        active = [str(value or "").strip() for value in active_chat_ids if str(value or "").strip()]
+        inactive = [str(value or "").strip() for value in inactive_chat_ids if str(value or "").strip()]
+        changed = 0
+        with self._connect() as conn:
+            with conn.cursor() as cur:
+                if inactive:
+                    cur.execute(
+                        """
+                        UPDATE group_invite_library
+                        SET binding_status = 'invalid', updated_at = CURRENT_TIMESTAMP
+                        WHERE chat_id = ANY(%s) AND binding_status <> 'invalid'
+                        """,
+                        (inactive,),
+                    )
+                    changed += int(cur.rowcount or 0)
+                if active:
+                    cur.execute(
+                        """
+                        UPDATE group_invite_library
+                        SET binding_status = CASE WHEN join_url = '' THEN 'pending' ELSE 'ready' END,
+                            enabled = TRUE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE chat_id = ANY(%s) AND binding_status = 'invalid'
+                        """,
+                        (active,),
+                    )
+                    changed += int(cur.rowcount or 0)
+            conn.commit()
+        return changed
+
     def _delete_image(self, item_id: str, *, force: bool) -> dict[str, Any]:
         refs = self._image_references(item_id)
         if (refs["miniprograms"] or refs["campaign_steps"]) and not force:
@@ -882,6 +1065,26 @@ class PostgresMediaLibraryRepository:
             if thumb_image_id not in (None, ""):
                 add_image_variant_urls(item, thumb_image_id, use_thumbnail_fallback=use_thumbnail_fallback)
             return item
+        if kind == "group_invite":
+            return {
+                "id": int(row.get("id") or 0),
+                "name": str(row.get("name") or ""),
+                "title": str(row.get("title") or ""),
+                "description": str(row.get("description") or ""),
+                "pic_url": str(row.get("pic_url") or ""),
+                "join_url": str(row.get("join_url") or ""),
+                "config_id": str(row.get("config_id") or ""),
+                "state": str(row.get("state") or ""),
+                "chat_id_list": [str(value) for value in _json(row.get("chat_id_list"), [])],
+                "chat_id": str(row.get("chat_id") or ((_json(row.get("chat_id_list"), []) or [""])[0]) or ""),
+                "binding_status": str(row.get("binding_status") or ("ready" if row.get("join_url") else "pending")),
+                "auto_create_room": _bool(row.get("auto_create_room")),
+                "room_base_name": str(row.get("room_base_name") or ""),
+                "room_base_id": row.get("room_base_id"),
+                "enabled": _bool(row.get("enabled")),
+                "created_at": _iso(row.get("created_at")),
+                "updated_at": _iso(row.get("updated_at")),
+            }
         item = {
             "id": int(row.get("id") or 0),
             "name": str(row.get("name") or ""),
@@ -904,4 +1107,6 @@ class PostgresMediaLibraryRepository:
             return "image_library"
         if kind == "miniprogram":
             return "miniprogram_library"
+        if kind == "group_invite":
+            return "group_invite_library"
         return "attachment_library"

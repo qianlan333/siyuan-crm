@@ -26,3 +26,10 @@ and PR output expectations.
 The architecture skill is the canonical development preflight. Other agent entry
 documents must point back to it instead of introducing separate required-reading
 lists.
+
+## Operation Cycle Agent Reporting
+
+Any Agent task that creates, updates, reports, or diagnoses a CRM operation cycle
+must read and follow
+[`docs/operation_cycles/agent_usage_guide.md`](docs/operation_cycles/agent_usage_guide.md).
+This guide is capability-specific and does not replace the architecture skill.

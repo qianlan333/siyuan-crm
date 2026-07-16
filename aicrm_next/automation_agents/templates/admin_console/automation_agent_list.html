@@ -340,7 +340,7 @@
 
     const materialText = (summary) => {
       const value = summary && typeof summary === "object" ? summary : {};
-      return `${Number(value.image_count || 0)} 图片 / ${Number(value.miniprogram_count || 0)} 小程序 / ${Number(value.attachment_count || 0)} PDF`;
+      return `${Number(value.image_count || 0)} 图片 / ${Number(value.miniprogram_count || 0)} 小程序 / ${Number(value.attachment_count || 0)} PDF / ${Number(value.group_invite_count || 0)} 群邀请`;
     };
 
     const statusPill = (status) => {
@@ -474,6 +474,7 @@
               image_library_ids: [],
               miniprogram_library_ids: [],
               attachment_library_ids: [],
+              group_invite_library_ids: [],
             },
           },
         });

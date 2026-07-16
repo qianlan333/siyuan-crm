@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "migrations" / "versions" / "0095_service_period_products.py"
 CLEANUP_MIGRATION = ROOT / "migrations" / "versions" / "0097_service_period_unionid_cleanup.py"
 HUANGYOUCAN_USAGE_MIGRATION = ROOT / "migrations" / "versions" / "0107_service_period_huangyoucan_usage_snapshot.py"
+MEMBER_VIEWS_MIGRATION = ROOT / "migrations" / "versions" / "0120_service_period_member_views.py"
 MANIFEST = ROOT / "docs" / "architecture" / "data_table_lifecycle_manifest.yml"
 _CONFTEST_SPEC = importlib.util.spec_from_file_location("service_period_test_conftest", ROOT / "tests" / "conftest.py")
 assert _CONFTEST_SPEC and _CONFTEST_SPEC.loader
@@ -63,6 +64,7 @@ def test_service_period_tables_registered_in_lifecycle_manifest_and_cleanup_orde
     assert "aicrm_next.service_period" in manifest["wechat_pay_orders"]["read_owners"]
     tables = conftest._TABLES_TO_TRUNCATE
     assert tables.index("service_period_events") < tables.index("service_period_entitlements")
+    assert tables.index("service_period_member_views") < tables.index("service_period_products")
     assert tables.index("service_period_entitlements") < tables.index("service_period_products")
     assert tables.index("service_period_products") < tables.index("wechat_pay_products")
 
@@ -87,3 +89,24 @@ def test_huangyoucan_usage_projection_schema_and_lifecycle_contract() -> None:
     assert tables.index("service_period_huangyoucan_usage_sync_runs") < tables.index(
         "service_period_huangyoucan_usage_snapshot"
     )
+
+
+def test_service_period_member_views_schema_backfill_and_lifecycle_contract() -> None:
+    migration = MEMBER_VIEWS_MIGRATION.read_text(encoding="utf-8")
+    manifest = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))["tables"]
+    entry = manifest["service_period_member_views"]
+
+    assert "CREATE TABLE IF NOT EXISTS service_period_member_views" in migration
+    assert "ON DELETE CASCADE" in migration
+    assert "uq_service_period_member_views_name" in migration
+    assert "LOWER(name)" in migration
+    assert "uq_service_period_member_views_default" in migration
+    assert "WHERE is_default = TRUE" in migration
+    assert "config_json JSONB" in migration
+    assert "version INTEGER NOT NULL DEFAULT 1" in migration
+    assert "INSERT INTO service_period_member_views" in migration
+    assert "FROM service_period_products products" in migration
+    assert "products.deleted = FALSE" in migration
+    assert entry["domain"] == "service_period"
+    assert entry["write_owner"] == "aicrm_next.service_period"
+    assert entry["migration_source"] == "0120_service_period_member_views"

@@ -196,6 +196,8 @@ def test_production_welcome_material_translation_uses_wecom_welcome_shapes() -> 
                 return [], ["image-media"]
             if package.get("attachment_library_ids"):
                 return [{"msgtype": "file", "file": {"media_id": "file-media"}}], []
+            if package.get("group_invite_library_ids"):
+                return [{"msgtype": "link", "link": {"title": "点击入群", "url": "https://work.weixin.qq.com/gm/0123456789abcdef0123456789abcdef", "desc": "欢迎加入"}}], []
             return [
                 {
                     "msgtype": "miniprogram",
@@ -213,6 +215,7 @@ def test_production_welcome_material_translation_uses_wecom_welcome_shapes() -> 
             {"msgtype": "image", "material_id": 110},
             {"msgtype": "file", "material_id": 120},
             {"msgtype": "miniprogram", "material_id": 130},
+            {"msgtype": "link", "material_id": 140},
         ],
         resolver=Resolver(),
     )
@@ -227,6 +230,14 @@ def test_production_welcome_material_translation_uses_wecom_welcome_shapes() -> 
                 "page": "pages/index",
                 "title": "欢迎卡片",
                 "pic_media_id": "mini-media",
+            },
+        },
+        {
+            "msgtype": "link",
+            "link": {
+                "title": "点击入群",
+                "url": "https://work.weixin.qq.com/gm/0123456789abcdef0123456789abcdef",
+                "desc": "欢迎加入",
             },
         },
     ]

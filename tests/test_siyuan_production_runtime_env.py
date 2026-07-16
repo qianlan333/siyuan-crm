@@ -18,6 +18,10 @@ def test_siyuan_runtime_values_enable_supported_wecom_effects_only() -> None:
     values = siyuan_production_runtime_values()
 
     assert values == {
+        "AICRM_EXTERNAL_EFFECT_RUN_DUE_SCHEDULER_ENABLED": "1",
+        "AICRM_EXTERNAL_EFFECT_RUN_DUE_INTERVAL_SECONDS": "60",
+        "AICRM_EXTERNAL_EFFECT_RUN_DUE_BATCH_SIZE": "20",
+        "AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY": "0",
         "AICRM_WECOM_EXECUTION_MODE": "execute",
         "AICRM_WECOM_ENABLED_EFFECT_TYPES": ",".join(WECOM_EFFECT_TYPES),
         "AICRM_WECOM_PRIVATE_ADAPTER_MODE": "production",
@@ -51,6 +55,10 @@ def test_siyuan_runtime_env_migration_is_idempotent_and_preserves_secrets(tmp_pa
     assert "SECRET_KEY='keep-me'" in first_body
     assert "WECOM_CONTACT_SECRET='keep-contact-secret'" in first_body
     assert "AICRM_WECOM_EXECUTION_MODE='execute'" in first_body
+    assert "AICRM_EXTERNAL_EFFECT_RUN_DUE_SCHEDULER_ENABLED='1'" in first_body
+    assert "AICRM_EXTERNAL_EFFECT_RUN_DUE_INTERVAL_SECONDS='60'" in first_body
+    assert "AICRM_EXTERNAL_EFFECT_RUN_DUE_BATCH_SIZE='20'" in first_body
+    assert "AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY='0'" in first_body
     assert f"AICRM_WECOM_ENABLED_EFFECT_TYPES='{','.join(WECOM_EFFECT_TYPES)}'" in first_body
     assert "AICRM_NEXT_WECOM_REAL_CALLS_ENABLED" not in first_body
     assert "AICRM_EXTERNAL_EFFECT_WECOM_EXECUTE" not in first_body

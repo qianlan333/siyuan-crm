@@ -29,6 +29,10 @@ DEPRECATED_WECOM_RUNTIME_KEYS = frozenset(
 
 def siyuan_production_runtime_values() -> dict[str, str]:
     return {
+        "AICRM_EXTERNAL_EFFECT_RUN_DUE_SCHEDULER_ENABLED": "1",
+        "AICRM_EXTERNAL_EFFECT_RUN_DUE_INTERVAL_SECONDS": "60",
+        "AICRM_EXTERNAL_EFFECT_RUN_DUE_BATCH_SIZE": "20",
+        "AICRM_EXTERNAL_EFFECT_TEST_EXECUTION_ONLY": "0",
         "AICRM_WECOM_EXECUTION_MODE": "execute",
         "AICRM_WECOM_ENABLED_EFFECT_TYPES": ",".join(WECOM_EFFECT_TYPES),
         "AICRM_WECOM_PRIVATE_ADAPTER_MODE": "production",
@@ -58,6 +62,7 @@ def main() -> int:
     values = ensure_siyuan_production_runtime_env(args.environment_file)
     print(
         "siyuan WeCom runtime configured: "
+        f"scheduler={values['AICRM_EXTERNAL_EFFECT_RUN_DUE_SCHEDULER_ENABLED']} "
         f"mode={values['AICRM_WECOM_EXECUTION_MODE']} "
         f"effect_type_count={len(WECOM_EFFECT_TYPES)}"
     )

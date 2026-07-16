@@ -116,13 +116,7 @@ def _safe_release_sha(value: object) -> str:
     return normalized if _RELEASE_SHA.fullmatch(normalized) else ""
 
 
-def _health_probe(
-    base_url: str,
-    *,
-    expected_sha: str,
-    timeout: float,
-    require_wechat_shop_callback_token: bool = True,
-) -> dict[str, Any]:
+def _health_probe(base_url: str, *, expected_sha: str, timeout: float) -> dict[str, Any]:
     response = _fetch(_url(base_url, "/health"), timeout=timeout)
     release_sha = _safe_release_sha(response.headers.get("x-aicrm-release-sha"))
     payload: dict[str, Any] = {}
@@ -153,7 +147,7 @@ def _health_probe(
         error_code = "health_release_sha_mismatch"
     elif not secret_key_present:
         error_code = "health_secret_key_not_ready"
-    elif require_wechat_shop_callback_token and not callback_token_present:
+    elif not callback_token_present:
         error_code = "health_wechat_shop_callback_token_not_ready"
     elif not production_data_ready:
         error_code = "health_production_data_not_ready"
@@ -284,7 +278,6 @@ def run(
     expected_sha: str,
     expected_callback_url: str,
     timeout: float,
-    require_wechat_shop_callback_token: bool = True,
 ) -> dict[str, Any]:
     normalized_sha = str(expected_sha or "").strip()
     if not _RELEASE_SHA.fullmatch(normalized_sha):
@@ -296,12 +289,7 @@ def run(
     if not normalized_callback_url:
         return _not_checked_payload("expected_callback_url_invalid")
 
-    health = _health_probe(
-        normalized_base_url,
-        expected_sha=normalized_sha,
-        timeout=timeout,
-        require_wechat_shop_callback_token=require_wechat_shop_callback_token,
-    )
+    health = _health_probe(normalized_base_url, expected_sha=normalized_sha, timeout=timeout)
     auth = {
         mode: _auth_probe(
             normalized_base_url,
@@ -330,12 +318,6 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--expected-callback-url", required=True)
-    parser.add_argument(
-        "--allow-missing-wechat-shop-callback-token",
-        action="store_true",
-        default=False,
-        help="Do not require the optional WeChat Shop callback token for non-shop CRM deployments.",
-    )
     parser.add_argument("--timeout", type=float, default=3.0)
     args = parser.parse_args(argv)
     payload = run(
@@ -343,7 +325,6 @@ def main(argv: list[str] | None = None) -> int:
         expected_sha=str(args.expected_sha),
         expected_callback_url=str(args.expected_callback_url),
         timeout=max(0.1, float(args.timeout)),
-        require_wechat_shop_callback_token=not bool(args.allow_missing_wechat_shop_callback_token),
     )
     print_json(payload, indent=2, sort_keys=True)
     return 0 if payload["ok"] else 1

@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-from migrations.audience_read import ensure_audience_read_schema
-
 
 revision = "0076_create_missing_baseline_runtime_tables"
 down_revision = "0075_drop_message_batch_legacy_tables"
@@ -18,7 +16,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    audience_read_available = ensure_audience_read_schema()
+    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
     op.execute(
         """
         CREATE TABLE IF NOT EXISTS questionnaires (
@@ -207,8 +205,6 @@ def upgrade() -> None:
         WHERE retry_from_log_id IS NOT NULL
         """
     )
-    if not audience_read_available:
-        return
     op.execute(
         """
         DO $$

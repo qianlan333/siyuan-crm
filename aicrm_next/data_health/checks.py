@@ -32,6 +32,10 @@ BROADCAST_TERMINAL_LOOKBACK_HOURS = max(
     int(os.getenv("AICRM_DATA_HEALTH_BROADCAST_TERMINAL_LOOKBACK_HOURS", "24") or 24),
 )
 EXTERNAL_EFFECT_RETRYABLE_DUE_MAX_COUNT = int(os.getenv("AICRM_DATA_HEALTH_EXTERNAL_EFFECT_RETRYABLE_DUE_MAX_COUNT", "100") or 100)
+EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS = max(
+    1,
+    int(os.getenv("AICRM_DATA_HEALTH_EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS", "24") or 24),
+)
 QUESTIONNAIRE_CONTINUATION_CUTOVER_SQL = QUESTIONNAIRE_AUTO_EXECUTE_CUTOVER_SQL
 COMMERCE_CONTINUATION_CUTOVER_SQL = "TIMESTAMPTZ '2026-07-13 09:46:09+00'"
 
@@ -579,11 +583,19 @@ def _external_effect_failed_retryable_backlog() -> DataHealthCheckResult:
             row = (
                 session.execute(
                     text(
-                        """
+                        f"""
                         SELECT
                             COUNT(*) FILTER (WHERE status = 'failed_retryable') AS failed_retryable_count,
-                            COUNT(*) FILTER (WHERE status = 'failed_terminal') AS failed_terminal_count,
-                            COUNT(*) FILTER (WHERE status = 'blocked') AS blocked_count,
+                            COUNT(*) FILTER (
+                                WHERE status = 'failed_terminal'
+                                  AND updated_at >= CURRENT_TIMESTAMP - make_interval(hours => {EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS})
+                            ) AS recent_failed_terminal_count,
+                            COUNT(*) FILTER (
+                                WHERE status = 'blocked'
+                                  AND updated_at >= CURRENT_TIMESTAMP - make_interval(hours => {EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS})
+                            ) AS recent_blocked_count,
+                            COUNT(*) FILTER (WHERE status = 'failed_terminal') AS historical_failed_terminal_count,
+                            COUNT(*) FILTER (WHERE status = 'blocked') AS historical_blocked_count,
                             COUNT(*) FILTER (
                                 WHERE status = 'failed_retryable'
                                   AND (next_retry_at IS NULL OR next_retry_at <= CURRENT_TIMESTAMP)
@@ -613,8 +625,10 @@ def _external_effect_failed_retryable_backlog() -> DataHealthCheckResult:
         )
 
     failed_retryable_count = int(row.get("failed_retryable_count") or 0)
-    failed_terminal_count = int(row.get("failed_terminal_count") or 0)
-    blocked_count = int(row.get("blocked_count") or 0)
+    failed_terminal_count = int(row.get("recent_failed_terminal_count", row.get("failed_terminal_count")) or 0)
+    blocked_count = int(row.get("recent_blocked_count", row.get("blocked_count")) or 0)
+    historical_failed_terminal_count = int(row.get("historical_failed_terminal_count") or failed_terminal_count)
+    historical_blocked_count = int(row.get("historical_blocked_count") or blocked_count)
     due_retryable_count = int(row.get("due_retryable_count") or 0)
     oldest_failed_retryable_age_seconds = int(float(row.get("oldest_failed_retryable_age_seconds") or 0))
     violations = []
@@ -628,6 +642,9 @@ def _external_effect_failed_retryable_backlog() -> DataHealthCheckResult:
         "failed_retryable_count": failed_retryable_count,
         "failed_terminal_count": failed_terminal_count,
         "blocked_count": blocked_count,
+        "historical_failed_terminal_count": historical_failed_terminal_count,
+        "historical_blocked_count": historical_blocked_count,
+        "terminal_lookback_hours": EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS,
         "due_retryable_count": due_retryable_count,
         "oldest_failed_retryable_age_seconds": oldest_failed_retryable_age_seconds,
         "due_retryable_threshold": EXTERNAL_EFFECT_RETRYABLE_DUE_MAX_COUNT,

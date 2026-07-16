@@ -16,6 +16,12 @@ from aicrm_next.platform_foundation.internal_events.models import (
 
 
 PRODUCT_CODE = "prd_20260713083438_75670b"
+PRODUCT_CODES = frozenset(
+    {
+        "prd_20260707050545_291025",
+        PRODUCT_CODE,
+    }
+)
 TAG_ID = "etbNXyCwAAUZm79s_QWeVnr3fktQn0mg"
 OWNER_USERID = "HuangYouCan"
 CONSUMER_NAME = "product_paid_wecom_tag_consumer"
@@ -95,7 +101,7 @@ def product_paid_wecom_tag_consumer(
     order = _order_from_event(event)
     product_code = _text(order.get("product_code"))
     out_trade_no = _text(order.get("out_trade_no") or event.aggregate_id)
-    if product_code != PRODUCT_CODE:
+    if product_code not in PRODUCT_CODES:
         return InternalEventConsumerResult(
             status="skipped",
             request_summary={"event_id": event.event_id, "product_code": product_code},
@@ -171,11 +177,11 @@ def product_paid_wecom_tag_consumer(
                     "external_userid": external_userid,
                     "follow_user_userid": OWNER_USERID,
                     "tag_ids": [TAG_ID],
-                    "product_code": PRODUCT_CODE,
+                    "product_code": product_code,
                     "out_trade_no": out_trade_no,
                 },
                 payload_summary={
-                    "product_code": PRODUCT_CODE,
+                    "product_code": product_code,
                     "tag_count": 1,
                     "owner_userid": OWNER_USERID,
                     "external_userid_present": True,
@@ -211,7 +217,7 @@ def product_paid_wecom_tag_consumer(
             "status": _text(job.get("status")),
         },
         result_summary={
-            "product_code": PRODUCT_CODE,
+            "product_code": product_code,
             "tag_id": TAG_ID,
             "owner_userid": OWNER_USERID,
             "external_effect_job_id": int(job.get("id") or 0),
@@ -223,6 +229,7 @@ __all__ = [
     "CONSUMER_NAME",
     "OWNER_USERID",
     "PRODUCT_CODE",
+    "PRODUCT_CODES",
     "TAG_ID",
     "product_paid_wecom_tag_consumer",
     "resolve_payment_tag_identity",

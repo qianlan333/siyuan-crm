@@ -5,8 +5,10 @@ from aicrm_next.shared.typing import JsonDict
 
 def list_item_projection(customer: JsonDict) -> JsonDict:
     binding = dict(customer.get("binding") or {})
+    identity = dict(customer.get("identity") or {})
     is_bound = bool(binding.get("is_bound")) if binding else bool(customer.get("mobile"))
     return {
+        "unionid": customer.get("unionid") or identity.get("unionid") or "",
         "external_userid": customer.get("external_userid"),
         "customer_name": customer.get("customer_name"),
         "owner_userid": customer.get("owner_userid"),

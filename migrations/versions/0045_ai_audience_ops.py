@@ -8,8 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-from migrations.audience_read import ensure_audience_read_schema
-
 
 revision = "0045_ai_audience_ops"
 down_revision = "0044_retire_legacy_webhook_deprecations"
@@ -18,11 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    audience_read_available = ensure_audience_read_schema()
+    op.execute("CREATE SCHEMA IF NOT EXISTS audience_read")
     _create_tables()
     _create_source_column_guards()
-    if audience_read_available:
-        _create_views()
+    _create_views()
 
 
 def downgrade() -> None:

@@ -90,7 +90,7 @@ def _exclusive_scope_override_matches(
 
 def _git_diff_names(*args: str) -> list[str]:
     completed = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMRTUXB", *args],
+        ["git", "diff", "--name-only", *args],
         cwd=ROOT,
         text=True,
         check=True,

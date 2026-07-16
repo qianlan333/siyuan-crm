@@ -64,7 +64,7 @@
           <td>{{ item.owner_display_name or item.owner_userid or "未分配" }}</td>
           <td>{{ item.mobile or "未填写" }}</td>
           <td>
-            <a class="admin-button admin-button--secondary" href="{{ url_for('api.admin_console_customer_detail', external_userid=item.external_userid) }}">
+            <a class="admin-button admin-button--secondary" href="{{ url_for('api.admin_console_customer_detail', external_userid=item.unionid or item.external_userid) }}">
               查看档案
             </a>
           </td>

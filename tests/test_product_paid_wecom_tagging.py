@@ -3,6 +3,7 @@ from __future__ import annotations
 from aicrm_next.commerce.payment_tagging import (
     OWNER_USERID,
     PRODUCT_CODE,
+    PRODUCT_CODES,
     TAG_ID,
     product_paid_wecom_tag_consumer,
     resolve_payment_tag_identity,
@@ -85,7 +86,17 @@ def test_non_matching_product_is_skipped_without_identity_lookup() -> None:
     assert result.response_summary["reason"] == "product_rule_not_matched"
 
 
-def test_matching_paid_order_plans_one_idempotent_wecom_tag_job() -> None:
+def test_each_matching_paid_product_plans_one_idempotent_wecom_tag_job() -> None:
+    assert PRODUCT_CODES == {
+        "prd_20260707050545_291025",
+        "prd_20260713083438_75670b",
+    }
+
+    for product_code in PRODUCT_CODES:
+        _assert_matching_paid_order_plans_one_idempotent_wecom_tag_job(product_code)
+
+
+def _assert_matching_paid_order_plans_one_idempotent_wecom_tag_job(product_code: str) -> None:
     repo = InMemoryExternalEffectRepository()
     effects = ExternalEffectService(repo)
     resolver = lambda _order, owner: {
@@ -94,20 +105,31 @@ def test_matching_paid_order_plans_one_idempotent_wecom_tag_job() -> None:
         "follow_user_userid": owner,
     }
 
-    first = product_paid_wecom_tag_consumer(_event(), _run(), identity_resolver=resolver, external_effects=effects)
-    second = product_paid_wecom_tag_consumer(_event(), _run(), identity_resolver=resolver, external_effects=effects)
+    first = product_paid_wecom_tag_consumer(
+        _event(product_code=product_code),
+        _run(),
+        identity_resolver=resolver,
+        external_effects=effects,
+    )
+    second = product_paid_wecom_tag_consumer(
+        _event(product_code=product_code),
+        _run(),
+        identity_resolver=resolver,
+        external_effects=effects,
+    )
     jobs, total = effects.list_jobs({"effect_type": WECOM_CONTACT_TAG_MARK})
 
     assert first.status == "succeeded"
     assert first.response_summary["external_effect_job_created"] is True
     assert second.status == "succeeded"
     assert second.response_summary["external_effect_job_reused"] is True
+    assert first.result_summary["product_code"] == product_code
     assert total == 1
     assert jobs[0].payload_json == {
         "external_userid": "wm_payment_tag",
         "follow_user_userid": OWNER_USERID,
         "tag_ids": [TAG_ID],
-        "product_code": PRODUCT_CODE,
+        "product_code": product_code,
         "out_trade_no": "WXP_PAYMENT_TAG",
     }
 

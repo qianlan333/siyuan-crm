@@ -396,6 +396,32 @@ def test_external_effect_backlog_probe_accepts_small_retryable_queue(monkeypatch
     assert any("FROM external_effect_job" in sql for sql in calls)
 
 
+def test_external_effect_backlog_keeps_historical_terminal_evidence_without_permanent_failure(monkeypatch) -> None:
+    from aicrm_next.data_health import checks
+
+    _patch_health_db(
+        monkeypatch,
+        {
+            "failed_retryable_count": 0,
+            "recent_failed_terminal_count": 0,
+            "recent_blocked_count": 0,
+            "historical_failed_terminal_count": 7,
+            "historical_blocked_count": 3,
+            "due_retryable_count": 0,
+            "oldest_failed_retryable_age_seconds": 0,
+        },
+    )
+
+    result = checks._external_effect_failed_retryable_backlog()
+
+    assert result.status == "ok"
+    assert result.evidence["failed_terminal_count"] == 0
+    assert result.evidence["blocked_count"] == 0
+    assert result.evidence["historical_failed_terminal_count"] == 7
+    assert result.evidence["historical_blocked_count"] == 3
+    assert result.evidence["terminal_lookback_hours"] == 24
+
+
 def test_retired_runtime_reference_scan_reads_each_source_once(tmp_path, monkeypatch) -> None:
     from tools import check_data_table_lifecycle as lifecycle
 

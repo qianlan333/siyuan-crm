@@ -30,17 +30,13 @@ def test_runtime_contract_inventory_covers_r00_behavior_surfaces() -> None:
     assert all(route["capability_owner"] for route in routes)
     assert all("responses" in route["contract"] for route in routes)
 
-    assert inventory["migration_heads"] == ["0122_internal_event_fanout_manifest"]
+    assert inventory["migration_heads"] == ["0123_required_physical_schema_repair"]
     assert len(inventory["tables"]) >= 150
     owned_lifecycles = {"canonical", "read_model", "event", "queue", "config"}
     assert all(table["write_owner"] for table in inventory["tables"] if table["lifecycle"] in owned_lifecycles)
     assert inventory["internal_event_consumers"]
     assert inventory["external_effects"]
-    runtime_manifest = ROOT / "deploy" / "production_runtime_units.json"
-    if runtime_manifest.exists():
-        assert any(unit["unit"] == "openclaw-wecom-callback-ingress.service" for unit in inventory["runtime_units"])
-    else:
-        assert inventory["runtime_units"] == []
+    assert any(unit["unit"] == "openclaw-wecom-callback-ingress.service" for unit in inventory["runtime_units"])
     assert "DATABASE_URL" in inventory["environment_variables"]
     assert {
         "AICRM_AUTH_ARCHIVE_WORKER_CLIENT_ID",

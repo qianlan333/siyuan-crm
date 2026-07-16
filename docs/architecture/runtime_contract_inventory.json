@@ -5,7 +5,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/auth_wecom/service.py",
       "key": "ADMIN_LOGIN_REDIRECT_URI",
-      "line": 76
+      "line": 75
     },
     {
       "accessor": "os.getenv",
@@ -358,6 +358,12 @@
     {
       "accessor": "os.getenv",
       "file": "aicrm_next/data_health/checks.py",
+      "key": "AICRM_DATA_HEALTH_EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS",
+      "line": 37
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "aicrm_next/data_health/checks.py",
       "key": "AICRM_DATA_HEALTH_PROJECTION_FRESHNESS_MAX_MINUTES",
       "line": 27
     },
@@ -563,7 +569,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_config/application.py",
       "key": "AICRM_NEXT_ALIPAY_MODE",
-      "line": 970
+      "line": 1012
     },
     {
       "accessor": "os.getenv",
@@ -761,7 +767,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_config/application.py",
       "key": "AICRM_NEXT_WECHAT_PAY_MODE",
-      "line": 964
+      "line": 1006
     },
     {
       "accessor": "os.getenv",
@@ -1133,7 +1139,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/customer_read_model/repo.py",
       "key": "CUSTOMER_READ_MODEL_REPO_BACKEND",
-      "line": 596
+      "line": 592
     },
     {
       "accessor": "os.getenv",
@@ -1469,7 +1475,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "REDIS_URL",
-      "line": 137
+      "line": 139
     },
     {
       "accessor": "os.getenv",
@@ -1511,7 +1517,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/shared/runtime.py",
       "key": "SECRET_KEY",
-      "line": 110
+      "line": 112
     },
     {
       "accessor": "runtime_setting",
@@ -1715,7 +1721,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/shared/runtime.py",
       "key": "WECHAT_SHOP_CALLBACK_TOKEN",
-      "line": 111
+      "line": 113
     },
     {
       "accessor": "os.getenv",
@@ -1733,7 +1739,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/auth_wecom/service.py",
       "key": "WECOM_AGENT_ID",
-      "line": 82
+      "line": 81
     },
     {
       "accessor": "os.getenv",
@@ -1871,7 +1877,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/auth_wecom/service.py",
       "key": "WECOM_CORP_ID",
-      "line": 81
+      "line": 80
     },
     {
       "accessor": "os.getenv",
@@ -1979,7 +1985,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/auth_wecom/service.py",
       "key": "WECOM_SECRET",
-      "line": 83
+      "line": 82
     },
     {
       "accessor": "runtime_setting",
@@ -2033,7 +2039,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "WORKER_RELEASE_SHA",
-      "line": 131
+      "line": 133
     }
   ],
   "environment_variables": [
@@ -2080,6 +2086,7 @@
     "AICRM_DATA_HEALTH_BROADCAST_RETRYABLE_DUE_MAX_COUNT",
     "AICRM_DATA_HEALTH_BROADCAST_TERMINAL_LOOKBACK_HOURS",
     "AICRM_DATA_HEALTH_EXTERNAL_EFFECT_RETRYABLE_DUE_MAX_COUNT",
+    "AICRM_DATA_HEALTH_EXTERNAL_EFFECT_TERMINAL_LOOKBACK_HOURS",
     "AICRM_DATA_HEALTH_PROJECTION_FRESHNESS_MAX_MINUTES",
     "AICRM_ENABLE_IN_PROCESS_ARCHIVE_SYNC",
     "AICRM_ENV_FILE",
@@ -2898,7 +2905,7 @@
     }
   ],
   "migration_heads": [
-    "0122_internal_event_fanout_manifest"
+    "0123_required_physical_schema_repair"
   ],
   "openapi_components": {
     "schemas": {
@@ -44751,6 +44758,11 @@
       "kind": "service",
       "state": "retired_forbidden",
       "unit": "openclaw-automation-conversion-due-runner.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "openclaw-automation-conversion-due-runner.timer"
     },
     {
       "kick_after_timer_restart": false,

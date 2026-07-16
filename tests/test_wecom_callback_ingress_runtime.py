@@ -1,28 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.channel_entry.ingress_app import create_wecom_callback_ingress_app
 from scripts.ops import check_callback_quick_ack_state as quick_ack_state
 from scripts.ops.check_wecom_callback_ingress_cutover import analyze_nginx_config, run as run_cutover_check
-
-
-ROOT = Path(__file__).resolve().parents[1]
-SIYUAN_DEPLOY_OVERLAY_REASON = (
-    "siyuan-crm keeps its existing production deploy/systemd overlay; "
-    "AI-CRM nginx callback cutover template is not part of this sync PR"
-)
-
-
-def _is_siyuan_deploy_overlay() -> bool:
-    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return (
-        "scripts/ensure_channel_multi_staff_schema.py" in workflow
-        and not (ROOT / "deploy" / "aicrm-web.service").exists()
-    )
 
 
 def _event() -> dict:
@@ -90,7 +72,6 @@ def test_wecom_callback_ingress_runtime_never_fake_acks_when_inbox_fails(monkeyp
     assert "webhook ingress unavailable" in response.text
 
 
-@pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_wecom_callback_ingress_nginx_template_routes_to_5002_with_short_timeouts_and_backpressure() -> None:
     template = open("deploy/nginx-wecom-callback-ingress.conf.example", encoding="utf-8").read()
     payload = analyze_nginx_config("deploy/nginx-wecom-callback-ingress.conf.example")
@@ -458,7 +439,6 @@ def test_wecom_callback_ingress_cutover_check_ignores_commented_backpressure(tmp
     assert any("backpressure" in warning for warning in payload["warnings"])
 
 
-@pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_wecom_callback_ingress_cutover_check_accepts_5002_template_without_probe() -> None:
     payload = run_cutover_check(
         [
@@ -475,7 +455,6 @@ def test_wecom_callback_ingress_cutover_check_accepts_5002_template_without_prob
     assert payload["nginx"]["callback_backpressure_configured"] is True
 
 
-@pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_wecom_callback_ingress_cutover_probe_rejects_plain_success(monkeypatch) -> None:
     monkeypatch.setattr("scripts.ops.check_wecom_callback_ingress_cutover.probe_json", lambda url, timeout: {"checked": True, "ok": True, "status_code": 200, "body": "ok", "error": ""})
     monkeypatch.setattr(
@@ -490,7 +469,6 @@ def test_wecom_callback_ingress_cutover_probe_rejects_plain_success(monkeypatch)
     assert any("plain success" in warning for warning in payload["warnings"])
 
 
-@pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_wecom_callback_ingress_cutover_probe_accepts_app_level_invalid_callback(monkeypatch) -> None:
     monkeypatch.setattr("scripts.ops.check_wecom_callback_ingress_cutover.probe_json", lambda url, timeout: {"checked": True, "ok": True, "status_code": 200, "body": "ok", "error": ""})
     monkeypatch.setattr(

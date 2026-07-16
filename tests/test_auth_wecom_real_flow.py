@@ -25,18 +25,13 @@ class FakeWeComAdminAuthClient:
         return {"errcode": 0, "UserId": "HuangYouCan"}
 
 
-def _prepare_client(monkeypatch, tmp_path, *, real_auth_env: str = "explicit_gate") -> tuple[TestClient, FakeWeComAdminAuthClient]:
+def _prepare_client(monkeypatch, tmp_path) -> tuple[TestClient, FakeWeComAdminAuthClient]:
     database_url = f"sqlite+pysqlite:///{tmp_path / 'wecom_auth.sqlite3'}"
     monkeypatch.setenv("DATABASE_URL", database_url)
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
     monkeypatch.setenv("SECRET_KEY", "wecom-admin-auth-test-secret")
-    monkeypatch.delenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", raising=False)
-    monkeypatch.delenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", raising=False)
-    if real_auth_env == "mode_live":
-        monkeypatch.setenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", "live")
-    else:
-        monkeypatch.setenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", "true")
+    monkeypatch.setenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", "true")
     monkeypatch.setenv("WECOM_CORP_ID", "ww-test-corp")
     monkeypatch.setenv("WECOM_AGENT_ID", "1000023")
     monkeypatch.setenv("WECOM_SECRET", "secret_for_test")
@@ -119,7 +114,6 @@ def _prepare_client(monkeypatch, tmp_path, *, real_auth_env: str = "explicit_gat
 
 def test_html_start_redirects_to_login_error_when_real_wecom_auth_is_disabled(monkeypatch) -> None:
     monkeypatch.delenv("AICRM_WECOM_ADMIN_AUTH_ENABLE_REAL", raising=False)
-    monkeypatch.delenv("AICRM_NEXT_WECOM_ADMIN_AUTH_MODE", raising=False)
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_NEXT_DISABLE_LEGACY_PRODUCTION_FACADE", "1")
 

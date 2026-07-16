@@ -28,6 +28,7 @@ def test_runtime_units_manifest_classifies_every_deploy_timer() -> None:
     assert approval_required.isdisjoint(retired_forbidden)
     assert "aicrm-archive-sync.timer" in approval_required
     assert "aicrm-huangyoucan-usage-sync.timer" in approval_required
+    assert "aicrm-wechat-shop-order-sync.timer" in approval_required
     assert "openclaw-external-effect-worker.timer" in active
     assert "openclaw-customer-read-model-refresh.timer" in active
     assert "openclaw-external-push-worker.timer" in retired_forbidden
@@ -37,6 +38,7 @@ def test_runtime_units_manifest_classifies_every_deploy_timer() -> None:
     assert "openclaw-wecom-callback-inbox-worker.timer" not in deploy_timers
     assert "aicrm-automation-jobs-run-due.timer" in retired_forbidden
     assert "aicrm-web.service" in retired_forbidden
+    assert "openclaw-automation-conversion-due-runner.timer" in retired_forbidden
     assert set(manifest["retired_unit_files"]) == retired_forbidden
 
 
@@ -372,10 +374,8 @@ def test_runtime_units_stop_and_verify_dry_runs_are_manifest_driven(capsys) -> N
         assert f"sudo systemctl is-active {unit}" in verify_output
         assert f"sudo systemctl is-failed {unit}" in verify_output
     assert "sudo test '!' -e /etc/systemd/system/openclaw-wecom-callback-ingress.service.d/10-aicrm-callback-hotfix-runtime.conf" in verify_output
-    expected_approval_timers = ",".join(
-        item["timer"] for item in _manifest()["approval_required"]
-    )
-    assert f"approval_required_timers={expected_approval_timers}" in verify_output
+    expected_approval = "approval_required_timers=" + ",".join(item["timer"] for item in _manifest()["approval_required"])
+    assert expected_approval in verify_output
 
 
 def test_runtime_units_verify_requires_primary_active_and_enabled_approval_timer_active() -> None:

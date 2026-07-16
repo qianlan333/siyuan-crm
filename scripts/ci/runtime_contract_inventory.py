@@ -205,12 +205,7 @@ def _external_effects(root: Path) -> tuple[list[dict[str, str]], list[dict[str, 
 
 
 def _runtime_units(root: Path) -> list[dict[str, Any]]:
-    manifest_path = root / "deploy" / "production_runtime_units.json"
-    if not manifest_path.exists():
-        # siyuan-crm keeps a lightweight deploy overlay and intentionally does
-        # not carry AI-CRM's canonical runtime-unit manifest.
-        return []
-    manifest = _load_structured(manifest_path)
+    manifest = _load_structured(root / "deploy" / "production_runtime_units.json")
     units: list[dict[str, Any]] = []
     primary_web = dict(manifest.get("primary_web") or {})
     if primary_web.get("service"):

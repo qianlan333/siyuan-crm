@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from aicrm_next.ai_audience_ops.constants import (
     AI_AUDIENCE_REFRESH_DEFAULT_ROW_LIMIT,
     AI_AUDIENCE_REFRESH_MAX_ROW_LIMIT,
@@ -18,15 +16,6 @@ from scripts.ops.ensure_ai_audience_external_api_env import ensure_allowed_prefi
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SIYUAN_DEPLOY_OVERLAY_REASON = (
-    "siyuan-crm keeps its existing production deploy/systemd overlay; "
-    "AI-CRM deploy env repair hook is not part of this sync PR"
-)
-
-
-def _is_siyuan_deploy_overlay() -> bool:
-    workflow = (ROOT / ".github" / "workflows" / "deploy.yml").read_text(encoding="utf-8")
-    return "scripts/ensure_channel_multi_staff_schema.py" in workflow and "workflow_run:" not in workflow
 
 
 def test_simple_sql_uses_sqlalchemy_safe_timestamptz_cast() -> None:
@@ -43,18 +32,6 @@ def test_huangxiaocan_member_usage_migration_casts_text_timestamps_before_coales
     assert "COALESCE(finished_at::timestamptz, updated_at::timestamptz, created_at::timestamptz, CURRENT_TIMESTAMP) AS used_at" in source
     assert "COALESCE(updated_at::timestamptz, created_at::timestamptz, CURRENT_TIMESTAMP) AS used_at" in source
     assert "COALESCE(finished_at, updated_at, created_at, CURRENT_TIMESTAMP)::timestamptz" not in source
-
-
-def test_audience_read_schema_creation_is_privilege_tolerant() -> None:
-    helper = (ROOT / "migrations/audience_read.py").read_text(encoding="utf-8")
-    direct_schema_creates = [
-        path
-        for path in (ROOT / "migrations/versions").glob("*.py")
-        if "CREATE SCHEMA IF NOT EXISTS audience_read" in path.read_text(encoding="utf-8")
-    ]
-
-    assert "WHEN insufficient_privilege" in helper
-    assert direct_schema_creates == []
 
 
 def test_ai_audience_refresh_query_timeout_allows_heavier_catalog_views() -> None:
@@ -85,7 +62,6 @@ def test_ai_audience_external_api_env_allows_runtime_business_prefix(tmp_path) -
     assert "AICRM_AI_AUDIENCE_SPEC_ALLOWED_PREFIXES=prod_verify_,audience_" in env_path.read_text(encoding="utf-8")
 
 
-@pytest.mark.skipif(_is_siyuan_deploy_overlay(), reason=SIYUAN_DEPLOY_OVERLAY_REASON)
 def test_deploy_workflow_repairs_ai_audience_external_api_prefixes() -> None:
     workflow = (ROOT / ".github/workflows/deploy.yml").read_text(encoding="utf-8")
 

@@ -508,12 +508,8 @@ def _coerce_datetime(value: object) -> datetime:
         return value
     if value:
         normalized = str(value).strip()
-        # PostgreSQL may render whole-hour UTC offsets as ``+08``/``-05``.
-        # ``datetime.fromisoformat`` requires an explicit minute component.
         if len(normalized) >= 3 and normalized[-3] in {"+", "-"} and normalized[-2:].isdigit():
             normalized += ":00"
-        # Python versions before 3.11 accept only 3 or 6 fractional digits in
-        # ISO datetimes, while PostgreSQL may emit any precision up to 6.
         fractional = re.fullmatch(
             r"(?P<prefix>.+:\d{2})\.(?P<fraction>\d+)(?P<offset>Z|[+-]\d{2}:\d{2})?",
             normalized,

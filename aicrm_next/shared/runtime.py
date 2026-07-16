@@ -5,6 +5,9 @@ import os
 from aicrm_next.shared.release import current_release_sha
 
 
+ALLOW_MISSING_WECHAT_SHOP_CALLBACK_TOKEN_KEY = "AICRM_ALLOW_MISSING_WECHAT_SHOP_CALLBACK_TOKEN"
+
+
 def _env_flag(name: str, *, default: bool = False) -> bool:
     value = str(os.getenv(name, "") or "").strip().lower()
     if not value:
@@ -77,9 +80,13 @@ def require_signing_secret(
     return local_fallback.encode("utf-8")
 
 
+def wechat_shop_callback_token_required() -> bool:
+    return production_environment() and not _env_flag(ALLOW_MISSING_WECHAT_SHOP_CALLBACK_TOKEN_KEY)
+
+
 def assert_required_runtime_secrets() -> None:
     require_signing_secret("SECRET_KEY", local_fallback="aicrm-next-local-secret")
-    if production_environment():
+    if wechat_shop_callback_token_required():
         require_signing_secret("WECHAT_SHOP_CALLBACK_TOKEN", local_fallback="")
 
 
@@ -111,6 +118,7 @@ def runtime_health_state() -> dict:
         "service": "aicrm-next",
         "secret_key_present": bool(runtime_setting("SECRET_KEY")),
         "wechat_shop_callback_token_present": bool(runtime_setting("WECHAT_SHOP_CALLBACK_TOKEN")),
+        "wechat_shop_callback_token_required": wechat_shop_callback_token_required(),
         "database": mode,
         "database_mode": mode,
         "fixture_mode": fixture,

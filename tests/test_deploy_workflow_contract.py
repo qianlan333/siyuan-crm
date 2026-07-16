@@ -1128,3 +1128,9 @@ def test_deploy_runs_runtime_environment_as_repository_module():
 
     assert "python3 -m scripts.ops.ensure_runtime_environment" in workflow
     assert "python3 scripts/ops/ensure_runtime_environment.py" not in workflow
+    persistence_index = workflow.index("python3 -m scripts.ops.ensure_runtime_environment")
+    runtime_start_index = workflow.index("sudo systemctl start openclaw-wecom-postgres.service", persistence_index)
+    flag_index = workflow.index("runtime_environment_args+=(--allow-missing-wechat-shop-callback-token)")
+
+    assert flag_index < persistence_index < runtime_start_index
+    assert '"${runtime_environment_args[@]}"' in workflow[persistence_index:runtime_start_index]

@@ -387,10 +387,15 @@ jobs:
               echo "PUBLIC_BASE_URL must be an https origin"
               exit 1
             fi
+            runtime_environment_args=()
+            if [ "${{ env.ALLOW_MISSING_WECHAT_SHOP_CALLBACK_TOKEN }}" = "1" ]; then
+              runtime_environment_args+=(--allow-missing-wechat-shop-callback-token)
+            fi
             python3 -m scripts.ops.ensure_runtime_environment \
               --environment-file /home/ubuntu/.openclaw-wecom-pg.env \
               --target-environment "$deploy_target" \
-              --public-base-url "$auth_issuer"
+              --public-base-url "$auth_issuer" \
+              "${runtime_environment_args[@]}"
             set -a
             source /home/ubuntu/.openclaw-wecom-pg.env
             set +a

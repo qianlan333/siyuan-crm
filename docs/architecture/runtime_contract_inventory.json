@@ -653,7 +653,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "AICRM_NEXT_ENV",
-      "line": 38
+      "line": 41
     },
     {
       "accessor": "os.getenv",
@@ -1073,7 +1073,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "APP_ENV",
-      "line": 40
+      "line": 43
     },
     {
       "accessor": "os.getenv",
@@ -1223,7 +1223,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "DATABASE_URL",
-      "line": 16
+      "line": 19
     },
     {
       "accessor": "os.getenv",
@@ -1361,7 +1361,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "ENVIRONMENT",
-      "line": 39
+      "line": 42
     },
     {
       "accessor": "os.getenv",
@@ -1379,7 +1379,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "FLASK_ENV",
-      "line": 41
+      "line": 44
     },
     {
       "accessor": "os.environ.get",
@@ -1475,7 +1475,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "REDIS_URL",
-      "line": 139
+      "line": 147
     },
     {
       "accessor": "os.getenv",
@@ -1517,7 +1517,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/shared/runtime.py",
       "key": "SECRET_KEY",
-      "line": 112
+      "line": 119
     },
     {
       "accessor": "runtime_setting",
@@ -1721,7 +1721,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/shared/runtime.py",
       "key": "WECHAT_SHOP_CALLBACK_TOKEN",
-      "line": 113
+      "line": 120
     },
     {
       "accessor": "os.getenv",
@@ -2039,7 +2039,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/shared/runtime.py",
       "key": "WORKER_RELEASE_SHA",
-      "line": 133
+      "line": 141
     }
   ],
   "environment_variables": [

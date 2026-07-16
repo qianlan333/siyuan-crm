@@ -40,7 +40,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def run(*, limit: int | None = None, dry_run: bool = True, event_types: list[str] | None = None, consumer_names: list[str] | None = None) -> dict:
-    return InternalEventWorker(consumer_registry=build_internal_event_consumer_registry()).run_due(
+    return InternalEventWorker(
+        consumer_registry=build_internal_event_consumer_registry(),
+        relay_role="owner",
+    ).run_due(
         batch_size=int(limit or _default_limit()),
         dry_run=bool(dry_run),
         event_types=event_types,

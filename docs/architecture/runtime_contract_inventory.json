@@ -515,7 +515,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/platform_foundation/internal_events/worker.py",
       "key": "AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE",
-      "line": 199
+      "line": 247
     },
     {
       "accessor": "os.getenv",
@@ -2898,7 +2898,7 @@
     }
   ],
   "migration_heads": [
-    "0121_service_period_member_grid_sharing"
+    "0122_internal_event_fanout_manifest"
   ],
   "openapi_components": {
     "schemas": {
@@ -46975,7 +46975,7 @@
       "domain": "internal_events",
       "drop_candidate": false,
       "lifecycle": "event",
-      "migration_source": "0043_internal_event_queue",
+      "migration_source": "0043_internal_event_queue, fan-out manifest added by 0122_internal_event_fanout_manifest",
       "pii_level": "",
       "read_owners": [
         "aicrm_next.platform_foundation.internal_events.worker",

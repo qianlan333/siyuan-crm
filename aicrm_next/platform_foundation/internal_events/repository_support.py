@@ -135,6 +135,18 @@ def _json_obj(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _json_list(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, list):
+        return [dict(item) for item in value if isinstance(item, dict)]
+    if isinstance(value, str) and value:
+        try:
+            data = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return [dict(item) for item in data if isinstance(item, dict)] if isinstance(data, list) else []
+    return []
+
+
 def _payload_summary(payload: dict[str, Any]) -> dict[str, Any]:
     summary: dict[str, Any] = {}
     for key, value in dict(payload or {}).items():
@@ -170,10 +182,12 @@ def _public_event(row: dict[str, Any] | None) -> InternalEvent | None:
     payload = dict(row)
     for key in ("payload_json", "payload_summary_json"):
         payload[key] = _json_obj(payload.get(key))
+    payload["fanout_manifest_json"] = _json_list(payload.get("fanout_manifest_json"))
     for key in ("occurred_at", "created_at"):
         payload[key] = public_datetime(payload.get(key))
     payload["id"] = int(payload.get("id") or 0)
     payload["event_version"] = int(payload.get("event_version") or 1)
+    payload["expected_consumer_count"] = int(payload.get("expected_consumer_count") or 0)
     return InternalEvent(**payload)
 
 
@@ -387,6 +401,8 @@ class InternalEventRepository:
         self,
         outbox: InternalEventOutboxRecord,
         consumers: list[InternalEventConsumerSpec],
+        *,
+        fanout_manifest: dict[str, Any],
     ) -> tuple[InternalEventOutboxRecord, InternalEvent, list[InternalEventConsumerRun]] | None:
         raise NotImplementedError
 

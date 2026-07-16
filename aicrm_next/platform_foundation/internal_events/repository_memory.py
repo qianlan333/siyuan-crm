@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .fanout import validate_fanout_manifest
 from .repository_support import (
     Any,
     DEFAULT_TENANT_ID,
@@ -31,6 +32,7 @@ from .repository_support import (
     utcnow,
     uuid4,
 )
+
 
 class InMemoryInternalEventRepository(InternalEventRepository):
     def __init__(self) -> None:
@@ -75,6 +77,10 @@ class InMemoryInternalEventRepository(InternalEventRepository):
             "occurred_at": public_datetime(request.occurred_at or now),
             "payload_json": dict(request.payload or {}),
             "payload_summary_json": payload_summary,
+            "fanout_manifest_version": "",
+            "fanout_manifest_hash": "",
+            "fanout_manifest_json": [],
+            "expected_consumer_count": 0,
             "created_at": public_datetime(now),
         }
         self._next_event_id += 1
@@ -566,11 +572,70 @@ class InMemoryInternalEventRepository(InternalEventRepository):
         self,
         outbox: InternalEventOutboxRecord,
         consumers: list[InternalEventConsumerSpec],
+        *,
+        fanout_manifest: dict[str, Any],
     ) -> tuple[InternalEventOutboxRecord, InternalEvent, list[InternalEventConsumerRun]] | None:
         row = self._find_outbox(outbox.id)
         if not row or row.get("status") != "running" or _text(row.get("lease_token")) != _text(outbox.lease_token):
             return None
-        event, runs = self.create_event_with_consumer_runs(outbox.to_create_request(), consumers)
+        normalized_consumers = _consumer_specs_payload(consumers)
+        try:
+            manifest_consumers = validate_fanout_manifest(
+                outbox.event_type,
+                fanout_manifest,
+                consumers=normalized_consumers,
+            )
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        expected_names = {item["consumer_name"] for item in manifest_consumers}
+        manifest_version = _text(fanout_manifest.get("version"))
+        manifest_hash = _text(fanout_manifest.get("hash"))
+        expected_count = len(manifest_consumers)
+        events_before = [dict(item) for item in self._events]
+        runs_before = [dict(item) for item in self._runs]
+        next_event_id_before = self._next_event_id
+        next_run_id_before = self._next_run_id
+        try:
+            event = self.create_event(outbox.to_create_request())
+            event_row = next((item for item in self._events if item.get("event_id") == event.event_id), None)
+            if event_row is None:
+                raise RuntimeError("internal_event_fanout_manifest_persist_failed")
+            existing_hash = _text(event_row.get("fanout_manifest_hash"))
+            if existing_hash and existing_hash != manifest_hash:
+                raise RuntimeError("internal_event_fanout_manifest_mismatch")
+            event_row.update(
+                {
+                    "fanout_manifest_version": manifest_version,
+                    "fanout_manifest_hash": manifest_hash,
+                    "fanout_manifest_json": manifest_consumers,
+                    "expected_consumer_count": expected_count,
+                }
+            )
+            event = _public_event(event_row)
+            if event is None:
+                raise RuntimeError("internal_event_fanout_manifest_persist_failed")
+            runs = [
+                self.create_consumer_run(
+                    event=event,
+                    consumer_name=consumer.consumer_name,
+                    consumer_type=consumer.consumer_type,
+                    max_attempts=consumer.max_attempts,
+                )
+                for consumer in normalized_consumers
+            ]
+            actual_names = {
+                _text(item.get("consumer_name"))
+                for item in self._runs
+                if item.get("tenant_id") == event.tenant_id and item.get("event_id") == event.event_id
+            }
+            if actual_names != expected_names or len(runs) != expected_count:
+                raise RuntimeError("internal_event_fanout_incomplete")
+        except Exception:
+            self._events = events_before
+            self._runs = runs_before
+            self._next_event_id = next_event_id_before
+            self._next_run_id = next_run_id_before
+            raise
         now = public_datetime(utcnow())
         row.update(
             {

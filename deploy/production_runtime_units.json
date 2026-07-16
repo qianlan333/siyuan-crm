@@ -18,6 +18,7 @@
     {
       "timer": "openclaw-ai-audience-scheduler.timer",
       "service": "openclaw-ai-audience-scheduler.service",
+      "internal_event_relay_role": "consumer_only",
       "kick_after_timer_restart": true
     },
     {
@@ -28,6 +29,7 @@
     {
       "timer": "openclaw-internal-event-worker.timer",
       "service": "openclaw-internal-event-worker.service",
+      "internal_event_relay_role": "owner",
       "kick_after_timer_restart": true
     },
     {

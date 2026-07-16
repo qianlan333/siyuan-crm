@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from aicrm_next.platform_foundation.internal_events.repository import InMemoryInternalEventRepository
-from aicrm_next.platform_foundation.internal_events.models import InternalEventCreateRequest
+from aicrm_next.platform_foundation.internal_events.consumer_registry import InternalEventConsumerRegistry
+from aicrm_next.platform_foundation.internal_events.models import InternalEventConsumerResult, InternalEventCreateRequest
 from aicrm_next.platform_foundation.internal_events.worker import InternalEventWorker
 from scripts import run_internal_event_worker
 
@@ -17,11 +18,22 @@ class _BrokenOutboxAcquireRepository(InMemoryInternalEventRepository):
 
 
 class _BrokenOutboxFailurePersistenceRepository(InMemoryInternalEventRepository):
-    def relay_outbox(self, outbox, consumers):
+    def relay_outbox(self, outbox, consumers, *, fanout_manifest):
         raise RuntimeError("injected relay failure")
 
     def mark_outbox_failure(self, outbox, **kwargs):
         raise RuntimeError("injected failure persistence failure")
+
+
+def _owner_registry() -> InternalEventConsumerRegistry:
+    registry = InternalEventConsumerRegistry()
+    registry.register(
+        "test.worker.exit",
+        "projection",
+        lambda event, run: InternalEventConsumerResult(status="succeeded"),
+    )
+    registry.seal_fanout_contract()
+    return registry
 
 
 def test_worker_returns_failure_summary_when_consumer_acquire_raises(monkeypatch) -> None:
@@ -41,7 +53,11 @@ def test_outbox_acquire_failure_is_reported_and_makes_worker_nonzero(monkeypatch
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_ENABLED", "1")
     monkeypatch.setenv("AICRM_INTERNAL_EVENTS_AUTO_EXECUTE", "1")
 
-    result = InternalEventWorker(_BrokenOutboxAcquireRepository()).run_due(batch_size=1, dry_run=False)
+    result = InternalEventWorker(
+        _BrokenOutboxAcquireRepository(),
+        _owner_registry(),
+        relay_role="owner",
+    ).run_due(batch_size=1, dry_run=False)
 
     assert result["ok"] is False
     assert result["exit_code"] == 1
@@ -62,7 +78,7 @@ def test_outbox_failure_persistence_exception_is_summarized(monkeypatch) -> None
         )
     )
 
-    result = InternalEventWorker(repo).run_due(batch_size=1, dry_run=False)
+    result = InternalEventWorker(repo, _owner_registry(), relay_role="owner").run_due(batch_size=1, dry_run=False)
 
     assert result["ok"] is False
     assert result["exit_code"] == 1

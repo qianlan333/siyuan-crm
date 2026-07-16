@@ -231,3 +231,28 @@ def test_aicrm_canonical_runtime_isolation_systemd_units_are_deployable() -> Non
         assert "EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env" in service
         assert "WorkingDirectory=/home/ubuntu/极简 crm" in service
         assert command in service
+
+
+def test_internal_event_runtime_declares_exactly_one_relay_owner() -> None:
+    manifest = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
+    declared = {
+        item["service"]: item["internal_event_relay_role"]
+        for item in manifest["active_autostart"]
+        if item.get("internal_event_relay_role")
+    }
+
+    assert declared == {
+        "openclaw-ai-audience-scheduler.service": "consumer_only",
+        "openclaw-internal-event-worker.service": "owner",
+    }
+    assert list(declared.values()).count("owner") == 1
+
+    internal_worker = (ROOT / "scripts" / "run_internal_event_worker.py").read_text(encoding="utf-8")
+    audience_runtime = (ROOT / "aicrm_next" / "ai_audience_ops" / "scheduler.py").read_text(encoding="utf-8")
+    internal_service = (ROOT / "deploy" / "openclaw-internal-event-worker.service").read_text(encoding="utf-8")
+    audience_service = (ROOT / "deploy" / "openclaw-ai-audience-scheduler.service").read_text(encoding="utf-8")
+
+    assert 'relay_role="owner"' in internal_worker
+    assert 'relay_role="consumer_only"' in audience_runtime
+    assert "Environment=AICRM_INTERNAL_EVENT_RELAY_ROLE=owner" in internal_service
+    assert "Environment=AICRM_INTERNAL_EVENT_RELAY_ROLE=consumer_only" in audience_service

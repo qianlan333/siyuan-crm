@@ -125,17 +125,23 @@ class InternalEventOutboxRelay:
     ) -> None:
         self._repo = repository or build_internal_event_repository()
         self._registry = consumer_registry or current_internal_event_consumer_registry()
+        if not self._registry.is_fanout_authoritative:
+            raise RuntimeError("authoritative fanout registry required for internal event outbox relay")
         self._locked_by = locked_by or f"internal-event-relay-{uuid4().hex[:8]}"
 
     def _consumer_specs(self, event_type: str) -> list[InternalEventConsumerSpec]:
+        manifest = self._registry.fanout_manifest_for(event_type)
         return [
             InternalEventConsumerSpec(
-                consumer_name=consumer.consumer_name,
-                consumer_type=consumer.consumer_type,
-                max_attempts=consumer.max_attempts,
+                consumer_name=str(consumer.get("consumer_name") or ""),
+                consumer_type=str(consumer.get("consumer_type") or "projection"),
+                max_attempts=max(1, int(consumer.get("max_attempts") or 5)),
             )
-            for consumer in self._registry.list_for_event_type(event_type)
+            for consumer in manifest["consumers"]
         ]
+
+    def _fanout_manifest(self, event_type: str) -> dict[str, Any]:
+        return self._registry.fanout_manifest_for(event_type)
 
     def preview_due(self, *, limit: int = 50) -> dict[str, Any]:
         records = self._repo.list_due_outbox(limit=limit)
@@ -187,7 +193,11 @@ class InternalEventOutboxRelay:
         }
         for record in records:
             try:
-                relayed = self._repo.relay_outbox(record, self._consumer_specs(record.event_type))
+                relayed = self._repo.relay_outbox(
+                    record,
+                    self._consumer_specs(record.event_type),
+                    fanout_manifest=self._fanout_manifest(record.event_type),
+                )
             except Exception as exc:
                 try:
                     failed = self._repo.mark_outbox_failure(

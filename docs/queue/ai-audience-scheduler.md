@@ -7,6 +7,7 @@ It follows the queue boundaries:
 - emits `ai_audience.refresh.incremental_tick` every scheduler run;
 - emits `ai_audience.refresh.daily_tick` only during the configured daily window, default `Asia/Shanghai 02:00`;
 - dispatches AI audience internal-event consumers for source poke, refresh, and member-event outbound planning;
+- runs with `AICRM_INTERNAL_EVENT_RELAY_ROLE=consumer_only` and therefore cannot acquire or relay global outbox rows;
 - never sends webhook or WeCom messages directly.
 
 External side effects remain in `external_effect_job` and are executed only by the External Effect worker.
@@ -28,4 +29,4 @@ The timer runs every 3 minutes:
 OnCalendar=*-*-* *:0/3:00
 ```
 
-The service sets a pair allowlist for AI audience consumers only, so it does not execute unrelated internal-event consumers.
+The service sets a pair allowlist for AI audience consumers only, so it does not execute unrelated internal-event consumers. The pair allowlist is an execution filter, not a relay ownership mechanism: relay is structurally disabled in this scheduler and remains owned only by `scripts/run_internal_event_worker.py`.

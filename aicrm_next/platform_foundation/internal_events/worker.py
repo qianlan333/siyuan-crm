@@ -30,6 +30,9 @@ from .repository import InternalEventRepository, build_internal_event_repository
 
 _FINISHED_STATUSES = {"succeeded", "skipped"}
 _FORCE_REASON_HINTS = ("gray", "grey", "test", "loopback", "production_gray", "灰度")
+RELAY_ROLE_OWNER = "owner"
+RELAY_ROLE_CONSUMER_ONLY = "consumer_only"
+_RELAY_ROLES = {RELAY_ROLE_OWNER, RELAY_ROLE_CONSUMER_ONLY}
 
 
 def _next_retry_at(attempt_count: int, retry_after_seconds: int | None = None):
@@ -88,15 +91,59 @@ class InternalEventWorker:
         consumer_registry: InternalEventConsumerRegistry | None = None,
         *,
         locked_by: str = "",
+        relay_role: str = RELAY_ROLE_CONSUMER_ONLY,
     ):
         self._repo = repository or build_internal_event_repository()
         self._registry = consumer_registry or current_internal_event_consumer_registry()
         self._locked_by = locked_by or f"internal-event-worker-{uuid4().hex[:8]}"
-        self._outbox_relay = InternalEventOutboxRelay(
-            self._repo,
-            self._registry,
-            locked_by=f"{self._locked_by}-relay",
+        normalized_role = str(relay_role or "").strip() or RELAY_ROLE_CONSUMER_ONLY
+        if normalized_role not in _RELAY_ROLES:
+            raise ValueError(f"unsupported internal event relay role: {normalized_role}")
+        self._relay_role = normalized_role
+        self._outbox_relay = (
+            InternalEventOutboxRelay(
+                self._repo,
+                self._registry,
+                locked_by=f"{self._locked_by}-relay",
+            )
+            if self._relay_role == RELAY_ROLE_OWNER
+            else None
         )
+
+    def _disabled_outbox_relay(self, *, dry_run: bool) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "dry_run": bool(dry_run),
+            "enabled": False,
+            "relay_role": self._relay_role,
+            "reason": "consumer_only_worker",
+            "items": [],
+            "counts": {
+                "candidate_count": 0,
+                "relayed_count": 0,
+                "failed_retryable_count": 0,
+                "failed_terminal_count": 0,
+                "lost_lease_count": 0,
+                "unhandled_failure_count": 0,
+            },
+            "real_external_call_executed": False,
+        }
+
+    def _preview_outbox_relay(self, *, limit: int) -> dict[str, Any]:
+        if self._outbox_relay is None:
+            return self._disabled_outbox_relay(dry_run=True)
+        payload = self._outbox_relay.preview_due(limit=limit)
+        payload["enabled"] = True
+        payload["relay_role"] = self._relay_role
+        return payload
+
+    def _run_outbox_relay(self, *, limit: int) -> dict[str, Any]:
+        if self._outbox_relay is None:
+            return self._disabled_outbox_relay(dry_run=False)
+        payload = self._outbox_relay.relay_due(limit=limit)
+        payload["enabled"] = True
+        payload["relay_role"] = self._relay_role
+        return payload
 
     def _effective_event_types(self, event_types: list[str] | None = None) -> list[str] | None:
         configured = allowed_event_types()
@@ -161,6 +208,7 @@ class InternalEventWorker:
             "event_types": event_types or [],
             "consumer_names": consumer_names or [],
             "event_consumers": [f"{event_type}:{consumer_name}" for event_type, consumer_name in (event_consumers or [])],
+            "relay_role": self._relay_role,
             "config": diagnostics_payload(),
             "real_external_call_executed": False,
         }
@@ -218,7 +266,7 @@ class InternalEventWorker:
         return None
 
     def preview_due(self, *, batch_size: int = 10, event_types: list[str] | None = None, consumer_names: list[str] | None = None) -> dict[str, Any]:
-        outbox_relay = self._outbox_relay.preview_due(limit=batch_size)
+        outbox_relay = self._preview_outbox_relay(limit=batch_size)
         effective_event_types = self._effective_event_types(event_types)
         effective_event_consumers = self._effective_event_consumers(event_types=event_types, consumer_names=consumer_names)
         if effective_event_consumers is not None:
@@ -270,6 +318,7 @@ class InternalEventWorker:
             "event_types": effective_event_types or [],
             "consumer_names": effective_consumers or [],
             "event_consumers": [f"{event_type}:{consumer_name}" for event_type, consumer_name in (effective_event_consumers or [])],
+            "relay_role": self._relay_role,
             "config": diagnostics_payload(),
             "real_external_call_executed": False,
         }
@@ -316,7 +365,7 @@ class InternalEventWorker:
         if gated is not None:
             return gated
         try:
-            outbox_relay = self._outbox_relay.relay_due(limit=batch_size)
+            outbox_relay = self._run_outbox_relay(limit=batch_size)
         except Exception as exc:
             outbox_relay = {
                 "ok": False,
@@ -349,6 +398,7 @@ class InternalEventWorker:
                 "event_types": effective_event_types or [],
                 "consumer_names": effective_consumers or [],
                 "event_consumers": [f"{event_type}:{consumer_name}" for event_type, consumer_name in (effective_event_consumers or [])],
+                "relay_role": self._relay_role,
                 "outbox_relay": outbox_relay,
                 "config": diagnostics_payload(),
                 "real_external_call_executed": False,
@@ -416,6 +466,7 @@ class InternalEventWorker:
             "event_types": effective_event_types or [],
             "consumer_names": effective_consumers or [],
             "event_consumers": [f"{event_type}:{consumer_name}" for event_type, consumer_name in (effective_event_consumers or [])],
+            "relay_role": self._relay_role,
             "outbox_relay": outbox_relay,
             "config": diagnostics_payload(),
             "real_external_call_executed": False,

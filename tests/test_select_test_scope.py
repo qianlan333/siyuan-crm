@@ -11,10 +11,16 @@ ROOT = Path(__file__).resolve().parents[1]
 SELECTOR = ROOT / "scripts" / "ci" / "select_test_scope.py"
 
 
-def _select(*changed_files: str, inherit_ci_event: bool = False) -> dict:
+def _select(
+    *changed_files: str,
+    inherit_ci_event: bool = False,
+    deleted_files: tuple[str, ...] = (),
+) -> dict:
     command = [sys.executable, str(SELECTOR), "--json"]
     for changed_file in changed_files:
         command.extend(["--changed-file", changed_file])
+    for deleted_file in deleted_files:
+        command.extend(["--deleted-file", deleted_file])
     env = os.environ.copy()
     env.pop("AICRM_FORCE_FULL_CI", None)
     if not inherit_ci_event:
@@ -51,6 +57,26 @@ def test_every_runtime_python_change_runs_import_graph_architecture_gate() -> No
     assert result["matched_scopes"] == ["media_library"]
     assert result["architecture_gate"] == "fast"
     assert result["needs_full_ci"] is False
+
+
+def test_unmapped_deleted_path_forces_full_ci_without_blocking_retirement() -> None:
+    retired_path = "aicrm_next/retired_context/api.py"
+    result = _select(deleted_files=(retired_path,))
+
+    assert result["changed_files"] == [retired_path]
+    assert result["unmatched_files"] == []
+    assert result["unmapped_deleted_files"] == [retired_path]
+    assert result["architecture_gate"] == "full"
+    assert result["needs_full_ci"] is True
+
+
+def test_runtime_security_contract_has_a_permanent_scope() -> None:
+    result = _select("tests/test_p1_runtime_security.py")
+
+    assert "runtime_readiness" in result["matched_scopes"]
+    assert result["unmatched_files"] == []
+    assert "tests/test_p1_runtime_security.py" in result["python_tests"]
+    assert result["needs_full_ci"] is True
 
 
 def test_import_graph_governance_changes_force_mapped_full_ci() -> None:

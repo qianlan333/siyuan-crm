@@ -425,7 +425,7 @@
       "accessor": "os.environ.get",
       "file": "scripts/ci/select_test_scope.py",
       "key": "AICRM_FORCE_FULL_CI",
-      "line": 126
+      "line": 138
     },
     {
       "accessor": "os.getenv",
@@ -1385,25 +1385,25 @@
       "accessor": "os.environ.get",
       "file": "scripts/ci/select_test_scope.py",
       "key": "GITHUB_EVENT_NAME",
-      "line": 108
+      "line": 120
     },
     {
       "accessor": "os.environ.get",
       "file": "scripts/ci/select_test_scope.py",
       "key": "GITHUB_EVENT_NAME",
-      "line": 134
+      "line": 146
     },
     {
       "accessor": "os.environ.get",
       "file": "scripts/ci/select_test_scope.py",
       "key": "GITHUB_EVENT_PATH",
-      "line": 103
+      "line": 115
     },
     {
       "accessor": "os.environ.get",
       "file": "scripts/ci/select_test_scope.py",
       "key": "GITHUB_EVENT_PATH",
-      "line": 129
+      "line": 141
     },
     {
       "accessor": "os.getenv",

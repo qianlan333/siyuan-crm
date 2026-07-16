@@ -214,7 +214,8 @@
       "name": "runtime_readiness",
       "paths": [
         "aicrm_next/platform_foundation/readiness.py",
-        "tests/test_runtime_readiness.py"
+        "tests/test_runtime_readiness.py",
+        "tests/test_p1_runtime_security.py"
       ],
       "python_tests": [
         "tests/test_runtime_readiness.py",

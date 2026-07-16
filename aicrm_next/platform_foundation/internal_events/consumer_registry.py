@@ -7,6 +7,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Iterator
 
+from .fanout import build_fanout_manifest
 from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerType, InternalEventConsumerRun
 
 InternalEventConsumerHandler = Callable[[InternalEvent, InternalEventConsumerRun], InternalEventConsumerResult]
@@ -34,6 +35,7 @@ class InternalEventConsumerRegistry:
     def __init__(self) -> None:
         self._consumers: dict[str, list[RegisteredInternalEventConsumer]] = defaultdict(list)
         self._handler_aliases: dict[tuple[str, str], InternalEventConsumerHandler] = {}
+        self._fanout_authoritative = False
 
     def register(
         self,
@@ -50,16 +52,27 @@ class InternalEventConsumerRegistry:
             raise ValueError("event_type is required")
         if not consumer_name:
             raise ValueError("consumer_name is required")
-        existing = [item for item in self._consumers[event_type] if item.consumer_name != consumer_name]
-        existing.append(
-            RegisteredInternalEventConsumer(
-                event_type=event_type,
-                consumer_name=consumer_name,
-                consumer_type=consumer_type,
-                handler=handler,
-                max_attempts=max(1, int(max_attempts or 5)),
-            )
+        normalized_max_attempts = max(1, int(max_attempts or 5))
+        registered = RegisteredInternalEventConsumer(
+            event_type=event_type,
+            consumer_name=consumer_name,
+            consumer_type=consumer_type,
+            handler=handler,
+            max_attempts=normalized_max_attempts,
         )
+        if self._fanout_authoritative:
+            for index, current in enumerate(self._consumers[event_type]):
+                if current.consumer_name != consumer_name:
+                    continue
+                if current.consumer_type != consumer_type or current.max_attempts != normalized_max_attempts:
+                    raise RuntimeError("internal event fanout contract is sealed")
+                # Handler bindings are runtime composition details and may be
+                # refreshed without changing the authoritative fan-out shape.
+                self._consumers[event_type][index] = registered
+                return
+            raise RuntimeError("internal event fanout contract is sealed")
+        existing = [item for item in self._consumers[event_type] if item.consumer_name != consumer_name]
+        existing.append(registered)
         self._consumers[event_type] = existing
 
     def register_handler_alias(
@@ -96,9 +109,26 @@ class InternalEventConsumerRegistry:
     def to_dict(self) -> dict[str, list[dict[str, Any]]]:
         return {event_type: [consumer.to_dict() for consumer in consumers] for event_type, consumers in self._consumers.items()}
 
+    @property
+    def is_fanout_authoritative(self) -> bool:
+        return self._fanout_authoritative
+
+    def seal_fanout_contract(self) -> None:
+        self._fanout_authoritative = True
+
+    def fanout_manifest_for(self, event_type: str) -> dict[str, Any]:
+        if not self._fanout_authoritative:
+            raise RuntimeError("internal event fanout contract is not sealed")
+        normalized_event_type = str(event_type or "").strip()
+        return build_fanout_manifest(
+            normalized_event_type,
+            self.list_for_event_type(normalized_event_type),
+        )
+
     def clear(self) -> None:
         self._consumers.clear()
         self._handler_aliases.clear()
+        self._fanout_authoritative = False
 
 
 DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY = InternalEventConsumerRegistry()

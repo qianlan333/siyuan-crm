@@ -18,6 +18,9 @@ python scripts/ops/reconcile_internal_event_outbox.py
 - `legacy_paid_without_outbox_count`（只作历史库存展示，不修复）
 - `relayed_outbox_without_event_count`
 - `event_missing_consumer_run_count`
+- `manifest_backed_event_missing_consumer_run_count`（按事件落库时的 fan-out manifest 计算）
+- `manifestless_event_missing_consumer_run_count`（仅兼容切换点后的旧事件）
+- `manifest_validation_error_count`（manifest 版本、数量、结构或哈希错误，必须为 0）
 - `legacy_event_missing_consumer_run_count`（只作历史库存展示，不修复）
 - `manual_only_in_automatic_due_count`（必须为 0）
 - `stale_running_consumer_count`
@@ -28,6 +31,12 @@ python scripts/ops/reconcile_internal_event_outbox.py
 `2026-07-13T09:46:09Z` 之后视为可执行异常。切换前订单与事件保留为
 `legacy_*` 计数，`--repair` 不会为其创建 outbox 或 consumer-run，避免历史订单
 被批量重放。
+
+对于带 manifest 的事件，当前运行时 registry 不参与缺口推导：修复只补该事件
+`fanout_manifest_json` 声明且尚不存在的 consumer-run。manifest 版本、数量或哈希校验失败时，
+该事件不会降级到当前 registry，修复结果会报告 `manifest_validation_error_count` 并返回失败，
+需要先人工核对数据。只有切换点之后且 manifest 为空的 expand-migration 旧事件，才使用当前
+canonical payment registry 作为兼容回退。
 
 ## Dry-run 修复预览
 
@@ -49,6 +58,7 @@ python scripts/ops/reconcile_internal_event_outbox.py
 - `manual_only_in_automatic_due_count=0`；
 - 修复结果 `real_external_call_executed=false`、`pii_in_output=false`；
 - consumer attempt_count 未因 repair 增加。
+- `manifest_validation_error_count=0`。
 
 确认后恢复 timer：
 
@@ -60,5 +70,5 @@ sudo systemctl status openclaw-internal-event-worker.timer --no-pager
 ## 回滚
 
 - 若 repair 失败，保持 timer 停止；pending/running outbox 会保留，禁止手工删除。
-- 回滚 application release；`0099` 为 expand-only，可保留表/列。
+- 回滚 application release；`0099` 与 `0122` 均为 expand-only，可保留表/列。
 - 不把 `failed_terminal/blocked` 直接改成 pending；必须使用带 reason 的 retry/skip API。

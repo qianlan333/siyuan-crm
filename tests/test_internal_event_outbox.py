@@ -68,6 +68,7 @@ def _registry(*names: str) -> InternalEventConsumerRegistry:
             name,
             lambda event, run: InternalEventConsumerResult(status="succeeded", result_summary={"consumer": run.consumer_name}),
         )
+    registry.seal_fanout_contract()
     return registry
 
 
@@ -197,6 +198,227 @@ def test_outbox_relay_is_idempotent_and_creates_all_registered_runs() -> None:
     assert event_total == 1
     assert run_total == 2
     assert {run.consumer_name for run in runs} == {"projection-a", "projection-b"}
+
+
+def test_fanout_contract_is_deterministic_sealed_and_immutable() -> None:
+    registry = InternalEventConsumerRegistry()
+    registry.register(EVENT_TYPE, "projection-b", lambda event, run: InternalEventConsumerResult(status="succeeded"), max_attempts=7)
+    registry.register(EVENT_TYPE, "projection-a", lambda event, run: InternalEventConsumerResult(status="succeeded"))
+
+    assert registry.is_fanout_authoritative is False
+    with pytest.raises(RuntimeError, match="fanout contract is not sealed"):
+        registry.fanout_manifest_for(EVENT_TYPE)
+
+    registry.seal_fanout_contract()
+    manifest = registry.fanout_manifest_for(EVENT_TYPE)
+
+    assert registry.is_fanout_authoritative is True
+    assert manifest["version"] == "internal-event-fanout/v1"
+    assert len(manifest["hash"]) == 64
+    assert manifest["expected_consumer_count"] == 2
+    assert [item["consumer_name"] for item in manifest["consumers"]] == ["projection-a", "projection-b"]
+    assert manifest["consumers"][1]["max_attempts"] == 7
+    with pytest.raises(RuntimeError, match="fanout contract is sealed"):
+        registry.register(EVENT_TYPE, "projection-c", lambda event, run: InternalEventConsumerResult(status="succeeded"))
+
+
+def test_outbox_relay_rejects_unsealed_partial_registry_before_acquire() -> None:
+    repo = InMemoryInternalEventRepository()
+    repo.enqueue_outbox(_request("transactional-event:unsealed"))
+    partial = InternalEventConsumerRegistry()
+    partial.register(EVENT_TYPE, "projection-a", lambda event, run: InternalEventConsumerResult(status="succeeded"))
+
+    with pytest.raises(RuntimeError, match="authoritative fanout registry required"):
+        InternalEventOutboxRelay(repo, partial)
+
+    assert len(repo.list_due_outbox(limit=10)) == 1
+
+
+def test_outbox_relay_persists_authoritative_fanout_manifest() -> None:
+    repo = InMemoryInternalEventRepository()
+    registry = _registry("projection-b", "projection-a")
+    repo.enqueue_outbox(_request("transactional-event:manifest"))
+
+    result = InternalEventOutboxRelay(repo, registry).relay_due(limit=10)
+    events, total = repo.list_events({"event_type": EVENT_TYPE})
+
+    assert result["ok"] is True
+    assert total == 1
+    event = events[0]
+    assert event.fanout_manifest_version == "internal-event-fanout/v1"
+    assert len(event.fanout_manifest_hash) == 64
+    assert event.expected_consumer_count == 2
+    assert [item["consumer_name"] for item in event.fanout_manifest_json] == ["projection-a", "projection-b"]
+
+
+def test_manifest_mismatch_is_retryable_and_does_not_overwrite_existing_contract() -> None:
+    repo = InMemoryInternalEventRepository()
+    request = _request("transactional-event:manifest-mismatch")
+    event = repo.create_event(request)
+    event_row = next(row for row in repo._events if row["event_id"] == event.event_id)
+    event_row.update(
+        {
+            "fanout_manifest_version": "internal-event-fanout/v1",
+            "fanout_manifest_hash": "existing-contract-hash",
+            "fanout_manifest_json": [
+                {"consumer_name": "projection-old", "consumer_type": "projection", "max_attempts": 5}
+            ],
+            "expected_consumer_count": 1,
+        }
+    )
+    repo.enqueue_outbox(request)
+
+    result = InternalEventOutboxRelay(repo, _registry("projection-new")).relay_due(limit=10)
+
+    assert result["ok"] is False
+    assert result["counts"]["failed_retryable_count"] == 1
+    assert repo._outbox[0]["status"] == "failed_retryable"
+    assert repo._events[0]["fanout_manifest_hash"] == "existing-contract-hash"
+    assert repo._runs == []
+
+
+def test_incomplete_fanout_rolls_back_event_and_runs_before_outbox_failure() -> None:
+    class IncompleteRepository(InMemoryInternalEventRepository):
+        def create_consumer_run(self, *, event, consumer_name, consumer_type="projection", max_attempts=5):
+            if consumer_name == "projection-b":
+                consumer_name = "projection-a"
+            return super().create_consumer_run(
+                event=event,
+                consumer_name=consumer_name,
+                consumer_type=consumer_type,
+                max_attempts=max_attempts,
+            )
+
+    repo = IncompleteRepository()
+    repo.enqueue_outbox(_request("transactional-event:incomplete-fanout"))
+
+    result = InternalEventOutboxRelay(repo, _registry("projection-a", "projection-b")).relay_due(limit=10)
+
+    assert result["ok"] is False
+    assert result["counts"]["failed_retryable_count"] == 1
+    assert repo._outbox[0]["status"] == "failed_retryable"
+    assert repo._outbox[0]["internal_event_id"] == ""
+    assert repo._events == []
+    assert repo._runs == []
+
+
+def test_manifest_reconciliation_repairs_only_stored_consumers_without_execution() -> None:
+    repo = InMemoryInternalEventRepository()
+    handler_calls: list[str] = []
+    relay_registry = InternalEventConsumerRegistry()
+    for name in ("projection-a", "projection-b"):
+        relay_registry.register(
+            PAYMENT_SUCCEEDED_EVENT_TYPE,
+            name,
+            lambda event, run: handler_calls.append(run.consumer_name),
+        )
+    relay_registry.seal_fanout_contract()
+    request = InternalEventCreateRequest(
+        event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
+        aggregate_type="wechat_pay_order",
+        aggregate_id="manifest-repair",
+        idempotency_key="payment.succeeded:MANIFEST_REPAIR",
+        source_module="tests.test_internal_event_outbox",
+        payload={"order": {"id": "manifest-repair", "status": "paid"}},
+    )
+    repo.enqueue_outbox(request)
+    assert InternalEventOutboxRelay(repo, relay_registry).relay_due(limit=10)["ok"] is True
+    event = repo.list_events({"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE})[0][0]
+    repo._runs = [row for row in repo._runs if row["consumer_name"] != "projection-b"]
+
+    current_registry = InternalEventConsumerRegistry()
+    current_registry.register(
+        PAYMENT_SUCCEEDED_EVENT_TYPE,
+        "projection-a",
+        lambda event, run: handler_calls.append(run.consumer_name),
+    )
+    current_registry.register(
+        PAYMENT_SUCCEEDED_EVENT_TYPE,
+        "projection-c",
+        lambda event, run: handler_calls.append(run.consumer_name),
+    )
+    current_registry.seal_fanout_contract()
+    service = InternalEventOutboxReconciliationService(repo, current_registry)
+
+    first_count, first_invalid = service._repair_missing_consumer_runs(limit=10)
+    second_count, second_invalid = service._repair_missing_consumer_runs(limit=10)
+    runs, total = repo.list_consumer_runs({"event_id": event.event_id})
+
+    assert (first_count, first_invalid) == (1, 0)
+    assert (second_count, second_invalid) == (0, 0)
+    assert total == 2
+    assert {run.consumer_name for run in runs} == {"projection-a", "projection-b"}
+    assert all(run.attempt_count == 0 for run in runs)
+    assert handler_calls == []
+
+
+def test_manifest_reconciliation_never_falls_back_when_stored_hash_is_invalid() -> None:
+    repo = InMemoryInternalEventRepository()
+    relay_registry = InternalEventConsumerRegistry()
+    relay_registry.register(
+        PAYMENT_SUCCEEDED_EVENT_TYPE,
+        "projection-a",
+        lambda event, run: InternalEventConsumerResult(status="succeeded"),
+    )
+    relay_registry.seal_fanout_contract()
+    request = InternalEventCreateRequest(
+        event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
+        aggregate_type="wechat_pay_order",
+        aggregate_id="invalid-manifest-repair",
+        idempotency_key="payment.succeeded:INVALID_MANIFEST_REPAIR",
+        source_module="tests.test_internal_event_outbox",
+    )
+    repo.enqueue_outbox(request)
+    assert InternalEventOutboxRelay(repo, relay_registry).relay_due(limit=10)["ok"] is True
+    event = repo.list_events({"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE})[0][0]
+    repo._events[0]["fanout_manifest_hash"] = "tampered"
+    repo._runs = []
+
+    fallback_registry = InternalEventConsumerRegistry()
+    fallback_registry.register(
+        PAYMENT_SUCCEEDED_EVENT_TYPE,
+        "projection-fallback",
+        lambda event, run: InternalEventConsumerResult(status="succeeded"),
+    )
+    fallback_registry.seal_fanout_contract()
+    service = InternalEventOutboxReconciliationService(repo, fallback_registry)
+
+    repaired_count, invalid_count = service._repair_missing_consumer_runs(limit=10)
+
+    assert (repaired_count, invalid_count) == (0, 1)
+    assert repo.list_consumer_runs({"event_id": event.event_id}) == ([], 0)
+
+
+def test_scoped_worker_is_consumer_only_and_cannot_relay_pending_outbox() -> None:
+    repo = InMemoryInternalEventRepository()
+    registry = _registry("projection-a")
+    record = repo.enqueue_outbox(_request("transactional-event:scoped-worker"))
+
+    scoped = InternalEventWorker(repo, registry).run_due(
+        batch_size=10,
+        dry_run=False,
+        event_types=[EVENT_TYPE],
+        consumer_names=["projection-a"],
+    )
+
+    assert scoped["ok"] is True
+    assert scoped["relay_role"] == "consumer_only"
+    assert scoped["outbox_relay"]["enabled"] is False
+    assert scoped["outbox_relay"]["reason"] == "consumer_only_worker"
+    due = repo.list_due_outbox(limit=10)
+    assert [item.outbox_id for item in due] == [record.outbox_id]
+
+    owner = InternalEventWorker(repo, registry, relay_role="owner").run_due(
+        batch_size=10,
+        dry_run=False,
+        event_types=[EVENT_TYPE],
+        consumer_names=["projection-a"],
+    )
+
+    assert owner["ok"] is True
+    assert owner["relay_role"] == "owner"
+    assert owner["outbox_relay"]["counts"]["relayed_count"] == 1
+    assert repo.list_due_outbox(limit=10) == []
 
 
 def test_terminal_and_blocked_are_manual_only_and_do_not_gain_attempts() -> None:
@@ -417,6 +639,7 @@ def test_postgres_count_only_reconciliation_repairs_missing_consumer_runs_withou
     registry = InternalEventConsumerRegistry()
     registry.register(PAYMENT_SUCCEEDED_EVENT_TYPE, "projection-a", lambda event, run: InternalEventConsumerResult(status="succeeded"))
     registry.register(PAYMENT_SUCCEEDED_EVENT_TYPE, "projection-b", lambda event, run: InternalEventConsumerResult(status="succeeded"))
+    registry.seal_fanout_contract()
     request = InternalEventCreateRequest(
         event_type=PAYMENT_SUCCEEDED_EVENT_TYPE,
         aggregate_type="wechat_pay_order",

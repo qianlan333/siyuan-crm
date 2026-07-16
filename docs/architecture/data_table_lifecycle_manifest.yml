@@ -1742,11 +1742,11 @@ tables:
       - internal event publish
       - internal event worker
       - internal event admin API
-    migration_source: 0043_internal_event_queue
+    migration_source: 0043_internal_event_queue, fan-out manifest added by 0122_internal_event_fanout_manifest
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_event_effect_table_lineage.py
-    notes: Canonical internal event ledger. Business-critical producers first write internal_event_outbox in the business transaction; relay atomically creates this row and all registered consumer runs. Handlers must enqueue external_effect_job for real external calls.
+    notes: Canonical internal event ledger. Business-critical producers first write internal_event_outbox in the business transaction; the single canonical relay owner snapshots the sealed fan-out manifest, atomically creates this row and the exact declared consumer-run set, and only then marks outbox relayed. Handlers must enqueue external_effect_job for real external calls.
 
   internal_event_outbox:
     domain: internal_events
@@ -1778,7 +1778,7 @@ tables:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_event_effect_table_lineage.py
       - tests/test_internal_event_outbox.py
-    notes: Technical outbox only; payment and refund state share this durability boundary. Commerce repair only ensures idempotent outbox continuations and never executes consumers or providers.
+    notes: Technical outbox only; payment and refund state share this durability boundary. scripts/run_internal_event_worker.py is the only relay owner; scoped schedulers are consumer-only. Commerce and internal-event repair only ensure idempotent technical continuations and never execute consumers or providers.
 
   internal_event_consumer_run:
     domain: internal_events
@@ -1798,7 +1798,7 @@ tables:
     guard_tests:
       - tests/test_data_table_lifecycle_guard.py
       - tests/test_event_effect_table_lineage.py
-    notes: Tracks consumer execution state for internal_event. Automatic due is limited to pending, due failed_retryable, and stale running; failed_terminal/blocked require audited manual action.
+    notes: Tracks consumer execution state for internal_event. Relay creates the exact manifest-declared set atomically; manifest-aware reconciliation may only restore missing declared rows without executing handlers. Automatic due is limited to pending, due failed_retryable, and stale running; failed_terminal/blocked require audited manual action.
 
   internal_event_consumer_attempt:
     domain: internal_events

@@ -10,6 +10,7 @@ from aicrm_next.shared.db_session import connect_raw_postgres, get_session_facto
 from aicrm_next.shared.runtime import raw_database_url
 
 from ..consumer_registry import InternalEventConsumerRegistry, current_internal_event_consumer_registry
+from ..fanout import validate_fanout_manifest
 from ..models import InternalEvent, InternalEventConsumerSpec, InternalEventCreateRequest
 from ..outbox import InternalEventOutboxRelay, enqueue_transactional_internal_event_outbox
 from ..payment import PAYMENT_SUCCEEDED_EVENT_TYPE, build_payment_succeeded_event_request
@@ -36,6 +37,25 @@ def _json_object(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _json_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return list(value)
+    if isinstance(value, str) and value:
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return []
+        return list(parsed) if isinstance(parsed, list) else []
+    return []
+
+
+def _mapping_rows(result: Any) -> list[dict[str, Any]]:
+    mappings = getattr(result, "mappings", None)
+    if not callable(mappings):
+        return []
+    return [dict(row) for row in mappings().all()]
+
+
 def _request_from_event(event: InternalEvent) -> InternalEventCreateRequest:
     return InternalEventCreateRequest(
         event_type=event.event_type,
@@ -59,6 +79,27 @@ def _request_from_event(event: InternalEvent) -> InternalEventCreateRequest:
         correlation_id=event.correlation_id,
         tenant_id=event.tenant_id,
     )
+
+
+def _manifest_specs_from_event(event: InternalEvent) -> list[InternalEventConsumerSpec] | None:
+    """Return the stored contract, or ``None`` for a legacy manifest-less event."""
+
+    raw_consumers = list(event.fanout_manifest_json or [])
+    version = _text(event.fanout_manifest_version)
+    manifest_hash = _text(event.fanout_manifest_hash)
+    expected_count = int(event.expected_consumer_count or 0)
+    if not version and not manifest_hash and not raw_consumers and expected_count == 0:
+        return None
+    normalized = validate_fanout_manifest(
+        event.event_type,
+        {
+            "version": version,
+            "hash": manifest_hash,
+            "expected_consumer_count": expected_count,
+            "consumers": raw_consumers,
+        },
+    )
+    return [InternalEventConsumerSpec(**item) for item in normalized]
 
 
 class InternalEventOutboxReconciliationService:
@@ -175,10 +216,42 @@ class InternalEventOutboxReconciliationService:
                     )
                 ).scalar_one()
             )
-            missing_by_consumer: dict[str, int] = {}
+            manifest_missing_rows_result = session.execute(
+                text(
+                    f"""
+                    SELECT manifest.value ->> 'consumer_name' AS consumer_name, COUNT(*) AS missing_count
+                    FROM internal_event e
+                    CROSS JOIN LATERAL jsonb_array_elements(
+                        CASE
+                            WHEN jsonb_typeof(e.fanout_manifest_json) = 'array' THEN e.fanout_manifest_json
+                            ELSE '[]'::jsonb
+                        END
+                    ) AS manifest(value)
+                    WHERE e.event_type = :event_type
+                      AND e.created_at >= {_INTERNAL_EVENT_RECONCILIATION_CUTOVER_AT_SQL}
+                      AND COALESCE(e.fanout_manifest_hash, '') <> ''
+                      AND COALESCE(manifest.value ->> 'consumer_name', '') <> ''
+                      AND NOT EXISTS (
+                          SELECT 1 FROM internal_event_consumer_run r
+                          WHERE r.event_id = e.event_id
+                            AND r.consumer_name = manifest.value ->> 'consumer_name'
+                      )
+                    GROUP BY manifest.value ->> 'consumer_name'
+                    """
+                ),
+                {"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE},
+            )
+            manifest_missing_rows = _mapping_rows(manifest_missing_rows_result)
+            manifest_missing_by_consumer = {
+                _text(row.get("consumer_name")): int(row.get("missing_count") or 0)
+                for row in manifest_missing_rows
+                if _text(row.get("consumer_name"))
+            }
+            missing_by_consumer: dict[str, int] = dict(manifest_missing_by_consumer)
+            manifestless_missing_by_consumer: dict[str, int] = {}
             legacy_missing_by_consumer: dict[str, int] = {}
             for spec in self._payment_specs():
-                missing_by_consumer[spec.consumer_name] = int(
+                manifestless_missing_by_consumer[spec.consumer_name] = int(
                     session.execute(
                         text(
                             f"""
@@ -186,6 +259,12 @@ class InternalEventOutboxReconciliationService:
                             FROM internal_event e
                             WHERE e.event_type = :event_type
                               AND e.created_at >= {_INTERNAL_EVENT_RECONCILIATION_CUTOVER_AT_SQL}
+                              AND COALESCE(e.fanout_manifest_hash, '') = ''
+                              AND CASE
+                                  WHEN jsonb_typeof(e.fanout_manifest_json) = 'array'
+                                  THEN jsonb_array_length(e.fanout_manifest_json)
+                                  ELSE -1
+                              END = 0
                               AND NOT EXISTS (
                                   SELECT 1 FROM internal_event_consumer_run r
                                   WHERE r.event_id = e.event_id AND r.consumer_name = :consumer_name
@@ -194,6 +273,10 @@ class InternalEventOutboxReconciliationService:
                         ),
                         {"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE, "consumer_name": spec.consumer_name},
                     ).scalar_one()
+                )
+                missing_by_consumer[spec.consumer_name] = (
+                    missing_by_consumer.get(spec.consumer_name, 0)
+                    + manifestless_missing_by_consumer[spec.consumer_name]
                 )
                 legacy_missing_by_consumer[spec.consumer_name] = int(
                     session.execute(
@@ -212,6 +295,35 @@ class InternalEventOutboxReconciliationService:
                         {"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE, "consumer_name": spec.consumer_name},
                     ).scalar_one()
                 )
+            manifest_contract_rows = _mapping_rows(
+                session.execute(
+                    text(
+                        f"""
+                        SELECT event_type, fanout_manifest_version, fanout_manifest_hash,
+                               fanout_manifest_json, expected_consumer_count
+                        FROM internal_event
+                        WHERE event_type = :event_type
+                          AND created_at >= {_INTERNAL_EVENT_RECONCILIATION_CUTOVER_AT_SQL}
+                          AND COALESCE(fanout_manifest_hash, '') <> ''
+                        """
+                    ),
+                    {"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE},
+                )
+            )
+            manifest_validation_error_count = 0
+            for row in manifest_contract_rows:
+                try:
+                    validate_fanout_manifest(
+                        _text(row.get("event_type")),
+                        {
+                            "version": _text(row.get("fanout_manifest_version")),
+                            "hash": _text(row.get("fanout_manifest_hash")),
+                            "expected_consumer_count": int(row.get("expected_consumer_count") or 0),
+                            "consumers": _json_list(row.get("fanout_manifest_json")),
+                        },
+                    )
+                except (TypeError, ValueError):
+                    manifest_validation_error_count += 1
         outbox_metrics = self._repo.outbox_metrics()
         queue_metrics = self._repo.queue_metrics({"event_type": PAYMENT_SUCCEEDED_EVENT_TYPE})
         return {
@@ -221,6 +333,11 @@ class InternalEventOutboxReconciliationService:
             "relayed_outbox_without_event_count": relayed_outbox_without_event,
             "event_missing_consumer_run_count": sum(missing_by_consumer.values()),
             "event_missing_consumer_run_by_consumer": missing_by_consumer,
+            "manifest_backed_event_missing_consumer_run_count": sum(manifest_missing_by_consumer.values()),
+            "manifest_backed_event_missing_consumer_run_by_consumer": manifest_missing_by_consumer,
+            "manifestless_event_missing_consumer_run_count": sum(manifestless_missing_by_consumer.values()),
+            "manifestless_event_missing_consumer_run_by_consumer": manifestless_missing_by_consumer,
+            "manifest_validation_error_count": manifest_validation_error_count,
             "legacy_event_missing_consumer_run_count": sum(legacy_missing_by_consumer.values()),
             "legacy_event_missing_consumer_run_by_consumer": legacy_missing_by_consumer,
             "actionable_cutover_at": _INTERNAL_EVENT_RECONCILIATION_CUTOVER_AT,
@@ -266,10 +383,15 @@ class InternalEventOutboxReconciliationService:
             session.commit()
 
         relay_result = InternalEventOutboxRelay(self._repo, self._registry).relay_due(limit=limit)
-        consumer_run_count = self._repair_missing_consumer_runs(limit=limit)
+        consumer_run_count, manifest_validation_error_count = self._repair_missing_consumer_runs(limit=limit)
         after = self.diagnose()
         return {
-            "ok": bool(relay_result.get("ok")) and bool(after.get("ok")),
+            "ok": (
+                bool(relay_result.get("ok"))
+                and bool(after.get("ok"))
+                and manifest_validation_error_count == 0
+                and int(after.get("manifest_validation_error_count") or 0) == 0
+            ),
             "dry_run": False,
             "before": before,
             "after": after,
@@ -277,6 +399,7 @@ class InternalEventOutboxReconciliationService:
                 "payment_outbox_count": payment_outbox_count,
                 "outbox_event_count": outbox_event_count,
                 "consumer_run_count": consumer_run_count,
+                "manifest_validation_error_count": manifest_validation_error_count,
             },
             "relay": relay_result,
             "real_external_call_executed": False,
@@ -322,7 +445,7 @@ class InternalEventOutboxReconciliationService:
             conn.commit()
         return repaired
 
-    def _repair_missing_consumer_runs(self, *, limit: int) -> int:
+    def _repair_missing_consumer_runs(self, *, limit: int) -> tuple[int, int]:
         events, _ = self._repo.list_events(
             {
                 "event_type": PAYMENT_SUCCEEDED_EVENT_TYPE,
@@ -331,8 +454,17 @@ class InternalEventOutboxReconciliationService:
             limit=max(1, min(int(limit or 100), 200)),
         )
         repaired = 0
-        specs = self._payment_specs()
+        manifest_validation_error_count = 0
         for event in events:
+            try:
+                specs = _manifest_specs_from_event(event)
+            except ValueError:
+                manifest_validation_error_count += 1
+                continue
+            if specs is None:
+                # Expand-migration compatibility: only post-cutover, manifest-less
+                # payment events may derive expectations from the current catalog.
+                specs = self._payment_specs()
             existing, _ = self._repo.list_consumer_runs({"event_id": event.event_id}, limit=200)
             existing_names = {run.consumer_name for run in existing}
             missing = [spec for spec in specs if spec.consumer_name not in existing_names]
@@ -340,4 +472,4 @@ class InternalEventOutboxReconciliationService:
                 continue
             self._repo.create_event_with_consumer_runs(_request_from_event(event), missing)
             repaired += len(missing)
-        return repaired
+        return repaired, manifest_validation_error_count

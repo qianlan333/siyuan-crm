@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from aicrm_next.shared.runtime import production_data_ready, raw_database_url
 
+from .fanout import validate_fanout_manifest
 from .repository_support import (
     AUTOMATIC_PENDING_STATUSES,
     Any,
@@ -1052,6 +1053,8 @@ class SQLAlchemyInternalEventRepository(InternalEventRepository):
         self,
         outbox: InternalEventOutboxRecord,
         consumers: list[InternalEventConsumerSpec],
+        *,
+        fanout_manifest: dict[str, Any],
     ) -> tuple[InternalEventOutboxRecord, InternalEvent, list[InternalEventConsumerRun]] | None:
         if not _text(outbox.lease_token):
             return None
@@ -1068,11 +1071,60 @@ class SQLAlchemyInternalEventRepository(InternalEventRepository):
             if current_outbox is None:
                 session.rollback()
                 return None
+            normalized_consumers = _consumer_specs_payload(consumers)
+            try:
+                manifest_consumers = validate_fanout_manifest(
+                    current_outbox.event_type,
+                    fanout_manifest,
+                    consumers=normalized_consumers,
+                )
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+            expected_names = {item["consumer_name"] for item in manifest_consumers}
+            manifest_version = _text(fanout_manifest.get("version"))
+            manifest_hash = _text(fanout_manifest.get("hash"))
+            expected_count = len(manifest_consumers)
             event = self._create_event_in_session(session, current_outbox.to_create_request())
+            manifest_row = session.execute(
+                text(
+                    """
+                    UPDATE internal_event
+                    SET fanout_manifest_version = :manifest_version,
+                        fanout_manifest_hash = :manifest_hash,
+                        fanout_manifest_json = CAST(:manifest_json AS jsonb),
+                        expected_consumer_count = :expected_consumer_count
+                    WHERE id = :event_id
+                      AND (fanout_manifest_hash = '' OR fanout_manifest_hash = :manifest_hash)
+                    RETURNING *
+                    """
+                ),
+                {
+                    "event_id": int(event.id),
+                    "manifest_version": manifest_version,
+                    "manifest_hash": manifest_hash,
+                    "manifest_json": _json_dumps(manifest_consumers),
+                    "expected_consumer_count": expected_count,
+                },
+            ).mappings().fetchone()
+            if not manifest_row:
+                raise RuntimeError("internal_event_fanout_manifest_mismatch")
+            event = _public_event(dict(manifest_row))
+            if event is None:
+                raise RuntimeError("internal_event_fanout_manifest_persist_failed")
             runs = [
                 self._create_consumer_run_in_session(session, event=event, consumer=consumer)
-                for consumer in _consumer_specs_payload(consumers)
+                for consumer in normalized_consumers
             ]
+            actual_rows = session.execute(
+                text(
+                    "SELECT consumer_name FROM internal_event_consumer_run "
+                    "WHERE tenant_id = :tenant_id AND event_id = :event_id"
+                ),
+                {"tenant_id": event.tenant_id, "event_id": event.event_id},
+            ).mappings().fetchall()
+            actual_names = {_text(row.get("consumer_name")) for row in actual_rows if _text(row.get("consumer_name"))}
+            if actual_names != expected_names or len(runs) != expected_count:
+                raise RuntimeError("internal_event_fanout_incomplete")
             updated_row = session.execute(
                 text(
                     """

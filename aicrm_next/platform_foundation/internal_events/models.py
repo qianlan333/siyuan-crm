@@ -103,6 +103,10 @@ class InternalEvent:
     occurred_at: str = ""
     payload_json: dict[str, Any] = field(default_factory=dict)
     payload_summary_json: dict[str, Any] = field(default_factory=dict)
+    fanout_manifest_version: str = ""
+    fanout_manifest_hash: str = ""
+    fanout_manifest_json: list[dict[str, Any]] = field(default_factory=list)
+    expected_consumer_count: int = 0
     created_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:

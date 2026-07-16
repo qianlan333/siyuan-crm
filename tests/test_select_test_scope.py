@@ -341,6 +341,7 @@ def test_r06_internal_event_outbox_files_force_full_postgres_ci() -> None:
         "aicrm_next/platform_foundation/internal_events/reconciliation/outbox.py",
         "aicrm_next/public_product/h5_wechat_pay.py",
         "migrations/versions/0099_internal_event_outbox_and_consumer_lease.py",
+        "migrations/versions/0122_internal_event_fanout_manifest.py",
         "scripts/ops/reconcile_internal_event_outbox.py",
         "tests/test_internal_event_outbox.py",
         "tests/test_internal_event_worker_exit.py",

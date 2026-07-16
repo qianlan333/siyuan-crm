@@ -81,7 +81,7 @@ def run_due_refresh_consumers(
             "skipped": "no_refresh_consumers_selected",
             "real_external_call_executed": False,
         }
-    return InternalEventWorker().run_due(
+    return InternalEventWorker(relay_role="consumer_only").run_due(
         batch_size=batch_size,
         dry_run=dry_run,
         event_types=event_types,
@@ -90,7 +90,7 @@ def run_due_refresh_consumers(
 
 
 def run_due_source_poke_consumers(*, dry_run: bool = True, batch_size: int = 20) -> dict[str, Any]:
-    return InternalEventWorker().run_due(
+    return InternalEventWorker(relay_role="consumer_only").run_due(
         batch_size=batch_size,
         dry_run=dry_run,
         event_types=_source_poke_event_types(),
@@ -99,7 +99,7 @@ def run_due_source_poke_consumers(*, dry_run: bool = True, batch_size: int = 20)
 
 
 def run_due_outbound_consumers(*, dry_run: bool = True, batch_size: int = 20) -> dict[str, Any]:
-    return InternalEventWorker().run_due(
+    return InternalEventWorker(relay_role="consumer_only").run_due(
         batch_size=batch_size,
         dry_run=dry_run,
         event_types=[RUN_REFRESHED_EVENT],

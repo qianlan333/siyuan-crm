@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.internal_event_composition import build_internal_event_consumer_registry
@@ -26,13 +27,33 @@ def test_composition_builds_complete_isolated_registries() -> None:
     second = build_internal_event_consumer_registry()
 
     assert first is not second
+    assert first.is_fanout_authoritative is True
+    assert second.is_fanout_authoritative is True
     assert _consumer_names(first, "payment.succeeded") == _consumer_names(second, "payment.succeeded")
     assert "service_period_entitlement_consumer" in _consumer_names(first, "payment.succeeded")
 
-    first.register("registry.probe", "first_only", _unused_handler)
+    with pytest.raises(RuntimeError, match="fanout contract is sealed"):
+        first.register("registry.probe", "first_only", _unused_handler)
 
-    assert _consumer_names(first, "registry.probe") == {"first_only"}
+    assert _consumer_names(first, "registry.probe") == set()
     assert _consumer_names(second, "registry.probe") == set()
+
+
+def test_sealed_registry_allows_handler_rebind_without_changing_fanout_manifest() -> None:
+    registry = build_internal_event_consumer_registry()
+    before = registry.fanout_manifest_for("payment.succeeded")
+    current = registry.list_for_event_type("payment.succeeded")[0]
+
+    registry.register(
+        current.event_type,
+        current.consumer_name,
+        _unused_handler,
+        consumer_type=current.consumer_type,
+        max_attempts=current.max_attempts,
+    )
+
+    assert registry.get_handler(current.event_type, current.consumer_name) is _unused_handler
+    assert registry.fanout_manifest_for("payment.succeeded") == before
 
 
 def test_create_app_owns_registry_without_mutating_process_default() -> None:
@@ -55,13 +76,16 @@ def test_registry_scope_binds_default_services_and_restores_cli_fallback() -> No
     assert current_internal_event_consumer_registry() is DEFAULT_INTERNAL_EVENT_CONSUMER_REGISTRY
 
 
-def test_web_request_uses_only_its_own_app_registry() -> None:
+def test_web_request_uses_its_own_immutable_app_registry() -> None:
     first_app = create_app()
     second_app = create_app()
-    first_app.state.internal_event_consumer_registry.register("registry.probe", "first_only", _unused_handler)
 
     first_payload = TestClient(first_app).get("/api/admin/internal-events/diagnostics").json()
     second_payload = TestClient(second_app).get("/api/admin/internal-events/diagnostics").json()
 
-    assert first_payload["registered_consumers"]["registry.probe"][0]["consumer_name"] == "first_only"
+    assert first_app.state.internal_event_consumer_registry is not second_app.state.internal_event_consumer_registry
+    assert first_app.state.internal_event_consumer_registry.is_fanout_authoritative is True
+    with pytest.raises(RuntimeError, match="fanout contract is sealed"):
+        first_app.state.internal_event_consumer_registry.register("registry.probe", "first_only", _unused_handler)
+    assert "registry.probe" not in first_payload["registered_consumers"]
     assert "registry.probe" not in second_payload["registered_consumers"]

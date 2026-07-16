@@ -127,6 +127,7 @@ def build_internal_event_consumer_registry() -> InternalEventConsumerRegistry:
     register_questionnaire_event_consumers(registry)
     register_shadow_event_consumers(registry)
     register_ai_audience_event_consumers(registry)
+    registry.seal_fanout_contract()
     return registry
 
 

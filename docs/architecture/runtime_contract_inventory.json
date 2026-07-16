@@ -1133,7 +1133,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/customer_read_model/repo.py",
       "key": "CUSTOMER_READ_MODEL_REPO_BACKEND",
-      "line": 580
+      "line": 585
     },
     {
       "accessor": "os.getenv",
@@ -44734,11 +44734,9 @@
       "unit": "aicrm-web.service"
     },
     {
-      "kick_after_timer_restart": true,
-      "kick_failure_fatal": false,
       "kind": "timer",
       "service": "aicrm-wechat-shop-order-sync.service",
-      "state": "active_autostart",
+      "state": "approval_required",
       "unit": "aicrm-wechat-shop-order-sync.timer"
     },
     {

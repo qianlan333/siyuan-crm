@@ -106,6 +106,9 @@ def test_runtime_transaction_wraps_migration_and_all_mainline_units() -> None:
     assert "openclaw-customer-read-model-refresh.timer" in active
     assert "openclaw-ai-audience-scheduler.timer" in active
     assert "openclaw-automation-ops-scheduler.timer" in active
+    assert "aicrm-wechat-shop-order-sync.timer" not in active
+    approval_required = {item["timer"] for item in manifest["approval_required"]}
+    assert "aicrm-wechat-shop-order-sync.timer" in approval_required
 
 
 def test_siyuan_runtime_environment_is_migrated_before_workers_start() -> None:

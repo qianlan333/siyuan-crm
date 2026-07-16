@@ -1,0 +1,12 @@
+[Unit]
+Description=OpenClaw Identity Resolution Backfill Worker - consume crm_user_identity_resolution_queue
+After=network.target openclaw-wecom-postgres.service
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_identity_resolution_backfill_worker.py --execute --limit 20'

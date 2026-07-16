@@ -13,6 +13,7 @@ DEFAULT_MANIFEST = ROOT / "docs" / "architecture" / "route_ownership_manifest.ym
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS", "TRACE"}
 _READ_ONLY_UNSAFE_PATHS = {
     "/api/admin/service-period-products/{service_product_id}/member-grid/query",
+    "/api/public/service-period-member-grid/query",
 }
 
 _HYBRID_ADMIN_EXACT_PATHS = {
@@ -66,6 +67,10 @@ def _admin_capability(entry: dict[str, Any]) -> str:
     path = str(entry["path"])
     owner = str(entry["capability_owner"])
     write = _is_write(entry)
+    if "/service-period-products/" in path and any(
+        marker in path for marker in ("/data", "/member-grid", "/member-views", "/members/")
+    ):
+        return "service_period_grid_access"
     if not write:
         if owner == "admin_config" or path.startswith("/admin/config"):
             return "manage_config"
@@ -111,6 +116,12 @@ def _pii_level(entry: dict[str, Any]) -> str:
 
 def _hybrid_admin_route(path: str) -> bool:
     return path in _HYBRID_ADMIN_EXACT_PATHS
+
+
+def _service_period_grid_route(path: str) -> bool:
+    return "/service-period-products/" in path and any(
+        marker in path for marker in ("/data", "/member-grid", "/member-views", "/members/")
+    )
 
 
 def _machine_capability(path: str) -> str:
@@ -194,6 +205,17 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
             client_purpose=_machine_purpose(path),
         )
 
+    if _service_period_grid_route(path):
+        return _policy(
+            "admin",
+            "human_session",
+            "service_period_grid_access",
+            "single_resource",
+            "sensitive",
+            unsafe_method,
+            "authenticated",
+        )
+
     if _starts(path, "/admin", "/api/admin", "/setup"):
         return _policy(
             "admin",
@@ -263,6 +285,20 @@ def _policy_for(entry: dict[str, Any]) -> dict[str, Any]:
 
     if path.startswith("/sidebar/"):
         return _policy("sidebar", "public", "sidebar_bootstrap", "self", "none", False, "public_strict")
+
+    if path == "/shared/service-period-member-grid":
+        return _policy("public_h5", "public", "public", "public", "none", False, "public_standard")
+
+    if _starts(path, "/api/public/service-period-member-grid"):
+        return _policy(
+            "public_h5",
+            "public",
+            "public",
+            "single_resource",
+            "sensitive",
+            False,
+            "public_strict",
+        )
 
     callback_markers = ("callback", "notify", "webhook", "test-receiver")
     if path in {"/api/wecom/events"} or ("/webhook-deliveries" not in path and any(marker in path for marker in callback_markers)):

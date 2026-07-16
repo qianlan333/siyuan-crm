@@ -29,6 +29,7 @@ from .platform_foundation.internal_events import internal_event_consumer_registr
 from .questionnaire.repo import reset_questionnaire_fixture_state
 from .read_model_composition import build_sidebar_contact_binding_status_query, get_customer_detail
 from .radar_links.repo import reset_radar_links_fixture_state
+from .service_period_composition import build_service_period_member_grid_access_service
 from .router_registry import register_routers
 from .shared.errors import ApplicationError
 from .shared.repository_provider import RepositoryProviderError
@@ -78,6 +79,7 @@ def create_app(*, pii_audit_repository: PiiAuditRepository | None = None) -> Fas
     app.state.internal_event_consumer_registry = build_internal_event_consumer_registry()
     app.state.sidebar_contact_binding_status_query_factory = build_sidebar_contact_binding_status_query
     app.state.external_customer_detail_query = get_customer_detail
+    app.state.service_period_member_grid_access_service_factory = build_service_period_member_grid_access_service
 
     if fixture_mode():
         fixture_reset_registry.reset_fixture_state()

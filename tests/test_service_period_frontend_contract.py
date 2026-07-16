@@ -179,7 +179,13 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
     assert 'id="spGridScroll"' in text
     assert 'id="spUnsavedDialog"' in text
     assert 'id="spConflictDialog"' in text
+    assert 'id="spShareButton"' in text
+    assert 'id="spShareDialog"' in text
+    assert 'id="spInviteCollaborator"' in text
+    assert 'id="spExternalShareToggle"' in text
+    assert 'id="spCopyExternalShareUrl"' in text
     assert "/static/service-period/admin_console/member_grid.css" in text
+    assert "/static/service-period/admin_console/member_grid_share.js" in text
     assert "/static/service-period/admin_console/member_grid.js" in text
 
     schema = next_client.get(f"/api/admin/service-period-products/{product['id']}/member-grid/schema")
@@ -227,6 +233,10 @@ def test_service_period_data_page_has_only_data_contract(next_client) -> None:
     assert 'event.key === "Enter" && !event.shiftKey' in script
     assert 'event.key === "Escape"' in script
     assert "window.sessionStorage" in script
+    assert 'String(root.dataset.mode || "internal") === "public"' in script
+    assert '"X-AICRM-Grid-Share-Token": shareToken' in script
+    assert 'credentials: "omit"' in script
+    assert 'referrerPolicy: "no-referrer"' in script
 
     stylesheet = (
         Path(__file__).resolve().parents[1]

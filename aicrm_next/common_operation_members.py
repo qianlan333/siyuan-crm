@@ -41,9 +41,11 @@ def _fetch_rows(conn: Any, sql: str, *, source: str, priority: int) -> list[dict
     return rows
 
 
-def list_operation_member_rows() -> list[dict[str, Any]]:
+def list_operation_member_rows(*, scope: str = "common") -> list[dict[str, Any]]:
     conn = _connect()
     if conn is None:
+        if normalize_scope(scope) == "wecom_directory":
+            return []
         try:
             from aicrm_next.automation_engine.group_ops.repo import build_group_ops_repository
 
@@ -81,6 +83,8 @@ def list_operation_member_rows() -> list[dict[str, Any]]:
                 priority=10,
             )
         )
+        if normalize_scope(scope) == "wecom_directory":
+            return rows
         rows.extend(
             _fetch_rows(
                 conn,
@@ -149,7 +153,7 @@ def search_operation_members(
     include_inactive: bool = False,
 ) -> dict[str, Any]:
     return operation_members_payload(
-        list_operation_member_rows(),
+        list_operation_member_rows(scope=scope),
         q=clean_text(q),
         scope=normalize_scope(scope),
         page=clamp_page(page),

@@ -29,6 +29,11 @@ from .domain import (
 )
 from .huangyoucan_usage import huangyoucan_usage_match_joins, huangyoucan_usage_select_fields, public_huangyoucan_usage_fields
 from .member_admin_fields import InMemoryMemberAdminFieldsMixin, PostgresMemberAdminFieldsMixin
+from .member_grid_access_repo import (
+    InMemoryMemberGridAccessRepositoryMixin,
+    MemberGridAccessRepositoryProtocol,
+    PostgresMemberGridAccessRepositoryMixin,
+)
 from .member_grid_repo import (
     InMemoryMemberGridRepositoryMixin,
     MemberGridRepositoryProtocol,
@@ -112,7 +117,7 @@ def _compact_trade_product_payload(product: dict[str, Any], *, product_id: Any |
     }
 
 
-class ServicePeriodRepository(MemberGridRepositoryProtocol, Protocol):
+class ServicePeriodRepository(MemberGridRepositoryProtocol, MemberGridAccessRepositoryProtocol, Protocol):
     def list_products(self, *, limit: int, offset: int) -> dict[str, Any]: ...
     def create_service_product(self, *, trade_product: dict[str, Any], duration_days: int, membership_config_id: str, membership_config_name: str, link_slug: str, metadata_json: dict[str, Any] | None = None) -> dict[str, Any]: ...
     def get_product(self, service_product_id: str) -> dict[str, Any] | None: ...
@@ -132,16 +137,23 @@ class ServicePeriodRepository(MemberGridRepositoryProtocol, Protocol):
     def expire_due_entitlements(self, *, now: datetime | None = None) -> dict[str, Any]: ...
 
 
-class InMemoryServicePeriodRepository(InMemoryMemberAdminFieldsMixin, InMemoryMemberGridRepositoryMixin):
+class InMemoryServicePeriodRepository(
+    InMemoryMemberAdminFieldsMixin,
+    InMemoryMemberGridRepositoryMixin,
+    InMemoryMemberGridAccessRepositoryMixin,
+):
     def __init__(self) -> None:
         self._products: list[dict[str, Any]] = []
         self._entitlements: list[dict[str, Any]] = []
         self._events: list[dict[str, Any]] = []
         self._member_views: list[dict[str, Any]] = []
+        self._member_grid_collaborators: list[dict[str, Any]] = []
+        self._member_grid_shares: list[dict[str, Any]] = []
         self._next_product_id = 1
         self._next_entitlement_id = 1
         self._next_event_id = 1
         self._next_member_view_id = 1
+        self._next_member_grid_collaborator_id = 1
 
     def list_products(self, *, limit: int, offset: int) -> dict[str, Any]:
         rows = [self._serialize_product(row, include_trade_product=False) for row in self._products if not row.get("deleted")]
@@ -181,6 +193,7 @@ class InMemoryServicePeriodRepository(InMemoryMemberAdminFieldsMixin, InMemoryMe
         self._next_product_id += 1
         self._products.append(row)
         self._append_default_member_view(text(row["id"]), actor="system")
+        self._append_default_member_grid_share(text(row["id"]), actor="system")
         return self._serialize_product(row)
 
     def get_product(self, service_product_id: str) -> dict[str, Any] | None:
@@ -251,6 +264,7 @@ class InMemoryServicePeriodRepository(InMemoryMemberAdminFieldsMixin, InMemoryMe
             raise ContractError("已有服务期凭证的周期商品不能硬删除，请先下架")
         self._products = [item for item in self._products if item is not row]
         self._delete_member_views(service_product_id)
+        self._delete_member_grid_access(service_product_id)
         return {"ok": True, "deleted": True, "service_product_id": service_product_id, "trade_product_id": text(row.get("trade_product_id"))}
 
     def has_entitlements(self, service_product_id: str) -> bool:
@@ -611,7 +625,11 @@ class InMemoryServicePeriodRepository(InMemoryMemberAdminFieldsMixin, InMemoryMe
         }
 
 
-class PostgresServicePeriodRepository(PostgresMemberAdminFieldsMixin, PostgresMemberGridRepositoryMixin):
+class PostgresServicePeriodRepository(
+    PostgresMemberAdminFieldsMixin,
+    PostgresMemberGridRepositoryMixin,
+    PostgresMemberGridAccessRepositoryMixin,
+):
     def __init__(self, database_url: str) -> None:
         self._database_url = database_url
 
@@ -683,6 +701,7 @@ class PostgresServicePeriodRepository(PostgresMemberAdminFieldsMixin, PostgresMe
                 ),
             ).fetchone()
             self._insert_default_member_view(conn, row["id"], actor="system")
+            self._insert_default_member_grid_share(conn, text(row["id"]), actor="system")
             conn.commit()
         return self.get_product(text(row.get("id"))) or {}
 

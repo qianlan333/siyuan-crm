@@ -24,6 +24,7 @@ from aicrm_next.service_period.member_grid import (
 )
 from aicrm_next.service_period.repo import (
     PostgresServicePeriodRepository,
+    build_service_period_repository,
     reset_service_period_fixture_state,
 )
 from aicrm_next.shared.errors import ContractError
@@ -340,6 +341,15 @@ def test_viewer_can_query_drafts_but_cannot_manage_views_or_edit_remarks(monkeyp
     monkeypatch.delenv("DATABASE_URL", raising=False)
     client = TestClient(create_app(), raise_server_exceptions=False)
     product = CreateServicePeriodProductCommand()(ServicePeriodProductCreateRequest(**_product_payload("sp_grid_permissions")))["product"]
+    build_service_period_repository().create_member_grid_collaborator(
+        product["id"],
+        admin_user_id="test",
+        wecom_userid="viewer_test",
+        display_name="只读测试账号",
+        avatar_url="",
+        permission="read",
+        actor="pytest",
+    )
     GrantOrRenewEntitlementCommand()(order=_paid_order(1, product_code="sp_grid_permissions"))
     query_target = "/api/admin/service-period-products/{service_product_id}/member-grid/query"
     query_token = install_admin_action_tokens(client, ("POST", query_target), roles=("viewer",))[("POST", query_target)]

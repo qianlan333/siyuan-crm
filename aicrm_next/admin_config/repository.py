@@ -652,6 +652,103 @@ class AdminConfigRepository:
             ).mappings().first()
         return dict(row) if row else None
 
+    def get_active_wecom_directory_member(self, wecom_userid: str) -> dict[str, Any] | None:
+        with self._engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT
+                        wecom_userid, corp_id, display_name, department_name,
+                        position, avatar_url, is_active, wecom_status
+                    FROM admin_wecom_directory_members
+                    WHERE wecom_userid = :wecom_userid
+                      AND is_active = TRUE
+                    ORDER BY updated_at DESC, id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"wecom_userid": str(wecom_userid or "").strip()},
+            ).mappings().first()
+        return dict(row) if row else None
+
+    def admin_user_role_codes(self, admin_user_id: int) -> list[str]:
+        rows = self.list_admin_user_roles([int(admin_user_id or 0)])
+        return [str(row.get("role_code") or "").strip() for row in rows if str(row.get("role_code") or "").strip()]
+
+    def add_admin_user_role(self, *, admin_user_id: int, role_code: str) -> None:
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                text(
+                    """
+                    INSERT INTO admin_user_roles (admin_user_id, role_code, created_at)
+                    VALUES (:admin_user_id, :role_code, CURRENT_TIMESTAMP)
+                    ON CONFLICT(admin_user_id, role_code) DO NOTHING
+                    """
+                ),
+                {"admin_user_id": int(admin_user_id), "role_code": str(role_code or "").strip()},
+            )
+            if result.rowcount:
+                conn.execute(
+                    text("UPDATE admin_users SET session_version = session_version + 1 WHERE id = :id"),
+                    {"id": int(admin_user_id)},
+                )
+
+    def remove_admin_user_role(self, *, admin_user_id: int, role_code: str) -> None:
+        with self._engine.begin() as conn:
+            result = conn.execute(
+                text("DELETE FROM admin_user_roles WHERE admin_user_id = :admin_user_id AND role_code = :role_code"),
+                {"admin_user_id": int(admin_user_id), "role_code": str(role_code or "").strip()},
+            )
+            if result.rowcount:
+                conn.execute(
+                    text("UPDATE admin_users SET session_version = session_version + 1 WHERE id = :id"),
+                    {"id": int(admin_user_id)},
+                )
+
+    def disable_service_period_grid_account(self, *, admin_user_id: int, operator: str) -> None:
+        with self._engine.begin() as conn:
+            conn.execute(
+                text(
+                    """
+                    UPDATE admin_users
+                    SET is_active = FALSE,
+                        login_enabled = FALSE,
+                        session_version = session_version + 1,
+                        updated_at = CURRENT_TIMESTAMP,
+                        updated_by = :operator
+                    WHERE id = :admin_user_id
+                      AND auth_source = 'service_period_grid_collaboration'
+                    """
+                ),
+                {"admin_user_id": int(admin_user_id), "operator": str(operator or "system").strip()},
+            )
+
+    def list_super_admin_users(self) -> list[dict[str, Any]]:
+        with self._engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT
+                        users.id,
+                        users.wecom_userid,
+                        users.display_name,
+                        users.is_active,
+                        users.login_enabled,
+                        COALESCE(directory.avatar_url, '') AS avatar_url
+                    FROM admin_users users
+                    LEFT JOIN admin_user_roles roles ON roles.admin_user_id = users.id
+                    LEFT JOIN admin_wecom_directory_members directory
+                      ON directory.wecom_userid = users.wecom_userid
+                     AND directory.is_active = TRUE
+                    WHERE users.is_active = TRUE
+                      AND users.login_enabled = TRUE
+                      AND (users.admin_level = 'super_admin' OR roles.role_code = 'super_admin')
+                    ORDER BY users.id
+                    """
+                )
+            ).mappings().all()
+        return [dict(row) for row in rows]
+
     def upsert_admin_user(self, payload: dict[str, Any]) -> dict[str, Any]:
         user_id = int(payload.get("id") or 0)
         if user_id:

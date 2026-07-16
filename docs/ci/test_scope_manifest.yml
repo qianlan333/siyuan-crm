@@ -578,16 +578,24 @@
       "name": "service_period",
       "paths": [
         "aicrm_next/service_period/**",
+        "aicrm_next/admin_config/service_period_grid_accounts.py",
+        "aicrm_next/platform_foundation/auth_platform/service_period_grid_share.py",
+        "aicrm_next/service_period_composition.py",
+        "aicrm_next/service_period_grid_auth.py",
+        "aicrm_next/service_period_grid_ports.py",
+        "aicrm_next/shared/operation_members.py",
         "aicrm_next/main.py",
         "migrations/versions/0120_service_period_member_views.py",
+        "migrations/versions/0121_service_period_member_grid_sharing.py",
         "tests/test_service_period_*.py",
-        "tests/frontend/service_period_member_grid.test.mjs"
+        "tests/frontend/service_period_member_grid*.test.mjs"
       ],
       "python_tests": [
         "tests/test_service_period_application.py",
         "tests/test_service_period_h5_payment.py",
         "tests/test_service_period_frontend_contract.py",
         "tests/test_service_period_member_grid.py",
+        "tests/test_service_period_member_grid_sharing.py",
         "tests/test_service_period_schema.py",
         "tests/test_public_product_frontend_contract.py",
         "tests/test_wechat_products_admin_page_contract.py",
@@ -597,7 +605,8 @@
         "tests/test_next_api_docs_page.py"
       ],
       "frontend_tests": [
-        "tests/frontend/service_period_member_grid.test.mjs"
+        "tests/frontend/service_period_member_grid.test.mjs",
+        "tests/frontend/service_period_member_grid_sharing.test.mjs"
       ],
       "needs_postgres": true,
       "needs_full_ci": true,

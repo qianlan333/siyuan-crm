@@ -28,6 +28,7 @@
     scope: "",
     pageSize: "",
     includeInactive: null,
+    allowRefresh: true,
   };
 
   function memberLabel(member) {
@@ -325,6 +326,7 @@
     const confirmButton = modal.querySelector("[data-operation-member-confirm]");
     const refreshButton = modal.querySelector("[data-operation-member-refresh]");
     if (refreshButton) {
+      refreshButton.hidden = !state.allowRefresh;
       refreshButton.disabled = state.loading;
       refreshButton.textContent = state.loading ? "刷新中" : "刷新客服";
     }
@@ -475,6 +477,7 @@
     state.scope = String(options.scope || "").trim();
     state.pageSize = String(options.page_size || options.pageSize || "").trim();
     state.includeInactive = optionBool(options, "includeInactive", "include_inactive");
+    state.allowRefresh = optionBool(options, "allowRefresh", "allow_refresh") !== false;
     state.multiple = Boolean(options.multiple);
     state.max = Math.max(1, Number(options.max || (state.multiple ? 5 : 1)) || 1);
     state.disabledUserIds = (Array.isArray(options.disabledUserIds) ? options.disabledUserIds : []).map((item) => String(item || "").trim()).filter(Boolean);

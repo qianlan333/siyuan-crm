@@ -34,6 +34,7 @@ def test_repository_ownership_targeted_declarations_are_complete() -> None:
         "admin_operation_logs",
         "admin_user_roles",
         "admin_users",
+        "admin_wecom_directory_members",
         "app_settings",
         "marketing_automation_configs",
         "marketing_automation_question_rules",

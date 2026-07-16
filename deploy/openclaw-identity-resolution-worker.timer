@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw Identity Resolution Backfill Worker every 2 minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/2:20
+Persistent=true
+Unit=openclaw-identity-resolution-worker.service
+
+[Install]
+WantedBy=timers.target

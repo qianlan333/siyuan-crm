@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OpenClaw Internal Event Queue Worker every minute
+
+[Timer]
+OnCalendar=*-*-* *:*:40
+Persistent=true
+Unit=openclaw-internal-event-worker.service
+
+[Install]
+WantedBy=timers.target

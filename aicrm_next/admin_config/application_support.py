@@ -66,8 +66,13 @@ ROLE_LABELS = {
     "automation_admin": "自动化管理员",
     "questionnaire_admin": "问卷管理员",
     "viewer": "只读成员",
+    "service_period_grid_collaborator": "周期商品数据协作者",
 }
-ADMIN_ASSIGNABLE_ROLE_OPTIONS = [{"value": key, "label": value} for key, value in ROLE_LABELS.items() if key != "super_admin"]
+ADMIN_ASSIGNABLE_ROLE_OPTIONS = [
+    {"value": key, "label": value}
+    for key, value in ROLE_LABELS.items()
+    if key not in {"super_admin", "service_period_grid_collaborator"}
+]
 ADMIN_LEVEL_LABELS = {"super_admin": "超级管理员", "admin": "管理员"}
 MCP_TOOL_GROUP_LABELS = {
     "crm": "客户查询",

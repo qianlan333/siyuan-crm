@@ -1,0 +1,10 @@
+[Unit]
+Description=Run AI-CRM HuangYouCan usage sync at 09:00 and 21:00 Asia/Shanghai
+
+[Timer]
+OnCalendar=*-*-* 09,21:00:00 Asia/Shanghai
+Persistent=true
+Unit=aicrm-huangyoucan-usage-sync.service
+
+[Install]
+WantedBy=timers.target

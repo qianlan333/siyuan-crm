@@ -1,0 +1,10 @@
+[Unit]
+Description=Refresh OpenClaw Customer Read Model every 30 minutes
+
+[Timer]
+OnCalendar=*-*-* *:0/30:00
+Persistent=true
+Unit=openclaw-customer-read-model-refresh.service
+
+[Install]
+WantedBy=timers.target

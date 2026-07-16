@@ -8,6 +8,7 @@ repositories:
       - admin_operation_logs
       - admin_user_roles
       - admin_users
+      - admin_wecom_directory_members
       - app_settings
       - marketing_automation_configs
       - marketing_automation_question_rules
@@ -695,6 +696,14 @@ repositories:
       - wecom_external_contact_identity_map
     table_writes:
       - service_period_member_views
+  aicrm_next/service_period/member_grid_access_repo.py:
+    capability_owner: aicrm_next.service_period
+    table_reads:
+      - service_period_member_collaborators
+      - service_period_member_shares
+    table_writes:
+      - service_period_member_collaborators
+      - service_period_member_shares
   aicrm_next/service_period/repo.py:
     capability_owner: aicrm_next.service_period
     table_reads:

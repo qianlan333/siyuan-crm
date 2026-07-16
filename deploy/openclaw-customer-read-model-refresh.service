@@ -1,0 +1,11 @@
+[Unit]
+Description=OpenClaw Customer Read Model Refresh - rebuild list and detail projections
+After=network.target postgresql.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_customer_read_model_refresh.py --execute'
+TimeoutStartSec=900

@@ -1,0 +1,14 @@
+[Unit]
+Description=AI-CRM Internal Event Worker - relay transactional outbox and dispatch due consumers
+After=network.target openclaw-wecom-postgres.service
+Requires=openclaw-wecom-postgres.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/极简 crm
+EnvironmentFile=/home/ubuntu/.openclaw-wecom-pg.env
+Environment=AICRM_INTERNAL_EVENTS_ENABLED=0
+Environment=AICRM_INTERNAL_EVENTS_SHADOW_ONLY=1
+Environment=AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE=50
+ExecStart=/bin/bash -lc 'source /home/ubuntu/venvs/openclaw/bin/activate && python scripts/run_internal_event_worker.py --execute'

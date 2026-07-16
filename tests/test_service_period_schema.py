@@ -11,6 +11,7 @@ MIGRATION = ROOT / "migrations" / "versions" / "0095_service_period_products.py"
 CLEANUP_MIGRATION = ROOT / "migrations" / "versions" / "0097_service_period_unionid_cleanup.py"
 HUANGYOUCAN_USAGE_MIGRATION = ROOT / "migrations" / "versions" / "0107_service_period_huangyoucan_usage_snapshot.py"
 MEMBER_VIEWS_MIGRATION = ROOT / "migrations" / "versions" / "0120_service_period_member_views.py"
+MEMBER_GRID_SHARING_MIGRATION = ROOT / "migrations" / "versions" / "0121_service_period_member_grid_sharing.py"
 MANIFEST = ROOT / "docs" / "architecture" / "data_table_lifecycle_manifest.yml"
 _CONFTEST_SPEC = importlib.util.spec_from_file_location("service_period_test_conftest", ROOT / "tests" / "conftest.py")
 assert _CONFTEST_SPEC and _CONFTEST_SPEC.loader
@@ -110,3 +111,29 @@ def test_service_period_member_views_schema_backfill_and_lifecycle_contract() ->
     assert entry["domain"] == "service_period"
     assert entry["write_owner"] == "aicrm_next.service_period"
     assert entry["migration_source"] == "0120_service_period_member_views"
+
+
+def test_service_period_member_grid_sharing_schema_backfill_and_lifecycle_contract() -> None:
+    migration = MEMBER_GRID_SHARING_MIGRATION.read_text(encoding="utf-8")
+    manifest = yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))["tables"]
+
+    assert "CREATE TABLE IF NOT EXISTS service_period_member_collaborators" in migration
+    assert "CREATE TABLE IF NOT EXISTS service_period_member_shares" in migration
+    assert migration.count("ON DELETE CASCADE") >= 2
+    assert "permission IN ('read', 'edit')" in migration
+    assert "UNIQUE (tenant_id, service_product_id, admin_user_id)" in migration
+    assert "UNIQUE (tenant_id, service_product_id, wecom_userid)" in migration
+    assert "uq_service_period_member_shares_public_id" in migration
+    assert "users.is_active = TRUE" in migration
+    assert "users.login_enabled = TRUE" in migration
+    assert "roles.role_code = 'super_admin'" in migration
+    assert "products.deleted = FALSE" in migration
+    for table in ("service_period_member_collaborators", "service_period_member_shares"):
+        entry = manifest[table]
+        assert entry["domain"] == "service_period"
+        assert entry["write_owner"] == "aicrm_next.service_period"
+        assert entry["migration_source"] == "0121_service_period_member_grid_sharing"
+
+    tables = conftest._TABLES_TO_TRUNCATE
+    assert tables.index("service_period_member_collaborators") < tables.index("service_period_products")
+    assert tables.index("service_period_member_shares") < tables.index("service_period_products")

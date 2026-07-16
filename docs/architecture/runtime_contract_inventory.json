@@ -563,7 +563,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_config/application.py",
       "key": "AICRM_NEXT_ALIPAY_MODE",
-      "line": 968
+      "line": 970
     },
     {
       "accessor": "os.getenv",
@@ -761,7 +761,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_config/application.py",
       "key": "AICRM_NEXT_WECHAT_PAY_MODE",
-      "line": 962
+      "line": 964
     },
     {
       "accessor": "os.getenv",
@@ -1859,7 +1859,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/admin_auth/route_policy.py",
       "key": "WECOM_CORP_ID",
-      "line": 246
+      "line": 250
     },
     {
       "accessor": "os.getenv",
@@ -2898,7 +2898,7 @@
     }
   ],
   "migration_heads": [
-    "0120_service_period_member_views"
+    "0121_service_period_member_grid_sharing"
   ],
   "openapi_components": {
     "schemas": {
@@ -28469,6 +28469,275 @@
               "application/json": {
                 "schema": {
                   "additionalProperties": true,
+                  "title": "Response Service Period Member Grid Access Api Admin Service Period Products  Service Product Id  Member Grid Access Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.service_period_member_grid_access",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "service_period_member_grid_access",
+      "operation_id": "service_period_member_grid_access:GET:/api/admin/service-period-products/{service_product_id}/member-grid/access",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/access",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.create_service_period_member_grid_collaborator",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "create_service_period_member_grid_collaborator",
+      "operation_id": "create_service_period_member_grid_collaborator:POST:/api/admin/service-period-products/{service_product_id}/member-grid/collaborators",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/collaborators",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "collaborator_id",
+            "required": true,
+            "schema": {
+              "title": "Collaborator Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Delete Service Period Member Grid Collaborator Api Admin Service Period Products  Service Product Id  Member Grid Collaborators  Collaborator Id  Delete",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.delete_service_period_member_grid_collaborator",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "DELETE"
+      ],
+      "name": "delete_service_period_member_grid_collaborator",
+      "operation_id": "delete_service_period_member_grid_collaborator:DELETE:/api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "collaborator_id",
+            "required": true,
+            "schema": {
+              "title": "Collaborator Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Service Period Member Grid Collaborator Api Admin Service Period Products  Service Product Id  Member Grid Collaborators  Collaborator Id  Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.update_service_period_member_grid_collaborator",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_service_period_member_grid_collaborator",
+      "operation_id": "update_service_period_member_grid_collaborator:PUT:/api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Update Service Period Member Grid External Share Api Admin Service Period Products  Service Product Id  Member Grid External Share Put",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.update_service_period_member_grid_external_share",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "PUT"
+      ],
+      "name": "update_service_period_member_grid_external_share",
+      "operation_id": "update_service_period_member_grid_external_share:PUT:/api/admin/service-period-products/{service_product_id}/member-grid/external-share",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/external-share",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
                   "title": "Response Query Service Period Member Grid Api Admin Service Period Products  Service Product Id  Member Grid Query Post",
                   "type": "object"
                 }
@@ -28548,6 +28817,57 @@
       "name": "service_period_member_grid_schema",
       "operation_id": "service_period_member_grid_schema:GET:/api/admin/service-period-products/{service_product_id}/member-grid/schema",
       "path": "/api/admin/service-period-products/{service_product_id}/member-grid/schema",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "service_product_id",
+            "required": true,
+            "schema": {
+              "title": "Service Product Id",
+              "type": "string"
+            }
+          }
+        ],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Get Service Period Member Grid Share Settings Api Admin Service Period Products  Service Product Id  Member Grid Share Settings Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.get_service_period_member_grid_share_settings",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "get_service_period_member_grid_share_settings",
+      "operation_id": "get_service_period_member_grid_share_settings:GET:/api/admin/service-period-products/{service_product_id}/member-grid/share-settings",
+      "path": "/api/admin/service-period-products/{service_product_id}/member-grid/share-settings",
       "route_group": "service_period"
     },
     {
@@ -41330,6 +41650,60 @@
       "route_group": "public_product"
     },
     {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.public_service_period_member_grid_bootstrap",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "GET"
+      ],
+      "name": "public_service_period_member_grid_bootstrap",
+      "operation_id": "public_service_period_member_grid_bootstrap:GET:/api/public/service-period-member-grid/bootstrap",
+      "path": "/api/public/service-period-member-grid/bootstrap",
+      "route_group": "service_period"
+    },
+    {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.public_service_period_member_grid_query",
+      "include_in_schema": true,
+      "kind": "api",
+      "methods": [
+        "POST"
+      ],
+      "name": "public_service_period_member_grid_query",
+      "operation_id": "public_service_period_member_grid_query:POST:/api/public/service-period-member-grid/query",
+      "path": "/api/public/service-period-member-grid/query",
+      "route_group": "service_period"
+    },
+    {
       "capability_owner": "sidebar_write",
       "contract": {
         "parameters": [],
@@ -44144,6 +44518,35 @@
       "route_group": "admin_config"
     },
     {
+      "capability_owner": "service_period",
+      "contract": {
+        "parameters": [],
+        "request_body": null,
+        "responses": {
+          "200": {
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        }
+      },
+      "endpoint": "aicrm_next.service_period.api.public_service_period_member_grid_page",
+      "include_in_schema": true,
+      "kind": "page",
+      "methods": [
+        "GET"
+      ],
+      "name": "api.public_service_period_member_grid_page",
+      "operation_id": "api.public_service_period_member_grid_page:GET:/shared/service-period-member-grid",
+      "path": "/shared/service-period-member-grid",
+      "route_group": "service_period"
+    },
+    {
       "capability_owner": "identity_contact",
       "contract": {
         "parameters": [],
@@ -44272,7 +44675,192 @@
       "route_group": "verification_files"
     }
   ],
-  "runtime_units": [],
+  "runtime_units": [
+    {
+      "kind": "timer",
+      "service": "aicrm-archive-sync.service",
+      "state": "approval_required",
+      "unit": "aicrm-archive-sync.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "aicrm-automation-jobs-run-due.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "aicrm-automation-jobs-run-due.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "aicrm-campaign-run-due.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "aicrm-campaign-run-due.timer"
+    },
+    {
+      "kind": "timer",
+      "service": "aicrm-huangyoucan-usage-sync.service",
+      "state": "approval_required",
+      "unit": "aicrm-huangyoucan-usage-sync.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "aicrm-reply-monitor-capture.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "aicrm-reply-monitor-capture.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "aicrm-reply-monitor-run-due.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "aicrm-reply-monitor-run-due.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "aicrm-web.service"
+    },
+    {
+      "kick_after_timer_restart": true,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "aicrm-wechat-shop-order-sync.service",
+      "state": "active_autostart",
+      "unit": "aicrm-wechat-shop-order-sync.timer"
+    },
+    {
+      "kick_after_timer_restart": true,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-ai-audience-scheduler.service",
+      "state": "active_autostart",
+      "unit": "openclaw-ai-audience-scheduler.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "openclaw-automation-conversion-due-runner.service"
+    },
+    {
+      "kick_after_timer_restart": false,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-automation-ops-scheduler.service",
+      "state": "active_autostart",
+      "unit": "openclaw-automation-ops-scheduler.timer"
+    },
+    {
+      "kind": "timer",
+      "service": "openclaw-broadcast-hourly-feishu-report.service",
+      "state": "approval_required",
+      "unit": "openclaw-broadcast-hourly-feishu-report.timer"
+    },
+    {
+      "kick_after_timer_restart": true,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-broadcast-queue-worker.service",
+      "state": "active_autostart",
+      "unit": "openclaw-broadcast-queue-worker.timer"
+    },
+    {
+      "kick_after_timer_restart": true,
+      "kick_failure_fatal": true,
+      "kind": "timer",
+      "service": "openclaw-customer-read-model-refresh.service",
+      "state": "active_autostart",
+      "unit": "openclaw-customer-read-model-refresh.timer"
+    },
+    {
+      "kind": "timer",
+      "service": "openclaw-external-contact-full-sync.service",
+      "state": "approval_required",
+      "unit": "openclaw-external-contact-full-sync.timer"
+    },
+    {
+      "kind": "timer",
+      "service": "openclaw-external-contact-sync.service",
+      "state": "approval_required",
+      "unit": "openclaw-external-contact-sync.timer"
+    },
+    {
+      "kick_after_timer_restart": false,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-external-effect-worker.service",
+      "state": "active_autostart",
+      "unit": "openclaw-external-effect-worker.timer"
+    },
+    {
+      "kind": "service",
+      "state": "retired_forbidden",
+      "unit": "openclaw-external-push-worker.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "openclaw-external-push-worker.timer"
+    },
+    {
+      "kick_after_timer_restart": false,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-identity-resolution-worker.service",
+      "state": "active_autostart",
+      "unit": "openclaw-identity-resolution-worker.timer"
+    },
+    {
+      "kick_after_timer_restart": true,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-internal-event-worker.service",
+      "state": "active_autostart",
+      "unit": "openclaw-internal-event-worker.timer"
+    },
+    {
+      "kick_after_timer_restart": false,
+      "kick_failure_fatal": false,
+      "kind": "timer",
+      "service": "openclaw-wechat-pay-order-reconciliation-worker.service",
+      "state": "active_autostart",
+      "unit": "openclaw-wechat-pay-order-reconciliation-worker.timer"
+    },
+    {
+      "health_url": "",
+      "kind": "service",
+      "state": "active",
+      "unit": "openclaw-wecom-callback-inbox-worker.service"
+    },
+    {
+      "kind": "timer",
+      "state": "retired_forbidden",
+      "unit": "openclaw-wecom-callback-inbox-worker.timer"
+    },
+    {
+      "health_url": "http://127.0.0.1:5002/health",
+      "kind": "service",
+      "state": "active",
+      "unit": "openclaw-wecom-callback-ingress.service"
+    },
+    {
+      "kind": "service",
+      "state": "primary_web",
+      "unit": "openclaw-wecom-postgres.service"
+    }
+  ],
   "schema_version": 1,
   "tables": [
     {
@@ -47029,6 +47617,30 @@
         "aicrm_next.service_period"
       ],
       "table": "service_period_huangyoucan_usage_sync_runs",
+      "write_owner": "aicrm_next.service_period"
+    },
+    {
+      "domain": "service_period",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0121_service_period_member_grid_sharing",
+      "pii_level": "internal_contact",
+      "read_owners": [
+        "aicrm_next.service_period"
+      ],
+      "table": "service_period_member_collaborators",
+      "write_owner": "aicrm_next.service_period"
+    },
+    {
+      "domain": "service_period",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0121_service_period_member_grid_sharing",
+      "pii_level": "internal_contact",
+      "read_owners": [
+        "aicrm_next.service_period"
+      ],
+      "table": "service_period_member_shares",
       "write_owner": "aicrm_next.service_period"
     },
     {

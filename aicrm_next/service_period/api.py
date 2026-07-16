@@ -11,6 +11,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from aicrm_next.service_period_grid_auth import admin_auth_enforcement_enabled, current_auth_context
 from aicrm_next.admin_shell import shell_context
 from aicrm_next.public_product import h5_wechat_pay
 from aicrm_next.shared.errors import ContractError, NotFoundError
@@ -42,6 +43,17 @@ from .application import (
 )
 from .dto import ServicePeriodProductCreateRequest, ServicePeriodProductUpdateRequest
 from .member_grid import MemberViewConflictError
+from aicrm_next.service_period_grid_ports import CollaboratorAccountDisabledError
+from .member_grid_access import (
+    MemberGridAccessConflictError,
+    MemberGridAccessDeniedError,
+    MemberGridShareGoneError,
+)
+from .member_grid_sharing import (
+    MemberGridShareUnauthorizedError,
+    PublicServicePeriodMemberGridService,
+    ServicePeriodMemberGridAccessService,
+)
 from .public import render_service_period_pay_page, render_service_period_public_page
 
 
@@ -151,8 +163,10 @@ def _service_period_checkout_state(product: dict, request: Request, public_state
 def _raise_http(exc: Exception) -> None:
     if isinstance(exc, NotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, MemberViewConflictError):
+    if isinstance(exc, (MemberViewConflictError, MemberGridAccessConflictError, CollaboratorAccountDisabledError)):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    if isinstance(exc, MemberGridAccessDeniedError):
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     if isinstance(exc, ContractError):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     safe_log_exception(LOGGER, "service period api unexpected error", exc)
@@ -172,6 +186,59 @@ def _payload(data: dict) -> dict:
 def _actor(request: Request) -> str:
     context = getattr(request.state, "auth_context", None)
     return str(getattr(context, "principal_id", "") or "system")
+
+
+def _grid_access_service(request: Request) -> ServicePeriodMemberGridAccessService:
+    factory = getattr(request.app.state, "service_period_member_grid_access_service_factory", None)
+    return factory() if callable(factory) else ServicePeriodMemberGridAccessService()
+
+
+def _require_grid_access(request: Request, service_product_id: str, permission: str):
+    return _grid_access_service(request).require(
+        service_product_id,
+        permission,
+        context=current_auth_context(request),
+        auth_enforced=admin_auth_enforcement_enabled(),
+    )
+
+
+def _expected_version(payload: dict[str, object], *, label: str) -> int:
+    try:
+        version = int(payload.get("version") or 0)
+    except (TypeError, ValueError) as exc:
+        raise ContractError(f"{label}版本无效") from exc
+    if version < 1:
+        raise ContractError(f"{label}版本无效")
+    return version
+
+
+def _public_grid_response(payload: dict, *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(
+        jsonable_encoder(
+            {
+                **payload,
+                "route_owner": "ai_crm_next",
+                "source_status": "next_service_period_public_grid",
+                "fallback_used": False,
+                "real_external_call_executed": False,
+            }
+        ),
+        status_code=status_code,
+        headers={**route_headers(), "Cache-Control": "no-store, private, max-age=0", "Pragma": "no-cache"},
+    )
+
+
+def _raise_public_grid_http(exc: Exception) -> None:
+    if isinstance(exc, MemberGridShareUnauthorizedError):
+        raise HTTPException(status_code=401, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+    if isinstance(exc, MemberGridShareGoneError):
+        raise HTTPException(status_code=410, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+    if isinstance(exc, NotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+    if isinstance(exc, ContractError):
+        raise HTTPException(status_code=400, detail=str(exc), headers={"Cache-Control": "no-store"}) from exc
+    safe_log_exception(LOGGER, "service period public member grid unexpected error", exc)
+    raise HTTPException(status_code=500, detail="public_member_grid_unavailable", headers={"Cache-Control": "no-store"}) from exc
 
 
 def _admin_context(request: Request, *, page_title: str, page_summary: str, page_mode: str, product: dict | None = None) -> dict:
@@ -197,6 +264,24 @@ def _admin_context(request: Request, *, page_title: str, page_summary: str, page
         }
     )
     return context
+
+
+def _member_grid_page_title(product: dict) -> str:
+    title = str(product.get("title") or product.get("name") or "周期商品").strip()
+    return title if title.endswith("数据") else f"{title}数据"
+
+
+def _limit_member_grid_action_tokens(context: dict, access) -> None:
+    tokens = dict(context.get("admin_action_tokens") or {})
+    for key in list(tokens):
+        is_view_write = "/member-views" in key and not key.startswith("GET ")
+        is_cell_write = "/members/{unionid}/" in key
+        is_share_write = "/member-grid/collaborators" in key or "/member-grid/external-share" in key
+        if (is_view_write or is_cell_write) and not access.can_edit:
+            tokens.pop(key, None)
+        elif is_share_write and not access.can_manage_share:
+            tokens.pop(key, None)
+    context["admin_action_tokens"] = tokens
 
 
 @router.get("/admin/service-period-products", response_class=HTMLResponse, name="api.admin_service_period_products_page")
@@ -259,22 +344,32 @@ def admin_service_period_product_edit_page(request: Request, service_product_id:
 
 @router.get("/admin/service-period-products/{service_product_id}/data", response_class=HTMLResponse, name="api.admin_service_period_product_data_page")
 def admin_service_period_product_data_page(request: Request, service_product_id: str):
+    access = None
     try:
+        access = _require_grid_access(request, service_product_id, "read")
         product = GetServicePeriodProductQuery()(service_product_id)["product"]
         status_code = 200
         page_error = ""
     except Exception as exc:
         product = {}
-        status_code = 404
+        status_code = 403 if isinstance(exc, MemberGridAccessDeniedError) else 404
         page_error = str(exc)
     context = _admin_context(
         request,
-        page_title=f"{product.get('title') or product.get('name') or '周期商品'}数据",
+        page_title=_member_grid_page_title(product),
         page_summary="按视图筛选、排序和分组周期商品会员数据。",
         page_mode="data",
         product=product,
     )
-    context.update({"page_error": page_error})
+    context.update(
+        {
+            "page_error": page_error,
+            "compact_shell": bool(access and access.compact_shell),
+            "member_grid_access": access.to_dict() if access else {},
+        }
+    )
+    if access:
+        _limit_member_grid_action_tokens(context, access)
     return templates.TemplateResponse(request, "service_period_member_grid.html", context, status_code=status_code)
 
 
@@ -392,17 +487,33 @@ def service_period_product_members(
         _raise_http(exc)
 
 
-@router.get("/api/admin/service-period-products/{service_product_id}/member-grid/schema")
-def service_period_member_grid_schema(service_product_id: str) -> dict:
+@router.get("/api/admin/service-period-products/{service_product_id}/member-grid/access")
+def service_period_member_grid_access(service_product_id: str, request: Request) -> dict:
     try:
+        return _payload(
+            _grid_access_service(request).access_payload(
+                service_product_id,
+                context=current_auth_context(request),
+                auth_enforced=admin_auth_enforcement_enabled(),
+            )
+        )
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.get("/api/admin/service-period-products/{service_product_id}/member-grid/schema")
+def service_period_member_grid_schema(service_product_id: str, request: Request) -> dict:
+    try:
+        _require_grid_access(request, service_product_id, "read")
         return _payload(GetServicePeriodMemberGridSchemaQuery()(service_product_id))
     except Exception as exc:
         _raise_http(exc)
 
 
 @router.get("/api/admin/service-period-products/{service_product_id}/member-views")
-def list_service_period_member_views(service_product_id: str) -> dict:
+def list_service_period_member_views(service_product_id: str, request: Request) -> dict:
     try:
+        _require_grid_access(request, service_product_id, "read")
         return _payload(ListServicePeriodMemberViewsQuery()(service_product_id))
     except Exception as exc:
         _raise_http(exc)
@@ -411,6 +522,7 @@ def list_service_period_member_views(service_product_id: str) -> dict:
 @router.post("/api/admin/service-period-products/{service_product_id}/member-views")
 def create_service_period_member_view(service_product_id: str, request: Request) -> JSONResponse:
     try:
+        _require_grid_access(request, service_product_id, "edit")
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         result = _payload(
@@ -436,6 +548,7 @@ def create_service_period_member_view(service_product_id: str, request: Request)
 @router.put("/api/admin/service-period-products/{service_product_id}/member-views/{view_id}")
 def update_service_period_member_view(service_product_id: str, view_id: str, request: Request) -> dict:
     try:
+        _require_grid_access(request, service_product_id, "edit")
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         config = payload.get("config")
@@ -469,6 +582,7 @@ def update_service_period_member_view(service_product_id: str, view_id: str, req
 @router.delete("/api/admin/service-period-products/{service_product_id}/member-views/{view_id}")
 def delete_service_period_member_view(service_product_id: str, view_id: str, request: Request) -> dict:
     try:
+        _require_grid_access(request, service_product_id, "edit")
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         try:
@@ -497,6 +611,7 @@ def delete_service_period_member_view(service_product_id: str, view_id: str, req
 def query_service_period_member_grid(service_product_id: str, request: Request) -> dict:
     started_at = perf_counter()
     try:
+        _require_grid_access(request, service_product_id, "read")
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         config = payload.get("config")
@@ -528,6 +643,7 @@ def query_service_period_member_grid(service_product_id: str, request: Request) 
 @router.put("/api/admin/service-period-products/{service_product_id}/members/{unionid}/remark")
 def update_service_period_member_remark(service_product_id: str, unionid: str, request: Request) -> dict:
     try:
+        _require_grid_access(request, service_product_id, "edit")
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         return _payload(UpdateServicePeriodMemberRemarkCommand()(service_product_id, unionid, remark=str(payload.get("remark") or "")))
@@ -538,6 +654,7 @@ def update_service_period_member_remark(service_product_id: str, unionid: str, r
 @router.put("/api/admin/service-period-products/{service_product_id}/members/{unionid}/alliance")
 def update_service_period_member_alliance(service_product_id: str, unionid: str, request: Request) -> dict:
     try:
+        _require_grid_access(request, service_product_id, "edit")
         body = read_request_json(request)
         payload = body if isinstance(body, dict) else {}
         return _payload(
@@ -549,6 +666,169 @@ def update_service_period_member_alliance(service_product_id: str, unionid: str,
         )
     except Exception as exc:
         _raise_http(exc)
+
+
+@router.get("/api/admin/service-period-products/{service_product_id}/member-grid/share-settings")
+def get_service_period_member_grid_share_settings(service_product_id: str, request: Request) -> dict:
+    try:
+        result = _grid_access_service(request).share_settings(
+            service_product_id,
+            context=current_auth_context(request),
+            auth_enforced=admin_auth_enforcement_enabled(),
+            base_url=str(request.base_url),
+        )
+        return _payload(result)
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.post("/api/admin/service-period-products/{service_product_id}/member-grid/collaborators")
+def create_service_period_member_grid_collaborator(service_product_id: str, request: Request) -> JSONResponse:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        result = _grid_access_service(request).create_collaborator(
+            service_product_id,
+            wecom_userid=str(payload.get("wecom_userid") or ""),
+            permission=str(payload.get("permission") or "read"),
+            actor=_actor(request),
+            context=current_auth_context(request),
+            auth_enforced=admin_auth_enforcement_enabled(),
+        )
+        LOGGER.info(
+            "service_period_member_grid_collaborator_created",
+            extra=safe_log_fields(
+                service_product_id=service_product_id,
+                collaborator_id=(result.get("collaborator") or {}).get("id"),
+            ),
+        )
+        return JSONResponse(jsonable_encoder(_payload(result)), status_code=201)
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.put("/api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}")
+def update_service_period_member_grid_collaborator(
+    service_product_id: str,
+    collaborator_id: str,
+    request: Request,
+) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        result = _grid_access_service(request).update_collaborator(
+            service_product_id,
+            collaborator_id,
+            permission=str(payload.get("permission") or ""),
+            expected_version=_expected_version(payload, label="协作者"),
+            actor=_actor(request),
+            context=current_auth_context(request),
+            auth_enforced=admin_auth_enforcement_enabled(),
+        )
+        return _payload(result)
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.delete("/api/admin/service-period-products/{service_product_id}/member-grid/collaborators/{collaborator_id}")
+def delete_service_period_member_grid_collaborator(
+    service_product_id: str,
+    collaborator_id: str,
+    request: Request,
+) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        result = _grid_access_service(request).delete_collaborator(
+            service_product_id,
+            collaborator_id,
+            expected_version=_expected_version(payload, label="协作者"),
+            actor=_actor(request),
+            context=current_auth_context(request),
+            auth_enforced=admin_auth_enforcement_enabled(),
+        )
+        LOGGER.info(
+            "service_period_member_grid_collaborator_deleted",
+            extra=safe_log_fields(service_product_id=service_product_id, collaborator_id=collaborator_id),
+        )
+        return _payload(result)
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.put("/api/admin/service-period-products/{service_product_id}/member-grid/external-share")
+def update_service_period_member_grid_external_share(service_product_id: str, request: Request) -> dict:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        result = _grid_access_service(request).set_external_share(
+            service_product_id,
+            enabled=bool(payload.get("enabled")),
+            expected_version=_expected_version(payload, label="外部分享"),
+            actor=_actor(request),
+            context=current_auth_context(request),
+            auth_enforced=admin_auth_enforcement_enabled(),
+            base_url=str(request.base_url),
+        )
+        LOGGER.info(
+            "service_period_member_grid_external_share_updated",
+            extra=safe_log_fields(
+                service_product_id=service_product_id,
+                enabled=bool((result.get("external_share") or {}).get("enabled")),
+            ),
+        )
+        return _payload(result)
+    except Exception as exc:
+        _raise_http(exc)
+
+
+@router.get("/shared/service-period-member-grid", response_class=HTMLResponse, name="api.public_service_period_member_grid_page")
+def public_service_period_member_grid_page(request: Request):
+    response = templates.TemplateResponse(
+        request,
+        "service_period_member_grid_public.html",
+        {
+            "request": request,
+            "page_title": "周期商品数据",
+            "page_summary": "外部只读分享",
+        },
+    )
+    response.headers.update({**route_headers(), "Cache-Control": "no-store, private, max-age=0", "Pragma": "no-cache"})
+    return response
+
+
+@router.get("/api/public/service-period-member-grid/bootstrap")
+def public_service_period_member_grid_bootstrap(request: Request) -> JSONResponse:
+    try:
+        payload = PublicServicePeriodMemberGridService().bootstrap(
+            str(request.headers.get("X-AICRM-Grid-Share-Token") or "")
+        )
+        return _public_grid_response(payload)
+    except Exception as exc:
+        _raise_public_grid_http(exc)
+
+
+@router.post("/api/public/service-period-member-grid/query")
+def public_service_period_member_grid_query(request: Request) -> JSONResponse:
+    try:
+        body = read_request_json(request)
+        payload = body if isinstance(body, dict) else {}
+        unexpected = set(payload) - {"view_id", "cursor", "limit"}
+        if unexpected:
+            raise ContractError("公开只读查询不支持自定义筛选配置")
+        try:
+            limit = int(payload.get("limit") or 100)
+        except (TypeError, ValueError) as exc:
+            raise ContractError("分页参数无效") from exc
+        result = PublicServicePeriodMemberGridService().query(
+            str(request.headers.get("X-AICRM-Grid-Share-Token") or ""),
+            view_id=str(payload.get("view_id") or ""),
+            cursor=str(payload.get("cursor") or ""),
+            limit=limit,
+        )
+        return _public_grid_response(result)
+    except Exception as exc:
+        _raise_public_grid_http(exc)
 
 
 @router.get("/s/{link_slug}", response_class=HTMLResponse, name="api.public_service_period_product_page")

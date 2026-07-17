@@ -70,7 +70,7 @@ def admin_radar_link_detail(request: Request, link_id: int) -> Response:
     context = shell_context(
         request=request,
         page_title="点击记录",
-        page_summary="只展示 unionid、外部联系人 ID 和访问时间。编辑请返回列表点击“编辑”。",
+        page_summary="只展示已授权并取得 unionid 的访问记录，外部联系人 ID 由统一身份补齐。编辑请返回列表点击“编辑”。",
         active_endpoint="api.admin_radar_links",
     )
     context["breadcrumbs"] = [

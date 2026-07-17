@@ -34,7 +34,7 @@
 <section class="radar-detail-page">
   <div class="radar-top">
     <div>
-      <h2 data-title>内容雷达详情</h2>
+      <h2 data-title>雷达概览</h2>
       <div class="radar-muted" data-summary>加载内容基础信息...</div>
     </div>
     <div class="radar-actions">
@@ -47,7 +47,7 @@
   <div class="radar-filter">
     <label class="radar-filter-field">
       <span>搜索用户</span>
-      <input data-keyword placeholder="unionid / 外部联系人ID">
+      <input data-keyword placeholder="unionid / 外部联系人 ID">
     </label>
     <label class="radar-filter-field compact">
       <span>开始时间</span>
@@ -125,7 +125,7 @@
         .some((value) => String(value || "").toLowerCase().includes(keyword));
     }) : events;
     if (!list.length) {
-      rowsEl.innerHTML = `<tr><td colspan="3" class="radar-empty">暂无点击记录</td></tr>`;
+      rowsEl.innerHTML = `<tr><td colspan="3" class="radar-empty">暂无已授权访问记录</td></tr>`;
       return;
     }
     rowsEl.innerHTML = list.map((event) => `
@@ -144,7 +144,7 @@
     try {
       const payload = await fetchJson(`/api/admin/radar-links/${linkId}/events?${params.toString()}`);
       link = payload.link || {};
-      titleEl.textContent = "点击记录";
+      titleEl.textContent = link.title || "未命名内容";
       summaryEl.textContent = `${link.title || "未命名内容"} · ${typeLabels[link.target_type] || link.target_type || "-"} · ${link.enabled === false ? "停用" : "启用"} · ${link.wrapper_url || ""}`;
       lastEvents = payload.events || [];
       renderEvents(lastEvents);

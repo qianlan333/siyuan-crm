@@ -32,6 +32,8 @@ class RadarLinksRepository(Protocol):
         stage: str = "",
         start_at: str = "",
         end_at: str = "",
+        require_unionid: bool = False,
+        enrich_external_userid: bool = False,
     ) -> tuple[list[dict[str, Any]], int]: ...
     def list_external_clicks(
         self,
@@ -191,6 +193,8 @@ class InMemoryRadarLinksRepository:
         stage: str = "",
         start_at: str = "",
         end_at: str = "",
+        require_unionid: bool = False,
+        enrich_external_userid: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         rows = [
             deepcopy(item)
@@ -206,7 +210,24 @@ class InMemoryRadarLinksRepository:
         end_filter = str(end_at or "").strip()
         if end_filter:
             rows = [item for item in rows if str(item.get("created_at") or "") <= end_filter]
+        if require_unionid:
+            rows = [item for item in rows if str(item.get("unionid") or "").strip()]
+        if enrich_external_userid:
+            rows = [self._with_resolved_external_userid(item) for item in rows]
         return rows[offset : offset + limit], len(rows)
+
+    def _with_resolved_external_userid(self, event: dict[str, Any]) -> dict[str, Any]:
+        projected = deepcopy(event)
+        if str(projected.get("external_userid") or "").strip():
+            return projected
+        unionid = str(projected.get("unionid") or "").strip()
+        candidates = [item for item in self._external_identities if str(item.get("unionid") or "") == unionid]
+        if len(candidates) != 1:
+            return projected
+        external_userids = [str(value or "").strip() for value in candidates[0].get("external_userids", []) if str(value or "").strip()]
+        if len(external_userids) == 1:
+            projected["external_userid"] = external_userids[0]
+        return projected
 
     def _external_identity(self, event: dict[str, Any]) -> dict[str, str]:
         raw_unionid = str(event.get("unionid") or "").strip()
@@ -630,36 +651,52 @@ class PostgresRadarLinksRepository:
         stage: str = "",
         start_at: str = "",
         end_at: str = "",
+        require_unionid: bool = False,
+        enrich_external_userid: bool = False,
     ) -> tuple[list[dict[str, Any]], int]:
         limit = max(1, min(int(limit or 100), 500))
         offset = max(0, int(offset or 0))
-        conditions = ["link_id = %s"]
+        conditions = ["event.link_id = %s"]
         params: list[Any] = [int(link_id)]
         stage_filter = str(stage or "").strip()
         if stage_filter:
-            conditions.append("stage = %s")
+            conditions.append("event.stage = %s")
             params.append(stage_filter)
         start_filter = str(start_at or "").strip()
         if start_filter:
-            conditions.append("created_at >= %s")
+            conditions.append("event.created_at >= %s")
             params.append(start_filter)
         end_filter = str(end_at or "").strip()
         if end_filter:
-            conditions.append("created_at <= %s")
+            conditions.append("event.created_at <= %s")
             params.append(end_filter)
+        if require_unionid:
+            conditions.append("NULLIF(event.unionid, '') IS NOT NULL")
         where_sql = " AND ".join(conditions)
+        external_userid_sql = "event.external_userid"
+        identity_join_sql = ""
+        if enrich_external_userid:
+            external_userid_sql = "COALESCE(NULLIF(event.external_userid, ''), NULLIF(identity.primary_external_userid, ''), '')"
+            identity_join_sql = """
+                LEFT JOIN crm_user_identity identity
+                  ON identity.unionid = event.unionid
+                 AND COALESCE(identity.identity_status, 'active') = 'active'
+            """
         with self._connect() as conn:
             total = int(
-                (conn.execute(f"SELECT COUNT(*) AS total FROM radar_click_events WHERE {where_sql}", tuple(params)).fetchone() or {}).get("total") or 0
+                (conn.execute(f"SELECT COUNT(*) AS total FROM radar_click_events event WHERE {where_sql}", tuple(params)).fetchone() or {}).get("total") or 0
             )
             rows = conn.execute(
                 f"""
-                SELECT id, id AS event_id, link_id, code, stage, openid, unionid, external_userid,
-                    target_type_snapshot, person_id, ip_hash, user_agent, referer, query_params_json,
-                    source_channel, campaign_id, staff_id, source_channel_snapshot, campaign_id_snapshot, staff_id_snapshot, error_code, created_at
-                FROM radar_click_events
+                SELECT event.id, event.id AS event_id, event.link_id, event.code, event.stage, event.openid, event.unionid,
+                    {external_userid_sql} AS external_userid,
+                    event.target_type_snapshot, event.person_id, event.ip_hash, event.user_agent, event.referer, event.query_params_json,
+                    event.source_channel, event.campaign_id, event.staff_id, event.source_channel_snapshot,
+                    event.campaign_id_snapshot, event.staff_id_snapshot, event.error_code, event.created_at
+                FROM radar_click_events event
+                {identity_join_sql}
                 WHERE {where_sql}
-                ORDER BY id DESC
+                ORDER BY event.id DESC
                 LIMIT %s OFFSET %s
                 """,
                 tuple(params + [limit, offset]),

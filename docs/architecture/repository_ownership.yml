@@ -134,6 +134,7 @@ repositories:
       - ai_audience_package_version
       - automation_agent_config
       - crm_user_identity
+      - external_effect_job
       - wecom_external_contact_follow_users
       - wecom_external_contact_identity_map
     table_writes:

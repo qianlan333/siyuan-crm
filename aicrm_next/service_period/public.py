@@ -179,19 +179,25 @@ def render_service_period_public_page(service_product: dict[str, Any], state: di
     }}
     .service-period-wecom-action[hidden] {{ display: none; }}
     .service-period-wecom-button {{
-      min-height: 30px;
-      padding: 5px 11px;
-      border: 1px solid #b9cdfc;
+      width: min(100%, 280px);
+      min-height: 44px;
+      padding: 10px 18px;
+      border: 1px solid #8fb0f8;
       border-radius: 999px;
-      background: #f6f9ff;
+      background: #eef4ff;
       color: #285fcf;
-      font-size: 12px;
+      box-shadow: 0 4px 14px rgba(40, 95, 207, 0.12);
+      font-size: 16px;
       font-weight: 800;
-      line-height: 1;
+      line-height: 1.2;
       cursor: pointer;
     }}
+    .service-period-wecom-button:focus-visible {{
+      outline: 3px solid rgba(51, 112, 255, 0.24);
+      outline-offset: 2px;
+    }}
     .service-period-wecom-button:active {{
-      background: #eaf1ff;
+      background: #dfeaff;
       transform: translateY(1px);
     }}
     .service-period-bar {{

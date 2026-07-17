@@ -127,6 +127,18 @@ class AudienceRepository:
     def list_ai_audience_batch_rows(self, package_id: int) -> list[dict[str, Any]]:
         raise NotImplementedError
 
+    def get_run(self, run_id: int) -> dict[str, Any] | None:
+        raise NotImplementedError
+
+    def list_pending_entered_outbound_batches(
+        self,
+        package_id: int,
+        *,
+        run_id: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        raise NotImplementedError
+
     def resolve_member_unionid(self, normalized: dict[str, Any]) -> str:
         raise NotImplementedError
 
@@ -794,6 +806,113 @@ class SQLAlchemyAudienceRepository(AudiencePackageRepositoryMixin, AudienceRepos
             LIMIT :limit
             """,
             {"package_id": int(package_id), "limit": max(1, min(int(limit or 50), 200))},
+        )
+
+    def get_run(self, run_id: int) -> dict[str, Any] | None:
+        return self._one(
+            "SELECT * FROM ai_audience_package_run WHERE id = :run_id LIMIT 1",
+            {"run_id": int(run_id)},
+        )
+
+    def list_pending_entered_outbound_batches(
+        self,
+        package_id: int,
+        *,
+        run_id: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return self._all(
+            """
+            WITH eligible AS (
+                SELECT DISTINCT
+                    event.run_id,
+                    event.package_id,
+                    identity.primary_external_userid AS external_userid
+                FROM ai_audience_member_event event
+                JOIN ai_audience_member_current member
+                  ON member.package_id = event.package_id
+                 AND member.unionid = event.unionid
+                 AND member.status = 'active'
+                JOIN crm_user_identity identity
+                  ON identity.unionid = event.unionid
+                 AND COALESCE(identity.primary_external_userid, '') <> ''
+                WHERE event.package_id = :package_id
+                  AND event.event_type = 'entered'
+                  AND event.run_id IS NOT NULL
+                  AND (:run_id = 0 OR event.run_id = :run_id)
+            ),
+            pending AS (
+                SELECT
+                    eligible.run_id,
+                    eligible.package_id,
+                    subscription.id AS subscription_id,
+                    subscription.webhook_url,
+                    subscription.headers_json,
+                    subscription.execution_mode,
+                    subscription.requires_approval,
+                    subscription.max_attempts,
+                    eligible.external_userid
+                FROM eligible
+                JOIN ai_audience_outbound_subscription subscription
+                  ON subscription.package_id = eligible.package_id
+                 AND subscription.status = 'active'
+                 AND subscription.trigger_event_type = 'entered'
+                 AND subscription.target_type = 'webhook'
+                WHERE NOT EXISTS (
+                    SELECT 1
+                    FROM external_effect_job job
+                    CROSS JOIN LATERAL jsonb_array_elements_text(
+                        CASE
+                            WHEN jsonb_typeof(job.payload_json->'body') = 'array' THEN job.payload_json->'body'
+                            ELSE '[]'::jsonb
+                        END
+                    ) planned_external_userid
+                    WHERE job.business_type = 'ai_audience_package_run'
+                      AND job.business_id = eligible.run_id::text
+                      AND job.target_type = 'webhook'
+                      AND job.target_id = subscription.id::text
+                      AND planned_external_userid.value = eligible.external_userid
+                )
+            ),
+            ranked AS (
+                SELECT
+                    pending.*,
+                    ((ROW_NUMBER() OVER (
+                        PARTITION BY run_id, subscription_id
+                        ORDER BY external_userid
+                    ) - 1) / 200)::integer AS batch_index
+                FROM pending
+            )
+            SELECT
+                run_id,
+                package_id,
+                subscription_id,
+                webhook_url,
+                headers_json,
+                execution_mode,
+                requires_approval,
+                max_attempts,
+                batch_index,
+                jsonb_agg(external_userid ORDER BY external_userid) AS external_userids
+            FROM ranked
+            GROUP BY
+                run_id,
+                package_id,
+                subscription_id,
+                webhook_url,
+                headers_json,
+                execution_mode,
+                requires_approval,
+                max_attempts,
+                batch_index
+            ORDER BY run_id ASC, subscription_id ASC, batch_index ASC
+            LIMIT :limit
+            """,
+            {
+                "package_id": int(package_id),
+                "run_id": max(0, int(run_id or 0)),
+                "limit": max(1, min(int(limit or 100), 500)),
+            },
         )
 
     def list_members(self, package_id: int, *, limit: int = 100) -> list[dict[str, Any]]:

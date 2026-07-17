@@ -219,6 +219,8 @@ class ListRadarLinkEventsQuery:
             stage=stage,
             start_at=start_at,
             end_at=end_at,
+            require_unionid=True,
+            enrich_external_userid=True,
         )
         masked = [_event_projection(item) for item in events]
         link_projection = radar_link_projection(link, base_url=base_url)
@@ -342,6 +344,8 @@ class ExportRadarLinkEventsQuery:
                 offset=offset,
                 start_at=start_at,
                 end_at=end_at,
+                require_unionid=True,
+                enrich_external_userid=True,
             )
             rows.extend(
                 {

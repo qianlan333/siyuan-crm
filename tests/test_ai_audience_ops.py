@@ -1074,6 +1074,125 @@ def test_package_refresh_uses_internal_event_and_external_effect_queue(next_clie
 
 
 @pytest.mark.usefixtures("next_pg_schema")
+def test_refresh_run_compensates_questionnaire_member_after_late_wecom_identity(next_client, monkeypatch) -> None:
+    database_url = os.environ["DATABASE_URL"]
+    monkeypatch.setenv("AICRM_AUDIENCE_READONLY_DATABASE_URL", database_url)
+    session_factory = get_session_factory()
+    unionid = "union_questionnaire_then_wecom_001"
+    external_userid = "wm_questionnaire_then_wecom_001"
+    with session_factory() as session:
+        session.execute(
+            text(
+                """
+                INSERT INTO questionnaire_submissions (
+                    questionnaire_id, unionid, follow_user_userid, staff_id, submitted_at
+                )
+                VALUES (991, :unionid, '', '', CURRENT_TIMESTAMP - interval '1 minute')
+                """
+            ),
+            {"unionid": unionid},
+        )
+        session.commit()
+
+    create_resp = next_client.post(
+        "/api/ai/audience/packages",
+        headers=_auth(),
+        json={
+            "package_key": "questionnaire_then_wecom_activation",
+            "name": "先填问卷后加企微激活",
+            "natural_language_definition": "提交问卷即入包，后置企微身份就绪后补触发。",
+            "query_mode": "incremental_event",
+            "incremental_sql_text": _valid_incremental_sql(),
+        },
+    )
+    assert create_resp.status_code == 200
+    package_id = int(create_resp.json()["package"]["id"])
+    assert next_client.post(f"/api/ai/audience/packages/{package_id}/publish", headers=_auth(), json={}).status_code == 200
+    assert (
+        next_client.post(
+            f"/api/ai/audience/packages/{package_id}/outbound-subscriptions",
+            headers=_auth(),
+            json={"trigger_event_type": "entered", "webhook_url": "https://agent.example.test/audience"},
+        ).status_code
+        == 200
+    )
+
+    first_refresh = next_client.post(
+        f"/api/ai/audience/packages/{package_id}/refresh",
+        headers=_auth(),
+        json={"run_type": "incremental", "params": {"questionnaire_id": 991}},
+    ).json()
+    assert first_refresh["entered_count"] == 1
+    first_run_id = int(first_refresh["run"]["id"])
+    repo = build_audience_repository()
+
+    deferred = AudienceOutboundService(repository=repo).plan_for_refresh_run(first_run_id)
+
+    assert deferred["ok"] is True
+    assert deferred["planned_count"] == 0
+
+    with session_factory() as session:
+        session.execute(
+            text(
+                """
+                INSERT INTO crm_user_identity (
+                    unionid, primary_external_userid, external_userids_json,
+                    identity_status, created_at, updated_at
+                )
+                VALUES (
+                    :unionid, :external_userid, jsonb_build_array(CAST(:external_userid AS text)),
+                    'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                ON CONFLICT (unionid) DO UPDATE SET
+                    primary_external_userid = EXCLUDED.primary_external_userid,
+                    external_userids_json = EXCLUDED.external_userids_json,
+                    identity_status = 'active',
+                    updated_at = CURRENT_TIMESTAMP
+                """
+            ),
+            {"unionid": unionid, "external_userid": external_userid},
+        )
+        session.commit()
+
+    second_refresh = next_client.post(
+        f"/api/ai/audience/packages/{package_id}/refresh",
+        headers=_auth(),
+        json={"run_type": "incremental", "params": {"questionnaire_id": 991}},
+    ).json()
+    assert second_refresh["entered_count"] == 0
+    second_run_id = int(second_refresh["run"]["id"])
+
+    compensated = AudienceOutboundService(repository=repo).plan_for_refresh_run(second_run_id)
+
+    assert compensated["ok"] is True
+    assert compensated["planned_count"] == 1
+    assert compensated["late_identity_planned_count"] == 1
+    assert compensated["source_run_ids"] == [first_run_id]
+    job = compensated["external_effect_jobs"][0]
+    assert job["business_id"] == str(first_run_id)
+    assert job["payload_json"]["body"] == [external_userid]
+    assert job["payload_json"]["headers"]["X-AICRM-Refresh-Run-Id"] == str(first_run_id)
+    assert job["payload_summary_json"]["late_identity_compensation"] is True
+
+    deduplicated = AudienceOutboundService(repository=repo).plan_for_refresh_run(second_run_id)
+
+    assert deduplicated["planned_count"] == 0
+    with session_factory() as session:
+        job_count = session.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM external_effect_job
+                WHERE business_type = 'ai_audience_package_run'
+                  AND business_id = :business_id
+                """
+            ),
+            {"business_id": str(first_run_id)},
+        ).scalar_one()
+    assert job_count == 1
+
+
+@pytest.mark.usefixtures("next_pg_schema")
 def test_source_dirty_emits_existing_internal_event_queue(next_client, monkeypatch) -> None:
     response = next_client.post(
         "/api/ai/audience/source-dirty",

@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
-from aicrm_next.radar_links.repo import build_radar_links_repository
+from aicrm_next.radar_links.repo import PostgresRadarLinksRepository, build_radar_links_repository
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,9 +115,11 @@ def test_public_radar_redirect_records_landing(client):
     assert response.status_code == 302
     assert response.headers["location"] == "https://example.com/landing"
     events = client.get(f"/api/admin/radar-links/{link['id']}/events").json()["events"]
-    assert [event["stage"] for event in events] == ["redirect", "landing"]
-    assert events[1]["ip_hash"]
-    assert "ip" not in events[1]
+    assert events == []
+    raw_events, _ = build_radar_links_repository().list_click_events(link["id"])
+    assert [event["stage"] for event in raw_events] == ["redirect", "landing"]
+    assert raw_events[1]["ip_hash"]
+    assert not raw_events[1].get("ip")
 
 
 def test_public_radar_ignores_forged_query_and_plain_identity_cookies(client):
@@ -134,11 +136,13 @@ def test_public_radar_ignores_forged_query_and_plain_identity_cookies(client):
     assert response.status_code == 302
     assert response.headers["location"].startswith("/api/h5/radar/oauth/start?state=")
     events = client.get(f"/api/admin/radar-links/{link['id']}/events").json()["events"]
-    assert [event["stage"] for event in events] == ["oauth_start", "landing"]
-    assert all(event["openid_masked"] == "" for event in events)
-    assert all(event["unionid_masked"] == "" for event in events)
-    assert all(event["external_userid"] == "" for event in events)
-    assert all(not ({"openid", "unionid", "external_userid"} & {key.lower() for key in event["query_params_json"]}) for event in events)
+    assert events == []
+    raw_events, _ = build_radar_links_repository().list_click_events(link["id"])
+    assert [event["stage"] for event in raw_events] == ["oauth_start", "landing"]
+    assert all(not str(event.get("openid") or "") for event in raw_events)
+    assert all(not str(event.get("unionid") or "") for event in raw_events)
+    assert all(not str(event.get("external_userid") or "") for event in raw_events)
+    assert all(not ({"openid", "unionid", "external_userid"} & {key.lower() for key in event["query_params_json"]}) for event in raw_events)
 
 
 def test_fake_oauth_callback_with_unionid_records_authorized_click_and_redirects(client):
@@ -160,9 +164,101 @@ def test_fake_oauth_callback_with_unionid_records_authorized_click_and_redirects
     assert callback_response.headers["location"] == "https://example.com/landing"
     events = client.get(f"/api/admin/radar-links/{link['id']}/events").json()["events"]
     stages = [event["stage"] for event in events]
-    assert stages == ["redirect", "authorized", "oauth_callback", "oauth_start", "landing"]
+    assert stages == ["redirect", "authorized", "oauth_callback"]
     assert events[1]["unionid_masked"] == "unioni...back"
     assert "unionid" not in events[1]
+    raw_events, _ = build_radar_links_repository().list_click_events(link["id"])
+    assert [event["stage"] for event in raw_events] == ["redirect", "authorized", "oauth_callback", "oauth_start", "landing"]
+
+
+def test_admin_radar_records_hide_missing_unionid_and_enrich_external_userid(client):
+    link = _create_link(client, auth_required=True)
+    landing_response = client.get(f"/r/{link['code']}", follow_redirects=False)
+    state = _state_from_oauth_start_location(landing_response.headers["location"])
+    client.get(
+        "/api/h5/radar/oauth/callback",
+        params={"state": state, "unionid": "unionid_001"},
+        follow_redirects=False,
+    )
+
+    response = client.get(f"/api/admin/radar-links/{link['id']}/events")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total"] == 3
+    assert [event["stage"] for event in payload["events"]] == ["redirect", "authorized", "oauth_callback"]
+    assert all(event["unionid_masked"] for event in payload["events"])
+    assert {event["external_userid"] for event in payload["events"]} == {"wx_ext_001"}
+
+
+def test_admin_radar_export_excludes_missing_unionid_and_uses_resolved_external_userid(client):
+    link = _create_link(client, auth_required=True)
+    landing_response = client.get(f"/r/{link['code']}", follow_redirects=False)
+    state = _state_from_oauth_start_location(landing_response.headers["location"])
+    client.get(
+        "/api/h5/radar/oauth/callback",
+        params={"state": state, "unionid": "unionid_001"},
+        follow_redirects=False,
+    )
+
+    response = client.get(f"/api/admin/radar-links/{link['id']}/events/export")
+
+    assert response.status_code == 200
+    lines = response.text.lstrip("\ufeff").splitlines()
+    assert len(lines) == 4
+    assert all("unionid_001,wx_ext_001," in line for line in lines[1:])
+
+
+def test_postgres_admin_radar_records_use_one_identity_join_and_unionid_filter(monkeypatch):
+    class Result:
+        def __init__(self, *, one=None, rows=None) -> None:
+            self._one = one
+            self._rows = rows or []
+
+        def fetchone(self):
+            return self._one
+
+        def fetchall(self):
+            return self._rows
+
+    class Connection:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            return None
+
+        def execute(self, sql, params=()):
+            self.calls.append((sql, params))
+            if "COUNT(*) AS total" in sql:
+                return Result(one={"total": 1})
+            return Result(
+                rows=[
+                    {
+                        "event_id": 9,
+                        "unionid": "unionid_001",
+                        "external_userid": "wx_ext_001",
+                        "created_at": "2026-07-16T11:21:17+08:00",
+                    }
+                ]
+            )
+
+    connection = Connection()
+    repository = PostgresRadarLinksRepository("postgresql://fixture")
+    monkeypatch.setattr(repository, "_connect", lambda: connection)
+
+    rows, total = repository.list_click_events(11, require_unionid=True, enrich_external_userid=True)
+
+    assert total == 1
+    assert rows[0]["external_userid"] == "wx_ext_001"
+    assert len(connection.calls) == 2
+    page_sql = connection.calls[1][0]
+    assert "JOIN crm_user_identity" in page_sql
+    assert "NULLIF(event.unionid, '') IS NOT NULL" in page_sql
+    assert "primary_external_userid" in page_sql
 
 
 def test_real_radar_oauth_start_builds_wechat_authorize_url_under_explicit_flag(client, monkeypatch):
@@ -227,11 +323,13 @@ def test_real_radar_oauth_callback_exchanges_code_and_records_unionid(client, mo
     assert callback_response.headers["location"] == "https://example.com/landing"
     events = client.get(f"/api/admin/radar-links/{link['id']}/events").json()["events"]
     stages = [event["stage"] for event in events]
-    assert stages == ["redirect", "authorized", "oauth_callback", "oauth_start", "landing"]
+    assert stages == ["redirect", "authorized", "oauth_callback"]
     assert events[1]["openid_masked"] == "openid...real"
     assert events[1]["unionid_masked"] == "unioni...real"
     assert "openid" not in events[1]
     assert "unionid" not in events[1]
+    raw_events, _ = build_radar_links_repository().list_click_events(link["id"])
+    assert [event["stage"] for event in raw_events] == ["redirect", "authorized", "oauth_callback", "oauth_start", "landing"]
 
 
 def test_real_radar_oauth_callback_ignores_direct_identity_parameters(client, monkeypatch):
@@ -267,10 +365,12 @@ def test_real_radar_oauth_callback_ignores_direct_identity_parameters(client, mo
 
     assert callback_response.status_code == 302
     events = client.get(f"/api/admin/radar-links/{link['id']}/events?stage=authorized").json()["events"]
-    assert events[0]["openid_masked"] == "openid...ider"
-    assert events[0]["unionid_masked"] == ""
-    assert events[0]["external_userid"] == ""
-    assert "forged" not in str(events[0])
+    assert events == []
+    raw_events, _ = build_radar_links_repository().list_click_events(link["id"], stage="authorized")
+    assert raw_events[0]["openid"] == "openid_from_provider"
+    assert raw_events[0]["unionid"] == ""
+    assert raw_events[0]["external_userid"] == ""
+    assert "forged" not in str(raw_events[0])
 
 
 def test_real_radar_oauth_requires_explicit_flag(client, monkeypatch):
@@ -369,6 +469,10 @@ def test_radar_link_new_options_and_admin_subpages_render(client):
     assert "unionid" in detail_response.text
     assert "外部联系人ID" in detail_response.text
     assert "导出 CSV" in detail_response.text
+    assert "只展示已授权并取得 unionid 的访问记录" in detail_response.text
+    assert "暂无已授权访问记录" in detail_response.text
+    assert 'titleEl.textContent = link.title || "未命名内容"' in detail_response.text
+    assert 'titleEl.textContent = "点击记录"' not in detail_response.text
     assert "user_agent" not in detail_response.text
     assert "openid" not in detail_response.text
 

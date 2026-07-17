@@ -2041,7 +2041,7 @@ routes:
   rollback: previous_release
   audience: admin
   auth_scheme: human_session
-  capability: manage_operations
+  capability: manage_automation
   access_scope: global
   pii_level: internal
   csrf: true

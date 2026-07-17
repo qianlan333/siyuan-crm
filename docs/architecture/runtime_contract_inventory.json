@@ -119,13 +119,13 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/ai_audience_ops/repository.py",
       "key": "AICRM_AUDIENCE_READONLY_DATABASE_URL",
-      "line": 383
+      "line": 395
     },
     {
       "accessor": "os.getenv",
       "file": "aicrm_next/ai_audience_ops/repository.py",
       "key": "AICRM_AUDIENCE_READONLY_DATABASE_URL",
-      "line": 397
+      "line": 409
     },
     {
       "accessor": "declared_runtime_environment_key",

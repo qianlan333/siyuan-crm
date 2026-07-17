@@ -88,6 +88,120 @@ class AudienceOutboundService:
         }
 
     def plan_for_run(self, run_id: int) -> dict[str, Any]:
+        pending_loader = getattr(self._repo, "list_pending_entered_outbound_batches", None)
+        run_loader = getattr(self._repo, "get_run", None)
+        if callable(pending_loader) and callable(run_loader):
+            run = run_loader(int(run_id))
+            if not run:
+                return {"ok": False, "error": "run_not_found", "real_external_call_executed": False}
+            package = self._repo.get_package(int(run["package_id"]))
+            if not package:
+                return {"ok": False, "error": "package_not_found", "real_external_call_executed": False}
+            batches = pending_loader(int(package["id"]), run_id=int(run_id), limit=100)
+            return self._plan_pending_batches(package, batches, trigger_run_id=int(run_id))
+
+        return self._plan_for_run_legacy(int(run_id))
+
+    def plan_for_refresh_run(self, run_id: int) -> dict[str, Any]:
+        run_loader = getattr(self._repo, "get_run", None)
+        pending_loader = getattr(self._repo, "list_pending_entered_outbound_batches", None)
+        if not callable(run_loader) or not callable(pending_loader):
+            return self.plan_for_run(int(run_id))
+        run = run_loader(int(run_id))
+        if not run:
+            return {"ok": False, "error": "run_not_found", "real_external_call_executed": False}
+        package = self._repo.get_package(int(run["package_id"]))
+        if not package:
+            return {"ok": False, "error": "package_not_found", "real_external_call_executed": False}
+        batches = pending_loader(int(package["id"]), limit=100)
+        return self._plan_pending_batches(package, batches, trigger_run_id=int(run_id))
+
+    def _plan_pending_batches(
+        self,
+        package: dict[str, Any],
+        batches: list[dict[str, Any]],
+        *,
+        trigger_run_id: int,
+    ) -> dict[str, Any]:
+        planned: list[dict[str, Any]] = []
+        source_run_ids: set[int] = set()
+        late_identity_planned_count = 0
+        for batch in batches:
+            source_run_id = int(batch.get("run_id") or 0)
+            external_userids = sorted({_text(item) for item in list(batch.get("external_userids") or []) if _text(item)})
+            if source_run_id <= 0 or not external_userids:
+                continue
+            subscription_id = int(batch.get("subscription_id") or 0)
+            webhook_url = _text(batch.get("webhook_url"))
+            if subscription_id <= 0 or not webhook_url:
+                continue
+            target_hash = hashlib.sha256(f"webhook:{webhook_url}".encode("utf-8")).hexdigest()[:16]
+            member_hash = hashlib.sha256("\n".join(external_userids).encode("utf-8")).hexdigest()[:16]
+            idempotency_key = (
+                f"ai_audience_outbound_run:{int(package['id'])}:{source_run_id}:"
+                f"entered:{target_hash}:members:{member_hash}"
+            )
+            subscription = {
+                "id": subscription_id,
+                "webhook_url": webhook_url,
+                "headers_json": batch.get("headers_json") if isinstance(batch.get("headers_json"), dict) else {},
+            }
+            payload = self._run_payload(
+                package=package,
+                run_id=source_run_id,
+                external_userids=external_userids,
+                subscription=subscription,
+                idempotency_key=idempotency_key,
+            )
+            late_identity_compensation = source_run_id != int(trigger_run_id)
+            job = self._external_effects.plan_effect(
+                effect_type=WEBHOOK_GENERIC_PUSH,
+                adapter_name="webhook",
+                operation="post",
+                target_type="webhook",
+                target_id=str(subscription_id),
+                payload=payload,
+                payload_summary={
+                    "package_key": package.get("package_key"),
+                    "run_id": source_run_id,
+                    "trigger_refresh_run_id": int(trigger_run_id),
+                    "trigger_event_type": "entered",
+                    "external_userid_count": len(external_userids),
+                    "late_identity_compensation": late_identity_compensation,
+                    "webhook_url_present": True,
+                },
+                business_type="ai_audience_package_run",
+                business_id=str(source_run_id),
+                source_module="ai_audience_ops.outbound_service",
+                source_event_id="",
+                risk_level="medium",
+                requires_approval=bool(batch.get("requires_approval")),
+                execution_mode=_text(batch.get("execution_mode")) or "execute",
+                max_attempts=int(batch.get("max_attempts") or 5),
+                idempotency_key=idempotency_key,
+                status="queued",
+                context=CommandContext(
+                    actor_id="ai_audience_outbound",
+                    actor_type="system",
+                    source_route="ai_audience.refresh_run",
+                    request_id=str(source_run_id),
+                ),
+            )
+            planned.append(job)
+            source_run_ids.add(source_run_id)
+            if late_identity_compensation:
+                late_identity_planned_count += len(external_userids)
+        return {
+            "ok": True,
+            "run_id": int(trigger_run_id),
+            "planned_count": len(planned),
+            "late_identity_planned_count": late_identity_planned_count,
+            "source_run_ids": sorted(source_run_ids),
+            "external_effect_jobs": planned,
+            "real_external_call_executed": False,
+        }
+
+    def _plan_for_run_legacy(self, run_id: int) -> dict[str, Any]:
         entered_events = self._repo.list_member_events_for_run(int(run_id), event_type="entered")
         if not entered_events:
             return {"ok": True, "run_id": int(run_id), "planned_count": 0, "external_effect_jobs": [], "real_external_call_executed": False}
@@ -101,6 +215,15 @@ class AudienceOutboundService:
             trigger_event_type="entered",
         )
         external_userids = sorted({_text(event.get("external_userid")) for event in entered_events if _text(event.get("external_userid"))})
+        if not external_userids:
+            return {
+                "ok": True,
+                "run_id": int(run_id),
+                "planned_count": 0,
+                "deferred_identity_count": len(entered_events),
+                "external_effect_jobs": [],
+                "real_external_call_executed": False,
+            }
         planned: list[dict[str, Any]] = []
         seen_targets: set[tuple[str, str, str]] = set()
         for subscription in subscriptions:

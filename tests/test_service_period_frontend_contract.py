@@ -319,6 +319,9 @@ def test_service_period_public_page_renders_none_active_and_expired_ctas(next_cl
     assert '<div class="service-period-wecom-action" id="servicePeriodWecomAction">' in active_page.text
     assert 'id="servicePeriodAddWecomButton"' in active_page.text
     assert "添加企微账号" in active_page.text
+    assert "width: min(100%, 280px);" in active_page.text
+    assert "min-height: 44px;" in active_page.text
+    assert "font-size: 16px;" in active_page.text
     assert 'id="leadQrModal"' in active_page.text
     assert "扫码添加企微领取后续资料" in active_page.text
     assert "https://example.com/service-period-lead.png" in active_page.text

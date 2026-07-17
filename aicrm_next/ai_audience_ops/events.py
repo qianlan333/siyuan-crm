@@ -70,7 +70,7 @@ def outbound_effect_consumer(event: InternalEvent, run: InternalEventConsumerRun
     payload = dict(event.payload_json or {})
     run_id = int(payload.get("run_id") or event.aggregate_id or 0) if event.event_type == RUN_REFRESHED_EVENT else 0
     member_event_id = int(payload.get("member_event_id") or event.aggregate_id or 0)
-    result = AudienceOutboundService().plan_for_run(run_id) if run_id > 0 else AudienceOutboundService().plan_for_member_event(member_event_id)
+    result = AudienceOutboundService().plan_for_refresh_run(run_id) if run_id > 0 else AudienceOutboundService().plan_for_member_event(member_event_id)
     ok = bool(result.get("ok"))
     return InternalEventConsumerResult(
         status="succeeded" if ok else "failed_retryable",
@@ -119,6 +119,7 @@ def _summary(payload: dict[str, Any]) -> dict[str, Any]:
         "failed_count",
         "member_event_count",
         "planned_count",
+        "late_identity_planned_count",
         "run_id",
         "entered_count",
         "updated_count",

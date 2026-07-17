@@ -98,6 +98,16 @@ def test_known_unsafe_routes_have_explicit_deny_by_default_policies() -> None:
     )
     assert _entry("/api/identity/resolve", "GET")["auth_scheme"] == "api_client_jwt"
     _assert_policy(
+        "/api/admin/channels/{channel_id:int}/qrcode/generate",
+        "POST",
+        {
+            "audience": "admin",
+            "auth_scheme": "human_session",
+            "capability": "manage_automation",
+            "csrf": True,
+        },
+    )
+    _assert_policy(
         "/api/sidebar/bind-mobile",
         "POST",
         {

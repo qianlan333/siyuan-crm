@@ -67,6 +67,8 @@ def _admin_capability(entry: dict[str, Any]) -> str:
     path = str(entry["path"])
     owner = str(entry["capability_owner"])
     write = _is_write(entry)
+    if path == "/api/admin/channels/{channel_id:int}/qrcode/generate":
+        return "manage_automation"
     if "/service-period-products/" in path and any(
         marker in path for marker in ("/data", "/member-grid", "/member-views", "/members/")
     ):

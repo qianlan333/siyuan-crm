@@ -342,6 +342,32 @@ def test_automation_admin_can_use_authenticated_group_ops_control_plane(monkeypa
     assert response.json()["name"] == "authenticated formal plan"
 
 
+def test_automation_admin_can_generate_channel_qrcode_but_viewer_cannot(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_generate(command):
+        return {
+            "ok": True,
+            "channel_id": command.channel_id,
+            "scene_value": "aqr_permission_contract",
+            "config_id": "cfg-permission-contract",
+            "qr_url": "https://wework.qpic.cn/permission-contract",
+            "source": "aicrm_next.channel_entry",
+            "route_owner": "ai_crm_next",
+        }
+
+    monkeypatch.setattr("aicrm_next.channel_entry.api.generate_channel_qrcode", fake_generate)
+    operator = _admin_client(monkeypatch, "automation_admin")
+    viewer = _admin_client(monkeypatch, "viewer")
+
+    allowed = operator.post("/api/admin/channels/17/qrcode/generate", json={})
+    denied = viewer.post("/api/admin/channels/17/qrcode/generate", json={})
+
+    assert allowed.status_code == 200
+    assert allowed.json()["channel_id"] == 17
+    assert denied.status_code == 403
+    assert denied.json()["error"] == "admin_capability_required"
+    assert denied.json()["required_capability"] == "manage_automation"
+
+
 def test_five_principal_permission_matrix(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AICRM_NEXT_ENV", "test")
     monkeypatch.setenv("AICRM_ROUTE_POLICY_ENFORCED", "true")

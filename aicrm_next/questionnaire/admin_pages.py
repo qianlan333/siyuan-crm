@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from aicrm_next.admin_shell import shell_context
+from aicrm_next.shared.admin_action_runtime import admin_action_token_bundle
 
 from .application import GetQuestionnaireEditorQuery, GetQuestionnairePreflightQuery, ListQuestionnairesQuery
 from .external_push_logs import QuestionnaireExternalPushLogReadService
@@ -145,6 +146,7 @@ def _questionnaire_editor_response(
             "editor_default_assessment": default_assessment,
             "initial_questionnaire": questionnaire,
             "initial_questionnaire_id": questionnaire_id,
+            "admin_action_tokens": admin_action_token_bundle(request),
             "page_error": page_error,
         },
     )

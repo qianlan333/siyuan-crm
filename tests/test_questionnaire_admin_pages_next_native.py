@@ -5,6 +5,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from aicrm_next.main import create_app
+from tests.admin_auth_test_helpers import install_admin_session
 
 
 def test_questionnaire_admin_list_page_exposes_next_read_status_without_facade() -> None:
@@ -43,6 +44,18 @@ def test_questionnaire_admin_new_page_is_readonly_shell_without_write_execution(
     assert "新建问卷" in response.text
     assert '"initialQuestionnaireId": null' in response.text
     assert "/static/questionnaire/admin_questionnaire_editor.js?v=20260715-operations-only" in response.text
+
+
+def test_questionnaire_editor_loads_the_shared_authenticated_request_client() -> None:
+    client = TestClient(create_app())
+    install_admin_session(client, "super_admin")
+
+    response = client.get("/admin/questionnaires/new")
+
+    assert response.status_code == 200
+    assert "/static/admin_console/admin_api_client.js?v=admin-request-security-v2-20260713" in response.text
+    assert 'id="aicrmAdminActionGrants"' in response.text
+    assert "POST /api/admin/questionnaires" in response.text
 
 
 def test_questionnaire_admin_editor_exposes_other_option_controls() -> None:

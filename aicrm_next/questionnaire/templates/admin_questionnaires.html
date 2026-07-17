@@ -6,6 +6,7 @@
   <title>{{ editor_page_title or "问卷编辑" }}</title>
   <link rel="stylesheet" href="/static/admin_console/wecom_tag_picker.css?v=unified-tag-picker-20260608">
   <link rel="stylesheet" href="/static/questionnaire/admin_questionnaire_editor.css?v=20260713">
+  <script defer src="/static/admin_console/admin_api_client.js?v=admin-request-security-v2-20260713"></script>
 </head>
 <body class="{% if editor_default_assessment %}assessment-template-mode{% endif %}">
   <div class="shell">
@@ -126,6 +127,7 @@
       "initialQuestionnaireId": initial_questionnaire_id
     } | tojson }}
   </script>
+  <script id="aicrmAdminActionGrants" type="application/json">{{ (admin_action_tokens or {}) | tojson }}</script>
   <script src="/static/questionnaire/admin_questionnaire_editor.js?v=20260715-operations-only"></script>
 </body>
 </html>

@@ -47,11 +47,17 @@ def check_questionnaire_unionid_cutover(*, proof_hours: int = 24) -> dict[str, A
             and _text(os.getenv("AICRM_QUESTIONNAIRE_OAUTH_ENABLE_REAL")).lower() in {"1", "true", "yes", "on"}
         ),
         "database_configured": bool(raw_database_url()),
-        "internal_events_enabled": _text(os.getenv("AICRM_INTERNAL_EVENTS_ENABLED")).lower()
-        in {"1", "true", "yes", "on"},
         "identity_ready_event_allowed": (
             not internal_event_types or "customer.wecom_identity_ready" in internal_event_types
         ),
+    }
+    current_cutover_state = {
+        "identity_gate_enabled": _text(os.getenv("AICRM_QUESTIONNAIRE_UNIONID_REQUIRED")).lower()
+        in {"1", "true", "yes", "on"},
+        "continuation_enabled": _text(os.getenv("AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED")).lower()
+        in {"1", "true", "yes", "on"},
+        "internal_events_enabled": _text(os.getenv("AICRM_INTERNAL_EVENTS_ENABLED")).lower()
+        in {"1", "true", "yes", "on"},
     }
     proof: dict[str, Any] = {
         "available": False,
@@ -92,15 +98,16 @@ def check_questionnaire_unionid_cutover(*, proof_hours: int = 24) -> dict[str, A
     ready = all(checks.values()) and bool(proof["available"])
     return {
         "ok": True,
-        "ready_to_enable_unionid_gate": ready,
+        "ready_to_enable_identity_gate": ready,
         "checks": checks,
-        "real_oauth_unionid_proof": proof,
-        "required_cutover_flags": {
-            "AICRM_QUESTIONNAIRE_UNIONID_REQUIRED": "1",
-            "AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED": "1",
-            "AICRM_INTERNAL_EVENTS_ENABLED": "1",
-            "AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES": "append customer.wecom_identity_ready when non-empty",
-        },
+        "current_cutover_state": current_cutover_state,
+        "real_oauth_identity_proof": proof,
+        "required_cutover_settings": [
+            "AICRM_QUESTIONNAIRE_UNIONID_REQUIRED=1",
+            "AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED=1",
+            "AICRM_INTERNAL_EVENTS_ENABLED=1",
+            "append customer.wecom_identity_ready to AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES when non-empty",
+        ],
         "database_mutation_performed": False,
         "provider_call_executed": False,
         "pii_in_output": False,
@@ -120,7 +127,7 @@ def main() -> int:
     args = parser.parse_args()
     payload = check_questionnaire_unionid_cutover(proof_hours=args.proof_hours)
     print_json(payload, indent=2)
-    if args.require_real_proof and not payload["ready_to_enable_unionid_gate"]:
+    if args.require_real_proof and not payload["ready_to_enable_identity_gate"]:
         return 1
     return 0
 

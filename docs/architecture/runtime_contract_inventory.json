@@ -533,7 +533,7 @@
       "accessor": "os.getenv",
       "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
       "key": "AICRM_INTERNAL_EVENTS_ENABLED",
-      "line": 50
+      "line": 59
     },
     {
       "accessor": "os.getenv",
@@ -873,6 +873,12 @@
     },
     {
       "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED",
+      "line": 57
+    },
+    {
+      "accessor": "os.getenv",
       "file": "aicrm_next/questionnaire/oauth.py",
       "key": "AICRM_QUESTIONNAIRE_OAUTH_ADAPTER_MODE",
       "line": 90
@@ -912,6 +918,12 @@
       "file": "aicrm_next/questionnaire/public_access.py",
       "key": "AICRM_QUESTIONNAIRE_UNIONID_REQUIRED",
       "line": 26
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "AICRM_QUESTIONNAIRE_UNIONID_REQUIRED",
+      "line": 55
     },
     {
       "accessor": "os.getenv",

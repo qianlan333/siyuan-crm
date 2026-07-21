@@ -803,7 +803,6 @@ class SQLAlchemyAudienceRepository(AudiencePackageRepositoryMixin, AudienceRepos
                     updated_at = CURRENT_TIMESTAMP
                 FROM matched
                 WHERE p.id = matched.id
-                  AND (p.lease_expires_at IS NULL OR p.lease_expires_at <= CURRENT_TIMESTAMP)
                 RETURNING p.id
             )
             SELECT COUNT(*) AS updated_count FROM updated
@@ -840,6 +839,7 @@ class SQLAlchemyAudienceRepository(AudiencePackageRepositoryMixin, AudienceRepos
                     updated_at = CURRENT_TIMESTAMP
                 FROM matched
                 WHERE p.id = matched.id
+                  AND (p.lease_expires_at IS NULL OR p.lease_expires_at <= CURRENT_TIMESTAMP)
                 RETURNING p.id
             )
             SELECT COUNT(*) AS updated_count FROM updated

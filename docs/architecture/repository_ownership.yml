@@ -636,6 +636,21 @@ repositories:
     capability_owner: aicrm_next.public_product
     table_reads: []
     table_writes: []
+  aicrm_next/questionnaire/continuation_repo.py:
+    capability_owner: aicrm_next.questionnaire
+    table_reads:
+      - ai_audience_package
+      - ai_audience_package_dependency
+      - automation_agent_webhook_batch
+      - automation_agent_webhook_item
+      - crm_user_identity
+      - external_effect_job
+      - questionnaire_continuation_job
+      - questionnaire_submissions
+    table_writes:
+      - questionnaire_continuation_job
+    non_literal_table_reads:
+      - crm_user_identity
   aicrm_next/questionnaire/repo.py:
     capability_owner: aicrm_next.questionnaire
     table_reads:

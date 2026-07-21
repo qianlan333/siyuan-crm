@@ -5,6 +5,7 @@ import logging
 import os
 import re
 import secrets
+from datetime import datetime, timezone
 from typing import Any
 
 from aicrm_next.shared.release import current_release_sha
@@ -39,7 +40,10 @@ from aicrm_next.platform_foundation.external_effects import (
     WECOM_CONTACT_TAG_MARK,
     WECOM_WELCOME_MESSAGE_SEND,
 )
-from aicrm_next.platform_foundation.internal_events import InternalEventService
+from aicrm_next.platform_foundation.internal_events import (
+    InternalEventService,
+    emit_customer_wecom_identity_ready_event,
+)
 from aicrm_next.platform_foundation.external_effects.realtime import wake_external_effect_job
 from aicrm_next.platform_foundation.external_effects.adapters import ExternalEffectAdapterRegistry
 
@@ -511,6 +515,30 @@ def _sync_identity_best_effort(
         except Exception as exc:
             safe_log_exception(LOGGER, "channel entry canonicalization after identity failed", exc, level=logging.WARNING)
             identity_sync["channel_entry_canonical"] = {"status": "failed", "reason": str(exc)}
+        external_userid = text(event.get("ExternalUserID"))
+        follow_user_userid = text(event.get("UserID"))
+        unionid = text(identity_sync.get("unionid"))
+        event_time = int(text(event.get("CreateTime")) or 0)
+        occurred_at = datetime.fromtimestamp(event_time, tz=timezone.utc) if event_time > 0 else datetime.now(timezone.utc)
+        trace_id = (
+            f"wecom-identity-ready:{corp_id}:"
+            f"{event_log_id or event_time or 'unknown'}:{external_userid}:{follow_user_userid}"
+        )
+        try:
+            identity_sync["questionnaire_identity_ready_event"] = emit_customer_wecom_identity_ready_event(
+                unionid=unionid,
+                external_userid=external_userid,
+                follow_user_userid=follow_user_userid,
+                identity_map_id=identity_sync.get("identity_map_id"),
+                occurred_at=occurred_at,
+                trace_id=trace_id,
+            )
+        except Exception as exc:
+            safe_log_exception(LOGGER, "questionnaire identity-ready event emit failed", exc, level=logging.WARNING)
+            identity_sync["questionnaire_identity_ready_event"] = {
+                "status": "failed",
+                "reason": exc.__class__.__name__,
+            }
     else:
         identity_sync["runtime_identity"] = (
             _mark_runtime_identity_from_sync(

@@ -53,6 +53,10 @@
     {
       "timer": "openclaw-automation-ops-scheduler.timer",
       "service": "openclaw-automation-ops-scheduler.service"
+    },
+    {
+      "timer": "openclaw-questionnaire-continuation-scheduler.timer",
+      "service": "openclaw-questionnaire-continuation-scheduler.service"
     }
   ],
   "approval_required": [

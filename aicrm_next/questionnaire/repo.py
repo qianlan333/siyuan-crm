@@ -796,7 +796,7 @@ class PostgresQuestionnaireReadRepository:
             unionid=_text(payload.get("unionid") or respondent_identity.get("unionid")) or None,
             external_userid=_text(payload.get("external_userid") or respondent_identity.get("external_userid")) or None,
             openid=_text(payload.get("openid") or respondent_identity.get("openid")) or None,
-            mobile=mobile_snapshot or None,
+            mobile=None if payload.get("unionid_verified") else (mobile_snapshot or None),
         )
         with self._connect() as identity_conn:
             identity_resolution = resolve_identity_with_dbapi(identity_conn, requested_identity)
@@ -861,9 +861,13 @@ class PostgresQuestionnaireReadRepository:
                     """
                     INSERT INTO questionnaire_submissions (
                         questionnaire_id, unionid, follow_user_userid, source_channel, campaign_id,
-                        staff_id, total_score, final_tags, assessment_result_snapshot, result_token, submitted_at
+                        staff_id, total_score, final_tags, assessment_result_snapshot, result_token,
+                        unionid_verification_source, unionid_verified_at, submitted_at
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        %s, CASE WHEN %s THEN NOW() ELSE NULL END, NOW()
+                    )
                     RETURNING id, submitted_at
                     """,
                     (
@@ -877,6 +881,8 @@ class PostgresQuestionnaireReadRepository:
                         _jsonb(final_tags),
                         _jsonb(assessment_result),
                         _text(payload.get("result_token")),
+                        _text(payload.get("unionid_verification_source")),
+                        bool(payload.get("unionid_verified") and unionid),
                     ),
                 ).fetchone()
                 submission_id = int(row["id"])
@@ -924,6 +930,8 @@ class PostgresQuestionnaireReadRepository:
                     "matched_by": _text(payload.get("matched_by")),
                     "openid": _text(payload.get("openid") or respondent_identity.get("openid")),
                     "unionid": unionid,
+                    "unionid_verification_source": _text(payload.get("unionid_verification_source")),
+                    "unionid_verified_at": submitted_at if payload.get("unionid_verified") and unionid else "",
                     "mobile": mobile_snapshot,
                     "mobile_snapshot": mobile_snapshot,
                     "source_channel": _text(source.get("source_channel")),

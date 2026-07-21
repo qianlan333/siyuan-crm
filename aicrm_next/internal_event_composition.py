@@ -10,6 +10,7 @@ from .commerce.payment_tagging import (
 )
 from .identity_contact.payment_projection import project_payment_order_mobile
 from .ai_audience_ops import register_ai_audience_event_consumers
+from .ai_audience_ops.repository import build_audience_repository
 from .cloud_orchestrator.repository import build_cloud_plan_repository
 from .questionnaire.event_consumers import (
     automation_questionnaire_consumer,
@@ -17,6 +18,10 @@ from .questionnaire.event_consumers import (
     questionnaire_projection_consumer,
     questionnaire_tag_consumer,
     questionnaire_webhook_consumer,
+)
+from .questionnaire.continuation import (
+    configure_questionnaire_continuation_audience_repository,
+    questionnaire_identity_continuation_consumer,
 )
 from .service_period.payment_consumer import service_period_entitlement_consumer
 from .service_period.refund_consumer import service_period_refund_consumer
@@ -65,6 +70,7 @@ from .platform_foundation.internal_events import (
     current_internal_event_consumer_registry,
     register_payment_succeeded_consumers as _register_payment_succeeded_consumers,
     register_questionnaire_event_consumers as _register_questionnaire_event_consumers,
+    register_customer_wecom_identity_ready_consumer as _register_customer_wecom_identity_ready_consumer,
     register_refund_succeeded_consumers as _register_refund_succeeded_consumers,
     register_shadow_event_consumers as _register_shadow_event_consumers,
 )
@@ -109,6 +115,16 @@ def register_questionnaire_event_consumers(registry: InternalEventConsumerRegist
     )
 
 
+def register_questionnaire_identity_continuation_consumer(
+    registry: InternalEventConsumerRegistry | None = None,
+) -> None:
+    registry = registry or current_internal_event_consumer_registry()
+    _register_customer_wecom_identity_ready_consumer(
+        questionnaire_identity_continuation_consumer,
+        registry,
+    )
+
+
 def register_shadow_event_consumers(registry: InternalEventConsumerRegistry | None = None) -> None:
     registry = registry or current_internal_event_consumer_registry()
     _register_shadow_event_consumers(
@@ -121,10 +137,12 @@ def register_shadow_event_consumers(registry: InternalEventConsumerRegistry | No
 
 
 def build_internal_event_consumer_registry() -> InternalEventConsumerRegistry:
+    configure_questionnaire_continuation_audience_repository(build_audience_repository)
     registry = InternalEventConsumerRegistry()
     register_payment_succeeded_consumers(registry)
     register_refund_succeeded_consumers(registry)
     register_questionnaire_event_consumers(registry)
+    register_questionnaire_identity_continuation_consumer(registry)
     register_shadow_event_consumers(registry)
     register_ai_audience_event_consumers(registry)
     registry.seal_fanout_contract()
@@ -135,6 +153,7 @@ __all__ = [
     "build_internal_event_consumer_registry",
     "register_payment_succeeded_consumers",
     "register_questionnaire_event_consumers",
+    "register_questionnaire_identity_continuation_consumer",
     "register_refund_succeeded_consumers",
     "register_shadow_event_consumers",
 ]

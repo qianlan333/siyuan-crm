@@ -89,13 +89,16 @@ def test_h5_submit_without_wechat_identity_returns_oauth_redirect(client: TestCl
 
 def test_h5_page_handles_oauth_required_submit_without_exposing_raw_error(client: TestClient) -> None:
     response = client.get("/s/hxc-activation-v1", params={"openid": "openid-next-public-001"})
+    script = client.get("/static/questionnaire/questionnaire_h5_page.js")
 
     assert response.status_code == 200
-    html = response.text
-    assert "function startOAuthRedirect" in html
-    assert "oauth_required_redirect" in html
-    assert "请先完成企微认证" in html
-    assert html.index("if (isOAuthRequired(result))") < html.index("throw new Error(result.error || '提交失败')")
+    assert script.status_code == 200
+    source = script.text
+    assert "/static/questionnaire/questionnaire_h5_page.js" in response.text
+    assert "function startOAuthRedirect" in source
+    assert "oauth_required_redirect" in source
+    assert "请先完成企微认证" in source
+    assert source.index("if (isOAuthRequired(result))") < source.index("throw new Error(result.error || '提交失败')")
 
 
 def test_oauth_callback_default_still_returns_json_and_cookie(client: TestClient) -> None:

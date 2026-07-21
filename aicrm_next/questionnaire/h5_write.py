@@ -294,7 +294,7 @@ def _handle_submit(command: Command) -> dict[str, Any]:
             "person_id": identity.person_id if identity else None,
             "external_userid": (identity.external_userid if identity else identity_payload.get("external_userid")) or "",
             "openid": (identity.openid if identity else identity_payload.get("openid")) or "",
-            "unionid": (identity.unionid if identity else "") or "",
+            "unionid": (identity.unionid if identity else identity_payload.get("unionid")) or "",
             "mobile": identity_payload.get("mobile") or (identity.mobile if identity else "") or "",
             "binding_status": identity.binding_status if identity else ("identity_pending_unionid" if identity_input_present else "unresolved"),
             "identity_map_id": identity.identity_map_id if identity else None,
@@ -304,9 +304,14 @@ def _handle_submit(command: Command) -> dict[str, Any]:
         mobile_binding = {
             "ok": True,
             "skipped": True,
-            "reason": "canonical_identity_unresolved",
+            "reason": (
+                "questionnaire_mobile_is_answer_only"
+                if identity_payload.get("unionid_verified")
+                else "canonical_identity_unresolved"
+            ),
+            "real_external_call_executed": False,
         }
-        if identity is not None:
+        if identity is not None and not bool(identity_payload.get("unionid_verified")):
             mobile_binding = _sync_questionnaire_mobile_binding(command=command, submission=resolved_identity)
             if mobile_binding.get("ok") and not mobile_binding.get("skipped"):
                 final_resolution = _identity_result(
@@ -335,7 +340,10 @@ def _handle_submit(command: Command) -> dict[str, Any]:
                             "matched_by": identity.matched_by or "",
                         }
                     )
-        if repo.find_submission_for_identity(int(item["id"]), resolved_identity):
+        dedupe_identity = dict(resolved_identity)
+        if bool(identity_payload.get("unionid_verified")):
+            dedupe_identity["mobile"] = ""
+        if repo.find_submission_for_identity(int(item["id"]), dedupe_identity):
             raise ContractError("already_submitted")
         score, final_tags = score_and_tags(item, answers)
         result = {
@@ -350,6 +358,8 @@ def _handle_submit(command: Command) -> dict[str, Any]:
             "external_userid": resolved_identity.get("external_userid") or "",
             "openid": resolved_identity.get("openid") or "",
             "unionid": resolved_identity.get("unionid") or "",
+            "unionid_verification_source": identity_payload.get("unionid_verification_source") or "",
+            "unionid_verified": bool(identity_payload.get("unionid_verified")),
             "mobile": resolved_identity.get("mobile") or "",
             "answers": answers,
             "answers_json": answers,
@@ -567,6 +577,8 @@ def _identity_payload(raw: Any) -> dict[str, Any]:
         "unionid": str(identity.get("unionid") or "").strip(),
         "mobile": str(identity.get("mobile") or "").strip(),
         "respondent_key": str(identity.get("respondent_key") or "").strip(),
+        "unionid_verification_source": str(identity.get("unionid_verification_source") or "").strip(),
+        "unionid_verified": bool(identity.get("unionid_verified")),
     }
 
 

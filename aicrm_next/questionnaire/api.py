@@ -16,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.templating import Jinja2Templates
 
+from aicrm_next.identity_contact.wechat_unionid_guard import evaluate_wechat_unionid_access
 from aicrm_next.navigation_target import safe_completion_url
 from aicrm_next.shared.errors import ContractError, NotFoundError
 from aicrm_next.shared.pii_audit import infer_pii_result_count, set_pii_audit_result_count
@@ -58,8 +59,8 @@ from .application import (
     StartWechatOAuthQuery,
 )
 from .dto import OAuthCallbackRequest, OAuthStartRequest
-from .oauth import COOKIE_NAME, questionnaire_oauth_state_context
-from .public_access import QuestionnaireRespondentIdentityService
+from .oauth import COOKIE_NAME, questionnaire_h5_identity_from_cookies, questionnaire_oauth_state_context
+from .public_access import QuestionnaireRespondentIdentityService, questionnaire_unionid_gate_enabled
 from .result_access import issue_questionnaire_result_grant
 from .operations import (
     QuestionnaireOperationsConflictError,
@@ -551,9 +552,28 @@ def _h5_source_payload(payload: dict[str, Any], request: Request) -> dict[str, A
 async def _execute_h5_submit(request: Request, slug: str) -> Response:
     try:
         payload = await _h5_json_body(request)
+        access = _questionnaire_access_decision(request, slug)
+        if not access.allowed:
+            return JSONResponse(
+                {
+                    **access.payload(),
+                    "redirect_url": access.oauth_start_url,
+                    "source_status": access.error,
+                    "write_model_status": "blocked",
+                    "route_owner": "ai_crm_next",
+                    "fallback_used": False,
+                    "real_external_call_executed": False,
+                    "degraded": False,
+                },
+                status_code=access.status_code,
+            )
         identity_result = _questionnaire_identity_result_from_request(request)
         request_identity = dict(identity_result.get("identity") or {})
-        if _wechat_submit_requires_oauth(request, request_identity=request_identity, identity_result=identity_result):
+        if not questionnaire_unionid_gate_enabled() and _wechat_submit_requires_oauth(
+            request,
+            request_identity=request_identity,
+            identity_result=identity_result,
+        ):
             return JSONResponse(
                 {
                     "ok": False,
@@ -570,7 +590,16 @@ async def _execute_h5_submit(request: Request, slug: str) -> Response:
                 status_code=401,
             )
         submit_identity = dict(request_identity)
-        submit_identity.update(_h5_identity_payload(payload))
+        # OAuth identity fields are accepted only from the signed HttpOnly cookie.
+        # The public body may still carry non-identity command metadata, but it
+        # cannot forge any identity alias. Mobile is read only from an actual
+        # questionnaire answer by the questionnaire write model.
+        body_identity = _h5_identity_payload(payload)
+        if questionnaire_unionid_gate_enabled():
+            submit_identity["unionid_verification_source"] = "wechat_oauth_signed_session"
+            submit_identity["unionid_verified"] = True
+        else:
+            submit_identity.update(body_identity)
         submission_identity_result = QuestionnaireRespondentIdentityService().resolve(
             cookies=request.cookies,
             request_identity=submit_identity,
@@ -785,14 +814,43 @@ def _questionnaire_oauth_start_url(slug: str, source_params: dict[str, str]) -> 
     return f"/api/h5/wechat/oauth/start?{urlencode(query)}"
 
 
+def _questionnaire_access_decision(request: Request, slug: str):
+    if not questionnaire_unionid_gate_enabled():
+        return evaluate_wechat_unionid_access(
+            {
+                "unionid": "legacy_gate_disabled",
+                "unionid_verified": True,
+                "identity_source": "wechat_oauth_provider",
+            },
+            is_wechat_browser=_is_wechat_browser(request),
+            oauth_start_url=_questionnaire_oauth_start_url(
+                slug,
+                _request_values(request, _QUESTIONNAIRE_SOURCE_PARAM_FIELDS),
+            ),
+        )
+    return evaluate_wechat_unionid_access(
+        questionnaire_h5_identity_from_cookies(request.cookies),
+        is_wechat_browser=_is_wechat_browser(request),
+        oauth_start_url=_questionnaire_oauth_start_url(
+            slug,
+            _request_values(request, _QUESTIONNAIRE_SOURCE_PARAM_FIELDS),
+        ),
+    )
+
+
 def _questionnaire_identity_from_request(request: Request) -> dict[str, str]:
     return _questionnaire_identity_result_from_request(request)["identity"]
 
 
 def _questionnaire_identity_result_from_request(request: Request) -> dict[str, Any]:
+    request_identity = (
+        {}
+        if questionnaire_unionid_gate_enabled()
+        else _request_values(request, _QUESTIONNAIRE_IDENTITY_HINT_FIELDS)
+    )
     return QuestionnaireRespondentIdentityService().resolve(
         cookies=request.cookies,
-        request_identity=_request_values(request, _QUESTIONNAIRE_IDENTITY_HINT_FIELDS),
+        request_identity=request_identity,
         slug=str(request.path_params.get("slug") or request.query_params.get("slug") or ""),
     )
 
@@ -1200,8 +1258,14 @@ def wechat_oauth_callback(
             ),
         )
         return _oauth_html_error(
-            title="授权未完成",
-            message="授权未完成，请重新进入问卷。",
+            title="微信身份存在冲突" if payload.get("error") == "identity_conflict" else "授权未完成",
+            message=(
+                "微信身份存在冲突，请联系管理员处理。"
+                if payload.get("error") == "identity_conflict"
+                else "未能获取微信稳定身份，请重新进入问卷或联系管理员。"
+                if payload.get("error") == "unionid_unavailable"
+                else "授权未完成，请重新进入问卷。"
+            ),
             return_url=str(state_context.get("redirect_url") or redirect or ""),
             slug=str(payload.get("slug") or state_context.get("slug") or ""),
             status_code=status_code,
@@ -1237,12 +1301,20 @@ def public_questionnaire_h5_page(request: Request, slug: str):
     request_hints = _request_values(request, _QUESTIONNAIRE_META_FIELDS)
     identity_result = _questionnaire_identity_result_from_request(request)
     identity = dict(identity_result.get("identity") or {})
-    request_hints = {**request_hints, **{key: value for key, value in identity.items() if value}}
+    if not questionnaire_unionid_gate_enabled():
+        request_hints = {**request_hints, **{key: value for key, value in identity.items() if value}}
     is_wechat_browser = _is_wechat_browser(request)
-    is_authorized = _is_authorized_identity(identity, identity_result)
+    access = _questionnaire_access_decision(request, slug)
+    is_authorized = access.allowed if questionnaire_unionid_gate_enabled() else _is_authorized_identity(identity, identity_result)
     oauth_config = GetQuestionnaireOAuthConfigQuery()()
     oauth_configured = bool(oauth_config.get("configured"))
-    should_require_oauth = is_wechat_browser and oauth_configured and not is_authorized
+    should_require_oauth = (
+        not access.allowed
+        if questionnaire_unionid_gate_enabled()
+        else is_wechat_browser and oauth_configured and not is_authorized
+    )
+    if questionnaire_unionid_gate_enabled() and is_wechat_browser and access.oauth_start_url:
+        return RedirectResponse(access.oauth_start_url, status_code=302)
     submission_status = GetPublicQuestionnaireSubmissionStatusQuery()(slug, identity=identity)
     if submission_status.get("submitted") and not should_require_oauth:
         redirect_url = (
@@ -1257,14 +1329,22 @@ def public_questionnaire_h5_page(request: Request, slug: str):
     page_mode = "auth_gate" if should_require_oauth else "questionnaire"
     env_notice = ""
     if page_mode == "auth_gate":
-        env_notice = "认证成功后即可填写并提交问卷。" if oauth_configured else "当前企微认证配置未完成，请联系管理员。"
+        env_notice = (
+            access.message
+            if questionnaire_unionid_gate_enabled()
+            else "认证成功后即可填写并提交问卷。" if oauth_configured else "当前企微认证配置未完成，请联系管理员。"
+        )
     page_state = {
         "mode": page_mode,
         "slug": slug,
         "title": questionnaire["title"],
         "description": questionnaire.get("description") or "",
         "env_notice": env_notice,
-        "oauth_start_url": _questionnaire_oauth_start_url(slug, source_params) if oauth_configured else "",
+        "oauth_start_url": (
+            access.oauth_start_url
+            if questionnaire_unionid_gate_enabled()
+            else _questionnaire_oauth_start_url(slug, source_params) if oauth_configured else ""
+        ),
         "submit_url": f"/api/h5/questionnaires/{slug}/submit",
         "api_url": f"/api/h5/questionnaires/{slug}",
         "diagnostics_url": f"/api/h5/questionnaires/{slug}/client-diagnostics",
@@ -1294,6 +1374,17 @@ def public_questionnaire_submitted(request: Request, slug: str):
         payload = GetPublicQuestionnaireQuery()(slug)
     except Exception as exc:
         _raise_http(exc)
+    access = _questionnaire_access_decision(request, slug)
+    if questionnaire_unionid_gate_enabled() and not access.allowed:
+        if access.oauth_start_url:
+            return RedirectResponse(access.oauth_start_url, status_code=302)
+        return _oauth_html_error(
+            title="请在微信中打开",
+            message=access.message,
+            return_url=f"/s/{slug}",
+            slug=slug,
+            status_code=access.status_code,
+        )
     questionnaire = jsonable_encoder(payload["questionnaire"])
     identity_result = _questionnaire_identity_result_from_request(request)
     submission_status = GetPublicQuestionnaireSubmissionStatusQuery()(

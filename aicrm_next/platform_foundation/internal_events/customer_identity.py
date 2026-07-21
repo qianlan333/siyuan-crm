@@ -5,13 +5,14 @@ from typing import Any, Protocol
 
 from aicrm_next.platform_foundation.command_bus import CommandContext
 
-from .config import customer_identity_internal_events_enabled, event_type_allowed
+from .config import customer_identity_internal_events_enabled, env_bool, event_type_allowed, internal_events_enabled
 from .consumer_registry import InternalEventConsumerRegistry, current_internal_event_consumer_registry
 from .legacy_path_markers import mark_legacy_path_invoked
 from .models import InternalEvent, InternalEventConsumerResult, InternalEventConsumerRun
 from .service import InternalEventService
 
 CUSTOMER_PHONE_BOUND_EVENT_TYPE = "customer.phone_bound"
+CUSTOMER_WECOM_IDENTITY_READY_EVENT_TYPE = "customer.wecom_identity_ready"
 
 
 class BindMobileRequest(Protocol):
@@ -175,6 +176,100 @@ def register_customer_identity_event_consumers(registry: InternalEventConsumerRe
         customer_identity_ai_assist_notify_consumer,
         consumer_type="orchestration",
     )
+
+
+def register_customer_wecom_identity_ready_consumer(
+    handler: Any,
+    registry: InternalEventConsumerRegistry | None = None,
+) -> None:
+    registry = registry or current_internal_event_consumer_registry()
+    registry.register(
+        CUSTOMER_WECOM_IDENTITY_READY_EVENT_TYPE,
+        "questionnaire_identity_continuation_consumer",
+        handler,
+        consumer_type="orchestration",
+    )
+
+
+def emit_customer_wecom_identity_ready_event(
+    *,
+    unionid: str,
+    external_userid: str,
+    follow_user_userid: str,
+    identity_map_id: int | str | None,
+    occurred_at: Any = None,
+    trace_id: str,
+    source_module: str = "channel_entry.application",
+    source_route: str = "channel_entry.wecom_identity_sync",
+) -> dict[str, Any]:
+    """Emit the narrow hand-off after canonical WeCom identity is complete.
+
+    The payload deliberately excludes mobile, openid, questionnaire answers and
+    message content. The questionnaire consumer re-reads authoritative state.
+    """
+
+    if not internal_events_enabled() or not env_bool("AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED", default=False):
+        return {"status": "skipped", "reason": "questionnaire_continuation_internal_events_disabled"}
+    if not event_type_allowed(CUSTOMER_WECOM_IDENTITY_READY_EVENT_TYPE):
+        return {"status": "skipped", "reason": "internal_events_disabled_or_event_type_not_allowed"}
+    normalized_unionid = _text(unionid)
+    normalized_external = _text(external_userid)
+    normalized_owner = _text(follow_user_userid)
+    normalized_trace = _text(trace_id)
+    if not normalized_unionid:
+        return {"status": "skipped", "reason": "unionid_missing"}
+    if not normalized_external:
+        return {"status": "skipped", "reason": "external_userid_missing"}
+    if not normalized_owner:
+        return {"status": "skipped", "reason": "follow_user_userid_missing"}
+    if not normalized_trace:
+        return {"status": "skipped", "reason": "trace_id_missing"}
+
+    identity_key = _hash_text(
+        f"{normalized_unionid}|{normalized_external}|{normalized_owner}|{identity_map_id or ''}"
+    )
+    event_result = InternalEventService().emit_event(
+        event_type=CUSTOMER_WECOM_IDENTITY_READY_EVENT_TYPE,
+        event_version=1,
+        aggregate_type="customer_identity",
+        aggregate_id=normalized_unionid,
+        subject_type="unionid",
+        subject_id=normalized_unionid,
+        idempotency_key=f"customer.wecom_identity_ready:{identity_key}:{normalized_trace}",
+        source_module=source_module,
+        source_command_id=normalized_trace,
+        correlation_id=normalized_trace,
+        occurred_at=occurred_at,
+        context=CommandContext(
+            actor_id=normalized_owner,
+            actor_type="system",
+            trace_id=normalized_trace,
+            request_id=normalized_trace,
+            source_route=source_route,
+        ),
+        payload={
+            "identity": {
+                "identity_map_id": identity_map_id,
+                "unionid": normalized_unionid,
+                "external_userid": normalized_external,
+                "follow_user_userid": normalized_owner,
+                "occurred_at": occurred_at,
+                "trace_id": normalized_trace,
+            }
+        },
+        payload_summary={
+            "identity_map_id_present": identity_map_id not in (None, ""),
+            "unionid_present": True,
+            "external_userid_present": True,
+            "follow_user_userid_present": True,
+            "trace_id": normalized_trace,
+        },
+    )
+    return {
+        "status": "emitted",
+        "event_id": event_result["event"]["event_id"],
+        "consumer_run_count": len(event_result.get("consumer_runs") or []),
+    }
 
 
 def emit_customer_phone_bound_event(

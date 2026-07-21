@@ -66,14 +66,15 @@ def test_all_alembic_down_revisions_exist() -> None:
     assert missing == {}
 
 
-def test_required_physical_schema_repair_is_the_single_head() -> None:
+def test_questionnaire_continuation_is_single_head_after_required_schema_repair() -> None:
     revisions = _migration_revisions()
     referenced = {parent for item in revisions.values() for parent in _parents(item["down_revision"])}
     heads = set(revisions) - referenced
     repair = VERSIONS / "0123_required_physical_schema_repair.py"
     source = repair.read_text(encoding="utf-8")
 
-    assert heads == {"0123_required_physical_schema_repair"}
+    assert heads == {"0124_questionnaire_continuation_jobs"}
+    assert revisions["0124_questionnaire_continuation_jobs"]["down_revision"] == "0123_required_physical_schema_repair"
     assert revisions["0123_required_physical_schema_repair"]["down_revision"] == "0122_internal_event_fanout_manifest"
     assert "0018_hxc_dashboard_broadcast_tasks" in source
     assert "0023_group_ops_webhook_rules" in source

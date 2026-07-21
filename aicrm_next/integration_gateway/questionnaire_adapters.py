@@ -323,8 +323,11 @@ class WeChatOAuthAdapter(_GuardedQuestionnaireAdapter):
             exchange_payload = client.exchange_code(app_id=app_id, app_secret=app_secret, code=code)
             if self._wechat_error_code(exchange_payload):
                 return self._wechat_payload_error(operation=operation, idempotency_key=idempotency_key, target=target, payload=exchange_payload)
-            resolved_openid = str(exchange_payload.get("openid") or openid or "").strip()
-            resolved_unionid = str(exchange_payload.get("unionid") or unionid or "").strip()
+            # Public callback query aliases are never identity evidence. In
+            # production only values returned by WeChat's code exchange (or
+            # its userinfo endpoint below) may enter the signed session.
+            resolved_openid = str(exchange_payload.get("openid") or "").strip()
+            resolved_unionid = str(exchange_payload.get("unionid") or "").strip()
             access_token = str(exchange_payload.get("access_token") or "").strip()
             if not resolved_openid:
                 return self._wechat_payload_error(operation=operation, idempotency_key=idempotency_key, target=target, payload=exchange_payload)
@@ -350,7 +353,7 @@ class WeChatOAuthAdapter(_GuardedQuestionnaireAdapter):
         result = {
             "openid": resolved_openid,
             "unionid": resolved_unionid,
-            "external_userid": external_userid or "",
+            "external_userid": "",
             "redirect_url": redirect or (f"/s/{state}" if state else "/"),
             "state": (state or "").strip(),
             "source_status": "production",

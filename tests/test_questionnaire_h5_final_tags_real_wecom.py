@@ -34,6 +34,7 @@ from aicrm_next.platform_foundation.internal_events.worker import InternalEventW
 from aicrm_next.questionnaire import h5_write
 from aicrm_next.questionnaire.h5_write import reset_questionnaire_h5_write_fixture_state
 from aicrm_next.questionnaire.repo import reset_questionnaire_fixture_state
+from aicrm_next.questionnaire.continuation_repo import build_questionnaire_continuation_repository
 
 
 def _client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -174,6 +175,32 @@ def test_tag_consumer_waits_retryably_for_canonical_identity(
     assert response_summary[f"{expected_missing}_present"] is False
     assert ExternalEffectService().list_jobs({"effect_type": WECOM_CONTACT_TAG_MARK})[1] == 0
     assert get_customer_tag_local_projection_fixture_rows() == []
+
+
+def test_tag_consumer_hands_incomplete_identity_to_durable_continuation(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED", "1")
+    client = _client(monkeypatch)
+    response = _submit(
+        client,
+        identity={
+            "follow_user_userid": "owner-real-001",
+            "unionid": "union-missing-external",
+        },
+        idempotency_key="questionnaire-continuation-waiting-tag",
+    )
+
+    result = _run_tag_consumer(client)
+    rows, counts = build_questionnaire_continuation_repository().list_operations(
+        int(response.json()["questionnaire_id"])
+    )
+    assert result["counts"]["succeeded_count"] == 1, result
+    response_summary = result["items"][0]["attempt"]["response_summary_json"]
+    assert response_summary["continuation_status"] == "waiting_identity"
+    # Internal-event audit summaries intentionally collapse collection values.
+    assert response_summary["missing_identity_fields"] == "list"
+    assert counts == {"waiting_identity": 1}
+    assert rows[0]["action_type"] == "wecom_tag"
+    assert ExternalEffectService().list_jobs({"effect_type": WECOM_CONTACT_TAG_MARK})[1] == 0
 
 
 def test_tag_consumer_plans_one_job_and_reuses_the_same_lineage(monkeypatch: pytest.MonkeyPatch) -> None:

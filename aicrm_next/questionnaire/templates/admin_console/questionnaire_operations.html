@@ -1,9 +1,9 @@
 {% extends "admin_shell/base.html" %}
 
 {% block head_extra %}
-<link rel="stylesheet" href="/static/questionnaire/questionnaire_operations.css?v=20260714">
+<link rel="stylesheet" href="/static/questionnaire/questionnaire_operations.css?v=20260721-continuation">
 <script defer src="/static/navigation-target/completion_target_config.js?v=20260714"></script>
-<script defer src="/static/questionnaire/questionnaire_operations.js?v=20260714.2"></script>
+<script defer src="/static/questionnaire/questionnaire_operations.js?v=20260721-continuation"></script>
 {% endblock %}
 
 {% block content %}
@@ -38,6 +38,10 @@
         <span>外部推送</span>
         <strong id="qo-summary-push">未启用</strong>
       </div>
+      <div class="qo-metric">
+        <span>等待企微身份</span>
+        <strong id="qo-summary-continuation">{{ operations_payload.continuations.summary.waiting_identity }}</strong>
+      </div>
     </div>
     <div class="qo-toast" id="qo-toast" role="status" aria-live="polite"></div>
   </section>
@@ -49,6 +53,9 @@
       </button>
       <button data-qo-panel="external-push" type="button">
         <span class="qo-index">2</span><span>外部推送</span>
+      </button>
+      <button data-qo-panel="continuation" type="button">
+        <span class="qo-index">3</span><span>身份续接</span>
       </button>
     </nav>
 
@@ -190,6 +197,33 @@
             <button class="qo-button qo-button--secondary" id="qo-test-push" type="button">测试推送</button>
             <button class="qo-button qo-button--primary" id="qo-save-push" type="button">保存外部推送</button>
           </div>
+        </div>
+      </section>
+
+      <section class="qo-panel" data-qo-panel-content="continuation">
+        <div class="qo-panel-head">
+          <div>
+            <h2>身份续接</h2>
+            <p>问卷已保存但尚未完成企微身份时，最多等待 7 天；此处展示派发状态，不把“已派发”视为真实发送成功。</p>
+          </div>
+          <span class="qo-state-badge" id="qo-continuation-gate">门禁未开启</span>
+        </div>
+        <div class="qo-continuation-summary" id="qo-continuation-summary"></div>
+        <div class="qo-table-wrap">
+          <table class="qo-table">
+            <thead>
+              <tr>
+                <th>提交</th>
+                <th>动作</th>
+                <th>续接状态</th>
+                <th>剩余有效期</th>
+                <th>下游状态</th>
+                <th>异常码</th>
+              </tr>
+            </thead>
+            <tbody id="qo-continuation-rows"></tbody>
+          </table>
+          <div class="qo-empty" id="qo-continuation-empty" hidden>当前没有续接任务。</div>
         </div>
       </section>
     </div>

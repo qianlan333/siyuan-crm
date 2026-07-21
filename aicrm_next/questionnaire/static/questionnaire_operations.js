@@ -31,13 +31,14 @@
     return value ? Number(value) : null;
   }
   function switchPanel(name) {
-    state.activePanel = name === "external-push" ? "external-push" : "completion";
+    state.activePanel = ["completion", "external-push", "continuation"].includes(name) ? name : "completion";
     document.querySelectorAll("[data-qo-panel]").forEach((button) => {
       button.classList.toggle("is-active", button.dataset.qoPanel === state.activePanel);
     });
     document.querySelectorAll("[data-qo-panel-content]").forEach((panel) => {
       panel.classList.toggle("is-active", panel.dataset.qoPanelContent === state.activePanel);
     });
+    $("qo-save-current").hidden = state.activePanel === "continuation";
   }
   function completionEnabled() { return Boolean($("qo-completion-enabled").checked); }
   function syncCompletionVisibility() {
@@ -129,6 +130,48 @@
     $("qo-push-capability").textContent = message;
     $("qo-test-push").disabled = !ok;
   }
+  function formatRemaining(seconds) {
+    const value = Math.max(0, Number(seconds || 0));
+    if (!value) return "已到期";
+    const hours = Math.floor(value / 3600);
+    const days = Math.floor(hours / 24);
+    if (days > 0) return `${days} 天 ${hours % 24} 小时`;
+    if (hours > 0) return `${hours} 小时`;
+    return `${Math.max(1, Math.ceil(value / 60))} 分钟`;
+  }
+  function renderContinuation() {
+    const continuation = state.payload.continuations || {};
+    const summary = continuation.summary || {};
+    const metrics = [
+      ["等待身份", summary.waiting_identity || 0, "waiting"],
+      ["已派发", summary.dispatched || 0, "dispatched"],
+      ["已过期", summary.expired || 0, "expired"],
+      ["身份冲突", summary.blocked_conflict || 0, "conflict"],
+      ["下游失败", summary.downstream_failed || 0, "failed"],
+    ];
+    $("qo-summary-continuation").textContent = String(summary.waiting_identity || 0);
+    $("qo-continuation-gate").textContent = continuation.enabled ? "续接已开启" : "续接门禁未开启";
+    $("qo-continuation-gate").classList.toggle("is-ok", Boolean(continuation.enabled));
+    $("qo-continuation-summary").innerHTML = metrics.map(([label, value, kind]) => `
+      <div class="qo-continuation-metric qo-continuation-metric--${kind}">
+        <span>${api.escapeHtml(label)}</span><strong>${Number(value || 0)}</strong>
+      </div>
+    `).join("");
+    const items = Array.isArray(continuation.items) ? continuation.items : [];
+    $("qo-continuation-empty").hidden = items.length > 0;
+    $("qo-continuation-rows").innerHTML = items.map((item) => {
+      const downstream = text(item.downstream_status)
+        || (item.status === "dispatched" ? "等待下游记录" : "尚未派发");
+      return `<tr>
+        <td><strong>#${api.escapeHtml(item.submission_id || "-")}</strong><small>${api.escapeHtml(item.submitted_at || "-")}</small></td>
+        <td>${api.escapeHtml(item.action_label || item.action_type || "-")}</td>
+        <td><span class="qo-status qo-status--${api.escapeHtml(item.status || "unknown")}">${api.escapeHtml(item.status_label || item.status || "-")}</span></td>
+        <td>${api.escapeHtml(formatRemaining(item.remaining_seconds))}</td>
+        <td><strong>${api.escapeHtml(downstream)}</strong><small>${api.escapeHtml(item.downstream_ref_id || "")}</small></td>
+        <td>${api.escapeHtml(item.last_error_code || "-")}</td>
+      </tr>`;
+    }).join("");
+  }
   function fill(payload) {
     state.payload = { ...state.payload, ...payload };
     payload = state.payload;
@@ -157,6 +200,7 @@
     $("qo-push-remark").value = push.remark || "";
     renderParams(push.custom_params || []);
     renderCapability();
+    renderContinuation();
     syncCompletionVisibility();
     renderChannels();
   }
@@ -251,6 +295,7 @@
   $("qo-save-push").addEventListener("click", () => savePush().catch((error) => setToast(error.message || "保存失败", true)));
   $("qo-test-push").addEventListener("click", () => testPush().catch((error) => setToast(error.message || "测试失败", true)));
   $("qo-save-current").addEventListener("click", () => {
+    if (state.activePanel === "continuation") return;
     const action = state.activePanel === "external-push" ? savePush : saveCompletion;
     action().catch((error) => setToast(error.message || "保存失败", true));
   });

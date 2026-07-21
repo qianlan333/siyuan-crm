@@ -221,13 +221,13 @@ class IdentityBridgeService:
                 owner_userid=owner_userid,
                 bind_by_userid=owner_userid or "wecom_external_contact_callback",
             )
-            questionnaire_backfill: dict[str, Any] = {"status": "skipped", "reason": "mobile_not_bound"}
-            if text((mobile_binding or {}).get("mobile")) and text((mobile_binding or {}).get("status")) in {"bound", "already_bound"}:
-                questionnaire_backfill = self.repository.backfill_questionnaire_submissions_for_mobile_binding(
-                    external_userid=external_userid,
-                    mobile=text(mobile_binding.get("mobile")),
-                    follow_user_userid=owner_userid,
-                )
+            # Questionnaire identity is continued exclusively by canonical
+            # UnionID. Mobile remains an answer/contact point and must never be
+            # used to attach a submission to a WeCom customer automatically.
+            questionnaire_backfill: dict[str, Any] = {
+                "status": "skipped",
+                "reason": "unionid_continuation_required",
+            }
             return {
                 "status": "success",
                 "identity_map_id": int(identity_map_id or 0),

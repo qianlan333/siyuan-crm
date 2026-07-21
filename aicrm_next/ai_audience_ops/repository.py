@@ -770,6 +770,21 @@ class SQLAlchemyAudienceRepository(AudiencePackageRepositoryMixin, AudienceRepos
             {"package_id": int(package_id), "backoff_seconds": max(60, int(backoff_seconds or 300)), "reason": _text(reason)[:500]},
         )
 
+    def count_dependencies(self, *, source_type: str, source_key: str = "") -> int:
+        row = self._one(
+            """
+            SELECT COUNT(DISTINCT p.id) AS dependency_count
+            FROM ai_audience_package p
+            JOIN ai_audience_package_dependency d ON d.package_id = p.id
+            WHERE p.status = 'active'
+              AND p.incremental_enabled = TRUE
+              AND d.source_type = :source_type
+              AND (:source_key = '' OR d.source_key = '' OR d.source_key = :source_key)
+            """,
+            {"source_type": _text(source_type), "source_key": _text(source_key)},
+        )
+        return int((row or {}).get("dependency_count") or 0)
+
     def poke_dependencies(self, *, source_type: str, source_key: str = "") -> int:
         row = self._write_one(
             """
@@ -788,11 +803,52 @@ class SQLAlchemyAudienceRepository(AudiencePackageRepositoryMixin, AudienceRepos
                     updated_at = CURRENT_TIMESTAMP
                 FROM matched
                 WHERE p.id = matched.id
+                  AND (p.lease_expires_at IS NULL OR p.lease_expires_at <= CURRENT_TIMESTAMP)
                 RETURNING p.id
             )
             SELECT COUNT(*) AS updated_count FROM updated
             """,
             {"source_type": _text(source_type), "source_key": _text(source_key)},
+        )
+        return int((row or {}).get("updated_count") or 0)
+
+    def poke_dependencies_since(
+        self,
+        *,
+        source_type: str,
+        source_key: str = "",
+        since_at: datetime,
+    ) -> int:
+        row = self._write_one(
+            """
+            WITH matched AS (
+                SELECT DISTINCT p.id
+                FROM ai_audience_package p
+                JOIN ai_audience_package_dependency d ON d.package_id = p.id
+                WHERE p.status = 'active'
+                  AND p.incremental_enabled = TRUE
+                  AND d.source_type = :source_type
+                  AND (:source_key = '' OR d.source_key = '' OR d.source_key = :source_key)
+            ),
+            updated AS (
+                UPDATE ai_audience_package p
+                SET last_incremental_watermark_at = CASE
+                        WHEN p.last_incremental_watermark_at IS NULL THEN :since_at
+                        ELSE LEAST(p.last_incremental_watermark_at, :since_at)
+                    END,
+                    next_incremental_refresh_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                FROM matched
+                WHERE p.id = matched.id
+                RETURNING p.id
+            )
+            SELECT COUNT(*) AS updated_count FROM updated
+            """,
+            {
+                "source_type": _text(source_type),
+                "source_key": _text(source_key),
+                "since_at": since_at,
+            },
         )
         return int((row or {}).get("updated_count") or 0)
 

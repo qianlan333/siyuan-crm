@@ -516,10 +516,49 @@ class StartWechatOAuthQuery:
 
 
 class CompleteWechatOAuthCallbackCommand:
-    def __init__(self, adapter: QuestionnaireOAuthAdapter | None = None) -> None:
+    def __init__(self, adapter: QuestionnaireOAuthAdapter | None = None, identity_projector=None) -> None:
         self._adapter = adapter or build_questionnaire_oauth_adapter()
+        if identity_projector is None:
+            from aicrm_next.identity_contact.application import ProjectWechatOAuthIdentityCommand
+
+            identity_projector = ProjectWechatOAuthIdentityCommand()
+        self._identity_projector = identity_projector
 
     def execute(self, request: OAuthCallbackRequest) -> dict[str, Any]:
-        return self._adapter.callback(request)
+        result = dict(self._adapter.callback(request) or {})
+        if not result.get("ok"):
+            return result
+        identity = dict(result.get("identity") or {})
+        try:
+            projection = dict(
+                self._identity_projector(
+                    openid=str(identity.get("openid") or "").strip(),
+                    unionid=str(identity.get("unionid") or "").strip(),
+                    source_route="/api/h5/wechat/oauth/callback",
+                )
+                or {}
+            )
+        except Exception:
+            projection = {"ok": False, "reason": "wechat_oauth_identity_projection_failed"}
+        if not projection.get("ok"):
+            result.pop("session_cookie", None)
+            result.pop("session_cookie_name", None)
+            result.pop("identity", None)
+            reason = str(projection.get("reason") or "wechat_oauth_identity_projection_failed")
+            conflict = "conflict" in reason
+            return {
+                **result,
+                "ok": False,
+                "error": "identity_conflict" if conflict else reason,
+                "message": "微信身份存在冲突，请联系管理员处理。" if conflict else "微信身份写入失败，请稍后重试。",
+                "status_code": 409 if conflict else 503,
+                "identity_projection": {"ok": False, "reason": reason},
+            }
+        result["identity_projection"] = {
+            "ok": True,
+            "projected": bool(projection.get("projected")),
+            "reason": str(projection.get("reason") or ""),
+        }
+        return result
 
     __call__ = execute

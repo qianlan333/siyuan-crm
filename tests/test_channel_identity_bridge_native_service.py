@@ -207,6 +207,7 @@ def test_sync_external_contact_identity_allows_missing_openid() -> None:
     assert result["status"] == "success"
     assert result["unionid_present"] is True
     assert result["openid_present"] is False
+    assert result["follow_user_userid"] == "owner_native"
     assert result["profile_description"] == {
         "status": "success",
         "description_source": "external_userid",
@@ -251,6 +252,7 @@ def test_sync_external_contact_identity_without_unionid_stays_pending() -> None:
     assert result["status"] == "pending_identity"
     assert result["reason"] == "missing_unionid"
     assert result["unionid_present"] is False
+    assert result["follow_user_userid"] == "owner_native"
     assert result["profile_description"]["status"] == "success"
     assert result["mobile_binding"] == {"status": "skipped", "reason": "identity_pending_unionid"}
     assert repo.binding_status == {"is_bound": False, "mobile": ""}

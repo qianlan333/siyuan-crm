@@ -115,3 +115,44 @@ def test_identity_sync_emits_ready_event_without_channel_state(monkeypatch: pyte
     assert emitted[0]["unionid"] == "union-no-state-001"
     assert emitted[0]["external_userid"] == "wm-no-state-001"
     assert emitted[0]["follow_user_userid"] == "owner-no-state-001"
+
+
+def test_identity_sync_uses_follow_owner_from_live_detail_when_callback_user_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    emitted: list[dict] = []
+    monkeypatch.setattr(
+        channel_application,
+        "sync_external_contact_identity_for_event",
+        lambda event, corp_id: {
+            "status": "success",
+            "unionid": "union-detail-owner-001",
+            "identity_map_id": 502,
+            "follow_user_userid": "owner-from-live-detail",
+        },
+    )
+    monkeypatch.setattr(channel_application, "_record_identity_sync_result", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        channel_application,
+        "_canonicalize_channel_entry_after_identity",
+        lambda *args, **kwargs: {"status": "success"},
+    )
+    monkeypatch.setattr(
+        channel_application,
+        "emit_customer_wecom_identity_ready_event",
+        lambda **kwargs: emitted.append(kwargs) or {"status": "emitted", "event_id": "iev-detail-owner"},
+    )
+
+    result = channel_application._sync_identity_best_effort(
+        {
+            "Event": "change_external_contact",
+            "ChangeType": "add_external_contact",
+            "ExternalUserID": "wm-detail-owner-001",
+            "CreateTime": "1784592000",
+        },
+        corp_id="ww-detail-owner",
+        event_log_id=502,
+    )
+
+    assert result["questionnaire_identity_ready_event"]["status"] == "emitted"
+    assert emitted[0]["follow_user_userid"] == "owner-from-live-detail"

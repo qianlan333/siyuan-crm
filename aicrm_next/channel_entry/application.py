@@ -516,7 +516,7 @@ def _sync_identity_best_effort(
             safe_log_exception(LOGGER, "channel entry canonicalization after identity failed", exc, level=logging.WARNING)
             identity_sync["channel_entry_canonical"] = {"status": "failed", "reason": str(exc)}
         external_userid = text(event.get("ExternalUserID"))
-        follow_user_userid = text(event.get("UserID"))
+        follow_user_userid = text(identity_sync.get("follow_user_userid") or event.get("UserID"))
         unionid = text(identity_sync.get("unionid"))
         event_time = int(text(event.get("CreateTime")) or 0)
         occurred_at = datetime.fromtimestamp(event_time, tz=timezone.utc) if event_time > 0 else datetime.now(timezone.utc)

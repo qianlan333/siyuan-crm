@@ -24,6 +24,11 @@ from aicrm_next.questionnaire.external_push import build_questionnaire_external_
 from aicrm_next.shared.errors import ContractError
 from aicrm_next.shared.outbound_https import WebhookUrlValidationError, validate_webhook_url
 from .admin_write import QuestionnaireAdminWriteInputError, normalize_external_push_config
+from .continuation import questionnaire_continuation_enabled
+from .continuation_repo import (
+    QuestionnaireContinuationRepository,
+    build_questionnaire_continuation_repository,
+)
 from .domain import normalize_questionnaire
 from .repo import QuestionnaireRepository, build_questionnaire_repository
 
@@ -100,9 +105,11 @@ class QuestionnaireOperationsService:
         self,
         repository: QuestionnaireRepository | None = None,
         channel_reader: ChannelCompletionReadPort | None = None,
+        continuation_repository: QuestionnaireContinuationRepository | None = None,
     ) -> None:
         self._repo = repository or build_questionnaire_repository()
         self._channels = channel_reader or ChannelCompletionClient()
+        self._continuations = continuation_repository or build_questionnaire_continuation_repository()
 
     def get_operations(self, questionnaire_id: int) -> dict[str, Any]:
         item = self._require_questionnaire(questionnaire_id)
@@ -314,8 +321,82 @@ class QuestionnaireOperationsService:
             "completion": self._completion_projection(item, lead_channel=lead_channel),
             "external_push": _external_push_projection(item),
             "push_capability": _capability_projection(),
+            "continuations": self._continuation_projection(int(questionnaire["id"])),
             **self._read_meta(),
         }
+
+    def _continuation_projection(self, questionnaire_id: int) -> dict[str, Any]:
+        try:
+            rows, raw_counts = self._continuations.list_operations(questionnaire_id, limit=100)
+        except Exception as exc:
+            raise QuestionnaireOperationsUnavailableError(str(exc)) from exc
+        now = datetime.now(timezone.utc)
+        failed_downstream_statuses = {"failed", "partial_failed", "failed_terminal", "cancelled"}
+        items: list[dict[str, Any]] = []
+        downstream_failed_count = int(raw_counts.get("failed_terminal") or 0)
+        for row in rows:
+            expires_at = self._as_datetime(row.get("expires_at"))
+            remaining_seconds = max(0, int((expires_at - now).total_seconds())) if expires_at else 0
+            action_type = _text(row.get("action_type"))
+            status = _text(row.get("status"))
+            downstream_status = _text(row.get("downstream_status"))
+            if downstream_status in failed_downstream_statuses:
+                downstream_failed_count += 1
+            items.append(
+                {
+                    "id": int(row.get("id") or 0),
+                    "submission_id": _text(row.get("submission_id")),
+                    "action_type": action_type,
+                    "action_label": "问卷标签" if action_type == "wecom_tag" else "Agent 话术",
+                    "status": status,
+                    "status_label": {
+                        "waiting_identity": "等待身份",
+                        "dispatching": "派发中",
+                        "dispatched": "已派发",
+                        "expired": "已过期",
+                        "blocked_conflict": "身份冲突",
+                        "failed_terminal": "下游失败",
+                    }.get(status, status or "未知"),
+                    "submitted_at": _text(row.get("submitted_at")),
+                    "expires_at": _text(row.get("expires_at")),
+                    "remaining_seconds": remaining_seconds,
+                    "downstream_ref_type": _text(row.get("downstream_ref_type")),
+                    "downstream_ref_id": _text(
+                        row.get("downstream_execution_ref") or row.get("downstream_ref_id")
+                    ),
+                    "downstream_status": downstream_status,
+                    "last_error_code": _text(row.get("last_error_code")),
+                }
+            )
+        return {
+            "enabled": questionnaire_continuation_enabled(),
+            "validity_days": 7,
+            "summary": {
+                "waiting_identity": int(raw_counts.get("waiting_identity") or 0),
+                "dispatched": int(raw_counts.get("dispatched") or 0),
+                "expired": int(raw_counts.get("expired") or 0),
+                "blocked_conflict": int(raw_counts.get("blocked_conflict") or 0),
+                "downstream_failed": downstream_failed_count,
+            },
+            "items": items,
+            "total": sum(int(value or 0) for value in raw_counts.values()),
+        }
+
+    @staticmethod
+    def _as_datetime(value: Any) -> datetime | None:
+        if isinstance(value, datetime):
+            result = value
+        else:
+            raw = _text(value)
+            if not raw:
+                return None
+            try:
+                result = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if result.tzinfo is None:
+            result = result.replace(tzinfo=timezone.utc)
+        return result.astimezone(timezone.utc)
 
     def _questionnaire_summary(self, item: dict[str, Any]) -> dict[str, Any]:
         questionnaire = normalize_questionnaire(item)

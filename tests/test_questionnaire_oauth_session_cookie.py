@@ -27,4 +27,6 @@ def test_oauth_session_cookie_is_signed_and_contains_identity(client: TestClient
     assert payload["slug"] == "hxc-activation-v1"
     assert payload["openid"].startswith("openid_fake_")
     assert payload["respondent_key"]
+    assert payload["unionid_verified"] is True
+    assert payload["identity_source"] == "wechat_oauth_provider"
     assert "HttpOnly" in cookie_header

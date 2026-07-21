@@ -149,7 +149,10 @@ def test_next_external_contact_callback_syncs_identity_and_binds_orphan_mobile(a
             "real_external_call_executed": True,
         }
         assert result["identity_sync"]["mobile_binding"]["status"] == "already_bound"
-        assert result["identity_sync"]["questionnaire_backfill"]["reason"] == "questionnaire_submissions_unionid_only"
+        assert result["identity_sync"]["questionnaire_backfill"] == {
+            "status": "skipped",
+            "reason": "unionid_continuation_required",
+        }
         assert adapter.profile_updates == [
             {
                 "userid": "owner_bridge",

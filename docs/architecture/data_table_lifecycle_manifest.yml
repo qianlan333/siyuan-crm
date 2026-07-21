@@ -1602,6 +1602,28 @@ tables:
       - tests/test_unionid_identity_refactor_schema.py
     notes: Unionid-keyed submission fact table; legacy identity fields are boundary projections only.
 
+  questionnaire_continuation_job:
+    domain: questionnaire
+    lifecycle: canonical
+    write_owner: aicrm_next.questionnaire.continuation_repo
+    read_owners:
+      - aicrm_next.questionnaire.continuation
+      - aicrm_next.questionnaire.operations
+    replacement: none; durable identity-dependent questionnaire continuation state
+    drop_candidate: false
+    drop_after: ""
+    runtime_entrypoints:
+      - questionnaire submitted internal event consumers
+      - customer wecom identity ready consumer
+      - questionnaire continuation reconciliation worker
+      - questionnaire operations admin API
+    migration_source: 0124_questionnaire_continuation_jobs
+    pii_level: internal_contact
+    guard_tests:
+      - tests/test_data_table_lifecycle_guard.py
+      - tests/test_questionnaire_continuation.py
+    notes: Stores one idempotent action row per submission without mobile, openid, answers, or message content; UnionID is the sole wake-up key.
+
   questionnaire_submission_answers:
     domain: questionnaire
     lifecycle: event

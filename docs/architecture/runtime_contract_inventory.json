@@ -513,6 +513,12 @@
     },
     {
       "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES",
+      "line": 38
+    },
+    {
+      "accessor": "os.getenv",
       "file": "aicrm_next/platform_foundation/internal_events/config.py",
       "key": "AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE",
       "line": 195
@@ -522,6 +528,12 @@
       "file": "aicrm_next/platform_foundation/internal_events/worker.py",
       "key": "AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE",
       "line": 247
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "AICRM_INTERNAL_EVENTS_ENABLED",
+      "line": 50
     },
     {
       "accessor": "os.getenv",
@@ -641,7 +653,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "AICRM_NEXT_ENV",
-      "line": 438
+      "line": 441
     },
     {
       "accessor": "os.getenv",
@@ -713,7 +725,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "AICRM_NEXT_QUESTIONNAIRE_WEBHOOK_MODE",
-      "line": 817
+      "line": 820
     },
     {
       "accessor": "os.getenv",
@@ -755,7 +767,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "AICRM_NEXT_WECHAT_OAUTH_MODE",
-      "line": 809
+      "line": 812
     },
     {
       "accessor": "os.getenv",
@@ -809,7 +821,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "AICRM_NEXT_WECOM_TAG_MODE",
-      "line": 813
+      "line": 816
     },
     {
       "accessor": "os.getenv",
@@ -854,10 +866,28 @@
       "line": 119
     },
     {
+      "accessor": "runtime_bool",
+      "file": "aicrm_next/questionnaire/continuation.py",
+      "key": "AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED",
+      "line": 80
+    },
+    {
       "accessor": "os.getenv",
       "file": "aicrm_next/questionnaire/oauth.py",
       "key": "AICRM_QUESTIONNAIRE_OAUTH_ADAPTER_MODE",
       "line": 90
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "AICRM_QUESTIONNAIRE_OAUTH_ADAPTER_MODE",
+      "line": 35
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "AICRM_QUESTIONNAIRE_OAUTH_ENABLE_REAL",
+      "line": 47
     },
     {
       "accessor": "os.getenv",
@@ -876,6 +906,12 @@
       "file": "aicrm_next/questionnaire/result_access.py",
       "key": "AICRM_QUESTIONNAIRE_RESULT_GRANT_TTL_SECONDS",
       "line": 86
+    },
+    {
+      "accessor": "runtime_bool",
+      "file": "aicrm_next/questionnaire/public_access.py",
+      "key": "AICRM_QUESTIONNAIRE_UNIONID_REQUIRED",
+      "line": 26
     },
     {
       "accessor": "os.getenv",
@@ -1067,7 +1103,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "APP_ENV",
-      "line": 440
+      "line": 443
     },
     {
       "accessor": "os.getenv",
@@ -1355,7 +1391,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "ENVIRONMENT",
-      "line": 439
+      "line": 442
     },
     {
       "accessor": "os.getenv",
@@ -1373,7 +1409,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "FLASK_ENV",
-      "line": 441
+      "line": 444
     },
     {
       "accessor": "os.getenv",
@@ -1541,7 +1577,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "WECHAT_MP_APP_ID",
-      "line": 416
+      "line": 419
     },
     {
       "accessor": "os.getenv",
@@ -1556,10 +1592,16 @@
       "line": 299
     },
     {
+      "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "WECHAT_MP_APP_ID",
+      "line": 42
+    },
+    {
       "accessor": "runtime_setting",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "WECHAT_MP_APP_SECRET",
-      "line": 420
+      "line": 423
     },
     {
       "accessor": "runtime_setting",
@@ -1568,10 +1610,22 @@
       "line": 300
     },
     {
+      "accessor": "runtime_setting",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "WECHAT_MP_APP_SECRET",
+      "line": 43
+    },
+    {
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "WECHAT_MP_OAUTH_SCOPE",
-      "line": 424
+      "line": 427
+    },
+    {
+      "accessor": "os.getenv",
+      "file": "scripts/ops/check_questionnaire_unionid_cutover.py",
+      "key": "WECHAT_MP_OAUTH_SCOPE",
+      "line": 34
     },
     {
       "accessor": "os.getenv",
@@ -1625,7 +1679,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/integration_gateway/questionnaire_adapters.py",
       "key": "WECHAT_PAY_NOTIFY_URL",
-      "line": 456
+      "line": 459
     },
     {
       "accessor": "os.getenv",
@@ -1805,7 +1859,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WECOM_CALLBACK_AES_KEY",
-      "line": 54
+      "line": 58
     },
     {
       "accessor": "os.getenv",
@@ -1835,7 +1889,7 @@
       "accessor": "runtime_setting",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WECOM_CALLBACK_TOKEN",
-      "line": 53
+      "line": 57
     },
     {
       "accessor": "os.getenv",
@@ -1889,7 +1943,7 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WECOM_CORP_ID",
-      "line": 52
+      "line": 56
     },
     {
       "accessor": "os.getenv",
@@ -2027,13 +2081,13 @@
       "accessor": "os.getenv",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WORKER_RELEASE_SHA",
-      "line": 976
+      "line": 1004
     },
     {
       "accessor": "os.getenv",
       "file": "aicrm_next/channel_entry/application.py",
       "key": "WORKER_RELEASE_SHA",
-      "line": 1194
+      "line": 1222
     },
     {
       "accessor": "os.getenv",
@@ -2111,6 +2165,7 @@
     "AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_CONSUMERS",
     "AICRM_INTERNAL_EVENTS_ALLOWED_EVENT_TYPES",
     "AICRM_INTERNAL_EVENTS_AUTO_EXECUTE_MAX_BATCH_SIZE",
+    "AICRM_INTERNAL_EVENTS_ENABLED",
     "AICRM_INTERNAL_EVENTS_LEGACY_PATH_RETIRE_AFTER_DAYS",
     "AICRM_INTERNAL_EVENTS_WORKER_BATCH_SIZE",
     "AICRM_INTERNAL_EVENT_WORKER_BATCH_SIZE",
@@ -2147,10 +2202,13 @@
     "AICRM_NGINX_CONFIG",
     "AICRM_PII_AUDIT_ENABLED",
     "AICRM_PUBLIC_BASE_URL",
+    "AICRM_QUESTIONNAIRE_CONTINUATION_ENABLED",
     "AICRM_QUESTIONNAIRE_OAUTH_ADAPTER_MODE",
+    "AICRM_QUESTIONNAIRE_OAUTH_ENABLE_REAL",
     "AICRM_QUESTIONNAIRE_OAUTH_REDIRECT_ALLOWLIST",
     "AICRM_QUESTIONNAIRE_OAUTH_STATE_SECRET",
     "AICRM_QUESTIONNAIRE_RESULT_GRANT_TTL_SECONDS",
+    "AICRM_QUESTIONNAIRE_UNIONID_REQUIRED",
     "AICRM_ROUTE_POLICY_ENFORCED",
     "AICRM_RUNTIME_V2_AGENT_FAKE_ALLOWED",
     "AICRM_RUNTIME_V2_AGENT_FAKE_OUTPUT",
@@ -2610,6 +2668,13 @@
       "max_attempts": 5
     },
     {
+      "consumer_name": "questionnaire_identity_continuation_consumer",
+      "consumer_type": "orchestration",
+      "event_type": "customer.wecom_identity_ready",
+      "handler_registered": true,
+      "max_attempts": 5
+    },
+    {
       "consumer_name": "ai_audience_source_poke_consumer",
       "consumer_type": "projection",
       "event_type": "external_form.submitted",
@@ -2905,7 +2970,7 @@
     }
   ],
   "migration_heads": [
-    "0123_required_physical_schema_repair"
+    "0124_questionnaire_continuation_jobs"
   ],
   "openapi_components": {
     "schemas": {
@@ -44844,6 +44909,14 @@
       "kick_after_timer_restart": false,
       "kick_failure_fatal": false,
       "kind": "timer",
+      "service": "openclaw-questionnaire-continuation-scheduler.service",
+      "state": "active_autostart",
+      "unit": "openclaw-questionnaire-continuation-scheduler.timer"
+    },
+    {
+      "kick_after_timer_restart": false,
+      "kick_failure_fatal": false,
+      "kind": "timer",
       "service": "openclaw-wechat-pay-order-reconciliation-worker.service",
       "state": "active_autostart",
       "unit": "openclaw-wechat-pay-order-reconciliation-worker.timer"
@@ -47387,6 +47460,19 @@
       ],
       "table": "prod_test_backup_ai_audience_full_20260623",
       "write_owner": "legacy.production_runtime"
+    },
+    {
+      "domain": "questionnaire",
+      "drop_candidate": false,
+      "lifecycle": "canonical",
+      "migration_source": "0124_questionnaire_continuation_jobs",
+      "pii_level": "internal_contact",
+      "read_owners": [
+        "aicrm_next.questionnaire.continuation",
+        "aicrm_next.questionnaire.operations"
+      ],
+      "table": "questionnaire_continuation_job",
+      "write_owner": "aicrm_next.questionnaire.continuation_repo"
     },
     {
       "domain": "questionnaire",

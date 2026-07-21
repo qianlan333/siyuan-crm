@@ -4,12 +4,50 @@ from aicrm_next.integration_gateway.customer_sync_adapters import build_identity
 from aicrm_next.platform_foundation.internal_events.customer_identity import emit_customer_phone_bound_event
 from aicrm_next.platform_foundation.internal_events.shadow import safe_emit
 from aicrm_next.shared.runtime import production_data_ready
+from aicrm_next.shared.postgres_connection import db_session
 from aicrm_next.shared.typing import JsonDict
 
 from .domain import normalize_identity_request, normalize_mobile_binding_request, resolve_single_corp_id
 from .dto import BindMobileToExternalContactRequest, IdentityResolution, IdentityResolveResult, ResolvePersonIdentityRequest
 from .repo import FixtureIdentityRepository, IdentityBindingRepository, PostgresIdentityRepository, build_identity_binding_repository
 from .resolver import resolved_identity_or_none
+from .oauth_projection_repo import project_wechat_oauth_identity
+
+
+class ProjectWechatOAuthIdentityCommand:
+    """Project one provider-verified OAuth identity through the identity owner."""
+
+    def execute(
+        self,
+        *,
+        openid: str,
+        unionid: str,
+        source_route: str,
+    ) -> JsonDict:
+        if not production_data_ready():
+            return {
+                "ok": bool(str(openid or "").strip() and str(unionid or "").strip()),
+                "projected": False,
+                "reason": "production_database_not_required",
+                "unionid": str(unionid or "").strip(),
+            }
+        with db_session() as conn:
+            try:
+                result = project_wechat_oauth_identity(
+                    conn,
+                    openid=openid,
+                    unionid=unionid,
+                    source_route=source_route,
+                )
+                # Conflict evidence is intentionally committed while the caller
+                # still refuses to issue an identity session.
+                conn.commit()
+                return dict(result)
+            except Exception:
+                conn.rollback()
+                raise
+
+    __call__ = execute
 
 
 class ResolvePersonIdentityQuery:

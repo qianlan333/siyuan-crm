@@ -12,11 +12,18 @@ from .oauth import (
     questionnaire_h5_identity_from_cookies,
     resolve_adapter_mode,
 )
+from aicrm_next.shared.runtime_settings import runtime_bool
 from .operations import resolve_questionnaire_completion_action
 from .repo import QuestionnaireRepository, build_questionnaire_repository
 
 
 IDENTITY_FIELDS = ("respondent_key", "openid", "unionid", "external_userid")
+
+
+def questionnaire_unionid_gate_enabled() -> bool:
+    """Runtime cutover for the all-published-questionnaire UnionID gate."""
+
+    return runtime_bool("AICRM_QUESTIONNAIRE_UNIONID_REQUIRED", default=False)
 
 
 def _text(value: Any) -> str:

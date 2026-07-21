@@ -182,6 +182,7 @@ _TABLES_TO_TRUNCATE = [
     # — questionnaire
     "questionnaire_external_push_logs",
     "questionnaire_scrm_apply_logs",
+    "questionnaire_continuation_job",
     "questionnaire_submission_answers",
     "questionnaire_submissions",
     "questionnaire_options",

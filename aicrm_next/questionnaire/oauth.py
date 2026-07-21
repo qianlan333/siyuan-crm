@@ -176,6 +176,8 @@ def questionnaire_h5_identity_from_cookies(cookies: Mapping[str, str]) -> Json:
         "external_userid": str(payload.get("external_userid") or "").strip(),
         "slug": str(payload.get("slug") or "").strip(),
         "anonymous": bool(payload.get("anonymous")),
+        "unionid_verified": bool(payload.get("unionid_verified")),
+        "identity_source": str(payload.get("identity_source") or "").strip(),
     }
 
 
@@ -187,6 +189,8 @@ def build_questionnaire_h5_identity_cookie(identity: Mapping[str, Any]) -> str:
         "external_userid": str(identity.get("external_userid") or "").strip(),
         "slug": str(identity.get("slug") or "").strip(),
         "anonymous": bool(identity.get("anonymous")),
+        "unionid_verified": bool(identity.get("unionid_verified")),
+        "identity_source": str(identity.get("identity_source") or "").strip(),
         "iat": _now(),
     }
     return _signed_blob(payload)
@@ -277,9 +281,9 @@ class QuestionnaireOAuthAdapter:
         adapter_result = self._adapter.resolve_oauth_identity(
             state=request.state,
             redirect=str(state_payload.get("redirect") or ""),
-            openid=request.openid,
-            unionid=request.unionid,
-            external_userid=request.external_userid,
+            openid=None,
+            unionid=None,
+            external_userid=None,
             code=request.code,
         )
         result = adapter_result.get("result") if isinstance(adapter_result.get("result"), dict) else {}
@@ -321,6 +325,8 @@ class QuestionnaireOAuthAdapter:
             "slug": state_payload.get("slug", ""),
             "nonce": state_payload.get("nonce", ""),
             "iat": _now(),
+            "unionid_verified": True,
+            "identity_source": "wechat_oauth_provider",
         }
         return session, _signed_blob(session)
 
@@ -339,6 +345,23 @@ class QuestionnaireOAuthAdapter:
                     target_id=str(state_payload.get("slug") or ""),
                     status_code=200,
                 )
+            from aicrm_next.identity_contact.application import ResolvePersonIdentityQuery
+            from aicrm_next.identity_contact.wechat_unionid_guard import resolve_oauth_unionid
+
+            canonical_unionid = resolve_oauth_unionid(
+                identity,
+                identity_query=ResolvePersonIdentityQuery(),
+            )
+            if not canonical_unionid:
+                self._record_diagnostic("unionid_unavailable", request, state_payload)
+                return self._error(
+                    "unionid_unavailable",
+                    "WeChat OAuth did not provide a canonical UnionID",
+                    event_type="questionnaire.oauth.callback.identity_missing",
+                    target_id=str(state_payload.get("slug") or ""),
+                    status_code=409,
+                )
+            identity["unionid"] = canonical_unionid
             _USED_NONCES.add(str(state_payload["nonce"]))
             session_identity, signed_cookie = self.create_identity_session(identity, state_payload)
             result = {
@@ -390,9 +413,9 @@ class QuestionnaireOAuthAdapter:
             slug=request.slug,
             state=state,
             redirect="/api/h5/wechat/oauth/callback",
-            openid=request.openid,
-            unionid=request.unionid,
-            external_userid=request.external_userid,
+            openid=None,
+            unionid=None,
+            external_userid=None,
         )
         result = adapter_result.get("result") if isinstance(adapter_result.get("result"), dict) else {}
         return {

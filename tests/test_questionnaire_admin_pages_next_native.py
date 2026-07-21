@@ -120,6 +120,10 @@ def test_questionnaire_operations_page_owns_completion_and_external_push_ui() ->
     assert 'id="qo-legacy-path"' in page.text
     assert "外部推送" in page.text
     assert "测试推送" in page.text
+    assert "身份续接" in page.text
+    assert "等待企微身份" in page.text
+    assert 'id="qo-continuation-summary"' in page.text
+    assert 'id="qo-continuation-rows"' in page.text
     assert "/static/navigation-target/completion_target_config.js" in page.text
 
     operations_script = (root / "aicrm_next/questionnaire/static/questionnaire_operations.js").read_text(encoding="utf-8")
@@ -128,6 +132,8 @@ def test_questionnaire_operations_page_owns_completion_and_external_push_ui() ->
     assert "const api = window.AdminApi;" in operations_script
     assert '$("qo-legacy-appid").textContent' in operations_script
     assert '$("qo-legacy-path").textContent' in operations_script
+    assert "renderContinuation" in operations_script
+    assert '["completion", "external-push", "continuation"]' in operations_script
 
     editor_script = (root / "aicrm_next/questionnaire/static/admin_questionnaire_editor.js").read_text(encoding="utf-8")
     assert "completion_target" not in editor_script
@@ -143,8 +149,10 @@ def test_questionnaire_operations_page_owns_completion_and_external_push_ui() ->
 
     public_template = (root / "aicrm_next/frontend_compat/templates/questionnaire_h5_page.html").read_text(encoding="utf-8")
     public_completion_script = (root / "aicrm_next/questionnaire/static/questionnaire_completion_action.js").read_text(encoding="utf-8")
+    public_page_script = (root / "aicrm_next/questionnaire/static/questionnaire_h5_page.js").read_text(encoding="utf-8")
     assert "/static/questionnaire/questionnaire_completion_action.js" in public_template
-    assert "AICRMQuestionnaireCompletionAction.create" in public_template
+    assert "/static/questionnaire/questionnaire_h5_page.js" in public_template
+    assert "AICRMQuestionnaireCompletionAction.create" in public_page_script
     assert 'action.type === "lead_qr"' in public_completion_script
 
 

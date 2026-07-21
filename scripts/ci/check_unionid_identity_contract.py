@@ -130,10 +130,13 @@ def check() -> list[str]:
         errors.append("service period missing_unionid must be failed_retryable with an explicit error code")
 
     questionnaire_h5 = _read(Path("aicrm_next/questionnaire/h5_write.py"))
-    if (
-        '"error_code": "identity_pending_unionid" if not unionid else ""' not in questionnaire_h5
-        or '"identity_pending": not bool(unionid and external_userid and follow_user_userid)' not in questionnaire_h5
-    ):
+    questionnaire_waiting_tokens = (
+        "identity_ready = bool(unionid and external_userid and follow_user_userid)",
+        '"identity_pending_unionid"',
+        '"identity_pending_wecom"',
+        '"identity_pending": not identity_ready',
+    )
+    if any(token not in questionnaire_h5 for token in questionnaire_waiting_tokens):
         errors.append("questionnaire H5 must expose unresolved canonical identity as queued continuation state")
     questionnaire_consumer = _read(Path("aicrm_next/questionnaire/event_consumers.py"))
     if (

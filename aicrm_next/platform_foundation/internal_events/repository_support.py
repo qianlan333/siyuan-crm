@@ -35,7 +35,12 @@ EVENT_SECTION_EVENT_TYPES: dict[str, tuple[str, ...]] = {
     "questionnaire": ("questionnaire.submitted",),
     "broadcast": ("broadcast_task.created", "ops_plan.approved"),
     "ai_assist": ("ai_campaign.created", "ai_campaign.approved", "ai_campaign.started"),
-    "customer": ("customer.phone_bound", "customer.tagged", "customer.untagged"),
+    "customer": (
+        "customer.phone_bound",
+        "customer.wecom_identity_ready",
+        "customer.tagged",
+        "customer.untagged",
+    ),
     "owner_migration": ("owner_migration.executed",),
 }
 LEASE_TIMEOUT = timedelta(minutes=5)

@@ -1211,6 +1211,76 @@ def test_source_dirty_emits_existing_internal_event_queue(next_client, monkeypat
 
 
 @pytest.mark.usefixtures("next_pg_schema")
+def test_questionnaire_continuation_rewind_waits_for_active_package_lease(next_client) -> None:
+    create_resp = next_client.post(
+        "/api/ai/audience/packages",
+        headers=_auth(),
+        json={
+            "package_key": "continuation_lease_pkg",
+            "name": "问卷续接租约测试",
+            "incremental_sql_text": _valid_incremental_sql(),
+        },
+    )
+    assert create_resp.status_code == 200
+    package_id = int(create_resp.json()["package"]["id"])
+    assert next_client.post(f"/api/ai/audience/packages/{package_id}/publish", headers=_auth(), json={}).status_code == 200
+
+    session_factory = get_session_factory()
+    with session_factory() as session:
+        session.execute(
+            text(
+                """
+                UPDATE ai_audience_package
+                SET lease_token = 'active-questionnaire-refresh',
+                    lease_expires_at = CURRENT_TIMESTAMP + interval '10 minutes',
+                    next_incremental_refresh_at = CURRENT_TIMESTAMP + interval '1 hour',
+                    last_incremental_watermark_at = CURRENT_TIMESTAMP
+                WHERE id = :package_id
+                """
+            ),
+            {"package_id": package_id},
+        )
+        session.commit()
+
+    repo = build_audience_repository()
+    assert repo.poke_dependencies(
+        source_type="questionnaire_submission",
+        source_key="questionnaire:991",
+    ) == 1
+    rewind_at = datetime(2026, 7, 20, 8, 0, tzinfo=timezone.utc)
+    assert repo.poke_dependencies_since(
+        source_type="questionnaire_submission",
+        source_key="questionnaire:991",
+        since_at=rewind_at,
+    ) == 0
+
+    with session_factory() as session:
+        session.execute(
+            text(
+                """
+                UPDATE ai_audience_package
+                SET lease_token = '', lease_expires_at = NULL
+                WHERE id = :package_id
+                """
+            ),
+            {"package_id": package_id},
+        )
+        session.commit()
+
+    assert repo.poke_dependencies_since(
+        source_type="questionnaire_submission",
+        source_key="questionnaire:991",
+        since_at=rewind_at,
+    ) == 1
+    with session_factory() as session:
+        watermark = session.execute(
+            text("SELECT last_incremental_watermark_at FROM ai_audience_package WHERE id = :package_id"),
+            {"package_id": package_id},
+        ).scalar_one()
+    assert watermark == rewind_at
+
+
+@pytest.mark.usefixtures("next_pg_schema")
 def test_inbound_webhook_requires_hmac_and_records_event(next_client, monkeypatch) -> None:
     secret = "inbound-secret"
     create_resp = next_client.post(

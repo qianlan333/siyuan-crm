@@ -7,6 +7,7 @@ from aicrm_next.questionnaire.continuation import (
     QuestionnaireContinuationService,
 )
 from aicrm_next.questionnaire.continuation_repo import InMemoryQuestionnaireContinuationRepository
+from aicrm_next.shared.sensitive_data import redact_sensitive_data
 
 
 class FakeQuestionnaireRepository:
@@ -343,10 +344,34 @@ def test_unionid_cutover_preflight_requires_recent_real_oauth_proof_without_muta
     assert "WECHAT_MP_OAUTH_SCOPE" in source
     assert "snsapi_userinfo" in source
     assert "customer.wecom_identity_ready" in source
-    assert '"internal_events_enabled"' in source
+    assert '"internal_events_enabled": _text(os.getenv("AICRM_INTERNAL_EVENTS_ENABLED"))' in source
     assert "'/api/h5/wechat/oauth/callback'" in source
-    assert '"ready_to_enable_unionid_gate": ready' in source
+    assert '"ready_to_enable_identity_gate": ready' in source
+    assert '"real_oauth_identity_proof": proof' in source
+    assert "ready_to_enable_unionid_gate" not in source
+    assert "real_oauth_unionid_proof" not in source
+    assert '"internal_events_enabled"' not in source.split("checks = {", 1)[1].split("current_cutover_state", 1)[0]
     assert '"database_mutation_performed": False' in source
     assert "INSERT INTO" not in source.upper()
     assert "UPDATE " not in source.upper()
     assert "DELETE FROM" not in source.upper()
+
+
+def test_unionid_cutover_preflight_control_fields_survive_output_redaction() -> None:
+    output = redact_sensitive_data(
+        {
+            "ready_to_enable_identity_gate": True,
+            "real_oauth_identity_proof": {
+                "available": True,
+                "unionid_hash": "0123456789abcdef",
+                "openid_hash": "fedcba9876543210",
+            },
+        }
+    )
+
+    assert output["ready_to_enable_identity_gate"] is True
+    assert output["real_oauth_identity_proof"] == {
+        "available": True,
+        "unionid_hash": "0123456789abcdef",
+        "openid_hash": "fedcba9876543210",
+    }

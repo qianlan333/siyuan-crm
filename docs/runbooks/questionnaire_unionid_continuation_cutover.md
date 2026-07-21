@@ -11,7 +11,9 @@
    python scripts/ops/check_questionnaire_unionid_cutover.py --require-real-proof
    ```
 
-   只有 `ready_to_enable_unionid_gate=true` 才能继续。检查结果只输出 UnionID/OpenID 哈希，不输出原值。
+   只有 `ready_to_enable_identity_gate=true` 才能继续。检查结果只输出 UnionID/OpenID 哈希，不输出原值。
+   `current_cutover_state.internal_events_enabled=false` 是启用前的正常状态，不参与 OAuth 证明判定；
+   第 5 步必须将三个开关原子开启。
 5. 在生产环境文件中同时开启：
 
    ```text

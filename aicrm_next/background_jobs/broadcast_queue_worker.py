@@ -656,12 +656,20 @@ def _load_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any
     with connect() as conn:
         row = conn.execute(
             """
-            SELECT id, recipient_id, content_text, content_payload_json, attachments_json
-            FROM cloud_broadcast_plan_recipient_messages
-            WHERE plan_id = %s
-              AND recipient_id = %s
-              AND status IN ('queued', 'pending', 'dispatching')
-            ORDER BY sequence_index ASC, id ASC
+            SELECT m.id,
+                   m.recipient_id,
+                   m.content_text,
+                   m.content_payload_json,
+                   m.attachments_json,
+                   r.owner_userid
+            FROM cloud_broadcast_plan_recipient_messages m
+            JOIN cloud_broadcast_plan_recipients r
+              ON r.id = m.recipient_id
+             AND r.plan_id = m.plan_id
+            WHERE m.plan_id = %s
+              AND m.recipient_id = %s
+              AND m.status IN ('queued', 'pending', 'dispatching')
+            ORDER BY m.sequence_index ASC, m.id ASC
             LIMIT 1
             """,
             (plan_id, recipient_id),
@@ -673,6 +681,7 @@ def _load_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any
         "content_text": _text(row.get("content_text")),
         "content_payload_json": _json_dict(row.get("content_payload_json")),
         "attachments": _json_list(row.get("attachments_json")),
+        "owner_userid": _text(row.get("owner_userid")),
     }
 
 
@@ -689,6 +698,8 @@ def _with_cloud_plan_recipient_message(payload: dict[str, Any]) -> dict[str, Any
         hydrated["attachments"] = message.get("attachments")
     if message.get("cloud_plan_message_id"):
         hydrated["cloud_plan_message_id"] = message.get("cloud_plan_message_id")
+    if message.get("owner_userid") and not _text(hydrated.get("sender_userid") or hydrated.get("owner_userid")):
+        hydrated["owner_userid"] = message.get("owner_userid")
     return hydrated
 
 

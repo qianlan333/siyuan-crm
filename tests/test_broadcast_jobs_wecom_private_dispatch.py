@@ -250,6 +250,48 @@ def test_cloud_plan_recipient_message_uses_bound_sender_and_hydrates_text(monkey
     assert repo.sent[0]["request_payload"]["content_preview"] == "agent generated hello"
 
 
+def test_cloud_plan_recipient_message_hydrates_recipient_owner_when_job_omits_sender(monkeypatch) -> None:
+    adapter = Adapter({"ok": True, "wecom_msgid": "msg-cloud-owner", "result": {"msgid": "msg-cloud-owner"}})
+    monkeypatch.setattr("aicrm_next.integration_gateway.wecom_private_adapter.build_wecom_private_message_adapter", lambda: adapter)
+    monkeypatch.setattr(worker, "runtime_setting", lambda _key, default="": default)
+    monkeypatch.setattr(
+        worker,
+        "_load_cloud_plan_recipient_message",
+        lambda payload: {
+            "cloud_plan_message_id": 78,
+            "content_text": "owner hydrated hello",
+            "content_payload_json": {},
+            "attachments": [],
+            "owner_userid": "QuestionnaireOwner",
+        },
+    )
+    repo = FakeRepo(
+        [
+            _job(
+                source_type="cloud_plan",
+                source_table="cloud_broadcast_plan_recipients",
+                source_id="agent_plan:3",
+                idempotency_key="cloud_plan_recipient:agent_plan:3",
+                channel="wecom_private",
+                content_type="cloud_plan",
+                payload={
+                    "plan_id": "agent_plan",
+                    "recipient_id": 3,
+                    "message_mode": "recipient_messages",
+                    "sender_userid": "",
+                    "rendered_content": {},
+                },
+            )
+        ]
+    )
+
+    summary = run_broadcast_queue_worker(repo=repo, dispatcher=SafeSkippedBroadcastDispatcher())
+
+    assert summary["sent_ok"] == 1
+    assert adapter.payload["sender"] == "QuestionnaireOwner"
+    assert adapter.payload["text"] == {"content": "owner hydrated hello"}
+
+
 def test_cloud_plan_message_loader_does_not_require_external_userid_column(monkeypatch) -> None:
     class Cursor:
         def execute(self, sql: str, params: tuple[Any, ...]) -> "Cursor":
@@ -264,6 +306,7 @@ def test_cloud_plan_message_loader_does_not_require_external_userid_column(monke
                 "content_text": "agent generated hello",
                 "content_payload_json": {"miniprogram_library_ids": [1325]},
                 "attachments_json": [],
+                "owner_userid": "QuestionnaireOwner",
             }
 
     @contextmanager
@@ -286,6 +329,7 @@ def test_cloud_plan_message_loader_does_not_require_external_userid_column(monke
         "content_text": "agent generated hello",
         "content_payload_json": {"miniprogram_library_ids": [1325]},
         "attachments": [],
+        "owner_userid": "QuestionnaireOwner",
     }
 
 

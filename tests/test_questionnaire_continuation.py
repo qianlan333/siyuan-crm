@@ -335,6 +335,20 @@ def test_backfill_query_requires_recent_server_verified_unionid_and_no_mobile_ma
     assert "openid" not in query.lower()
 
 
+def test_operations_and_backfill_accept_wildcard_questionnaire_dependencies() -> None:
+    source = open(
+        "aicrm_next/questionnaire/continuation_repo.py",
+        encoding="utf-8",
+    ).read()
+
+    wildcard_clause = "dependency.source_key = ''"
+    assert source.count(wildcard_clause) == 3
+    assert "OR dependency.source_key = 'questionnaire:' || job.questionnaire_id::text" in source
+    assert source.count(
+        "OR dependency.source_key = 'questionnaire:' || submission.questionnaire_id::text"
+    ) == 2
+
+
 def test_unionid_cutover_preflight_requires_recent_real_oauth_proof_without_mutation() -> None:
     source = open(
         "scripts/ops/check_questionnaire_unionid_cutover.py",

@@ -406,7 +406,10 @@ class PostgresQuestionnaireContinuationRepository(QuestionnaireContinuationRepos
                           AND item.unionid = job.unionid
                           AND item.created_at >= submission.submitted_at
                           AND dependency.source_type = 'questionnaire_submission'
-                          AND dependency.source_key = 'questionnaire:' || job.questionnaire_id::text
+                          AND (
+                              dependency.source_key = ''
+                              OR dependency.source_key = 'questionnaire:' || job.questionnaire_id::text
+                          )
                         ORDER BY item.created_at DESC, item.id DESC
                         LIMIT 1
                     ) agent_item ON TRUE
@@ -471,7 +474,10 @@ class PostgresQuestionnaireContinuationRepository(QuestionnaireContinuationRepos
                                     FROM ai_audience_package_dependency dependency
                                     JOIN ai_audience_package package ON package.id = dependency.package_id
                                     WHERE dependency.source_type = 'questionnaire_submission'
-                                      AND dependency.source_key = 'questionnaire:' || submission.questionnaire_id::text
+                                      AND (
+                                          dependency.source_key = ''
+                                          OR dependency.source_key = 'questionnaire:' || submission.questionnaire_id::text
+                                      )
                                       AND package.status = 'active'
                                 )
                                 AND NOT EXISTS (
@@ -484,7 +490,10 @@ class PostgresQuestionnaireContinuationRepository(QuestionnaireContinuationRepos
                                       AND item.created_at >= submission.submitted_at
                                       AND item.status IN ('generated', 'callback_succeeded')
                                       AND dependency.source_type = 'questionnaire_submission'
-                                      AND dependency.source_key = 'questionnaire:' || submission.questionnaire_id::text
+                                      AND (
+                                          dependency.source_key = ''
+                                          OR dependency.source_key = 'questionnaire:' || submission.questionnaire_id::text
+                                      )
                                 )
                                 AND NOT EXISTS (
                                     SELECT 1

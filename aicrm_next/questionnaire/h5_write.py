@@ -766,6 +766,7 @@ def _plan_questionnaire_tag_side_effect(
     external_userid = str(submission.get("external_userid") or "").strip()
     unionid = str(submission.get("unionid") or "").strip()
     follow_user_userid = str(submission.get("follow_user_userid") or "").strip()
+    identity_ready = bool(unionid and external_userid and follow_user_userid)
     tag_ids = list(dict.fromkeys(str(tag_id or "").strip() for tag_id in final_tags if str(tag_id or "").strip()))
     base = {
         "ok": True,
@@ -814,11 +815,23 @@ def _plan_questionnaire_tag_side_effect(
     return {
         **base,
         "status": "queued",
-        "error_code": "identity_pending_unionid" if not unionid else "",
+        "error_code": (
+            "identity_pending_unionid"
+            if not unionid
+            else ("identity_pending_wecom" if not identity_ready else "")
+        ),
         "error_message": "",
-        "reason": "durable_internal_event_waiting_for_unionid" if not unionid else "durable_internal_event_queued",
+        "reason": (
+            "durable_internal_event_waiting_for_unionid"
+            if not unionid
+            else (
+                "durable_internal_event_waiting_for_wecom_identity"
+                if not identity_ready
+                else "durable_internal_event_queued"
+            )
+        ),
         "retryable": True,
-        "identity_pending": not bool(unionid and external_userid and follow_user_userid),
+        "identity_pending": not identity_ready,
         "skipped": False,
     }
 

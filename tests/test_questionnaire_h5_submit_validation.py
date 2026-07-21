@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -9,6 +11,9 @@ from aicrm_next.questionnaire.h5_write import (
     reset_questionnaire_h5_write_fixture_state,
 )
 from aicrm_next.questionnaire.repo import build_questionnaire_repository, reset_questionnaire_fixture_state
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture()
@@ -168,5 +173,7 @@ def test_questionnaire_mobile_field_frontend_enforces_11_digits(client: TestClie
 
     assert response.status_code == 200
     assert 'maxlength="11"' in response.text
-    assert "input.maxLength = 11" in response.text
-    assert "请输入11位有效手机号。" in response.text
+    assert '/static/questionnaire/questionnaire_h5_page.js?v=20260721-unionid-continuation' in response.text
+    frontend_source = (ROOT / "aicrm_next/questionnaire/static/questionnaire_h5_page.js").read_text(encoding="utf-8")
+    assert "input.maxLength = 11" in frontend_source
+    assert "请输入11位有效手机号。" in frontend_source

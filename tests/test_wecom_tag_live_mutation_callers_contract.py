@@ -115,7 +115,9 @@ def test_questionnaire_submit_with_unionid_only_queues_identity_recovery_without
     tag_plan = response.json()["side_effects"]["wecom_tag"]
     assert tag_plan["adapter_mode"] == "durable_internal_event"
     assert tag_plan["status"] == "queued"
-    assert tag_plan["error_code"] == "identity_pending_unionid"
+    assert tag_plan["error_code"] == "identity_pending_wecom"
+    assert tag_plan["reason"] == "durable_internal_event_waiting_for_wecom_identity"
+    assert tag_plan["identity_pending"] is True
     assert tag_plan["retryable"] is True
     assert tag_plan["local_projection_updated"] is False
     assert tag_plan["wecom_api_called"] is False
